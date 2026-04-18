@@ -1,0 +1,51 @@
+name: bench-smoke
+
+# Fast smoke test on every PR: compiles all bench targets and runs a
+# 500-file hyperfine smoke to catch "I broke the bench harness" regressions.
+# Does NOT gate on numbers — GitHub-hosted runner variance is too high for
+# that. See docs/benchmarks/METHODOLOGY.md.
+
+on:
+  pull_request:
+    paths:
+      - "crates/alint-bench/**"
+      - "xtask/**"
+      - "crates/alint-core/**"
+      - "crates/alint-rules/**"
+      - "crates/alint-cli/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bench.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/alint-bench/**"
+      - "xtask/**"
+      - "crates/alint-cli/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-benches:
+    name: compile criterion benches
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo bench --no-run
+        run: cargo bench -p alint-bench --no-run
+
+  bench-release-smoke:
+    name: xtask bench-release --quick
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install hyperfine
+        run: sudo apt-get update && sudo apt-get install -y hyperfine
+      - name: run quick smoke
+        run: cargo run -p xtask --release -- bench-release --quick

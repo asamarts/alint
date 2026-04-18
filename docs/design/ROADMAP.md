@@ -8,15 +8,15 @@
 
 The smallest scope that is usefully adoptable.
 
-- Walker (honors `.gitignore`), config loader (YAML + JSON Schema validation), globset-based scopes.
-- Rule primitives: `file_exists`, `file_absent`, `dir_exists`, `dir_absent`, `file_content_matches`, `file_content_forbidden`, `file_header`, `filename_case`, `filename_regex`, `file_max_size`, `file_is_text`.
-- Output formats: `human`, `json`.
-- CLI subcommands: `check`, `list`, `explain`.
-- JSON Schema published for editor autocomplete.
-- Benchmarks published with the release.
-- Static binaries on GitHub Releases, install script, `cargo install alint`.
-- Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false`; crates.io metadata (`description`, `license`, `repository`, `keywords`, `categories`) populated on every published crate.
-- Dogfood `.alint.yml` exercising the tool against its own repo.
+- ✅ Walker (honors `.gitignore`), config loader (YAML + JSON Schema validation), globset-based scopes.
+- ✅ Rule primitives: `file_exists`, `file_absent`, `dir_exists`, `dir_absent`, `file_content_matches`, `file_content_forbidden`, `file_header`, `filename_case`, `filename_regex`, `file_max_size`, `file_is_text`.
+- ✅ Output formats: `human`, `json`.
+- ✅ CLI subcommands: `check`, `list`, `explain`.
+- ✅ JSON Schema published for editor autocomplete (`schemas/v1/config.json`).
+- ✅ Benchmarks published with the release — criterion micro-benches under `crates/alint-bench/` and hyperfine macro-benches via `xtask bench-release`. Methodology at [`docs/benchmarks/METHODOLOGY.md`](../benchmarks/METHODOLOGY.md); per-platform results under `docs/benchmarks/v0.1/`.
+- ⏳ Static binaries on GitHub Releases, install script, `cargo install alint`.
+- ⏳ Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false`; crates.io metadata (`description`, `license`, `repository`, `keywords`, `categories`) populated on every published crate.
+- ✅ Dogfood `.alint.yml` exercising the tool against its own repo.
 
 ## v0.2 — Cross-file and composition
 

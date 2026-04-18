@@ -1,0 +1,86 @@
+# Benchmark rule config — embedded into `xtask` via include_str! and written
+# into the generated tree before each hyperfine run.
+#
+# Shape: ~15 rules spanning layout, naming, and content families. Intended to
+# approximate a mid-size real-world policy without pulling in
+# structured-content or cross-file rules (those are v0.2+).
+version: 1
+
+rules:
+  # Layout
+  - id: readme
+    kind: file_exists
+    paths: "README.md"
+    root_only: true
+    level: warning
+  - id: license
+    kind: file_exists
+    paths: ["LICENSE", "LICENSE.md"]
+    root_only: true
+    level: warning
+  - id: no-lock-bak
+    kind: file_absent
+    paths: "**/*.bak"
+    level: error
+  - id: no-node-modules
+    kind: dir_absent
+    paths: "**/node_modules/cache"
+    level: error
+
+  # Naming
+  - id: rs-snake
+    kind: filename_case
+    paths: "**/*.rs"
+    case: snake
+    level: warning
+  - id: tsx-pascal
+    kind: filename_case
+    paths: "**/*.tsx"
+    case: pascal
+    level: warning
+  - id: yaml-kebab
+    kind: filename_case
+    paths: "**/*.yaml"
+    case: kebab
+    level: info
+  - id: yml-kebab
+    kind: filename_case
+    paths: "**/*.yml"
+    case: kebab
+    level: info
+  - id: md-any
+    kind: filename_regex
+    paths: "**/*.md"
+    pattern: "[a-zA-Z0-9_.-]+"
+    level: info
+  - id: json-any
+    kind: filename_regex
+    paths: "**/*.json"
+    pattern: "[a-zA-Z0-9_.-]+"
+    level: info
+
+  # Content
+  - id: rs-no-todo
+    kind: file_content_forbidden
+    paths: "**/*.rs"
+    pattern: '\b(TODO|XXX)\b'
+    level: warning
+  - id: ts-no-debugger
+    kind: file_content_forbidden
+    paths: ["**/*.ts", "**/*.tsx"]
+    pattern: '\bdebugger\s*;'
+    level: error
+  - id: py-no-print
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: '^\s*print\s*\('
+    level: warning
+  - id: all-text
+    kind: file_is_text
+    paths: "**/*.{rs,ts,tsx,md,yaml,yml,json,py,txt}"
+    level: error
+  - id: no-huge
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 1048576
+    level: warning

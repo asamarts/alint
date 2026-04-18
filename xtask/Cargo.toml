@@ -1,0 +1,23 @@
+[package]
+name = "xtask"
+description = "Cargo-xtask helpers for alint (bench, release, etc.)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+alint-bench.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

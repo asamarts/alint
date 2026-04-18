@@ -1,0 +1,56 @@
+[package]
+name = "alint-bench"
+description = "Benchmark harness and deterministic fixture generator for alint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+bench = false
+
+[features]
+default = []
+# Filesystem-walking benches are feature-gated because they are inherently
+# noisier than the pure-CPU benches — useful for characterizing, not gating.
+fs-benches = []
+
+[[bench]]
+name = "glob_compile"
+harness = false
+
+[[bench]]
+name = "glob_match"
+harness = false
+
+[[bench]]
+name = "regex_content"
+harness = false
+
+[[bench]]
+name = "rule_engine"
+harness = false
+
+[[bench]]
+name = "walker"
+harness = false
+required-features = ["fs-benches"]
+
+[dependencies]
+alint-core.workspace = true
+alint-dsl.workspace = true
+alint-rules.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+regex.workspace = true
+globset.workspace = true
+
+[lints]
+workspace = true
