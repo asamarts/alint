@@ -1,0 +1,394 @@
+# alint — Architecture
+
+> Status: Living design document. Describes alint's internals for contributors
+> and embedders. For the current scope by version, see [ROADMAP.md](./ROADMAP.md).
+
+## Overview
+
+alint is a language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**. It is a single static Rust binary that reads a declarative YAML config and enforces rules over a repository tree.
+
+Examples of rules in scope:
+
+- Does file `X` exist at path `Y`? Does directory `Z` contain file `W`?
+- Do filenames under `components/` follow PascalCase?
+- Does every `.c` file have a matching `.h` in the same directory?
+- Does every `.java` file start with a required license-header comment?
+- Is anything binary present under `src/`?
+- Does `package.json`'s `license` field equal `"Apache-2.0"`?
+
+Out of scope (explicitly — use the named tool instead):
+
+- Code semantics / AST linting → ESLint, Clippy, ruff
+- Static application security testing → Semgrep, CodeQL
+- Infrastructure-as-code scanning → Checkov, Conftest, tfsec
+- Commit-message linting → commitlint
+- Secret scanning → gitleaks, trufflehog
+
+The clarity of these non-goals is itself a feature.
+
+## Design principles
+
+1. **The repository tree is the input.** Every rule sees a unified file/directory index. The walk happens once per invocation.
+2. **One DSL, four rule families.** *Layout* (exists/absent, directory contents), *content* (regex, header, hash, size, text/binary, structured-path queries), *naming* (case, regex, template), *cross-file* (pair, for-each, every-matching).
+3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
+4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism.
+5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
+6. **Every rule carries its own story.** Severity, message, `policy_url`, and optional `fix` are first-class fields.
+7. **Modern output formats from day one.** Human, JSON, SARIF, GitHub annotations, JUnit.
+8. **Single static binary.** Rust, no runtime dependency on Node, Ruby, or Python.
+
+## Rule model
+
+Every rule is a record:
+
+- `id` — unique kebab-case identifier
+- `kind` — the primitive rule type, namespaced (`file_exists`, `filename_case`, `pair`, ...)
+- `level` — `error` | `warning` | `info` | `off`
+- `paths` — the scope glob(s); accepts a string, an array (with `!negation`), or `{include, exclude}`
+- `when` — optional expression gating rule application on facts
+- `message` — human message; supports `{{vars.*}}` and `{{ctx.*}}` substitution
+- `policy_url` — optional URL to a human-readable policy justification
+- `fix` — optional fixer block
+- kind-specific fields
+
+Severity maps to exit codes: `error` with violations → 1; `warning` → 0 unless `--fail-on-warning`; `info` → 0; `off` → rule skipped. `off` is useful when overriding a rule inherited from an `extends`-ed ruleset.
+
+The `Rule` trait is the unit of execution:
+
+```rust
+pub trait Rule: Send + Sync + std::fmt::Debug {
+    fn id(&self) -> &str;
+    fn level(&self) -> Level;
+    fn policy_url(&self) -> Option<&str> { None }
+    fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
+}
+```
+
+Rules produce `Violation`s; the engine aggregates them into a `Report`.
+
+## DSL
+
+YAML, with a JSON Schema at `https://alint.rs/schemas/v1/config.json` (enables editor autocomplete and inline validation via the YAML language server).
+
+```yaml
+# .alint.yml
+version: 1
+
+extends:
+  - url: https://raw.githubusercontent.com/example/rulesets/base.yaml
+    sha256: "a1b2..."           # optional subresource integrity
+  - path: ./team-policy.alint.yml
+
+ignore:
+  - "target/**"
+respect_gitignore: true
+
+vars:
+  copyright_year: "2026"
+
+facts:
+  - id: is_rust
+    any_file_exists: ["Cargo.toml"]
+
+rules:
+  - id: readme-exists
+    kind: file_exists
+    paths: ["README.md", "README", "README.rst"]
+    root_only: true
+    level: error
+    message: "A README file is required at the repository root."
+
+  - id: c-requires-h
+    kind: pair
+    primary: "**/*.c"
+    partner: "{dir}/{stem}.h"
+    level: error
+
+  - id: components-pascalcase
+    kind: filename_case
+    paths: "components/**/*.{tsx,jsx}"
+    case: pascal
+    level: error
+
+  - id: cargo-lock-checked-in
+    when: facts.is_rust
+    kind: file_exists
+    paths: "Cargo.lock"
+    root_only: true
+    level: error
+```
+
+### Rule primitives
+
+Not every primitive is available in every release — see [ROADMAP.md](./ROADMAP.md) for which ship in which version. The full taxonomy:
+
+**Layout family**
+
+| Kind | Purpose |
+|---|---|
+| `file_exists` | Any file matching `paths` must exist. `root_only: true` constrains to repo root. |
+| `file_absent` | No file matching `paths` may exist. |
+| `dir_exists` / `dir_absent` | Directory presence / absence. |
+| `dir_contains` | Every directory matching `select` must contain files matching `require`. |
+| `dir_only_contains` | Every directory matching `select` may contain only files matching `allow`. |
+
+**Content family**
+
+| Kind | Purpose |
+|---|---|
+| `file_content_matches` / `file_content_forbidden` | File contents must (not) match regex. |
+| `file_header` / `file_footer` | First / last N lines must match pattern. |
+| `file_hash` | Content SHA-256 matches expected. |
+| `file_max_size` / `file_max_lines` | Upper bounds. |
+| `file_is_text` / `file_is_binary` | Content is detected as text / binary (magic bytes + UTF-8 validity). |
+| `file_shebang` | First line is a shebang matching pattern. |
+| `json_path_equals` / `json_path_matches` | JSONPath query returns expected value / matches regex. |
+| `yaml_path_*` / `toml_path_*` | Same for YAML / TOML. |
+| `json_schema_passes` | File validates against a JSON Schema. |
+
+**Naming family**
+
+| Kind | Purpose |
+|---|---|
+| `filename_case` | Basename matches a case convention (`lower`, `upper`, `pascal`, `camel`, `snake`, `kebab`, `screaming-snake`, `flat`). |
+| `filename_regex` | Basename matches a regex. |
+| `filename_matches_template` | Basename matches a template with captures. |
+| `path_case` | Every path segment matches a case convention. |
+| `path_max_depth` | Relative path has at most N segments. |
+
+**Cross-file family**
+
+| Kind | Purpose |
+|---|---|
+| `pair` | For every file matching `primary`, a file matching the `partner` template must exist. |
+| `for_each_file` / `for_each_dir` | For every matching file/dir, evaluate nested `require` rules with the entry as context. |
+| `every_matching_has` | Sugar for a common `for_each` shape. |
+| `unique_by` | No two files matching `select` may share the value of `key`. |
+
+**Git-aware family**
+
+| Kind | Purpose |
+|---|---|
+| `git_tracked_only` | Every matching file must be git-tracked. |
+| `git_no_denied_paths` | Git tree must not contain paths matching pattern. |
+| `git_commit_message` | Commits in range must match / not-match patterns. |
+
+**Plugin family**
+
+| Kind | Purpose |
+|---|---|
+| `command` | Shell out to an external command with `{path}`; non-zero exit = failure. |
+| `wasm` | Evaluate a WASM plugin against the file / tree. |
+
+### Path template tokens
+
+Used in `partner`, nested `require`, messages, and rename fixers:
+
+- `{dir}` — parent directory of the matched file
+- `{path}` — full relative path
+- `{basename}` — filename including extension
+- `{stem}` — filename without the final extension
+- `{ext}` — final extension without the dot
+- `{parent_name}` — immediate parent directory name
+- `{stem_kebab}`, `{stem_snake}`, `{stem_pascal}`, ... — transformed stems
+
+### Scope and globbing
+
+Globs compile via `globset`:
+
+- `*` — any run of non-separator chars
+- `**` — any number of path segments (own segment only)
+- `?` — one non-separator char
+- `[abc]`, `[a-z]` — character classes
+- `{a,b,c}` — brace alternation
+- `!pattern` — negation (arrays only)
+
+Every rule's `paths` accepts one of three shapes:
+
+```yaml
+paths: "src/**/*.rs"                                       # single glob
+paths: ["src/**/*.rs", "!src/**/testdata/**"]              # array with negation
+paths: {include: ["src/**"], exclude: ["**/*.test.*"]}     # explicit pair
+```
+
+`.gitignore` is honored by default. `.alintignore` provides alint-specific exclusions. `ignore:` in config adds to the exclusion set.
+
+### Facts and conditional rules
+
+Facts are declarative properties of the repository, evaluated once per run and cached. `when` clauses gate rules on facts.
+
+Fact kinds include `any_file_exists`, `all_files_exist`, `file_content_matches`, `detect: linguist` (primary languages), `detect: askalono` (SPDX license), `count_files`, `count_contributors`, `git_branch`, and `custom: {command: [...]}` (shell out, JSON stdout → value).
+
+The `when` expression language is deliberately bounded:
+
+- Operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`, `in`, `matches`
+- Identifiers: `facts.<name>`, `vars.<name>`, `ctx.<name>`
+- Literals: strings, numbers, booleans, null, lists
+
+No user-defined functions, no recursion, no I/O. Examples:
+
+```yaml
+when: facts.is_rust
+when: facts.primary_language in ["Rust", "Go"]
+when: facts.is_rust and not facts.is_workspace_member
+when: count_files("**/*.java") > 0
+```
+
+### Composition
+
+`extends` accepts local paths and URLs (with optional SHA-256 subresource integrity). Child configs deep-merge over parents on a per-rule-id basis. Setting `level: off` on an inherited rule disables it.
+
+Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
+
+## Execution model
+
+1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
+2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
+3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
+4. **Walk.** One pass over the filesystem via the `ignore` crate. Build a `FileIndex` of path → metadata (size, is-text heuristic, extension, parent).
+5. **Match.** For each rule, resolve matching files/dirs from the index via compiled `GlobSet`.
+6. **Read cache.** Files requested by multiple content rules are read once; bytes cached for the run.
+7. **Evaluate.** Rule evaluation fans out via `rayon`.
+8. **Aggregate.** Collect `RuleResult`s into a `Report`.
+9. **Fix (optional).** Apply fixers serially; re-run checks.
+10. **Emit.** Format via selected output.
+
+Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; fact and rule evaluation are both parallelized; fixers run serially (they mutate the tree).
+
+## Crate layout
+
+alint is a Cargo workspace — the standard shape for Rust tools (rustc, cargo, tokio, ruff, biome, rust-analyzer, wasmtime, ...). The reasons apply here: pre-1.0 breaking changes in the core ripple through the graph, so every such change is one PR rather than a multi-repo release; one `Cargo.lock` guarantees consistent transitive deps; one CI run (`cargo test --workspace`) validates the full graph; contributors clone once.
+
+**Current crates:**
+
+```
+alint/
+├── crates/
+│   ├── alint-cli/          binary entrypoint (will be renamed to `alint`
+│   │                       before the first crates.io publish; its
+│   │                       `[[bin]] name` is already `alint`)
+│   ├── alint-core/         engine, walker, rule trait, config AST, errors
+│   ├── alint-dsl/          YAML config loader + schema validation
+│   ├── alint-rules/        built-in rule implementations
+│   └── alint-output/       formatters (human, json, ...)
+├── docs/
+│   └── design/             architecture and roadmap
+├── .alint.yml              dogfood config
+└── Cargo.toml              workspace manifest
+```
+
+**Planned additions (see [ROADMAP.md](./ROADMAP.md)):**
+
+- `crates/alint-facts/` — language and license detectors
+- `crates/alint-plugin/` — command runner and WASM plugin host
+- `crates/alint-lsp/` — language-server implementation
+- `crates/alint-test/` — snapshot test harness for rule behaviors
+- `editors/` — VS Code, Zed, Helix extensions
+- `rulesets/` — bundled rulesets (embedded at build time; also published as raw YAML)
+- `xtask/` — benchmark harness and release tooling
+
+### Publishing intent (crates.io)
+
+The public crate surface is kept narrow so the semver-stable API is small and maintainable.
+
+| Crate | `publish` | Why |
+|---|---|---|
+| `alint` (binary) | public | Enables `cargo install alint`. Package name matches `[[bin]] name`. |
+| `alint-core` | public | Embeddable engine for custom drivers — scripts, custom CI gates, third-party hosts. Semver-stable from 1.0. |
+| `alint-dsl`, `alint-rules`, `alint-output`, and later-phase crates | `publish = false` | Internal plumbing. Promotion to public requires a concrete external consumer and a commitment to maintain the API. |
+
+Unpublished crates still ship inside the binary and can be promoted later. The reverse — publishing a crate then realizing you don't want to maintain it as a stable API — is much harder.
+
+## Plugin model
+
+Two tiers, introduced across the roadmap:
+
+- **`command` rule kind.** Rule shells out per matched file. Exit code is the verdict; stdout/stderr is the message. Environment variables expose path, rule id, level, vars, and facts. Simple, scriptable, language-agnostic.
+- **`wasm` plugin kind.** Plugins implement a stable WIT interface, receive file bytes + metadata, and return a structured result. Distributed as `.wasm` blobs referenced by URL with SRI. Sandboxed, deterministic, no network by default (opt-in capability).
+
+Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
+
+## Output formats
+
+Selected via `--format`:
+
+- `human` (default) — colorized, per-rule grouped output with source snippets.
+- `json` — stable, versioned schema.
+- `sarif` — SARIF 2.1.0 for GitHub Code Scanning and Azure DevOps.
+- `github` — GitHub Actions annotations (`::error file=...`).
+- `gitlab` — GitLab Code Quality JSON.
+- `junit` — JUnit XML for generic CI reporting.
+- `markdown` — report with TOC, suitable for posting as a GitHub issue body.
+- `summary` — one-line status per rule.
+
+## Full example
+
+A Rust project dogfood config, showing composition, facts, and multiple rule families:
+
+```yaml
+# yaml-language-server: $schema=https://alint.rs/schemas/v1/config.json
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+
+vars:
+  copyright_year: "2026"
+  org: "Acme Corp"
+
+ignore:
+  - "target/**"
+
+facts:
+  - id: has_benches
+    any_file_exists: ["benches/**/*.rs"]
+
+rules:
+  # Override an inherited rule.
+  readme-exists:
+    paths: ["README.md", "README.adoc"]
+
+  # Disable an inherited rule.
+  no-todo-comments:
+    level: off
+
+  # New rules.
+  - id: cargo-members-are-kebab
+    kind: toml_path_matches
+    paths: "Cargo.toml"
+    query: "$.workspace.members[*]"
+    pattern: "^[a-z][a-z0-9-]+$"
+    level: error
+
+  - id: crates-have-readme
+    kind: for_each_dir
+    select: "crates/*"
+    require:
+      - kind: file_exists
+        paths: "{dir}/README.md"
+    level: error
+
+  - id: integration-test-pair
+    kind: pair
+    primary: "crates/*/src/*.rs"
+    partner: "crates/*/tests/{stem}_test.rs"
+    level: warning
+
+  - id: bench-gated
+    when: facts.has_benches
+    kind: file_exists
+    paths: "benches/Cargo.toml"
+    level: error
+```
+
+## Contributing new rule kinds
+
+A new rule kind typically needs:
+
+1. A `Rule` impl in `crates/alint-rules/src/<kind>.rs`.
+2. Registration in `register_builtin` in `crates/alint-rules/src/lib.rs`.
+3. Unit tests alongside the impl (snapshot harness arrives with `alint-test`).
+4. A row in the primitives tables above.
+5. An entry in the Full Example section if the kind is commonly used.
+6. If the primitive shifts from "planned" to "shipped," an update in [ROADMAP.md](./ROADMAP.md).

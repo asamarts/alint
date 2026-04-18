@@ -1,0 +1,27 @@
+[package]
+name = "alint-cli"
+description = "alint — a language-agnostic linter for repository structure, existence, naming, and content rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "alint"
+path = "src/main.rs"
+
+[dependencies]
+alint-core.workspace = true
+alint-dsl.workspace = true
+alint-rules.workspace = true
+alint-output.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+miette.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

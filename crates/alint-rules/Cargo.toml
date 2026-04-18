@@ -1,0 +1,17 @@
+[package]
+name = "alint-rules"
+description = "Built-in rule implementations for alint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+alint-core.workspace = true
+serde.workspace = true
+serde_yaml_ng.workspace = true
+
+[lints]
+workspace = true

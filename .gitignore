@@ -1,0 +1,18 @@
+/target
+/Cargo.lock.bak
+**/*.rs.bk
+
+# Editor caches
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# alint runtime caches
+.alint-cache/
+
+# Internal planning docs (kept locally, not published).
+# The public-facing design docs live in docs/design/.
+/PROPOSAL.md
+

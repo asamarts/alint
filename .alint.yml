@@ -1,0 +1,48 @@
+# Dogfood config: alint lints its own repository.
+# yaml-language-server: $schema=https://alint.rs/schemas/v1/config.json
+
+version: 1
+
+ignore:
+  - "target/**"
+
+rules:
+  - id: architecture-doc-exists
+    kind: file_exists
+    paths: docs/design/ARCHITECTURE.md
+    level: error
+    message: "docs/design/ARCHITECTURE.md (architecture doc for contributors) must exist."
+
+  - id: roadmap-doc-exists
+    kind: file_exists
+    paths: docs/design/ROADMAP.md
+    level: error
+    message: "docs/design/ROADMAP.md (scope per phase) must exist."
+
+  - id: cargo-workspace-manifest
+    kind: file_exists
+    paths: Cargo.toml
+    root_only: true
+    level: error
+    message: "alint is a Cargo workspace; Cargo.toml must exist at the root."
+
+  - id: gitignore-present
+    kind: file_exists
+    paths: .gitignore
+    root_only: true
+    level: warning
+
+  - id: readme-exists
+    kind: file_exists
+    paths: ["README.md", "README", "README.rst"]
+    root_only: true
+    level: warning
+    message: "A README at the repo root is strongly recommended (not yet written for alint)."
+    policy_url: "https://opensource.guide/starting-a-project/#writing-a-readme"
+
+  - id: license-exists
+    kind: file_exists
+    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"]
+    root_only: true
+    level: warning
+    message: "A LICENSE file is required before publishing this repo."
