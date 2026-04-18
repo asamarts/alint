@@ -86,8 +86,8 @@ impl RuleSpec {
     where
         T: serde::de::DeserializeOwned,
     {
-        Ok(serde_yaml_ng::from_value(
-            serde_yaml_ng::Value::Mapping(self.extra.clone()),
-        )?)
+        Ok(serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(
+            self.extra.clone(),
+        ))?)
     }
 }

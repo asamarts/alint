@@ -86,14 +86,18 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
 }
 
 fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
-    let (rules, respect_gitignore, extra_ignores) = load_rules(path, cli)?;
-    let rule_count = rules.len();
-    let engine = Engine::new(rules);
+    let loaded = load_rules(path, cli)?;
+    let rule_count = loaded.rules.len();
+    let engine = Engine::new(loaded.rules);
 
-    let effective_gitignore = if cli.no_gitignore { false } else { respect_gitignore };
+    let effective_gitignore = if cli.no_gitignore {
+        false
+    } else {
+        loaded.respect_gitignore
+    };
     let walk_opts = WalkOptions {
         respect_gitignore: effective_gitignore,
-        extra_ignores,
+        extra_ignores: loaded.extra_ignores,
     };
 
     let index = walk(path, &walk_opts).context("walking repository")?;
@@ -101,10 +105,7 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
 
     let report = engine.run(path, &index).context("running rules")?;
 
-    let format: Format = cli
-        .format
-        .parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
     format.write(&report, &mut out).context("writing output")?;
@@ -121,11 +122,11 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
 }
 
 fn cmd_list(cli: &Cli) -> Result<ExitCode> {
-    let (rules, _, _) = load_rules(Path::new("."), cli)?;
-    if rules.is_empty() {
+    let loaded = load_rules(Path::new("."), cli)?;
+    if loaded.rules.is_empty() {
         println!("(no rules loaded from config)");
     } else {
-        for rule in &rules {
+        for rule in &loaded.rules {
             println!(
                 "{:<8} {}{}",
                 rule.level().as_str(),
@@ -140,8 +141,8 @@ fn cmd_list(cli: &Cli) -> Result<ExitCode> {
 }
 
 fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
-    let (rules, _, _) = load_rules(Path::new("."), cli)?;
-    let Some(rule) = rules.iter().find(|r| r.id() == rule_id) else {
+    let loaded = load_rules(Path::new("."), cli)?;
+    let Some(rule) = loaded.rules.iter().find(|r| r.id() == rule_id) else {
         bail!("no rule with id {rule_id:?} found in the effective config");
     };
     println!("id:         {}", rule.id());
@@ -153,17 +154,20 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+struct LoadedConfig {
+    rules: Vec<Box<dyn Rule>>,
+    respect_gitignore: bool,
+    extra_ignores: Vec<String>,
+}
+
 /// Load the effective config from disk and instantiate every rule.
-/// Returns the built rule objects plus the walk-relevant bits of the config.
-fn load_rules(
-    cwd: &Path,
-    cli: &Cli,
-) -> Result<(Vec<Box<dyn Rule>>, bool, Vec<String>)> {
+fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     let config_path = if let Some(first) = cli.config.first() {
         first.clone()
     } else {
-        alint_dsl::discover(cwd)
-            .ok_or_else(|| anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display()))?
+        alint_dsl::discover(cwd).ok_or_else(|| {
+            anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display())
+        })?
     };
     tracing::debug!(?config_path, "loading config");
     let config = alint_dsl::load(&config_path)?;
@@ -180,5 +184,9 @@ fn load_rules(
             .with_context(|| format!("building rule {:?}", spec.id))?;
         rules.push(rule);
     }
-    Ok((rules, config.respect_gitignore, config.ignore))
+    Ok(LoadedConfig {
+        rules,
+        respect_gitignore: config.respect_gitignore,
+        extra_ignores: config.ignore,
+    })
 }

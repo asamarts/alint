@@ -12,15 +12,9 @@ use alint_core::{Config, Error, Result};
 /// The schema's primary consumer is the YAML language server for editor
 /// autocomplete; tests round-trip representative configs through it to
 /// keep the schema and the actual DSL in sync.
-pub const CONFIG_SCHEMA_V1: &str =
-    include_str!("../../../schemas/v1/config.json");
+pub const CONFIG_SCHEMA_V1: &str = include_str!("../../../schemas/v1/config.json");
 
-const DEFAULT_CONFIG_NAMES: &[&str] = &[
-    ".alint.yml",
-    ".alint.yaml",
-    "alint.yml",
-    "alint.yaml",
-];
+const DEFAULT_CONFIG_NAMES: &[&str] = &[".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"];
 
 /// Locate a config file starting at `start` and walking upward until one is
 /// found or the filesystem root is hit.
@@ -63,10 +57,7 @@ fn validate(config: &Config) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for rule in &config.rules {
         if !seen.insert(&rule.id) {
-            return Err(Error::rule_config(
-                &rule.id,
-                "duplicate rule id in config",
-            ));
+            return Err(Error::rule_config(&rule.id, "duplicate rule id in config"));
         }
     }
     Ok(())

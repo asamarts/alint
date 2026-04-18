@@ -85,12 +85,10 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
         if rel.as_os_str().is_empty() {
             continue;
         }
-        let metadata = entry
-            .metadata()
-            .map_err(|e| Error::Io {
-                path: abs.to_path_buf(),
-                source: std::io::Error::other(e.to_string()),
-            })?;
+        let metadata = entry.metadata().map_err(|e| Error::Io {
+            path: abs.to_path_buf(),
+            source: std::io::Error::other(e.to_string()),
+        })?;
         entries.push(FileEntry {
             path: rel.to_path_buf(),
             is_dir: metadata.is_dir(),

@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # required to create GitHub Releases
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: false
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            use_cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            use_cross: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: install musl-tools (native Linux musl only)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: build + package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross }}
+          VERSION: ${{ github.ref_name }}
+        run: ci/scripts/release-binary.sh
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alint-${{ matrix.target }}
+          path: |
+            target/release-artifacts/alint-*.tar.gz
+            target/release-artifacts/alint-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: aggregate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          # Each per-file .sha256 carries the hash + basename; concatenate.
+          cat *.tar.gz.sha256 > SHA256SUMS
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          # install.sh lives at the repo root and is committed; copy it alongside
+          # the binary tarballs so users can `curl -sSL <url>/install.sh | bash`.
+          cp "${GITHUB_WORKSPACE}/install.sh" ./install.sh
+          chmod +x install.sh
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --title "alint $TAG" \
+            --generate-notes \
+            install.sh SHA256SUMS \
+            alint-*.tar.gz alint-*.tar.gz.sha256

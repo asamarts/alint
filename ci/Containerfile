@@ -1,0 +1,53 @@
+FROM debian:bookworm-slim
+
+ARG RUNNER_VERSION=2.332.0
+ARG RUST_VERSION=stable
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    libssl-dev \
+    pkg-config \
+    hyperfine \
+    libicu72 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:${PATH}"
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain ${RUST_VERSION} \
+    && rustup component add clippy rustfmt
+
+# Cargo subcommands used by ci/scripts/
+RUN cargo install --locked cargo-audit
+
+# Create non-root runner user
+RUN useradd -m -d /home/runner -s /bin/bash runner
+
+# Install GitHub Actions runner agent
+WORKDIR /home/runner/actions-runner
+RUN DPKG_ARCH=$(dpkg --print-architecture) \
+    && case "$DPKG_ARCH" in amd64) ARCH=x64 ;; arm64) ARCH=arm64 ;; *) ARCH="$DPKG_ARCH" ;; esac \
+    && curl -fsSL -o runner.tar.gz \
+       "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${ARCH}-${RUNNER_VERSION}.tar.gz" \
+    && tar xzf runner.tar.gz \
+    && rm runner.tar.gz \
+    && ./bin/installdependencies.sh \
+    && chown -R runner:runner /home/runner \
+    && chown -R runner:runner /usr/local/cargo /usr/local/rustup
+
+COPY runner/entrypoint.sh /home/runner/entrypoint.sh
+RUN chmod +x /home/runner/entrypoint.sh
+
+USER runner
+WORKDIR /home/runner/actions-runner
+
+ENTRYPOINT ["/home/runner/entrypoint.sh"]

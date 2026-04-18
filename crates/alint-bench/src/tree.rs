@@ -12,9 +12,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use tempfile::TempDir;
 
-const EXTENSIONS: &[&str] = &[
-    "rs", "ts", "tsx", "md", "yaml", "yml", "json", "txt", "py",
-];
+const EXTENSIONS: &[&str] = &["rs", "ts", "tsx", "md", "yaml", "yml", "json", "txt", "py"];
 
 /// A generated tree rooted under a tempdir that is cleaned up on drop.
 #[derive(Debug)]

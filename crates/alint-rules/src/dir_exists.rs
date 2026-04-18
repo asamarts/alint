@@ -24,12 +24,18 @@ impl Rule for DirExistsRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let found = ctx.index.dirs().any(|entry| self.scope.matches(&entry.path));
+        let found = ctx
+            .index
+            .dirs()
+            .any(|entry| self.scope.matches(&entry.path));
         if found {
             Ok(Vec::new())
         } else {
             let msg = self.message.clone().unwrap_or_else(|| {
-                format!("expected a directory matching [{}]", self.patterns.join(", "))
+                format!(
+                    "expected a directory matching [{}]",
+                    self.patterns.join(", ")
+                )
             });
             Ok(vec![Violation::new(msg)])
         }

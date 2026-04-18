@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+
+# ─────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── Change detection ──────────────────────────────────────────────
+  changes:
+    name: Detect Changes
+    runs-on: [self-hosted, linux, alint]
+    outputs:
+      rust: ${{ steps.detect.outputs.rust }}
+      docs: ${{ steps.detect.outputs.docs }}
+      bench: ${{ steps.detect.outputs.bench }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: ci/scripts/detect-changes.sh
+
+  # ── Rust pipeline ─────────────────────────────────────────────────
+  fmt:
+    name: Format
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/fmt.sh
+
+  clippy:
+    name: Clippy
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/clippy.sh
+
+  test:
+    name: Test
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/test.sh
+
+  audit:
+    name: Audit
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/audit.sh
+
+  build:
+    name: Build
+    needs: [changes, clippy, test]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/build.sh
+
+  docs:
+    name: Docs
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+      && github.event_name == 'push'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/docs.sh
+
+  dogfood:
+    name: Dogfood
+    needs: [changes, build]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/dogfood.sh
+
+  # ── Bench smoke ───────────────────────────────────────────────────
+  bench-smoke:
+    name: Bench Smoke
+    needs: [changes, build]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.bench == 'true'
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/scripts/bench-smoke.sh
+
+  # ── Summary report ───────────────────────────────────────────────
+  summary:
+    name: Summary
+    if: always()
+    needs:
+      - changes
+      - fmt
+      - clippy
+      - test
+      - audit
+      - build
+      - docs
+      - dogfood
+      - bench-smoke
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          RUST_CHANGED: ${{ needs.changes.outputs.rust }}
+          DOCS_CHANGED: ${{ needs.changes.outputs.docs }}
+          BENCH_CHANGED: ${{ needs.changes.outputs.bench }}
+          FMT_RESULT: ${{ needs.fmt.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          AUDIT_RESULT: ${{ needs.audit.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DOCS_JOB_RESULT: ${{ needs.docs.result }}
+          DOGFOOD_RESULT: ${{ needs.dogfood.result }}
+          BENCH_SMOKE_RESULT: ${{ needs.bench-smoke.result }}
+        run: ci/scripts/summary.sh

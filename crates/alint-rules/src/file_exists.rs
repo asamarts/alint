@@ -50,7 +50,11 @@ impl Rule for FileExistsRule {
             Ok(Vec::new())
         } else {
             let message = self.message.clone().unwrap_or_else(|| {
-                let scope = if self.root_only { " at the repo root" } else { "" };
+                let scope = if self.root_only {
+                    " at the repo root"
+                } else {
+                    ""
+                };
                 format!(
                     "expected a file matching [{}]{scope}",
                     self.describe_patterns()
@@ -70,9 +74,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     };
     let patterns = patterns_of(paths);
     let scope = Scope::from_paths_spec(paths)?;
-    let opts: Options = spec.deserialize_options().unwrap_or(Options {
-        root_only: false,
-    });
+    let opts: Options = spec
+        .deserialize_options()
+        .unwrap_or(Options { root_only: false });
     Ok(Box::new(FileExistsRule {
         id: spec.id.clone(),
         level: spec.level,

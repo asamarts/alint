@@ -49,8 +49,7 @@ impl Rule for FileHeaderRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
                     );
                     continue;
                 }
@@ -62,10 +61,7 @@ impl Rule for FileHeaderRule {
                 );
                 continue;
             };
-            let header: String = text
-                .split_inclusive('\n')
-                .take(self.lines)
-                .collect();
+            let header: String = text.split_inclusive('\n').take(self.lines).collect();
             if !self.pattern.is_match(&header) {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(

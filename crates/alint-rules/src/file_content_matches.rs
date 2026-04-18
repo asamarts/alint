@@ -42,8 +42,7 @@ impl Rule for FileContentMatchesRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
                     );
                     continue;
                 }
@@ -57,7 +56,10 @@ impl Rule for FileContentMatchesRule {
             };
             if !self.pattern.is_match(text) {
                 let msg = self.message.clone().unwrap_or_else(|| {
-                    format!("content does not match required pattern /{}/", self.pattern_src)
+                    format!(
+                        "content does not match required pattern /{}/",
+                        self.pattern_src
+                    )
                 });
                 violations.push(Violation::new(msg).with_path(&entry.path));
             }

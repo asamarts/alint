@@ -43,8 +43,7 @@ impl Rule for FileIsTextRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
                     );
                     continue;
                 }

@@ -63,7 +63,10 @@ mod registry_tests {
             "filename_case",
             "filename_regex",
         ] {
-            assert!(known.contains(&kind), "{kind} missing from builtin registry");
+            assert!(
+                known.contains(&kind),
+                "{kind} missing from builtin registry"
+            );
         }
     }
 }

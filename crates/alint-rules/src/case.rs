@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for CaseConvention {
         let raw: String = String::deserialize(d)?;
         let canon: String = raw
             .chars()
-            .filter(|c| c.is_ascii_alphabetic())
+            .filter(char::is_ascii_alphabetic)
             .map(|c| c.to_ascii_lowercase())
             .collect();
         match canon.as_str() {
@@ -98,7 +98,8 @@ fn is_uppercase(s: &str) -> bool {
 }
 
 fn is_flat(s: &str) -> bool {
-    s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
 
 fn is_snake(s: &str) -> bool {

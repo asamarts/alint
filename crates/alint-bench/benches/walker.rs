@@ -16,8 +16,7 @@ mod inner {
     pub fn bench_walker(c: &mut Criterion) {
         let mut group = c.benchmark_group("walker");
         for &n in &[100usize, 1_000, 10_000] {
-            let tree = alint_bench::tree::generate_tree(n, 4, 42)
-                .expect("tree generates");
+            let tree = alint_bench::tree::generate_tree(n, 4, 42).expect("tree generates");
             let opts = WalkOptions::default();
             group.throughput(Throughput::Elements(n as u64));
             group.bench_with_input(BenchmarkId::from_parameter(n), &tree, |b, t| {

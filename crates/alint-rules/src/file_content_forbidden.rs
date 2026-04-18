@@ -42,8 +42,7 @@ impl Rule for FileContentForbiddenRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
                     );
                     continue;
                 }
@@ -55,9 +54,10 @@ impl Rule for FileContentForbiddenRule {
             };
             if let Some(m) = self.pattern.find(text) {
                 let line = text[..m.start()].matches('\n').count() + 1;
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!("forbidden pattern /{}/ found", self.pattern_src)
-                });
+                let msg = self
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| format!("forbidden pattern /{}/ found", self.pattern_src));
                 violations.push(
                     Violation::new(msg)
                         .with_path(&entry.path)

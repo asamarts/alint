@@ -120,7 +120,11 @@ fn bench_release(quick: bool, out: Option<PathBuf>, seed: u64) -> Result<()> {
     ensure_hyperfine()?;
 
     let binary = build_release_binary()?;
-    let sizes: &[usize] = if quick { &[500] } else { &[1_000, 10_000, 100_000] };
+    let sizes: &[usize] = if quick {
+        &[500]
+    } else {
+        &[1_000, 10_000, 100_000]
+    };
 
     // Write the shared config file once to a tempdir and point every run at it.
     let config_dir = tempfile::tempdir()?;

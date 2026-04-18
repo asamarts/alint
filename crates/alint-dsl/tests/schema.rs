@@ -6,14 +6,13 @@
 use alint_dsl::CONFIG_SCHEMA_V1;
 
 fn compile_schema() -> jsonschema::Validator {
-    let schema_json: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA_V1)
-        .expect("schema should be well-formed JSON");
+    let schema_json: serde_json::Value =
+        serde_json::from_str(CONFIG_SCHEMA_V1).expect("schema should be well-formed JSON");
     jsonschema::validator_for(&schema_json).expect("schema should compile")
 }
 
 fn yaml_to_json(yaml: &str) -> serde_json::Value {
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(yaml).expect("yaml should parse");
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml should parse");
     serde_json::to_value(value).expect("yaml → json should round-trip")
 }
 
@@ -39,8 +38,7 @@ fn assert_invalid(validator: &jsonschema::Validator, instance: &serde_json::Valu
 
 #[test]
 fn schema_is_well_formed_json() {
-    let _: serde_json::Value =
-        serde_json::from_str(CONFIG_SCHEMA_V1).expect("valid JSON");
+    let _: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA_V1).expect("valid JSON");
 }
 
 #[test]

@@ -32,7 +32,10 @@ pub fn write_human(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     let passing = report.passing_rules();
     let total = report.total_violations();
     if any {
-        writeln!(w, "\n{failing} rule(s) failing, {passing} passing, {total} violation(s).")?;
+        writeln!(
+            w,
+            "\n{failing} rule(s) failing, {passing} passing, {total} violation(s)."
+        )?;
     } else {
         writeln!(w, "All {passing} rule(s) passed.")?;
     }

@@ -23,11 +23,13 @@ impl Violation {
         }
     }
 
+    #[must_use]
     pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.path = Some(path.into());
         self
     }
 
+    #[must_use]
     pub fn with_location(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
