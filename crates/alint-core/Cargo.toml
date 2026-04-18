@@ -1,11 +1,15 @@
 [package]
 name = "alint-core"
-description = "Core types and execution engine for alint"
+description = "Core types and execution engine for the alint language-agnostic repository linter."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage = "https://github.com/asamarts/alint"
+readme = "../../README.md"
+keywords = ["linter", "policy", "repository", "structure"]
+categories = ["development-tools"]
 authors.workspace = true
 
 [dependencies]

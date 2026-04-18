@@ -42,16 +42,24 @@ rules:
     kind: file_exists
     paths: ["README.md", "README", "README.rst"]
     root_only: true
-    level: warning
-    message: "A README at the repo root is strongly recommended."
+    level: error
+    message: "A README at the repo root is required."
     policy_url: "https://opensource.guide/starting-a-project/#writing-a-readme"
 
   - id: license-exists
+    # alint is dual-licensed Apache-2.0 OR MIT. Either root LICENSE file
+    # or at least one of LICENSE-APACHE / LICENSE-MIT satisfies the rule.
     kind: file_exists
-    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"]
+    paths:
+      - "LICENSE"
+      - "LICENSE.md"
+      - "LICENSE.txt"
+      - "LICENSE-APACHE"
+      - "LICENSE-MIT"
+      - "COPYING"
     root_only: true
-    level: warning
-    message: "A LICENSE file is required before publishing this repo."
+    level: error
+    message: "A LICENSE file is required."
 
   - id: no-committed-cargo-lock-bak
     kind: file_absent

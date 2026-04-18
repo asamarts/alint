@@ -1,11 +1,15 @@
 [package]
-name = "alint-cli"
-description = "alint — a language-agnostic linter for repository structure, existence, naming, and content rules"
+name = "alint"
+description = "Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage = "https://github.com/asamarts/alint"
+readme = "../../README.md"
+keywords = ["linter", "policy", "repository", "structure", "cli"]
+categories = ["development-tools", "command-line-utilities"]
 authors.workspace = true
 
 [[bin]]

@@ -271,15 +271,19 @@ alint is a Cargo workspace — the standard shape for Rust tools (rustc, cargo, 
 ```
 alint/
 ├── crates/
-│   ├── alint-cli/          binary entrypoint (will be renamed to `alint`
-│   │                       before the first crates.io publish; its
-│   │                       `[[bin]] name` is already `alint`)
+│   ├── alint/              binary entrypoint; `cargo install alint`
 │   ├── alint-core/         engine, walker, rule trait, config AST, errors
 │   ├── alint-dsl/          YAML config loader + schema validation
 │   ├── alint-rules/        built-in rule implementations
-│   └── alint-output/       formatters (human, json, ...)
+│   ├── alint-output/       formatters (human, json, ...)
+│   └── alint-bench/        criterion micro-benches + seeded tree generator
+├── xtask/                  cargo-xtask helpers (bench-release driver)
+├── ci/                     self-hosted runner + per-job shell scripts
+├── schemas/v1/             JSON Schema for .alint.yml
 ├── docs/
-│   └── design/             architecture and roadmap
+│   ├── design/             architecture and roadmap
+│   └── benchmarks/         methodology and per-platform published numbers
+├── install.sh              curl-pipeable platform-detecting installer
 ├── .alint.yml              dogfood config
 └── Cargo.toml              workspace manifest
 ```

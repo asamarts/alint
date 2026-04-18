@@ -172,7 +172,7 @@ fn ensure_hyperfine() -> Result<()> {
 }
 
 fn build_release_binary() -> Result<PathBuf> {
-    eprintln!("[xtask] cargo build --release -p alint-cli");
+    eprintln!("[xtask] cargo build --release -p alint");
     let status = Command::new(env!("CARGO"))
         .args(["build", "--release", "-p", "alint-cli"])
         .status()

@@ -41,7 +41,7 @@ fi
 
 echo "==> Building ${BIN_NAME} for ${TARGET} (via ${BUILD_CMD})"
 rustup target add "$TARGET" 2>/dev/null || true
-$BUILD_CMD build --release --locked --target "$TARGET" -p alint-cli
+$BUILD_CMD build --release --locked --target "$TARGET" -p alint
 
 BIN_PATH="target/${TARGET}/release/${BIN_NAME}${BIN_EXT}"
 if [[ ! -f "$BIN_PATH" ]]; then

@@ -1,12 +1,13 @@
 [package]
 name = "alint-output"
-description = "Output formatters for alint reports (human, json, ...)"
+description = "Internal: output formatters for alint reports (human, json, ...). Not a stable public API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+publish = false
 
 [dependencies]
 alint-core.workspace = true

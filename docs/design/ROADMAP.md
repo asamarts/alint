@@ -14,8 +14,8 @@ The smallest scope that is usefully adoptable.
 - ✅ CLI subcommands: `check`, `list`, `explain`.
 - ✅ JSON Schema published for editor autocomplete (`schemas/v1/config.json`).
 - ✅ Benchmarks published with the release — criterion micro-benches under `crates/alint-bench/` and hyperfine macro-benches via `xtask bench-release`. Methodology at [`docs/benchmarks/METHODOLOGY.md`](../benchmarks/METHODOLOGY.md); per-platform results under `docs/benchmarks/v0.1/`.
-- ⏳ Static binaries on GitHub Releases, install script, `cargo install alint`.
-- ⏳ Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false`; crates.io metadata (`description`, `license`, `repository`, `keywords`, `categories`) populated on every published crate.
+- ✅ Static binaries on GitHub Releases, install script, `cargo install alint` — release workflow at `.github/workflows/release.yml`, installer at [`install.sh`](../../install.sh).
+- ✅ Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false` (only `alint` + `alint-core` publish); crates.io metadata populated on the public crates; `LICENSE-APACHE` + `LICENSE-MIT` + root `README.md` added.
 - ✅ Dogfood `.alint.yml` exercising the tool against its own repo.
 
 ## v0.2 — Cross-file and composition

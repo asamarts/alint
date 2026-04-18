@@ -5,12 +5,12 @@ members = [
     "crates/alint-dsl",
     "crates/alint-rules",
     "crates/alint-output",
-    "crates/alint-cli",
+    "crates/alint",
     "crates/alint-bench",
     "xtask",
 ]
 # `cargo run` without -p defaults to the CLI; xtask is explicit-only.
-default-members = ["crates/alint-cli"]
+default-members = ["crates/alint"]
 
 [workspace.package]
 version = "0.1.0"

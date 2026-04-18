@@ -69,7 +69,7 @@ Location: `xtask/src/main.rs`. Rule config: `xtask/src/bench_config.yml`.
 
 The driver:
 
-1. `cargo build --release -p alint-cli`.
+1. `cargo build --release -p alint`.
 2. For each tree size (default 1k / 10k / 100k; `--quick` collapses to a
    single 500-file smoke), generates a deterministic synthetic tree under
    `$TMPDIR` via `alint-bench::tree::generate_tree`. The seed is fixed

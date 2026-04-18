@@ -1,12 +1,13 @@
 [package]
 name = "alint-dsl"
-description = "YAML DSL loader for alint configuration files"
+description = "Internal: YAML DSL loader for alint configuration files. Not a stable public API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+publish = false
 
 [dependencies]
 alint-core.workspace = true

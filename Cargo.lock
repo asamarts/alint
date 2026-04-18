@@ -41,6 +41,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alint"
+version = "0.1.0"
+dependencies = [
+ "alint-core",
+ "alint-dsl",
+ "alint-output",
+ "alint-rules",
+ "anyhow",
+ "clap",
+ "miette",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "alint-bench"
 version = "0.1.0"
 dependencies = [
@@ -53,21 +68,6 @@ dependencies = [
  "rand_chacha",
  "regex",
  "tempfile",
-]
-
-[[package]]
-name = "alint-cli"
-version = "0.1.0"
-dependencies = [
- "alint-core",
- "alint-dsl",
- "alint-output",
- "alint-rules",
- "anyhow",
- "clap",
- "miette",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
