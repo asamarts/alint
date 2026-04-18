@@ -1,0 +1,10 @@
+name: hello-debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "hello from GitHub-hosted ubuntu-latest"
