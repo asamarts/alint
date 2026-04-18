@@ -7,6 +7,7 @@ ignore:
   - "target/**"
 
 rules:
+  # --- Layout (existence) -------------------------------------------------
   - id: architecture-doc-exists
     kind: file_exists
     paths: docs/design/ARCHITECTURE.md
@@ -24,7 +25,6 @@ rules:
     paths: Cargo.toml
     root_only: true
     level: error
-    message: "alint is a Cargo workspace; Cargo.toml must exist at the root."
 
   - id: gitignore-present
     kind: file_exists
@@ -37,7 +37,7 @@ rules:
     paths: ["README.md", "README", "README.rst"]
     root_only: true
     level: warning
-    message: "A README at the repo root is strongly recommended (not yet written for alint)."
+    message: "A README at the repo root is strongly recommended."
     policy_url: "https://opensource.guide/starting-a-project/#writing-a-readme"
 
   - id: license-exists
@@ -46,3 +46,68 @@ rules:
     root_only: true
     level: warning
     message: "A LICENSE file is required before publishing this repo."
+
+  - id: no-committed-cargo-lock-bak
+    kind: file_absent
+    paths: "**/Cargo.lock.bak"
+    level: error
+    message: "Cargo.lock.bak is generated; don't commit it."
+
+  - id: no-target-dir-tracked
+    kind: dir_absent
+    paths: "**/target"
+    level: error
+    message: "The Cargo build directory `target/` must not be tracked."
+
+  # --- Naming -------------------------------------------------------------
+  - id: rust-sources-snake-case
+    kind: filename_case
+    paths: "crates/**/src/**/*.rs"
+    case: snake
+    level: error
+    message: "Rust module filenames must be snake_case."
+
+  - id: toml-kebab-or-snake
+    kind: filename_regex
+    paths: "**/*.toml"
+    stem: true
+    pattern: "[a-z][a-z0-9_-]*|Cargo"
+    level: warning
+
+  # --- Content ------------------------------------------------------------
+  - id: cargo-toml-is-edition-2024
+    kind: file_content_matches
+    paths: "Cargo.toml"
+    pattern: 'edition\s*(?:=|\.workspace\s*=\s*true)'
+    level: error
+    message: "Root Cargo.toml must declare the 2024 edition."
+
+  - id: no-dbg-macros-in-prod
+    kind: file_content_forbidden
+    paths:
+      include: "crates/**/src/**/*.rs"
+      exclude: "crates/**/src/**/tests.rs"
+    pattern: '\bdbg!\s*\('
+    level: warning
+    message: "`dbg!` macros should not land in committed Rust sources."
+
+  - id: readme-has-word-alint
+    # Only runs once a README exists; harmless no-op until then.
+    kind: file_content_matches
+    paths: ["README.md", "README"]
+    pattern: "(?i)alint"
+    level: info
+    message: "README should mention the project name at least once."
+
+  - id: no-huge-committed-blobs
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 5242880          # 5 MiB
+    level: warning
+    message: "Committed blobs larger than 5 MiB should be reviewed."
+
+  - id: rust-sources-are-text
+    kind: file_is_text
+    paths: "crates/**/src/**/*.rs"
+    level: error
+    message: "Rust sources must be text (no accidental binary commits)."

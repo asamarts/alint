@@ -25,17 +25,35 @@ impl Config {
 
 /// YAML shape for a rule's `paths:` field — a single glob, an array (with
 /// optional `!pattern` negations), or an explicit `{include, exclude}` pair.
+/// For the include/exclude form, each field accepts either a single string
+/// or a list of strings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PathsSpec {
     Single(String),
     Many(Vec<String>),
     IncludeExclude {
-        #[serde(default)]
+        #[serde(default, deserialize_with = "string_or_vec")]
         include: Vec<String>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "string_or_vec")]
         exclude: Vec<String>,
     },
+}
+
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(s) => Ok(vec![s]),
+        OneOrMany::Many(v) => Ok(v),
+    }
 }
 
 /// YAML-level description of a rule before it is instantiated into a `Box<dyn Rule>`
