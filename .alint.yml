@@ -1,5 +1,5 @@
 # Dogfood config: alint lints its own repository.
-# yaml-language-server: $schema=https://alint.rs/schemas/v1/config.json
+# yaml-language-server: $schema=./schemas/v1/config.json
 
 version: 1
 
@@ -31,6 +31,12 @@ rules:
     paths: .gitignore
     root_only: true
     level: warning
+
+  - id: schema-v1-present
+    kind: file_exists
+    paths: schemas/v1/config.json
+    level: error
+    message: "schemas/v1/config.json must exist (embedded into alint-dsl via include_str!)."
 
   - id: readme-exists
     kind: file_exists

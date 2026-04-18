@@ -15,5 +15,9 @@ serde_yaml_ng.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+jsonschema.workspace = true
+serde_json.workspace = true
+
 [lints]
 workspace = true

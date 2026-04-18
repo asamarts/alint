@@ -6,6 +6,15 @@ use std::path::{Path, PathBuf};
 
 use alint_core::{Config, Error, Result};
 
+/// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
+/// files. Embedded at build time from `schemas/v1/config.json`.
+///
+/// The schema's primary consumer is the YAML language server for editor
+/// autocomplete; tests round-trip representative configs through it to
+/// keep the schema and the actual DSL in sync.
+pub const CONFIG_SCHEMA_V1: &str =
+    include_str!("../../../schemas/v1/config.json");
+
 const DEFAULT_CONFIG_NAMES: &[&str] = &[
     ".alint.yml",
     ".alint.yaml",

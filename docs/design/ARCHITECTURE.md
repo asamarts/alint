@@ -68,7 +68,14 @@ Rules produce `Violation`s; the engine aggregates them into a `Report`.
 
 ## DSL
 
-YAML, with a JSON Schema at `https://alint.rs/schemas/v1/config.json` (enables editor autocomplete and inline validation via the YAML language server).
+YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](../../schemas/v1/config.json) in this repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). Integration tests round-trip representative configs through a compliant validator so the schema and the engine's actual DSL stay in sync.
+
+For editor autocomplete, reference the schema via the YAML language server pragma — either by a relative path (recommended inside this repo) or by the GitHub raw URL (for downstream users, once the repo is public):
+
+```yaml
+# yaml-language-server: $schema=./schemas/v1/config.json
+# or: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+```
 
 ```yaml
 # .alint.yml
@@ -326,7 +333,7 @@ Selected via `--format`:
 A Rust project dogfood config, showing composition, facts, and multiple rule families:
 
 ```yaml
-# yaml-language-server: $schema=https://alint.rs/schemas/v1/config.json
+# yaml-language-server: $schema=./schemas/v1/config.json
 version: 1
 
 extends:

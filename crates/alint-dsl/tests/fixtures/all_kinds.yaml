@@ -1,0 +1,78 @@
+# Test fixture: exercises every v0.1 rule kind with both required and
+# optional fields. Used by `schema_tests::schema_accepts_all_kinds_fixture`.
+version: 1
+
+ignore:
+  - "target/**"
+respect_gitignore: true
+
+rules:
+  - id: readme-exists
+    kind: file_exists
+    paths: README.md
+    root_only: true
+    level: error
+    message: "README required"
+    policy_url: "https://example.com/policies/readme"
+
+  - id: no-lockfile-bak
+    kind: file_absent
+    paths: ["**/Cargo.lock.bak", "**/package-lock.json.bak"]
+    level: error
+
+  - id: docs-dir
+    kind: dir_exists
+    paths: "docs/**"
+    level: warning
+
+  - id: no-target
+    kind: dir_absent
+    paths: "**/target"
+    level: error
+
+  - id: license-header
+    kind: file_content_matches
+    paths:
+      include: "**/*.java"
+      exclude: "**/generated/**"
+    pattern: "(?i)copyright"
+    level: error
+
+  - id: no-todos
+    kind: file_content_forbidden
+    paths:
+      include: ["src/**/*.rs"]
+      exclude: ["src/**/*_test.rs"]
+    pattern: '\b(TODO|FIXME|XXX)\b'
+    level: warning
+
+  - id: java-header
+    kind: file_header
+    paths: "**/*.java"
+    pattern: "(?s)Copyright"
+    lines: 20
+    level: error
+
+  - id: max-size
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 10485760
+    level: warning
+
+  - id: all-text
+    kind: file_is_text
+    paths: "src/**"
+    level: error
+
+  - id: components-pascal
+    kind: filename_case
+    paths: "components/**/*.tsx"
+    case: PascalCase
+    level: error
+
+  - id: tests-pattern
+    kind: filename_regex
+    paths: "tests/**/*.rs"
+    pattern: "^test_[a-z0-9_]+$"
+    stem: true
+    level: error

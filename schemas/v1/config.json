@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json",
+  "title": "alint configuration (v1)",
+  "description": "Schema for .alint.yml configuration files. Authoritative reference: docs/design/ARCHITECTURE.md in the alint repository.",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Config schema version. Always 1 for this schema."
+    },
+    "ignore": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Additional glob patterns excluded on top of .gitignore."
+    },
+    "respect_gitignore": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to honor .gitignore files during the walk."
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" },
+      "description": "Rules evaluated against the repository tree."
+    }
+  },
+
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "off"],
+      "description": "Severity. `off` disables a rule (useful when overriding inherited rules)."
+    },
+
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Unique kebab-case identifier for the rule."
+    },
+
+    "string_or_string_array": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
+    "paths_spec": {
+      "description": "A single glob, an array of globs (with optional `!negation`), or an explicit include/exclude pair.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "include": { "$ref": "#/$defs/string_or_string_array" },
+            "exclude": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        }
+      ]
+    },
+
+    "case_convention": {
+      "type": "string",
+      "description": "Case convention. Aliases like PascalCase / pascal / pascal-case / UpperCamelCase all resolve to the same canonical form.",
+      "enum": [
+        "lower", "lowercase",
+        "upper", "uppercase",
+        "pascal", "pascalcase", "PascalCase", "UpperCamelCase", "upper_camel", "upper_camel_case",
+        "camel", "camelcase", "camelCase", "lowerCamelCase", "lower_camel", "lower_camel_case",
+        "snake", "snakecase", "snake_case",
+        "kebab", "kebabcase", "kebab-case", "dash", "dashcase", "dash-case",
+        "screaming-snake", "screamingsnake", "screamingsnakecase", "SCREAMING_SNAKE_CASE", "upper_snake", "upper_snake_case",
+        "flat", "flatcase"
+      ]
+    },
+
+    "rule_common": {
+      "type": "object",
+      "required": ["id", "kind", "level"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" },
+        "kind": {
+          "type": "string",
+          "description": "The primitive rule kind. See docs/design/ARCHITECTURE.md §4.4 for the full catalog."
+        },
+        "level": { "$ref": "#/$defs/level" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "message": {
+          "type": "string",
+          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution."
+        },
+        "policy_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Link to a human-readable policy justification."
+        },
+        "when": {
+          "type": "string",
+          "description": "Gate the rule on a fact-based expression (available from v0.2)."
+        }
+      }
+    },
+
+    "rule": {
+      "allOf": [
+        { "$ref": "#/$defs/rule_common" },
+        { "$ref": "#/$defs/rule_kind_dispatch" }
+      ],
+      "unevaluatedProperties": false
+    },
+
+    "rule_kind_dispatch": {
+      "description": "Dispatch on the `kind` discriminator. Each branch sets the required kind-specific fields.",
+      "oneOf": [
+        { "$ref": "#/$defs/rule_file_exists" },
+        { "$ref": "#/$defs/rule_file_absent" },
+        { "$ref": "#/$defs/rule_dir_exists" },
+        { "$ref": "#/$defs/rule_dir_absent" },
+        { "$ref": "#/$defs/rule_file_content_matches" },
+        { "$ref": "#/$defs/rule_file_content_forbidden" },
+        { "$ref": "#/$defs/rule_file_header" },
+        { "$ref": "#/$defs/rule_file_max_size" },
+        { "$ref": "#/$defs/rule_file_is_text" },
+        { "$ref": "#/$defs/rule_filename_case" },
+        { "$ref": "#/$defs/rule_filename_regex" }
+      ]
+    },
+
+    "rule_file_exists": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_exists" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "root_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, only files directly at the repository root satisfy the rule."
+        }
+      }
+    },
+
+    "rule_file_absent": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_absent" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_dir_exists": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "dir_exists" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_dir_absent": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "dir_absent" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_content_matches": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "const": "file_content_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. File contents must match."
+        }
+      }
+    },
+
+    "rule_file_content_forbidden": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "const": "file_content_forbidden" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. File contents must NOT match."
+        }
+      }
+    },
+
+    "rule_file_header": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "const": "file_header" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. The first `lines` lines of each file in scope must match."
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Number of leading lines to consider."
+        }
+      }
+    },
+
+    "rule_file_max_size": {
+      "type": "object",
+      "required": ["paths", "max_bytes"],
+      "properties": {
+        "kind": { "const": "file_max_size" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum allowed file size in bytes."
+        }
+      }
+    },
+
+    "rule_file_is_text": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_is_text" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_filename_case": {
+      "type": "object",
+      "required": ["paths", "case"],
+      "properties": {
+        "kind": { "const": "filename_case" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "case": { "$ref": "#/$defs/case_convention" }
+      }
+    },
+
+    "rule_filename_regex": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "const": "filename_regex" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex, automatically anchored with ^...$ by the engine."
+        },
+        "stem": {
+          "type": "boolean",
+          "default": false,
+          "description": "Match the file stem (no extension) instead of the full basename."
+        }
+      }
+    }
+  }
+}
