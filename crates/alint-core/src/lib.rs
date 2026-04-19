@@ -6,6 +6,7 @@
 mod config;
 mod engine;
 mod error;
+pub mod facts;
 mod level;
 mod registry;
 mod report;
@@ -17,6 +18,7 @@ mod walker;
 pub use config::{Config, NestedRuleSpec, PathsSpec, RuleSpec};
 pub use engine::Engine;
 pub use error::{Error, Result};
+pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use level::Level;
 pub use registry::{RuleBuilder, RuleRegistry};
 pub use report::Report;

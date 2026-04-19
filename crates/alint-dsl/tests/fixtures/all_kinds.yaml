@@ -6,6 +6,18 @@ ignore:
   - "target/**"
 respect_gitignore: true
 
+vars:
+  copyright_year: "2026"
+  org: "Acme Corp"
+
+facts:
+  - id: is_rust
+    any_file_exists: [Cargo.toml]
+  - id: has_license_and_readme
+    all_files_exist: [LICENSE, README.md]
+  - id: n_rs_files
+    count_files: "**/*.rs"
+
 rules:
   - id: readme-exists
     kind: file_exists

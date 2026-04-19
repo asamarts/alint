@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
+use crate::facts::FactSpec;
 use crate::level::Level;
 
 /// Parsed form of a `.alint.yml` file.
@@ -11,6 +14,14 @@ pub struct Config {
     pub ignore: Vec<String>,
     #[serde(default = "default_respect_gitignore")]
     pub respect_gitignore: bool,
+    /// Free-form string variables referenced from rule messages and
+    /// `when` expressions as `{{vars.<name>}}` and `vars.<name>`.
+    #[serde(default)]
+    pub vars: HashMap<String, String>,
+    /// Repository properties evaluated once per run and referenced from
+    /// `when` clauses as `facts.<id>`.
+    #[serde(default)]
+    pub facts: Vec<FactSpec>,
     #[serde(default)]
     pub rules: Vec<RuleSpec>,
 }

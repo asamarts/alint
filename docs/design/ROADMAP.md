@@ -21,7 +21,7 @@ The smallest scope that is usefully adoptable.
 ## v0.2 — Cross-file and composition
 
 - Cross-file primitives: ✅ `pair`, ✅ `for_each_dir`, ✅ `for_each_file`, ✅ `every_matching_has`, ✅ `dir_contains`, ✅ `dir_only_contains`, ✅ `unique_by`. **(complete)**
-- ⏳ Facts system: `any_file_exists`, `all_files_exist`, `detect: linguist`, `detect: askalono`, `count_files`, `custom`.
+- Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`; ⏳ `detect: linguist`, ⏳ `detect: askalono`, ⏳ `custom`, ⏳ `git_branch`, ⏳ `file_content_matches`.
 - ⏳ `when` expression language.
 - ⏳ `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
 - ⏳ `fix` subcommand with `file_create`, `file_prepend`, `file_append`, `file_remove`, `file_rename`.

@@ -21,6 +21,16 @@
       "default": true,
       "description": "Whether to honor .gitignore files during the walk."
     },
+    "vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Free-form string variables referenced from rule messages as {{vars.<name>}} and from `when` clauses as vars.<name>."
+    },
+    "facts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact" },
+      "description": "Properties of the repository evaluated once per run; referenced from `when` clauses as facts.<id>."
+    },
     "rules": {
       "type": "array",
       "items": { "$ref": "#/$defs/rule" },
@@ -414,6 +424,36 @@
           "items": { "$ref": "#/$defs/nested_rule" }
         }
       }
+    },
+
+    "fact": {
+      "description": "A single fact declaration. Each fact has an `id` plus exactly one kind-specific field.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" }
+      },
+      "oneOf": [
+        {
+          "required": ["any_file_exists"],
+          "properties": {
+            "any_file_exists": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        },
+        {
+          "required": ["all_files_exist"],
+          "properties": {
+            "all_files_exist": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        },
+        {
+          "required": ["count_files"],
+          "properties": {
+            "count_files": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
     }
   }
 }

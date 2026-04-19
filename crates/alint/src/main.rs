@@ -89,7 +89,9 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
 fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
     let rule_count = loaded.rules.len();
-    let engine = Engine::new(loaded.rules, loaded.registry);
+    let engine = Engine::new(loaded.rules, loaded.registry)
+        .with_facts(loaded.facts)
+        .with_vars(loaded.vars);
 
     let effective_gitignore = if cli.no_gitignore {
         false
@@ -158,6 +160,8 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
 struct LoadedConfig {
     rules: Vec<Box<dyn Rule>>,
     registry: RuleRegistry,
+    facts: Vec<alint_core::FactSpec>,
+    vars: std::collections::HashMap<String, String>,
     respect_gitignore: bool,
     extra_ignores: Vec<String>,
 }
@@ -189,6 +193,8 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     Ok(LoadedConfig {
         rules,
         registry,
+        facts: config.facts,
+        vars: config.vars,
         respect_gitignore: config.respect_gitignore,
         extra_ignores: config.ignore,
     })

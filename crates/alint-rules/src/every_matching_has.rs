@@ -125,6 +125,8 @@ mod tests {
             root: Path::new("/"),
             index: &idx,
             registry: Some(&reg),
+            facts: None,
+            vars: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         // `{path}` resolves to "packages/a" (dir) and "packages/x.md" (file).

@@ -126,6 +126,8 @@ mod tests {
             root: Path::new("/"),
             index: &idx,
             registry: Some(&reg),
+            facts: None,
+            vars: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty(), "unexpected: {v:?}");
@@ -154,6 +156,8 @@ mod tests {
             root: Path::new("/"),
             index: &idx,
             registry: Some(&reg),
+            facts: None,
+            vars: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         assert_eq!(v.len(), 2);

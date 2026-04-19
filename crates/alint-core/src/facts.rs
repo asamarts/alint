@@ -1,0 +1,262 @@
+//! Facts — cached properties of the repository evaluated once per run and
+//! referenced by `when` clauses on rules (shipping in a later commit).
+//!
+//! Each fact has an `id` and exactly one kind-specific top-level field that
+//! names its type. Example:
+//!
+//! ```yaml
+//! facts:
+//!   - id: is_rust
+//!     any_file_exists: ["Cargo.toml"]
+//!   - id: is_monorepo
+//!     all_files_exist: ["packages", "pnpm-workspace.yaml"]
+//!   - id: n_java_files
+//!     count_files: "**/*.java"
+//! ```
+//!
+//! Evaluation is declarative and cheap — facts see the walked `FileIndex`
+//! but not arbitrary filesystem state outside the repo root.
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::error::Result;
+use crate::scope::Scope;
+use crate::walker::FileIndex;
+
+/// A value a fact evaluates to. Keeps the surface small for v0.2; richer
+/// types (list, map) arrive with the `when` expression language.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FactValue {
+    Bool(bool),
+    Int(i64),
+    String(String),
+}
+
+impl FactValue {
+    /// Boolean coercion — `Bool(b)` → b; `Int(n)` → `n != 0`; `String(s)` →
+    /// `!s.is_empty()`. Used by `when` evaluation's truthiness checks.
+    pub fn truthy(&self) -> bool {
+        match self {
+            Self::Bool(b) => *b,
+            Self::Int(n) => *n != 0,
+            Self::String(s) => !s.is_empty(),
+        }
+    }
+}
+
+/// A string or a list of strings — accepted by fact kinds whose input is
+/// glob-shaped.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl OneOrMany {
+    pub fn to_vec(&self) -> Vec<String> {
+        match self {
+            Self::One(s) => vec![s.clone()],
+            Self::Many(v) => v.clone(),
+        }
+    }
+}
+
+/// YAML-level declaration of a single fact.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FactSpec {
+    pub id: String,
+    #[serde(flatten)]
+    pub kind: FactKind,
+}
+
+/// The closed set of built-in fact kinds. Serde dispatches via `untagged`
+/// — the first variant whose required field is present in the YAML wins.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum FactKind {
+    AnyFileExists { any_file_exists: OneOrMany },
+    AllFilesExist { all_files_exist: OneOrMany },
+    CountFiles { count_files: String },
+}
+
+/// The resolved map from fact id to value, produced once per `Engine::run`.
+#[derive(Debug, Default, Clone)]
+pub struct FactValues(HashMap<String, FactValue>);
+
+impl FactValues {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, id: String, v: FactValue) {
+        self.0.insert(id, v);
+    }
+
+    pub fn get(&self, id: &str) -> Option<&FactValue> {
+        self.0.get(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_map(&self) -> &HashMap<String, FactValue> {
+        &self.0
+    }
+}
+
+/// Evaluate a whole fact list against a prebuilt `FileIndex`. Invoked by
+/// `Engine::run` before any rule evaluates.
+pub fn evaluate_facts(facts: &[FactSpec], _root: &Path, index: &FileIndex) -> Result<FactValues> {
+    let mut out = FactValues::new();
+    for spec in facts {
+        let value = evaluate_one(spec, index)?;
+        out.insert(spec.id.clone(), value);
+    }
+    Ok(out)
+}
+
+fn evaluate_one(spec: &FactSpec, index: &FileIndex) -> Result<FactValue> {
+    match &spec.kind {
+        FactKind::AnyFileExists { any_file_exists } => {
+            let globs = any_file_exists.to_vec();
+            let scope = Scope::from_patterns(&globs)?;
+            let found = index.files().any(|e| scope.matches(&e.path));
+            Ok(FactValue::Bool(found))
+        }
+        FactKind::AllFilesExist { all_files_exist } => {
+            let globs = all_files_exist.to_vec();
+            for glob in &globs {
+                let scope = Scope::from_patterns(std::slice::from_ref(glob))?;
+                if !index.files().any(|e| scope.matches(&e.path)) {
+                    return Ok(FactValue::Bool(false));
+                }
+            }
+            Ok(FactValue::Bool(true))
+        }
+        FactKind::CountFiles { count_files } => {
+            let scope = Scope::from_patterns(std::slice::from_ref(count_files))?;
+            let count = index.files().filter(|e| scope.matches(&e.path)).count();
+            Ok(FactValue::Int(i64::try_from(count).unwrap_or(i64::MAX)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::walker::FileEntry;
+    use std::path::PathBuf;
+
+    fn idx(paths: &[&str]) -> FileIndex {
+        FileIndex {
+            entries: paths
+                .iter()
+                .map(|p| FileEntry {
+                    path: PathBuf::from(p),
+                    is_dir: false,
+                    size: 1,
+                })
+                .collect(),
+        }
+    }
+
+    fn parse(yaml: &str) -> Vec<FactSpec> {
+        serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    #[test]
+    fn any_file_exists_true_when_match_found() {
+        let facts = parse("- id: is_rust\n  any_file_exists: [Cargo.toml]\n");
+        let v =
+            evaluate_facts(&facts, Path::new("/"), &idx(&["Cargo.toml", "src/lib.rs"])).unwrap();
+        assert_eq!(v.get("is_rust"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn any_file_exists_false_when_no_match() {
+        let facts = parse("- id: is_rust\n  any_file_exists: [Cargo.toml]\n");
+        let v = evaluate_facts(&facts, Path::new("/"), &idx(&["src/lib.rs"])).unwrap();
+        assert_eq!(v.get("is_rust"), Some(&FactValue::Bool(false)));
+    }
+
+    #[test]
+    fn any_file_exists_accepts_single_string() {
+        let facts = parse("- id: has_readme\n  any_file_exists: README.md\n");
+        let v = evaluate_facts(&facts, Path::new("/"), &idx(&["README.md"])).unwrap();
+        assert_eq!(v.get("has_readme"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn all_files_exist_true_when_all_match() {
+        let facts = parse("- id: is_monorepo\n  all_files_exist: [Cargo.toml, README.md]\n");
+        let v = evaluate_facts(
+            &facts,
+            Path::new("/"),
+            &idx(&["Cargo.toml", "README.md", "src/main.rs"]),
+        )
+        .unwrap();
+        assert_eq!(v.get("is_monorepo"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn all_files_exist_false_when_any_missing() {
+        let facts = parse("- id: is_monorepo\n  all_files_exist: [Cargo.toml, README.md]\n");
+        let v = evaluate_facts(&facts, Path::new("/"), &idx(&["Cargo.toml"])).unwrap();
+        assert_eq!(v.get("is_monorepo"), Some(&FactValue::Bool(false)));
+    }
+
+    #[test]
+    fn count_files_returns_integer() {
+        let facts = parse("- id: n_rs\n  count_files: \"**/*.rs\"\n");
+        let v = evaluate_facts(
+            &facts,
+            Path::new("/"),
+            &idx(&["a.rs", "b.rs", "src/c.rs", "README.md"]),
+        )
+        .unwrap();
+        assert_eq!(v.get("n_rs"), Some(&FactValue::Int(3)));
+    }
+
+    #[test]
+    fn multiple_facts_all_resolved() {
+        let facts = parse(
+            r#"
+- id: is_rust
+  any_file_exists: [Cargo.toml]
+- id: n_rs
+  count_files: "**/*.rs"
+- id: has_readme
+  any_file_exists: README.md
+"#,
+        );
+        let v = evaluate_facts(
+            &facts,
+            Path::new("/"),
+            &idx(&["Cargo.toml", "src/lib.rs", "README.md"]),
+        )
+        .unwrap();
+        assert_eq!(v.len(), 3);
+        assert_eq!(v.get("is_rust"), Some(&FactValue::Bool(true)));
+        assert_eq!(v.get("n_rs"), Some(&FactValue::Int(1)));
+        assert_eq!(v.get("has_readme"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn truthy_coercion() {
+        assert!(FactValue::Bool(true).truthy());
+        assert!(!FactValue::Bool(false).truthy());
+        assert!(FactValue::Int(1).truthy());
+        assert!(!FactValue::Int(0).truthy());
+        assert!(FactValue::String("x".into()).truthy());
+        assert!(!FactValue::String(String::new()).truthy());
+    }
+}

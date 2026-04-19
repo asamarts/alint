@@ -182,6 +182,8 @@ mod tests {
             root: Path::new("/"),
             index: &idx,
             registry: None,
+            facts: None,
+            vars: None,
         };
         rule.evaluate(&ctx).unwrap()
     }

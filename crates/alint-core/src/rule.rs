@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
+use crate::facts::FactValues;
 use crate::level::Level;
 use crate::registry::RuleRegistry;
 use crate::walker::FileIndex;
@@ -55,15 +57,18 @@ impl RuleResult {
 
 /// Execution context handed to each rule during evaluation.
 ///
-/// `registry` is available for rules that need to build and evaluate nested
-/// rules at runtime (e.g. `for_each_dir`). Rules that do not need this can
-/// ignore the field; tests constructing a `Context` directly can set
-/// `registry: None`.
+/// - `registry` — available for rules that need to build and evaluate nested
+///   rules at runtime (e.g. `for_each_dir`). Tests that don't exercise
+///   nested evaluation can set this to `None`.
+/// - `facts` — resolved fact values, computed once per `Engine::run`.
+/// - `vars` — user-supplied string variables from the config's `vars:` section.
 #[derive(Debug)]
 pub struct Context<'a> {
     pub root: &'a Path,
     pub index: &'a FileIndex,
     pub registry: Option<&'a RuleRegistry>,
+    pub facts: Option<&'a FactValues>,
+    pub vars: Option<&'a HashMap<String, String>>,
 }
 
 /// Trait every built-in and plugin rule implements.
