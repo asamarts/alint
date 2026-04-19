@@ -76,3 +76,10 @@ rules:
     pattern: "^test_[a-z0-9_]+$"
     stem: true
     level: error
+
+  - id: c-requires-h
+    kind: pair
+    primary: "**/*.c"
+    partner: "{dir}/{stem}.h"
+    level: error
+    message: "{{ctx.primary}} has no matching header at {{ctx.partner}}"

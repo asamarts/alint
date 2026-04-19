@@ -32,6 +32,13 @@ impl FileIndex {
     pub fn total_size(&self) -> u64 {
         self.files().map(|f| f.size).sum()
     }
+
+    /// Find a file entry by its exact relative path. Linear scan — acceptable
+    /// at the scales we target today; revisit with a `HashSet` / `HashMap`
+    /// index if cross-file-rule benches start to show it.
+    pub fn find_file(&self, rel: &Path) -> Option<&FileEntry> {
+        self.files().find(|e| e.path == rel)
+    }
 }
 
 #[derive(Debug, Clone)]

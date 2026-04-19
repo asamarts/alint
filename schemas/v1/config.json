@@ -130,7 +130,8 @@
         { "$ref": "#/$defs/rule_file_max_size" },
         { "$ref": "#/$defs/rule_file_is_text" },
         { "$ref": "#/$defs/rule_filename_case" },
-        { "$ref": "#/$defs/rule_filename_regex" }
+        { "$ref": "#/$defs/rule_filename_regex" },
+        { "$ref": "#/$defs/rule_pair" }
       ]
     },
 
@@ -267,6 +268,23 @@
           "type": "boolean",
           "default": false,
           "description": "Match the file stem (no extension) instead of the full basename."
+        }
+      }
+    },
+
+    "rule_pair": {
+      "description": "For every file matching `primary`, a file matching the `partner` template must exist. Template tokens: {dir}, {stem}, {ext}, {basename}, {path}, {parent_name}.",
+      "type": "object",
+      "required": ["primary", "partner"],
+      "properties": {
+        "kind": { "const": "pair" },
+        "primary": {
+          "type": "string",
+          "description": "Glob selecting the primary files."
+        },
+        "partner": {
+          "type": "string",
+          "description": "Path template resolved per primary match. Example: \"{dir}/{stem}.h\"."
         }
       }
     }

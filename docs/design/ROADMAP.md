@@ -20,13 +20,13 @@ The smallest scope that is usefully adoptable.
 
 ## v0.2 — Cross-file and composition
 
-- Cross-file primitives: `pair`, `for_each_dir`, `for_each_file`, `every_matching_has`, `dir_contains`, `dir_only_contains`, `unique_by`.
-- Facts system: `any_file_exists`, `all_files_exist`, `detect: linguist`, `detect: askalono`, `count_files`, `custom`.
-- `when` expression language.
-- `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
-- `fix` subcommand with `file_create`, `file_prepend`, `file_append`, `file_remove`, `file_rename`.
-- Output formats: `sarif`, `github`.
-- Official GitHub Action.
+- Cross-file primitives: ✅ `pair`, ⏳ `for_each_dir`, ⏳ `for_each_file`, ⏳ `every_matching_has`, ⏳ `dir_contains`, ⏳ `dir_only_contains`, ⏳ `unique_by`.
+- ⏳ Facts system: `any_file_exists`, `all_files_exist`, `detect: linguist`, `detect: askalono`, `count_files`, `custom`.
+- ⏳ `when` expression language.
+- ⏳ `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
+- ⏳ `fix` subcommand with `file_create`, `file_prepend`, `file_append`, `file_remove`, `file_rename`.
+- ⏳ Output formats: `sarif`, `github`.
+- ⏳ Official GitHub Action.
 
 ## v0.3 — Structured content
 

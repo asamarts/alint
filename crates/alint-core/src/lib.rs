@@ -11,6 +11,7 @@ mod registry;
 mod report;
 mod rule;
 mod scope;
+pub mod template;
 mod walker;
 
 pub use config::{Config, PathsSpec, RuleSpec};

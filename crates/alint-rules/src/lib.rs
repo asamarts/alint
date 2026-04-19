@@ -18,6 +18,7 @@ pub mod file_max_size;
 pub mod filename_case;
 pub mod filename_regex;
 pub mod io;
+pub mod pair;
 
 /// Register every built-in rule kind into the given registry.
 pub fn register_builtin(registry: &mut RuleRegistry) {
@@ -32,6 +33,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("file_is_text", file_is_text::build);
     registry.register("filename_case", filename_case::build);
     registry.register("filename_regex", filename_regex::build);
+    registry.register("pair", pair::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -62,6 +64,7 @@ mod registry_tests {
             "file_is_text",
             "filename_case",
             "filename_regex",
+            "pair",
         ] {
             assert!(
                 known.contains(&kind),
