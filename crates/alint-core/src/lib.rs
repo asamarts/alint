@@ -1,6 +1,7 @@
 //! alint-core — engine, walker, rule trait, config AST.
 //!
-//! See `PROPOSAL.md` at the repository root for the design rationale.
+//! See `docs/design/ARCHITECTURE.md` in the alint repository for the
+//! rule model, execution order, and crate layout rationale.
 
 mod config;
 mod engine;
