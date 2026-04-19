@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use alint_core::{Engine, Rule, RuleRegistry, WalkOptions, walk};
+use alint_core::{Engine, RuleRegistry, WalkOptions, walk};
 use alint_output::Format;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -88,8 +88,8 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
 
 fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
-    let rule_count = loaded.rules.len();
-    let engine = Engine::new(loaded.rules, loaded.registry)
+    let rule_count = loaded.entries.len();
+    let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
 
@@ -126,14 +126,17 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
 
 fn cmd_list(cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(Path::new("."), cli)?;
-    if loaded.rules.is_empty() {
+    if loaded.entries.is_empty() {
         println!("(no rules loaded from config)");
     } else {
-        for rule in &loaded.rules {
+        for entry in &loaded.entries {
+            let rule = &entry.rule;
+            let gated = if entry.when.is_some() { " [when]" } else { "" };
             println!(
-                "{:<8} {}{}",
+                "{:<8} {}{}{}",
                 rule.level().as_str(),
                 rule.id(),
+                gated,
                 rule.policy_url()
                     .map(|u| format!("  ({u})"))
                     .unwrap_or_default()
@@ -145,20 +148,24 @@ fn cmd_list(cli: &Cli) -> Result<ExitCode> {
 
 fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(Path::new("."), cli)?;
-    let Some(rule) = loaded.rules.iter().find(|r| r.id() == rule_id) else {
+    let Some(entry) = loaded.entries.iter().find(|e| e.rule.id() == rule_id) else {
         bail!("no rule with id {rule_id:?} found in the effective config");
     };
+    let rule = &entry.rule;
     println!("id:         {}", rule.id());
     println!("level:      {}", rule.level().as_str());
     if let Some(url) = rule.policy_url() {
         println!("policy_url: {url}");
+    }
+    if let Some(when) = &entry.when {
+        println!("when:       {when:?}");
     }
     println!("debug:      {rule:?}");
     Ok(ExitCode::SUCCESS)
 }
 
 struct LoadedConfig {
-    rules: Vec<Box<dyn Rule>>,
+    entries: Vec<alint_core::RuleEntry>,
     registry: RuleRegistry,
     facts: Vec<alint_core::FactSpec>,
     vars: std::collections::HashMap<String, String>,
@@ -166,7 +173,8 @@ struct LoadedConfig {
     extra_ignores: Vec<String>,
 }
 
-/// Load the effective config from disk and instantiate every rule.
+/// Load the effective config from disk and instantiate every rule,
+/// parsing any `when:` clauses into AST at build time.
 fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     let config_path = if let Some(first) = cli.config.first() {
         first.clone()
@@ -180,7 +188,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
 
     let registry: RuleRegistry = alint_rules::builtin_registry();
 
-    let mut rules: Vec<Box<dyn Rule>> = Vec::with_capacity(config.rules.len());
+    let mut entries: Vec<alint_core::RuleEntry> = Vec::with_capacity(config.rules.len());
     for spec in &config.rules {
         if matches!(spec.level, alint_core::Level::Off) {
             continue;
@@ -188,10 +196,16 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         let rule = registry
             .build(spec)
             .with_context(|| format!("building rule {:?}", spec.id))?;
-        rules.push(rule);
+        let mut entry = alint_core::RuleEntry::new(rule);
+        if let Some(when_src) = &spec.when {
+            let expr = alint_core::when::parse(when_src)
+                .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
+            entry = entry.with_when(expr);
+        }
+        entries.push(entry);
     }
     Ok(LoadedConfig {
-        rules,
+        entries,
         registry,
         facts: config.facts,
         vars: config.vars,

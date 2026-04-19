@@ -6,7 +6,21 @@ version: 1
 ignore:
   - "target/**"
 
+facts:
+  - id: is_rust
+    any_file_exists: [Cargo.toml]
+
 rules:
+  # --- when-gated -----------------------------------------------------------
+  - id: rust-has-toolchain
+    when: facts.is_rust
+    kind: file_exists
+    paths: [rust-toolchain.toml, rust-toolchain]
+    root_only: true
+    level: info
+    message: "rust-toolchain.toml pins the compiler version for reproducible builds"
+
+
   # --- Layout (existence) -------------------------------------------------
   - id: architecture-doc-exists
     kind: file_exists

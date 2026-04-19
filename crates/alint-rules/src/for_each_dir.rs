@@ -132,6 +132,31 @@ pub(crate) fn evaluate_for_each(
         let tokens = PathTokens::from_path(&entry.path);
         for (i, nested) in require.iter().enumerate() {
             let nested_spec = nested.instantiate(parent_id, i, level, &tokens);
+            // Gate the nested rule on its `when:` clause (if present).
+            if let Some(when_src) = &nested_spec.when {
+                if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
+                    let expr = alint_core::when::parse(when_src).map_err(|e| {
+                        Error::rule_config(
+                            parent_id,
+                            format!("nested rule #{i}: invalid when: {e}"),
+                        )
+                    })?;
+                    let env = alint_core::WhenEnv { facts, vars };
+                    match expr.evaluate(&env) {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(e) => {
+                            violations.push(
+                                Violation::new(format!(
+                                    "{parent_id}: nested rule #{i} when error: {e}"
+                                ))
+                                .with_path(&entry.path),
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
             let nested_rule = match registry.build(&nested_spec) {
                 Ok(r) => r,
                 Err(e) => {

@@ -14,9 +14,10 @@ mod rule;
 mod scope;
 pub mod template;
 mod walker;
+pub mod when;
 
 pub use config::{Config, NestedRuleSpec, PathsSpec, RuleSpec};
-pub use engine::Engine;
+pub use engine::{Engine, RuleEntry};
 pub use error::{Error, Result};
 pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use level::Level;
@@ -25,3 +26,4 @@ pub use report::Report;
 pub use rule::{Context, Rule, RuleResult, Violation};
 pub use scope::Scope;
 pub use walker::{FileEntry, FileIndex, WalkOptions, walk};
+pub use when::{WhenEnv, WhenError, WhenExpr};
