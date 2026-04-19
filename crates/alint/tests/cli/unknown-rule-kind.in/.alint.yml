@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: weird
+    kind: definitely-not-a-real-kind
+    paths: "**/*"
+    level: error

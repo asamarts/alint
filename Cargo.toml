@@ -51,6 +51,7 @@ rand_chacha = "0.9"
 tempfile = "3"
 dir-test = "0.4"
 proptest = "1"
+trycmd = "0.15"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,9 @@
+version: 1
+rules:
+  - id: has-readme
+    kind: file_exists
+    paths: README.md
+    level: error
+    fix:
+      file_create:
+        content: "# demo\n"

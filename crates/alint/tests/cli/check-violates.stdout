@@ -1,0 +1,4 @@
+error[has-readme]:
+  - expected a file matching [README.md] at the repo root
+
+1 rule(s) failing, 0 passing, 1 violation(s).

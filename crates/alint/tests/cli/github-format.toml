@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["--format", "github", "check", "."]
+status.code = 1

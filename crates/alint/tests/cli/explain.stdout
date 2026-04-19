@@ -1,0 +1,4 @@
+id:         has-readme
+level:      error
+policy_url: https://opensource.guide/starting-a-project/#writing-a-readme
+debug:      [..]

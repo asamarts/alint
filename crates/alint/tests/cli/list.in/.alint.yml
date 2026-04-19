@@ -1,0 +1,10 @@
+version: 1
+rules:
+  - id: has-readme
+    kind: file_exists
+    paths: README.md
+    level: error
+  - id: no-bak-files
+    kind: file_absent
+    paths: "**/*.bak"
+    level: warning
