@@ -25,7 +25,7 @@ The smallest scope that is usefully adoptable.
 - ✅ `when` expression language — bounded grammar with `and`/`or`/`not`, comparison ops (`==` `!=` `<` `<=` `>` `>=`), `in` (list/substring), `matches` (regex), literal types (bool/int/string/list/null), and `facts.X` / `vars.X` identifiers. Parsed at rule-build time; gates rules in Engine + nested rules in `for_each_*`.
 - ⏳ `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
 - ⏳ `fix` subcommand with `file_create`, `file_prepend`, `file_append`, `file_remove`, `file_rename`.
-- ⏳ Output formats: `sarif`, `github`.
+- ✅ Output formats: `sarif`, `github`.
 - ⏳ Official GitHub Action.
 
 ## v0.3 — Structured content

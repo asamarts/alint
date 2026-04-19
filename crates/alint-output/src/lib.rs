@@ -1,21 +1,27 @@
 //! Output formatters. Each format converts an [`alint_core::Report`] into
 //! bytes suitable for stdout or a file.
 
+mod github;
 mod human;
 mod json;
+mod sarif;
 
 use std::io::Write;
 use std::str::FromStr;
 
 use alint_core::Report;
 
+pub use github::write_github;
 pub use human::write_human;
 pub use json::write_json;
+pub use sarif::write_sarif;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Human,
     Json,
+    Sarif,
+    Github,
 }
 
 impl FromStr for Format {
@@ -24,6 +30,8 @@ impl FromStr for Format {
         match s.to_ascii_lowercase().as_str() {
             "human" | "pretty" | "text" => Ok(Self::Human),
             "json" => Ok(Self::Json),
+            "sarif" => Ok(Self::Sarif),
+            "github" | "github-actions" => Ok(Self::Github),
             other => Err(format!("unknown output format: {other}")),
         }
     }
@@ -34,6 +42,8 @@ impl Format {
         match self {
             Self::Human => write_human(report, w),
             Self::Json => write_json(report, w),
+            Self::Sarif => write_sarif(report, w),
+            Self::Github => write_github(report, w),
         }
     }
 }
