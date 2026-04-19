@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 
 use crate::config::PathsSpec;
 use crate::error::{Error, Result};
@@ -8,12 +8,24 @@ use crate::error::{Error, Result};
 /// Compiled include/exclude matcher built from a [`PathsSpec`] or raw pattern list.
 ///
 /// Patterns prefixed with `!` are treated as excludes when passed as a flat list.
-/// Paths are matched relative to the repository root.
+/// Paths are matched relative to the repository root. Globs are compiled with
+/// `literal_separator(true)` — i.e., Git-style semantics where `*` never
+/// crosses a path separator. `**` is required to descend into subdirectories.
 #[derive(Debug, Clone)]
 pub struct Scope {
     include: GlobSet,
     exclude: GlobSet,
     has_include: bool,
+}
+
+fn compile(pattern: &str) -> Result<Glob> {
+    GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+        .map_err(|source| Error::Glob {
+            pattern: pattern.to_string(),
+            source,
+        })
 }
 
 impl Scope {
@@ -23,17 +35,9 @@ impl Scope {
         let mut has_include = false;
         for pattern in patterns {
             if let Some(rest) = pattern.strip_prefix('!') {
-                let glob = Glob::new(rest).map_err(|source| Error::Glob {
-                    pattern: rest.to_string(),
-                    source,
-                })?;
-                exclude.add(glob);
+                exclude.add(compile(rest)?);
             } else {
-                let glob = Glob::new(pattern).map_err(|source| Error::Glob {
-                    pattern: pattern.clone(),
-                    source,
-                })?;
-                include.add(glob);
+                include.add(compile(pattern)?);
                 has_include = true;
             }
         }
@@ -67,7 +71,7 @@ impl Scope {
     /// Match-all scope (used when no `paths` is configured on a rule).
     pub fn match_all() -> Self {
         let mut include = GlobSetBuilder::new();
-        include.add(Glob::new("**").expect("`**` must compile"));
+        include.add(compile("**").expect("`**` must compile"));
         Self {
             include: include.build().expect("`**` GlobSet must build"),
             exclude: GlobSet::empty(),

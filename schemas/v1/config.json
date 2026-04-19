@@ -133,7 +133,8 @@
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_for_each_dir" },
-        { "$ref": "#/$defs/rule_for_each_file" }
+        { "$ref": "#/$defs/rule_for_each_file" },
+        { "$ref": "#/$defs/rule_dir_only_contains" }
       ]
     },
 
@@ -338,6 +339,26 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/nested_rule" },
           "description": "Nested rules evaluated against each matched file."
+        }
+      }
+    },
+
+    "rule_dir_only_contains": {
+      "description": "Every direct child *file* of directories matching `select` must match at least one glob in `allow`. Subdirectories of the matched dir are not checked. Allow globs match the child's basename.",
+      "type": "object",
+      "required": ["select", "allow"],
+      "properties": {
+        "kind": { "const": "dir_only_contains" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the directories to enumerate."
+        },
+        "allow": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "Basename glob(s) accepted as direct children. Anything else is a violation."
         }
       }
     }

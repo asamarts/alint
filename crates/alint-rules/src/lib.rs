@@ -8,6 +8,7 @@ use alint_core::RuleRegistry;
 pub mod case;
 pub mod dir_absent;
 pub mod dir_exists;
+pub mod dir_only_contains;
 pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;
@@ -38,6 +39,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("pair", pair::build);
     registry.register("for_each_dir", for_each_dir::build);
     registry.register("for_each_file", for_each_file::build);
+    registry.register("dir_only_contains", dir_only_contains::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -71,6 +73,7 @@ mod registry_tests {
             "pair",
             "for_each_dir",
             "for_each_file",
+            "dir_only_contains",
         ] {
             assert!(
                 known.contains(&kind),
