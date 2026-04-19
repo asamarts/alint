@@ -1,19 +1,17 @@
-//! `for_each_file` — iterate over every file matching `select:` and
-//! evaluate a nested `require:` block against each. Same mechanics as
-//! [`crate::for_each_dir`] — differs only in iterating files instead of
-//! directories from the `FileIndex`.
-//!
-//! Canonical shape — for every `tests/unit/*.rs`, require a corresponding
-//! `tests/snapshots/{stem}.snap`:
+//! `every_matching_has` — every file OR directory matching `select` must
+//! satisfy every rule in `require`. Sugar over `for_each_file` +
+//! `for_each_dir`: one rule that iterates both entry kinds so users who
+//! don't care whether a glob matches files or dirs can write a single
+//! rule instead of two.
 //!
 //! ```yaml
-//! - id: unit-has-snapshot
-//!   kind: for_each_file
-//!   select: "tests/unit/*.rs"
+//! - id: every-pkg-has-readme
+//!   kind: every_matching_has
+//!   select: "packages/*"   # matches dirs today; might also match files tomorrow
 //!   require:
 //!     - kind: file_exists
-//!       paths: "tests/snapshots/{stem}.snap"
-//!   level: warning
+//!       paths: "{path}/README.md"
+//!   level: error
 //! ```
 
 use alint_core::{Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope, Violation};
@@ -29,7 +27,7 @@ struct Options {
 }
 
 #[derive(Debug)]
-pub struct ForEachFileRule {
+pub struct EveryMatchingHasRule {
     id: String,
     level: Level,
     policy_url: Option<String>,
@@ -37,7 +35,7 @@ pub struct ForEachFileRule {
     require: Vec<NestedRuleSpec>,
 }
 
-impl Rule for ForEachFileRule {
+impl Rule for EveryMatchingHasRule {
     fn id(&self) -> &str {
         &self.id
     }
@@ -55,7 +53,7 @@ impl Rule for ForEachFileRule {
             &self.select_scope,
             &self.require,
             ctx,
-            IterateMode::Files,
+            IterateMode::Both,
         )
     }
 }
@@ -67,11 +65,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if opts.require.is_empty() {
         return Err(Error::rule_config(
             &spec.id,
-            "for_each_file requires at least one nested rule under `require:`",
+            "every_matching_has requires at least one nested rule under `require:`",
         ));
     }
     let select_scope = Scope::from_patterns(&[opts.select])?;
-    Ok(Box::new(ForEachFileRule {
+    Ok(Box::new(EveryMatchingHasRule {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
@@ -104,22 +102,23 @@ mod tests {
     }
 
     #[test]
-    fn passes_when_every_file_has_required_sibling() {
-        let require: Vec<NestedRuleSpec> = vec![
-            serde_yaml_ng::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
-        ];
-        let r = ForEachFileRule {
+    fn iterates_both_files_and_dirs() {
+        // `packages/*` matches a dir `packages/a` AND a file `packages/x.md`
+        // (rare but possible). The rule should evaluate require against
+        // both.
+        let require: Vec<NestedRuleSpec> =
+            vec![serde_yaml_ng::from_str("kind: file_exists\npaths: \"{path}\"\n").unwrap()];
+        let r = EveryMatchingHasRule {
             id: "t".into(),
             level: Level::Error,
             policy_url: None,
-            select_scope: Scope::from_patterns(&["**/*.c".to_string()]).unwrap(),
+            select_scope: Scope::from_patterns(&["packages/*".to_string()]).unwrap(),
             require,
         };
         let idx = index(&[
-            ("src/foo.c", false),
-            ("src/foo.h", false),
-            ("src/bar.c", false),
-            ("src/bar.h", false),
+            ("packages", true),
+            ("packages/a", true),
+            ("packages/x.md", false),
         ]);
         let reg = registry();
         let ctx = Context {
@@ -128,34 +127,11 @@ mod tests {
             registry: Some(&reg),
         };
         let v = r.evaluate(&ctx).unwrap();
-        assert!(v.is_empty(), "unexpected: {v:?}");
-    }
-
-    #[test]
-    fn violates_per_missing_sibling() {
-        let require: Vec<NestedRuleSpec> = vec![
-            serde_yaml_ng::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
-        ];
-        let r = ForEachFileRule {
-            id: "t".into(),
-            level: Level::Error,
-            policy_url: None,
-            select_scope: Scope::from_patterns(&["**/*.c".to_string()]).unwrap(),
-            require,
-        };
-        let idx = index(&[
-            ("src/foo.c", false),
-            ("src/foo.h", false), // matched
-            ("src/bar.c", false), // no bar.h
-            ("src/baz.c", false), // no baz.h
-        ]);
-        let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-        };
-        let v = r.evaluate(&ctx).unwrap();
-        assert_eq!(v.len(), 2);
+        // `{path}` resolves to "packages/a" (dir) and "packages/x.md" (file).
+        // The dir "packages/a" is not a file in the index — file_exists
+        // cannot find it because file_exists iterates files(), not dirs().
+        // So we expect one violation for the dir case and none for the file.
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("packages/a")));
     }
 }

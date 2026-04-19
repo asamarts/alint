@@ -113,3 +113,17 @@ rules:
     key: "{stem}"
     level: warning
     message: "{{ctx.count}} files share stem {{ctx.key}}: {{ctx.paths}}"
+
+  - id: packages-have-readme-and-license
+    kind: dir_contains
+    select: "packages/*"
+    require: ["README.md", "LICENSE*"]
+    level: error
+
+  - id: every-pkg-has-src
+    kind: every_matching_has
+    select: "packages/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/package.json"
+    level: error

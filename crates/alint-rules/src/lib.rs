@@ -7,8 +7,10 @@ use alint_core::RuleRegistry;
 
 pub mod case;
 pub mod dir_absent;
+pub mod dir_contains;
 pub mod dir_exists;
 pub mod dir_only_contains;
+pub mod every_matching_has;
 pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;
@@ -42,6 +44,8 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("for_each_file", for_each_file::build);
     registry.register("dir_only_contains", dir_only_contains::build);
     registry.register("unique_by", unique_by::build);
+    registry.register("dir_contains", dir_contains::build);
+    registry.register("every_matching_has", every_matching_has::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -77,6 +81,8 @@ mod registry_tests {
             "for_each_file",
             "dir_only_contains",
             "unique_by",
+            "dir_contains",
+            "every_matching_has",
         ] {
             assert!(
                 known.contains(&kind),

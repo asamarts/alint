@@ -135,7 +135,9 @@
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
-        { "$ref": "#/$defs/rule_unique_by" }
+        { "$ref": "#/$defs/rule_unique_by" },
+        { "$ref": "#/$defs/rule_dir_contains" },
+        { "$ref": "#/$defs/rule_every_matching_has" }
       ]
     },
 
@@ -378,6 +380,38 @@
           "type": "string",
           "default": "{basename}",
           "description": "Path-template producing a key per matched file. Default: {basename}."
+        }
+      }
+    },
+
+    "rule_dir_contains": {
+      "description": "Every directory matching `select` must have at least one direct child basename matching each glob in `require`. Sugar over for_each_dir + file_exists; use for_each_dir for deeper semantics.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "dir_contains" },
+        "select": { "type": "string" },
+        "require": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "Basename glob(s) — every dir matching `select` must have at least one child matching each."
+        }
+      }
+    },
+
+    "rule_every_matching_has": {
+      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "every_matching_has" },
+        "select": { "type": "string" },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" }
         }
       }
     }

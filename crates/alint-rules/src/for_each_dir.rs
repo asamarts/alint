@@ -67,7 +67,7 @@ impl Rule for ForEachDirRule {
             &self.select_scope,
             &self.require,
             ctx,
-            /* iterate_dirs = */ true,
+            IterateMode::Dirs,
         )
     }
 }
@@ -92,15 +92,24 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }))
 }
 
-/// Shared evaluation logic for `for_each_dir` and `for_each_file`. Flag
-/// selects whether to iterate directories or regular files from the index.
+/// What to iterate in [`evaluate_for_each`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IterateMode {
+    Dirs,
+    Files,
+    /// Both files and dirs (dirs first) — used by `every_matching_has`.
+    Both,
+}
+
+/// Shared evaluation logic for `for_each_dir`, `for_each_file`, and
+/// `every_matching_has`. `mode` selects which entries to iterate.
 pub(crate) fn evaluate_for_each(
     parent_id: &str,
     level: Level,
     select_scope: &Scope,
     require: &[NestedRuleSpec],
     ctx: &Context<'_>,
-    iterate_dirs: bool,
+    mode: IterateMode,
 ) -> Result<Vec<Violation>> {
     let Some(registry) = ctx.registry else {
         return Err(Error::Other(format!(
@@ -109,10 +118,10 @@ pub(crate) fn evaluate_for_each(
         )));
     };
 
-    let entries: Box<dyn Iterator<Item = _>> = if iterate_dirs {
-        Box::new(ctx.index.dirs())
-    } else {
-        Box::new(ctx.index.files())
+    let entries: Box<dyn Iterator<Item = _>> = match mode {
+        IterateMode::Dirs => Box::new(ctx.index.dirs()),
+        IterateMode::Files => Box::new(ctx.index.files()),
+        IterateMode::Both => Box::new(ctx.index.dirs().chain(ctx.index.files())),
     };
 
     let mut violations = Vec::new();
