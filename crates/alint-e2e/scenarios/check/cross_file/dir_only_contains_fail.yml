@@ -1,0 +1,25 @@
+name: dir_only_contains flags files outside the allowlist
+tags: [check, dir_only_contains, cross_file]
+
+given:
+  tree:
+    src:
+      a.rs: ""
+      b.rs: ""
+      stray.py: ""
+      notes.txt: ""
+  config: |
+    version: 1
+    rules:
+      - id: src-only-rs
+        kind: dir_only_contains
+        select: "src"
+        allow: ["*.rs"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: src-only-rs, level: error, path: src/stray.py}
+      - {rule: src-only-rs, level: error, path: src/notes.txt}

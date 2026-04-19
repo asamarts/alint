@@ -1,0 +1,27 @@
+name: for_each_file checks nested rules against every selected file
+tags: [check, for_each_file, cross_file]
+
+given:
+  tree:
+    tests:
+      unit:
+        parser.rs: "fn t1() {}"
+        lexer.rs: "fn t2() {}"
+      snapshots:
+        parser.snap: "output"
+  config: |
+    version: 1
+    rules:
+      - id: unit-has-snapshot
+        kind: for_each_file
+        select: "tests/unit/*.rs"
+        require:
+          - kind: file_exists
+            paths: "tests/snapshots/{stem}.snap"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: unit-has-snapshot, level: warning, path: tests/unit/lexer.rs}

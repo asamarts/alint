@@ -1,0 +1,20 @@
+name: file_content_matches fires when the required pattern is absent
+tags: [check, file_content_matches]
+
+given:
+  tree:
+    README.md: "# Project\n\nA short description.\n"
+  config: |
+    version: 1
+    rules:
+      - id: spdx-in-readme
+        kind: file_content_matches
+        paths: "README.md"
+        pattern: "SPDX-License-Identifier"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: spdx-in-readme, level: warning, path: README.md}

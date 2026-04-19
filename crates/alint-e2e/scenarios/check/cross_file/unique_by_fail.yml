@@ -1,0 +1,25 @@
+name: unique_by fires when multiple files share the chosen key
+tags: [check, unique_by, cross_file]
+
+given:
+  tree:
+    a:
+      util.rs: "pub fn a() {}"
+    b:
+      util.rs: "pub fn b() {}"
+    c:
+      other.rs: "pub fn c() {}"
+  config: |
+    version: 1
+    rules:
+      - id: unique-rs-stems
+        kind: unique_by
+        select: "**/*.rs"
+        key: "{stem}"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: unique-rs-stems, level: warning}

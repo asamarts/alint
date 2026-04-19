@@ -1,0 +1,23 @@
+name: file_is_text flags files whose bytes look binary
+tags: [check, file_is_text]
+
+given:
+  tree:
+    src:
+      # A null byte in the middle of otherwise-ASCII content is
+      # enough for content_inspector to classify as binary.
+      accidental_blob.rs: "hello\u0000world"
+      clean.rs: "pub fn ok() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: src-is-text
+        kind: file_is_text
+        paths: "src/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: src-is-text, level: error, path: src/accidental_blob.rs}

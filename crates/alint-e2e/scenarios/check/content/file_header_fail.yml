@@ -1,0 +1,23 @@
+name: file_header flags files whose first N lines miss the required pattern
+tags: [check, file_header]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\n"
+      b.rs: "// Copyright 2026\n// SPDX-License-Identifier: Apache-2.0\nfn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: copyright-header
+        kind: file_header
+        paths: "src/**/*.rs"
+        pattern: "(?s)Copyright"
+        lines: 3
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: copyright-header, level: error, path: src/a.rs}

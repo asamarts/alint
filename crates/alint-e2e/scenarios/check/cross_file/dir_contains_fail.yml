@@ -1,0 +1,28 @@
+name: dir_contains fires when required files are missing in a selected dir
+tags: [check, dir_contains, cross_file]
+
+given:
+  tree:
+    packages:
+      alpha:
+        README.md: "# alpha"
+        LICENSE: "MIT"
+      beta:
+        README.md: "# beta"
+      gamma:
+        LICENSE: "MIT"
+  config: |
+    version: 1
+    rules:
+      - id: packages-have-readme-and-license
+        kind: dir_contains
+        select: "packages/*"
+        require: ["README.md", "LICENSE*"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: packages-have-readme-and-license, level: error, path: packages/beta}
+      - {rule: packages-have-readme-and-license, level: error, path: packages/gamma}

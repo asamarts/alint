@@ -1,0 +1,23 @@
+name: file_absent fires for each forbidden match
+tags: [check, file_absent]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    "Cargo.lock.bak": "# generated\n"
+    src:
+      "main.rs.bak": ""
+  config: |
+    version: 1
+    rules:
+      - id: no-bak-files
+        kind: file_absent
+        paths: "**/*.bak"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-bak-files, level: error, path: Cargo.lock.bak}
+      - {rule: no-bak-files, level: error, path: src/main.rs.bak}

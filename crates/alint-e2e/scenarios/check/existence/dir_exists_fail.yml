@@ -1,0 +1,19 @@
+name: dir_exists fires when the required directory is missing
+tags: [check, dir_exists]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-src
+        kind: dir_exists
+        paths: "src"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: has-src, level: error}

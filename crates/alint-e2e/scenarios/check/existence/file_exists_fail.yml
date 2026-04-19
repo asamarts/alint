@@ -1,0 +1,20 @@
+name: file_exists fires when the required file is missing
+tags: [check, file_exists]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: has-readme, level: error}

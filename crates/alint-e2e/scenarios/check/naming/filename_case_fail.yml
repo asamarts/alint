@@ -1,0 +1,24 @@
+name: filename_case flags stems that don't match the convention
+tags: [check, filename_case]
+
+given:
+  tree:
+    src:
+      good_module.rs: ""
+      BadModule.rs: ""
+      OtherName.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: rust-snake
+        kind: filename_case
+        paths: "src/**/*.rs"
+        case: snake
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: rust-snake, level: error, path: src/BadModule.rs}
+      - {rule: rust-snake, level: error, path: src/OtherName.rs}

@@ -1,0 +1,23 @@
+name: pair fires when a primary file has no matching partner
+tags: [check, pair, cross_file]
+
+given:
+  tree:
+    src:
+      alpha.c: "int a;"
+      alpha.h: "int a;"
+      beta.c: "int b;"
+  config: |
+    version: 1
+    rules:
+      - id: c-requires-h
+        kind: pair
+        primary: "src/**/*.c"
+        partner: "{dir}/{stem}.h"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: c-requires-h, level: error, path: src/beta.c}

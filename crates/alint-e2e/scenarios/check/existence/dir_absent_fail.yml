@@ -1,0 +1,22 @@
+name: dir_absent fires when a forbidden directory is committed
+tags: [check, dir_absent]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    target:
+      debug:
+        build.log: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-target
+        kind: dir_absent
+        paths: "**/target"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-target, level: error}

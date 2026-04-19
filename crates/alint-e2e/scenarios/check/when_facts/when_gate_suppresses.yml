@@ -1,0 +1,24 @@
+name: when clause suppresses a rule when its fact evaluates false
+tags: [check, when, facts]
+
+given:
+  tree:
+    package.json: "{}"
+    src:
+      index.js: "module.exports = {};"
+  config: |
+    version: 1
+    facts:
+      - id: is_rust
+        any_file_exists: [Cargo.toml]
+    rules:
+      - id: rust-has-toolchain
+        when: facts.is_rust
+        kind: file_exists
+        paths: [rust-toolchain.toml, rust-toolchain]
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

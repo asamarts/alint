@@ -1,0 +1,21 @@
+name: file_max_size flags oversized files
+tags: [check, file_max_size]
+
+given:
+  tree:
+    tiny.txt: "short"
+    big.txt: "this content is easily over ten bytes long"
+  config: |
+    version: 1
+    rules:
+      - id: under-10-bytes
+        kind: file_max_size
+        paths: "**/*.txt"
+        max_bytes: 10
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: under-10-bytes, level: warning, path: big.txt}

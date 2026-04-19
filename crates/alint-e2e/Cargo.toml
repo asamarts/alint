@@ -13,6 +13,7 @@ publish = false
 
 [dev-dependencies]
 alint-testkit.workspace = true
+dir-test.workspace = true
 
 [lints]
 workspace = true

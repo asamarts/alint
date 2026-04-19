@@ -1,0 +1,28 @@
+name: every_matching_has evaluates nested rules against every selected entry
+tags: [check, every_matching_has, cross_file]
+
+given:
+  tree:
+    packages:
+      alpha:
+        package.json: "{}"
+      beta:
+        README.md: "# beta"
+      gamma:
+        package.json: "{}"
+  config: |
+    version: 1
+    rules:
+      - id: every-pkg-has-package-json
+        kind: every_matching_has
+        select: "packages/*"
+        require:
+          - kind: file_exists
+            paths: "{path}/package.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: every-pkg-has-package-json, level: error, path: packages/beta}

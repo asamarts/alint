@@ -1,0 +1,24 @@
+name: filename_regex flags test stems that don't match the required pattern
+tags: [check, filename_regex]
+
+given:
+  tree:
+    tests:
+      test_parser.rs: ""
+      test_lexer.rs: ""
+      BadNamingHere.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: tests-named-test-prefix
+        kind: filename_regex
+        paths: "tests/**/*.rs"
+        pattern: "^test_[a-z0-9_]+$"
+        stem: true
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: tests-named-test-prefix, level: error, path: tests/BadNamingHere.rs}

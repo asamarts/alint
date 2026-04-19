@@ -1,0 +1,25 @@
+name: when clause admits a rule when its fact evaluates true
+tags: [check, when, facts]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    src:
+      main.rs: "fn main() {}"
+  config: |
+    version: 1
+    facts:
+      - id: is_rust
+        any_file_exists: [Cargo.toml]
+    rules:
+      - id: rust-has-toolchain
+        when: facts.is_rust
+        kind: file_exists
+        paths: [rust-toolchain.toml, rust-toolchain]
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: rust-has-toolchain, level: warning}

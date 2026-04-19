@@ -1,0 +1,22 @@
+name: file_content_forbidden flags every file matching the forbidden pattern
+tags: [check, file_content_forbidden]
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {\n    dbg!(42);\n}\n"
+      clean.rs: "pub fn ok() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-dbg
+        kind: file_content_forbidden
+        paths: "src/**/*.rs"
+        pattern: '\bdbg!\s*\('
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-dbg, level: warning, path: src/main.rs}

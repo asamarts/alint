@@ -1,0 +1,28 @@
+name: for_each_dir evaluates nested rules in every selected directory
+tags: [check, for_each_dir, cross_file]
+
+given:
+  tree:
+    src:
+      alpha:
+        mod.rs: "pub fn a() {}"
+      beta:
+        lib.rs: "pub fn b() {}"
+      gamma:
+        mod.rs: "pub fn c() {}"
+  config: |
+    version: 1
+    rules:
+      - id: every-module-has-mod
+        kind: for_each_dir
+        select: "src/*"
+        require:
+          - kind: file_exists
+            paths: "{path}/mod.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: every-module-has-mod, level: error, path: src/beta}
