@@ -58,6 +58,103 @@ impl CaseConvention {
             Self::Flat => is_flat(s),
         }
     }
+
+    /// Convert `input` to this convention. Used by `file_rename` to
+    /// derive a filename's corrected form. For `Lower`/`Upper` the
+    /// transform is a simple ASCII case flip on letters; other
+    /// conventions tokenize on separators and case transitions then
+    /// re-assemble.
+    pub fn convert(self, input: &str) -> String {
+        match self {
+            Self::Lower => input.to_ascii_lowercase(),
+            Self::Upper => input.to_ascii_uppercase(),
+            Self::Pascal => assemble_cap(&tokenize(input)),
+            Self::Camel => assemble_camel(&tokenize(input)),
+            Self::Snake => tokenize(input)
+                .iter()
+                .map(|t| t.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join("_"),
+            Self::Kebab => tokenize(input)
+                .iter()
+                .map(|t| t.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join("-"),
+            Self::ScreamingSnake => tokenize(input)
+                .iter()
+                .map(|t| t.to_ascii_uppercase())
+                .collect::<Vec<_>>()
+                .join("_"),
+            Self::Flat => tokenize(input)
+                .iter()
+                .map(|t| t.to_ascii_lowercase())
+                .collect(),
+        }
+    }
+}
+
+/// Split a case-mixed string into word tokens. Separators (`_`, `-`,
+/// space, `.`) split; case transitions split (`fooBar` → `foo`,`Bar`;
+/// `XMLParser` → `XML`,`Parser`). Tokens retain their original casing —
+/// conversion functions lowercase/titlecase as needed.
+fn tokenize(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if matches!(c, '_' | '-' | ' ' | '.') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        if c.is_ascii_uppercase() && !current.is_empty() {
+            let last = current.chars().last().unwrap();
+            let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_ascii_lowercase();
+            // Split before uppercase when prev is lowercase/digit
+            // (`fooBar` → `foo`,`Bar`) or when we're exiting an
+            // acronym run (`XMLParser` → `XML`,`Parser`).
+            if last.is_ascii_lowercase()
+                || last.is_ascii_digit()
+                || (last.is_ascii_uppercase() && next_is_lower)
+            {
+                tokens.push(std::mem::take(&mut current));
+            }
+        }
+        current.push(c);
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn title(s: &str) -> String {
+    let mut it = s.chars();
+    match it.next() {
+        None => String::new(),
+        Some(first) => {
+            let mut out = String::with_capacity(s.len());
+            out.push(first.to_ascii_uppercase());
+            for c in it {
+                out.push(c.to_ascii_lowercase());
+            }
+            out
+        }
+    }
+}
+
+fn assemble_cap(tokens: &[String]) -> String {
+    tokens.iter().map(|t| title(t)).collect()
+}
+
+fn assemble_camel(tokens: &[String]) -> String {
+    let mut it = tokens.iter();
+    let first = it
+        .next()
+        .map(|t| t.to_ascii_lowercase())
+        .unwrap_or_default();
+    std::iter::once(first).chain(it.map(|t| title(t))).collect()
 }
 
 /// Accept `PascalCase`, `pascal`, `pascal-case`, `pascalcase`, `pascal_case`
@@ -197,6 +294,38 @@ mod tests {
         assert!(is_flat("helloworld"));
         assert!(!is_flat("hello_world"));
         assert!(is_lowercase("hello_world")); // permissive: letters-only check
+    }
+
+    #[test]
+    fn convert_snake_from_various_shapes() {
+        assert_eq!(CaseConvention::Snake.convert("FooBar"), "foo_bar");
+        assert_eq!(CaseConvention::Snake.convert("fooBar"), "foo_bar");
+        assert_eq!(CaseConvention::Snake.convert("foo-bar"), "foo_bar");
+        assert_eq!(CaseConvention::Snake.convert("XMLParser"), "xml_parser");
+        assert_eq!(CaseConvention::Snake.convert("hello"), "hello");
+    }
+
+    #[test]
+    fn convert_pascal_from_various_shapes() {
+        assert_eq!(CaseConvention::Pascal.convert("foo_bar"), "FooBar");
+        assert_eq!(CaseConvention::Pascal.convert("foo-bar"), "FooBar");
+        assert_eq!(CaseConvention::Pascal.convert("fooBar"), "FooBar");
+        assert_eq!(CaseConvention::Pascal.convert("hello"), "Hello");
+    }
+
+    #[test]
+    fn convert_camel_kebab_screaming_flat() {
+        assert_eq!(CaseConvention::Camel.convert("FooBar"), "fooBar");
+        assert_eq!(CaseConvention::Kebab.convert("FooBar"), "foo-bar");
+        assert_eq!(CaseConvention::ScreamingSnake.convert("FooBar"), "FOO_BAR");
+        assert_eq!(CaseConvention::Flat.convert("FooBar"), "foobar");
+    }
+
+    #[test]
+    fn convert_is_idempotent_on_already_correct_input() {
+        assert_eq!(CaseConvention::Snake.convert("foo_bar"), "foo_bar");
+        assert_eq!(CaseConvention::Pascal.convert("FooBar"), "FooBar");
+        assert_eq!(CaseConvention::Kebab.convert("foo-bar"), "foo-bar");
     }
 
     #[test]

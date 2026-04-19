@@ -6,10 +6,11 @@
 //! `foo.spec.ts`, the stem is `foo.spec`, which will fail most case checks —
 //! use `filename_regex` for finer control in those situations.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 use crate::case::CaseConvention;
+use crate::fixers::FileRenameFixer;
 
 #[derive(Debug, Deserialize)]
 struct Options {
@@ -24,6 +25,7 @@ pub struct FilenameCaseRule {
     message: Option<String>,
     scope: Scope,
     case: CaseConvention,
+    fixer: Option<FileRenameFixer>,
 }
 
 impl Rule for FilenameCaseRule {
@@ -35,6 +37,10 @@ impl Rule for FilenameCaseRule {
     }
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -71,6 +77,19 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+    let fixer = match &spec.fix {
+        Some(FixSpec::FileRename { .. }) => Some(FileRenameFixer::new(opts.case)),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with filename_case",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FilenameCaseRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -78,5 +97,6 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
         case: opts.case,
+        fixer,
     }))
 }

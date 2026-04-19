@@ -198,6 +198,19 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_rename"],
+          "additionalProperties": false,
+          "properties": {
+            "file_rename": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Rename the violating file's stem to the parent rule's target convention (e.g. filename_case's `case:`). Extension is preserved; the file stays in the same directory. No parameters."
+            }
+          }
         }
       ]
     },

@@ -104,6 +104,7 @@ pub enum FixSpec {
     FileRemove { file_remove: FileRemoveFixSpec },
     FilePrepend { file_prepend: FilePrependFixSpec },
     FileAppend { file_append: FileAppendFixSpec },
+    FileRename { file_rename: FileRenameFixSpec },
 }
 
 impl FixSpec {
@@ -114,6 +115,7 @@ impl FixSpec {
             Self::FileRemove { .. } => "file_remove",
             Self::FilePrepend { .. } => "file_prepend",
             Self::FileAppend { .. } => "file_append",
+            Self::FileRename { .. } => "file_rename",
         }
     }
 }
@@ -157,6 +159,13 @@ pub struct FileAppendFixSpec {
     /// `content` is the caller's responsibility.
     pub content: String,
 }
+
+/// Empty marker: `file_rename` takes no parameters. The target name
+/// is derived from the parent rule (e.g. `filename_case` converts the
+/// stem to its configured case; the extension is preserved).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileRenameFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed

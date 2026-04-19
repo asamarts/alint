@@ -17,8 +17,8 @@ mod walker;
 pub mod when;
 
 pub use config::{
-    Config, FileAppendFixSpec, FileCreateFixSpec, FilePrependFixSpec, FileRemoveFixSpec, FixSpec,
-    NestedRuleSpec, PathsSpec, RuleSpec,
+    Config, FileAppendFixSpec, FileCreateFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
+    FileRenameFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
 };
 pub use engine::{Engine, RuleEntry};
 pub use error::{Error, Result};

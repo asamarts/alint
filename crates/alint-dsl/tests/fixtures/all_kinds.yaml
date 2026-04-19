@@ -105,6 +105,8 @@ rules:
     paths: "components/**/*.tsx"
     case: PascalCase
     level: error
+    fix:
+      file_rename: {}
 
   - id: tests-pattern
     kind: filename_regex
