@@ -106,3 +106,10 @@ rules:
     allow: ["*.rs", "mod.rs"]
     level: error
     message: "{{ctx.basename}} not allowed under {{ctx.dir}}"
+
+  - id: unique-rs-stems
+    kind: unique_by
+    select: "**/*.rs"
+    key: "{stem}"
+    level: warning
+    message: "{{ctx.count}} files share stem {{ctx.key}}: {{ctx.paths}}"
