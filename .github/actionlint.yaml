@@ -1,0 +1,6 @@
+# Configuration for https://github.com/rhysd/actionlint.
+# Declares the custom self-hosted runner label so actionlint does not flag it.
+
+self-hosted-runner:
+  labels:
+    - alint
