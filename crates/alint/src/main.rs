@@ -1,6 +1,7 @@
 //! alint — language-agnostic repository linter.
 //!
-//! See `PROPOSAL.md` at the workspace root for the design rationale.
+//! See `docs/design/ARCHITECTURE.md` for the rule model, DSL, and execution
+//! model. User-facing docs are in the root `README.md`.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
