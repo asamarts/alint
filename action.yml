@@ -1,0 +1,97 @@
+name: alint
+description: Lint repository structure, filenames, and file content with alint.
+author: asamarts
+branding:
+  icon: check-square
+  color: blue
+
+inputs:
+  version:
+    description: alint version to install (tag like `v0.1.0`, or `latest`).
+    required: false
+    default: latest
+  path:
+    description: Directory to lint. Defaults to the repository root.
+    required: false
+    default: "."
+  config:
+    description: |
+      Extra config file path(s), one per line. Leave empty to let alint
+      auto-discover `.alint.yml` at the lint root.
+    required: false
+    default: ""
+  format:
+    description: |
+      Output format: `human`, `json`, `sarif`, `github` (inline PR annotations),
+      `github-actions` (alias for `github`). Defaults to `github`.
+    required: false
+    default: github
+  fail-on-warning:
+    description: Treat warnings as errors for exit-code purposes.
+    required: false
+    default: "false"
+  args:
+    description: Extra CLI arguments appended verbatim after the subcommand.
+    required: false
+    default: ""
+  working-directory:
+    description: Working directory for the run. Defaults to the runner's workspace.
+    required: false
+    default: ${{ github.workspace }}
+
+outputs:
+  sarif-file:
+    description: Absolute path to the SARIF file (only populated when `format: sarif`).
+    value: ${{ steps.run.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install alint
+      shell: bash
+      env:
+        ALINT_VERSION: ${{ inputs.version }}
+        INSTALL_DIR: ${{ runner.temp }}/alint-bin
+      run: |
+        set -euo pipefail
+        curl -fsSL "https://raw.githubusercontent.com/asamarts/alint/main/install.sh" | bash
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+
+    - name: Run alint
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ALINT_BIN: ${{ runner.temp }}/alint-bin/alint
+        ALINT_FORMAT: ${{ inputs.format }}
+        ALINT_PATH: ${{ inputs.path }}
+        ALINT_CONFIG: ${{ inputs.config }}
+        ALINT_FAIL_ON_WARNING: ${{ inputs.fail-on-warning }}
+        ALINT_EXTRA: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+
+        cli_args=(--format "$ALINT_FORMAT")
+
+        if [ -n "$ALINT_CONFIG" ]; then
+          while IFS= read -r cfg; do
+            [ -z "$cfg" ] && continue
+            cli_args+=(--config "$cfg")
+          done <<< "$ALINT_CONFIG"
+        fi
+
+        if [ "$ALINT_FAIL_ON_WARNING" = "true" ]; then
+          cli_args+=(--fail-on-warning)
+        fi
+
+        # Intentional word-splitting on user-provided extras.
+        # shellcheck disable=SC2206
+        extra=($ALINT_EXTRA)
+
+        if [ "$ALINT_FORMAT" = "sarif" ]; then
+          out="${RUNNER_TEMP:-/tmp}/alint.sarif"
+          "$ALINT_BIN" "${cli_args[@]}" check "$ALINT_PATH" ${extra[@]+"${extra[@]}"} > "$out"
+          echo "sarif-file=$out" >> "$GITHUB_OUTPUT"
+        else
+          "$ALINT_BIN" "${cli_args[@]}" check "$ALINT_PATH" ${extra[@]+"${extra[@]}"}
+        fi

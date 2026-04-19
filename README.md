@@ -15,7 +15,7 @@ alint enforces declarative rules over a repository tree. The rule model and DSL 
 - Every `.c` file must have a matching `.h` file in the same directory. *(v0.2 — cross-file rules)*
 - For every subdirectory of `src/`, a `mod.rs` must exist. *(v0.2 — per-directory quantification)*
 
-Rules are defined in `.alint.yml`. alint walks the tree (honoring `.gitignore` by default), matches each rule against the index, and emits results in `human` or `json` format today, with `sarif`, GitHub Actions annotations, JUnit, and Markdown arriving in v0.2–v0.3.
+Rules are defined in `.alint.yml`. alint walks the tree (honoring `.gitignore` by default), matches each rule against the index, and emits results in `human`, `json`, `sarif`, or `github` (GitHub Actions annotations) format, with JUnit and Markdown arriving in v0.3.
 
 ## Non-goals
 
@@ -100,11 +100,51 @@ alint explain <id> # show a rule's definition
 Output formats:
 
 ```bash
-alint check --format human   # default; colorized for humans
-alint check --format json    # stable, versioned JSON schema
+alint check --format human            # default; colorized for humans
+alint check --format json             # stable, versioned JSON schema
+alint check --format sarif            # SARIF 2.1.0 (for GitHub Code Scanning)
+alint check --format github           # GitHub Actions workflow commands
 ```
 
 Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` internal error. Warnings do not fail by default — use `--fail-on-warning` to flip that.
+
+## Use in CI
+
+### GitHub Actions
+
+Inline PR annotations (default):
+
+```yaml
+- uses: asamarts/alint@v0.1.0
+```
+
+All inputs (all optional):
+
+```yaml
+- uses: asamarts/alint@v0.1.0
+  with:
+    version: v0.1.0        # alint release tag (default: latest)
+    path: .                # directory to lint (default: .)
+    format: github         # human | json | sarif | github (default)
+    config: |              # extra config path(s), one per line
+      .alint.yml
+    fail-on-warning: false
+    args: ""               # extra CLI args appended verbatim
+```
+
+Upload findings to GitHub Code Scanning:
+
+```yaml
+- uses: asamarts/alint@v0.1.0
+  id: alint
+  with:
+    format: sarif
+  continue-on-error: true
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: ${{ steps.alint.outputs.sarif-file }}
+```
 
 ## Docs
 

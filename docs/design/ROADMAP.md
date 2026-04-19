@@ -26,7 +26,7 @@ The smallest scope that is usefully adoptable.
 - ⏳ `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
 - ⏳ `fix` subcommand with `file_create`, `file_prepend`, `file_append`, `file_remove`, `file_rename`.
 - ✅ Output formats: `sarif`, `github`.
-- ⏳ Official GitHub Action.
+- ✅ Official GitHub Action (`action.yml` at repo root; composite action wrapping `install.sh`).
 
 ## v0.3 — Structured content
 
