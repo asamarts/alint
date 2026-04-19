@@ -15,6 +15,7 @@
 mod error;
 pub mod runner;
 pub mod scenario;
+pub mod strategies;
 pub mod treespec;
 
 pub use error::{Error, Result};

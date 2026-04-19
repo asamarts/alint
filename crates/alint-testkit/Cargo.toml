@@ -13,6 +13,7 @@ publish = false
 alint-core.workspace = true
 alint-dsl.workspace = true
 alint-rules.workspace = true
+proptest.workspace = true
 serde.workspace = true
 serde_yaml_ng.workspace = true
 tempfile.workspace = true

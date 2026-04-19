@@ -12,8 +12,10 @@ publish = false
 [dependencies]
 
 [dev-dependencies]
+alint-core.workspace = true
 alint-testkit.workspace = true
 dir-test.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true
