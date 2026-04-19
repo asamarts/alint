@@ -22,6 +22,7 @@ pub mod for_each_dir;
 pub mod for_each_file;
 pub mod io;
 pub mod pair;
+pub mod unique_by;
 
 /// Register every built-in rule kind into the given registry.
 pub fn register_builtin(registry: &mut RuleRegistry) {
@@ -40,6 +41,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("for_each_dir", for_each_dir::build);
     registry.register("for_each_file", for_each_file::build);
     registry.register("dir_only_contains", dir_only_contains::build);
+    registry.register("unique_by", unique_by::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -74,6 +76,7 @@ mod registry_tests {
             "for_each_dir",
             "for_each_file",
             "dir_only_contains",
+            "unique_by",
         ] {
             assert!(
                 known.contains(&kind),

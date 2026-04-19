@@ -134,7 +134,8 @@
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
-        { "$ref": "#/$defs/rule_dir_only_contains" }
+        { "$ref": "#/$defs/rule_dir_only_contains" },
+        { "$ref": "#/$defs/rule_unique_by" }
       ]
     },
 
@@ -359,6 +360,24 @@
             { "type": "array", "items": { "type": "string" }, "minItems": 1 }
           ],
           "description": "Basename glob(s) accepted as direct children. Anything else is a violation."
+        }
+      }
+    },
+
+    "rule_unique_by": {
+      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`.",
+      "type": "object",
+      "required": ["select"],
+      "properties": {
+        "kind": { "const": "unique_by" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the files to deduplicate."
+        },
+        "key": {
+          "type": "string",
+          "default": "{basename}",
+          "description": "Path-template producing a key per matched file. Default: {basename}."
         }
       }
     }
