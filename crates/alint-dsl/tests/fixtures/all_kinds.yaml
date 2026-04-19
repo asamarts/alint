@@ -99,3 +99,10 @@ rules:
       - kind: file_exists
         paths: "tests/snapshots/{stem}.snap"
     level: warning
+
+  - id: src-only-rs
+    kind: dir_only_contains
+    select: "src/*"
+    allow: ["*.rs", "mod.rs"]
+    level: error
+    message: "{{ctx.basename}} not allowed under {{ctx.dir}}"
