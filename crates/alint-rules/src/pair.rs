@@ -172,6 +172,7 @@ mod tests {
         let ctx = Context {
             root: Path::new("/"),
             index: &index,
+            registry: None,
         };
         rule.evaluate(&ctx).unwrap()
     }

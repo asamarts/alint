@@ -17,6 +17,8 @@ pub mod file_is_text;
 pub mod file_max_size;
 pub mod filename_case;
 pub mod filename_regex;
+pub mod for_each_dir;
+pub mod for_each_file;
 pub mod io;
 pub mod pair;
 
@@ -34,6 +36,8 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("filename_case", filename_case::build);
     registry.register("filename_regex", filename_regex::build);
     registry.register("pair", pair::build);
+    registry.register("for_each_dir", for_each_dir::build);
+    registry.register("for_each_file", for_each_file::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -65,6 +69,8 @@ mod registry_tests {
             "filename_case",
             "filename_regex",
             "pair",
+            "for_each_dir",
+            "for_each_file",
         ] {
             assert!(
                 known.contains(&kind),

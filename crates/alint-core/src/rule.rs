@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 use crate::level::Level;
+use crate::registry::RuleRegistry;
 use crate::walker::FileIndex;
 
 /// A single linting violation produced by a rule.
@@ -53,10 +54,16 @@ impl RuleResult {
 }
 
 /// Execution context handed to each rule during evaluation.
+///
+/// `registry` is available for rules that need to build and evaluate nested
+/// rules at runtime (e.g. `for_each_dir`). Rules that do not need this can
+/// ignore the field; tests constructing a `Context` directly can set
+/// `registry: None`.
 #[derive(Debug)]
 pub struct Context<'a> {
     pub root: &'a Path,
     pub index: &'a FileIndex,
+    pub registry: Option<&'a RuleRegistry>,
 }
 
 /// Trait every built-in and plugin rule implements.

@@ -14,7 +14,7 @@ mod scope;
 pub mod template;
 mod walker;
 
-pub use config::{Config, PathsSpec, RuleSpec};
+pub use config::{Config, NestedRuleSpec, PathsSpec, RuleSpec};
 pub use engine::Engine;
 pub use error::{Error, Result};
 pub use level::Level;

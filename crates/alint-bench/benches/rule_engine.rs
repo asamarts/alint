@@ -91,7 +91,7 @@ fn bench_rule_engine(c: &mut Criterion) {
     for &n in &[1_000usize, 10_000, 100_000] {
         let index = build_index(n);
         let rules = build_rules();
-        let engine = Engine::new(rules);
+        let engine = Engine::new(rules, alint_rules::builtin_registry());
 
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {

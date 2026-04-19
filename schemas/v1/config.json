@@ -131,8 +131,23 @@
         { "$ref": "#/$defs/rule_file_is_text" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
-        { "$ref": "#/$defs/rule_pair" }
+        { "$ref": "#/$defs/rule_pair" },
+        { "$ref": "#/$defs/rule_for_each_dir" },
+        { "$ref": "#/$defs/rule_for_each_file" }
       ]
+    },
+
+    "nested_rule": {
+      "description": "A nested rule inside `require:`. Unlike top-level rules, `id` and `level` are synthesized from the parent; the user supplies only `kind` plus kind-specific options.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "message": { "type": "string" },
+        "policy_url": { "type": "string", "format": "uri" },
+        "when": { "type": "string" }
+      }
     },
 
     "rule_file_exists": {
@@ -285,6 +300,44 @@
         "partner": {
           "type": "string",
           "description": "Path template resolved per primary match. Example: \"{dir}/{stem}.h\"."
+        }
+      }
+    },
+
+    "rule_for_each_dir": {
+      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "for_each_dir" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the directories to iterate."
+        },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" },
+          "description": "Nested rules evaluated against each matched directory."
+        }
+      }
+    },
+
+    "rule_for_each_file": {
+      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "for_each_file" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the files to iterate."
+        },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" },
+          "description": "Nested rules evaluated against each matched file."
         }
       }
     }

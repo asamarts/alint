@@ -14,6 +14,8 @@
 
 use std::path::Path;
 
+use crate::config::PathsSpec;
+
 /// Token values derived from a relative path. Consumed by
 /// [`render_path`] and by cross-file rules to resolve partner paths.
 #[derive(Debug, Clone)]
@@ -84,6 +86,44 @@ pub fn render_path(template: &str, t: &PathTokens) -> String {
 ///
 /// Whitespace inside the braces (`{{ ctx.primary }}`) is ignored so users
 /// can format their messages for readability.
+/// Apply path-template substitution to every string inside a YAML mapping,
+/// recursively into nested mappings and sequences. Non-string values pass
+/// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
+/// the `{dir}` in a nested rule's `paths`, `pattern`, or `partner` field
+/// resolves to the iterated entry's path at rule-build time.
+pub fn render_mapping(m: serde_yaml_ng::Mapping, tokens: &PathTokens) -> serde_yaml_ng::Mapping {
+    let mut out = serde_yaml_ng::Mapping::with_capacity(m.len());
+    for (k, v) in m {
+        out.insert(k, render_value(v, tokens));
+    }
+    out
+}
+
+/// Recursive mate to [`render_mapping`] for arbitrary YAML values.
+pub fn render_value(v: serde_yaml_ng::Value, tokens: &PathTokens) -> serde_yaml_ng::Value {
+    use serde_yaml_ng::Value;
+    match v {
+        Value::String(s) => Value::String(render_path(&s, tokens)),
+        Value::Sequence(seq) => {
+            Value::Sequence(seq.into_iter().map(|e| render_value(e, tokens)).collect())
+        }
+        Value::Mapping(m) => Value::Mapping(render_mapping(m, tokens)),
+        other => other,
+    }
+}
+
+/// Apply path-template substitution to every pattern in a `PathsSpec`.
+pub fn render_paths_spec(spec: &PathsSpec, tokens: &PathTokens) -> PathsSpec {
+    match spec {
+        PathsSpec::Single(s) => PathsSpec::Single(render_path(s, tokens)),
+        PathsSpec::Many(v) => PathsSpec::Many(v.iter().map(|s| render_path(s, tokens)).collect()),
+        PathsSpec::IncludeExclude { include, exclude } => PathsSpec::IncludeExclude {
+            include: include.iter().map(|s| render_path(s, tokens)).collect(),
+            exclude: exclude.iter().map(|s| render_path(s, tokens)).collect(),
+        },
+    }
+}
+
 pub fn render_message<F>(template: &str, resolve: F) -> String
 where
     F: Fn(&str, &str) -> Option<String>,

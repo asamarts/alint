@@ -91,3 +91,53 @@ impl RuleSpec {
         ))?)
     }
 }
+
+/// Rule specification for nested rules (e.g. the `require:` block of
+/// `for_each_dir`). Unlike [`RuleSpec`], `id` and `level` are synthesized
+/// from the parent rule — users just supply the `kind` plus kind-specific
+/// options, optionally with a `message` / `policy_url` / `when`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NestedRuleSpec {
+    pub kind: String,
+    #[serde(default)]
+    pub paths: Option<PathsSpec>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub policy_url: Option<String>,
+    #[serde(default)]
+    pub when: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_yaml_ng::Mapping,
+}
+
+impl NestedRuleSpec {
+    /// Synthesize a full [`RuleSpec`] for a single iteration, applying
+    /// path-template substitution (using the iterated entry's tokens) to
+    /// every string field. The resulting spec has `id =
+    /// "{parent_id}.require[{idx}]"` and inherits `level` from the parent.
+    pub fn instantiate(
+        &self,
+        parent_id: &str,
+        idx: usize,
+        level: Level,
+        tokens: &crate::template::PathTokens,
+    ) -> RuleSpec {
+        RuleSpec {
+            id: format!("{parent_id}.require[{idx}]"),
+            kind: self.kind.clone(),
+            level,
+            paths: self
+                .paths
+                .as_ref()
+                .map(|p| crate::template::render_paths_spec(p, tokens)),
+            message: self
+                .message
+                .as_deref()
+                .map(|m| crate::template::render_path(m, tokens)),
+            policy_url: self.policy_url.clone(),
+            when: self.when.clone(),
+            extra: crate::template::render_mapping(self.extra.clone(), tokens),
+        }
+    }
+}

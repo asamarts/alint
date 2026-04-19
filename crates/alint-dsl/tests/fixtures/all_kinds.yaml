@@ -83,3 +83,19 @@ rules:
     partner: "{dir}/{stem}.h"
     level: error
     message: "{{ctx.primary}} has no matching header at {{ctx.partner}}"
+
+  - id: every-module-has-mod
+    kind: for_each_dir
+    select: "src/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/mod.rs"
+    level: error
+
+  - id: unit-has-snapshot
+    kind: for_each_file
+    select: "tests/unit/*.rs"
+    require:
+      - kind: file_exists
+        paths: "tests/snapshots/{stem}.snap"
+    level: warning
