@@ -162,6 +162,42 @@
               "properties": {}
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_prepend"],
+          "additionalProperties": false,
+          "properties": {
+            "file_prepend": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Bytes to insert at the start of each violating file. A trailing newline in `content` is the caller's responsibility."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_append"],
+          "additionalProperties": false,
+          "properties": {
+            "file_append": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Bytes to append to each violating file. A leading newline in `content` is the caller's responsibility."
+                }
+              }
+            }
+          }
         }
       ]
     },

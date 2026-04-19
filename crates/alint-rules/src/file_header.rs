@@ -1,8 +1,10 @@
 //! `file_header` — first N lines of each file in scope must match a pattern.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
+
+use crate::fixers::FilePrependFixer;
 
 #[derive(Debug, Deserialize)]
 struct Options {
@@ -25,6 +27,7 @@ pub struct FileHeaderRule {
     pattern_src: String,
     pattern: Regex,
     lines: usize,
+    fixer: Option<FilePrependFixer>,
 }
 
 impl Rule for FileHeaderRule {
@@ -36,6 +39,10 @@ impl Rule for FileHeaderRule {
     }
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -98,6 +105,18 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let pattern = Regex::new(&opts.pattern)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
+    let fixer = match &spec.fix {
+        Some(FixSpec::FilePrepend { file_prepend }) => {
+            Some(FilePrependFixer::new(file_prepend.content.clone()))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!("fix.{} is not compatible with file_header", other.op_name()),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FileHeaderRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -107,5 +126,6 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         pattern_src: opts.pattern,
         pattern,
         lines: opts.lines,
+        fixer,
     }))
 }

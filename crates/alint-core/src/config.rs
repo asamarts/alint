@@ -95,13 +95,27 @@ pub struct RuleSpec {
     pub extra: serde_yaml_ng::Mapping,
 }
 
-/// The `fix:` block on a rule. The op name is the discriminator key —
-/// exactly one of `file_create` or `file_remove` must be present.
+/// The `fix:` block on a rule. Exactly one op key must be present —
+/// alint errors at load time when the op and rule kind are incompatible.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum FixSpec {
     FileCreate { file_create: FileCreateFixSpec },
     FileRemove { file_remove: FileRemoveFixSpec },
+    FilePrepend { file_prepend: FilePrependFixSpec },
+    FileAppend { file_append: FileAppendFixSpec },
+}
+
+impl FixSpec {
+    /// The op name as it appears in YAML — used in config-error messages.
+    pub fn op_name(&self) -> &'static str {
+        match self {
+            Self::FileCreate { .. } => "file_create",
+            Self::FileRemove { .. } => "file_remove",
+            Self::FilePrepend { .. } => "file_prepend",
+            Self::FileAppend { .. } => "file_append",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,6 +141,22 @@ fn default_create_parents() -> bool {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileRemoveFixSpec {}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FilePrependFixSpec {
+    /// Bytes to insert at the beginning of each violating file. A
+    /// trailing newline in `content` is the caller's responsibility.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileAppendFixSpec {
+    /// Bytes to append to each violating file. A leading newline in
+    /// `content` is the caller's responsibility.
+    pub content: String,
+}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed

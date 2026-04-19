@@ -107,10 +107,10 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 cfg.create_parents,
             ))
         }
-        Some(FixSpec::FileRemove { .. }) => {
+        Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
-                "fix.file_remove is not compatible with file_exists",
+                format!("fix.{} is not compatible with file_exists", other.op_name()),
             ));
         }
         None => None,

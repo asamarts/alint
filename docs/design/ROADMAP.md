@@ -24,8 +24,8 @@ The smallest scope that is usefully adoptable.
 - Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`; ⏳ `detect: linguist`, ⏳ `detect: askalono`, ⏳ `custom`, ⏳ `git_branch`, ⏳ `file_content_matches`.
 - ✅ `when` expression language — bounded grammar with `and`/`or`/`not`, comparison ops (`==` `!=` `<` `<=` `>` `>=`), `in` (list/substring), `matches` (regex), literal types (bool/int/string/list/null), and `facts.X` / `vars.X` identifiers. Parsed at rule-build time; gates rules in Engine + nested rules in `for_each_*`.
 - ⏳ `extends` with URL resolution, SHA-256 SRI, caching under `~/.cache/alint/rulesets/`.
-- ⏳ `fix` subcommand: ✅ `file_create`, ✅ `file_remove`; ⏳ `file_rename`, ⏳ `file_prepend`, ⏳ `file_append`.
-  - Deferred for later (likely v0.5 when bundled rulesets land): `content_from: <path>` for `file_create`, so long bodies (LICENSE texts, standard boilerplate) can live alongside the rule rather than inline in YAML.
+- ⏳ `fix` subcommand: ✅ `file_create`, ✅ `file_remove`, ✅ `file_prepend`, ✅ `file_append`; ⏳ `file_rename`.
+  - Deferred for later (likely v0.5 when bundled rulesets land): `content_from: <path>` for `file_create` / `file_prepend` / `file_append`, so long bodies (LICENSE texts, standard boilerplate) can live alongside the rule rather than inline in YAML.
 - ✅ Output formats: `sarif`, `github`.
 - ✅ Official GitHub Action (`action.yml` at repo root; composite action wrapping `install.sh`).
 

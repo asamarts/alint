@@ -59,10 +59,10 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     };
     let fixer = match &spec.fix {
         Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
-        Some(FixSpec::FileCreate { .. }) => {
+        Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
-                "fix.file_create is not compatible with file_absent",
+                format!("fix.{} is not compatible with file_absent", other.op_name()),
             ));
         }
         None => None,

@@ -65,6 +65,9 @@ rules:
       exclude: "**/generated/**"
     pattern: "(?i)copyright"
     level: error
+    fix:
+      file_append:
+        content: "\n// Copyright (c) 2026\n"
 
   - id: no-todos
     kind: file_content_forbidden
@@ -80,6 +83,11 @@ rules:
     pattern: "(?s)Copyright"
     lines: 20
     level: error
+    fix:
+      file_prepend:
+        content: |
+          // Copyright (c) 2026 Acme Corp
+          // SPDX-License-Identifier: Apache-2.0
 
   - id: max-size
     kind: file_max_size

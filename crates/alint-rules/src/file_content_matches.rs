@@ -1,8 +1,10 @@
 //! `file_content_matches` — every file in scope must match a regex.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
+
+use crate::fixers::FileAppendFixer;
 
 #[derive(Debug, Deserialize)]
 struct Options {
@@ -18,6 +20,7 @@ pub struct FileContentMatchesRule {
     scope: Scope,
     pattern_src: String,
     pattern: Regex,
+    fixer: Option<FileAppendFixer>,
 }
 
 impl Rule for FileContentMatchesRule {
@@ -29,6 +32,10 @@ impl Rule for FileContentMatchesRule {
     }
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -80,6 +87,21 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let pattern = Regex::new(&opts.pattern)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
+    let fixer = match &spec.fix {
+        Some(FixSpec::FileAppend { file_append }) => {
+            Some(FileAppendFixer::new(file_append.content.clone()))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with file_content_matches",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FileContentMatchesRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -88,5 +110,6 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
         pattern_src: opts.pattern,
         pattern,
+        fixer,
     }))
 }
