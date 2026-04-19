@@ -7,12 +7,15 @@ use std::path::{Path, PathBuf};
 use alint_core::{Config, Error, Result};
 
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
-/// files. Embedded at build time from `schemas/v1/config.json`.
+/// files. Embedded at build time from the in-crate copy at
+/// `crates/alint-dsl/schemas/v1/config.json`, which is kept byte-identical
+/// with the root `schemas/v1/config.json` (the public URL source) by the
+/// `in_crate_schema_matches_root` test below.
 ///
 /// The schema's primary consumer is the YAML language server for editor
 /// autocomplete; tests round-trip representative configs through it to
 /// keep the schema and the actual DSL in sync.
-pub const CONFIG_SCHEMA_V1: &str = include_str!("../../../schemas/v1/config.json");
+pub const CONFIG_SCHEMA_V1: &str = include_str!("../schemas/v1/config.json");
 
 const DEFAULT_CONFIG_NAMES: &[&str] = &[".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"];
 
@@ -88,6 +91,25 @@ rules:
     fn rejects_wrong_version() {
         let yaml = "version: 99\nrules: []\n";
         assert!(parse(yaml).is_err());
+    }
+
+    #[test]
+    fn in_crate_schema_matches_root() {
+        // Guard against drift between the in-crate copy (embedded by
+        // `include_str!`) and the root `schemas/v1/config.json` that the
+        // public URL serves. Only runs inside the workspace checkout — the
+        // published crate does not ship the root copy, so the test skips.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../schemas/v1/config.json");
+        let Ok(canonical) = std::fs::read_to_string(&root) else {
+            return;
+        };
+        assert_eq!(
+            canonical, CONFIG_SCHEMA_V1,
+            "crates/alint-dsl/schemas/v1/config.json has drifted from \
+             schemas/v1/config.json — run `cp schemas/v1/config.json \
+             crates/alint-dsl/schemas/v1/config.json` to resync",
+        );
     }
 
     #[test]
