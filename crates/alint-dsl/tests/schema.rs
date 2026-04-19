@@ -63,9 +63,15 @@ fn accepts_every_rule_kind() {
 
 #[test]
 fn accepts_dogfood_config() {
+    // The repo's own `.alint.yml` lives outside this crate; load it at
+    // runtime from the workspace root so the test compiles cleanly in
+    // the published crate (where the workspace checkout is absent).
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.alint.yml");
+    let Ok(yaml) = std::fs::read_to_string(&path) else {
+        return;
+    };
     let validator = compile_schema();
-    let yaml = include_str!("../../../.alint.yml");
-    let instance = yaml_to_json(yaml);
+    let instance = yaml_to_json(&yaml);
     assert_valid(&validator, &instance, "repo dogfood .alint.yml");
 }
 
