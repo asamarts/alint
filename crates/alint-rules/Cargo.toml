@@ -6,8 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage = "https://github.com/asamarts/alint"
+readme = "../../README.md"
 authors.workspace = true
-publish = false
 
 [dependencies]
 alint-core.workspace = true
