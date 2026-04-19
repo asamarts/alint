@@ -1,0 +1,18 @@
+[package]
+name = "alint-e2e"
+description = "Internal: end-to-end scenario tests for alint. Not a library."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+alint-testkit.workspace = true
+
+[lints]
+workspace = true

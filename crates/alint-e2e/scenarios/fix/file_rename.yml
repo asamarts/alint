@@ -1,0 +1,34 @@
+name: file_rename normalizes Rust sources to snake_case
+tags: [fix, filename_case, file_rename]
+
+given:
+  tree:
+    src:
+      FooBar.rs: "pub fn a() {}\n"
+      XMLParser.rs: "pub fn b() {}\n"
+      already_snake.rs: "pub fn c() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: rust-snake
+        kind: filename_case
+        paths: "src/**/*.rs"
+        case: snake
+        level: error
+        fix:
+          file_rename: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: rust-snake, level: error, path: src/FooBar.rs}
+      - {rule: rust-snake, level: error, path: src/XMLParser.rs}
+  - applied: [rust-snake]
+  - violations: []
+
+expect_tree:
+  src:
+    foo_bar.rs: "pub fn a() {}\n"
+    xml_parser.rs: "pub fn b() {}\n"
+    already_snake.rs: "pub fn c() {}\n"

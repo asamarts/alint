@@ -1,0 +1,28 @@
+name: file_append adds an SPDX marker to the README
+tags: [fix, file_content_matches, file_append]
+
+given:
+  tree:
+    README.md: "# Project\n\nA short description.\n"
+  config: |
+    version: 1
+    rules:
+      - id: spdx-in-readme
+        kind: file_content_matches
+        paths: "README.md"
+        pattern: "SPDX-License-Identifier"
+        level: warning
+        fix:
+          file_append:
+            content: "\n<!-- SPDX-License-Identifier: Apache-2.0 -->\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: spdx-in-readme, level: warning, path: README.md}
+  - applied: [spdx-in-readme]
+  - violations: []
+
+expect_tree:
+  README.md: "# Project\n\nA short description.\n\n<!-- SPDX-License-Identifier: Apache-2.0 -->\n"

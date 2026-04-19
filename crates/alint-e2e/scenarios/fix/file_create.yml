@@ -1,0 +1,33 @@
+name: file_create synthesizes a missing README
+tags: [fix, file_exists, file_create]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+        fix:
+          file_create:
+            content: "# demo\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: has-readme, level: error}
+  - applied: [has-readme]
+  - violations: []
+
+expect_tree:
+  README.md: "# demo\n"
+  Cargo.toml: "[package]\nname = \"demo\"\n"
+  src:
+    main.rs: "fn main() {}\n"

@@ -1,0 +1,33 @@
+name: file_remove deletes forbidden .bak files
+tags: [fix, file_absent, file_remove]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    Cargo.lock.bak: "# generated; should not be committed\n"
+    src:
+      main.rs: "fn main() {}\n"
+      notes.md.bak: "draft\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bak-files
+        kind: file_absent
+        paths: "**/*.bak"
+        level: error
+        fix:
+          file_remove: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-bak-files, level: error, path: Cargo.lock.bak}
+      - {rule: no-bak-files, level: error, path: src/notes.md.bak}
+  - applied: [no-bak-files]
+  - violations: []
+
+expect_tree:
+  Cargo.toml: "[package]\nname = \"demo\"\n"
+  src:
+    main.rs: "fn main() {}\n"

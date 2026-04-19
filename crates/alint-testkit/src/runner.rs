@@ -1,0 +1,262 @@
+//! Drive a [`Scenario`](crate::scenario::Scenario) against an
+//! isolated tempdir and collect per-step observations for the
+//! harness to assert on.
+
+use std::path::{Path, PathBuf};
+
+use alint_core::{Engine, FixReport, FixStatus, Level, Report, RuleEntry, WalkOptions, walk};
+use tempfile::TempDir;
+
+use crate::error::{Error, Result};
+use crate::scenario::{ExpectStep, Scenario, Step};
+use crate::treespec::{VerifyReport, materialize, verify};
+
+/// Concrete outcome of one step. The runner collects these in order;
+/// the harness (or `assert_scenario`) checks them against the
+/// scenario's `expect:` list.
+#[derive(Debug)]
+pub enum StepOutcome {
+    Check(Report),
+    Fix(FixReport),
+}
+
+/// Everything a harness learns from running a scenario.
+#[derive(Debug)]
+pub struct ScenarioRun {
+    pub root: PathBuf,
+    /// Kept alive so `root` stays valid; drops clean up the tempdir.
+    _tmp: TempDir,
+    pub steps: Vec<StepOutcome>,
+}
+
+/// Materialize the scenario, drive its steps, collect outcomes.
+/// Caller asserts against [`ScenarioRun`] via
+/// [`assert_scenario`] (or by hand).
+pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
+    scenario.validate()?;
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-testkit-")
+        .tempdir()
+        .map_err(|source| Error::Io {
+            path: std::env::temp_dir(),
+            source,
+        })?;
+    let root = tmp.path().to_path_buf();
+
+    materialize(&scenario.given.tree, &root)?;
+    let config_path = root.join(".alint.yml");
+    std::fs::write(&config_path, &scenario.given.config).map_err(|source| Error::Io {
+        path: config_path.clone(),
+        source,
+    })?;
+
+    let mut steps = Vec::with_capacity(scenario.when.len());
+    for step in &scenario.when {
+        let outcome = run_step(*step, &root)?;
+        steps.push(outcome);
+    }
+
+    Ok(ScenarioRun {
+        root,
+        _tmp: tmp,
+        steps,
+    })
+}
+
+fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
+    let config = alint_dsl::load(&root.join(".alint.yml"))?;
+    let registry = alint_rules::builtin_registry();
+
+    let mut entries: Vec<RuleEntry> = Vec::with_capacity(config.rules.len());
+    for spec in &config.rules {
+        if matches!(spec.level, Level::Off) {
+            continue;
+        }
+        let rule = registry.build(spec)?;
+        let mut entry = RuleEntry::new(rule);
+        if let Some(src) = &spec.when {
+            let expr = alint_core::when::parse(src)?;
+            entry = entry.with_when(expr);
+        }
+        entries.push(entry);
+    }
+    let engine = Engine::from_entries(entries, registry)
+        .with_facts(config.facts.clone())
+        .with_vars(config.vars.clone());
+
+    let walk_opts = WalkOptions {
+        respect_gitignore: config.respect_gitignore,
+        extra_ignores: config.ignore.clone(),
+    };
+    let index = walk(root, &walk_opts)?;
+
+    Ok(match step {
+        Step::Check => StepOutcome::Check(engine.run(root, &index)?),
+        Step::Fix => StepOutcome::Fix(engine.fix(root, &index, false)?),
+        Step::FixDryRun => StepOutcome::Fix(engine.fix(root, &index, true)?),
+    })
+}
+
+/// Assert a [`ScenarioRun`] matches its scenario's `expect:` list
+/// and `expect_tree:` block. Returns `Ok(())` if every assertion
+/// passes; otherwise a detailed error describing the first failure.
+pub fn assert_scenario(scenario: &Scenario, run: &ScenarioRun) -> Result<()> {
+    if scenario.expect.len() != run.steps.len() {
+        return Err(Error::scenario(format!(
+            "scenario {:?}: expected {} step result(s), got {}",
+            scenario.name,
+            scenario.expect.len(),
+            run.steps.len()
+        )));
+    }
+    for (i, (exp, got)) in scenario.expect.iter().zip(&run.steps).enumerate() {
+        assert_step(scenario, i, exp, got)?;
+    }
+    if let Some(expected) = &scenario.expect_tree {
+        let mode = scenario.expect_tree_mode.into();
+        let mut report = verify(expected, &run.root, mode)?;
+        // The runner writes `.alint.yml` into the tempdir so alint
+        // can find its config; that file is scenario machinery, not
+        // tree-under-test content. Strict verification should not
+        // flag it as `Extra`.
+        report.discrepancies.retain(|d| !is_runner_machinery(d));
+        if !report.is_match() {
+            return Err(Error::scenario(format!(
+                "scenario {:?}: expect_tree mismatch:\n{report}",
+                scenario.name,
+            )));
+        }
+        let _: VerifyReport = report; // type-check the return
+    }
+    Ok(())
+}
+
+fn is_runner_machinery(d: &crate::treespec::Discrepancy) -> bool {
+    matches!(
+        d,
+        crate::treespec::Discrepancy::Extra { path } if path == ".alint.yml"
+    )
+}
+
+fn assert_step(
+    scenario: &Scenario,
+    idx: usize,
+    expect: &ExpectStep,
+    outcome: &StepOutcome,
+) -> Result<()> {
+    let prefix = format!("scenario {:?} step {idx}", scenario.name);
+
+    match (outcome, expect.violations.as_ref()) {
+        (StepOutcome::Check(report), Some(wanted)) => {
+            assert_violations(&prefix, report, wanted)?;
+        }
+        (StepOutcome::Check(_), None)
+            if expect.applied.is_some()
+                || expect.skipped.is_some()
+                || expect.unfixable.is_some() =>
+        {
+            return Err(Error::scenario(format!(
+                "{prefix}: check step cannot carry applied/skipped/unfixable expectations"
+            )));
+        }
+        (StepOutcome::Check(_), None) => {}
+        (StepOutcome::Fix(report), _) => {
+            if let Some(applied) = &expect.applied {
+                assert_fix_status(&prefix, "applied", report, applied, |s| {
+                    matches!(s, FixStatus::Applied(_))
+                })?;
+            }
+            if let Some(skipped) = &expect.skipped {
+                assert_fix_status(&prefix, "skipped", report, skipped, |s| {
+                    matches!(s, FixStatus::Skipped(_))
+                })?;
+            }
+            if let Some(unfixable) = &expect.unfixable {
+                assert_fix_status(&prefix, "unfixable", report, unfixable, |s| {
+                    matches!(s, FixStatus::Unfixable)
+                })?;
+            }
+            if expect.violations.is_some() {
+                return Err(Error::scenario(format!(
+                    "{prefix}: fix step cannot carry `violations` expectation"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn assert_violations(
+    prefix: &str,
+    report: &Report,
+    wanted: &[crate::scenario::ExpectViolation],
+) -> Result<()> {
+    let mut actual: Vec<(String, alint_core::Level, Option<String>)> = Vec::new();
+    for r in &report.results {
+        for v in &r.violations {
+            actual.push((
+                r.rule_id.clone(),
+                r.level,
+                v.path.as_ref().map(|p| p.display().to_string()),
+            ));
+        }
+    }
+    if actual.len() != wanted.len() {
+        return Err(Error::scenario(format!(
+            "{prefix}: expected {} violation(s), got {}: {:?}",
+            wanted.len(),
+            actual.len(),
+            actual.iter().map(|(r, _, _)| r).collect::<Vec<_>>()
+        )));
+    }
+    // Order-insensitive match: every wanted must find one actual
+    // that hasn't been claimed yet.
+    let mut claimed = vec![false; actual.len()];
+    for w in wanted {
+        let found = actual.iter().enumerate().position(|(i, a)| {
+            !claimed[i]
+                && a.0 == w.rule
+                && w.level.is_none_or(|lv| lv.matches(a.1))
+                && match (&w.path, &a.2) {
+                    (Some(p), Some(ap)) => p == ap,
+                    (None, _) => true,
+                    (Some(_), None) => false,
+                }
+        });
+        match found {
+            Some(i) => claimed[i] = true,
+            None => {
+                return Err(Error::scenario(format!(
+                    "{prefix}: no violation matching rule={:?} level={:?} path={:?}. Actual: {actual:?}",
+                    w.rule, w.level, w.path,
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn assert_fix_status(
+    prefix: &str,
+    label: &str,
+    report: &FixReport,
+    wanted_rules: &[String],
+    pred: impl Fn(&FixStatus) -> bool,
+) -> Result<()> {
+    let actual: Vec<String> = report
+        .results
+        .iter()
+        .filter(|r| r.items.iter().any(|it| pred(&it.status)))
+        .map(|r| r.rule_id.clone())
+        .collect();
+    let mut expected = wanted_rules.to_vec();
+    expected.sort();
+    let mut got = actual.clone();
+    got.sort();
+    if expected != got {
+        return Err(Error::scenario(format!(
+            "{prefix}: {label} rule set mismatch. expected={expected:?}, got={got:?}"
+        )));
+    }
+    Ok(())
+}

@@ -1,0 +1,33 @@
+name: file_prepend injects a license header
+tags: [fix, file_header, file_prepend]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\n"
+      b.rs: "// Copyright 2026\nfn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: header-required
+        kind: file_header
+        paths: "src/**/*.rs"
+        pattern: "(?s)Copyright"
+        lines: 3
+        level: error
+        fix:
+          file_prepend:
+            content: "// Copyright 2026\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: header-required, level: error, path: src/a.rs}
+  - applied: [header-required]
+  - violations: []
+
+expect_tree:
+  src:
+    a.rs: "// Copyright 2026\nfn a() {}\n"
+    b.rs: "// Copyright 2026\nfn b() {}\n"

@@ -7,6 +7,8 @@ members = [
     "crates/alint-output",
     "crates/alint",
     "crates/alint-bench",
+    "crates/alint-testkit",
+    "crates/alint-e2e",
     "xtask",
 ]
 # `cargo run` without -p defaults to the CLI; xtask is explicit-only.
@@ -26,6 +28,7 @@ alint-dsl = { path = "crates/alint-dsl", version = "0.1.0" }
 alint-rules = { path = "crates/alint-rules", version = "0.1.0" }
 alint-output = { path = "crates/alint-output", version = "0.1.0" }
 alint-bench = { path = "crates/alint-bench", version = "0.1.0" }
+alint-testkit = { path = "crates/alint-testkit", version = "0.1.0" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

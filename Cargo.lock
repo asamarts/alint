@@ -98,6 +98,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alint-e2e"
+version = "0.1.0"
+dependencies = [
+ "alint-testkit",
+]
+
+[[package]]
 name = "alint-output"
 version = "0.1.0"
 dependencies = [
@@ -117,6 +124,19 @@ dependencies = [
  "serde",
  "serde_yaml_ng",
  "tempfile",
+]
+
+[[package]]
+name = "alint-testkit"
+version = "0.1.0"
+dependencies = [
+ "alint-core",
+ "alint-dsl",
+ "alint-rules",
+ "serde",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
