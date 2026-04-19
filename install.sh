@@ -43,7 +43,10 @@ echo "==> Detected platform: ${OS}/${ARCH} → ${TARGET}"
 
 if [[ "${VERSION}" == "latest" ]]; then
   echo "==> Resolving latest release tag"
-  VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  # Fetch first so `set -o pipefail` does not trip on curl's SIGPIPE when
+  # awk exits early after the first match.
+  RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+  VERSION=$(printf '%s\n' "${RELEASE_JSON}" \
     | awk -F'"' '/"tag_name":/ {print $4; exit}')
   if [[ -z "${VERSION}" ]]; then
     echo "error: could not resolve latest release tag from github api"
