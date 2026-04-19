@@ -99,8 +99,8 @@ rules:
         // `include_str!`) and the root `schemas/v1/config.json` that the
         // public URL serves. Only runs inside the workspace checkout — the
         // published crate does not ship the root copy, so the test skips.
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../schemas/v1/config.json");
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/v1/config.json");
         let Ok(canonical) = std::fs::read_to_string(&root) else {
             return;
         };

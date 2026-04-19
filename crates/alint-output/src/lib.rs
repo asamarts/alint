@@ -9,11 +9,11 @@ mod sarif;
 use std::io::Write;
 use std::str::FromStr;
 
-use alint_core::Report;
+use alint_core::{FixReport, Report};
 
 pub use github::write_github;
-pub use human::write_human;
-pub use json::write_json;
+pub use human::{write_fix_human, write_human};
+pub use json::{write_fix_json, write_json};
 pub use sarif::write_sarif;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,15 @@ impl Format {
             Self::Json => write_json(report, w),
             Self::Sarif => write_sarif(report, w),
             Self::Github => write_github(report, w),
+        }
+    }
+
+    /// Write a fix-report. Only `Human` and `Json` are supported — SARIF
+    /// and GitHub annotations describe findings, not remediations.
+    pub fn write_fix(self, report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
+        match self {
+            Self::Human | Self::Sarif | Self::Github => write_fix_human(report, w),
+            Self::Json => write_fix_json(report, w),
         }
     }
 }

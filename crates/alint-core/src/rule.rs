@@ -79,4 +79,45 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
+
+    /// Optional automatic-fix strategy. Rules whose violations can be
+    /// mechanically corrected (e.g. creating a missing file, removing a
+    /// forbidden one, renaming to the correct case) return a
+    /// [`Fixer`] here; the default implementation reports the rule as
+    /// unfixable.
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        None
+    }
+}
+
+/// Runtime context for applying a fix.
+#[derive(Debug)]
+pub struct FixContext<'a> {
+    pub root: &'a Path,
+    /// When true, fixers must describe what they would do without
+    /// touching the filesystem.
+    pub dry_run: bool,
+}
+
+/// The result of applying (or simulating) one fix against one violation.
+#[derive(Debug, Clone)]
+pub enum FixOutcome {
+    /// The fix was applied (or would be, under `dry_run`). The string
+    /// is a human-readable one-liner — e.g. `"created LICENSE"`,
+    /// `"would remove target/debug.log"`.
+    Applied(String),
+    /// The fixer intentionally did nothing; the string explains why
+    /// (e.g. `"already exists"`, `"no path on violation"`). This is
+    /// distinct from a hard error returned via `Result::Err`.
+    Skipped(String),
+}
+
+/// A mechanical corrector for a specific rule's violations.
+pub trait Fixer: Send + Sync + std::fmt::Debug {
+    /// Short human-readable summary of what this fixer does,
+    /// independent of any specific violation.
+    fn describe(&self) -> String;
+
+    /// Apply the fix against a single violation.
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome>;
 }

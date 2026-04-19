@@ -18,5 +18,8 @@ regex.workspace = true
 globset.workspace = true
 content_inspector.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

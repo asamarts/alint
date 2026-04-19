@@ -31,6 +31,22 @@ rules:
     kind: file_absent
     paths: ["**/Cargo.lock.bak", "**/package-lock.json.bak"]
     level: error
+    fix:
+      file_remove: {}
+
+  - id: has-editorconfig
+    kind: file_exists
+    paths: .editorconfig
+    root_only: true
+    level: warning
+    fix:
+      file_create:
+        content: |
+          root = true
+          [*]
+          end_of_line = lf
+          indent_style = space
+          indent_size = 2
 
   - id: docs-dir
     kind: dir_exists

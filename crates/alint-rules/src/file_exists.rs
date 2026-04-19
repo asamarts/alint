@@ -1,8 +1,14 @@
 //! `file_exists` — require that at least one file matching any of the given
 //! globs exists in the repository.
 
-use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::PathBuf;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation,
+};
 use serde::Deserialize;
+
+use crate::fixers::FileCreateFixer;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,6 +26,7 @@ pub struct FileExistsRule {
     scope: Scope,
     patterns: Vec<String>,
     root_only: bool,
+    fixer: Option<FileCreateFixer>,
 }
 
 impl FileExistsRule {
@@ -63,6 +70,10 @@ impl Rule for FileExistsRule {
             Ok(vec![Violation::new(message)])
         }
     }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -77,6 +88,33 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .unwrap_or(Options { root_only: false });
+    let fixer = match &spec.fix {
+        Some(FixSpec::FileCreate { file_create: cfg }) => {
+            let target = cfg
+                .path
+                .clone()
+                .or_else(|| first_literal_path(&patterns))
+                .ok_or_else(|| {
+                    Error::rule_config(
+                        &spec.id,
+                        "fix.file_create needs a `path` — none of the rule's `paths:` \
+                         entries is a literal filename",
+                    )
+                })?;
+            Some(FileCreateFixer::new(
+                target,
+                cfg.content.clone(),
+                cfg.create_parents,
+            ))
+        }
+        Some(FixSpec::FileRemove { .. }) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                "fix.file_remove is not compatible with file_exists",
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FileExistsRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -85,7 +123,19 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope,
         patterns,
         root_only: opts.root_only,
+        fixer,
     }))
+}
+
+/// Best-effort: return the first entry in `patterns` that has no glob
+/// metacharacters (so it's a usable file path). Returns `None` if every
+/// pattern is a glob — in that case the caller must require an
+/// explicit `fix.file_create.path`.
+fn first_literal_path(patterns: &[String]) -> Option<PathBuf> {
+    patterns
+        .iter()
+        .find(|p| !p.chars().any(|c| matches!(c, '*' | '?' | '[' | '{')))
+        .map(PathBuf::from)
 }
 
 fn patterns_of(spec: &PathsSpec) -> Vec<String> {

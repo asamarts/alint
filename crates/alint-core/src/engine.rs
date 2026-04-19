@@ -6,8 +6,8 @@ use rayon::prelude::*;
 use crate::error::Result;
 use crate::facts::{FactSpec, FactValues, evaluate_facts};
 use crate::registry::RuleRegistry;
-use crate::report::Report;
-use crate::rule::{Context, Rule, RuleResult, Violation};
+use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
+use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 
@@ -104,6 +104,80 @@ impl Engine {
             .filter_map(|entry| run_entry(entry, &ctx, &when_env, &fact_values))
             .collect();
         Ok(Report { results })
+    }
+
+    /// Evaluate every rule and apply fixers for their violations.
+    /// Fixes run sequentially — rules whose fixers touch the filesystem
+    /// must not race. Rules with no fixer contribute
+    /// [`FixStatus::Unfixable`] entries so the caller sees them in the
+    /// report. Rules that pass (no violations) are omitted from the
+    /// result, same as [`Engine::run`]'s usual behaviour.
+    pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
+        let fact_values = evaluate_facts(&self.facts, root, index)?;
+        let ctx = Context {
+            root,
+            index,
+            registry: Some(&self.registry),
+            facts: Some(&fact_values),
+            vars: Some(&self.vars),
+        };
+        let when_env = WhenEnv {
+            facts: &fact_values,
+            vars: &self.vars,
+        };
+        let fix_ctx = FixContext { root, dry_run };
+
+        let mut results: Vec<FixRuleResult> = Vec::new();
+        for entry in &self.entries {
+            if let Some(expr) = &entry.when {
+                match expr.evaluate(&when_env) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        results.push(FixRuleResult {
+                            rule_id: entry.rule.id().to_string(),
+                            level: entry.rule.level(),
+                            items: vec![FixItem {
+                                violation: Violation::new(format!("when evaluation error: {e}")),
+                                status: FixStatus::Unfixable,
+                            }],
+                        });
+                        continue;
+                    }
+                }
+            }
+            let violations = match entry.rule.evaluate(&ctx) {
+                Ok(v) => v,
+                Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+            };
+            if violations.is_empty() {
+                continue;
+            }
+            let fixer = entry.rule.fixer();
+            let items: Vec<FixItem> = violations
+                .into_iter()
+                .map(|v| {
+                    let status = match fixer {
+                        Some(f) => match f.apply(&v, &fix_ctx) {
+                            Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
+                            Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
+                            Err(e) => FixStatus::Skipped(format!("fix error: {e}")),
+                        },
+                        None => FixStatus::Unfixable,
+                    };
+                    FixItem {
+                        violation: v,
+                        status,
+                    }
+                })
+                .collect();
+            results.push(FixRuleResult {
+                rule_id: entry.rule.id().to_string(),
+                level: entry.rule.level(),
+                items,
+            });
+        }
+        Ok(FixReport { results })
     }
 }
 

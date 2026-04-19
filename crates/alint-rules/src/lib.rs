@@ -20,6 +20,7 @@ pub mod file_is_text;
 pub mod file_max_size;
 pub mod filename_case;
 pub mod filename_regex;
+pub mod fixers;
 pub mod for_each_dir;
 pub mod for_each_file;
 pub mod io;

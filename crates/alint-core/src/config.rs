@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
@@ -82,11 +83,50 @@ pub struct RuleSpec {
     pub policy_url: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// Optional mechanical-fix strategy. Rules whose builders understand
+    /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
+    /// rules whose kind is incompatible with the op return a config error
+    /// at build time.
+    #[serde(default)]
+    pub fix: Option<FixSpec>,
     /// The entire YAML mapping, retained so each rule builder can deserialize
     /// its kind-specific fields without every option being represented here.
     #[serde(flatten)]
     pub extra: serde_yaml_ng::Mapping,
 }
+
+/// The `fix:` block on a rule. The op name is the discriminator key —
+/// exactly one of `file_create` or `file_remove` must be present.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum FixSpec {
+    FileCreate { file_create: FileCreateFixSpec },
+    FileRemove { file_remove: FileRemoveFixSpec },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCreateFixSpec {
+    /// Content to write. Required — there is no implicit empty default;
+    /// for an empty file, pass `content: ""` explicitly.
+    pub content: String,
+    /// Path to create, relative to the repo root. When omitted, the
+    /// rule builder substitutes the first literal entry from the rule's
+    /// `paths:` list.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    /// Whether to create intermediate directories. Defaults to true.
+    #[serde(default = "default_create_parents")]
+    pub create_parents: bool,
+}
+
+fn default_create_parents() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileRemoveFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed
@@ -148,6 +188,7 @@ impl NestedRuleSpec {
                 .map(|m| crate::template::render_path(m, tokens)),
             policy_url: self.policy_url.clone(),
             when: self.when.clone(),
+            fix: None,
             extra: crate::template::render_mapping(self.extra.clone(), tokens),
         }
     }

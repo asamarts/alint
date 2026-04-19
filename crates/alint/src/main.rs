@@ -55,6 +55,15 @@ enum Command {
         /// Rule id to describe.
         rule_id: String,
     },
+    /// Apply automatic fixes for violations whose rules declare one.
+    Fix {
+        /// Root of the repository to operate on.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Print what would be done without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -83,6 +92,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         Command::Check { path } => cmd_check(&path, &cli),
         Command::List => cmd_list(&cli),
         Command::Explain { rule_id } => cmd_explain(&rule_id, &cli),
+        Command::Fix { path, dry_run } => cmd_fix(&path, dry_run, &cli),
     }
 }
 
@@ -117,6 +127,45 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
     tracing::debug!(rules = rule_count, "done");
 
     let exit = if report.has_errors() || (cli.fail_on_warning && report.has_warnings()) {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    };
+    Ok(exit)
+}
+
+fn cmd_fix(path: &Path, dry_run: bool, cli: &Cli) -> Result<ExitCode> {
+    let loaded = load_rules(path, cli)?;
+    let engine = Engine::from_entries(loaded.entries, loaded.registry)
+        .with_facts(loaded.facts)
+        .with_vars(loaded.vars);
+
+    let effective_gitignore = if cli.no_gitignore {
+        false
+    } else {
+        loaded.respect_gitignore
+    };
+    let walk_opts = WalkOptions {
+        respect_gitignore: effective_gitignore,
+        extra_ignores: loaded.extra_ignores,
+    };
+
+    let index = walk(path, &walk_opts).context("walking repository")?;
+    let report = engine
+        .fix(path, &index, dry_run)
+        .context("applying fixes")?;
+
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    format
+        .write_fix(&report, &mut out)
+        .context("writing output")?;
+    out.flush().ok();
+
+    let exit = if report.has_unfixable_errors()
+        || (cli.fail_on_warning && report.has_unfixable_warnings())
+    {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS

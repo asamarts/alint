@@ -115,8 +115,55 @@
         "when": {
           "type": "string",
           "description": "Gate the rule on a fact-based expression (available from v0.2)."
-        }
+        },
+        "fix": { "$ref": "#/$defs/fix" }
       }
+    },
+
+    "fix": {
+      "description": "Automatic-fix strategy applied by `alint fix`. Each rule kind accepts a specific op — alint errors at load time when the op and kind are incompatible.",
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["file_create"],
+          "additionalProperties": false,
+          "properties": {
+            "file_create": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Literal bytes to write. Required — pass \"\" for an empty file."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Target path, relative to the repo root. When omitted, the first literal entry from the rule's `paths:` list is used."
+                },
+                "create_parents": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Create intermediate directories if missing."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_remove"],
+          "additionalProperties": false,
+          "properties": {
+            "file_remove": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            }
+          }
+        }
+      ]
     },
 
     "rule": {

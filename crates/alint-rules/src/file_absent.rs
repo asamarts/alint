@@ -1,6 +1,10 @@
 //! `file_absent` — emit a violation for every file matching `paths`.
 
-use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation,
+};
+
+use crate::fixers::FileRemoveFixer;
 
 #[derive(Debug)]
 pub struct FileAbsentRule {
@@ -10,6 +14,7 @@ pub struct FileAbsentRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    fixer: Option<FileRemoveFixer>,
 }
 
 impl Rule for FileAbsentRule {
@@ -39,6 +44,10 @@ impl Rule for FileAbsentRule {
         }
         Ok(violations)
     }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -48,6 +57,16 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "file_absent requires a `paths` field",
         ));
     };
+    let fixer = match &spec.fix {
+        Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
+        Some(FixSpec::FileCreate { .. }) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                "fix.file_create is not compatible with file_absent",
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FileAbsentRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -55,6 +74,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
+        fixer,
     }))
 }
 

@@ -116,6 +116,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_yaml_ng",
+ "tempfile",
 ]
 
 [[package]]
