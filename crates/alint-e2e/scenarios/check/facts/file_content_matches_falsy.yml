@@ -1,0 +1,27 @@
+name: file_content_matches fact suppresses a gated rule when the pattern is absent
+tags: [check, facts, file_content_matches]
+
+given:
+  tree:
+    Cargo.toml: "[dependencies]\nserde = \"1\"\n"
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    facts:
+      - id: uses_tokio
+        file_content_matches:
+          paths: Cargo.toml
+          pattern: "\\btokio\\b"
+    rules:
+      - id: needs-tokio-util
+        when: facts.uses_tokio
+        kind: file_content_matches
+        paths: Cargo.toml
+        pattern: "tokio-util"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,28 @@
+name: file_content_matches fact fires a gated rule when the pattern is present
+tags: [check, facts, file_content_matches]
+
+given:
+  tree:
+    Cargo.toml: "[dependencies]\ntokio = \"1\"\n"
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    facts:
+      - id: uses_tokio
+        file_content_matches:
+          paths: Cargo.toml
+          pattern: "\\btokio\\b"
+    rules:
+      - id: needs-tokio-util
+        when: facts.uses_tokio
+        kind: file_content_matches
+        paths: Cargo.toml
+        pattern: "tokio-util"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: needs-tokio-util, level: warning, path: Cargo.toml}

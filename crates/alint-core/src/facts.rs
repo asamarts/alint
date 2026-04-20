@@ -20,9 +20,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use regex::Regex;
 use serde::Deserialize;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::scope::Scope;
 use crate::walker::FileIndex;
 
@@ -78,9 +79,28 @@ pub struct FactSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum FactKind {
-    AnyFileExists { any_file_exists: OneOrMany },
-    AllFilesExist { all_files_exist: OneOrMany },
-    CountFiles { count_files: String },
+    AnyFileExists {
+        any_file_exists: OneOrMany,
+    },
+    AllFilesExist {
+        all_files_exist: OneOrMany,
+    },
+    CountFiles {
+        count_files: String,
+    },
+    FileContentMatches {
+        file_content_matches: FileContentMatchesFact,
+    },
+}
+
+/// Fact-kind body for `file_content_matches`. Fact evaluates
+/// truthy when at least one file in `paths` contains a regex
+/// match for `pattern`. Files that aren't valid UTF-8 are skipped.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileContentMatchesFact {
+    pub paths: OneOrMany,
+    pub pattern: String,
 }
 
 /// The resolved map from fact id to value, produced once per `Engine::run`.
@@ -115,16 +135,16 @@ impl FactValues {
 
 /// Evaluate a whole fact list against a prebuilt `FileIndex`. Invoked by
 /// `Engine::run` before any rule evaluates.
-pub fn evaluate_facts(facts: &[FactSpec], _root: &Path, index: &FileIndex) -> Result<FactValues> {
+pub fn evaluate_facts(facts: &[FactSpec], root: &Path, index: &FileIndex) -> Result<FactValues> {
     let mut out = FactValues::new();
     for spec in facts {
-        let value = evaluate_one(spec, index)?;
+        let value = evaluate_one(spec, root, index)?;
         out.insert(spec.id.clone(), value);
     }
     Ok(out)
 }
 
-fn evaluate_one(spec: &FactSpec, index: &FileIndex) -> Result<FactValue> {
+fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactValue> {
     match &spec.kind {
         FactKind::AnyFileExists { any_file_exists } => {
             let globs = any_file_exists.to_vec();
@@ -146,6 +166,26 @@ fn evaluate_one(spec: &FactSpec, index: &FileIndex) -> Result<FactValue> {
             let scope = Scope::from_patterns(std::slice::from_ref(count_files))?;
             let count = index.files().filter(|e| scope.matches(&e.path)).count();
             Ok(FactValue::Int(i64::try_from(count).unwrap_or(i64::MAX)))
+        }
+        FactKind::FileContentMatches {
+            file_content_matches: spec,
+        } => {
+            let scope = Scope::from_patterns(&spec.paths.to_vec())?;
+            let regex = Regex::new(&spec.pattern)
+                .map_err(|e| Error::Other(format!("fact pattern /{}/: {e}", spec.pattern)))?;
+            let any = index.files().any(|entry| {
+                if !scope.matches(&entry.path) {
+                    return false;
+                }
+                let Ok(bytes) = std::fs::read(root.join(&entry.path)) else {
+                    return false;
+                };
+                let Ok(text) = std::str::from_utf8(&bytes) else {
+                    return false;
+                };
+                regex.is_match(text)
+            });
+            Ok(FactValue::Bool(any))
         }
     }
 }
@@ -248,6 +288,60 @@ mod tests {
         assert_eq!(v.get("is_rust"), Some(&FactValue::Bool(true)));
         assert_eq!(v.get("n_rs"), Some(&FactValue::Int(1)));
         assert_eq!(v.get("has_readme"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn file_content_matches_true_when_pattern_appears() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[dependencies]\ntokio = \"1\"\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "hello\n").unwrap();
+
+        let facts = parse(
+            "- id: uses_tokio\n  file_content_matches:\n    paths: Cargo.toml\n    pattern: tokio\n",
+        );
+        let idx = idx(&["Cargo.toml", "README.md"]);
+        let v = evaluate_facts(&facts, tmp.path(), &idx).unwrap();
+        assert_eq!(v.get("uses_tokio"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn file_content_matches_false_when_pattern_absent() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "[dependencies]\n").unwrap();
+
+        let facts = parse(
+            "- id: uses_tokio\n  file_content_matches:\n    paths: Cargo.toml\n    pattern: tokio\n",
+        );
+        let idx = idx(&["Cargo.toml"]);
+        let v = evaluate_facts(&facts, tmp.path(), &idx).unwrap();
+        assert_eq!(v.get("uses_tokio"), Some(&FactValue::Bool(false)));
+    }
+
+    #[test]
+    fn file_content_matches_skips_non_utf8_files() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        // Invalid UTF-8 byte sequence.
+        std::fs::write(tmp.path().join("blob.bin"), [0xFFu8, 0xFE, 0x00, 0x01]).unwrap();
+        std::fs::write(
+            tmp.path().join("text.txt"),
+            "SPDX-License-Identifier: MIT\n",
+        )
+        .unwrap();
+
+        let facts = parse(
+            "- id: has_spdx\n  file_content_matches:\n    paths: [\"**/*\"]\n    pattern: SPDX\n",
+        );
+        let idx = idx(&["blob.bin", "text.txt"]);
+        let v = evaluate_facts(&facts, tmp.path(), &idx).unwrap();
+        // Non-UTF-8 is silently skipped, so `text.txt` is what matters.
+        assert_eq!(v.get("has_spdx"), Some(&FactValue::Bool(true)));
     }
 
     #[test]

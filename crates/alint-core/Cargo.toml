@@ -22,5 +22,8 @@ rayon.workspace = true
 regex.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

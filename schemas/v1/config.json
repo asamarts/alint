@@ -552,6 +552,23 @@
           "properties": {
             "count_files": { "type": "string" }
           }
+        },
+        {
+          "required": ["file_content_matches"],
+          "properties": {
+            "file_content_matches": {
+              "type": "object",
+              "required": ["paths", "pattern"],
+              "additionalProperties": false,
+              "properties": {
+                "paths": { "$ref": "#/$defs/string_or_string_array" },
+                "pattern": {
+                  "type": "string",
+                  "description": "Rust-regex pattern matched against the content of every file in `paths`. The fact is true iff at least one file contains a match. Non-UTF-8 files are skipped."
+                }
+              }
+            }
+          }
         }
       ],
       "unevaluatedProperties": false
