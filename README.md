@@ -23,7 +23,7 @@ alint enforces declarative rules over a repository tree. Rules live in a `.alint
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.2.0`.
+- **Official GitHub Action** — `asamarts/alint@v0.2.1`.
 
 ### Typical use cases
 
@@ -159,15 +159,15 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.2.0
+- uses: asamarts/alint@v0.2.1
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.2.0
+- uses: asamarts/alint@v0.2.1
   with:
-    version: v0.2.0        # alint release tag (default: latest)
+    version: v0.2.1        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -179,7 +179,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.2.0
+- uses: asamarts/alint@v0.2.1
   id: alint
   with:
     format: sarif

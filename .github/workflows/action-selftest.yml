@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: alint check (annotations)
-        uses: asamarts/alint@v0.2.0
+        uses: asamarts/alint@v0.2.1
         # Default format is `github` — inline annotations on
         # the PR if run against a PR commit. Exit 0 if the repo
         # is clean against its own `.alint.yml`.
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: alint check (sarif)
         id: alint
-        uses: asamarts/alint@v0.2.0
+        uses: asamarts/alint@v0.2.1
         with:
           format: sarif
         continue-on-error: true
@@ -54,16 +54,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: alint check (json)
-        uses: asamarts/alint@v0.2.0
+        uses: asamarts/alint@v0.2.1
         with:
           format: json
 
   action-explicit-version:
-    name: pinned version (@v0.2.0)
+    name: pinned version (@v0.2.1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: alint check with explicit version input
-        uses: asamarts/alint@v0.2.0
+        uses: asamarts/alint@v0.2.1
         with:
-          version: v0.2.0
+          version: v0.2.1
