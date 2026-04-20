@@ -1,0 +1,21 @@
+name: file_content_forbidden is silent when no match is found
+tags: [check, file_content_forbidden, passing]
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {\n    println!(\"hi\");\n}\n"
+      clean.rs: "pub fn ok() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-dbg
+        kind: file_content_forbidden
+        paths: "src/**/*.rs"
+        pattern: '\bdbg!\s*\('
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

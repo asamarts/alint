@@ -1,0 +1,25 @@
+name: every_matching_has passes when every selected entry satisfies the require
+tags: [check, every_matching_has, cross_file, passing]
+
+given:
+  tree:
+    packages:
+      alpha:
+        package.json: "{}"
+      beta:
+        package.json: "{}"
+  config: |
+    version: 1
+    rules:
+      - id: every-pkg-has-package-json
+        kind: every_matching_has
+        select: "packages/*"
+        require:
+          - kind: file_exists
+            paths: "{path}/package.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,20 @@
+name: file_is_text is silent when every file is UTF-8 text
+tags: [check, file_is_text, passing]
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {}\n"
+      lib.rs: "pub fn ok() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: src-is-text
+        kind: file_is_text
+        paths: "src/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

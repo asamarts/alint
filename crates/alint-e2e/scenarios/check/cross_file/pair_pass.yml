@@ -1,0 +1,23 @@
+name: pair is silent when every primary has its partner
+tags: [check, pair, cross_file, passing]
+
+given:
+  tree:
+    src:
+      alpha.c: "int a;"
+      alpha.h: "int a;"
+      beta.c: "int b;"
+      beta.h: "int b;"
+  config: |
+    version: 1
+    rules:
+      - id: c-requires-h
+        kind: pair
+        primary: "src/**/*.c"
+        partner: "{dir}/{stem}.h"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

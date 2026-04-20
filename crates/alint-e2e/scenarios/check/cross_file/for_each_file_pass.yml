@@ -1,0 +1,27 @@
+name: for_each_file passes when every selected file satisfies the require
+tags: [check, for_each_file, cross_file, passing]
+
+given:
+  tree:
+    tests:
+      unit:
+        parser.rs: ""
+        lexer.rs: ""
+      snapshots:
+        parser.snap: ""
+        lexer.snap: ""
+  config: |
+    version: 1
+    rules:
+      - id: unit-has-snapshot
+        kind: for_each_file
+        select: "tests/unit/*.rs"
+        require:
+          - kind: file_exists
+            paths: "tests/snapshots/{stem}.snap"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

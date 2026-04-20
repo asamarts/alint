@@ -1,0 +1,23 @@
+name: filename_regex is silent when every stem matches
+tags: [check, filename_regex, passing]
+
+given:
+  tree:
+    tests:
+      test_parser.rs: ""
+      test_lexer.rs: ""
+      test_eval_123.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: tests-named-test-prefix
+        kind: filename_regex
+        paths: "tests/**/*.rs"
+        pattern: "^test_[a-z0-9_]+$"
+        stem: true
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

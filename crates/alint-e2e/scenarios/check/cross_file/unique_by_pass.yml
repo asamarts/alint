@@ -1,0 +1,22 @@
+name: unique_by is silent when every key is distinct
+tags: [check, unique_by, cross_file, passing]
+
+given:
+  tree:
+    src:
+      alpha.rs: ""
+      beta.rs: ""
+      gamma.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: unique-rs-stems
+        kind: unique_by
+        select: "**/*.rs"
+        key: "{stem}"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

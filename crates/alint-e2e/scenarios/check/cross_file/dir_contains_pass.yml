@@ -1,0 +1,25 @@
+name: dir_contains is silent when every selected dir has the required files
+tags: [check, dir_contains, cross_file, passing]
+
+given:
+  tree:
+    packages:
+      alpha:
+        README.md: "# alpha"
+        LICENSE: "MIT"
+      beta:
+        README.md: "# beta"
+        LICENSE-APACHE: "Apache-2.0 text"
+  config: |
+    version: 1
+    rules:
+      - id: packages-have-readme-and-license
+        kind: dir_contains
+        select: "packages/*"
+        require: ["README.md", "LICENSE*"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

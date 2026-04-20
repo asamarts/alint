@@ -1,0 +1,22 @@
+name: dir_only_contains is silent when every child is in the allowlist
+tags: [check, dir_only_contains, cross_file, passing]
+
+given:
+  tree:
+    src:
+      a.rs: ""
+      b.rs: ""
+      mod.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: src-only-rs
+        kind: dir_only_contains
+        select: "src"
+        allow: ["*.rs"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

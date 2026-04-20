@@ -1,0 +1,23 @@
+name: filename_case is silent when every stem matches
+tags: [check, filename_case, passing]
+
+given:
+  tree:
+    src:
+      main.rs: ""
+      lib.rs: ""
+      nested_mod.rs: ""
+      with1number.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: rust-snake
+        kind: filename_case
+        paths: "src/**/*.rs"
+        case: snake
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

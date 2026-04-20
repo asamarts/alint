@@ -1,0 +1,22 @@
+name: file_header is silent when every file has the required header
+tags: [check, file_header, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "// Copyright 2026\nfn a() {}\n"
+      b.rs: "// Copyright 2026\n// SPDX-License-Identifier: Apache-2.0\nfn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: copyright-header
+        kind: file_header
+        paths: "src/**/*.rs"
+        pattern: "(?s)Copyright"
+        lines: 3
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

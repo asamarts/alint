@@ -1,0 +1,20 @@
+name: dir_absent is silent when the forbidden directory is absent
+tags: [check, dir_absent, passing]
+
+given:
+  tree:
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    src:
+      main.rs: "fn main() {}"
+  config: |
+    version: 1
+    rules:
+      - id: no-target
+        kind: dir_absent
+        paths: "**/target"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
