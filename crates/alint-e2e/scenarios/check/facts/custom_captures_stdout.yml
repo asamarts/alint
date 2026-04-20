@@ -1,0 +1,24 @@
+name: custom fact exposes command stdout to when-gating
+tags: [check, facts, custom, unix]
+
+given:
+  tree:
+    LICENSE: "MIT"
+  config: |
+    version: 1
+    facts:
+      - id: lic
+        custom:
+          argv: ["/bin/sh", "-c", "printf 'MIT\\n'"]
+    rules:
+      - id: mit-requires-ack
+        when: facts.lic == "MIT"
+        kind: file_exists
+        paths: LICENSE-ACK.txt
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: mit-requires-ack, level: error}

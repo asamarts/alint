@@ -146,6 +146,10 @@ fn load_recursive(
             let target = resolve_relative(&source_dir, entry);
             load_recursive(&target, visiting, opts)?
         };
+        // Extended configs cannot introduce `custom:` facts —
+        // those would spawn arbitrary processes on behalf of a
+        // ruleset whose code the user didn't write.
+        alint_core::facts::reject_custom_facts(&parent, entry)?;
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
@@ -476,6 +480,48 @@ rules: []
         let cfg = load_with(&config_path, &opts).unwrap();
         let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["inherited", "local"]);
+    }
+
+    #[test]
+    fn load_rejects_custom_fact_declared_in_local_extends() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            r#"version: 1
+facts:
+  - id: from_base
+    custom:
+      argv: ["/bin/true"]
+rules: []
+"#,
+        )
+        .unwrap();
+        std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("custom"), "{err}");
+        assert!(err.contains("base.yml"), "{err}");
+    }
+
+    #[test]
+    fn load_allows_custom_fact_in_top_level_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &path,
+            r#"version: 1
+facts:
+  - id: whoami
+    custom:
+      argv: ["/bin/true"]
+rules: []
+"#,
+        )
+        .unwrap();
+        let cfg = load(&path).unwrap();
+        assert_eq!(cfg.facts.len(), 1);
+        assert_eq!(cfg.facts[0].id, "whoami");
     }
 
     #[test]

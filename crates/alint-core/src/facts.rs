@@ -94,6 +94,28 @@ pub enum FactKind {
     GitBranch {
         git_branch: GitBranchFact,
     },
+    Custom {
+        custom: CustomFact,
+    },
+}
+
+/// Fact-kind body for `custom`. Spawns `argv` as a child process
+/// rooted at the repo; the process's stdout (trimmed of trailing
+/// whitespace) becomes the fact's `String` value. A non-zero
+/// exit code resolves to the empty string; timeouts and spawn
+/// failures do the same. No shell is invoked — `argv` is passed
+/// to `execve` (or the platform equivalent) verbatim.
+///
+/// Security: `custom` facts are only allowed in the user's own
+/// top-level config. Any `extends:` ancestor that declares one
+/// is rejected at load time — otherwise a malicious ruleset
+/// could execute arbitrary code just by being fetched.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomFact {
+    /// Program and arguments. `argv[0]` is looked up through PATH
+    /// if it's not an absolute or relative-with-separator path.
+    pub argv: Vec<String>,
 }
 
 /// Fact-kind body for `file_content_matches`. Fact evaluates
@@ -205,7 +227,49 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
             Ok(FactValue::Bool(any))
         }
         FactKind::GitBranch { git_branch: _ } => Ok(FactValue::String(read_git_branch(root))),
+        FactKind::Custom { custom } => Ok(FactValue::String(run_custom(custom, root))),
     }
+}
+
+/// Best-effort: spawn `argv` at `root`, capture stdout. Non-zero
+/// exit / spawn failures / unusable output → empty string.
+fn run_custom(spec: &CustomFact, root: &Path) -> String {
+    let Some((program, args)) = spec.argv.split_first() else {
+        return String::new();
+    };
+    let output = std::process::Command::new(program)
+        .args(args)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return String::new();
+    };
+    if !output.status.success() {
+        return String::new();
+    }
+    match std::str::from_utf8(&output.stdout) {
+        Ok(text) => text.trim_end().to_string(),
+        Err(_) => String::new(),
+    }
+}
+
+/// Reject `custom` facts in `config`. Used by the DSL loader to
+/// enforce that only the user's top-level config can spawn
+/// processes; extended (local or remote) configs can't.
+pub fn reject_custom_facts(config: &crate::config::Config, source: &str) -> Result<()> {
+    for f in &config.facts {
+        if matches!(f.kind, FactKind::Custom { .. }) {
+            return Err(Error::Other(format!(
+                "fact {:?}: `custom:` facts are only allowed in the user's top-level \
+                 config; declaring one in an extended config ({source}) is refused because \
+                 it would let a ruleset spawn arbitrary processes",
+                f.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Best-effort branch resolution: read `<root>/.git/HEAD` and
@@ -417,6 +481,76 @@ mod tests {
         let facts = parse("- id: branch\n  git_branch: {}\n");
         let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
         assert_eq!(v.get("branch"), Some(&FactValue::String(String::new())));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_captures_stdout_trimmed() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        let facts = parse(
+            "- id: greeting\n  custom:\n    argv: [\"/bin/sh\", \"-c\", \"printf 'hello world\\n'\"]\n",
+        );
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(
+            v.get("greeting"),
+            Some(&FactValue::String("hello world".to_string()))
+        );
+    }
+
+    #[test]
+    fn custom_unknown_program_is_empty_string() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        let facts =
+            parse("- id: nope\n  custom:\n    argv: [\"no-such-program-alint-test-xyzzy\"]\n");
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(v.get("nope"), Some(&FactValue::String(String::new())));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_nonzero_exit_is_empty_string() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        // `false` exits 1; we should not see any captured output.
+        let facts = parse("- id: bad\n  custom:\n    argv: [\"/bin/false\"]\n");
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(v.get("bad"), Some(&FactValue::String(String::new())));
+    }
+
+    #[test]
+    fn reject_custom_facts_flags_custom_but_passes_others() {
+        let facts = parse(
+            "- id: plain\n  any_file_exists: x\n- id: run\n  custom:\n    argv: [\"echo\"]\n",
+        );
+        let config = crate::config::Config {
+            version: 1,
+            extends: Vec::new(),
+            ignore: Vec::new(),
+            respect_gitignore: true,
+            vars: std::collections::HashMap::new(),
+            facts,
+            rules: Vec::new(),
+        };
+        let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
+        assert!(err.to_string().contains("custom"), "{err}");
+        assert!(err.to_string().contains("./base.yml"), "{err}");
+    }
+
+    #[test]
+    fn reject_custom_facts_ok_when_none_present() {
+        let facts = parse("- id: plain\n  any_file_exists: x\n");
+        let config = crate::config::Config {
+            version: 1,
+            extends: Vec::new(),
+            ignore: Vec::new(),
+            respect_gitignore: true,
+            vars: std::collections::HashMap::new(),
+            facts,
+            rules: Vec::new(),
+        };
+        assert!(reject_custom_facts(&config, "./base.yml").is_ok());
     }
 
     #[test]
