@@ -6,6 +6,58 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-04-20
+
+Patch release. Finishes the v0.2 roadmap item that didn't make it
+into v0.2.0: `extends:` composition.
+
+### Added
+
+- **`extends:` for local files.** A config can inherit rules,
+  facts, vars, and ignore globs from another YAML file on disk
+  (relative or absolute path). Resolution is recursive with cycle
+  detection; merge is id-based with child-overrides-parent
+  semantics for rules + facts, dict-merge for vars, and
+  concatenation for ignore globs.
+- **`extends:` for HTTPS URLs with SHA-256 SRI.** Remote entries
+  take the form `https://.../foo.yml#sha256-<64 hex chars>`. The
+  SRI is non-negotiable: URLs without it are rejected. Responses
+  are verified against the declared hash before use and cached
+  atomically on disk at `<user-cache-dir>/alint/rulesets/<sri>.yml`.
+  `ureq` is the underlying HTTPS client (rustls for TLS — no
+  OS-native crypto linking).
+- **`alint_dsl::load_with(path, &LoadOptions)`** for embedders and
+  tests that need to pin the cache path or override the fetcher.
+- **Action self-test workflow** (`.github/workflows/action-selftest.yml`)
+  that dogfoods `asamarts/alint@<tag>` across `ubuntu-latest` on
+  four configurations (default, `format: sarif` + JSON-parse
+  assertion, `format: json`, explicit `version:` input). Catches
+  regressions in the release-tarball → install.sh → binary
+  distribution chain that in-process tests don't exercise.
+
+### Security
+
+- HTTPS `extends:` requires SRI on every entry; no
+  trust-on-first-use. `http://` schemes are rejected outright.
+  Cache entries are re-verified against SRI on read, so a
+  tampered on-disk cache fails loudly rather than serving bad
+  content. Body size is capped at 16 MiB to bound memory against
+  a hostile server.
+
+### Known limitations
+
+- Remote configs cannot themselves contain `extends:` (nested
+  remote extends deferred — a relative path inside a fetched
+  config has no principled base for resolution).
+- The config-wide `respect_gitignore` field cannot distinguish
+  "unset" from the `true` default during merge; the child's
+  value wins unconditionally.
+
+### Added dependencies
+
+- `ureq` (rustls TLS), `sha2`, `directories`. Release-binary size
+  impact: ~+1.5–2 MiB, mostly from rustls' embedded root certs.
+
 ## [0.2.0] — 2026-04-19
 
 Second release. The theme is composition and remediation: cross-file rules,
@@ -121,6 +173,7 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/asamarts/alint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/asamarts/alint/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/asamarts/alint/releases/tag/v0.1.0
