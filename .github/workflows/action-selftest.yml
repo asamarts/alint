@@ -1,0 +1,69 @@
+name: Action self-test
+
+# Dogfood the official GitHub Action on the alint repo itself.
+# Exercises the full install-from-release → invoke → annotate
+# chain that external consumers follow, which our in-process
+# tests don't cover. Runs on ubuntu-latest (not self-hosted) so
+# this job represents a typical external user's environment.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  action-default:
+    name: default (github annotations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alint check (annotations)
+        uses: asamarts/alint@v0.2.0
+        # Default format is `github` — inline annotations on
+        # the PR if run against a PR commit. Exit 0 if the repo
+        # is clean against its own `.alint.yml`.
+
+  action-sarif:
+    name: sarif output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alint check (sarif)
+        id: alint
+        uses: asamarts/alint@v0.2.0
+        with:
+          format: sarif
+        continue-on-error: true
+      - name: verify SARIF file exists and parses as JSON
+        run: |
+          set -euo pipefail
+          test -f "${{ steps.alint.outputs.sarif-file }}"
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
+            "${{ steps.alint.outputs.sarif-file }}"
+
+  action-json:
+    name: json output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alint check (json)
+        uses: asamarts/alint@v0.2.0
+        with:
+          format: json
+
+  action-explicit-version:
+    name: pinned version (@v0.2.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alint check with explicit version input
+        uses: asamarts/alint@v0.2.0
+        with:
+          version: v0.2.0
