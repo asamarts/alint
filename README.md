@@ -1,21 +1,40 @@
 # alint
 
-A language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**.
+[![Crates.io](https://img.shields.io/crates/v/alint.svg)](https://crates.io/crates/alint)
+[![CI](https://github.com/asamarts/alint/actions/workflows/ci.yml/badge.svg)](https://github.com/asamarts/alint/actions/workflows/ci.yml)
+[![License](https://img.shields.io/crates/l/alint.svg)](#license)
 
-> Status: early development. v0.1 is the MVP — see [docs/design/ROADMAP.md](docs/design/ROADMAP.md) for scope per version.
+**alint** (short for *agnostic lint*) is a language-agnostic linter for **repository structure, filenames, and file content rules**, with optional auto-fix.
+
+> Status: v0.2 ships 18 rule kinds, auto-fix, and conditional rules via a bounded expression language. See [docs/design/ROADMAP.md](docs/design/ROADMAP.md) for scope per version.
 
 ## What alint does
 
-alint enforces declarative rules over a repository tree. The rule model and DSL are described in full at [docs/design/ARCHITECTURE.md](docs/design/ARCHITECTURE.md). Representative rules (some shipped in v0.1, some planned for v0.2):
+alint enforces declarative rules over a repository tree. Rules live in a `.alint.yml` at the root; alint walks the tree (honoring `.gitignore`), matches rules against every file and directory, reports violations, and — when you ask — automatically fixes them.
 
-- A `README.md` must exist at the repo root. *(v0.1)*
-- Every `.java` file must start with a required license-header comment. *(v0.1)*
-- Filenames under `components/` must be PascalCase. *(v0.1)*
-- No binary files may exist under `src/`. *(v0.1)*
-- Every `.c` file must have a matching `.h` file in the same directory. *(v0.2 — cross-file rules)*
-- For every subdirectory of `src/`, a `mod.rs` must exist. *(v0.2 — per-directory quantification)*
+### Core capabilities
 
-Rules are defined in `.alint.yml`. alint walks the tree (honoring `.gitignore` by default), matches each rule against the index, and emits results in `human`, `json`, `sarif`, or `github` (GitHub Actions annotations) format, with JUnit and Markdown arriving in v0.3.
+- **18 rule kinds** across four families:
+  - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
+  - *Naming* — `filename_case` (snake/kebab/Pascal/camel/screaming-snake/flat/lower/upper), `filename_regex`.
+  - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_max_size`, `file_is_text`.
+  - *Cross-file* — `pair`, `for_each_dir`, `for_each_file`, `dir_contains`, `dir_only_contains`, `unique_by`, `every_matching_has`.
+- **Auto-fix** — five file ops (`file_create`, `file_remove`, `file_prepend`, `file_append`, `file_rename`) wired to the rule kinds where a mechanical correction is well-defined. Preview with `alint fix --dry-run` before applying.
+- **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
+- **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
+- **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
+- **Official GitHub Action** — `asamarts/alint@v0.2.0`.
+
+### Typical use cases
+
+- "Every package in a monorepo has a `README.md` and a `LICENSE*`" — `dir_contains` across `packages/*`.
+- "All Rust source files carry a copyright header; auto-prepend any that don't" — `file_header` + `file_prepend`.
+- "No stray `*.bak` or `*.swp` files in committed history; delete any that slip in" — `file_absent` + `file_remove`.
+- "Filename case convention enforced per language" — `filename_case` with `when: facts.is_typescript` gating.
+- "Every module directory has a `mod.rs`" — `for_each_dir` with nested `file_exists`.
+- "No two files share a basename across the tree" — `unique_by` with `key: "{basename}"`.
+
+The full DSL is documented in [docs/design/ARCHITECTURE.md](docs/design/ARCHITECTURE.md).
 
 ## Non-goals
 
@@ -62,24 +81,43 @@ Create a `.alint.yml` at the root of your repository:
 # yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
 version: 1
 
+facts:
+  - id: is_rust
+    any_file_exists: [Cargo.toml]
+
 rules:
   - id: readme-exists
     kind: file_exists
     paths: ["README.md", "README"]
     root_only: true
     level: error
+    fix:
+      file_create:
+        content: "# Project\n"
 
-  - id: no-large-blobs
-    kind: file_max_size
-    paths: "**"
-    max_bytes: 1048576
+  - id: no-backup-files
+    kind: file_absent
+    paths: "**/*.{bak,swp}"
     level: warning
+    fix:
+      file_remove: {}
 
   - id: components-pascal
     kind: filename_case
     paths: "components/**/*.{tsx,jsx}"
     case: pascal
     level: error
+    fix:
+      file_rename: {}
+
+  - id: rust-snake
+    when: facts.is_rust
+    kind: filename_case
+    paths: "src/**/*.rs"
+    case: snake
+    level: error
+    fix:
+      file_rename: {}
 
   - id: java-license-header
     kind: file_header
@@ -87,23 +125,29 @@ rules:
     lines: 20
     pattern: "(?s)Copyright \\(c\\) \\d{4}"
     level: error
+    fix:
+      file_prepend:
+        content: |
+          // Copyright (c) 2026 Acme Corp
 ```
 
 Then run:
 
 ```bash
-alint check        # run all rules against the current directory
-alint list         # list effective rules
-alint explain <id> # show a rule's definition
+alint check           # run all rules against the current directory
+alint fix --dry-run   # preview the auto-fixes that would be applied
+alint fix             # apply every fixable violation in place
+alint list            # list effective rules
+alint explain <id>    # show a rule's definition
 ```
 
 Output formats:
 
 ```bash
-alint check --format human            # default; colorized for humans
-alint check --format json             # stable, versioned JSON schema
-alint check --format sarif            # SARIF 2.1.0 (for GitHub Code Scanning)
-alint check --format github           # GitHub Actions workflow commands
+alint check --format human    # default; colorized for humans
+alint check --format json     # stable, versioned JSON schema
+alint check --format sarif    # SARIF 2.1.0 (for GitHub Code Scanning)
+alint check --format github   # GitHub Actions workflow commands
 ```
 
 Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` internal error. Warnings do not fail by default — use `--fail-on-warning` to flip that.
@@ -115,15 +159,15 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.1.0
+- uses: asamarts/alint@v0.2.0
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.1.0
+- uses: asamarts/alint@v0.2.0
   with:
-    version: v0.1.0        # alint release tag (default: latest)
+    version: v0.2.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -135,7 +179,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.1.0
+- uses: asamarts/alint@v0.2.0
   id: alint
   with:
     format: sarif
@@ -150,6 +194,7 @@ Upload findings to GitHub Code Scanning:
 
 - [**ARCHITECTURE.md**](docs/design/ARCHITECTURE.md) — rule model, DSL, execution model, crate layout, plugin model.
 - [**ROADMAP.md**](docs/design/ROADMAP.md) — scope per version from v0.1 through v1.0.
+- [**CHANGELOG.md**](CHANGELOG.md) — per-version changes, breaking and otherwise.
 - [**docs/benchmarks/METHODOLOGY.md**](docs/benchmarks/METHODOLOGY.md) — how benchmarks are measured and published.
 - Per-version, per-platform benchmark results under [`docs/benchmarks/<version>/`](docs/benchmarks/).
 
@@ -158,10 +203,12 @@ Upload findings to GitHub Code Scanning:
 ```bash
 git clone https://github.com/asamarts/alint
 cd alint
-cargo test --workspace        # ~30 tests
+cargo test --workspace        # 200+ tests; includes end-to-end scenarios
 cargo run -- check            # dogfood: alint lints itself
 cargo bench -p alint-bench    # criterion micro-benches
 ```
+
+End-to-end tests live in `crates/alint-e2e/scenarios/` as declarative YAML; adding a new scenario only requires a new file. CLI snapshot tests live in `crates/alint/tests/cli/` under `trycmd`. Property-based invariants are in `crates/alint-e2e/tests/invariants.rs`.
 
 CI is self-hosted with per-job bash scripts under `ci/scripts/` that run locally or in GitHub Actions unchanged. See [ci/env.example](ci/env.example) for runner setup.
 
