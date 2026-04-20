@@ -38,10 +38,47 @@ pub fn discover(start: &Path) -> Option<PathBuf> {
 }
 
 pub fn load(path: &Path) -> Result<Config> {
+    load_with(path, &LoadOptions::default())
+}
+
+/// Load with explicit options. Primarily useful for tests that
+/// want to point HTTPS `extends:` resolution at a scoped cache
+/// directory, and for embeddings that want to plug in a custom
+/// fetcher.
+pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     let mut visiting = std::collections::HashSet::new();
-    let merged = load_recursive(path, &mut visiting)?;
+    let merged = load_recursive(path, &mut visiting, opts)?;
     validate(&merged)?;
     Ok(merged)
+}
+
+/// Configuration for `load_with`.
+///
+/// Defaults enable HTTPS `extends:` resolution against the
+/// platform-default user cache and the default fetcher
+/// (30 s timeout, 16 MiB body cap, `rustls` TLS). Tests pin both
+/// via [`LoadOptions::with_cache`] to avoid touching the user's
+/// real cache dir.
+#[derive(Debug, Default, Clone)]
+pub struct LoadOptions {
+    /// Explicit cache. When `None`, a platform-default cache is
+    /// resolved lazily on first HTTPS entry.
+    pub cache: Option<extends::Cache>,
+    /// Explicit fetcher. When `None`, `Fetcher::default()` is used.
+    pub fetcher: Option<extends::Fetcher>,
+}
+
+impl LoadOptions {
+    /// Convenience: pin HTTPS resolution to an explicit cache
+    /// path. Used heavily in tests so scenarios don't share state
+    /// with each other or the user's real cache.
+    #[must_use]
+    pub fn with_cache(cache: extends::Cache) -> Self {
+        Self {
+            cache: Some(cache),
+            ..Self::default()
+        }
+    }
 }
 
 pub fn parse(yaml: &str) -> Result<Config> {
@@ -64,6 +101,7 @@ pub fn parse(yaml: &str) -> Result<Config> {
 fn load_recursive(
     path: &Path,
     visiting: &mut std::collections::HashSet<PathBuf>,
+    opts: &LoadOptions,
 ) -> Result<Config> {
     let canonical = path.canonicalize().map_err(|source| Error::Io {
         path: path.to_path_buf(),
@@ -97,20 +135,69 @@ fn load_recursive(
         ..Config::default()
     };
     for entry in &extends {
-        if entry.starts_with("http://") || entry.starts_with("https://") {
+        let parent = if entry.starts_with("http://") {
             return Err(Error::Other(format!(
-                "remote `extends` URLs are not supported in this build \
-                 (entry {entry:?}); only local paths work. HTTPS + SRI \
-                 support is planned — see the ROADMAP."
+                "plain http:// is not allowed in `extends:` (entry {entry:?}); \
+                 use https:// with an SRI hash instead"
             )));
-        }
-        let target = resolve_relative(&source_dir, entry);
-        let parent = load_recursive(&target, visiting)?;
+        } else if entry.starts_with("https://") {
+            load_remote(entry, opts, visiting)?
+        } else {
+            let target = resolve_relative(&source_dir, entry);
+            load_recursive(&target, visiting, opts)?
+        };
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
     visiting.remove(&canonical);
     Ok(merged)
+}
+
+fn load_remote(
+    entry: &str,
+    opts: &LoadOptions,
+    visiting: &mut std::collections::HashSet<PathBuf>,
+) -> Result<Config> {
+    let (url, sri) = extends::split_url_and_sri(entry).map_err(|e| Error::Other(e.to_string()))?;
+    let Some(sri) = sri else {
+        return Err(Error::Other(format!(
+            "remote `extends` entry {entry:?} has no integrity hash; \
+             HTTPS extends require `#sha256-<hex>` in the URL fragment"
+        )));
+    };
+
+    let cache = match opts.cache.clone() {
+        Some(c) => c,
+        None => extends::Cache::user_default()
+            .map_err(|e| Error::Other(format!("could not open cache: {e}")))?,
+    };
+    let fetcher = opts.fetcher.clone().unwrap_or_default();
+    let body = extends::resolve_remote(&url, &sri, &fetcher, &cache)
+        .map_err(|e| Error::Other(format!("resolving {url}: {e}")))?;
+
+    // Remote entries may themselves extend other things (local
+    // paths relative to… what, exactly?). For v0.2 we forbid
+    // nested extends in a remote body to dodge that ambiguity.
+    // When we lift this restriction, the base for relative
+    // resolution needs a deliberate decision.
+    let config: Config = serde_yaml_ng::from_str(
+        std::str::from_utf8(&body)
+            .map_err(|e| Error::Other(format!("remote body from {url} is not UTF-8: {e}")))?,
+    )?;
+    if !config.extends.is_empty() {
+        return Err(Error::Other(format!(
+            "remote config at {url} contains its own `extends:`; \
+             nested remote extends are not supported in this build"
+        )));
+    }
+    // Cycle guard token for the URL itself so a self-referencing
+    // fetched config can't loop.
+    let token = std::path::PathBuf::from(format!("remote://{}", sri.encoded()));
+    if !visiting.insert(token.clone()) {
+        return Err(Error::Other(format!("cycle on remote extends: {url}")));
+    }
+    visiting.remove(&token);
+    Ok(config)
 }
 
 fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
@@ -333,7 +420,7 @@ rules: []
     }
 
     #[test]
-    fn load_rejects_remote_extends() {
+    fn load_rejects_remote_extends_without_sri() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join(".alint.yml");
         std::fs::write(
@@ -341,9 +428,87 @@ rules: []
             "version: 1\nextends: [\"https://example.com/base.yml\"]\nrules: []\n",
         )
         .unwrap();
-        let err = load(&path).unwrap_err().to_string();
-        assert!(err.contains("remote"), "{err}");
+        let opts = LoadOptions::with_cache(extends::Cache::at(tmp.path().join("cache")));
+        let err = load_with(&path, &opts).unwrap_err().to_string();
+        assert!(err.contains("integrity hash"), "{err}");
         assert!(err.contains("https://example.com"), "{err}");
+    }
+
+    #[test]
+    fn load_resolves_https_extends_via_cache_hit() {
+        use sha2::{Digest, Sha256};
+
+        // The remote body; could be anything valid.
+        let remote_body = b"version: 1\nrules:\n  - id: inherited\n    kind: file_exists\n    paths: INHERITED.md\n    level: warning\n";
+
+        // Pre-compute the SRI so the scenario is hermetic and the
+        // integrity check on read succeeds.
+        let mut hasher = Sha256::new();
+        hasher.update(remote_body);
+        let digest = hasher.finalize();
+        let mut hex = String::with_capacity(digest.len() * 2);
+        for b in &digest {
+            use std::fmt::Write as _;
+            write!(hex, "{b:02x}").unwrap();
+        }
+        let sri_str = format!("sha256-{hex}");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = extends::Cache::at(tmp.path().join("cache"));
+        let sri = extends::Sri::parse(&sri_str).unwrap();
+
+        // Seed the cache so the loader hits it instead of the network.
+        cache.put(&sri, remote_body).unwrap();
+
+        // Local .alint.yml references the remote config + adds one
+        // local rule of its own.
+        let url = format!("https://example.invalid/base.yml#{sri_str}");
+        let config_path = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "version: 1\nextends: [\"{url}\"]\nrules:\n  - id: local\n    kind: file_exists\n    paths: LOCAL.md\n    level: error\n"
+            ),
+        )
+        .unwrap();
+
+        let opts = LoadOptions::with_cache(cache);
+        let cfg = load_with(&config_path, &opts).unwrap();
+        let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["inherited", "local"]);
+    }
+
+    #[test]
+    fn load_rejects_remote_extends_with_nested_extends() {
+        use sha2::{Digest, Sha256};
+
+        let remote_body = b"version: 1\nextends: [./chained.yml]\nrules: []\n";
+        let mut hasher = Sha256::new();
+        hasher.update(remote_body);
+        let digest = hasher.finalize();
+        let mut hex = String::with_capacity(digest.len() * 2);
+        for b in &digest {
+            use std::fmt::Write as _;
+            write!(hex, "{b:02x}").unwrap();
+        }
+        let sri_str = format!("sha256-{hex}");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = extends::Cache::at(tmp.path().join("cache"));
+        let sri = extends::Sri::parse(&sri_str).unwrap();
+        cache.put(&sri, remote_body).unwrap();
+
+        let url = format!("https://example.invalid/base.yml#{sri_str}");
+        let config_path = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &config_path,
+            format!("version: 1\nextends: [\"{url}\"]\nrules: []\n"),
+        )
+        .unwrap();
+
+        let opts = LoadOptions::with_cache(cache);
+        let err = load_with(&config_path, &opts).unwrap_err().to_string();
+        assert!(err.contains("nested remote extends"), "{err}");
     }
 
     #[test]

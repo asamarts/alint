@@ -64,7 +64,12 @@ pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
 }
 
 fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
-    let config = alint_dsl::load(&root.join(".alint.yml"))?;
+    // Scenarios don't share state with the user's real cache:
+    // HTTPS `extends:` (if the scenario uses it) resolves into
+    // a per-scenario subdirectory of the scenario's tempdir.
+    let cache = alint_dsl::extends::Cache::at(root.join(".alint-cache"));
+    let opts = alint_dsl::LoadOptions::with_cache(cache);
+    let config = alint_dsl::load_with(&root.join(".alint.yml"), &opts)?;
     let registry = alint_rules::builtin_registry();
 
     let mut entries: Vec<RuleEntry> = Vec::with_capacity(config.rules.len());
@@ -134,8 +139,16 @@ pub fn assert_scenario(scenario: &Scenario, run: &ScenarioRun) -> Result<()> {
 fn is_runner_machinery(d: &crate::treespec::Discrepancy) -> bool {
     matches!(
         d,
-        crate::treespec::Discrepancy::Extra { path } if path == ".alint.yml"
+        crate::treespec::Discrepancy::Extra { path } if is_machinery_path(path)
     )
+}
+
+fn is_machinery_path(path: &str) -> bool {
+    // The runner writes `.alint.yml` (scenario config) and a
+    // `.alint-cache/` tree (scoped HTTPS extends cache) into the
+    // scenario tempdir. Neither is content-under-test, so strict
+    // tree comparisons silently ignore them.
+    path == ".alint.yml" || path == ".alint-cache" || path.starts_with(".alint-cache/")
 }
 
 fn assert_step(
