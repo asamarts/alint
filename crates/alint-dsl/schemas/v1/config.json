@@ -569,6 +569,17 @@
               }
             }
           }
+        },
+        {
+          "required": ["git_branch"],
+          "properties": {
+            "git_branch": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Read `<repo>/.git/HEAD` and return the current branch name (string). Detached HEAD, no `.git/` directory, or any unrecognized layout resolves to an empty string (falsy under `when:`)."
+            }
+          }
         }
       ],
       "unevaluatedProperties": false

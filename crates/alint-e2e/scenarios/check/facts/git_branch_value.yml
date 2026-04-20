@@ -1,0 +1,26 @@
+name: git_branch fact exposes the current branch for when-gating
+tags: [check, facts, git_branch]
+
+given:
+  tree:
+    .git:
+      # Simulated .git/HEAD on a feature branch.
+      HEAD: "ref: refs/heads/release\n"
+    README.md: "# demo"
+  config: |
+    version: 1
+    facts:
+      - id: branch
+        git_branch: {}
+    rules:
+      - id: release-needs-changelog
+        when: facts.branch == "release"
+        kind: file_exists
+        paths: CHANGELOG.md
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: release-needs-changelog, level: error}

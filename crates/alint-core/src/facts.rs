@@ -91,6 +91,9 @@ pub enum FactKind {
     FileContentMatches {
         file_content_matches: FileContentMatchesFact,
     },
+    GitBranch {
+        git_branch: GitBranchFact,
+    },
 }
 
 /// Fact-kind body for `file_content_matches`. Fact evaluates
@@ -102,6 +105,20 @@ pub struct FileContentMatchesFact {
     pub paths: OneOrMany,
     pub pattern: String,
 }
+
+/// Fact-kind body for `git_branch`. Empty — the body is just
+/// `git_branch: {}` in YAML and the discriminator is the key.
+///
+/// Evaluates to the current branch name by reading `.git/HEAD`
+/// directly (no `git` binary required). Returns an empty string
+/// when the repo isn't on a named branch (detached HEAD, not a
+/// git repo at all, worktree/submodule variants, or any unusual
+/// `.git` layout we don't fully resolve). An empty string is
+/// falsy under `when:` coercion, so downstream rules naturally
+/// no-op in those cases.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct GitBranchFact {}
 
 /// The resolved map from fact id to value, produced once per `Engine::run`.
 #[derive(Debug, Default, Clone)]
@@ -187,7 +204,25 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
             });
             Ok(FactValue::Bool(any))
         }
+        FactKind::GitBranch { git_branch: _ } => Ok(FactValue::String(read_git_branch(root))),
     }
+}
+
+/// Best-effort branch resolution: read `<root>/.git/HEAD` and
+/// extract the branch from a `ref: refs/heads/<branch>` line.
+/// Detached HEADs, bare SHAs, worktree pointers, missing files,
+/// non-UTF-8 content — every edge case returns `""`. Downstream
+/// `when:` coercion treats that as falsy.
+fn read_git_branch(root: &Path) -> String {
+    let head = root.join(".git").join("HEAD");
+    let Ok(content) = std::fs::read_to_string(&head) else {
+        return String::new();
+    };
+    content
+        .trim()
+        .strip_prefix("ref: refs/heads/")
+        .unwrap_or("")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -342,6 +377,46 @@ mod tests {
         let v = evaluate_facts(&facts, tmp.path(), &idx).unwrap();
         // Non-UTF-8 is silently skipped, so `text.txt` is what matters.
         assert_eq!(v.get("has_spdx"), Some(&FactValue::Bool(true)));
+    }
+
+    #[test]
+    fn git_branch_reads_refs_heads() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::fs::write(tmp.path().join(".git/HEAD"), "ref: refs/heads/feature-x\n").unwrap();
+
+        let facts = parse("- id: branch\n  git_branch: {}\n");
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(
+            v.get("branch"),
+            Some(&FactValue::String("feature-x".to_string()))
+        );
+    }
+
+    #[test]
+    fn git_branch_detached_head_is_empty_string() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::fs::write(
+            tmp.path().join(".git/HEAD"),
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n",
+        )
+        .unwrap();
+
+        let facts = parse("- id: branch\n  git_branch: {}\n");
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(v.get("branch"), Some(&FactValue::String(String::new())));
+    }
+
+    #[test]
+    fn git_branch_missing_git_dir_is_empty_string() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        let facts = parse("- id: branch\n  git_branch: {}\n");
+        let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
+        assert_eq!(v.get("branch"), Some(&FactValue::String(String::new())));
     }
 
     #[test]
