@@ -1,0 +1,27 @@
+name: count_files fact feeds a numeric comparison in a when clause
+tags: [check, facts, count_files]
+
+given:
+  tree:
+    src:
+      a.rs: ""
+      b.rs: ""
+      c.rs: ""
+      d.rs: ""
+  config: |
+    version: 1
+    facts:
+      - id: n_rs
+        count_files: "src/**/*.rs"
+    rules:
+      - id: require-mod-when-large
+        when: facts.n_rs > 2
+        kind: file_exists
+        paths: "src/mod.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: require-mod-when-large, level: error}

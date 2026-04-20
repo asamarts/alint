@@ -1,0 +1,24 @@
+name: all_files_exist fact is false when any listed file is missing
+tags: [check, facts, all_files_exist]
+
+given:
+  tree:
+    Cargo.toml: ""
+    README.md: ""
+    # LICENSE intentionally missing
+  config: |
+    version: 1
+    facts:
+      - id: release_ready
+        all_files_exist: [Cargo.toml, README.md, LICENSE]
+    rules:
+      - id: when-ready-require-changelog
+        when: facts.release_ready
+        kind: file_exists
+        paths: "CHANGELOG.md"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

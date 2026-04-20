@@ -1,0 +1,44 @@
+name: check reports only the rules that actually violate when many are configured
+tags: [check, interactions]
+
+given:
+  tree:
+    README.md: "# Project\n"
+    Cargo.toml: "[package]\nname = \"demo\"\n"
+    src:
+      main.rs: "fn main() {}\n"
+      BadCase.rs: "pub fn b() {}\n"
+    target:
+      debug.log: ""
+  config: |
+    version: 1
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+
+      - id: has-cargo
+        kind: file_exists
+        paths: Cargo.toml
+        root_only: true
+        level: error
+
+      - id: no-target
+        kind: dir_absent
+        paths: "**/target"
+        level: error
+
+      - id: rust-snake
+        kind: filename_case
+        paths: "src/**/*.rs"
+        case: snake
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-target, level: error}
+      - {rule: rust-snake, level: warning, path: src/BadCase.rs}

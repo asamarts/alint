@@ -1,0 +1,47 @@
+name: fix applies independent fixers to different rules in a single pass
+tags: [fix, interactions]
+
+given:
+  tree:
+    old.bak: "garbage\n"
+    src:
+      alpha.rs: "fn a() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+        fix:
+          file_create:
+            content: "# demo\n"
+
+      - id: no-bak
+        kind: file_absent
+        paths: "**/*.bak"
+        level: error
+        fix:
+          file_remove: {}
+
+      - id: rust-header
+        kind: file_header
+        paths: "src/**/*.rs"
+        pattern: "(?s)Copyright"
+        lines: 3
+        level: error
+        fix:
+          file_prepend:
+            content: "// Copyright 2026\n"
+
+when: [fix, check]
+
+expect:
+  - applied: [has-readme, no-bak, rust-header]
+  - violations: []
+
+expect_tree:
+  README.md: "# demo\n"
+  src:
+    alpha.rs: "// Copyright 2026\nfn a() {}\n"

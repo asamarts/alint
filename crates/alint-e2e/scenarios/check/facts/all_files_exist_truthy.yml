@@ -1,0 +1,25 @@
+name: all_files_exist fact evaluates true only when every listed file is present
+tags: [check, facts, all_files_exist]
+
+given:
+  tree:
+    Cargo.toml: ""
+    README.md: ""
+    LICENSE: "Apache-2.0"
+  config: |
+    version: 1
+    facts:
+      - id: release_ready
+        all_files_exist: [Cargo.toml, README.md, LICENSE]
+    rules:
+      - id: when-ready-require-changelog
+        when: facts.release_ready
+        kind: file_exists
+        paths: "CHANGELOG.md"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: when-ready-require-changelog, level: warning}

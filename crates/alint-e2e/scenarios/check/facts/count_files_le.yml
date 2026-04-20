@@ -1,0 +1,23 @@
+name: count_files fact skips rule when the comparison is false
+tags: [check, facts, count_files]
+
+given:
+  tree:
+    src:
+      only_one.rs: ""
+  config: |
+    version: 1
+    facts:
+      - id: n_rs
+        count_files: "src/**/*.rs"
+    rules:
+      - id: require-mod-when-large
+        when: facts.n_rs > 2
+        kind: file_exists
+        paths: "src/mod.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

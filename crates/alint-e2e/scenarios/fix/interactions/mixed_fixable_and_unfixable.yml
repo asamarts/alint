@@ -1,0 +1,37 @@
+name: fix applies fixable rules while leaving unfixable ones as Unfixable entries
+tags: [fix, interactions]
+
+given:
+  tree:
+    src:
+      dbg_use.rs: "fn x() {\n    dbg!(42);\n}\n"
+  config: |
+    version: 1
+    rules:
+      # Fixable: file_exists + file_create
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+        fix:
+          file_create:
+            content: "# demo\n"
+
+      # Not fixable: file_content_forbidden has no fix op in v0.2
+      - id: no-dbg
+        kind: file_content_forbidden
+        paths: "src/**/*.rs"
+        pattern: '\bdbg!\s*\('
+        level: warning
+
+when: [fix]
+
+expect:
+  - applied: [has-readme]
+    unfixable: [no-dbg]
+
+expect_tree:
+  README.md: "# demo\n"
+  src:
+    dbg_use.rs: "fn x() {\n    dbg!(42);\n}\n"
