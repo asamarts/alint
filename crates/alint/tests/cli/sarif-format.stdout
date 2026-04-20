@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "alint",
+          "informationUri": "https://github.com/asamarts/alint",
+          "version": "[..]",
+          "rules": [
+            {
+              "id": "has-readme",
+              "shortDescription": {
+                "text": "alint rule `has-readme`"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "has-readme",
+          "level": "error",
+          "message": {
+            "text": "expected a file matching [README.md] at the repo root"
+          },
+          "locations": []
+        }
+      ]
+    }
+  ]
+}

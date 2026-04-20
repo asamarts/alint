@@ -1,0 +1,11 @@
+version: 1
+rules:
+  - id: has-header
+    kind: file_header
+    paths: "src/**/*.rs"
+    pattern: "(?s)Copyright"
+    lines: 3
+    level: error
+    fix:
+      file_prepend:
+        content: "// Copyright 2026\n"

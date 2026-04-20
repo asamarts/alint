@@ -1,0 +1,7 @@
+version: 1
+rules:
+  - id: optional-readme
+    kind: file_exists
+    paths: README.md
+    root_only: true
+    level: warning

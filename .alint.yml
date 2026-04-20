@@ -5,6 +5,10 @@ version: 1
 
 ignore:
   - "target/**"
+  # Test fixtures deliberately contain shapes that violate our own
+  # rules (PascalCase stems, backup extensions, non-text files); we
+  # don't want to lint alint against them.
+  - "crates/alint/tests/cli/**"
 
 facts:
   - id: is_rust

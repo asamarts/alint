@@ -1,0 +1,9 @@
+version: 1
+rules:
+  - id: rust-snake
+    kind: filename_case
+    paths: "src/**/*.rs"
+    case: snake
+    level: error
+    fix:
+      file_rename: {}

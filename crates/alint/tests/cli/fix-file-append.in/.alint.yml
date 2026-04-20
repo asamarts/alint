@@ -1,0 +1,10 @@
+version: 1
+rules:
+  - id: spdx-in-readme
+    kind: file_content_matches
+    paths: "README.md"
+    pattern: "SPDX-License-Identifier"
+    level: warning
+    fix:
+      file_append:
+        content: "\n<!-- SPDX-License-Identifier: Apache-2.0 -->\n"
