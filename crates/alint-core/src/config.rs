@@ -7,10 +7,19 @@ use crate::facts::FactSpec;
 use crate::level::Level;
 
 /// Parsed form of a `.alint.yml` file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
+    /// Other config files this one inherits from. Entries resolved
+    /// left-to-right; later entries override earlier ones; the
+    /// current file's own definitions override everything it extends.
+    ///
+    /// Each entry is a local path (relative to the containing file
+    /// or absolute). Remote `https://` URLs are reserved but not yet
+    /// supported; the loader rejects them with a clear error.
+    #[serde(default)]
+    pub extends: Vec<String>,
     #[serde(default)]
     pub ignore: Vec<String>,
     #[serde(default = "default_respect_gitignore")]

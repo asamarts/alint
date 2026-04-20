@@ -1,0 +1,39 @@
+name: extends pulls rules from a sibling YAML file
+tags: [check, extends]
+
+given:
+  tree:
+    # Base ruleset committed alongside .alint.yml (not named .alint.yml
+    # so the walker doesn't pick it up as a separate config).
+    base.yml: |
+      version: 1
+      rules:
+        - id: has-readme
+          kind: file_exists
+          paths: README.md
+          level: error
+        - id: no-bak
+          kind: file_absent
+          paths: "**/*.bak"
+          level: warning
+
+    stale.bak: ""
+    # README intentionally missing — tests that the inherited rule
+    # fires from the extended file.
+
+  config: |
+    version: 1
+    extends: [./base.yml]
+    rules:
+      - id: local-extra
+        kind: file_exists
+        paths: LICENSE
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: has-readme, level: error}
+      - {rule: no-bak, level: warning, path: stale.bak}
+      - {rule: local-extra, level: warning}

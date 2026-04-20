@@ -1,0 +1,31 @@
+name: local rule with the same id overrides the inherited one
+tags: [check, extends]
+
+given:
+  tree:
+    base.yml: |
+      version: 1
+      rules:
+        - id: no-bak
+          kind: file_absent
+          paths: "**/*.bak"
+          level: error
+
+    stale.bak: ""
+
+  config: |
+    version: 1
+    extends: [./base.yml]
+    rules:
+      - id: no-bak
+        kind: file_absent
+        paths: "**/*.bak"
+        level: warning   # child downgrades error → warning
+
+when: [check]
+
+expect:
+  # Child-level `warning` wins. If inheritance were wrong the level
+  # would be `error`.
+  - violations:
+      - {rule: no-bak, level: warning, path: stale.bak}

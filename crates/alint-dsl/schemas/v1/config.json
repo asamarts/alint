@@ -11,6 +11,11 @@
       "const": 1,
       "description": "Config schema version. Always 1 for this schema."
     },
+    "extends": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Other config files this one inherits from. Local paths (relative to the current file or absolute) are resolved; HTTPS URLs are reserved for a future version. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends."
+    },
     "ignore": {
       "type": "array",
       "items": { "type": "string" },
