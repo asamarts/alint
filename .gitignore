@@ -19,3 +19,6 @@
 # Self-hosted runner credentials (copied from ci/env.example and filled in).
 /ci/.env
 
+# Claude Code workspace artifacts (scheduled task locks, etc).
+.claude/
+
