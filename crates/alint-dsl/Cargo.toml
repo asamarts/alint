@@ -12,10 +12,13 @@ authors.workspace = true
 
 [dependencies]
 alint-core.workspace = true
+directories.workspace = true
 serde.workspace = true
 serde_yaml_ng.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true

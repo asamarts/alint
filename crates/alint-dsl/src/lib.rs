@@ -4,6 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod extends;
+
 use alint_core::{Config, Error, FactSpec, Result, RuleSpec};
 
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
