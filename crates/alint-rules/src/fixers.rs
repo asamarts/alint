@@ -679,6 +679,116 @@ fn apply_char_filter(
     Ok(FixOutcome::Applied(format!("{verb} {}", path.display())))
 }
 
+/// Collapses runs of blank lines longer than `max` down to exactly
+/// `max` blank lines. A blank line is one whose content between
+/// line endings is empty or only spaces/tabs. Preserves the file's
+/// line endings (LF vs. CRLF) by operating on byte-level newlines.
+#[derive(Debug)]
+pub struct FileCollapseBlankLinesFixer {
+    max: u32,
+}
+
+impl FileCollapseBlankLinesFixer {
+    pub fn new(max: u32) -> Self {
+        Self { max }
+    }
+}
+
+impl Fixer for FileCollapseBlankLinesFixer {
+    fn describe(&self) -> String {
+        format!("collapse runs of blank lines to at most {}", self.max)
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would collapse blank lines in {} to at most {}",
+                path.display(),
+                self.max,
+            )));
+        }
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        let Ok(text) = std::str::from_utf8(&existing) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is not UTF-8; cannot collapse",
+                path.display()
+            )));
+        };
+        let collapsed = collapse_blank_lines(text, self.max);
+        if collapsed.as_bytes() == existing {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already clean",
+                path.display()
+            )));
+        }
+        std::fs::write(&abs, collapsed.as_bytes()).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "collapsed blank-line runs in {} to at most {}",
+            path.display(),
+            self.max,
+        )))
+    }
+}
+
+/// A "blank" line has content consisting only of spaces or tabs.
+pub(crate) fn line_is_blank(body: &str) -> bool {
+    body.bytes().all(|b| b == b' ' || b == b'\t')
+}
+
+/// Walk the file in (body, ending) pairs so the final slot after the
+/// last newline doesn't get double-counted as an extra blank line.
+/// Preserves CRLF vs LF verbatim.
+pub(crate) fn collapse_blank_lines(text: &str, max: u32) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut blank_run: u32 = 0;
+    let mut remaining = text;
+    loop {
+        let (body, ending, rest) = match remaining.find('\n') {
+            Some(i) => {
+                let before = &remaining[..i];
+                let (body, cr) = match before.strip_suffix('\r') {
+                    Some(s) => (s, "\r\n"),
+                    None => (before, "\n"),
+                };
+                (body, cr, &remaining[i + 1..])
+            }
+            None => (remaining, "", ""),
+        };
+        let blank = line_is_blank(body);
+        if blank {
+            blank_run += 1;
+            if blank_run > max {
+                if ending.is_empty() {
+                    break;
+                }
+                remaining = rest;
+                continue;
+            }
+        } else {
+            blank_run = 0;
+        }
+        out.push_str(body);
+        out.push_str(ending);
+        if ending.is_empty() {
+            break;
+        }
+        remaining = rest;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1074,5 +1184,46 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("a.md")).unwrap(),
             "one\ntwo\n"
         );
+    }
+
+    #[test]
+    fn collapse_blank_lines_keeps_up_to_max() {
+        assert_eq!(collapse_blank_lines("a\n\n\nb\n", 1), "a\n\nb\n");
+        assert_eq!(collapse_blank_lines("a\n\n\n\nb\n", 2), "a\n\n\nb\n");
+        assert_eq!(collapse_blank_lines("a\nb\n", 1), "a\nb\n");
+    }
+
+    #[test]
+    fn collapse_blank_lines_preserves_trailing_newline() {
+        // One existing blank line, max=1 → file must still end with "\n\n"
+        // (i.e. the blank line plus the EOF newline).
+        assert_eq!(collapse_blank_lines("a\n\n", 1), "a\n\n");
+    }
+
+    #[test]
+    fn collapse_blank_lines_max_zero_drops_all_blanks() {
+        assert_eq!(collapse_blank_lines("a\n\n\nb\n", 0), "a\nb\n");
+        assert_eq!(collapse_blank_lines("\n", 0), "");
+        assert_eq!(collapse_blank_lines("a\n\n", 0), "a\n");
+    }
+
+    #[test]
+    fn collapse_blank_lines_preserves_crlf() {
+        assert_eq!(
+            collapse_blank_lines("a\r\n\r\n\r\n\r\nb\r\n", 1),
+            "a\r\n\r\nb\r\n"
+        );
+    }
+
+    #[test]
+    fn collapse_blank_lines_treats_whitespace_only_as_blank() {
+        // Lines with only spaces/tabs count as blank, and dropped
+        // copies disappear entirely (their whitespace goes too).
+        assert_eq!(collapse_blank_lines("a\n  \n\t\n\nb\n", 1), "a\n  \nb\n");
+    }
+
+    #[test]
+    fn collapse_blank_lines_no_op_on_empty_file() {
+        assert_eq!(collapse_blank_lines("", 2), "");
     }
 }

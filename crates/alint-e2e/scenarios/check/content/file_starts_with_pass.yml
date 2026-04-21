@@ -1,0 +1,21 @@
+name: file_starts_with is silent when every file begins with the prefix
+tags: [check, file_starts_with, content, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "// SPDX-License-Identifier: MIT\nfn main() {}\n"
+      b.rs: "// SPDX-License-Identifier: MIT\nfn x() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: spdx-header
+        kind: file_starts_with
+        paths: "src/**/*.rs"
+        prefix: "// SPDX-License-Identifier: MIT\n"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

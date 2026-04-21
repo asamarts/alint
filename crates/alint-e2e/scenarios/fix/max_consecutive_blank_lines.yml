@@ -1,0 +1,29 @@
+name: max_consecutive_blank_lines + file_collapse_blank_lines collapses runs
+tags: [fix, max_consecutive_blank_lines, file_collapse_blank_lines, content]
+
+given:
+  tree:
+    clean.md: "a\n\nb\n"
+    gappy.md: "a\n\n\n\nb\n\n\n\nc\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-dbl-blank
+        kind: max_consecutive_blank_lines
+        paths: "**/*.md"
+        max: 1
+        level: warning
+        fix:
+          file_collapse_blank_lines: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-dbl-blank, level: warning, path: gappy.md}
+  - applied: [no-dbl-blank]
+  - violations: []
+
+expect_tree:
+  clean.md: "a\n\nb\n"
+  gappy.md: "a\n\nb\n\nc\n"

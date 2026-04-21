@@ -1,0 +1,22 @@
+name: indent_style tabs flags space-indented sources
+tags: [check, indent_style, content]
+
+given:
+  tree:
+    src:
+      ok.go: "package main\n\nfunc x() {\n\treturn\n}\n"
+      bad.go: "package main\n\nfunc y() {\n    return\n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: go-tabs
+        kind: indent_style
+        paths: "src/**/*.go"
+        style: tabs
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: go-tabs, level: error, path: src/bad.go}

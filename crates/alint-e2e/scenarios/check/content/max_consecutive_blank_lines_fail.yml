@@ -1,0 +1,22 @@
+name: max_consecutive_blank_lines flags runs longer than the limit
+tags: [check, max_consecutive_blank_lines, content]
+
+given:
+  tree:
+    docs:
+      clean.md: "a\n\nb\n"
+      gappy.md: "a\n\n\n\nb\n"          # 3 blank lines in a row, limit 1
+  config: |
+    version: 1
+    rules:
+      - id: no-dbl-blank
+        kind: max_consecutive_blank_lines
+        paths: "docs/**/*.md"
+        max: 1
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-dbl-blank, level: warning, path: docs/gappy.md}

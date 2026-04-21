@@ -1,0 +1,21 @@
+name: indent_style tabs passes tab-indented sources
+tags: [check, indent_style, content, passing]
+
+given:
+  tree:
+    src:
+      a.go: "package main\n\nfunc x() {\n\treturn\n}\n"
+      b.go: "package main\n\nfunc y() {\n\tif true {\n\t\treturn\n\t}\n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: go-tabs
+        kind: indent_style
+        paths: "src/**/*.go"
+        style: tabs
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

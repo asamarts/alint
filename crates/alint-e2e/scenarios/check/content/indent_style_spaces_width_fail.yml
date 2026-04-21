@@ -1,0 +1,25 @@
+name: indent_style spaces flags width-mismatched lines and tab indents
+tags: [check, indent_style, content]
+
+given:
+  tree:
+    conf:
+      ok.yml: "x:\n  a: 1\n  b: 2\n"
+      bad_width.yml: "x:\n   a: 1\n"      # 3 spaces, not a multiple of 2
+      bad_tab.yml: "x:\n\ta: 1\n"         # tab indent under spaces style
+  config: |
+    version: 1
+    rules:
+      - id: yml-2sp
+        kind: indent_style
+        paths: "conf/**/*.yml"
+        style: spaces
+        width: 2
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: yml-2sp, level: warning, path: conf/bad_tab.yml}
+      - {rule: yml-2sp, level: warning, path: conf/bad_width.yml}

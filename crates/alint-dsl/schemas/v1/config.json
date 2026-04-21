@@ -300,6 +300,19 @@
               "description": "Remove a leading UTF-8 / UTF-16 / UTF-32 BOM from the file. No-op when no BOM is present."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_collapse_blank_lines"],
+          "additionalProperties": false,
+          "properties": {
+            "file_collapse_blank_lines": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Collapse runs of blank lines longer than the parent rule's `max` down to exactly `max` blank lines. Preserves the file's line endings (LF vs CRLF). Skipped on files larger than `fix_size_limit` or on non-UTF-8 content."
+            }
+          }
         }
       ]
     },
@@ -352,7 +365,11 @@
         { "$ref": "#/$defs/rule_executable_bit" },
         { "$ref": "#/$defs/rule_executable_has_shebang" },
         { "$ref": "#/$defs/rule_shebang_has_executable" },
-        { "$ref": "#/$defs/rule_no_submodules" }
+        { "$ref": "#/$defs/rule_no_submodules" },
+        { "$ref": "#/$defs/rule_indent_style" },
+        { "$ref": "#/$defs/rule_max_consecutive_blank_lines" },
+        { "$ref": "#/$defs/rule_file_starts_with" },
+        { "$ref": "#/$defs/rule_file_ends_with" }
       ]
     },
 
@@ -839,6 +856,70 @@
       },
       "not": {
         "required": ["paths"]
+      }
+    },
+
+    "rule_indent_style": {
+      "description": "Every non-blank line must indent with the configured style. `tabs` rejects any leading space; `spaces` rejects any leading tab and optionally requires the leading-space count to be a multiple of `width`. Check-only — tab-width-aware reindentation is deferred.",
+      "type": "object",
+      "required": ["paths", "style"],
+      "properties": {
+        "kind": { "const": "indent_style" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "style": {
+          "type": "string",
+          "enum": ["tabs", "spaces"]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "When `style: spaces`, the leading-space count on every non-blank line must be a multiple of this. Ignored for `style: tabs`."
+        }
+      }
+    },
+
+    "rule_max_consecutive_blank_lines": {
+      "description": "Cap the number of blank lines that may appear in a row. A blank line is empty or only whitespace. Fixable via `file_collapse_blank_lines`, which collapses over-long runs to exactly `max` blank lines.",
+      "type": "object",
+      "required": ["paths", "max"],
+      "properties": {
+        "kind": { "const": "max_consecutive_blank_lines" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of blank lines allowed in a row. `0` means no blank lines at all."
+        }
+      }
+    },
+
+    "rule_file_starts_with": {
+      "description": "Every file in scope must begin with the given prefix (byte-level). Useful for SPDX headers, generated-file sentinels, magic bytes. Check-only; pair with `file_prepend` if you want auto-prepend (prevents silent duplication on near-matches).",
+      "type": "object",
+      "required": ["paths", "prefix"],
+      "properties": {
+        "kind": { "const": "file_starts_with" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "prefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required prefix, matched byte-for-byte."
+        }
+      }
+    },
+
+    "rule_file_ends_with": {
+      "description": "Every file in scope must end with the given suffix (byte-level). For a simple trailing-newline check, prefer `final_newline`. Check-only; pair with `file_append` if you want auto-append.",
+      "type": "object",
+      "required": ["paths", "suffix"],
+      "properties": {
+        "kind": { "const": "file_ends_with" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "suffix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required suffix, matched byte-for-byte."
+        }
       }
     },
 

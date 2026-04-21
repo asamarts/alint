@@ -17,9 +17,9 @@ mod walker;
 pub mod when;
 
 pub use config::{
-    Config, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCreateFixSpec,
-    FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec, FileRenameFixSpec,
-    FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
+    Config, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
+    FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
+    FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
     FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
 };
 pub use engine::{Engine, RuleEntry};

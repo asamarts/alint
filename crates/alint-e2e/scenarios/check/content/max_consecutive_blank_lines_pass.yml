@@ -1,0 +1,21 @@
+name: max_consecutive_blank_lines is silent within the limit
+tags: [check, max_consecutive_blank_lines, content, passing]
+
+given:
+  tree:
+    docs:
+      a.md: "# title\n\nfirst paragraph\n\nsecond paragraph\n"
+      b.md: "x\n\ny\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-dbl-blank
+        kind: max_consecutive_blank_lines
+        paths: "docs/**/*.md"
+        max: 1
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

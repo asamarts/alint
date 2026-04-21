@@ -16,21 +16,25 @@ pub mod executable_has_shebang;
 pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;
+pub mod file_ends_with;
 pub mod file_exists;
 pub mod file_hash;
 pub mod file_header;
 pub mod file_is_ascii;
 pub mod file_is_text;
 pub mod file_max_size;
+pub mod file_starts_with;
 pub mod filename_case;
 pub mod filename_regex;
 pub mod final_newline;
 pub mod fixers;
 pub mod for_each_dir;
 pub mod for_each_file;
+pub mod indent_style;
 pub mod io;
 pub mod line_endings;
 pub mod line_max_width;
+pub mod max_consecutive_blank_lines;
 pub mod max_directory_depth;
 pub mod max_files_per_directory;
 pub mod no_bidi_controls;
@@ -116,6 +120,15 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("executable_has_shebang", executable_has_shebang::build);
     registry.register("shebang_has_executable", shebang_has_executable::build);
     registry.register("no_submodules", no_submodules::build);
+
+    // Hygiene + byte fingerprint.
+    registry.register("indent_style", indent_style::build);
+    registry.register(
+        "max_consecutive_blank_lines",
+        max_consecutive_blank_lines::build,
+    );
+    registry.register("file_starts_with", file_starts_with::build);
+    registry.register("file_ends_with", file_ends_with::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -187,6 +200,11 @@ mod registry_tests {
             "executable_has_shebang",
             "shebang_has_executable",
             "no_submodules",
+            // Hygiene + byte fingerprint.
+            "indent_style",
+            "max_consecutive_blank_lines",
+            "file_starts_with",
+            "file_ends_with",
         ] {
             assert!(
                 known.contains(&kind),

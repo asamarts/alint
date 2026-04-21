@@ -1,0 +1,24 @@
+name: file_starts_with flags files missing the required prefix
+tags: [check, file_starts_with, content]
+
+given:
+  tree:
+    src:
+      ok.rs: "// SPDX-License-Identifier: MIT\nfn main() {}\n"
+      no_header.rs: "fn x() {}\n"
+      wrong_spdx.rs: "// SPDX-License-Identifier: GPL-3.0\nfn y() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: spdx-header
+        kind: file_starts_with
+        paths: "src/**/*.rs"
+        prefix: "// SPDX-License-Identifier: MIT\n"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: spdx-header, level: error, path: src/no_header.rs}
+      - {rule: spdx-header, level: error, path: src/wrong_spdx.rs}

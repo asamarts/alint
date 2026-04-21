@@ -162,6 +162,9 @@ pub enum FixSpec {
     FileStripBom {
         file_strip_bom: FileStripBomFixSpec,
     },
+    FileCollapseBlankLines {
+        file_collapse_blank_lines: FileCollapseBlankLinesFixSpec,
+    },
 }
 
 impl FixSpec {
@@ -179,6 +182,7 @@ impl FixSpec {
             Self::FileStripBidi { .. } => "file_strip_bidi",
             Self::FileStripZeroWidth { .. } => "file_strip_zero_width",
             Self::FileStripBom { .. } => "file_strip_bom",
+            Self::FileCollapseBlankLines { .. } => "file_collapse_blank_lines",
         }
     }
 }
@@ -267,6 +271,12 @@ pub struct FileStripZeroWidthFixSpec {}
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileStripBomFixSpec {}
+
+/// Empty marker. Behavior: collapse runs of blank lines longer than
+/// the parent rule's `max` down to exactly `max` blank lines.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileCollapseBlankLinesFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed
