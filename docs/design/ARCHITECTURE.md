@@ -143,15 +143,44 @@ Not every primitive is available in every release — see [ROADMAP.md](./ROADMAP
 
 | Kind | Purpose |
 |---|---|
-| `file_content_matches` / `file_content_forbidden` | File contents must (not) match regex. |
-| `file_header` / `file_footer` | First / last N lines must match pattern. |
+| `file_content_matches` / `file_content_forbidden` | File contents must (not) match regex. Aliases: `content_matches`, `content_forbidden`. |
+| `file_header` / `file_footer` | First / last N lines must match pattern. Alias for `file_header`: `header`. |
+| `file_starts_with` / `file_ends_with` | Byte-level prefix / suffix check (works on binary files). |
 | `file_hash` | Content SHA-256 matches expected. |
-| `file_max_size` / `file_max_lines` | Upper bounds. |
-| `file_is_text` / `file_is_binary` | Content is detected as text / binary (magic bytes + UTF-8 validity). |
+| `file_max_size` / `file_max_lines` | Upper bounds. Alias for `file_max_size`: `max_size`. |
+| `file_is_text` / `file_is_binary` / `file_is_ascii` | Content is detected as text / binary / 7-bit ASCII. Alias for `file_is_text`: `is_text`. |
+| `no_bom` | Flag a leading UTF-8 / UTF-16 / UTF-32 byte-order mark. Fixable via `file_strip_bom`. |
 | `file_shebang` | First line is a shebang matching pattern. |
 | `json_path_equals` / `json_path_matches` | JSONPath query returns expected value / matches regex. |
 | `yaml_path_*` / `toml_path_*` | Same for YAML / TOML. |
 | `json_schema_passes` | File validates against a JSON Schema. |
+
+**Text-hygiene family**
+
+| Kind | Purpose |
+|---|---|
+| `no_trailing_whitespace` | No line may end with space/tab. Fixable via `file_trim_trailing_whitespace`. |
+| `final_newline` | File must end with `\n`. Fixable via `file_append_final_newline`. |
+| `line_endings` | Every line uses the configured `target` (`lf` or `crlf`). Fixable via `file_normalize_line_endings`. |
+| `line_max_width` | Cap line length in characters (optional `tab_width`). |
+| `indent_style` | Every non-blank line indents with `tabs` or `spaces` (with optional `width`). Check-only. |
+| `max_consecutive_blank_lines` | Cap runs of blank lines to `max`. Fixable via `file_collapse_blank_lines`. |
+
+**Security / Unicode-sanity family**
+
+| Kind | Purpose |
+|---|---|
+| `no_merge_conflict_markers` | Flag `<<<<<<<`, `=======`, `>>>>>>>` markers at line start. |
+| `no_bidi_controls` | Flag Trojan-Source bidi controls (U+202A–202E, U+2066–2069). Fixable via `file_strip_bidi`. |
+| `no_zero_width_chars` | Flag body-internal U+200B/C/D and non-leading U+FEFF. Fixable via `file_strip_zero_width`. |
+
+**Structure family**
+
+| Kind | Purpose |
+|---|---|
+| `max_directory_depth` | Cap how deep the tree may go. |
+| `max_files_per_directory` | Cap per-directory fanout. |
+| `no_empty_files` | Flag zero-byte files. Fixable via `file_remove`. |
 
 **Naming family**
 
@@ -172,10 +201,31 @@ Not every primitive is available in every release — see [ROADMAP.md](./ROADMAP
 | `every_matching_has` | Sugar for a common `for_each` shape. |
 | `unique_by` | No two files matching `select` may share the value of `key`. |
 
-**Git-aware family**
+**Portable-metadata family**
+
+Portability checks that reject tree shapes which look fine on one OS but break checkouts elsewhere.
 
 | Kind | Purpose |
 |---|---|
+| `no_case_conflicts` | Flag pairs of paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults. |
+| `no_illegal_windows_names` | Reject reserved device names (CON, PRN, AUX, NUL, COM1–9, LPT1–9 — case-insensitive, regardless of extension), trailing dots/spaces, and the chars `<>:"|?*`. |
+
+**Unix-metadata family**
+
+Unix-filesystem metadata checks. All rules in this family are `#[cfg(unix)]`-gated at the engine layer: they emit no violations on Windows, so configs remain portable.
+
+| Kind | Purpose |
+|---|---|
+| `no_symlinks` | Flag tracked paths that are symbolic links (portability footgun on Windows + CI). Fixable via `file_remove`. |
+| `executable_bit` | Assert every file in scope has (`require: true`) or lacks (`require: false`) the `+x` bit. No fix op — chmod auto-apply deferred. |
+| `executable_has_shebang` | Every `+x` file must begin with `#!`. No fix op. |
+| `shebang_has_executable` | Every file starting with `#!` must have `+x` set. No fix op. |
+
+**Git-hygiene family**
+
+| Kind | Purpose |
+|---|---|
+| `no_submodules` | Flag `.gitmodules` at the repo root. Always targets `.gitmodules` (no `paths` override). Fixable via `file_remove`. |
 | `git_tracked_only` | Every matching file must be git-tracked. |
 | `git_no_denied_paths` | Git tree must not contain paths matching pattern. |
 | `git_commit_message` | Commits in range must match / not-match patterns. |
@@ -186,6 +236,34 @@ Not every primitive is available in every release — see [ROADMAP.md](./ROADMAP
 |---|---|
 | `command` | Shell out to an external command with `{path}`; non-zero exit = failure. |
 | `wasm` | Evaluate a WASM plugin against the file / tree. |
+
+### Fix operations
+
+Rules that declare a `fix:` block opt in to automatic remediation. The op is a discriminated union keyed by op name; each rule kind accepts at most one op.
+
+**Path-only ops** (ignore `fix_size_limit`):
+
+| Op | Shape | Rule kinds |
+|---|---|---|
+| `file_create` | `{content, path?, create_parents?}` | `file_exists` |
+| `file_remove` | `{}` | `file_absent`, `no_empty_files`, `no_symlinks`, `no_submodules` |
+| `file_rename` | `{}` (target derived from rule config) | `filename_case` |
+
+**Content-editing ops** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables):
+
+| Op | Shape | Rule kinds |
+|---|---|---|
+| `file_prepend` | `{content}` | `file_header` |
+| `file_append` | `{content}` | `file_content_matches` |
+| `file_trim_trailing_whitespace` | `{}` | `no_trailing_whitespace` |
+| `file_append_final_newline` | `{}` | `final_newline` |
+| `file_normalize_line_endings` | `{}` (target read from parent rule) | `line_endings` |
+| `file_strip_bidi` | `{}` | `no_bidi_controls` |
+| `file_strip_zero_width` | `{}` | `no_zero_width_chars` |
+| `file_strip_bom` | `{}` | `no_bom` |
+| `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
+
+Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. Fixers run serially after parallel evaluation so the tree is mutated from a single thread.
 
 ### Path template tokens
 
