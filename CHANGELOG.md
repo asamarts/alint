@@ -6,6 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-04-21
+
+Patch release fixing a broken `action.yml` that affects every
+`asamarts/alint@v0.2.1` / `v0.3.0` / `v0.3.1` consumer. No code
+changes to the CLI; no schema changes.
+
+### Fixed
+
+- **`action.yml`** — the `outputs.sarif-file.description` value
+  was an unquoted YAML scalar containing `` `format: sarif` ``.
+  GitHub's Actions YAML parser recently tightened and now
+  rejects the embedded `:` as an ambiguous nested mapping,
+  causing `uses: asamarts/alint@<any-released-tag>` to fail at
+  job-setup time with `Mapping values are not allowed in this
+  context.`. The description is now double-quoted.
+- **docs build** — rustdoc's `redundant_explicit_links` became
+  warn-by-default in a recent stable; combined with the
+  workspace's `RUSTDOCFLAGS="-D warnings"` it was breaking the
+  `cargo doc` CI job. Fixed a redundant link target in
+  `alint-testkit::runner`. Affects contributors / anyone
+  building from source with the current stable; no effect on
+  the release binary.
+
+### Changed
+
+- **Action self-test workflow** now pins `uses:` refs to
+  `@main` so it exercises the current action code instead of
+  an immutable (and, as of this week, unparsable) `@v0.2.1`.
+  The explicit-version test still passes a stable release tag
+  as the `version:` input — bumped from `v0.2.1` to `v0.3.1`
+  so the downloaded CLI understands the dogfood config's v0.3
+  rule kinds.
+
+### Upgrade note
+
+Consumers pinning `asamarts/alint@v0.2.1` / `v0.3.0` / `v0.3.1`
+should bump to `@v0.3.2`. There are no API / CLI / config
+changes — configs that worked under `@v0.3.1` continue to work
+verbatim.
+
 ## [0.3.1] — 2026-04-21
 
 Documentation-only patch release following v0.3.0. No code
@@ -326,7 +366,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/asamarts/alint/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/asamarts/alint/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/asamarts/alint/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/asamarts/alint/compare/v0.2.0...v0.2.1
