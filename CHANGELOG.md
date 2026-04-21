@@ -6,6 +6,130 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-21
+
+Rule-catalogue expansion. Adds ~25 new rule kinds across seven
+phase commits plus one new fix op, covering categories other
+repo-linters don't reach: Windows-name reserved words, bidi /
+zero-width Unicode scanners, Unix-metadata checks, and
+byte-level prefix/suffix. Also introduces the `fix_size_limit`
+config knob and short-name aliases for the rules that don't
+have a `dir_*` sibling.
+
+### Added
+
+#### Rule kinds (text hygiene — Phase 1)
+
+- **`no_trailing_whitespace`** — flag trailing space/tab on any
+  line. Fixable via `file_trim_trailing_whitespace` (preserves
+  LF vs CRLF endings).
+- **`final_newline`** — file must end with `\n`. Fixable via
+  `file_append_final_newline`.
+- **`line_endings`** — `target: lf | crlf`; every line must use
+  the configured ending. Fixable via
+  `file_normalize_line_endings`.
+- **`line_max_width`** — cap line length in characters (not
+  bytes); optional `tab_width` for tab expansion.
+
+#### Rule kinds (security / Unicode — Phase 2)
+
+- **`no_merge_conflict_markers`** — flag `<<<<<<< `, `=======`,
+  `>>>>>>> ` markers at the start of a line.
+- **`no_bidi_controls`** — flag Trojan-Source bidi overrides
+  (U+202A–202E, U+2066–2069). Fixable via `file_strip_bidi`.
+- **`no_zero_width_chars`** — flag body-internal zero-width
+  characters (U+200B/C/D plus non-leading U+FEFF). Leading BOM
+  is `no_bom`'s concern. Fixable via `file_strip_zero_width`.
+
+#### Rule kinds (encoding + content fingerprint — Phase 3)
+
+- **`file_is_ascii`** — every byte must be < 0x80.
+- **`no_bom`** — flag UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE
+  byte-order marks. Fixable via `file_strip_bom`.
+- **`file_hash`** — assert a SHA-256 digest for specific files
+  (rules-as-tripwire for generated artefacts).
+
+#### Rule kinds (structure — Phase 4)
+
+- **`max_directory_depth`** — cap how deep the tree may go.
+- **`max_files_per_directory`** — cap per-directory fanout.
+- **`no_empty_files`** — flag zero-byte files. Fixable via
+  `file_remove`.
+
+#### Rule kinds (portable metadata — Phase 5)
+
+- **`no_case_conflicts`** — flag paths that collide under a
+  case-insensitive filesystem (macOS HFS+/APFS, Windows NTFS
+  defaults).
+- **`no_illegal_windows_names`** — reject CON/PRN/AUX/NUL,
+  COM1-9, LPT1-9 (case-insensitive, regardless of extension),
+  trailing dots/spaces, and the reserved chars `<>:"|?*`.
+
+#### Rule kinds (Unix metadata + git — Phase 6)
+
+- **`no_symlinks`** — flag tracked paths that are symbolic
+  links. Fixable via `file_remove`.
+- **`executable_bit`** — `require: true|false`; enforce or
+  forbid the `+x` bit. Unix-only; no-op on Windows.
+- **`executable_has_shebang`** — `+x` files must begin with
+  `#!`. Unix-only.
+- **`shebang_has_executable`** — files starting with `#!` must
+  have `+x` set. Unix-only.
+- **`no_submodules`** — flag `.gitmodules` at the repo root.
+  Always targets `.gitmodules` (no `paths` override). Fixable
+  via `file_remove`.
+
+#### Rule kinds (hygiene + fingerprint — Phase 7)
+
+- **`indent_style`** — `style: tabs|spaces`, optional `width`
+  for spaces; every non-blank line must indent with the
+  configured style.
+- **`max_consecutive_blank_lines`** — `max: N`; cap runs of
+  blank lines. Fixable via new op `file_collapse_blank_lines`.
+- **`file_starts_with`** — byte-level prefix check. Works on
+  binary files, unlike `file_header` which is UTF-8 text.
+- **`file_ends_with`** — byte-level suffix check.
+
+#### Fix ops
+
+- **`file_trim_trailing_whitespace`** — strip trailing space/tab
+  on every line (preserves line endings).
+- **`file_append_final_newline`** — add `\n` when missing.
+- **`file_normalize_line_endings`** — rewrite to the parent
+  rule's `lf` / `crlf` target.
+- **`file_strip_bidi`** — remove U+202A–202E, U+2066–2069.
+- **`file_strip_zero_width`** — remove U+200B/C/D and
+  body-internal U+FEFF.
+- **`file_strip_bom`** — strip a leading UTF-8/16/32 BOM.
+- **`file_collapse_blank_lines`** — collapse blank-line runs to
+  the parent rule's `max`.
+
+#### Config + ergonomics
+
+- **`fix_size_limit`** (top-level config field) — maximum bytes
+  a content-editing fix will touch. Default 1 MiB; explicit
+  `null` disables the cap; path-only fixes (`file_create`,
+  `file_remove`, `file_rename`) ignore it. Over-limit files
+  report `Skipped` with a stderr warning.
+- **Short-name rule aliases** — rules without a `dir_*` sibling
+  also resolve under their unprefixed name:
+  `content_matches`, `content_forbidden`, `header`, `max_size`,
+  `is_text`. `file_exists` / `file_absent` keep the prefix
+  because they mirror `dir_exists` / `dir_absent`.
+
+### Changed
+
+- JSON Schema (`schemas/v1/config.json`) gains every new rule
+  kind, fix op, and the `fix_size_limit` field. Root and
+  in-crate copies stay byte-identical via the drift-guard test.
+
+### Compatibility
+
+- Schema version remains `1`. Every v0.2 config runs unchanged
+  under v0.3. The `Rule` and `Fixer` traits gained no new
+  required methods; out-of-tree implementations compile
+  unmodified. `Engine::with_fix_size_limit` is additive.
+
 ## [0.2.1] — 2026-04-20
 
 Patch release. Finishes the v0.2 roadmap item that didn't make it
@@ -173,7 +297,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/asamarts/alint/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/asamarts/alint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/asamarts/alint/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/asamarts/alint/releases/tag/v0.1.0
