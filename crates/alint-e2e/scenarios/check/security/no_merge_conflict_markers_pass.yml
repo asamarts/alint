@@ -1,0 +1,20 @@
+name: no_merge_conflict_markers is silent on clean files
+tags: [check, no_merge_conflict_markers, security, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "pub fn a() {}\n"
+      docs.md: "Conflict discussion: we use <<<<<< for ... (inline, no col-1 marker)\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-conflict
+        kind: no_merge_conflict_markers
+        paths: "src/**/*"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

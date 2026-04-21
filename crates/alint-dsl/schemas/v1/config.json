@@ -261,6 +261,32 @@
               "description": "Rewrite every line ending in the file to the parent rule's `target` (lf or crlf). Skipped on files larger than `fix_size_limit`."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_bidi"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_bidi": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove every Unicode bidi control character (U+202A–202E, U+2066–2069). Skipped on files larger than `fix_size_limit` or on non-UTF-8 content."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_zero_width"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_zero_width": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove every zero-width character (U+200B/C/D, body-internal U+FEFF). A leading BOM is preserved — use `no_bom` to strip that."
+            }
+          }
         }
       ]
     },
@@ -297,7 +323,10 @@
         { "$ref": "#/$defs/rule_no_trailing_whitespace" },
         { "$ref": "#/$defs/rule_final_newline" },
         { "$ref": "#/$defs/rule_line_endings" },
-        { "$ref": "#/$defs/rule_line_max_width" }
+        { "$ref": "#/$defs/rule_line_max_width" },
+        { "$ref": "#/$defs/rule_no_merge_conflict_markers" },
+        { "$ref": "#/$defs/rule_no_bidi_controls" },
+        { "$ref": "#/$defs/rule_no_zero_width_chars" }
       ]
     },
 
@@ -615,6 +644,36 @@
         "kind": { "const": "line_max_width" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "max_width": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_no_merge_conflict_markers": {
+      "description": "Flag files that still contain git conflict markers at the start of a line (`<<<<<<< `, `=======`, `>>>>>>> `, `||||||| `). Check-only; conflict resolution requires human judgment.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_merge_conflict_markers" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_bidi_controls": {
+      "description": "Flag Unicode bidirectional control characters (U+202A–202E, U+2066–2069) anywhere in a file. Trojan Source (CVE-2021-42574) defense. Fixable via `file_strip_bidi`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_bidi_controls" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_zero_width_chars": {
+      "description": "Flag zero-width characters (U+200B/C/D, plus body-internal U+FEFF). A leading U+FEFF (BOM) is not flagged here — use `no_bom` for that. Fixable via `file_strip_zero_width`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_zero_width_chars" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
       }
     },
 

@@ -1,0 +1,28 @@
+name: file_strip_bidi removes bidi control characters from file content
+tags: [fix, no_bidi_controls, file_strip_bidi, security]
+
+given:
+  tree:
+    src:
+      sneaky.rs: "let msg = \"\u202Ereversed\";\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bidi
+        kind: no_bidi_controls
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_strip_bidi: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-bidi, level: error, path: src/sneaky.rs}
+  - applied: [no-bidi]
+  - violations: []
+
+expect_tree:
+  src:
+    sneaky.rs: "let msg = \"reversed\";\n"

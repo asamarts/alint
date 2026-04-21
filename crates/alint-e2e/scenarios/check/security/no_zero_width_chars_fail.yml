@@ -1,0 +1,22 @@
+name: no_zero_width_chars flags hidden zero-width characters
+tags: [check, no_zero_width_chars, security]
+
+given:
+  tree:
+    src:
+      # U+200B zero-width space hidden inside an identifier.
+      obfuscated.rs: "pub fn sec\u200Bret() {}\n"
+      clean.rs: "pub fn normal() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-zwsp
+        kind: no_zero_width_chars
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-zwsp, level: error, path: src/obfuscated.rs}

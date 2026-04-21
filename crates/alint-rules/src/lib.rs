@@ -27,7 +27,10 @@ pub mod for_each_file;
 pub mod io;
 pub mod line_endings;
 pub mod line_max_width;
+pub mod no_bidi_controls;
+pub mod no_merge_conflict_markers;
 pub mod no_trailing_whitespace;
+pub mod no_zero_width_chars;
 pub mod pair;
 pub mod unique_by;
 
@@ -71,6 +74,14 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("final_newline", final_newline::build);
     registry.register("line_endings", line_endings::build);
     registry.register("line_max_width", line_max_width::build);
+
+    // Security / Unicode sanity.
+    registry.register(
+        "no_merge_conflict_markers",
+        no_merge_conflict_markers::build,
+    );
+    registry.register("no_bidi_controls", no_bidi_controls::build);
+    registry.register("no_zero_width_chars", no_zero_width_chars::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -121,6 +132,10 @@ mod registry_tests {
             "final_newline",
             "line_endings",
             "line_max_width",
+            // Security / Unicode sanity.
+            "no_merge_conflict_markers",
+            "no_bidi_controls",
+            "no_zero_width_chars",
         ] {
             assert!(
                 known.contains(&kind),

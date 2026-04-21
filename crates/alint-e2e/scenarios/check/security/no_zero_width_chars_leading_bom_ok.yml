@@ -1,0 +1,21 @@
+name: no_zero_width_chars ignores a leading BOM (that's no_bom's job)
+tags: [check, no_zero_width_chars, security]
+
+given:
+  tree:
+    src:
+      # File starts with U+FEFF (BOM). This rule should NOT flag it.
+      with_bom.rs: "\uFEFFpub fn ok() {}\n"
+      clean.rs: "pub fn ok2() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-zwsp
+        kind: no_zero_width_chars
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

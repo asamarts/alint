@@ -1,0 +1,23 @@
+name: no_bidi_controls flags Trojan-Source codepoints
+tags: [check, no_bidi_controls, security]
+
+given:
+  tree:
+    src:
+      clean.rs: "pub fn ok() {}\n"
+      # U+202E is RTL OVERRIDE; embedding it in a string literal
+      # creates the classic Trojan Source code-vs-display split.
+      sneaky.rs: "let comment = \"\u202EgnitcepsnI ydobon emah sih\";\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bidi
+        kind: no_bidi_controls
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-bidi, level: error, path: src/sneaky.rs}

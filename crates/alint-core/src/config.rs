@@ -153,6 +153,12 @@ pub enum FixSpec {
     FileNormalizeLineEndings {
         file_normalize_line_endings: FileNormalizeLineEndingsFixSpec,
     },
+    FileStripBidi {
+        file_strip_bidi: FileStripBidiFixSpec,
+    },
+    FileStripZeroWidth {
+        file_strip_zero_width: FileStripZeroWidthFixSpec,
+    },
 }
 
 impl FixSpec {
@@ -167,6 +173,8 @@ impl FixSpec {
             Self::FileTrimTrailingWhitespace { .. } => "file_trim_trailing_whitespace",
             Self::FileAppendFinalNewline { .. } => "file_append_final_newline",
             Self::FileNormalizeLineEndings { .. } => "file_normalize_line_endings",
+            Self::FileStripBidi { .. } => "file_strip_bidi",
+            Self::FileStripZeroWidth { .. } => "file_strip_zero_width",
         }
     }
 }
@@ -235,6 +243,20 @@ pub struct FileAppendFinalNewlineFixSpec {}
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileNormalizeLineEndingsFixSpec {}
+
+/// Empty marker. Behavior: remove every Unicode bidi control
+/// character (U+202A–202E, U+2066–2069) from the file's content.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileStripBidiFixSpec {}
+
+/// Empty marker. Behavior: remove every zero-width character
+/// (U+200B / U+200C / U+200D / U+FEFF) from the file's content,
+/// *except* a leading BOM (U+FEFF at position 0) — that's the
+/// responsibility of the `no_bom` rule.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileStripZeroWidthFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed

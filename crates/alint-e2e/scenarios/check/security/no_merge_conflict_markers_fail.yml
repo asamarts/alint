@@ -1,0 +1,21 @@
+name: no_merge_conflict_markers flags unresolved git markers
+tags: [check, no_merge_conflict_markers, security]
+
+given:
+  tree:
+    src:
+      clean.rs: "pub fn ok() {}\n"
+      half_merged.rs: "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-conflict
+        kind: no_merge_conflict_markers
+        paths: "src/**/*"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-conflict, level: error, path: src/half_merged.rs}

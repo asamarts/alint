@@ -19,7 +19,8 @@ pub mod when;
 pub use config::{
     Config, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCreateFixSpec,
     FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec, FileRenameFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
+    FileStripBidiFixSpec, FileStripZeroWidthFixSpec, FileTrimTrailingWhitespaceFixSpec, FixSpec,
+    NestedRuleSpec, PathsSpec, RuleSpec,
 };
 pub use engine::{Engine, RuleEntry};
 pub use error::{Error, Result};

@@ -1,0 +1,30 @@
+name: file_strip_zero_width removes body-internal zero-width chars but preserves leading BOM
+tags: [fix, no_zero_width_chars, file_strip_zero_width, security]
+
+given:
+  tree:
+    src:
+      # Leading BOM (kept) + body-internal ZWSP (removed).
+      a.rs: "\uFEFFpub fn sec\u200Bret() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-zwsp
+        kind: no_zero_width_chars
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_strip_zero_width: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-zwsp, level: error, path: src/a.rs}
+  - applied: [no-zwsp]
+  - violations: []
+
+expect_tree:
+  src:
+    # BOM survives; secret's ZWSP is gone.
+    a.rs: "\uFEFFpub fn secret() {}\n"

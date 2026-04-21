@@ -1,0 +1,21 @@
+name: no_bidi_controls is silent on clean files (including non-bidi Unicode)
+tags: [check, no_bidi_controls, security, passing]
+
+given:
+  tree:
+    src:
+      ascii.rs: "pub fn ok() {}\n"
+      # Snowman and emoji are normal Unicode — NOT bidi controls.
+      unicode.rs: "// A ☃ comment with emoji 🦀\npub fn fine() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bidi
+        kind: no_bidi_controls
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
