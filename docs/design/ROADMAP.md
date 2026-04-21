@@ -4,7 +4,11 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-## Current: v0.1 (MVP)
+**Latest release: v0.3.2** (crates.io + GitHub Releases, 2026-04-21).
+Next in flight: v0.4 — see the v0.4 section below for scope and the
+structured-content items rolled over from v0.3.
+
+## v0.1 — MVP (shipped)
 
 The smallest scope that is usefully adoptable.
 
@@ -18,7 +22,7 @@ The smallest scope that is usefully adoptable.
 - ✅ Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false` (only `alint` + `alint-core` publish); crates.io metadata populated on the public crates; `LICENSE-APACHE` + `LICENSE-MIT` + root `README.md` added.
 - ✅ Dogfood `.alint.yml` exercising the tool against its own repo.
 
-## v0.2 — Cross-file and composition
+## v0.2 — Cross-file and composition (shipped)
 
 - Cross-file primitives: ✅ `pair`, ✅ `for_each_dir`, ✅ `for_each_file`, ✅ `every_matching_has`, ✅ `dir_contains`, ✅ `dir_only_contains`, ✅ `unique_by`. **(complete)**
 - Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`, ✅ `file_content_matches`, ✅ `git_branch`, ✅ `custom` (security-gated; only allowed in the top-level config, never in `extends:`); ⏳ `detect: linguist`, ⏳ `detect: askalono` — both likely v0.5 alongside bundled rulesets.
@@ -30,16 +34,38 @@ The smallest scope that is usefully adoptable.
 - ✅ Output formats: `sarif`, `github`.
 - ✅ Official GitHub Action (`action.yml` at repo root; composite action wrapping `install.sh`).
 
-## v0.3 — Structured content
+## v0.3 — Hygiene, portable metadata, byte fingerprints (shipped)
+
+The v0.3 cut shifted scope mid-cycle. The originally-planned
+"structured content" family (JSON/YAML/TOML path queries) was
+rolled over to v0.4; the freed capacity was spent on content and
+metadata rules that surfaced during dogfooding as common pain
+points in real repos.
+
+- ✅ Text hygiene: `no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines` (+ `file_collapse_blank_lines` fix op).
+- ✅ Security / Unicode sanity: `no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars` (+ `file_strip_bidi` / `file_strip_zero_width` fix ops).
+- ✅ Encoding + content fingerprint: `no_bom` (+ `file_strip_bom`), `file_is_ascii`, `file_hash`.
+- ✅ Structure: `max_directory_depth`, `max_files_per_directory`, `no_empty_files`.
+- ✅ Portable metadata: `no_case_conflicts`, `no_illegal_windows_names`.
+- ✅ Unix metadata: `no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`.
+- ✅ Git hygiene: `no_submodules`.
+- ✅ Byte-level fingerprint: `file_starts_with`, `file_ends_with`.
+- ✅ Auto-fix ops added: `file_trim_trailing_whitespace`, `file_append_final_newline`, `file_normalize_line_endings`, `file_strip_bidi`, `file_strip_zero_width`, `file_strip_bom`, `file_collapse_blank_lines`.
+- ✅ `fix_size_limit` top-level config knob (default 1 MiB; `null` disables) — content-editing fixers skip oversize files with a stderr warning rather than rewrite them.
+- ✅ Short-name rule aliases (`content_matches`, `content_forbidden`, `header`, `max_size`, `is_text`) for rules without a `dir_*` sibling.
+
+**Deferred to v0.4**: structured-query primitives (`json_path_*`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`), `file_footer`, `file_max_lines`, `file_shebang`, opt-in nested `.alint.yml` discovery for monorepos, `markdown` / `junit` / `gitlab` output formats, `alint facts` subcommand for debugging `when` clauses.
+
+## v0.4 — Structured content + plugins v1 + distribution breadth
+
+Consolidates the structured-content scope rolled over from v0.3
+with the previously-planned v0.4 plugin + distribution work.
 
 - Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
-- Additional content primitives: `file_hash`, `file_shebang`, `file_max_lines`, `file_footer`.
-- Opt-in nested `.alint.yml` discovery for monorepos.
+- Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
 - Output formats: `markdown`, `junit`, `gitlab`.
 - `alint facts` subcommand (for debugging `when` clauses).
-
-## v0.4 — Plugins v1 and distribution breadth
-
+- Opt-in nested `.alint.yml` discovery for monorepos.
 - `command` plugin kind.
 - pre-commit hook (`.pre-commit-hooks.yaml`).
 - npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).

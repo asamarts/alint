@@ -4,15 +4,11 @@
 [![CI](https://github.com/asamarts/alint/actions/workflows/ci.yml/badge.svg)](https://github.com/asamarts/alint/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/alint.svg)](#license)
 
-**alint** (short for *agnostic lint*) is a language-agnostic linter for **repository structure, filenames, and file content rules**, with optional auto-fix.
+**alint** is a language-agnostic linter for repository structure. You declare the shape your repo should have — required files, filename conventions, content patterns, cross-file relationships — in a single `.alint.yml`, and alint enforces it. It walks the tree honoring `.gitignore`, runs rules in parallel, reports violations in human / JSON / SARIF / GitHub-annotation form, and can auto-fix what it flags. One static Rust binary, any language, any repo.
 
-> Status: v0.3 ships ~42 rule kinds across ten families, auto-fix with 12 ops, and conditional rules via a bounded expression language. See [docs/rules.md](docs/rules.md) for the full catalogue and [docs/design/ROADMAP.md](docs/design/ROADMAP.md) for scope per version.
+v0.3 ships ~42 rule kinds across ten families and 12 auto-fix ops — see [docs/rules.md](docs/rules.md) for the full catalogue. alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file and conditional-rule primitives.
 
-## What alint does
-
-alint enforces declarative rules over a repository tree. Rules live in a `.alint.yml` at the root; alint walks the tree (honoring `.gitignore`), matches rules against every file and directory, reports violations, and — when you ask — automatically fixes them.
-
-### Core capabilities
+## Core capabilities
 
 - **~42 rule kinds** across ten families (full reference: [docs/rules.md](docs/rules.md)):
   - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
@@ -30,9 +26,9 @@ alint enforces declarative rules over a repository tree. Rules live in a `.alint
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.3.0`.
+- **Official GitHub Action** — `asamarts/alint@v0.3.2`.
 
-### Typical use cases
+## Typical use cases
 
 - "Every package in a monorepo has a `README.md` and a `LICENSE*`" — `dir_contains` across `packages/*`.
 - "All Rust source files carry a copyright header; auto-prepend any that don't" — `file_header` + `file_prepend`.
@@ -166,15 +162,15 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.3.0
+- uses: asamarts/alint@v0.3.2
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.3.0
+- uses: asamarts/alint@v0.3.2
   with:
-    version: v0.3.0        # alint release tag (default: latest)
+    version: v0.3.2        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -186,7 +182,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.3.0
+- uses: asamarts/alint@v0.3.2
   id: alint
   with:
     format: sarif
@@ -199,6 +195,7 @@ Upload findings to GitHub Code Scanning:
 
 ## Docs
 
+- [**docs/rules.md**](docs/rules.md) — per-rule user reference, one entry per rule kind with a YAML example and fix-op cross-reference.
 - [**ARCHITECTURE.md**](docs/design/ARCHITECTURE.md) — rule model, DSL, execution model, crate layout, plugin model.
 - [**ROADMAP.md**](docs/design/ROADMAP.md) — scope per version from v0.1 through v1.0.
 - [**CHANGELOG.md**](CHANGELOG.md) — per-version changes, breaking and otherwise.
@@ -210,7 +207,7 @@ Upload findings to GitHub Code Scanning:
 ```bash
 git clone https://github.com/asamarts/alint
 cd alint
-cargo test --workspace        # 200+ tests; includes end-to-end scenarios
+cargo test --workspace        # 400+ tests; includes end-to-end scenarios
 cargo run -- check            # dogfood: alint lints itself
 cargo bench -p alint-bench    # criterion micro-benches
 ```
