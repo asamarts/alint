@@ -1,0 +1,24 @@
+name: executable_bit is silent when require=false matches the default mode
+tags: [check, executable_bit, unix_metadata, passing]
+
+# Tree-spec files are created with umask defaults (no +x), so
+# require=false passes trivially on Unix and is a no-op elsewhere.
+# The require=true fail case lives in tests/unix_metadata.rs.
+given:
+  tree:
+    README.md: "# demo"
+    docs:
+      intro.md: "hello\n"
+  config: |
+    version: 1
+    rules:
+      - id: docs-not-exec
+        kind: executable_bit
+        paths: "docs/**"
+        level: error
+        require: false
+
+when: [check]
+
+expect:
+  - violations: []

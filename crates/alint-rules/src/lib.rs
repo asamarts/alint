@@ -11,6 +11,8 @@ pub mod dir_contains;
 pub mod dir_exists;
 pub mod dir_only_contains;
 pub mod every_matching_has;
+pub mod executable_bit;
+pub mod executable_has_shebang;
 pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;
@@ -37,9 +39,12 @@ pub mod no_case_conflicts;
 pub mod no_empty_files;
 pub mod no_illegal_windows_names;
 pub mod no_merge_conflict_markers;
+pub mod no_submodules;
+pub mod no_symlinks;
 pub mod no_trailing_whitespace;
 pub mod no_zero_width_chars;
 pub mod pair;
+pub mod shebang_has_executable;
 pub mod unique_by;
 
 /// Register every built-in rule kind into the given registry.
@@ -104,6 +109,13 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     // Cross-platform / portable metadata.
     registry.register("no_case_conflicts", no_case_conflicts::build);
     registry.register("no_illegal_windows_names", no_illegal_windows_names::build);
+
+    // Unix metadata + git.
+    registry.register("no_symlinks", no_symlinks::build);
+    registry.register("executable_bit", executable_bit::build);
+    registry.register("executable_has_shebang", executable_has_shebang::build);
+    registry.register("shebang_has_executable", shebang_has_executable::build);
+    registry.register("no_submodules", no_submodules::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -169,6 +181,12 @@ mod registry_tests {
             // Portable metadata.
             "no_case_conflicts",
             "no_illegal_windows_names",
+            // Unix metadata + git.
+            "no_symlinks",
+            "executable_bit",
+            "executable_has_shebang",
+            "shebang_has_executable",
+            "no_submodules",
         ] {
             assert!(
                 known.contains(&kind),

@@ -1,0 +1,21 @@
+name: no_symlinks is silent on regular files
+tags: [check, no_symlinks, unix_metadata, passing]
+
+given:
+  tree:
+    README.md: "# demo"
+    src:
+      main.rs: "fn main() {}\n"
+      lib.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-links
+        kind: no_symlinks
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

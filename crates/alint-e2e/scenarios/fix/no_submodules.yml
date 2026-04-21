@@ -1,0 +1,29 @@
+name: no_submodules + file_remove deletes .gitmodules
+tags: [fix, no_submodules, file_remove, git]
+
+given:
+  tree:
+    README.md: "# demo"
+    .gitmodules: |
+      [submodule "vendor/lib"]
+        path = vendor/lib
+        url = https://example.com/lib.git
+  config: |
+    version: 1
+    rules:
+      - id: no-submods
+        kind: no_submodules
+        level: error
+        fix:
+          file_remove: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-submods, level: error, path: .gitmodules}
+  - applied: [no-submods]
+  - violations: []
+
+expect_tree:
+  README.md: "# demo"

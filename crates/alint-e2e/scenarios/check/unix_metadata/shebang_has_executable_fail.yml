@@ -1,0 +1,28 @@
+name: shebang_has_executable flags #! scripts that lack the +x bit
+tags: [check, shebang_has_executable, unix_metadata]
+
+# Tree-spec files are materialized without +x, so any file that starts
+# with `#!` trips this rule on Unix. On non-Unix the rule is a no-op.
+# The scenario is tagged `unix_metadata`; the native integration test
+# exercises the +x-present pass case.
+given:
+  tree:
+    README.md: "# demo"
+    scripts:
+      hello.sh: "#!/bin/sh\necho hi\n"
+      build.py: "#!/usr/bin/env python3\nprint('x')\n"
+      plain.md: "no shebang\n"
+  config: |
+    version: 1
+    rules:
+      - id: shebang-needs-x
+        kind: shebang_has_executable
+        paths: "scripts/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: shebang-needs-x, level: error, path: scripts/hello.sh}
+      - {rule: shebang-needs-x, level: error, path: scripts/build.py}

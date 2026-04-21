@@ -347,7 +347,12 @@
         { "$ref": "#/$defs/rule_max_files_per_directory" },
         { "$ref": "#/$defs/rule_no_empty_files" },
         { "$ref": "#/$defs/rule_no_case_conflicts" },
-        { "$ref": "#/$defs/rule_no_illegal_windows_names" }
+        { "$ref": "#/$defs/rule_no_illegal_windows_names" },
+        { "$ref": "#/$defs/rule_no_symlinks" },
+        { "$ref": "#/$defs/rule_executable_bit" },
+        { "$ref": "#/$defs/rule_executable_has_shebang" },
+        { "$ref": "#/$defs/rule_shebang_has_executable" },
+        { "$ref": "#/$defs/rule_no_submodules" }
       ]
     },
 
@@ -778,6 +783,62 @@
       "properties": {
         "kind": { "const": "no_illegal_windows_names" },
         "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_symlinks": {
+      "description": "Flag tracked paths that are symbolic links. Symlinks are a portability headache across Windows/macOS/Linux and CI runners. Fixable via `file_remove`, which deletes the symlink.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_symlinks" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_executable_bit": {
+      "description": "Assert that every file in scope either has the Unix +x bit set (`require: true`) or does not (`require: false`). No-op on non-Unix platforms. No fix op (chmod auto-apply deferred).",
+      "type": "object",
+      "required": ["paths", "require"],
+      "properties": {
+        "kind": { "const": "executable_bit" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "require": {
+          "type": "boolean",
+          "description": "`true`: +x must be set. `false`: +x must not be set."
+        }
+      }
+    },
+
+    "rule_executable_has_shebang": {
+      "description": "Every file with the +x bit set must begin with a shebang (`#!`). Catches scripts that were marked executable but whose content is a plain text file or missing a shebang. No-op on non-Unix.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "executable_has_shebang" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_shebang_has_executable": {
+      "description": "Every file that starts with `#!` must have the Unix +x bit set. The inverse of `executable_has_shebang`. No-op on non-Unix. No fix op (chmod auto-apply deferred).",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "shebang_has_executable" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_submodules": {
+      "description": "Flag the presence of `.gitmodules` at the repo root. Always targets `.gitmodules` — no `paths` field accepted. Fixable via `file_remove`.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "no_submodules" }
+      },
+      "not": {
+        "required": ["paths"]
       }
     },
 

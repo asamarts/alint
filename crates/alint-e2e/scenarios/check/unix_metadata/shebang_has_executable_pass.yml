@@ -1,0 +1,20 @@
+name: shebang_has_executable is silent on scripts with no shebang
+tags: [check, shebang_has_executable, unix_metadata, passing]
+
+given:
+  tree:
+    docs:
+      intro.md: "hello\n"
+      notes.txt: "no leading #! here\n"
+  config: |
+    version: 1
+    rules:
+      - id: shebang-needs-x
+        kind: shebang_has_executable
+        paths: "docs/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

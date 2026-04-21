@@ -1,0 +1,25 @@
+name: no_submodules flags .gitmodules at the repo root
+tags: [check, no_submodules, git]
+
+given:
+  tree:
+    README.md: "# demo"
+    .gitmodules: |
+      [submodule "vendor/lib"]
+        path = vendor/lib
+        url = https://example.com/lib.git
+    vendor:
+      lib:
+        .keep: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-submods
+        kind: no_submodules
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-submods, level: error, path: .gitmodules}

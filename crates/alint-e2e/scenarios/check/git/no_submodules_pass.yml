@@ -1,0 +1,20 @@
+name: no_submodules is silent when .gitmodules is absent
+tags: [check, no_submodules, git, passing]
+
+given:
+  tree:
+    README.md: "# demo"
+    src:
+      main.rs: "fn main() {}\n"
+    .gitignore: "/target\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-submods
+        kind: no_submodules
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
