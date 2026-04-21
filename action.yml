@@ -41,7 +41,7 @@ inputs:
 
 outputs:
   sarif-file:
-    description: Absolute path to the SARIF file (only populated when `format: sarif`).
+    description: "Absolute path to the SARIF file (only populated when `format: sarif`)."
     value: ${{ steps.run.outputs.sarif-file }}
 
 runs:

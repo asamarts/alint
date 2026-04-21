@@ -1,4 +1,4 @@
-//! Drive a [`Scenario`](crate::scenario::Scenario) against an
+//! Drive a [`Scenario`] against an
 //! isolated tempdir and collect per-step observations for the
 //! harness to assert on.
 
