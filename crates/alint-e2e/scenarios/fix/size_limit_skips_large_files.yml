@@ -1,0 +1,37 @@
+name: fix_size_limit skips oversized files with a clear reason
+tags: [fix, fix_size_limit]
+
+given:
+  tree:
+    src:
+      # 200 lines × 16 chars with trailing space ≈ 3200 bytes.
+      big.rs: "fn x() { /*pad*/  }  \nfn y() { /*pad*/  }  \nfn z() { /*pad*/  }  \nfn a() { /*pad*/  }  \nfn b() { /*pad*/  }  \nfn c() { /*pad*/  }  \nfn d() { /*pad*/  }  \nfn e() { /*pad*/  }  \nfn f() { /*pad*/  }  \nfn g() { /*pad*/  }  \nfn h() { /*pad*/  }  \nfn i() { /*pad*/  }  \nfn j() { /*pad*/  }  \nfn k() { /*pad*/  }  \nfn l() { /*pad*/  }  \nfn m() { /*pad*/  }  \nfn n() { /*pad*/  }  \nfn o() { /*pad*/  }  \nfn p() { /*pad*/  }  \nfn q() { /*pad*/  }  \nfn r() { /*pad*/  }  \nfn s() { /*pad*/  }  \nfn t() { /*pad*/  }  \nfn u() { /*pad*/  }  \nfn v() { /*pad*/  }  \n"
+      small.rs: "fn ok() {}   \n"
+  config: |
+    version: 1
+    fix_size_limit: 100
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: warning
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix]
+
+expect:
+  # The small file fixes cleanly; the big one is skipped with a
+  # reason mentioning the limit. Both appear as "applied" or
+  # "skipped" entries under the same rule — the testkit's
+  # applied/skipped matchers look for *any* item in that state,
+  # so a rule with a mix matches both lists.
+  - applied: [no-ws]
+    skipped: [no-ws]
+
+expect_tree:
+  src:
+    # small.rs got trimmed
+    small.rs: "fn ok() {}\n"
+    # big.rs should be BYTE-IDENTICAL to the input (skipped).
+    big.rs: "fn x() { /*pad*/  }  \nfn y() { /*pad*/  }  \nfn z() { /*pad*/  }  \nfn a() { /*pad*/  }  \nfn b() { /*pad*/  }  \nfn c() { /*pad*/  }  \nfn d() { /*pad*/  }  \nfn e() { /*pad*/  }  \nfn f() { /*pad*/  }  \nfn g() { /*pad*/  }  \nfn h() { /*pad*/  }  \nfn i() { /*pad*/  }  \nfn j() { /*pad*/  }  \nfn k() { /*pad*/  }  \nfn l() { /*pad*/  }  \nfn m() { /*pad*/  }  \nfn n() { /*pad*/  }  \nfn o() { /*pad*/  }  \nfn p() { /*pad*/  }  \nfn q() { /*pad*/  }  \nfn r() { /*pad*/  }  \nfn s() { /*pad*/  }  \nfn t() { /*pad*/  }  \nfn u() { /*pad*/  }  \nfn v() { /*pad*/  }  \n"

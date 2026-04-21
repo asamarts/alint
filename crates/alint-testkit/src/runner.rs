@@ -87,7 +87,8 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
     }
     let engine = Engine::from_entries(entries, registry)
         .with_facts(config.facts.clone())
-        .with_vars(config.vars.clone());
+        .with_vars(config.vars.clone())
+        .with_fix_size_limit(config.fix_size_limit);
 
     let walk_opts = WalkOptions {
         respect_gitignore: config.respect_gitignore,

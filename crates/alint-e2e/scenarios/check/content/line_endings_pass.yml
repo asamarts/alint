@@ -1,0 +1,21 @@
+name: line_endings is silent when every line matches the target
+tags: [check, line_endings, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\nfn b() {}\n"
+      b.rs: "fn c() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: lf-only
+        kind: line_endings
+        paths: "src/**/*.rs"
+        target: lf
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

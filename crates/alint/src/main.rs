@@ -138,7 +138,8 @@ fn cmd_fix(path: &Path, dry_run: bool, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
-        .with_vars(loaded.vars);
+        .with_vars(loaded.vars)
+        .with_fix_size_limit(loaded.fix_size_limit);
 
     let effective_gitignore = if cli.no_gitignore {
         false
@@ -220,6 +221,7 @@ struct LoadedConfig {
     vars: std::collections::HashMap<String, String>,
     respect_gitignore: bool,
     extra_ignores: Vec<String>,
+    fix_size_limit: Option<u64>,
 }
 
 /// Load the effective config from disk and instantiate every rule,
@@ -260,5 +262,6 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         vars: config.vars,
         respect_gitignore: config.respect_gitignore,
         extra_ignores: config.ignore,
+        fix_size_limit: config.fix_size_limit,
     })
 }

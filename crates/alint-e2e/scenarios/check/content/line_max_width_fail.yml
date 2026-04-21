@@ -1,0 +1,22 @@
+name: line_max_width flags overlong lines
+tags: [check, line_max_width]
+
+given:
+  tree:
+    src:
+      ok.rs: "fn a() {}\nfn b() {}\n"
+      wide.rs: "fn x() {}\nthis line is intentionally way too long to be acceptable under the limit\nfn y() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: narrow
+        kind: line_max_width
+        paths: "src/**/*.rs"
+        max_width: 30
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: narrow, level: warning, path: src/wide.rs}

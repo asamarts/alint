@@ -1,0 +1,21 @@
+name: final_newline is silent when every file ends with a newline
+tags: [check, final_newline, passing]
+
+given:
+  tree:
+    docs:
+      a.md: "# Hi\n"
+      b.md: "Hello\nworld\n"
+      empty.md: ""
+  config: |
+    version: 1
+    rules:
+      - id: eof
+        kind: final_newline
+        paths: "docs/**/*.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

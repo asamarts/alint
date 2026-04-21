@@ -1,0 +1,21 @@
+name: line_max_width is silent when every line fits
+tags: [check, line_max_width, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\nfn b() {}\n"
+      b.rs: "pub fn c() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: narrow
+        kind: line_max_width
+        paths: "src/**/*.rs"
+        max_width: 30
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

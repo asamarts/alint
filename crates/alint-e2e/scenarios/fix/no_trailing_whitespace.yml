@@ -1,0 +1,28 @@
+name: file_trim_trailing_whitespace strips trailing space/tab on every line
+tags: [fix, no_trailing_whitespace, file_trim_trailing_whitespace]
+
+given:
+  tree:
+    src:
+      bad.rs: "fn a() {}   \nfn b() {}\t\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-ws, level: error, path: src/bad.rs}
+  - applied: [no-ws]
+  - violations: []
+
+expect_tree:
+  src:
+    bad.rs: "fn a() {}\nfn b() {}\n"

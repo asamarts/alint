@@ -1,0 +1,22 @@
+name: line_endings flags files that mix CRLF and LF
+tags: [check, line_endings]
+
+given:
+  tree:
+    src:
+      pure_lf.rs: "fn a() {}\nfn b() {}\n"
+      has_crlf.rs: "fn c() {}\r\nfn d() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: lf-only
+        kind: line_endings
+        paths: "src/**/*.rs"
+        target: lf
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: lf-only, level: error, path: src/has_crlf.rs}

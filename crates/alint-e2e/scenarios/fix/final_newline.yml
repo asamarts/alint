@@ -1,0 +1,28 @@
+name: file_append_final_newline adds a trailing LF when missing
+tags: [fix, final_newline, file_append_final_newline]
+
+given:
+  tree:
+    docs:
+      a.md: "# Hi"
+  config: |
+    version: 1
+    rules:
+      - id: eof
+        kind: final_newline
+        paths: "docs/**/*.md"
+        level: error
+        fix:
+          file_append_final_newline: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: eof, level: error, path: docs/a.md}
+  - applied: [eof]
+  - violations: []
+
+expect_tree:
+  docs:
+    a.md: "# Hi\n"

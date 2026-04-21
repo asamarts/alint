@@ -40,6 +40,12 @@
       "type": "array",
       "items": { "$ref": "#/$defs/rule" },
       "description": "Rules evaluated against the repository tree."
+    },
+    "fix_size_limit": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "default": 1048576,
+      "description": "Max bytes a content-editing fix will touch. Files over this limit are reported as Skipped with a stderr warning. Default: 1 MiB. Explicit null disables the cap. Path-only fixes (file_create, file_remove, file_rename) ignore this setting."
     }
   },
 
@@ -216,6 +222,45 @@
               "description": "Rename the violating file's stem to the parent rule's target convention (e.g. filename_case's `case:`). Extension is preserved; the file stays in the same directory. No parameters."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_trim_trailing_whitespace"],
+          "additionalProperties": false,
+          "properties": {
+            "file_trim_trailing_whitespace": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Read the violating file, strip trailing space/tab on every line, write back. Preserves LF or CRLF endings. Skipped on files larger than `fix_size_limit`."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_append_final_newline"],
+          "additionalProperties": false,
+          "properties": {
+            "file_append_final_newline": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Append a single `\\n` byte when the file has content but doesn't end with one. No-op on empty files."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_normalize_line_endings"],
+          "additionalProperties": false,
+          "properties": {
+            "file_normalize_line_endings": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Rewrite every line ending in the file to the parent rule's `target` (lf or crlf). Skipped on files larger than `fix_size_limit`."
+            }
+          }
         }
       ]
     },
@@ -248,7 +293,11 @@
         { "$ref": "#/$defs/rule_dir_only_contains" },
         { "$ref": "#/$defs/rule_unique_by" },
         { "$ref": "#/$defs/rule_dir_contains" },
-        { "$ref": "#/$defs/rule_every_matching_has" }
+        { "$ref": "#/$defs/rule_every_matching_has" },
+        { "$ref": "#/$defs/rule_no_trailing_whitespace" },
+        { "$ref": "#/$defs/rule_final_newline" },
+        { "$ref": "#/$defs/rule_line_endings" },
+        { "$ref": "#/$defs/rule_line_max_width" }
       ]
     },
 
@@ -310,7 +359,7 @@
       "type": "object",
       "required": ["paths", "pattern"],
       "properties": {
-        "kind": { "const": "file_content_matches" },
+        "kind": { "enum": ["file_content_matches", "content_matches"] },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "pattern": {
           "type": "string",
@@ -323,7 +372,7 @@
       "type": "object",
       "required": ["paths", "pattern"],
       "properties": {
-        "kind": { "const": "file_content_forbidden" },
+        "kind": { "enum": ["file_content_forbidden", "content_forbidden"] },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "pattern": {
           "type": "string",
@@ -336,7 +385,7 @@
       "type": "object",
       "required": ["paths", "pattern"],
       "properties": {
-        "kind": { "const": "file_header" },
+        "kind": { "enum": ["file_header", "header"] },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "pattern": {
           "type": "string",
@@ -355,7 +404,7 @@
       "type": "object",
       "required": ["paths", "max_bytes"],
       "properties": {
-        "kind": { "const": "file_max_size" },
+        "kind": { "enum": ["file_max_size", "max_size"] },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "max_bytes": {
           "type": "integer",
@@ -369,7 +418,7 @@
       "type": "object",
       "required": ["paths"],
       "properties": {
-        "kind": { "const": "file_is_text" },
+        "kind": { "enum": ["file_is_text", "is_text"] },
         "paths": { "$ref": "#/$defs/paths_spec" }
       }
     },
@@ -524,6 +573,48 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/nested_rule" }
         }
+      }
+    },
+
+    "rule_no_trailing_whitespace": {
+      "description": "No line in any file in scope ends with a space or tab. Non-UTF-8 files are skipped silently.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_trailing_whitespace" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_final_newline": {
+      "description": "Every non-empty file in scope must end with a newline byte. Empty files are considered fine.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "final_newline" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_line_endings": {
+      "description": "Every line ending in every file in scope must use the `target` style (`lf` or `crlf`). Mixed endings within a file also fail.",
+      "type": "object",
+      "required": ["paths", "target"],
+      "properties": {
+        "kind": { "const": "line_endings" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "target": { "type": "string", "enum": ["lf", "crlf"] }
+      }
+    },
+
+    "rule_line_max_width": {
+      "description": "No line in any file in scope exceeds `max_width` Unicode scalar values (chars). Display width is NOT computed — use a formatter for that. Check-only; truncation is not a safe auto-fix.",
+      "type": "object",
+      "required": ["paths", "max_width"],
+      "properties": {
+        "kind": { "const": "line_max_width" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_width": { "type": "integer", "minimum": 1 }
       }
     },
 

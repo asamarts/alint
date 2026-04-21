@@ -20,24 +20,42 @@ pub mod file_is_text;
 pub mod file_max_size;
 pub mod filename_case;
 pub mod filename_regex;
+pub mod final_newline;
 pub mod fixers;
 pub mod for_each_dir;
 pub mod for_each_file;
 pub mod io;
+pub mod line_endings;
+pub mod line_max_width;
+pub mod no_trailing_whitespace;
 pub mod pair;
 pub mod unique_by;
 
 /// Register every built-in rule kind into the given registry.
+///
+/// Naming convention: rules that have a `dir_*` sibling keep
+/// their `file_*` prefix (`file_exists` vs `dir_exists`); rules
+/// with no such parallel also register a short alias without the
+/// prefix — `content_matches`, `content_forbidden`, `header`,
+/// `is_text`, `max_size`. Both forms resolve to the same
+/// builder; new rules land under short names only.
 pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("file_exists", file_exists::build);
     registry.register("file_absent", file_absent::build);
     registry.register("dir_exists", dir_exists::build);
     registry.register("dir_absent", dir_absent::build);
+
     registry.register("file_content_matches", file_content_matches::build);
+    registry.register("content_matches", file_content_matches::build);
     registry.register("file_content_forbidden", file_content_forbidden::build);
+    registry.register("content_forbidden", file_content_forbidden::build);
     registry.register("file_header", file_header::build);
+    registry.register("header", file_header::build);
     registry.register("file_max_size", file_max_size::build);
+    registry.register("max_size", file_max_size::build);
     registry.register("file_is_text", file_is_text::build);
+    registry.register("is_text", file_is_text::build);
+
     registry.register("filename_case", filename_case::build);
     registry.register("filename_regex", filename_regex::build);
     registry.register("pair", pair::build);
@@ -47,6 +65,12 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("unique_by", unique_by::build);
     registry.register("dir_contains", dir_contains::build);
     registry.register("every_matching_has", every_matching_has::build);
+
+    // Text-hygiene family (short names — no `file_` prefix).
+    registry.register("no_trailing_whitespace", no_trailing_whitespace::build);
+    registry.register("final_newline", final_newline::build);
+    registry.register("line_endings", line_endings::build);
+    registry.register("line_max_width", line_max_width::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -66,15 +90,23 @@ mod registry_tests {
         let r = builtin_registry();
         let known: Vec<&str> = r.known_kinds().collect();
         for kind in [
+            // Prefixed kinds (parallel with dir_*).
             "file_exists",
             "file_absent",
             "dir_exists",
             "dir_absent",
+            // Prefixed + short alias pairs.
             "file_content_matches",
+            "content_matches",
             "file_content_forbidden",
+            "content_forbidden",
             "file_header",
+            "header",
             "file_max_size",
+            "max_size",
             "file_is_text",
+            "is_text",
+            // Short-only.
             "filename_case",
             "filename_regex",
             "pair",
@@ -84,6 +116,11 @@ mod registry_tests {
             "unique_by",
             "dir_contains",
             "every_matching_has",
+            // Text-hygiene family.
+            "no_trailing_whitespace",
+            "final_newline",
+            "line_endings",
+            "line_max_width",
         ] {
             assert!(
                 known.contains(&kind),

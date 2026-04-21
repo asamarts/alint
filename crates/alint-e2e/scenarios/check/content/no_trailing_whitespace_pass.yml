@@ -1,0 +1,20 @@
+name: no_trailing_whitespace is silent when files are clean
+tags: [check, no_trailing_whitespace, passing]
+
+given:
+  tree:
+    src:
+      one.rs: "fn one() {}\n"
+      two.rs: "fn two() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

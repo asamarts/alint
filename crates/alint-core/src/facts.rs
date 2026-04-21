@@ -532,6 +532,7 @@ mod tests {
             vars: std::collections::HashMap::new(),
             facts,
             rules: Vec::new(),
+            fix_size_limit: None,
         };
         let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
         assert!(err.to_string().contains("custom"), "{err}");
@@ -549,6 +550,7 @@ mod tests {
             vars: std::collections::HashMap::new(),
             facts,
             rules: Vec::new(),
+            fix_size_limit: None,
         };
         assert!(reject_custom_facts(&config, "./base.yml").is_ok());
     }

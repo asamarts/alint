@@ -1,0 +1,21 @@
+name: final_newline flags files missing the trailing newline
+tags: [check, final_newline]
+
+given:
+  tree:
+    docs:
+      clean.md: "# Hi\n"
+      missing.md: "# No newline"
+  config: |
+    version: 1
+    rules:
+      - id: eof
+        kind: final_newline
+        paths: "docs/**/*.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: eof, level: error, path: docs/missing.md}

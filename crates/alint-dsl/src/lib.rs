@@ -229,6 +229,9 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
 fn merge(a: Config, b: Config) -> Config {
     let version = b.version;
     let respect_gitignore = b.respect_gitignore;
+    // fix_size_limit: child wins, same as respect_gitignore.
+    // Can't distinguish "unset" from the default here either.
+    let fix_size_limit = b.fix_size_limit;
 
     let mut ignore = a.ignore;
     ignore.extend(b.ignore);
@@ -272,6 +275,7 @@ fn merge(a: Config, b: Config) -> Config {
         vars,
         facts,
         rules,
+        fix_size_limit,
     }
 }
 

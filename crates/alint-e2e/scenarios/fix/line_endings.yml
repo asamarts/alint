@@ -1,0 +1,29 @@
+name: file_normalize_line_endings rewrites CRLF → LF (and vice versa)
+tags: [fix, line_endings, file_normalize_line_endings]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\r\nfn b() {}\r\n"
+  config: |
+    version: 1
+    rules:
+      - id: lf-only
+        kind: line_endings
+        paths: "src/**/*.rs"
+        target: lf
+        level: error
+        fix:
+          file_normalize_line_endings: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: lf-only, level: error, path: src/a.rs}
+  - applied: [lf-only]
+  - violations: []
+
+expect_tree:
+  src:
+    a.rs: "fn a() {}\nfn b() {}\n"

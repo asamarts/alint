@@ -97,6 +97,10 @@ pub struct FixContext<'a> {
     /// When true, fixers must describe what they would do without
     /// touching the filesystem.
     pub dry_run: bool,
+    /// Max bytes a content-editing fix will read + rewrite.
+    /// `None` means no cap. Honored by the `read_for_fix` helper
+    /// (and any custom fixer that opts in).
+    pub fix_size_limit: Option<u64>,
 }
 
 /// The result of applying (or simulating) one fix against one violation.
@@ -120,4 +124,73 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
 
     /// Apply the fix against a single violation.
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome>;
+}
+
+/// Result of [`read_for_fix`] — either the bytes of the file,
+/// or a [`FixOutcome::Skipped`] the caller should return.
+///
+/// Content-editing fixers (`file_prepend`, `file_append`,
+/// `file_trim_trailing_whitespace`, …) funnel their initial read
+/// through this helper so the `fix_size_limit` guard is enforced
+/// uniformly: over-limit files are reported as `Skipped` with a
+/// clear reason, and a one-line warning is printed to stderr so
+/// scripted runs notice.
+#[derive(Debug)]
+pub enum ReadForFix {
+    Bytes(Vec<u8>),
+    Skipped(FixOutcome),
+}
+
+/// Check whether `abs` is within the `fix_size_limit` on `ctx`.
+/// Returns `Some(outcome)` when the file is over-limit (the
+/// caller returns this directly); returns `None` when the fix
+/// can proceed. Emits a one-line stderr warning on over-limit.
+///
+/// Use this in fixers that modify the file without reading the
+/// full body (e.g. streaming append). For read-modify-write
+/// flows, prefer [`read_for_fix`] which folds the check in.
+pub fn check_fix_size(
+    abs: &Path,
+    display_path: &std::path::Path,
+    ctx: &FixContext<'_>,
+) -> Result<Option<FixOutcome>> {
+    let Some(limit) = ctx.fix_size_limit else {
+        return Ok(None);
+    };
+    let metadata = std::fs::metadata(abs).map_err(|source| crate::error::Error::Io {
+        path: abs.to_path_buf(),
+        source,
+    })?;
+    if metadata.len() > limit {
+        let reason = format!(
+            "{} is {} bytes; exceeds fix_size_limit ({}). Raise \
+             `fix_size_limit` in .alint.yml (or set it to `null` to disable) \
+             to fix files this large.",
+            display_path.display(),
+            metadata.len(),
+            limit,
+        );
+        eprintln!("alint: warning: {reason}");
+        return Ok(Some(FixOutcome::Skipped(reason)));
+    }
+    Ok(None)
+}
+
+/// Read `abs` subject to the size limit on `ctx`. Over-limit
+/// files return `ReadForFix::Skipped(Outcome::Skipped(_))` and
+/// emit a one-line stderr warning; in-limit files return
+/// `ReadForFix::Bytes(...)`. Pass-through I/O errors propagate.
+pub fn read_for_fix(
+    abs: &Path,
+    display_path: &std::path::Path,
+    ctx: &FixContext<'_>,
+) -> Result<ReadForFix> {
+    if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {
+        return Ok(ReadForFix::Skipped(outcome));
+    }
+    let bytes = std::fs::read(abs).map_err(|source| crate::error::Error::Io {
+        path: abs.to_path_buf(),
+        source,
+    })?;
+    Ok(ReadForFix::Bytes(bytes))
 }

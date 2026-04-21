@@ -1,0 +1,23 @@
+name: no_trailing_whitespace flags files with trailing spaces or tabs
+tags: [check, no_trailing_whitespace]
+
+given:
+  tree:
+    src:
+      good.rs: "fn good() {}\n"
+      bad.rs: "fn bad() {}   \n"
+      tabbed.md: "# Heading\t\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-ws, level: error, path: src/bad.rs}
+      - {rule: no-ws, level: error, path: src/tabbed.md}

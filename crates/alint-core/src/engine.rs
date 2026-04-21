@@ -45,6 +45,7 @@ pub struct Engine {
     registry: RuleRegistry,
     facts: Vec<FactSpec>,
     vars: HashMap<String, String>,
+    fix_size_limit: Option<u64>,
 }
 
 impl Engine {
@@ -56,6 +57,7 @@ impl Engine {
             registry,
             facts: Vec::new(),
             vars: HashMap::new(),
+            fix_size_limit: Some(1 << 20),
         }
     }
 
@@ -66,7 +68,14 @@ impl Engine {
             registry,
             facts: Vec::new(),
             vars: HashMap::new(),
+            fix_size_limit: Some(1 << 20),
         }
+    }
+
+    #[must_use]
+    pub fn with_fix_size_limit(mut self, limit: Option<u64>) -> Self {
+        self.fix_size_limit = limit;
+        self
     }
 
     #[must_use]
@@ -125,7 +134,11 @@ impl Engine {
             facts: &fact_values,
             vars: &self.vars,
         };
-        let fix_ctx = FixContext { root, dry_run };
+        let fix_ctx = FixContext {
+            root,
+            dry_run,
+            fix_size_limit: self.fix_size_limit,
+        };
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         for entry in &self.entries {

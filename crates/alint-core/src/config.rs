@@ -34,6 +34,26 @@ pub struct Config {
     pub facts: Vec<FactSpec>,
     #[serde(default)]
     pub rules: Vec<RuleSpec>,
+    /// Maximum file size, in bytes, that content-editing fixes
+    /// will read and rewrite. Files over this limit are reported
+    /// as `Skipped` in the fix report and a one-line warning is
+    /// printed to stderr. Defaults to 1 MiB; set explicitly to
+    /// `null` to disable the cap entirely.
+    ///
+    /// Path-only fixes (`file_create`, `file_remove`,
+    /// `file_rename`) ignore the cap — they don't read content.
+    #[serde(default = "default_fix_size_limit")]
+    pub fix_size_limit: Option<u64>,
+}
+
+// Returning `Option<u64>` (rather than bare `u64`) keeps the
+// YAML-facing type consistent with `Config.fix_size_limit`:
+// users set `null` in YAML to mean "no limit". The Option is
+// load-bearing at the field level, so clippy's warning on the
+// default fn is noise here.
+#[allow(clippy::unnecessary_wraps)]
+fn default_fix_size_limit() -> Option<u64> {
+    Some(1 << 20)
 }
 
 fn default_respect_gitignore() -> bool {
@@ -109,11 +129,30 @@ pub struct RuleSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum FixSpec {
-    FileCreate { file_create: FileCreateFixSpec },
-    FileRemove { file_remove: FileRemoveFixSpec },
-    FilePrepend { file_prepend: FilePrependFixSpec },
-    FileAppend { file_append: FileAppendFixSpec },
-    FileRename { file_rename: FileRenameFixSpec },
+    FileCreate {
+        file_create: FileCreateFixSpec,
+    },
+    FileRemove {
+        file_remove: FileRemoveFixSpec,
+    },
+    FilePrepend {
+        file_prepend: FilePrependFixSpec,
+    },
+    FileAppend {
+        file_append: FileAppendFixSpec,
+    },
+    FileRename {
+        file_rename: FileRenameFixSpec,
+    },
+    FileTrimTrailingWhitespace {
+        file_trim_trailing_whitespace: FileTrimTrailingWhitespaceFixSpec,
+    },
+    FileAppendFinalNewline {
+        file_append_final_newline: FileAppendFinalNewlineFixSpec,
+    },
+    FileNormalizeLineEndings {
+        file_normalize_line_endings: FileNormalizeLineEndingsFixSpec,
+    },
 }
 
 impl FixSpec {
@@ -125,6 +164,9 @@ impl FixSpec {
             Self::FilePrepend { .. } => "file_prepend",
             Self::FileAppend { .. } => "file_append",
             Self::FileRename { .. } => "file_rename",
+            Self::FileTrimTrailingWhitespace { .. } => "file_trim_trailing_whitespace",
+            Self::FileAppendFinalNewline { .. } => "file_append_final_newline",
+            Self::FileNormalizeLineEndings { .. } => "file_normalize_line_endings",
         }
     }
 }
@@ -175,6 +217,24 @@ pub struct FileAppendFixSpec {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileRenameFixSpec {}
+
+/// Empty marker. Behavior: read file (subject to `fix_size_limit`),
+/// strip trailing space/tab on every line, write back.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileTrimTrailingWhitespaceFixSpec {}
+
+/// Empty marker. Behavior: if the file has content and does not
+/// end with `\n`, append one.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileAppendFinalNewlineFixSpec {}
+
+/// Empty marker. Behavior: rewrite the file with every line ending
+/// replaced by the parent rule's configured target (`lf` or `crlf`).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileNormalizeLineEndingsFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed
