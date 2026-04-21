@@ -159,6 +159,9 @@ pub enum FixSpec {
     FileStripZeroWidth {
         file_strip_zero_width: FileStripZeroWidthFixSpec,
     },
+    FileStripBom {
+        file_strip_bom: FileStripBomFixSpec,
+    },
 }
 
 impl FixSpec {
@@ -175,6 +178,7 @@ impl FixSpec {
             Self::FileNormalizeLineEndings { .. } => "file_normalize_line_endings",
             Self::FileStripBidi { .. } => "file_strip_bidi",
             Self::FileStripZeroWidth { .. } => "file_strip_zero_width",
+            Self::FileStripBom { .. } => "file_strip_bom",
         }
     }
 }
@@ -257,6 +261,12 @@ pub struct FileStripBidiFixSpec {}
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileStripZeroWidthFixSpec {}
+
+/// Empty marker. Behavior: remove a leading UTF-8/UTF-16/UTF-32
+/// BOM byte sequence if present; otherwise a no-op.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FileStripBomFixSpec {}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed

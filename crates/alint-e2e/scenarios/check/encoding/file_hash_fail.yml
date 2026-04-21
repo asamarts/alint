@@ -1,0 +1,23 @@
+name: file_hash fails when file content drifts from declared SHA-256
+tags: [check, file_hash, encoding]
+
+given:
+  tree:
+    reference.txt: "hello world\n"
+  config: |
+    version: 1
+    rules:
+      - id: locked-content
+        kind: file_hash
+        paths: reference.txt
+        # SHA-256 of "hello world\n" is:
+        # a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447
+        # We assert a DIFFERENT hash to force a failure.
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: locked-content, level: error, path: reference.txt}

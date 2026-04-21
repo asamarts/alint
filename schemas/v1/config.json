@@ -287,6 +287,19 @@
               "description": "Remove every zero-width character (U+200B/C/D, body-internal U+FEFF). A leading BOM is preserved — use `no_bom` to strip that."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_bom"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_bom": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove a leading UTF-8 / UTF-16 / UTF-32 BOM from the file. No-op when no BOM is present."
+            }
+          }
         }
       ]
     },
@@ -326,7 +339,10 @@
         { "$ref": "#/$defs/rule_line_max_width" },
         { "$ref": "#/$defs/rule_no_merge_conflict_markers" },
         { "$ref": "#/$defs/rule_no_bidi_controls" },
-        { "$ref": "#/$defs/rule_no_zero_width_chars" }
+        { "$ref": "#/$defs/rule_no_zero_width_chars" },
+        { "$ref": "#/$defs/rule_file_is_ascii" },
+        { "$ref": "#/$defs/rule_no_bom" },
+        { "$ref": "#/$defs/rule_file_hash" }
       ]
     },
 
@@ -674,6 +690,37 @@
       "properties": {
         "kind": { "const": "no_zero_width_chars" },
         "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_is_ascii": {
+      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII). Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_is_ascii" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_bom": {
+      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. Fixable via `file_strip_bom`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_bom" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_hash": {
+      "description": "Each file in scope must have content whose SHA-256 equals the declared `sha256`. Accepts a bare 64-char hex string or a `sha256:`-prefixed form.",
+      "type": "object",
+      "required": ["paths", "sha256"],
+      "properties": {
+        "kind": { "const": "file_hash" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "sha256": { "type": "string", "pattern": "^(sha256:)?[0-9a-fA-F]{64}$" }
       }
     },
 

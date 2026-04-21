@@ -1,0 +1,21 @@
+name: file_is_ascii flags any non-ASCII byte
+tags: [check, file_is_ascii, encoding]
+
+given:
+  tree:
+    src:
+      ascii.rs: "pub fn ok() {}\n"
+      unicode.rs: "// The ☃ is here\npub fn cold() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: ascii-only
+        kind: file_is_ascii
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: ascii-only, level: error, path: src/unicode.rs}

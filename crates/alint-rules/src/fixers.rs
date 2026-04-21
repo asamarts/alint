@@ -579,6 +579,52 @@ impl Fixer for FileStripZeroWidthFixer {
     }
 }
 
+/// Strips a leading BOM (UTF-8 / UTF-16 / UTF-32 LE & BE) from
+/// the violating file.
+#[derive(Debug)]
+pub struct FileStripBomFixer;
+
+impl Fixer for FileStripBomFixer {
+    fn describe(&self) -> String {
+        "strip leading BOM".to_string()
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would strip BOM from {}",
+                path.display()
+            )));
+        }
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        let Some(bom) = crate::no_bom::detect_bom(&existing) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has no BOM",
+                path.display()
+            )));
+        };
+        let stripped = &existing[bom.byte_len()..];
+        std::fs::write(&abs, stripped).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "stripped {} BOM from {}",
+            bom.name(),
+            path.display()
+        )))
+    }
+}
+
 /// Shared read-modify-write helper for "remove every char that
 /// matches `predicate`" fix ops.
 fn apply_char_filter(

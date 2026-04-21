@@ -1,0 +1,21 @@
+name: no_bom flags files with a UTF-8 BOM
+tags: [check, no_bom, encoding]
+
+given:
+  tree:
+    docs:
+      clean.md: "# hi\n"
+      with_bom.md: "\uFEFF# hi\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bom
+        kind: no_bom
+        paths: "docs/**/*.md"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-bom, level: warning, path: docs/with_bom.md}

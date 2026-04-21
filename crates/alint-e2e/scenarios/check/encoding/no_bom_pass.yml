@@ -1,0 +1,20 @@
+name: no_bom is silent on BOM-less files
+tags: [check, no_bom, encoding, passing]
+
+given:
+  tree:
+    docs:
+      a.md: "# hi\n"
+      b.md: "content\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bom
+        kind: no_bom
+        paths: "docs/**/*.md"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

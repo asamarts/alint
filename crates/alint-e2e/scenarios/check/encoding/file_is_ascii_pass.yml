@@ -1,0 +1,20 @@
+name: file_is_ascii is silent when every byte is ASCII
+tags: [check, file_is_ascii, encoding, passing]
+
+given:
+  tree:
+    src:
+      a.rs: "pub fn a() {}\n"
+      b.rs: "pub fn b() { let _ = 42; }\n"
+  config: |
+    version: 1
+    rules:
+      - id: ascii-only
+        kind: file_is_ascii
+        paths: "src/**/*.rs"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

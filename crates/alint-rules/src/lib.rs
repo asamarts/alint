@@ -15,7 +15,9 @@ pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;
 pub mod file_exists;
+pub mod file_hash;
 pub mod file_header;
+pub mod file_is_ascii;
 pub mod file_is_text;
 pub mod file_max_size;
 pub mod filename_case;
@@ -28,6 +30,7 @@ pub mod io;
 pub mod line_endings;
 pub mod line_max_width;
 pub mod no_bidi_controls;
+pub mod no_bom;
 pub mod no_merge_conflict_markers;
 pub mod no_trailing_whitespace;
 pub mod no_zero_width_chars;
@@ -82,6 +85,11 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("no_bidi_controls", no_bidi_controls::build);
     registry.register("no_zero_width_chars", no_zero_width_chars::build);
+
+    // Encoding + content fingerprint.
+    registry.register("file_is_ascii", file_is_ascii::build);
+    registry.register("no_bom", no_bom::build);
+    registry.register("file_hash", file_hash::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -136,6 +144,10 @@ mod registry_tests {
             "no_merge_conflict_markers",
             "no_bidi_controls",
             "no_zero_width_chars",
+            // Encoding + fingerprint.
+            "file_is_ascii",
+            "no_bom",
+            "file_hash",
         ] {
             assert!(
                 known.contains(&kind),

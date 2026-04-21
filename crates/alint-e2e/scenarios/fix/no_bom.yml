@@ -1,0 +1,28 @@
+name: file_strip_bom removes a leading BOM
+tags: [fix, no_bom, file_strip_bom, encoding]
+
+given:
+  tree:
+    docs:
+      a.md: "\uFEFF# heading\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bom
+        kind: no_bom
+        paths: "docs/**/*.md"
+        level: warning
+        fix:
+          file_strip_bom: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-bom, level: warning, path: docs/a.md}
+  - applied: [no-bom]
+  - violations: []
+
+expect_tree:
+  docs:
+    a.md: "# heading\n"
