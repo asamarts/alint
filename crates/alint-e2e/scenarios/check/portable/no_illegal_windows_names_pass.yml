@@ -1,0 +1,22 @@
+name: no_illegal_windows_names is silent on normal paths
+tags: [check, no_illegal_windows_names, portable, passing]
+
+given:
+  tree:
+    README.md: ""
+    src:
+      lib.rs: ""
+      controllers.rs: ""  # not 'con' — partial match ok
+    COM10.cfg: ""          # COM10 is not reserved; only 1-9
+  config: |
+    version: 1
+    rules:
+      - id: no-win-reserved
+        kind: no_illegal_windows_names
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

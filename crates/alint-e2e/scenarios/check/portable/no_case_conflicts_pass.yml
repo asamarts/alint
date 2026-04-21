@@ -1,0 +1,22 @@
+name: no_case_conflicts is silent when every path is unique regardless of case
+tags: [check, no_case_conflicts, portable, passing]
+
+given:
+  tree:
+    README.md: "# hi"
+    CONTRIBUTING.md: "# guide"
+    src:
+      lib.rs: ""
+      util.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-case
+        kind: no_case_conflicts
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

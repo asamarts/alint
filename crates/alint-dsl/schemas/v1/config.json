@@ -345,7 +345,9 @@
         { "$ref": "#/$defs/rule_file_hash" },
         { "$ref": "#/$defs/rule_max_directory_depth" },
         { "$ref": "#/$defs/rule_max_files_per_directory" },
-        { "$ref": "#/$defs/rule_no_empty_files" }
+        { "$ref": "#/$defs/rule_no_empty_files" },
+        { "$ref": "#/$defs/rule_no_case_conflicts" },
+        { "$ref": "#/$defs/rule_no_illegal_windows_names" }
       ]
     },
 
@@ -755,6 +757,26 @@
       "required": ["paths"],
       "properties": {
         "kind": { "const": "no_empty_files" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_case_conflicts": {
+      "description": "Flag pairs of paths that differ only by case (e.g. README.md + readme.md). These can't coexist on macOS HFS+/APFS or Windows NTFS.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_case_conflicts" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_illegal_windows_names": {
+      "description": "Reject path components Windows can't represent: reserved device names (CON/PRN/AUX/NUL/COM1-9/LPT1-9 regardless of extension), trailing dots or spaces, and the forbidden chars <>:\"|?*.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_illegal_windows_names" },
         "paths": { "$ref": "#/$defs/paths_spec" }
       }
     },

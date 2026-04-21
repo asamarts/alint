@@ -33,7 +33,9 @@ pub mod max_directory_depth;
 pub mod max_files_per_directory;
 pub mod no_bidi_controls;
 pub mod no_bom;
+pub mod no_case_conflicts;
 pub mod no_empty_files;
+pub mod no_illegal_windows_names;
 pub mod no_merge_conflict_markers;
 pub mod no_trailing_whitespace;
 pub mod no_zero_width_chars;
@@ -98,6 +100,10 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("max_directory_depth", max_directory_depth::build);
     registry.register("max_files_per_directory", max_files_per_directory::build);
     registry.register("no_empty_files", no_empty_files::build);
+
+    // Cross-platform / portable metadata.
+    registry.register("no_case_conflicts", no_case_conflicts::build);
+    registry.register("no_illegal_windows_names", no_illegal_windows_names::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -160,6 +166,9 @@ mod registry_tests {
             "max_directory_depth",
             "max_files_per_directory",
             "no_empty_files",
+            // Portable metadata.
+            "no_case_conflicts",
+            "no_illegal_windows_names",
         ] {
             assert!(
                 known.contains(&kind),

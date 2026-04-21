@@ -1,0 +1,26 @@
+name: no_case_conflicts flags pairs that differ only by case
+# Note: this scenario only materializes faithfully on case-
+# sensitive filesystems (Linux, most CI runners). On macOS
+# HFS+/APFS or Windows NTFS defaults, the second file would
+# overwrite the first during materialization.
+tags: [check, no_case_conflicts, portable]
+
+given:
+  tree:
+    README.md: "# upper"
+    readme.md: "# lower"
+    other.txt: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-case
+        kind: no_case_conflicts
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-case, level: error, path: README.md}
+      - {rule: no-case, level: error, path: readme.md}

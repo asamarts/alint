@@ -1,0 +1,26 @@
+name: no_illegal_windows_names flags reserved and forbidden names
+tags: [check, no_illegal_windows_names, portable]
+
+given:
+  tree:
+    README.md: "# fine"
+    "con.txt": ""
+    "NUL": ""
+    "COM1.md": ""
+    "trailing_dot.": ""
+  config: |
+    version: 1
+    rules:
+      - id: no-win-reserved
+        kind: no_illegal_windows_names
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-win-reserved, level: error, path: COM1.md}
+      - {rule: no-win-reserved, level: error, path: NUL}
+      - {rule: no-win-reserved, level: error, path: con.txt}
+      - {rule: no-win-reserved, level: error, path: "trailing_dot."}
