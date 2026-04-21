@@ -6,7 +6,7 @@
 
 **alint** (short for *agnostic lint*) is a language-agnostic linter for **repository structure, filenames, and file content rules**, with optional auto-fix.
 
-> Status: v0.2 ships 18 rule kinds, auto-fix, and conditional rules via a bounded expression language. See [docs/design/ROADMAP.md](docs/design/ROADMAP.md) for scope per version.
+> Status: v0.3 ships ~42 rule kinds across ten families, auto-fix with 12 ops, and conditional rules via a bounded expression language. See [docs/rules.md](docs/rules.md) for the full catalogue and [docs/design/ROADMAP.md](docs/design/ROADMAP.md) for scope per version.
 
 ## What alint does
 
@@ -14,16 +14,23 @@ alint enforces declarative rules over a repository tree. Rules live in a `.alint
 
 ### Core capabilities
 
-- **18 rule kinds** across four families:
+- **~42 rule kinds** across ten families (full reference: [docs/rules.md](docs/rules.md)):
   - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
-  - *Naming* — `filename_case` (snake/kebab/Pascal/camel/screaming-snake/flat/lower/upper), `filename_regex`.
-  - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_max_size`, `file_is_text`.
+  - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_starts_with`, `file_ends_with`, `file_hash`, `file_max_size`, `file_is_text`, `file_is_ascii`.
+  - *Naming* — `filename_case`, `filename_regex`.
+  - *Text hygiene* — `no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines`.
+  - *Security / Unicode* — `no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars`.
+  - *Encoding* — `no_bom`.
+  - *Structure* — `max_directory_depth`, `max_files_per_directory`, `no_empty_files`.
+  - *Portable metadata* — `no_case_conflicts`, `no_illegal_windows_names`.
+  - *Unix metadata* — `no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`.
+  - *Git hygiene* — `no_submodules`.
   - *Cross-file* — `pair`, `for_each_dir`, `for_each_file`, `dir_contains`, `dir_only_contains`, `unique_by`, `every_matching_has`.
-- **Auto-fix** — five file ops (`file_create`, `file_remove`, `file_prepend`, `file_append`, `file_rename`) wired to the rule kinds where a mechanical correction is well-defined. Preview with `alint fix --dry-run` before applying.
+- **Auto-fix** — 12 file ops covering content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append). Preview with `alint fix --dry-run`. Content-editing ops honour a configurable `fix_size_limit` (default 1 MiB) that skips oversize files rather than rewriting them.
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.2.1`.
+- **Official GitHub Action** — `asamarts/alint@v0.3.0`.
 
 ### Typical use cases
 
@@ -159,15 +166,15 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.2.1
+- uses: asamarts/alint@v0.3.0
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.2.1
+- uses: asamarts/alint@v0.3.0
   with:
-    version: v0.2.1        # alint release tag (default: latest)
+    version: v0.3.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -179,7 +186,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.2.1
+- uses: asamarts/alint@v0.3.0
   id: alint
   with:
     format: sarif
