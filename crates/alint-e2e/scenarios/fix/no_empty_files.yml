@@ -1,0 +1,27 @@
+name: no_empty_files + file_remove deletes zero-byte files
+tags: [fix, no_empty_files, file_remove, structure]
+
+given:
+  tree:
+    keep.md: "# stays"
+    drop.log: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-empty
+        kind: no_empty_files
+        paths: "**"
+        level: warning
+        fix:
+          file_remove: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-empty, level: warning, path: drop.log}
+  - applied: [no-empty]
+  - violations: []
+
+expect_tree:
+  keep.md: "# stays"

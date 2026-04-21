@@ -1,0 +1,23 @@
+name: max_directory_depth is silent when every path is within the cap
+tags: [check, max_directory_depth, structure, passing]
+
+given:
+  tree:
+    README.md: ""
+    src:
+      lib.rs: ""
+      mod:
+        inner.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: shallow
+        kind: max_directory_depth
+        paths: "**"
+        max_depth: 3
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

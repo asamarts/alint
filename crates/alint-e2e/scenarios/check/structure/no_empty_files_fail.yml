@@ -1,0 +1,22 @@
+name: no_empty_files flags zero-byte files
+tags: [check, no_empty_files, structure]
+
+given:
+  tree:
+    README.md: "# hi"
+    placeholder.rs: ""
+    stray.log: ""
+  config: |
+    version: 1
+    rules:
+      - id: no-empty
+        kind: no_empty_files
+        paths: "**"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-empty, level: warning, path: placeholder.rs}
+      - {rule: no-empty, level: warning, path: stray.log}

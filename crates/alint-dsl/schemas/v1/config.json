@@ -342,7 +342,10 @@
         { "$ref": "#/$defs/rule_no_zero_width_chars" },
         { "$ref": "#/$defs/rule_file_is_ascii" },
         { "$ref": "#/$defs/rule_no_bom" },
-        { "$ref": "#/$defs/rule_file_hash" }
+        { "$ref": "#/$defs/rule_file_hash" },
+        { "$ref": "#/$defs/rule_max_directory_depth" },
+        { "$ref": "#/$defs/rule_max_files_per_directory" },
+        { "$ref": "#/$defs/rule_no_empty_files" }
       ]
     },
 
@@ -721,6 +724,38 @@
         "kind": { "const": "file_hash" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "sha256": { "type": "string", "pattern": "^(sha256:)?[0-9a-fA-F]{64}$" }
+      }
+    },
+
+    "rule_max_directory_depth": {
+      "description": "Every path in scope must sit at depth ≤ `max_depth` (number of `/`-separated components). Check-only; file relocation is a human decision.",
+      "type": "object",
+      "required": ["paths", "max_depth"],
+      "properties": {
+        "kind": { "const": "max_directory_depth" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_depth": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_max_files_per_directory": {
+      "description": "Every directory containing at least one in-scope file must hold ≤ `max_files` in-scope files (immediate children, non-recursive). Check-only.",
+      "type": "object",
+      "required": ["paths", "max_files"],
+      "properties": {
+        "kind": { "const": "max_files_per_directory" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_files": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_no_empty_files": {
+      "description": "Flag zero-byte files. Fixable via `file_remove`, which deletes the empty file.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_empty_files" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
       }
     },
 

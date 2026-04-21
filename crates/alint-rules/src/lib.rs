@@ -29,8 +29,11 @@ pub mod for_each_file;
 pub mod io;
 pub mod line_endings;
 pub mod line_max_width;
+pub mod max_directory_depth;
+pub mod max_files_per_directory;
 pub mod no_bidi_controls;
 pub mod no_bom;
+pub mod no_empty_files;
 pub mod no_merge_conflict_markers;
 pub mod no_trailing_whitespace;
 pub mod no_zero_width_chars;
@@ -90,6 +93,11 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("file_is_ascii", file_is_ascii::build);
     registry.register("no_bom", no_bom::build);
     registry.register("file_hash", file_hash::build);
+
+    // Structure / layout.
+    registry.register("max_directory_depth", max_directory_depth::build);
+    registry.register("max_files_per_directory", max_files_per_directory::build);
+    registry.register("no_empty_files", no_empty_files::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -148,6 +156,10 @@ mod registry_tests {
             "file_is_ascii",
             "no_bom",
             "file_hash",
+            // Structure / layout.
+            "max_directory_depth",
+            "max_files_per_directory",
+            "no_empty_files",
         ] {
             assert!(
                 known.contains(&kind),

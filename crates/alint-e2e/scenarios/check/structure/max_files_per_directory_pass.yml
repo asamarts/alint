@@ -1,0 +1,23 @@
+name: max_files_per_directory is silent when every dir is under the cap
+tags: [check, max_files_per_directory, structure, passing]
+
+given:
+  tree:
+    docs:
+      a.md: ""
+      b.md: ""
+    src:
+      c.md: ""
+  config: |
+    version: 1
+    rules:
+      - id: cap
+        kind: max_files_per_directory
+        paths: "**/*.md"
+        max_files: 5
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

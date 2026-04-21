@@ -1,0 +1,29 @@
+name: max_directory_depth flags paths nested too deeply
+tags: [check, max_directory_depth, structure]
+
+given:
+  tree:
+    top.txt: ""
+    src:
+      lib.rs: ""
+      deep:
+        nested:
+          way_down:
+            lost.rs: ""
+  config: |
+    version: 1
+    rules:
+      - id: shallow
+        kind: max_directory_depth
+        paths: "**"
+        max_depth: 3
+        level: warning
+
+when: [check]
+
+expect:
+  # top.txt (depth 1) — ok.
+  # src/lib.rs (depth 2) — ok.
+  # src/deep/nested/way_down/lost.rs (depth 5) — too deep.
+  - violations:
+      - {rule: shallow, level: warning, path: src/deep/nested/way_down/lost.rs}

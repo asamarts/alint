@@ -1,0 +1,26 @@
+name: max_files_per_directory flags overcrowded directories
+tags: [check, max_files_per_directory, structure]
+
+given:
+  tree:
+    packages:
+      a.md: ""
+      b.md: ""
+      c.md: ""
+      d.md: ""
+    other:
+      single.md: ""
+  config: |
+    version: 1
+    rules:
+      - id: cap
+        kind: max_files_per_directory
+        paths: "**/*.md"
+        max_files: 2
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: cap, level: warning, path: packages}

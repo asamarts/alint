@@ -1,0 +1,106 @@
+//! `max_files_per_directory` — cap how many files may live
+//! directly under any directory in scope (non-recursive).
+//!
+//! Useful for monorepos that want to force sharding — "no more
+//! than 200 files in `packages/`", etc. Reports one violation
+//! per overlong directory, with the overflow count.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Options {
+    max_files: usize,
+}
+
+#[derive(Debug)]
+pub struct MaxFilesPerDirectoryRule {
+    id: String,
+    level: Level,
+    policy_url: Option<String>,
+    message: Option<String>,
+    scope: Scope,
+    max_files: usize,
+}
+
+impl Rule for MaxFilesPerDirectoryRule {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn level(&self) -> Level {
+        self.level
+    }
+    fn policy_url(&self) -> Option<&str> {
+        self.policy_url.as_deref()
+    }
+
+    fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        // Group files by their immediate parent directory.
+        let mut counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
+        for entry in ctx.index.files() {
+            if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            let parent = entry
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            *counts.entry(parent).or_insert(0) += 1;
+        }
+        let mut violations = Vec::new();
+        for (dir, count) in counts {
+            if count > self.max_files {
+                let pretty = if dir.as_os_str().is_empty() {
+                    "<repo root>".to_string()
+                } else {
+                    dir.display().to_string()
+                };
+                let msg = self.message.clone().unwrap_or_else(|| {
+                    format!("{pretty} has {count} files; max is {}", self.max_files)
+                });
+                violations.push(Violation::new(msg).with_path(&dir));
+            }
+        }
+        Ok(violations)
+    }
+}
+
+pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    let paths = spec.paths.as_ref().ok_or_else(|| {
+        Error::rule_config(
+            &spec.id,
+            "max_files_per_directory requires a `paths` field (often `\"**\"`)",
+        )
+    })?;
+    let opts: Options = spec
+        .deserialize_options()
+        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+    if opts.max_files == 0 {
+        return Err(Error::rule_config(
+            &spec.id,
+            "max_files_per_directory `max_files` must be > 0",
+        ));
+    }
+    if spec.fix.is_some() {
+        return Err(Error::rule_config(
+            &spec.id,
+            "max_files_per_directory has no fix op — file relocation is a human decision",
+        ));
+    }
+    Ok(Box::new(MaxFilesPerDirectoryRule {
+        id: spec.id.clone(),
+        level: spec.level,
+        policy_url: spec.policy_url.clone(),
+        message: spec.message.clone(),
+        scope: Scope::from_paths_spec(paths)?,
+        max_files: opts.max_files,
+    }))
+}
+
+// `Path::to_path_buf` is required by the grouping above.
+use std::path::Path;

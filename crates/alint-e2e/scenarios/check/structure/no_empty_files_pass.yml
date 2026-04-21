@@ -1,0 +1,20 @@
+name: no_empty_files is silent when every file has at least one byte
+tags: [check, no_empty_files, structure, passing]
+
+given:
+  tree:
+    README.md: "# hi"
+    src:
+      a.rs: "fn a() {}"
+  config: |
+    version: 1
+    rules:
+      - id: no-empty
+        kind: no_empty_files
+        paths: "**"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []
