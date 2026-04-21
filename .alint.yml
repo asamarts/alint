@@ -143,3 +143,94 @@ rules:
     paths: "crates/**/src/**/*.rs"
     level: error
     message: "Rust sources must be text (no accidental binary commits)."
+
+  # --- Text hygiene (Phase 1) --------------------------------------------
+  - id: rust-no-trailing-ws
+    kind: no_trailing_whitespace
+    paths: "crates/**/src/**/*.rs"
+    level: warning
+
+  - id: rust-final-newline
+    kind: final_newline
+    paths: "crates/**/src/**/*.rs"
+    level: warning
+
+  - id: all-sources-lf-endings
+    # Repo is Linux-native; CRLF on a tracked source file almost
+    # always means a Windows editor / drag-and-drop artifact.
+    kind: line_endings
+    paths:
+      include: ["crates/**/src/**/*.rs", "**/*.toml", "**/*.yml", "**/*.md"]
+    target: lf
+    level: warning
+
+  # --- Security / Unicode (Phase 2) --------------------------------------
+  - id: no-merge-markers
+    kind: no_merge_conflict_markers
+    paths:
+      include: ["crates/**/src/**/*.rs", "**/*.toml", "**/*.yml", "**/*.md"]
+    level: error
+
+  - id: no-bidi-in-sources
+    # Trojan Source (CVE-2021-42574) defense.
+    kind: no_bidi_controls
+    paths: "crates/**/src/**/*.rs"
+    level: error
+
+  - id: no-zero-width-in-sources
+    kind: no_zero_width_chars
+    paths: "crates/**/src/**/*.rs"
+    level: error
+
+  # --- Encoding (Phase 3) ------------------------------------------------
+  - id: no-bom-in-sources
+    kind: no_bom
+    paths: ["crates/**/src/**/*.rs", "**/*.toml", "**/*.yml"]
+    level: warning
+
+  # --- Portable metadata (Phase 5) ---------------------------------------
+  - id: no-case-collisions
+    kind: no_case_conflicts
+    paths: "**"
+    level: error
+    message: "Paths that differ only by case break checkouts on macOS/Windows defaults."
+
+  - id: no-illegal-windows-names
+    kind: no_illegal_windows_names
+    paths: "**"
+    level: warning
+
+  # --- Unix metadata + git (Phase 6) -------------------------------------
+  - id: no-tracked-symlinks
+    kind: no_symlinks
+    paths: "**"
+    level: warning
+
+  - id: ci-scripts-are-executable
+    kind: executable_bit
+    paths: "ci/**/*.sh"
+    require: true
+    level: warning
+
+  - id: ci-shebang-needs-exec
+    kind: shebang_has_executable
+    paths: "ci/**/*.sh"
+    level: warning
+
+  - id: ci-exec-needs-shebang
+    kind: executable_has_shebang
+    paths: "ci/**/*.sh"
+    level: warning
+
+  - id: no-git-submodules
+    kind: no_submodules
+    level: warning
+
+  # --- Hygiene + fingerprint (Phase 7) -----------------------------------
+  - id: rust-max-blank-lines
+    # rustfmt typically collapses runs to a single blank line; an
+    # explicit rule here flags any that slip through manual edits.
+    kind: max_consecutive_blank_lines
+    paths: "crates/**/src/**/*.rs"
+    max: 1
+    level: warning
