@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "alint"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "alint-bench"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "alint-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "globset",
  "ignore",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "alint-dsl"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "directories",
@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "alint-e2e"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "alint-output"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "serde",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "alint-rules"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "content_inspector",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "alint-testkit"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -2517,7 +2517,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alint-bench",
  "anyhow",

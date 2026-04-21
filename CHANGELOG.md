@@ -6,6 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-04-21
+
+Documentation-only patch release following v0.3.0. No code
+changes; no schema changes; v0.3.0 configs run unchanged.
+
+### Added
+
+- **`docs/rules.md`** — per-rule user reference organised by the
+  ten families (Existence, Content, Naming, Text hygiene,
+  Security / Unicode, Encoding, Structure, Portable metadata,
+  Unix metadata, Git hygiene, Cross-file). Each entry has a
+  purpose, a small YAML example, and a pointer to its fix op if
+  one exists.
+
+### Changed
+
+- **`docs/design/ARCHITECTURE.md`** — rule-catalogue section
+  expanded with new family tables (Text hygiene, Security /
+  Unicode sanity, Structure, Portable metadata, Unix metadata,
+  Git hygiene) and a new Fix operations subsection listing
+  every op with its rule-kind cross-reference.
+- **`README.md`** — status line bumped from "v0.2 / 18 rules /
+  4 families" to "v0.3 / ~42 rules / 10 families / 12 fix ops";
+  GitHub Action references updated from `asamarts/alint@v0.2.1`
+  to `@v0.3.0`.
+- **`.alint.yml`** (dogfood) — expanded from 17 to 32 rules to
+  exercise the v0.3 catalogue against alint's own tree. All
+  rules pass.
+
 ## [0.3.0] — 2026-04-21
 
 Rule-catalogue expansion. Adds ~25 new rule kinds across seven
@@ -297,7 +326,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/asamarts/alint/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/asamarts/alint/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/asamarts/alint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/asamarts/alint/compare/v0.1.0...v0.2.0
