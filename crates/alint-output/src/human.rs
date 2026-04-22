@@ -63,6 +63,12 @@ pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> st
 
     let width = opts.effective_width();
 
+    // Layout: one blank line between buckets (separates files
+    // from each other) and one before the summary. No blank lines
+    // within a bucket — visual separation between violations
+    // already comes from the sigil/level anchor at column 2 vs.
+    // the indented message continuation. Denser == easier to
+    // scan a repo's worth of findings on one screen.
     let mut first_bucket = true;
     for (bucket, items) in &by_bucket {
         if !first_bucket {
@@ -77,7 +83,6 @@ pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> st
         write_section_header(w, &label, width, &opts.glyphs)?;
 
         for (result, violation) in items {
-            writeln!(w)?;
             write_violation(w, result, violation, &opts)?;
         }
     }
@@ -294,10 +299,10 @@ fn write_human_compact(
             continue;
         }
         for v in &result.violations {
-            let path = v.path.as_ref().map_or_else(
-                || "<repo>".to_string(),
-                |p| p.display().to_string(),
-            );
+            let path = v
+                .path
+                .as_ref()
+                .map_or_else(|| "<repo>".to_string(), |p| p.display().to_string());
             let line = v.line.unwrap_or(0);
             let col = v.column.unwrap_or(0);
             let (level_style, level_name) = match result.level {
