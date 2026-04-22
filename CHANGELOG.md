@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-04-21
+
+Packaging fix. v0.4.0 is functionally identical but failed to
+publish beyond `alint-core` on crates.io — the bundled-rulesets
+`include_str!` paths crossed the crate boundary, so
+`cargo publish` for `alint-dsl` couldn't find
+`rulesets/v1/*.yml` when packaging the tarball.
+
+### Fixed
+
+- **Move `rulesets/` → `crates/alint-dsl/rulesets/`**. The
+  rulesets now live inside the crate that embeds them, so
+  `cargo publish` picks them up automatically. Compile-time
+  `include_str!` paths in `bundled.rs` change from
+  `"../../../rulesets/…"` to `"../rulesets/…"`. No user-visible
+  behaviour change — the `alint://bundled/<name>@<rev>` URI
+  scheme and all four rulesets work identically.
+
+### Known leftover
+
+- `alint-core@0.4.0` is live on crates.io (it published
+  successfully before the packaging error stopped the chain).
+  It's functionally identical to `alint-core@0.4.1` and nothing
+  transitively depends on it — safe to ignore or yank later.
+
 ## [0.4.0] — 2026-04-21
 
 Headline: **bundled rulesets**. The single biggest adoption
@@ -438,7 +463,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/asamarts/alint/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/asamarts/alint/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/asamarts/alint/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/asamarts/alint/compare/v0.3.0...v0.3.1

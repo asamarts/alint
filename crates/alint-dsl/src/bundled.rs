@@ -25,21 +25,23 @@
 
 /// Every bundled ruleset known to this build, as a
 /// `(name, rev) -> embedded body` lookup table. Rulesets come
-/// from files under `rulesets/<rev>/<name>.yml` at the repo root,
-/// embedded at compile time via `include_str!`.
+/// from files under `crates/alint-dsl/rulesets/<rev>/<name>.yml`,
+/// embedded at compile time via `include_str!`. They live inside
+/// the crate (rather than at the repo root) so `cargo publish`
+/// bundles them into the crates.io tarball.
 const REGISTRY: &[(&str, &str, &str)] = &[
     (
         "oss-baseline",
         "v1",
-        include_str!("../../../rulesets/v1/oss-baseline.yml"),
+        include_str!("../rulesets/v1/oss-baseline.yml"),
     ),
-    ("rust", "v1", include_str!("../../../rulesets/v1/rust.yml")),
+    ("rust", "v1", include_str!("../rulesets/v1/rust.yml")),
     (
         "monorepo",
         "v1",
-        include_str!("../../../rulesets/v1/monorepo.yml"),
+        include_str!("../rulesets/v1/monorepo.yml"),
     ),
-    ("node", "v1", include_str!("../../../rulesets/v1/node.yml")),
+    ("node", "v1", include_str!("../rulesets/v1/node.yml")),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
