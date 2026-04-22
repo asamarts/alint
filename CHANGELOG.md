@@ -20,14 +20,21 @@ First cut of v0.4. No version tag yet; these changes are on
   binary via `include_str!`. Cycle-safe, leaf-only (bundled
   rulesets cannot themselves `extends:` anything). The resolver
   inherits the same `custom:`-fact guard as remote extends.
-- **First bundled ruleset: `alint://bundled/oss-baseline@v1`**
-  — 9 rules covering the community-docs baseline and content
-  hygiene most OSS repos want: README, LICENSE, SECURITY.md,
-  CODE_OF_CONDUCT.md, .gitignore existence; no merge-conflict
-  markers; no Unicode bidi controls; trailing-whitespace and
-  final-newline hygiene (auto-fixable). Non-blocking defaults
-  (`info`/`warning` for recommendations, `error` for
-  unambiguous bugs).
+- **Bundled rulesets shipped** (4 total):
+  - **`alint://bundled/oss-baseline@v1`** — 9 rules: community
+    docs (README, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md,
+    .gitignore) + merge-marker / bidi-control bans + trailing-
+    whitespace / final-newline hygiene (auto-fixable).
+  - **`alint://bundled/rust@v1`** — 10 rules: Cargo.toml /
+    Cargo.lock / rust-toolchain existence, no tracked `target/`,
+    snake_case sources, Trojan-Source defenses. Gated
+    `when: facts.is_rust` so safe to extend from polyglot repos.
+  - **`alint://bundled/node@v1`** — 8 rules: package.json +
+    lockfile, no tracked `node_modules/` or `dist/`, Node
+    version pin, JS/TS source hygiene. Gated `when: facts.is_node`.
+  - **`alint://bundled/monorepo@v1`** — 4 rules: README +
+    manifest in every `packages/*` / `crates/*` / `apps/*` /
+    `services/*` directory, unique package basenames.
 - **`docs/rules.md` gains a Bundled rulesets section** listing
   the catalog, overrides pattern, and planned future rulesets.
 

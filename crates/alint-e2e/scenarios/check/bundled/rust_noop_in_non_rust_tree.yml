@@ -1,0 +1,22 @@
+name: alint://bundled/rust stays quiet in a non-Rust tree (is_rust fact gates it)
+tags: [check, extends, bundled, rust, passing]
+
+# Every rule in `rust@v1` is gated with `when: facts.is_rust`, which
+# is false when Cargo.toml is absent. Extending the ruleset from a
+# polyglot repo's root config is therefore safe — nothing fires
+# unless Rust is actually present.
+given:
+  tree:
+    package.json: |
+      { "name": "demo", "version": "0.1.0" }
+    src:
+      index.js: "console.log('hi');\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/rust@v1
+
+when: [check]
+
+expect:
+  - violations: []

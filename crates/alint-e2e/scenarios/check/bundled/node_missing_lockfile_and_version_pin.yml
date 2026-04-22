@@ -1,0 +1,22 @@
+name: alint://bundled/node flags missing lockfile and version pin
+tags: [check, extends, bundled, node]
+
+given:
+  tree:
+    package.json: |
+      { "name": "demo", "version": "0.1.0" }
+    # No lockfile → warning
+    # No .nvmrc / .node-version → info
+    src:
+      index.ts: "export const hi = () => 'hi';\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/node@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: node-has-lockfile, level: warning}
+      - {rule: node-engine-or-nvmrc, level: info}

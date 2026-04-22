@@ -141,14 +141,20 @@ For common cases you don't want to hand-roll, alint ships a small catalogue of r
 ```yaml
 version: 1
 extends:
-  - alint://bundled/oss-baseline@v1    # README, LICENSE, SECURITY.md, no-merge-markers, …
+  - alint://bundled/oss-baseline@v1    # community docs + content hygiene
+  - alint://bundled/rust@v1            # Rust project (no-op if Cargo.toml absent)
+  - alint://bundled/node@v1            # Node project (no-op if package.json absent)
+  - alint://bundled/monorepo@v1        # packages/* / crates/* layout checks
 ```
 
-Currently shipped:
+Currently shipped (see [docs/rules.md](docs/rules.md#bundled-rulesets) for each ruleset's full rule list):
 
-- `alint://bundled/oss-baseline@v1` — the community-docs and content-hygiene checks most open-source repos want: `README`, `LICENSE`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.gitignore`, no merge-conflict markers, no bidi control characters, trailing-whitespace and final-newline hygiene. Non-blocking defaults (most rules are `info` or `warning`; unambiguous bugs are `error`).
+- **`oss-baseline@v1`** — README / LICENSE / SECURITY.md / CODE_OF_CONDUCT.md / .gitignore existence; merge-marker + bidi-control bans; trailing-whitespace and final-newline hygiene (auto-fixable).
+- **`rust@v1`** — Cargo.toml / Cargo.lock / rust-toolchain.toml existence; no committed `target/`; snake_case source filenames; Trojan-Source defenses. Gated with `when: facts.is_rust`.
+- **`node@v1`** — package.json + lockfile; no committed `node_modules/`, `dist/`, `.next/`, etc.; Node-version pin via `.nvmrc` or `engines`; JS/TS source hygiene. Gated with `when: facts.is_node`.
+- **`monorepo@v1`** — every `packages/*`, `crates/*`, `apps/*`, `services/*` directory has a README + ecosystem manifest; unique basenames.
 
-More rulesets (`rust`, `node`, `monorepo`, `compliance/reuse`) are planned for v0.5. Custom rulesets can be hosted via HTTPS `extends:` with SHA-256 SRI today.
+All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). You can upgrade severity, disable individual rules with `level: off`, or override scope by redeclaring the rule id in your own `.alint.yml`. More rulesets (`python`, `java`, `go`, `compliance/reuse`) are planned for v0.5.
 
 Then run:
 

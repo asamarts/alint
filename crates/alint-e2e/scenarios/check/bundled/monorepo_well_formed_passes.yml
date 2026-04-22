@@ -1,0 +1,31 @@
+name: alint://bundled/monorepo is silent on a well-formed workspace
+tags: [check, extends, bundled, monorepo, passing]
+
+given:
+  tree:
+    README.md: "# demo monorepo\n"
+    packages:
+      web:
+        package.json: |
+          { "name": "@demo/web", "version": "0.1.0" }
+        README.md: "# web\n"
+      api:
+        package.json: |
+          { "name": "@demo/api", "version": "0.1.0" }
+        README.md: "# api\n"
+    crates:
+      core:
+        Cargo.toml: |
+          [package]
+          name = "demo-core"
+          version = "0.1.0"
+        README.md: "# demo-core\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo@v1
+
+when: [check]
+
+expect:
+  - violations: []

@@ -27,11 +27,20 @@
 /// `(name, rev) -> embedded body` lookup table. Rulesets come
 /// from files under `rulesets/<rev>/<name>.yml` at the repo root,
 /// embedded at compile time via `include_str!`.
-const REGISTRY: &[(&str, &str, &str)] = &[(
-    "oss-baseline",
-    "v1",
-    include_str!("../../../rulesets/v1/oss-baseline.yml"),
-)];
+const REGISTRY: &[(&str, &str, &str)] = &[
+    (
+        "oss-baseline",
+        "v1",
+        include_str!("../../../rulesets/v1/oss-baseline.yml"),
+    ),
+    ("rust", "v1", include_str!("../../../rulesets/v1/rust.yml")),
+    (
+        "monorepo",
+        "v1",
+        include_str!("../../../rulesets/v1/monorepo.yml"),
+    ),
+    ("node", "v1", include_str!("../../../rulesets/v1/node.yml")),
+];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
 /// `alint://bundled/<name>@<rev>` URL) to its embedded body.

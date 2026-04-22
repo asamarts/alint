@@ -584,12 +584,54 @@ rules:
     level: off
 ```
 
+### `alint://bundled/rust@v1`
+
+Hygiene checks for Rust projects. Every rule is gated with `when: facts.is_rust` (declared inside the ruleset as `any_file_exists: [Cargo.toml]`), so extending the ruleset from a polyglot repo's root config is safe — rules don't fire unless Rust is actually present.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `rust-cargo-toml-exists` | `file_exists` | error | — |
+| `rust-cargo-lock-exists` | `file_exists` | warning | — |
+| `rust-toolchain-pinned` | `file_exists` | info | — |
+| `rust-no-tracked-target` | `dir_absent` | error | — |
+| `rust-sources-snake-case` | `filename_case` | error | `file_rename` |
+| `rust-sources-final-newline` | `final_newline` | warning | `file_append_final_newline` |
+| `rust-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+| `rust-sources-no-bidi` | `no_bidi_controls` | error | — |
+| `rust-sources-no-zero-width` | `no_zero_width_chars` | error | — |
+| `rust-no-merge-markers-in-manifests` | `no_merge_conflict_markers` | error | — |
+
+### `alint://bundled/node@v1`
+
+Hygiene checks for Node.js / npm / pnpm / yarn / bun projects. Every rule is gated with `when: facts.is_node` (via `any_file_exists: [package.json]`), so the ruleset is a safe no-op when `package.json` is absent.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `node-package-json-exists` | `file_exists` | error | — |
+| `node-has-lockfile` | `file_exists` | warning | — |
+| `node-no-tracked-node-modules` | `dir_absent` | error | — |
+| `node-no-tracked-dist` | `dir_absent` | info | — |
+| `node-engine-or-nvmrc` | `file_exists` | info | — |
+| `node-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `node-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+| `node-sources-no-bidi` | `no_bidi_controls` | error | — |
+
+### `alint://bundled/monorepo@v1`
+
+Language-agnostic monorepo-shape checks. Fires for every directory under `packages/*`, `crates/*`, `apps/*`, or `services/*`. Pair with `rust@v1` / `node@v1` for ecosystem-specific checks on the packages themselves.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `monorepo-packages-have-readme` | `for_each_dir` | warning | — |
+| `monorepo-packages-have-package-json` | `for_each_dir` | error | — |
+| `monorepo-crates-have-cargo-toml` | `for_each_dir` | error | — |
+| `monorepo-unique-package-names` | `unique_by` | warning | — |
+
 ### Planned rulesets (v0.5)
 
-- `alint://bundled/rust@v1` — `Cargo.toml` + `Cargo.lock` present, `rustfmt.toml`, no committed `target/`.
-- `alint://bundled/node@v1` — `package.json` schema, no committed `node_modules`, `.nvmrc` or `engines` present.
 - `alint://bundled/python@v1` — `pyproject.toml`, no `__pycache__`, no committed venv.
-- `alint://bundled/monorepo@v1` — every `packages/*` has README + package manifest.
+- `alint://bundled/java@v1` — Maven / Gradle manifest, standard source layout.
+- `alint://bundled/go@v1` — `go.mod`, `go.sum`, no committed `vendor/` without the official workflow.
 - `alint://bundled/compliance/reuse@v1` — FSFE REUSE specification (SPDX headers + `LICENSES/`).
 - `alint://bundled/compliance/apache-2@v1` — Apache 2.0 headers + `NOTICE` file.
 

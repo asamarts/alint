@@ -1,0 +1,24 @@
+name: alint://bundled/monorepo flags package dirs missing README / manifest
+tags: [check, extends, bundled, monorepo]
+
+given:
+  tree:
+    packages:
+      ok:
+        package.json: |
+          { "name": "@demo/ok", "version": "0.1.0" }
+        README.md: "# ok\n"
+      stripped:
+        # Missing both package.json and README.md — both rules fire.
+        index.js: "module.exports = {};\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: monorepo-packages-have-readme, level: warning}
+      - {rule: monorepo-packages-have-package-json, level: error}

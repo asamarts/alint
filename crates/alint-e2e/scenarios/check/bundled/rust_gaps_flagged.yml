@@ -1,0 +1,25 @@
+name: alint://bundled/rust flags Cargo.lock/toolchain gaps and PascalCase source
+tags: [check, extends, bundled, rust]
+
+given:
+  tree:
+    Cargo.toml: |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+    # Cargo.lock intentionally missing → warning
+    # rust-toolchain.toml intentionally missing → info
+    src:
+      LibRoot.rs: "pub fn hi() {}\n"        # PascalCase → error
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/rust@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: rust-cargo-lock-exists, level: warning}
+      - {rule: rust-toolchain-pinned, level: info}
+      - {rule: rust-sources-snake-case, level: error, path: src/LibRoot.rs}
