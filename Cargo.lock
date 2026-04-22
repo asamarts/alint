@@ -53,6 +53,7 @@ dependencies = [
  "clap",
  "miette",
  "supports-hyperlinks",
+ "terminal_size",
  "tracing",
  "tracing-subscriber",
  "trycmd",

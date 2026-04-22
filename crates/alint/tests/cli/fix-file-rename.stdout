@@ -1,4 +1,4 @@
-error[rust-snake]:
+error [rust-snake]:
   ✓ src/FooBar.rs — renamed src/FooBar.rs → src/foo_bar.rs
 
 1 applied, 0 skipped, 0 unfixable.

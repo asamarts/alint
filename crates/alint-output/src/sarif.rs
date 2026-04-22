@@ -211,12 +211,14 @@ mod tests {
                     level: Level::Error,
                     policy_url: Some("https://example.com/a".into()),
                     violations: vec![Violation::new("va1"), Violation::new("va2")],
+                    is_fixable: false,
                 },
                 RuleResult {
                     rule_id: "rule-b".into(),
                     level: Level::Warning,
                     policy_url: None,
                     violations: vec![Violation::new("vb")],
+                    is_fixable: false,
                 },
             ],
         };
@@ -247,12 +249,14 @@ mod tests {
                     level: Level::Off,
                     policy_url: None,
                     violations: vec![Violation::new("x")],
+                    is_fixable: false,
                 },
                 RuleResult {
                     rule_id: "info".into(),
                     level: Level::Info,
                     policy_url: None,
                     violations: vec![Violation::new("y")],
+                    is_fixable: false,
                 },
             ],
         };
@@ -275,6 +279,7 @@ mod tests {
                     line: Some(7),
                     column: Some(3),
                 }],
+                is_fixable: false,
             }],
         };
         let v = render(&report);
@@ -292,6 +297,7 @@ mod tests {
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation::new("no-path")],
+                is_fixable: false,
             }],
         };
         let v = render(&report);

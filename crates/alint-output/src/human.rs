@@ -1,65 +1,281 @@
+//! Human-readable formatter for [`Report`] and [`FixReport`].
+//!
+//! The check-renderer groups violations by file path (a
+//! "Repository-level" bucket leads for path-less violations,
+//! everything else is alphabetical by path), emits a terminal-
+//! width-aware section header for each bucket, and formats each
+//! violation with a colored level sigil, the rule id, an
+//! optional `fixable` tag, and the message — prefixed with
+//! `line:col` when available.
+//!
+//! Color, glyph-set, and terminal-width decisions all come from
+//! [`HumanOptions`] (see [`crate::style`]). Every styled span is
+//! written as `{STYLE}…{STYLE:#}`; the CLI's `AutoStream` decides
+//! whether SGR escapes reach the terminal.
+
+use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::PathBuf;
 
-use alint_core::{FixReport, FixStatus, Level, Report};
+use alint_core::{FixReport, FixStatus, Level, Report, RuleResult, Violation};
 
-use crate::style::{self, HumanOptions};
+use crate::style::{self, GlyphSet, HumanOptions};
+
+// ---------------------------------------------------------------
+// Check report
+// ---------------------------------------------------------------
 
 pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> std::io::Result<()> {
-    // Unused for now — Phase 2 will consume the glyph set when the
-    // renderer gets grouped/aligned. Accepted at the signature so
-    // the CLI→formatter wiring is in place from Phase 1.
-    let _ = opts;
+    // All-clean banner — green check + concise line, no summary
+    // block. Nothing else to render.
+    if report.failing_rules() == 0 {
+        let s = style::SUCCESS;
+        let passing = report.passing_rules();
+        writeln!(
+            w,
+            "{s}{} All {passing} rule(s) passed.{s:#}",
+            opts.glyphs.success,
+        )?;
+        return Ok(());
+    }
 
-    let mut any = false;
+    // Bucket violations by path. `Option<PathBuf>` sorts `None`
+    // before `Some`, which we want — repository-level gaps lead.
+    let mut by_bucket: BTreeMap<Option<PathBuf>, Vec<(&RuleResult, &Violation)>> = BTreeMap::new();
     for result in &report.results {
         if result.passed() {
             continue;
         }
-        any = true;
-        let sigil = level_sigil(result.level);
-        writeln!(w, "{sigil}[{}]:", result.rule_id)?;
-        for v in &result.violations {
-            if let Some(path) = &v.path {
-                writeln!(w, "  - {} — {}", path.display(), v.message)?;
-            } else {
-                writeln!(w, "  - {}", v.message)?;
-            }
-        }
-        if let Some(url) = &result.policy_url {
-            writeln!(w, "  policy: {url}")?;
+        for violation in &result.violations {
+            by_bucket
+                .entry(violation.path.clone())
+                .or_default()
+                .push((result, violation));
         }
     }
 
-    let failing = report.failing_rules();
-    let passing = report.passing_rules();
-    let total = report.total_violations();
-    if any {
-        // Minimal Phase 1 styling: color the failing/passing counts.
-        // Phase 2 will rebuild the whole summary; for now this is
-        // just a smoke test that colors survive the AutoStream.
-        let err_style = style::ERROR;
-        let pass_style = style::SUCCESS;
+    let width = opts.effective_width();
+
+    let mut first_bucket = true;
+    for (bucket, items) in &by_bucket {
+        if !first_bucket {
+            writeln!(w)?;
+        }
+        first_bucket = false;
+
+        let label = bucket.as_ref().map_or_else(
+            || "Repository-level".to_string(),
+            |p| p.display().to_string(),
+        );
+        write_section_header(w, &label, width, &opts.glyphs)?;
+
+        for (result, violation) in items {
+            writeln!(w)?;
+            write_violation(w, result, violation, &opts.glyphs)?;
+        }
+    }
+
+    writeln!(w)?;
+    write_summary(w, report, &opts.glyphs)?;
+    Ok(())
+}
+
+/// Emit a `─── <label> ─────…` section header stretched to
+/// `width` columns. Falls back gracefully when the label alone
+/// exceeds the width (just emits `─── label`, no trailing fill).
+fn write_section_header(
+    w: &mut dyn Write,
+    label: &str,
+    width: usize,
+    glyphs: &GlyphSet,
+) -> std::io::Result<()> {
+    let lead = format!("{r}{r}{r} {label} ", r = glyphs.rule);
+    // chars().count() is a display-width approximation that
+    // works for ASCII + the single-column Unicode glyphs we ship.
+    let used = lead.chars().count();
+    let tail_cols = width.saturating_sub(used);
+    let tail: String = glyphs.rule.repeat(tail_cols);
+    let s = style::DIM;
+    writeln!(w, "{s}{lead}{tail}{s:#}")?;
+    Ok(())
+}
+
+/// Render a single violation block:
+///
+/// ```text
+///   ✗  error    rule-id                           fixable
+///               3:12  Merge-conflict markers must not be committed.
+///               docs: https://…
+/// ```
+///
+/// Caller is responsible for the blank line before this block.
+fn write_violation(
+    w: &mut dyn Write,
+    result: &RuleResult,
+    violation: &Violation,
+    glyphs: &GlyphSet,
+) -> std::io::Result<()> {
+    let (sigil, level_style, level_name) = level_presentation(result.level, glyphs);
+
+    let rule_style = style::RULE_ID;
+    // First line: indent + sigil + level + rule_id + optional `fixable` tag.
+    if result.is_fixable {
+        let fix = style::FIXABLE;
         writeln!(
             w,
-            "\n{err_style}{failing} rule(s) failing{err_style:#}, \
-             {pass_style}{passing} passing{pass_style:#}, {total} violation(s).",
+            "  {level_style}{sigil}  {level_name}{level_style:#}  {rule_style}{}{rule_style:#}   {fix}fixable{fix:#}",
+            result.rule_id,
         )?;
     } else {
-        let ok_style = style::SUCCESS;
-        writeln!(w, "{ok_style}All {passing} rule(s) passed.{ok_style:#}")?;
+        writeln!(
+            w,
+            "  {level_style}{sigil}  {level_name}{level_style:#}  {rule_style}{}{rule_style:#}",
+            result.rule_id,
+        )?;
+    }
+
+    // Message line. `MSG_INDENT` spaces align under the rule_id
+    // (col 2 indent + 1 sigil + 2 spacer + 7 level + 2 spacer = 14).
+    let dim = style::DIM;
+    match (violation.line, violation.column) {
+        (Some(line), Some(col)) => {
+            writeln!(
+                w,
+                "{MSG_INDENT}{dim}{line}:{col}{dim:#}  {}",
+                violation.message
+            )?;
+        }
+        (Some(line), None) => {
+            writeln!(
+                w,
+                "{MSG_INDENT}{dim}line {line}{dim:#}  {}",
+                violation.message
+            )?;
+        }
+        _ => {
+            writeln!(w, "{MSG_INDENT}{}", violation.message)?;
+        }
+    }
+
+    // Policy URL, if present. Printed once per violation to stay
+    // near the relevant message (not once per rule as before —
+    // that hid the link below the list).
+    if let Some(url) = &result.policy_url {
+        let docs = style::DOCS;
+        writeln!(w, "{MSG_INDENT}{dim}docs:{dim:#} {docs}{url}{docs:#}")?;
     }
     Ok(())
 }
+
+/// Summary block: per-level counts, overall passing/failing/fixable
+/// totals, and a `alint fix` call-to-action when anything's auto-fixable.
+fn write_summary(w: &mut dyn Write, report: &Report, glyphs: &GlyphSet) -> std::io::Result<()> {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut infos = 0usize;
+    let mut fixable_violations = 0usize;
+
+    for r in &report.results {
+        if r.passed() {
+            continue;
+        }
+        let count = r.violations.len();
+        if r.is_fixable {
+            fixable_violations += count;
+        }
+        match r.level {
+            Level::Error => errors += count,
+            Level::Warning => warnings += count,
+            Level::Info => infos += count,
+            Level::Off => {} // filtered at config load; defensive skip
+        }
+    }
+
+    let total = errors + warnings + infos;
+    let failing = report.failing_rules();
+    let passing = report.passing_rules();
+    let dim = style::DIM;
+
+    let plural = if total == 1 { "" } else { "s" };
+    writeln!(w, "{dim}Summary ({total} violation{plural}):{dim:#}")?;
+
+    // First line: per-level breakdown. Skip levels with zero count
+    // to keep the line short on typical runs.
+    let mut parts: Vec<String> = Vec::new();
+    if errors > 0 {
+        let s = style::ERROR;
+        parts.push(format!(
+            "{s}{} {errors} error{e}{s:#}",
+            glyphs.error,
+            e = if errors == 1 { "" } else { "s" }
+        ));
+    }
+    if warnings > 0 {
+        let s = style::WARNING;
+        parts.push(format!(
+            "{s}{} {warnings} warning{e}{s:#}",
+            glyphs.warning,
+            e = if warnings == 1 { "" } else { "s" }
+        ));
+    }
+    if infos > 0 {
+        let s = style::INFO;
+        parts.push(format!("{s}{} {infos} info{s:#}", glyphs.info));
+    }
+    writeln!(w, "  {}", parts.join("   "))?;
+
+    // Second line: rule-level counts and fixable total.
+    let bullet = glyphs.bullet;
+    let fixable_tag = if fixable_violations > 0 {
+        let fix = style::FIXABLE;
+        format!(" {dim}{bullet}{dim:#} {fix}{fixable_violations} auto-fixable{fix:#}")
+    } else {
+        String::new()
+    };
+    writeln!(
+        w,
+        "  {passing} passing {dim}{bullet}{dim:#} {failing} failing{fixable_tag}",
+    )?;
+
+    if fixable_violations > 0 {
+        writeln!(w)?;
+        let fix = style::FIXABLE;
+        writeln!(
+            w,
+            "  {arrow} run {fix}`alint fix`{fix:#} to resolve {fixable_violations} fixable violation{p}.",
+            arrow = glyphs.arrow,
+            p = if fixable_violations == 1 { "" } else { "s" }
+        )?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------
+// Fix report
+// ---------------------------------------------------------------
 
 pub fn write_fix_human(
     report: &FixReport,
     w: &mut dyn Write,
     opts: HumanOptions,
 ) -> std::io::Result<()> {
-    let _ = opts;
+    let dim = style::DIM;
     for rule in &report.results {
-        let sigil = level_sigil(rule.level);
-        writeln!(w, "{sigil}[{}]:", rule.rule_id)?;
+        // Fix output uses un-padded level names — it's a flat
+        // header per rule, no tabular alignment needed.
+        let (level_style, level_name) = match rule.level {
+            Level::Error => (style::ERROR, "error"),
+            Level::Warning => (style::WARNING, "warning"),
+            Level::Info => (style::INFO, "info"),
+            Level::Off => (style::DIM, "off"),
+        };
+        let rule_style = style::RULE_ID;
+        writeln!(
+            w,
+            "{level_style}{level_name}{level_style:#} {rule_style}[{}]{rule_style:#}:",
+            rule.rule_id
+        )?;
         for item in &rule.items {
             let path = item
                 .violation
@@ -69,17 +285,22 @@ pub fn write_fix_human(
                 .unwrap_or_default();
             match &item.status {
                 FixStatus::Applied(summary) => {
-                    writeln!(w, "  ✓ {path}{summary}")?;
+                    let s = style::SUCCESS;
+                    writeln!(w, "  {s}{} {path}{summary}{s:#}", opts.glyphs.success)?;
                 }
                 FixStatus::Skipped(reason) => {
                     writeln!(
                         w,
-                        "  · {path}{} (skipped: {reason})",
-                        item.violation.message
+                        "  {dim}{} {path}{} (skipped: {reason}){dim:#}",
+                        opts.glyphs.bullet, item.violation.message
                     )?;
                 }
                 FixStatus::Unfixable => {
-                    writeln!(w, "  · {path}{} (no fixer)", item.violation.message)?;
+                    writeln!(
+                        w,
+                        "  {dim}{} {path}{} (no fixer){dim:#}",
+                        opts.glyphs.bullet, item.violation.message
+                    )?;
                 }
             }
         }
@@ -88,18 +309,34 @@ pub fn write_fix_human(
     let applied = report.applied();
     let skipped = report.skipped();
     let unfixable = report.unfixable();
+    let ok = style::SUCCESS;
     writeln!(
         w,
-        "\n{applied} applied, {skipped} skipped, {unfixable} unfixable."
+        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable."
     )?;
     Ok(())
 }
 
-fn level_sigil(level: Level) -> &'static str {
+// ---------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------
+
+/// Aligns message text under the `rule_id` on the first line.
+const MSG_INDENT: &str = "              ";
+
+/// Pick the sigil, style, and padded level name for a [`Level`].
+/// Level names are padded to 7 chars so the `rule_id` column aligns
+/// across errors / warnings / infos.
+fn level_presentation(
+    level: Level,
+    glyphs: &GlyphSet,
+) -> (&'static str, anstyle::Style, &'static str) {
     match level {
-        Level::Error => "error",
-        Level::Warning => "warning",
-        Level::Info => "info",
-        Level::Off => "off",
+        Level::Error => (glyphs.error, style::ERROR, "error  "),
+        Level::Warning => (glyphs.warning, style::WARNING, "warning"),
+        Level::Info => (glyphs.info, style::INFO, "info   "),
+        // `off` rules never reach the renderer — they're filtered
+        // at config load — but map to something sane for test use.
+        Level::Off => (glyphs.bullet, style::DIM, "off    "),
     }
 }

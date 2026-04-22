@@ -12,6 +12,7 @@
       "id": "has-readme",
       "level": "error",
       "passed": false,
+      "fixable": false,
       "violations": [
         {
           "message": "expected a file matching [README.md] at the repo root"

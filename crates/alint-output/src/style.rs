@@ -83,6 +83,8 @@ pub struct GlyphSet {
     pub rule: &'static str,
     /// Bullet for list items / summary lines.
     pub bullet: &'static str,
+    /// Arrow for call-to-action lines (`→ run alint fix`).
+    pub arrow: &'static str,
 }
 
 impl GlyphSet {
@@ -93,6 +95,7 @@ impl GlyphSet {
         success: "✓",
         rule: "─",
         bullet: "·",
+        arrow: "→",
     };
     pub const ASCII: Self = Self {
         error: "x",
@@ -101,6 +104,7 @@ impl GlyphSet {
         success: "v",
         rule: "-",
         bullet: "*",
+        arrow: "->",
     };
 
     /// Pick the Unicode set unless the caller forces ASCII or the
@@ -187,6 +191,10 @@ impl std::str::FromStr for ColorChoice {
 /// Renderer options shared across the human formatter family.
 /// Kept as a struct so new knobs (`--compact`, timing, etc.) can
 /// be added without touching every call site.
+///
+/// The `Default` impl gives Unicode glyphs, no hyperlinks, and
+/// `None` for width — the formatter then falls back to
+/// [`HumanOptions::DEFAULT_WIDTH`] columns.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HumanOptions {
     pub glyphs: GlyphSet,
@@ -195,6 +203,26 @@ pub struct HumanOptions {
     /// here so formatters decide per-call whether to emit the
     /// OSC 8 sequence.
     pub hyperlinks: bool,
+    /// Terminal width in columns, used for stretching section
+    /// separators. `None` signals "no TTY / couldn't detect" and
+    /// formatters fall back to [`HumanOptions::DEFAULT_WIDTH`].
+    pub width: Option<usize>,
+}
+
+impl HumanOptions {
+    /// Width used when no terminal is attached (pipes, files,
+    /// non-TTY log capture). Chosen to match POSIX `COLUMNS`
+    /// default and what most CLI tools settle on.
+    pub const DEFAULT_WIDTH: usize = 80;
+
+    /// Effective render width — the detected terminal width or
+    /// `DEFAULT_WIDTH` when detection failed. Capped at a sane
+    /// max so a 1000-col terminal doesn't produce section headers
+    /// longer than the reader can scan.
+    #[must_use]
+    pub fn effective_width(&self) -> usize {
+        self.width.unwrap_or(Self::DEFAULT_WIDTH).clamp(40, 120)
+    }
 }
 
 #[cfg(test)]

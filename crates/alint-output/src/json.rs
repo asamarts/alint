@@ -27,6 +27,10 @@ struct JsonResult<'a> {
     passed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     policy_url: Option<&'a str>,
+    /// Whether the rule declares a fixer. Useful for downstream
+    /// tools that want to decide whether suggesting `alint fix`
+    /// makes sense for this rule.
+    fixable: bool,
     violations: Vec<JsonViolation>,
 }
 
@@ -57,6 +61,7 @@ pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
             level: r.level,
             passed: r.passed(),
             policy_url: r.policy_url.as_deref(),
+            fixable: r.is_fixable,
             violations: r
                 .violations
                 .iter()

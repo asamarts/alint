@@ -47,6 +47,10 @@ pub struct RuleResult {
     pub level: Level,
     pub policy_url: Option<String>,
     pub violations: Vec<Violation>,
+    /// Whether the rule declares a [`Fixer`] — surfaced here so
+    /// the human formatter can tag violations as `fixable`
+    /// without threading the rule registry into the renderer.
+    pub is_fixable: bool,
 }
 
 impl RuleResult {

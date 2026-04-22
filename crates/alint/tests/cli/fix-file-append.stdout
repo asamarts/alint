@@ -1,4 +1,4 @@
-warning[spdx-in-readme]:
+warning [spdx-in-readme]:
   ✓ README.md — appended to README.md
 
 1 applied, 0 skipped, 0 unfixable.

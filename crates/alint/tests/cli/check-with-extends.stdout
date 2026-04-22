@@ -1,4 +1,8 @@
-error[inherited-readme]:
-  - expected a file matching [README.md] at the repo root
+─── Repository-level ───────────────────────────────────────────────────────────
 
-1 rule(s) failing, 0 passing, 1 violation(s).
+  ✗  error    inherited-readme
+              expected a file matching [README.md] at the repo root
+
+Summary (1 violation):
+  ✗ 1 error
+  0 passing · 1 failing

@@ -1,4 +1,4 @@
-error[has-header]:
+error [has-header]:
   ✓ src/module.rs — prepended src/module.rs
 
 1 applied, 0 skipped, 0 unfixable.

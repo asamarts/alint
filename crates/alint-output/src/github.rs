@@ -79,18 +79,21 @@ mod tests {
                     level: Level::Error,
                     policy_url: None,
                     violations: vec![Violation::new("boom")],
+                    is_fixable: false,
                 },
                 RuleResult {
                     rule_id: "rule-warn".into(),
                     level: Level::Warning,
                     policy_url: None,
                     violations: vec![Violation::new("careful")],
+                    is_fixable: false,
                 },
                 RuleResult {
                     rule_id: "rule-info".into(),
                     level: Level::Info,
                     policy_url: None,
                     violations: vec![Violation::new("fyi")],
+                    is_fixable: false,
                 },
             ],
         };
@@ -108,6 +111,7 @@ mod tests {
                 level: Level::Off,
                 policy_url: None,
                 violations: vec![Violation::new("should not appear")],
+                is_fixable: false,
             }],
         };
         assert_eq!(render(&report), "");
@@ -126,6 +130,7 @@ mod tests {
                     line: Some(12),
                     column: Some(4),
                 }],
+                is_fixable: false,
             }],
         };
         let out = render(&report);
@@ -143,6 +148,7 @@ mod tests {
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation::new("m")],
+                is_fixable: false,
             }],
         };
         let out = render(&report);
@@ -157,6 +163,7 @@ mod tests {
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation::new("a: b\nc")],
+                is_fixable: false,
             }],
         };
         let out = render(&report);

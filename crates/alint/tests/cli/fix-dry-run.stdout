@@ -1,4 +1,4 @@
-error[has-readme]:
+error [has-readme]:
   ✓ would create README.md
 
 1 applied, 0 skipped, 0 unfixable.

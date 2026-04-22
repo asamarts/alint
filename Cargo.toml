@@ -58,6 +58,7 @@ directories = "6"
 anstyle = "1"
 anstream = "0.6"
 supports-hyperlinks = "3"
+terminal_size = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

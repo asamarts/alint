@@ -210,6 +210,7 @@ fn run_entry(
                     level: entry.rule.level(),
                     policy_url: entry.rule.policy_url().map(str::to_string),
                     violations: vec![Violation::new(format!("when evaluation error: {e}"))],
+                    is_fixable: entry.rule.fixer().is_some(),
                 });
             }
         }
@@ -227,5 +228,6 @@ fn run_one(rule: &dyn Rule, ctx: &Context<'_>) -> RuleResult {
         level: rule.level(),
         policy_url: rule.policy_url().map(str::to_string),
         violations,
+        is_fixable: rule.fixer().is_some(),
     }
 }

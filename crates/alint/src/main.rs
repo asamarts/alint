@@ -257,9 +257,19 @@ fn render_env(
     // rendered as a link by anything downstream.
     let hyperlinks = is_tty && supports_hyperlinks::on(supports_hyperlinks::Stream::Stdout);
 
+    // Only ask the kernel for columns when we know we're on a TTY.
+    // Pipes have no useful width; let the formatter fall back to
+    // its DEFAULT_WIDTH constant.
+    let width = if is_tty {
+        terminal_size::terminal_size().map(|(w, _)| usize::from(w.0))
+    } else {
+        None
+    };
+
     let opts = HumanOptions {
         glyphs: GlyphSet::detect(cli.ascii),
         hyperlinks,
+        width,
     };
     Ok((stream, opts))
 }
