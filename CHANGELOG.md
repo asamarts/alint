@@ -6,6 +6,78 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-04-22
+
+Pretty-output overhaul of the `human` formatter. Schema-compatible;
+every v0.4.1 config still runs, every JSON/SARIF/GitHub output is
+byte-equivalent. Only the human-mode rendering and three new global
+CLI flags (`--color`, `--ascii`, `--compact`) are new.
+
+### Added
+
+- **Grouped-by-file layout** — violations now render under a
+  dim section header per file (`─── src/foo.rs ─────…`), with
+  a leading "Repository-level" bucket for path-less findings.
+  Each violation shows `<sigil>  <level>  <rule-id>  [fixable]`
+  on one line and the message (optionally prefixed with
+  `line:col`) on the next. Policy URLs render as `docs: <url>`
+  immediately under the relevant violation.
+- **Per-severity summary** — `Summary (N violations): ✗ 2 errors
+  ⚠ 1 warning  ℹ 5 info` + `X passing · Y failing · Z
+  auto-fixable` + a call-to-action line `→ run `alint fix` to
+  resolve N fixable violation(s).` when anything's auto-fixable.
+  All-passed gets a concise green `✓ All N rule(s) passed.`.
+- **`--color <auto|always|never>` global flag.** Defaults to
+  `auto` — honors `NO_COLOR`, `CLICOLOR_FORCE`, and TTY status
+  via `anstream::AutoStream`. JSON / SARIF / GitHub formats are
+  unaffected.
+- **`--ascii` global flag** forces ASCII glyphs (e.g. `x`/`!`/`i`
+  instead of `✗`/`⚠`/`ℹ`, `---` instead of `───`). Auto-enabled
+  when `TERM=dumb`.
+- **`--compact` global flag** switches to one-line-per-violation
+  output suitable for editors, `grep`, `wc -l`. Format:
+  `path:line:col: level: rule-id: message  [fixable]`, with
+  `<repo>` as the pseudo-path for path-less findings.
+- **OSC 8 hyperlinks on policy URLs** when the terminal supports
+  them (detected via `supports-hyperlinks`). Modern terminals
+  (iTerm2, Kitty, WezTerm, Alacritty, VSCode, GNOME Terminal,
+  Windows Terminal) make the `docs:` URL clickable without any
+  visible change. Older terminals see the plain URL they always
+  saw.
+- **`RuleResult.is_fixable`** exposed on the JSON output as
+  `fixable: bool`, letting tooling decide whether to prompt
+  users toward `alint fix` without cross-referencing rule
+  metadata.
+
+### Changed
+
+- **Terminal-width-aware section separators.** Auto-detected via
+  `terminal_size` on TTY, clamped to `[40, 120]` cols so wide
+  terminals don't produce unreadably long rules and narrow ones
+  still get some visual fill. Falls back to 80 cols off-TTY.
+- **Tightened vertical density** — no blank lines between
+  violations within a bucket. Visual separation still reads
+  clearly because the colored sigil anchors at column 2 while
+  continuation lines indent to column 14. A typical 8-violation
+  run drops from ~36 to ~27 lines of output.
+
+### Internal
+
+- New `alint-output::style` module centralizing role-based
+  `anstyle::Style` constants, `GlyphSet` (Unicode / ASCII), and
+  `HumanOptions` (plumbing for glyphs / hyperlinks / width /
+  compact). Swapping the palette is a one-file edit.
+- `Format::write_with_options` / `Format::write_fix_with_options`
+  added; existing `write` / `write_fix` remain as default-opts
+  shims so external embedders compile unchanged.
+
+### Dependencies
+
+- `anstyle` + `anstream` (ANSI styling with built-in `NO_COLOR` /
+  TTY handling).
+- `supports-hyperlinks` (OSC 8 detection).
+- `terminal_size` (column-width detection).
+
 ## [0.4.1] — 2026-04-21
 
 Packaging fix. v0.4.0 is functionally identical but failed to
@@ -463,7 +535,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/asamarts/alint/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/asamarts/alint/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/asamarts/alint/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/asamarts/alint/compare/v0.3.1...v0.3.2
