@@ -134,6 +134,22 @@ rules:
           // Copyright (c) 2026 Acme Corp
 ```
 
+### Bundled rulesets (one-line baseline)
+
+For common cases you don't want to hand-roll, alint ships a small catalogue of rulesets built into the binary. Use them via `extends:` without a network round-trip:
+
+```yaml
+version: 1
+extends:
+  - alint://bundled/oss-baseline@v1    # README, LICENSE, SECURITY.md, no-merge-markers, …
+```
+
+Currently shipped:
+
+- `alint://bundled/oss-baseline@v1` — the community-docs and content-hygiene checks most open-source repos want: `README`, `LICENSE`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.gitignore`, no merge-conflict markers, no bidi control characters, trailing-whitespace and final-newline hygiene. Non-blocking defaults (most rules are `info` or `warning`; unambiguous bugs are `error`).
+
+More rulesets (`rust`, `node`, `monorepo`, `compliance/reuse`) are planned for v0.5. Custom rulesets can be hosted via HTTPS `extends:` with SHA-256 SRI today.
+
 Then run:
 
 ```bash

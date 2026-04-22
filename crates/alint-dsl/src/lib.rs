@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod bundled;
 pub mod extends;
 
 use alint_core::{Config, Error, FactSpec, Result, RuleSpec};
@@ -142,6 +143,8 @@ fn load_recursive(
             )));
         } else if entry.starts_with("https://") {
             load_remote(entry, opts, visiting)?
+        } else if let Some(spec) = entry.strip_prefix("alint://bundled/") {
+            load_bundled(spec)?
         } else {
             let target = resolve_relative(&source_dir, entry);
             load_recursive(&target, visiting, opts)?
@@ -201,6 +204,36 @@ fn load_remote(
         return Err(Error::Other(format!("cycle on remote extends: {url}")));
     }
     visiting.remove(&token);
+    Ok(config)
+}
+
+/// Load an `alint://bundled/<name>@<rev>` ruleset from the
+/// in-binary registry. Bundled rulesets can't themselves extend
+/// anything — they're static, leaf-only fragments.
+fn load_bundled(spec: &str) -> Result<Config> {
+    let body = bundled::resolve(spec).ok_or_else(|| {
+        let shipped: Vec<String> = bundled::catalog()
+            .map(|(n, r)| format!("alint://bundled/{n}@{r}"))
+            .collect();
+        Error::Other(format!(
+            "unknown bundled ruleset 'alint://bundled/{spec}'; \
+             this build ships: [{}]",
+            shipped.join(", "),
+        ))
+    })?;
+
+    let config: Config = serde_yaml_ng::from_str(body).map_err(|e| {
+        Error::Other(format!(
+            "built-in ruleset '{spec}' failed to parse: {e}; \
+             this is a bug in alint — please file an issue"
+        ))
+    })?;
+    if !config.extends.is_empty() {
+        return Err(Error::Other(format!(
+            "bundled ruleset '{spec}' declares its own `extends:`; \
+             this is a bug in alint"
+        )));
+    }
     Ok(config)
 }
 

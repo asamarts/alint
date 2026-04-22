@@ -1,0 +1,93 @@
+# alint://bundled/oss-baseline@v1
+#
+# A minimal OSS-hygiene baseline — the documents and conventions
+# most open-source repositories are expected to follow. Adopt it
+# with:
+#
+#     extends:
+#       - alint://bundled/oss-baseline@v1
+#
+# Defaults are deliberately non-blocking (`info` for community-doc
+# recommendations, `warning` for missing README/LICENSE, `error` for
+# unambiguous bugs like committed merge markers or bidi controls).
+# Upgrade severity in your own config when you're ready to enforce.
+
+version: 1
+
+rules:
+  # --- Required top-level documents ---------------------------------
+  - id: oss-readme-exists
+    kind: file_exists
+    paths: ["README.md", "README", "README.rst"]
+    root_only: true
+    level: warning
+    message: "An open-source repo should have a README at the root."
+    policy_url: "https://opensource.guide/starting-a-project/#writing-a-readme"
+
+  - id: oss-license-exists
+    kind: file_exists
+    paths:
+      - "LICENSE"
+      - "LICENSE.md"
+      - "LICENSE.txt"
+      - "LICENSE-APACHE"
+      - "LICENSE-MIT"
+      - "COPYING"
+    root_only: true
+    level: warning
+    message: "An open-source repo should declare a license at the root."
+    policy_url: "https://opensource.guide/legal/#which-open-source-license-is-appropriate-for-my-project"
+
+  - id: oss-security-policy-exists
+    kind: file_exists
+    paths: ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]
+    level: info
+    message: "Consider adding a SECURITY.md so vulnerability reporters know where to disclose."
+    policy_url: "https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository"
+
+  - id: oss-code-of-conduct-exists
+    kind: file_exists
+    paths: ["CODE_OF_CONDUCT.md", ".github/CODE_OF_CONDUCT.md", "docs/CODE_OF_CONDUCT.md"]
+    level: info
+    message: "Consider adding a CODE_OF_CONDUCT.md."
+    policy_url: "https://www.contributor-covenant.org/"
+
+  - id: oss-gitignore-exists
+    kind: file_exists
+    paths: .gitignore
+    root_only: true
+    level: info
+    message: "Most OSS repos should have a .gitignore to keep build artefacts and secrets out of git."
+
+  # --- Unambiguous bugs (errors) -----------------------------------
+  - id: oss-no-merge-conflict-markers
+    kind: no_merge_conflict_markers
+    paths:
+      include: ["**/*.md", "**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.json"]
+    level: error
+    message: "Merge-conflict markers must not be committed."
+
+  - id: oss-no-bidi-controls
+    # Trojan Source (CVE-2021-42574): bidirectional override characters
+    # can make source code read differently from how it executes.
+    kind: no_bidi_controls
+    paths:
+      include: ["**/*.md", "**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.json"]
+    level: error
+    message: "Unicode bidi override characters are a code-review hazard; reject."
+    policy_url: "https://trojansource.codes/"
+
+  # --- Hygiene (info-level, auto-fixable) --------------------------
+  - id: oss-final-newline
+    kind: final_newline
+    paths: ["**/*.md", "**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml"]
+    level: info
+    fix:
+      file_append_final_newline: {}
+
+  - id: oss-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths: ["**/*.md", "**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml"]
+    level: info
+    fix:
+      file_trim_trailing_whitespace: {}

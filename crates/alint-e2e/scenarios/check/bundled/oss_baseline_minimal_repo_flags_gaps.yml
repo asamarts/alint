@@ -1,0 +1,26 @@
+name: alint://bundled/oss-baseline flags missing community docs
+tags: [check, extends, bundled, oss-baseline]
+
+# A bare repo that declares only a source file — none of the
+# documents the OSS baseline expects are present. All five
+# "file_exists" rules in the bundled ruleset should fire; none
+# of the hygiene rules (merge markers, bidi, trailing ws, final
+# newline) do because `main.py` isn't in their scope.
+given:
+  tree:
+    src:
+      main.py: "print('hi')\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/oss-baseline@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: oss-readme-exists, level: warning}
+      - {rule: oss-license-exists, level: warning}
+      - {rule: oss-security-policy-exists, level: info}
+      - {rule: oss-code-of-conduct-exists, level: info}
+      - {rule: oss-gitignore-exists, level: info}

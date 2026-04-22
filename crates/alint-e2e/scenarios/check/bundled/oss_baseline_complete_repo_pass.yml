@@ -1,0 +1,19 @@
+name: alint://bundled/oss-baseline is silent on a well-formed OSS repo
+tags: [check, extends, bundled, oss-baseline, passing]
+
+given:
+  tree:
+    README.md: "# demo\n"
+    LICENSE: "MIT License\n\nCopyright 2026.\n"
+    SECURITY.md: "# Security Policy\n\nReport vulnerabilities to security@example.com.\n"
+    CODE_OF_CONDUCT.md: "# Code of Conduct\n\nBe kind.\n"
+    .gitignore: "target/\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/oss-baseline@v1
+
+when: [check]
+
+expect:
+  - violations: []

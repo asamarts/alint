@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+First cut of v0.4. No version tag yet; these changes are on
+`main` and will ship when the rest of v0.4 is ready.
+
+### Added
+
+- **`.pre-commit-hooks.yaml`** at the repo root exposes `alint`
+  (check) and `alint-fix` (manual-stage) hooks for users of the
+  pre-commit framework. `language: rust` means zero setup —
+  pre-commit builds alint on first run.
+- **Bundled rulesets**: `alint://bundled/<name>@<rev>` URI
+  scheme resolved offline from ruleset bodies embedded in the
+  binary via `include_str!`. Cycle-safe, leaf-only (bundled
+  rulesets cannot themselves `extends:` anything). The resolver
+  inherits the same `custom:`-fact guard as remote extends.
+- **First bundled ruleset: `alint://bundled/oss-baseline@v1`**
+  — 9 rules covering the community-docs baseline and content
+  hygiene most OSS repos want: README, LICENSE, SECURITY.md,
+  CODE_OF_CONDUCT.md, .gitignore existence; no merge-conflict
+  markers; no Unicode bidi controls; trailing-whitespace and
+  final-newline hygiene (auto-fixable). Non-blocking defaults
+  (`info`/`warning` for recommendations, `error` for
+  unambiguous bugs).
+- **`docs/rules.md` gains a Bundled rulesets section** listing
+  the catalog, overrides pattern, and planned future rulesets.
+
+### Changed
+
+- **README quickstart** gains a "Bundled rulesets (one-line
+  baseline)" section showing how to adopt oss-baseline.
+
 ## [0.3.2] — 2026-04-21
 
 Patch release fixing a broken `action.yml` that affects every

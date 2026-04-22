@@ -5,8 +5,9 @@
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
 **Latest release: v0.3.2** (crates.io + GitHub Releases, 2026-04-21).
-Next in flight: v0.4 — see the v0.4 section below for scope and the
-structured-content items rolled over from v0.3.
+v0.4 is in flight on `main` — `.pre-commit-hooks.yaml` and the
+bundled-rulesets infra have landed, with `oss-baseline@v1` shipped.
+See the v0.4 section for the remaining scope.
 
 ## v0.1 — MVP (shipped)
 
@@ -56,26 +57,30 @@ points in real repos.
 
 **Deferred to v0.4**: structured-query primitives (`json_path_*`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`), `file_footer`, `file_max_lines`, `file_shebang`, opt-in nested `.alint.yml` discovery for monorepos, `markdown` / `junit` / `gitlab` output formats, `alint facts` subcommand for debugging `when` clauses.
 
-## v0.4 — Structured content + plugins v1 + distribution breadth
+## v0.4 — Structured content + plugins v1 + distribution breadth (in flight)
 
 Consolidates the structured-content scope rolled over from v0.3
-with the previously-planned v0.4 plugin + distribution work.
+with the previously-planned v0.4 plugin + distribution work, and
+pulls bundled rulesets forward from v0.5 because they're the
+single biggest adoption lever.
 
-- Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
-- Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
-- Output formats: `markdown`, `junit`, `gitlab`.
-- `alint facts` subcommand (for debugging `when` clauses).
-- Opt-in nested `.alint.yml` discovery for monorepos.
-- `command` plugin kind.
-- pre-commit hook (`.pre-commit-hooks.yaml`).
-- npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).
-- Git-aware primitives: `git_tracked_only`, `git_no_denied_paths`, `git_commit_message`.
+- ✅ `.pre-commit-hooks.yaml` — exposes `alint` and `alint-fix` hooks for pre-commit framework users.
+- ✅ Bundled rulesets infra: `alint://bundled/<name>@<rev>` URI scheme resolved offline via `include_str!`. Cycle-safe, leaf-only (bundled rulesets cannot themselves `extends:`).
+- ✅ First bundled ruleset: `alint://bundled/oss-baseline@v1` — README/LICENSE/SECURITY.md/CODE_OF_CONDUCT.md/.gitignore existence checks, merge-marker + bidi-control bans, trailing-whitespace + final-newline hygiene with auto-fix.
+- ⏳ Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
+- ⏳ Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
+- ⏳ Output formats: `markdown`, `junit`, `gitlab`.
+- ⏳ `alint facts` subcommand (for debugging `when` clauses).
+- ⏳ Opt-in nested `.alint.yml` discovery for monorepos.
+- ⏳ `command` plugin kind.
+- ⏳ npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).
+- ⏳ Git-aware primitives: `git_tracked_only`, `git_no_denied_paths`, `git_commit_message`.
 
-## v0.5 — LSP and bundled rulesets
+## v0.5 — LSP and additional bundled rulesets
 
 - LSP server (`alint lsp`): inline diagnostics, hover with rule documentation, code actions for "add to ignore" and "apply fix."
 - VS Code extension (bundles the LSP).
-- Bundled rulesets: `oss-baseline`, `rust`, `node`, `python`, `java`, `go`, `monorepo`, `compliance/reuse`, `compliance/apache-2`.
+- Additional bundled rulesets on top of the v0.4 `oss-baseline`: `rust`, `node`, `python`, `java`, `go`, `monorepo`, `compliance/reuse`, `compliance/apache-2`.
 
 ## v0.6 — WASM plugins
 

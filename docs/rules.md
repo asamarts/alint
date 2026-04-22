@@ -21,6 +21,7 @@ is the authoritative source for option types.
 - [Git hygiene](#git-hygiene)
 - [Cross-file](#cross-file)
 - [Fix operations](#fix-operations)
+- [Bundled rulesets](#bundled-rulesets)
 
 ---
 
@@ -530,3 +531,66 @@ rules:
 ```
 
 Over-limit files report `Skipped` with a stderr warning rather than applying the fix.
+
+---
+
+## Bundled rulesets
+
+alint ships a small catalog of pre-built rulesets embedded in the binary. Reference them from `extends:` via the `alint://bundled/<name>@<rev>` scheme:
+
+```yaml
+version: 1
+extends:
+  - alint://bundled/oss-baseline@v1
+```
+
+Bundled rulesets:
+
+- **Resolve offline** — no network fetch, no SRI needed, no cache entry.
+- **Are leaf-only** — they don't declare `extends:` of their own.
+- **Are versioned independently** — the `@v1` suffix lets rulesets evolve on a separate cadence from the binary. A single binary can ship multiple revisions of the same ruleset.
+- **Can be overridden locally** — any rule id declared in your `.alint.yml` wins over the bundled definition. Set `level: off` on a bundled rule id to disable it, or redefine it to tighten severity / change scope.
+
+### `alint://bundled/oss-baseline@v1`
+
+The minimal hygiene baseline most open-source repos want. Nine rules:
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `oss-readme-exists` | `file_exists` | warning | — |
+| `oss-license-exists` | `file_exists` | warning | — |
+| `oss-security-policy-exists` | `file_exists` | info | — |
+| `oss-code-of-conduct-exists` | `file_exists` | info | — |
+| `oss-gitignore-exists` | `file_exists` | info | — |
+| `oss-no-merge-conflict-markers` | `no_merge_conflict_markers` | error | — |
+| `oss-no-bidi-controls` | `no_bidi_controls` | error | `file_strip_bidi` |
+| `oss-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `oss-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+
+**Typical overrides:**
+
+```yaml
+extends:
+  - alint://bundled/oss-baseline@v1
+
+rules:
+  # Elevate missing-README from warning to error.
+  - id: oss-readme-exists
+    level: error
+
+  # Disable trailing-whitespace on Markdown — the two-trailing-spaces
+  # hard-break is deliberate.
+  - id: oss-no-trailing-whitespace
+    level: off
+```
+
+### Planned rulesets (v0.5)
+
+- `alint://bundled/rust@v1` — `Cargo.toml` + `Cargo.lock` present, `rustfmt.toml`, no committed `target/`.
+- `alint://bundled/node@v1` — `package.json` schema, no committed `node_modules`, `.nvmrc` or `engines` present.
+- `alint://bundled/python@v1` — `pyproject.toml`, no `__pycache__`, no committed venv.
+- `alint://bundled/monorepo@v1` — every `packages/*` has README + package manifest.
+- `alint://bundled/compliance/reuse@v1` — FSFE REUSE specification (SPDX headers + `LICENSES/`).
+- `alint://bundled/compliance/apache-2@v1` — Apache 2.0 headers + `NOTICE` file.
+
+Until those ship, you can compose any of them yourself by pairing `extends:` against an HTTPS URL (with SHA-256 SRI) or a local path.
