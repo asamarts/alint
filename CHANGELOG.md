@@ -6,42 +6,77 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-First cut of v0.4. No version tag yet; these changes are on
-`main` and will ship when the rest of v0.4 is ready.
+## [0.4.0] — 2026-04-21
+
+Headline: **bundled rulesets**. The single biggest adoption
+lever identified during pre-launch review — reduces onboarding
+from "write a ruleset" to "add one `extends:` line." Also lands
+pre-commit framework integration so any pre-commit user can
+adopt alint with 4 lines of YAML.
 
 ### Added
 
-- **`.pre-commit-hooks.yaml`** at the repo root exposes `alint`
-  (check) and `alint-fix` (manual-stage) hooks for users of the
-  pre-commit framework. `language: rust` means zero setup —
-  pre-commit builds alint on first run.
-- **Bundled rulesets**: `alint://bundled/<name>@<rev>` URI
-  scheme resolved offline from ruleset bodies embedded in the
-  binary via `include_str!`. Cycle-safe, leaf-only (bundled
-  rulesets cannot themselves `extends:` anything). The resolver
-  inherits the same `custom:`-fact guard as remote extends.
-- **Bundled rulesets shipped** (4 total):
-  - **`alint://bundled/oss-baseline@v1`** — 9 rules: community
-    docs (README, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md,
-    .gitignore) + merge-marker / bidi-control bans + trailing-
-    whitespace / final-newline hygiene (auto-fixable).
-  - **`alint://bundled/rust@v1`** — 10 rules: Cargo.toml /
-    Cargo.lock / rust-toolchain existence, no tracked `target/`,
-    snake_case sources, Trojan-Source defenses. Gated
-    `when: facts.is_rust` so safe to extend from polyglot repos.
-  - **`alint://bundled/node@v1`** — 8 rules: package.json +
-    lockfile, no tracked `node_modules/` or `dist/`, Node
-    version pin, JS/TS source hygiene. Gated `when: facts.is_node`.
-  - **`alint://bundled/monorepo@v1`** — 4 rules: README +
-    manifest in every `packages/*` / `crates/*` / `apps/*` /
-    `services/*` directory, unique package basenames.
-- **`docs/rules.md` gains a Bundled rulesets section** listing
-  the catalog, overrides pattern, and planned future rulesets.
+#### Bundled rulesets
+
+- **`alint://bundled/<name>@<rev>` URI scheme** for offline
+  resolution of built-in rulesets. Rulesets live under
+  `rulesets/<rev>/<name>.yml` and are embedded in the binary via
+  `include_str!` at compile time. Cycle-safe, leaf-only — a
+  bundled ruleset cannot itself declare `extends:` and cannot
+  introduce `custom:` facts, inheriting the same safety guards
+  as HTTPS extends.
+- **`alint://bundled/oss-baseline@v1`** — 9 rules. Community
+  docs (README, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md,
+  .gitignore) + merge-marker + bidi-control bans +
+  trailing-whitespace / final-newline hygiene (auto-fixable).
+- **`alint://bundled/rust@v1`** — 10 rules. Cargo.toml /
+  Cargo.lock / rust-toolchain existence, no tracked `target/`,
+  snake_case source filenames, Trojan-Source defenses. Every
+  rule gated `when: facts.is_rust` so extending it from a
+  polyglot repo is a safe no-op outside Rust trees.
+- **`alint://bundled/node@v1`** — 8 rules. package.json +
+  lockfile (npm / pnpm / yarn / bun), no tracked `node_modules/`
+  or common build outputs, Node version pinned via `.nvmrc` /
+  `.node-version` / `.tool-versions`, JS/TS source hygiene.
+  Gated `when: facts.is_node`.
+- **`alint://bundled/monorepo@v1`** — 4 rules. Every directory
+  under `{packages,crates,apps,services}/*` has a README +
+  ecosystem manifest; unique basenames. Pair with rust@v1 /
+  node@v1 for per-package ecosystem checks.
+
+#### Distribution
+
+- **`.pre-commit-hooks.yaml`** at the repo root exposes two
+  hooks for [pre-commit](https://pre-commit.com/) users:
+  - `alint` — runs `alint check`; non-mutating.
+  - `alint-fix` — runs `alint fix`; `stages: [manual]` by
+    default so it only runs when explicitly invoked via
+    `pre-commit run alint-fix`.
+
+  Both use `language: rust`, so pre-commit builds alint on
+  first run — zero install step.
 
 ### Changed
 
 - **README quickstart** gains a "Bundled rulesets (one-line
-  baseline)" section showing how to adopt oss-baseline.
+  baseline)" section and a "pre-commit" subsection under "Use
+  in CI".
+- **`docs/rules.md`** gains a Bundled rulesets section with a
+  per-ruleset table (rule id / kind / default level / fix op)
+  for every shipped ruleset, plus the override pattern.
+- **ROADMAP**: the original v0.4 scope (structured-query
+  primitives, git-aware primitives, Homebrew / Docker / npm,
+  markdown/junit/gitlab outputs, `command` plugin, nested
+  config discovery) rolls forward to v0.5. Bundled rulesets
+  moved from v0.5 → v0.4 because they're the largest
+  single-step adoption lever.
+
+### Compatibility
+
+- Schema version remains `1`. Every v0.3 config runs unchanged.
+- No changes to the `Rule`, `Fixer`, or `Engine` APIs.
+  `alint-dsl` gains a new public `bundled` module; the existing
+  `load` / `load_with` entry points are unchanged.
 
 ## [0.3.2] — 2026-04-21
 
@@ -403,7 +438,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/asamarts/alint/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/asamarts/alint/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/asamarts/alint/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/asamarts/alint/compare/v0.2.1...v0.3.0

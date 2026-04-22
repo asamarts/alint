@@ -4,10 +4,10 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.3.2** (crates.io + GitHub Releases, 2026-04-21).
-v0.4 is in flight on `main` — `.pre-commit-hooks.yaml` and the
-bundled-rulesets infra have landed, with `oss-baseline@v1` shipped.
-See the v0.4 section for the remaining scope.
+**Latest release: v0.4.0** (crates.io + GitHub Releases, 2026-04-21).
+Headline: bundled rulesets (`alint://bundled/<name>@<rev>`) plus
+pre-commit integration. Next planned: v0.5 — structured-query
+primitives + plugins v1 + distribution breadth.
 
 ## v0.1 — MVP (shipped)
 
@@ -57,16 +57,25 @@ points in real repos.
 
 **Deferred to v0.4**: structured-query primitives (`json_path_*`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`), `file_footer`, `file_max_lines`, `file_shebang`, opt-in nested `.alint.yml` discovery for monorepos, `markdown` / `junit` / `gitlab` output formats, `alint facts` subcommand for debugging `when` clauses.
 
-## v0.4 — Structured content + plugins v1 + distribution breadth (in flight)
+## v0.4 — Bundled rulesets + pre-commit (shipped)
 
-Consolidates the structured-content scope rolled over from v0.3
-with the previously-planned v0.4 plugin + distribution work, and
-pulls bundled rulesets forward from v0.5 because they're the
-single biggest adoption lever.
+Pulled forward from what was v0.5: **bundled rulesets** are the
+single biggest adoption lever, turning "write 20 rules" into
+"add one `extends:` line." Also lands pre-commit framework
+integration so any pre-commit user adopts alint with 4 lines of
+YAML.
 
-- ✅ `.pre-commit-hooks.yaml` — exposes `alint` and `alint-fix` hooks for pre-commit framework users.
-- ✅ Bundled rulesets infra: `alint://bundled/<name>@<rev>` URI scheme resolved offline via `include_str!`. Cycle-safe, leaf-only (bundled rulesets cannot themselves `extends:`).
-- ✅ First bundled ruleset: `alint://bundled/oss-baseline@v1` — README/LICENSE/SECURITY.md/CODE_OF_CONDUCT.md/.gitignore existence checks, merge-marker + bidi-control bans, trailing-whitespace + final-newline hygiene with auto-fix.
+- ✅ `.pre-commit-hooks.yaml` — exposes `alint` (check) and `alint-fix` (manual-stage) hooks. `language: rust` means zero setup for pre-commit users.
+- ✅ Bundled rulesets infra: `alint://bundled/<name>@<rev>` URI scheme resolved offline via `include_str!`. Cycle-safe, leaf-only (bundled rulesets cannot themselves `extends:`). Inherits the same `custom:`-fact guard as HTTPS extends.
+- ✅ `alint://bundled/oss-baseline@v1` — 9 rules. Community docs + content hygiene most OSS repos want.
+- ✅ `alint://bundled/rust@v1` — 10 rules. Gated `when: facts.is_rust` so it's a safe no-op in polyglot trees.
+- ✅ `alint://bundled/node@v1` — 8 rules. Gated `when: facts.is_node`.
+- ✅ `alint://bundled/monorepo@v1` — 4 rules. Language-agnostic `for_each_dir` over `{packages,crates,apps,services}/*`.
+
+## v0.5 — Structured content + plugins v1 + distribution breadth
+
+Rolled forward from the original v0.4 scope.
+
 - ⏳ Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
 - ⏳ Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
 - ⏳ Output formats: `markdown`, `junit`, `gitlab`.
@@ -75,14 +84,14 @@ single biggest adoption lever.
 - ⏳ `command` plugin kind.
 - ⏳ npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).
 - ⏳ Git-aware primitives: `git_tracked_only`, `git_no_denied_paths`, `git_commit_message`.
+- ⏳ Additional bundled rulesets: `python`, `java`, `go`, `compliance/reuse`, `compliance/apache-2`.
 
-## v0.5 — LSP and additional bundled rulesets
+## v0.6 — LSP
 
 - LSP server (`alint lsp`): inline diagnostics, hover with rule documentation, code actions for "add to ignore" and "apply fix."
 - VS Code extension (bundles the LSP).
-- Additional bundled rulesets on top of the v0.4 `oss-baseline`: `rust`, `node`, `python`, `java`, `go`, `monorepo`, `compliance/reuse`, `compliance/apache-2`.
 
-## v0.6 — WASM plugins
+## v0.7 — WASM plugins
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT interface.
 - Plugin registry scaffolding with signature verification.
