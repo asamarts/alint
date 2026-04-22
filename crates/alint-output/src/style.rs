@@ -185,6 +185,41 @@ impl std::str::FromStr for ColorChoice {
 }
 
 // ---------------------------------------------------------------
+// OSC 8 hyperlinks.
+// ---------------------------------------------------------------
+
+/// Write `text` as an OSC 8 hyperlink targeting `url` when
+/// `enabled`, or as plain `text` otherwise.
+///
+/// The OSC 8 sequence (`ESC ] 8 ; ; URL ESC \ text ESC ] 8 ; ; ESC \`)
+/// is understood by modern terminals (`iTerm2`, `Kitty`, `WezTerm`,
+/// `Alacritty`, `VSCode`'s integrated terminal, Windows Terminal,
+/// GNOME Terminal, …). Terminals that don't recognize it are
+/// supposed to pass the payload through unchanged — in practice
+/// most do, so we only emit the sequence when the CLI has
+/// *positively* detected hyperlink support via the
+/// `supports-hyperlinks` crate.
+///
+/// The surrounding SGR (underline + blue) is the caller's
+/// responsibility — we keep concerns separate so the same helper
+/// can render a cross-reference or a docs link with different
+/// styling.
+pub fn write_hyperlink(
+    w: &mut dyn std::io::Write,
+    url: &str,
+    text: &str,
+    enabled: bool,
+) -> std::io::Result<()> {
+    if enabled {
+        // ST = ESC \ (C1 string terminator). BEL (\x07) works too
+        // in most terminals but ESC \ is the standard spelling.
+        write!(w, "\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+    } else {
+        write!(w, "{text}")
+    }
+}
+
+// ---------------------------------------------------------------
 // Per-render options.
 // ---------------------------------------------------------------
 
@@ -207,6 +242,11 @@ pub struct HumanOptions {
     /// separators. `None` signals "no TTY / couldn't detect" and
     /// formatters fall back to [`HumanOptions::DEFAULT_WIDTH`].
     pub width: Option<usize>,
+    /// Use the one-line-per-violation compact renderer instead of
+    /// the grouped full layout. Designed for piping into editors /
+    /// grep / `wc -l`. The full-layout formatter calls through to
+    /// [`crate::write_human_compact`] when this is `true`.
+    pub compact: bool,
 }
 
 impl HumanOptions {
@@ -260,5 +300,21 @@ mod tests {
         );
         assert_eq!(GlyphSet::decide(true, Some("dumb")), GlyphSet::ASCII);
         assert_eq!(GlyphSet::decide(true, None), GlyphSet::ASCII);
+    }
+
+    #[test]
+    fn hyperlink_enabled_emits_osc8_sequence() {
+        let mut out = Vec::new();
+        write_hyperlink(&mut out, "https://example.com", "click", true).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        // ESC ] 8 ; ; URL ESC \ TEXT ESC ] 8 ; ; ESC \
+        assert_eq!(s, "\x1b]8;;https://example.com\x1b\\click\x1b]8;;\x1b\\");
+    }
+
+    #[test]
+    fn hyperlink_disabled_emits_plain_text() {
+        let mut out = Vec::new();
+        write_hyperlink(&mut out, "https://example.com", "click", false).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "click");
     }
 }

@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["check", "--compact", "--color=never", "."]
+status.code = 1

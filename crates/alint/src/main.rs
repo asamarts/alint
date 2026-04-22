@@ -19,6 +19,11 @@ use clap::{Parser, Subcommand};
     about = "Language-agnostic linter for repository structure, existence, naming, and content rules",
     long_about = None,
 )]
+// Several independent boolean flags are the natural shape of the
+// CLI surface — `--ascii`, `--compact`, `--fail-on-warning`,
+// `--no-gitignore`. Collapsing them into a state-machine enum
+// would obscure, not clarify.
+#[allow(clippy::struct_excessive_bools)]
 struct Cli {
     /// Path to a config file (repeatable; later overrides earlier).
     #[arg(long, short = 'c', global = true)]
@@ -53,6 +58,12 @@ struct Cli {
     /// Auto-enabled when `TERM=dumb`.
     #[arg(long, global = true)]
     ascii: bool,
+
+    /// Compact one-line-per-violation human output, suitable for
+    /// piping into editors / grep / `wc -l`. Format:
+    /// `path:line:col: level: rule-id: message`.
+    #[arg(long, global = true)]
+    compact: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -270,6 +281,7 @@ fn render_env(
         glyphs: GlyphSet::detect(cli.ascii),
         hyperlinks,
         width,
+        compact: cli.compact,
     };
     Ok((stream, opts))
 }

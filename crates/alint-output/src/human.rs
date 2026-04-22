@@ -19,13 +19,20 @@ use std::path::PathBuf;
 
 use alint_core::{FixReport, FixStatus, Level, Report, RuleResult, Violation};
 
-use crate::style::{self, GlyphSet, HumanOptions};
+use crate::style::{self, GlyphSet, HumanOptions, write_hyperlink};
 
 // ---------------------------------------------------------------
 // Check report
 // ---------------------------------------------------------------
 
 pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> std::io::Result<()> {
+    // Compact mode short-circuits the grouped layout entirely —
+    // its audience is pipes / editors / `wc -l`, not humans
+    // scanning output in a terminal.
+    if opts.compact {
+        return write_human_compact(report, w, &opts);
+    }
+
     // All-clean banner — green check + concise line, no summary
     // block. Nothing else to render.
     if report.failing_rules() == 0 {
@@ -71,7 +78,7 @@ pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> st
 
         for (result, violation) in items {
             writeln!(w)?;
-            write_violation(w, result, violation, &opts.glyphs)?;
+            write_violation(w, result, violation, &opts)?;
         }
     }
 
@@ -113,9 +120,9 @@ fn write_violation(
     w: &mut dyn Write,
     result: &RuleResult,
     violation: &Violation,
-    glyphs: &GlyphSet,
+    opts: &HumanOptions,
 ) -> std::io::Result<()> {
-    let (sigil, level_style, level_name) = level_presentation(result.level, glyphs);
+    let (sigil, level_style, level_name) = level_presentation(result.level, &opts.glyphs);
 
     let rule_style = style::RULE_ID;
     // First line: indent + sigil + level + rule_id + optional `fixable` tag.
@@ -159,10 +166,13 @@ fn write_violation(
 
     // Policy URL, if present. Printed once per violation to stay
     // near the relevant message (not once per rule as before —
-    // that hid the link below the list).
+    // that hid the link below the list). When the terminal
+    // supports OSC 8, we wrap the URL as a clickable hyperlink.
     if let Some(url) = &result.policy_url {
         let docs = style::DOCS;
-        writeln!(w, "{MSG_INDENT}{dim}docs:{dim:#} {docs}{url}{docs:#}")?;
+        write!(w, "{MSG_INDENT}{dim}docs:{dim:#} {docs}")?;
+        write_hyperlink(w, url, url, opts.hyperlinks)?;
+        writeln!(w, "{docs:#}")?;
     }
     Ok(())
 }
@@ -248,6 +258,117 @@ fn write_summary(w: &mut dyn Write, report: &Report, glyphs: &GlyphSet) -> std::
         )?;
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------
+// Compact renderer
+// ---------------------------------------------------------------
+
+/// One-line-per-violation rendering, `:`-separated so editor
+/// problem-matchers / `grep` / `wc -l` can consume it directly.
+///
+/// Format:
+///
+/// ```text
+/// <path>:<line>:<col>: <level>: <rule-id>: <message>[  [fixable]]
+/// ```
+///
+/// Path-less violations use the literal `<repo>` so every line
+/// parses uniformly. Missing line / col are rendered as `0`.
+/// Levels are color-tagged to aid visual scanning even in
+/// compact form; the `AutoStream` still strips SGR escapes when
+/// the sink isn't a TTY, so pipe-safe output is automatic.
+fn write_human_compact(
+    report: &Report,
+    w: &mut dyn Write,
+    opts: &HumanOptions,
+) -> std::io::Result<()> {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut infos = 0usize;
+    let mut fixable = 0usize;
+
+    for result in &report.results {
+        if result.passed() {
+            continue;
+        }
+        for v in &result.violations {
+            let path = v.path.as_ref().map_or_else(
+                || "<repo>".to_string(),
+                |p| p.display().to_string(),
+            );
+            let line = v.line.unwrap_or(0);
+            let col = v.column.unwrap_or(0);
+            let (level_style, level_name) = match result.level {
+                Level::Error => {
+                    errors += 1;
+                    (style::ERROR, "error")
+                }
+                Level::Warning => {
+                    warnings += 1;
+                    (style::WARNING, "warning")
+                }
+                Level::Info => {
+                    infos += 1;
+                    (style::INFO, "info")
+                }
+                Level::Off => (style::DIM, "off"), // filtered earlier; defensive
+            };
+            if result.is_fixable {
+                fixable += 1;
+            }
+
+            let rule_style = style::RULE_ID;
+            let fix_tag = if result.is_fixable {
+                let fix = style::FIXABLE;
+                format!("  {fix}[fixable]{fix:#}")
+            } else {
+                String::new()
+            };
+            writeln!(
+                w,
+                "{path}:{line}:{col}: {level_style}{level_name}{level_style:#}: {rule_style}{}{rule_style:#}: {}{fix_tag}",
+                result.rule_id, v.message,
+            )?;
+        }
+    }
+
+    // Trailing summary: one line, sentence-cased, no box. Stays
+    // at stderr-style density so `alint check --compact | wc -l`
+    // still counts only violations + summary (+1).
+    if errors == 0 && warnings == 0 && infos == 0 {
+        let s = style::SUCCESS;
+        writeln!(w, "{s}{} all rules passed.{s:#}", opts.glyphs.success)?;
+        return Ok(());
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if errors > 0 {
+        let s = style::ERROR;
+        parts.push(format!(
+            "{s}{errors} error{p}{s:#}",
+            p = if errors == 1 { "" } else { "s" }
+        ));
+    }
+    if warnings > 0 {
+        let s = style::WARNING;
+        parts.push(format!(
+            "{s}{warnings} warning{p}{s:#}",
+            p = if warnings == 1 { "" } else { "s" }
+        ));
+    }
+    if infos > 0 {
+        let s = style::INFO;
+        parts.push(format!("{s}{infos} info{s:#}"));
+    }
+    let mut line = parts.join(", ");
+    if fixable > 0 {
+        use std::fmt::Write as _;
+        let fix = style::FIXABLE;
+        write!(line, "; {fix}{fixable} auto-fixable{fix:#}").ok();
+    }
+    writeln!(w, "{line}.")?;
     Ok(())
 }
 
