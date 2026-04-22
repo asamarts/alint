@@ -193,6 +193,20 @@ Upload findings to GitHub Code Scanning:
     sarif_file: ${{ steps.alint.outputs.sarif-file }}
 ```
 
+### pre-commit
+
+Add to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/asamarts/alint
+    rev: v0.3.2
+    hooks:
+      - id: alint
+```
+
+The hook runs `alint check` against the repo's `.alint.yml`. For auto-fix, add `id: alint-fix` — it's registered under `stages: [manual]` so it only runs when invoked explicitly (`pre-commit run alint-fix`), since fixers mutate the tree.
+
 ## Docs
 
 - [**docs/rules.md**](docs/rules.md) — per-rule user reference, one entry per rule kind with a YAML example and fix-op cross-reference.

@@ -1,0 +1,24 @@
+- id: alint
+  name: alint
+  description: >-
+    Lint repository structure, filenames, and file content with alint.
+    Reads `.alint.yml` at the repo root; walks the tree honoring
+    `.gitignore`; reports violations. Non-mutating.
+  entry: alint check
+  language: rust
+  pass_filenames: false
+  always_run: true
+  types: [text]
+
+- id: alint-fix
+  name: alint (fix)
+  description: >-
+    Apply alint auto-fixes for violations whose rule declares a fix
+    strategy. Mutating — defaults to `stages: [manual]` so it runs
+    only when explicitly invoked via `pre-commit run alint-fix`.
+  entry: alint fix
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [manual]
+  types: [text]
