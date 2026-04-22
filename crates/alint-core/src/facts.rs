@@ -259,7 +259,15 @@ fn run_custom(spec: &CustomFact, root: &Path) -> String {
 /// enforce that only the user's top-level config can spawn
 /// processes; extended (local or remote) configs can't.
 pub fn reject_custom_facts(config: &crate::config::Config, source: &str) -> Result<()> {
-    for f in &config.facts {
+    reject_custom_facts_in(&config.facts, source)
+}
+
+/// Like [`reject_custom_facts`] but takes a bare facts slice —
+/// used by the DSL loader which does merge bookkeeping at the
+/// YAML layer before it has a full [`crate::config::Config`] to
+/// hand in.
+pub fn reject_custom_facts_in(facts: &[FactSpec], source: &str) -> Result<()> {
+    for f in facts {
         if matches!(f.kind, FactKind::Custom { .. }) {
             return Err(Error::Other(format!(
                 "fact {:?}: `custom:` facts are only allowed in the user's top-level \

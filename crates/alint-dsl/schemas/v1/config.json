@@ -14,7 +14,7 @@
     "extends": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Other config files this one inherits from. Local paths (relative to the current file or absolute) are resolved; HTTPS URLs are reserved for a future version. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends."
+      "description": "Configs to inherit from. Three source kinds are accepted:\n  • Local paths (relative to the current file, or absolute): `./base.yml`, `../shared/team.yml`, `/etc/alint/global.yml`.\n  • HTTPS URLs with required SHA-256 SRI: `https://raw.githubusercontent.com/org/repo/v1/rules.yml#sha256-<64-hex>`. Plain `http://` is rejected; SRI is non-negotiable.\n  • Bundled rulesets: `alint://bundled/<name>@<rev>`. Currently shipped: `oss-baseline@v1`, `rust@v1`, `node@v1`, `monorepo@v1`. Offline-resolved (no network, no cache).\n\nEntries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends.\n\n**Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it.\n\nRemote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead."
     },
     "ignore": {
       "type": "array",

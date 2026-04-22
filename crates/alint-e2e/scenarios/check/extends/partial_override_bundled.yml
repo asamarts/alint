@@ -1,0 +1,34 @@
+name: partial override of a bundled ruleset rule
+tags: [check, extends, composition, bundled, passing]
+
+# The most common real-world use: extend a bundled ruleset, then
+# tweak one of its rules without re-stating the whole thing.
+# Before field-level override, this required copy-pasting the
+# rule's kind + paths + message + policy_url from the bundled
+# source.
+
+given:
+  tree:
+    # A tree that the oss-baseline would normally flag at
+    # info level for missing SECURITY.md. The partial override
+    # below disables that single rule.
+    README.md: "# demo\n"
+    LICENSE: "MIT\n"
+
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/oss-baseline@v1
+    rules:
+      # Opt out of one bundled rule without touching the others.
+      - id: oss-security-policy-exists
+        level: off
+      - id: oss-code-of-conduct-exists
+        level: off
+      - id: oss-gitignore-exists
+        level: off
+
+when: [check]
+
+expect:
+  - violations: []

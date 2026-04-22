@@ -1,5 +1,28 @@
 //! YAML front-end for alint. Reads a `.alint.yml` and returns a
 //! [`alint_core::Config`] that the engine can instantiate.
+//!
+//! ## Composition model
+//!
+//! `extends:` resolution happens at the YAML-`Value` layer, not
+//! the typed-`Config` layer. Each `.alint.yml` (local, HTTPS,
+//! bundled) is parsed into a [`RawConfig`] that keeps each rule
+//! as a `serde_yaml_ng::Mapping` rather than a [`RuleSpec`]. This
+//! lets children in the extends chain specify only the fields
+//! they want to override — e.g.,
+//!
+//! ```yaml
+//! extends: [./base.yml]
+//! rules:
+//!   - id: inherited-rule   # only id + level; kind/paths/etc
+//!     level: off           # inherit from base.yml
+//! ```
+//!
+//! Merge semantics for rules: group by `id` (insertion-preserving
+//! across sources), merge the mapping fields last-wins. After all
+//! extends resolve, each merged mapping is deserialized once into
+//! a [`RuleSpec`] — validation (`kind` required, `level` required,
+//! kind-specific fields valid) fires there, so a rule that never
+//! gets a `kind` assigned anywhere in its chain is a clean error.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +30,9 @@ use std::path::{Path, PathBuf};
 pub mod bundled;
 pub mod extends;
 
-use alint_core::{Config, Error, FactSpec, Result, RuleSpec};
+use alint_core::{Config, Error, FactSpec, Result};
+use serde::Deserialize;
+use serde_yaml_ng::Mapping;
 
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
@@ -48,9 +73,78 @@ pub fn load(path: &Path) -> Result<Config> {
 /// fetcher.
 pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     let mut visiting = std::collections::HashSet::new();
-    let merged = load_recursive(path, &mut visiting, opts)?;
+    let raw = load_recursive(path, &mut visiting, opts)?;
+    let merged = raw.finalize()?;
     validate(&merged)?;
     Ok(merged)
+}
+
+/// Intermediate form used during `extends:` resolution. Identical
+/// to [`Config`] except that rules are kept as raw
+/// `serde_yaml_ng::Mapping`s so overrides can merge per-field
+/// instead of per-rule. See the module-level docs for the full
+/// composition model.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    extends: Vec<String>,
+    #[serde(default)]
+    ignore: Vec<String>,
+    #[serde(default = "default_respect_gitignore")]
+    respect_gitignore: bool,
+    #[serde(default)]
+    vars: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    facts: Vec<FactSpec>,
+    #[serde(default)]
+    rules: Vec<Mapping>,
+    #[serde(default = "default_fix_size_limit")]
+    fix_size_limit: Option<u64>,
+}
+
+fn default_respect_gitignore() -> bool {
+    true
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn default_fix_size_limit() -> Option<u64> {
+    Some(1 << 20)
+}
+
+impl RawConfig {
+    /// Deserialize each rule mapping into a [`RuleSpec`]. This is
+    /// where kind-specific validation fires: a rule that never
+    /// received a `kind` anywhere in its extends chain produces a
+    /// serde error here, referencing the offending rule's id.
+    fn finalize(self) -> Result<Config> {
+        let mut rules = Vec::with_capacity(self.rules.len());
+        for m in self.rules {
+            // Extract the id first so a deserialization error can
+            // name the offending rule.
+            let id_hint = m
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+            let spec: alint_core::RuleSpec =
+                serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(m)).map_err(|e| {
+                    Error::rule_config(&id_hint, format!("could not deserialize merged rule: {e}"))
+                })?;
+            rules.push(spec);
+        }
+        Ok(Config {
+            version: self.version,
+            extends: Vec::new(),
+            ignore: self.ignore,
+            respect_gitignore: self.respect_gitignore,
+            vars: self.vars,
+            facts: self.facts,
+            rules,
+            fix_size_limit: self.fix_size_limit,
+        })
+    }
 }
 
 /// Configuration for `load_with`.
@@ -98,12 +192,14 @@ pub fn parse(yaml: &str) -> Result<Config> {
 /// Recursively load `path`, resolving its `extends:` chain
 /// left-to-right. Later entries in the chain override earlier
 /// ones; the current file's own definitions override everything
-/// it extends.
+/// it extends. Rules are field-merged at the YAML-Mapping layer
+/// so children can override individual fields without re-stating
+/// the entire rule.
 fn load_recursive(
     path: &Path,
     visiting: &mut std::collections::HashSet<PathBuf>,
     opts: &LoadOptions,
-) -> Result<Config> {
+) -> Result<RawConfig> {
     let canonical = path.canonicalize().map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,
@@ -119,7 +215,7 @@ fn load_recursive(
         path: canonical.clone(),
         source,
     })?;
-    let mut config: Config = serde_yaml_ng::from_str(&contents)?;
+    let mut config: RawConfig = serde_yaml_ng::from_str(&contents)?;
 
     let extends = std::mem::take(&mut config.extends);
     if extends.is_empty() {
@@ -131,9 +227,9 @@ fn load_recursive(
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 
-    let mut merged = Config {
+    let mut merged = RawConfig {
         version: config.version,
-        ..Config::default()
+        ..RawConfig::default()
     };
     for entry in &extends {
         let parent = if entry.starts_with("http://") {
@@ -152,7 +248,7 @@ fn load_recursive(
         // Extended configs cannot introduce `custom:` facts —
         // those would spawn arbitrary processes on behalf of a
         // ruleset whose code the user didn't write.
-        alint_core::facts::reject_custom_facts(&parent, entry)?;
+        alint_core::facts::reject_custom_facts_in(&parent.facts, entry)?;
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
@@ -164,7 +260,7 @@ fn load_remote(
     entry: &str,
     opts: &LoadOptions,
     visiting: &mut std::collections::HashSet<PathBuf>,
-) -> Result<Config> {
+) -> Result<RawConfig> {
     let (url, sri) = extends::split_url_and_sri(entry).map_err(|e| Error::Other(e.to_string()))?;
     let Some(sri) = sri else {
         return Err(Error::Other(format!(
@@ -187,7 +283,7 @@ fn load_remote(
     // nested extends in a remote body to dodge that ambiguity.
     // When we lift this restriction, the base for relative
     // resolution needs a deliberate decision.
-    let config: Config = serde_yaml_ng::from_str(
+    let config: RawConfig = serde_yaml_ng::from_str(
         std::str::from_utf8(&body)
             .map_err(|e| Error::Other(format!("remote body from {url} is not UTF-8: {e}")))?,
     )?;
@@ -210,7 +306,7 @@ fn load_remote(
 /// Load an `alint://bundled/<name>@<rev>` ruleset from the
 /// in-binary registry. Bundled rulesets can't themselves extend
 /// anything — they're static, leaf-only fragments.
-fn load_bundled(spec: &str) -> Result<Config> {
+fn load_bundled(spec: &str) -> Result<RawConfig> {
     let body = bundled::resolve(spec).ok_or_else(|| {
         let shipped: Vec<String> = bundled::catalog()
             .map(|(n, r)| format!("alint://bundled/{n}@{r}"))
@@ -222,7 +318,7 @@ fn load_bundled(spec: &str) -> Result<Config> {
         ))
     })?;
 
-    let config: Config = serde_yaml_ng::from_str(body).map_err(|e| {
+    let config: RawConfig = serde_yaml_ng::from_str(body).map_err(|e| {
         Error::Other(format!(
             "built-in ruleset '{spec}' failed to parse: {e}; \
              this is a bug in alint — please file an issue"
@@ -249,21 +345,29 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
 /// Merge `b` into `a`, with `b` winning on conflicts.
 ///
 /// Semantics:
-/// - `rules` and `facts` dedupe by id; `b`'s entry wins for any
-///   duplicate. Ordering: `a`'s entries first (in order), then
-///   `b`'s entries, minus duplicates.
+/// - `rules` dedupe by id; rule mappings are **field-merged**,
+///   not replaced — `b`'s keys override `a`'s keys individually.
+///   So a child that specifies `{id: X, level: off}` over a
+///   parent `{id: X, kind: file_exists, paths: README.md, level:
+///   error}` yields a merged rule with kind + paths still set
+///   and level overridden. Ordering: `a`'s entries first (in
+///   order they first appear), then `b`'s new entries.
+/// - `facts` dedupe by id; `b`'s entry replaces `a`'s wholesale
+///   (fact kinds are a discriminated union — field-merging
+///   `any_file_exists` with `all_files_exist` would produce an
+///   invalid fact).
 /// - `vars` merged as a map; `b`'s values override.
 /// - `ignore` concatenated `a` then `b`.
-/// - `respect_gitignore` takes `b`'s value (it has a default, so
-///   there's no way to tell "unset" from "false"; document this).
+/// - `respect_gitignore` takes `b`'s value (its default hides
+///   "unset"; known v0.2 limitation).
 /// - `version` takes `b`'s value.
-/// - `extends` is always left empty on the merged result; resolved
-///   already.
-fn merge(a: Config, b: Config) -> Config {
+/// - `fix_size_limit` takes `b`'s value (same "default hides
+///   unset" caveat as `respect_gitignore`).
+/// - `extends` is always left empty on the merged result;
+///   resolved already.
+fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let version = b.version;
     let respect_gitignore = b.respect_gitignore;
-    // fix_size_limit: child wins, same as respect_gitignore.
-    // Can't distinguish "unset" from the default here either.
     let fix_size_limit = b.fix_size_limit;
 
     let mut ignore = a.ignore;
@@ -286,21 +390,41 @@ fn merge(a: Config, b: Config) -> Config {
         .map(|id| facts_by_id.remove(&id).unwrap())
         .collect();
 
-    let mut rules_by_id: std::collections::BTreeMap<String, RuleSpec> =
+    // Rules: field-merge mappings by id. Rules without an id key
+    // can't participate in merge and are passed through unchanged
+    // (the final `finalize` step will reject them — RuleSpec
+    // requires `id`).
+    let mut rules_by_id: std::collections::BTreeMap<String, Mapping> =
         std::collections::BTreeMap::new();
     let mut rule_order: Vec<String> = Vec::new();
-    for r in a.rules.into_iter().chain(b.rules) {
-        if !rules_by_id.contains_key(&r.id) {
-            rule_order.push(r.id.clone());
+    let mut orphans: Vec<Mapping> = Vec::new();
+    for m in a.rules.into_iter().chain(b.rules) {
+        let Some(id) = m.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+            orphans.push(m);
+            continue;
+        };
+        if let Some(existing) = rules_by_id.get_mut(&id) {
+            // Field-merge: b's keys overwrite a's at the top
+            // level of the rule mapping. Nested structures (e.g.
+            // a `fix:` block or `paths:` include/exclude pair)
+            // are replaced wholesale, which matches user
+            // expectation — overriding `fix.file_create.content`
+            // alone would be too surprising.
+            for (k, v) in m {
+                existing.insert(k, v);
+            }
+        } else {
+            rule_order.push(id.clone());
+            rules_by_id.insert(id, m);
         }
-        rules_by_id.insert(r.id.clone(), r);
     }
-    let rules: Vec<RuleSpec> = rule_order
+    let mut rules: Vec<Mapping> = rule_order
         .into_iter()
         .map(|id| rules_by_id.remove(&id).unwrap())
         .collect();
+    rules.extend(orphans);
 
-    Config {
+    RawConfig {
         version,
         extends: Vec::new(),
         ignore,

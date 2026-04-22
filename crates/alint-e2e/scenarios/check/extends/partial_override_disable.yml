@@ -1,0 +1,33 @@
+name: "disable inherited rule with just id + level off"
+tags: [check, extends, composition, passing]
+
+# The canonical "I want this bundled/extended rule off" idiom:
+# child re-states the id and sets level: off. No need to
+# re-declare kind or paths.
+
+given:
+  tree:
+    base.yml: |
+      version: 1
+      rules:
+        - id: no-bak
+          kind: file_absent
+          paths: "**/*.bak"
+          level: error
+
+    # Would fail the inherited rule if it were active.
+    stale.bak: ""
+
+  config: |
+    version: 1
+    extends: [./base.yml]
+    rules:
+      - id: no-bak
+        level: off
+
+when: [check]
+
+expect:
+  # The rule is disabled, so no violations despite stale.bak
+  # being present.
+  - violations: []

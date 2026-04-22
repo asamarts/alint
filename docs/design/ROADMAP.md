@@ -74,13 +74,50 @@ YAML.
 
 ## v0.5 — Structured content + plugins v1 + distribution breadth
 
-Rolled forward from the original v0.4 scope.
+Rolled forward from the original v0.4 scope, plus a Composition
+& reuse subsection for the gaps surfaced in the v0.4.2 audit.
+
+### Composition & reuse
+
+A coherent sub-theme on making `.alint.yml` shareable,
+overridable, and monorepo-friendly. Ranked by leverage ÷ effort.
+
+- 🏗 **Field-level rule override.** Let children in the
+  `extends:` chain specify only the fields they change
+  (`rules: - {id: X, level: off}`); kind/paths/etc inherit
+  from the earliest ancestor that declares them. Eliminates
+  the current requirement to re-declare the full rule just to
+  tweak `level`. *(in progress)*
+- 🏗 **Refresh `extends:` schema docs.** Mention SRI syntax,
+  `alint://bundled/` URLs, merge semantics, and the `level:
+  off` disable idiom. The current schema description is stale
+  (says HTTPS is "reserved for a future version"). *(in
+  progress)*
+- ⏳ **Nested `.alint.yml` discovery for monorepos.** Walk from
+  repo root down to each linted file; stack configs per
+  directory so `packages/frontend/.alint.yml` can layer on top
+  of the root config. Rules scope to the subtree where they're
+  declared.
+- ⏳ **Rule templates / parameterized rules.** Define a rule
+  shape once, instantiate N times with different arguments.
+  Example: "every `{{dir}}` has `{{file}}`" instantiated for
+  README, LICENSE, package.json. Reuses existing `{{vars.*}}`
+  machinery, extended to rule option fields.
+- ⏳ **Selective bundled adoption.** Syntax for "extend this
+  ruleset but only these rules" (`only: [...]`) or "extend but
+  drop these" (`except: [...]`). Fixes the current
+  all-or-nothing limitation on bundled rulesets.
+- ⏳ **`.alint.d/*.yml` drop-ins.** Auto-discover and merge YAML
+  files in a `.alint.d/` directory alphabetically, same merge
+  semantics as `extends`. Ops convention for layered team
+  configs.
+
+### Other scope
 
 - ⏳ Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
 - ⏳ Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
 - ⏳ Output formats: `markdown`, `junit`, `gitlab`.
 - ⏳ `alint facts` subcommand (for debugging `when` clauses).
-- ⏳ Opt-in nested `.alint.yml` discovery for monorepos.
 - ⏳ `command` plugin kind.
 - ⏳ npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).
 - ⏳ Git-aware primitives: `git_tracked_only`, `git_no_denied_paths`, `git_commit_message`.

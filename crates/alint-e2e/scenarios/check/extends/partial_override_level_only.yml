@@ -1,0 +1,43 @@
+name: child overrides only level; kind/paths inherit via field-merge
+tags: [check, extends, composition]
+
+# The key difference from `local_override_wins` is that the child
+# does NOT re-declare `kind` or `paths` — just the `id` and the
+# fields it wants to change. Kind/paths come from the parent via
+# field-level merge.
+
+given:
+  tree:
+    base.yml: |
+      version: 1
+      rules:
+        - id: no-bak
+          kind: file_absent
+          paths: "**/*.bak"
+          level: error
+        - id: no-swap
+          kind: file_absent
+          paths: "**/*.swp"
+          level: error
+
+    stale.bak: ""
+    stale.swp: ""
+
+  config: |
+    version: 1
+    extends: [./base.yml]
+    rules:
+      # Partial override: keep kind + paths from parent, just change level.
+      - id: no-bak
+        level: warning
+
+      # Partial override: kind + paths from parent, message added.
+      - id: no-swap
+        message: "Editor swap files should not be committed (custom message)."
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-bak, level: warning, path: stale.bak}
+      - {rule: no-swap, level: error, path: stale.swp}
