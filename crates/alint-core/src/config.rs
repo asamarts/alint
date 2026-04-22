@@ -44,6 +44,19 @@ pub struct Config {
     /// `file_rename`) ignore the cap — they don't read content.
     #[serde(default = "default_fix_size_limit")]
     pub fix_size_limit: Option<u64>,
+    /// Opt in to discovery of `.alint.yml` / `.alint.yaml` files
+    /// in subdirectories. When `true`, the loader walks the
+    /// repository tree (from the root config's directory,
+    /// respecting `.gitignore` and `ignore:`) and finds any
+    /// nested config files; each nested rule's path-like fields
+    /// (`paths`, `select`, `primary`) are prefixed with the
+    /// directory that nested config lives in, so the rule
+    /// auto-scopes to that subtree. Default `false`.
+    ///
+    /// Only the user's top-level config may set this — nested
+    /// configs themselves cannot spawn further nested discovery.
+    #[serde(default)]
+    pub nested_configs: bool,
 }
 
 // Returning `Option<u64>` (rather than bare `u64`) keeps the

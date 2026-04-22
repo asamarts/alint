@@ -1,0 +1,48 @@
+name: nested .alint.yml auto-scopes rules to its subtree
+tags: [check, nested, composition]
+
+# Two package subdirs each contribute their own rule. Each rule
+# should only fire on files inside its own package.
+
+given:
+  tree:
+    packages:
+      frontend:
+        ".alint.yml": |
+          version: 1
+          rules:
+            - id: frontend-ts-final-newline
+              kind: final_newline
+              paths: "**/*.ts"
+              level: warning
+        src:
+          # No trailing newline — should trip the frontend rule only.
+          "index.ts": "export const x = 1;"
+      backend:
+        ".alint.yml": |
+          version: 1
+          rules:
+            - id: backend-rs-snake-case
+              kind: filename_case
+              paths: "src/**/*.rs"
+              case: snake
+              level: error
+        src:
+          # PascalCase — should trip the backend rule only.
+          "BadName.rs": "fn main() {}\n"
+  config: |
+    version: 1
+    nested_configs: true
+
+when: [check]
+
+expect:
+  # Each nested rule fires only within its own subtree. If
+  # cross-contamination leaked in we'd see the frontend rule
+  # hit BadName.rs (it isn't a .ts file), or the backend rule
+  # hit index.ts (it's .ts, not .rs). Strict path filtering
+  # rules those out, but the scope-prefix is the load-bearing
+  # piece this scenario proves.
+  - violations:
+      - {rule: frontend-ts-final-newline, level: warning, path: packages/frontend/src/index.ts}
+      - {rule: backend-rs-snake-case, level: error, path: packages/backend/src/BadName.rs}

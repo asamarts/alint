@@ -541,6 +541,7 @@ mod tests {
             facts,
             rules: Vec::new(),
             fix_size_limit: None,
+            nested_configs: false,
         };
         let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
         assert!(err.to_string().contains("custom"), "{err}");
@@ -559,6 +560,7 @@ mod tests {
             facts,
             rules: Vec::new(),
             fix_size_limit: None,
+            nested_configs: false,
         };
         assert!(reject_custom_facts(&config, "./base.yml").is_ok());
     }

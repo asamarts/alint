@@ -46,6 +46,11 @@
       "minimum": 0,
       "default": 1048576,
       "description": "Max bytes a content-editing fix will touch. Files over this limit are reported as Skipped with a stderr warning. Default: 1 MiB. Explicit null disables the cap. Path-only fixes (file_create, file_remove, file_rename) ignore this setting."
+    },
+    "nested_configs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt in to discovery of nested `.alint.yml` / `.alint.yaml` files in subdirectories. When true, the loader walks the tree from this config's directory (honoring `.gitignore` + `ignore`) and finds any nested config files. Each nested rule's path-like scope fields (`paths`, `select`, `primary`) are automatically prefixed with the nested config's relative directory, so rules declared in `packages/frontend/.alint.yml` apply only under `packages/frontend/**`. Id collisions across configs are rejected with a clear error — per-subtree overrides aren't supported in this release (use `when:` on the root rule for that). Only the root config sets this; nested configs can't spawn further nested discovery."
     }
   },
 

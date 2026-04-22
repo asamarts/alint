@@ -82,22 +82,20 @@ Rolled forward from the original v0.4 scope, plus a Composition
 A coherent sub-theme on making `.alint.yml` shareable,
 overridable, and monorepo-friendly. Ranked by leverage ÷ effort.
 
-- 🏗 **Field-level rule override.** Let children in the
-  `extends:` chain specify only the fields they change
+- ✅ **Field-level rule override.** Children in the `extends:`
+  chain can specify only the fields they change
   (`rules: - {id: X, level: off}`); kind/paths/etc inherit
-  from the earliest ancestor that declares them. Eliminates
-  the current requirement to re-declare the full rule just to
-  tweak `level`. *(in progress)*
-- 🏗 **Refresh `extends:` schema docs.** Mention SRI syntax,
+  from the earliest ancestor that declares them. Shipped
+  2026-04-22 (commit `261dda5`).
+- ✅ **Refreshed `extends:` schema docs.** Mention SRI syntax,
   `alint://bundled/` URLs, merge semantics, and the `level:
-  off` disable idiom. The current schema description is stale
-  (says HTTPS is "reserved for a future version"). *(in
-  progress)*
-- ⏳ **Nested `.alint.yml` discovery for monorepos.** Walk from
-  repo root down to each linted file; stack configs per
-  directory so `packages/frontend/.alint.yml` can layer on top
-  of the root config. Rules scope to the subtree where they're
-  declared.
+  off` disable idiom. Shipped 2026-04-22 (commit `261dda5`).
+- ✅ **Nested `.alint.yml` discovery for monorepos.** Opt-in
+  via `nested_configs: true` on the root config. Each nested
+  rule's path-like scope fields (`paths`, `select`, `primary`)
+  auto-prefix with the config's relative directory. Cross-
+  subtree id collisions are rejected for MVP. Shipped
+  2026-04-22.
 - ⏳ **Rule templates / parameterized rules.** Define a rule
   shape once, instantiate N times with different arguments.
   Example: "every `{{dir}}` has `{{file}}`" instantiated for

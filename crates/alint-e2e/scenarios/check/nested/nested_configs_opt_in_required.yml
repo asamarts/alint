@@ -1,0 +1,31 @@
+name: nested configs are ignored when nested_configs flag is false
+tags: [check, nested, composition, passing]
+
+# Same tree as the happy-path scenario, but the root config
+# omits `nested_configs: true`. Expected: the nested
+# `packages/foo/.alint.yml` is silently ignored; no rules from
+# it fire.
+
+given:
+  tree:
+    packages:
+      foo:
+        ".alint.yml": |
+          version: 1
+          rules:
+            - id: foo-would-flag-this
+              kind: file_absent
+              paths: "**/*.ts"
+              level: error
+        src:
+          "index.ts": "export const x = 1;\n"
+  config: |
+    version: 1
+    # nested_configs omitted → defaults to false
+
+when: [check]
+
+expect:
+  # The nested rule would have flagged index.ts if nested
+  # discovery were on. It isn't, so nothing fires.
+  - violations: []
