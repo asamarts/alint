@@ -55,6 +55,9 @@ trycmd = "0.15"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 sha2 = "0.10"
 directories = "6"
+anstyle = "1"
+anstream = "0.6"
+supports-hyperlinks = "3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

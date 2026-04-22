@@ -21,9 +21,11 @@ alint-core.workspace = true
 alint-dsl.workspace = true
 alint-rules.workspace = true
 alint-output.workspace = true
+anstream.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 miette.workspace = true
+supports-hyperlinks.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

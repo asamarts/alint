@@ -3,12 +3,12 @@
 //! See `docs/design/ARCHITECTURE.md` for the rule model, DSL, and execution
 //! model. User-facing docs are in the root `README.md`.
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use alint_core::{Engine, RuleRegistry, WalkOptions, walk};
-use alint_output::Format;
+use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
@@ -35,6 +35,24 @@ struct Cli {
     /// Treat warnings as errors for exit-code purposes.
     #[arg(long, global = true)]
     fail_on_warning: bool,
+
+    /// When to emit ANSI color codes in human output. `auto` (the
+    /// default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`.
+    /// Only affects the `human` format; `json` / `sarif` / `github`
+    /// are always plain bytes.
+    #[arg(
+        long,
+        global = true,
+        value_name = "WHEN",
+        default_value = "auto",
+        value_parser = clap::builder::PossibleValuesParser::new(["auto", "always", "never"]),
+    )]
+    color: String,
+
+    /// Force ASCII glyphs in human output (e.g. `x` instead of `✗`).
+    /// Auto-enabled when `TERM=dumb`.
+    #[arg(long, global = true)]
+    ascii: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -119,9 +137,10 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
     let report = engine.run(path, &index).context("running rules")?;
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-    format.write(&report, &mut out).context("writing output")?;
+    let (mut out, opts) = render_env(cli)?;
+    format
+        .write_with_options(&report, &mut out, opts)
+        .context("writing output")?;
     out.flush().ok();
 
     tracing::debug!(rules = rule_count, "done");
@@ -157,10 +176,9 @@ fn cmd_fix(path: &Path, dry_run: bool, cli: &Cli) -> Result<ExitCode> {
         .context("applying fixes")?;
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
+    let (mut out, opts) = render_env(cli)?;
     format
-        .write_fix(&report, &mut out)
+        .write_fix_with_options(&report, &mut out, opts)
         .context("writing output")?;
     out.flush().ok();
 
@@ -212,6 +230,38 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     }
     println!("debug:      {rule:?}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// Build the stdout writer + human-format options from the
+/// user's `--color` / `--ascii` flags.
+///
+/// The returned writer is an `anstream::AutoStream` that strips
+/// ANSI SGR codes automatically when the underlying stream isn't
+/// a TTY (or when `NO_COLOR` is set, or when `--color=never` was
+/// passed). Formatters can therefore emit styled output
+/// unconditionally.
+fn render_env(
+    cli: &Cli,
+) -> Result<(
+    anstream::AutoStream<std::io::StdoutLock<'static>>,
+    HumanOptions,
+)> {
+    let choice: ColorChoice = cli.color.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    let stdout = io::stdout();
+    let is_tty = stdout.is_terminal();
+    let lock = stdout.lock();
+    let stream = anstream::AutoStream::new(lock, choice.to_anstream());
+
+    // Hyperlink detection needs a TTY to matter; piped output that
+    // happens to survive (because `--color=always`) still won't be
+    // rendered as a link by anything downstream.
+    let hyperlinks = is_tty && supports_hyperlinks::on(supports_hyperlinks::Stream::Stdout);
+
+    let opts = HumanOptions {
+        glyphs: GlyphSet::detect(cli.ascii),
+        hyperlinks,
+    };
+    Ok((stream, opts))
 }
 
 struct LoadedConfig {

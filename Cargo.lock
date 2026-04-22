@@ -48,9 +48,11 @@ dependencies = [
  "alint-dsl",
  "alint-output",
  "alint-rules",
+ "anstream 0.6.21",
  "anyhow",
  "clap",
  "miette",
+ "supports-hyperlinks",
  "tracing",
  "tracing-subscriber",
  "trycmd",
@@ -122,6 +124,8 @@ name = "alint-output"
 version = "0.4.1"
 dependencies = [
  "alint-core",
+ "anstream 0.6.21",
+ "anstyle",
  "serde",
  "serde_json",
 ]

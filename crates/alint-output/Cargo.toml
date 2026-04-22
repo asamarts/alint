@@ -14,6 +14,8 @@ authors.workspace = true
 alint-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+anstyle.workspace = true
+anstream.workspace = true
 
 [lints]
 workspace = true

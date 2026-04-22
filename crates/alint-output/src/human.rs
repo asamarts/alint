@@ -2,7 +2,14 @@ use std::io::Write;
 
 use alint_core::{FixReport, FixStatus, Level, Report};
 
-pub fn write_human(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
+use crate::style::{self, HumanOptions};
+
+pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> std::io::Result<()> {
+    // Unused for now — Phase 2 will consume the glyph set when the
+    // renderer gets grouped/aligned. Accepted at the signature so
+    // the CLI→formatter wiring is in place from Phase 1.
+    let _ = opts;
+
     let mut any = false;
     for result in &report.results {
         if result.passed() {
@@ -27,17 +34,29 @@ pub fn write_human(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     let passing = report.passing_rules();
     let total = report.total_violations();
     if any {
+        // Minimal Phase 1 styling: color the failing/passing counts.
+        // Phase 2 will rebuild the whole summary; for now this is
+        // just a smoke test that colors survive the AutoStream.
+        let err_style = style::ERROR;
+        let pass_style = style::SUCCESS;
         writeln!(
             w,
-            "\n{failing} rule(s) failing, {passing} passing, {total} violation(s)."
+            "\n{err_style}{failing} rule(s) failing{err_style:#}, \
+             {pass_style}{passing} passing{pass_style:#}, {total} violation(s).",
         )?;
     } else {
-        writeln!(w, "All {passing} rule(s) passed.")?;
+        let ok_style = style::SUCCESS;
+        writeln!(w, "{ok_style}All {passing} rule(s) passed.{ok_style:#}")?;
     }
     Ok(())
 }
 
-pub fn write_fix_human(report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
+pub fn write_fix_human(
+    report: &FixReport,
+    w: &mut dyn Write,
+    opts: HumanOptions,
+) -> std::io::Result<()> {
+    let _ = opts;
     for rule in &report.results {
         let sigil = level_sigil(rule.level);
         writeln!(w, "{sigil}[{}]:", rule.rule_id)?;
