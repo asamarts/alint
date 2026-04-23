@@ -38,6 +38,28 @@ rules:
     message: "An open-source repo should declare a license at the root."
     policy_url: "https://opensource.guide/legal/#which-open-source-license-is-appropriate-for-my-project"
 
+  - id: oss-license-non-empty
+    # A zero-byte LICENSE passes `oss-license-exists` while
+    # providing zero legal guidance. 200 bytes is a safely
+    # permissive floor — the shortest common OSS license
+    # (MIT) runs about 1 KiB once you include the copyright
+    # notice.
+    kind: file_min_size
+    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENSE-APACHE", "LICENSE-MIT", "COPYING"]
+    min_bytes: 200
+    level: info
+    message: "LICENSE file is suspiciously short; paste the full license text rather than a stub."
+
+  - id: oss-readme-non-stub
+    # Catches the classic "# Project\n\nTODO\n" README. Three
+    # lines is intentionally gentle — passes for most real
+    # READMEs without nagging early-stage repos.
+    kind: file_min_lines
+    paths: ["README.md", "README", "README.rst"]
+    min_lines: 3
+    level: info
+    message: "README is very short; add a brief description and at least a usage / install section."
+
   - id: oss-security-policy-exists
     kind: file_exists
     paths: ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]

@@ -1,0 +1,25 @@
+name: file_min_lines passes when files clear the line floor
+tags: [check, file_min_lines, metadata, passing]
+
+given:
+  tree:
+    # Five lines, with or without a trailing newline both count.
+    README.md: |
+      # Demo
+
+      A description.
+      Install: `cargo install foo`.
+      Run: `foo`.
+  config: |
+    version: 1
+    rules:
+      - id: min-4-lines
+        kind: file_min_lines
+        paths: "**/*.md"
+        min_lines: 4
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

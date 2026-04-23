@@ -1,0 +1,20 @@
+name: file_min_size passes when every in-scope file clears the floor
+tags: [check, file_min_size, metadata, passing]
+
+given:
+  tree:
+    # Well above the 10-byte floor.
+    README.md: "# demo\n\nA short but non-stub README.\n"
+  config: |
+    version: 1
+    rules:
+      - id: min-10
+        kind: file_min_size
+        paths: "**/*.md"
+        min_bytes: 10
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

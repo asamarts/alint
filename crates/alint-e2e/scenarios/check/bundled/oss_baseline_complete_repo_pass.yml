@@ -3,8 +3,24 @@ tags: [check, extends, bundled, oss-baseline, passing]
 
 given:
   tree:
-    README.md: "# demo\n"
-    LICENSE: "MIT License\n\nCopyright 2026.\n"
+    # Non-stub README — clears the `oss-readme-non-stub` floor
+    # of 3 lines.
+    README.md: |
+      # demo
+
+      A brief description of the demo project.
+      Install: `cargo install demo`.
+    # Non-empty LICENSE — clears the 200-byte floor; this is
+    # approximately the top of the MIT License text.
+    LICENSE: |
+      MIT License
+
+      Copyright (c) 2026 demo contributors.
+
+      Permission is hereby granted, free of charge, to any
+      person obtaining a copy of this software and associated
+      documentation files (the "Software"), to deal in the
+      Software without restriction...
     SECURITY.md: "# Security Policy\n\nReport vulnerabilities to security@example.com.\n"
     CODE_OF_CONDUCT.md: "# Code of Conduct\n\nBe kind.\n"
     .gitignore: "target/\n"

@@ -341,6 +341,8 @@
         { "$ref": "#/$defs/rule_file_content_forbidden" },
         { "$ref": "#/$defs/rule_file_header" },
         { "$ref": "#/$defs/rule_file_max_size" },
+        { "$ref": "#/$defs/rule_file_min_size" },
+        { "$ref": "#/$defs/rule_file_min_lines" },
         { "$ref": "#/$defs/rule_file_is_text" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
@@ -487,6 +489,36 @@
           "type": "integer",
           "minimum": 0,
           "description": "Maximum allowed file size in bytes."
+        }
+      }
+    },
+
+    "rule_file_min_size": {
+      "description": "Files in scope must be at least `min_bytes` bytes. Catches placeholder / stub files that pass existence checks but contain no useful content (e.g. a 20-byte README).",
+      "type": "object",
+      "required": ["paths", "min_bytes"],
+      "properties": {
+        "kind": { "enum": ["file_min_size", "min_size"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "min_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum allowed file size in bytes."
+        }
+      }
+    },
+
+    "rule_file_min_lines": {
+      "description": "Files in scope must have at least `min_lines` lines (where a line is `\\n`-terminated, with an unterminated trailing segment counting as one more, matching `wc -l` semantics). Common use: require README / CHANGELOG / SECURITY.md to be more than a title plus one sentence.",
+      "type": "object",
+      "required": ["paths", "min_lines"],
+      "properties": {
+        "kind": { "enum": ["file_min_lines", "min_lines"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "min_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum allowed line count."
         }
       }
     },

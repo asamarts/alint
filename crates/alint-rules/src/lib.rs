@@ -23,6 +23,8 @@ pub mod file_header;
 pub mod file_is_ascii;
 pub mod file_is_text;
 pub mod file_max_size;
+pub mod file_min_lines;
+pub mod file_min_size;
 pub mod file_starts_with;
 pub mod filename_case;
 pub mod filename_regex;
@@ -73,6 +75,10 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("header", file_header::build);
     registry.register("file_max_size", file_max_size::build);
     registry.register("max_size", file_max_size::build);
+    registry.register("file_min_size", file_min_size::build);
+    registry.register("min_size", file_min_size::build);
+    registry.register("file_min_lines", file_min_lines::build);
+    registry.register("min_lines", file_min_lines::build);
     registry.register("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
@@ -162,6 +168,10 @@ mod registry_tests {
             "header",
             "file_max_size",
             "max_size",
+            "file_min_size",
+            "min_size",
+            "file_min_lines",
+            "min_lines",
             "file_is_text",
             "is_text",
             // Short-only.

@@ -1,0 +1,27 @@
+name: file_min_lines flags files with too few lines
+tags: [check, file_min_lines, metadata]
+
+given:
+  tree:
+    # Two lines — below the 3-line floor.
+    stub.md: "# Project\nTODO\n"
+    # Four lines, passes.
+    fine.md: |
+      # Project
+
+      A description.
+      Usage: run me.
+  config: |
+    version: 1
+    rules:
+      - id: min-3-lines
+        kind: file_min_lines
+        paths: "**/*.md"
+        min_lines: 3
+        level: info
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: min-3-lines, level: info, path: stub.md}

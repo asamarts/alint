@@ -1,0 +1,28 @@
+name: file_min_size flags files below the size floor
+tags: [check, file_min_size, metadata]
+
+given:
+  tree:
+    # Ten bytes — below the 50-byte floor.
+    tiny.txt: "too short\n"
+    # Plenty of bytes — under the floor is exactly the
+    # violating condition, so this one must pass.
+    healthy.md: |
+      # Healthy doc
+
+      This document has more than fifty bytes of content, well
+      above the minimum. A short README reads like a stub.
+  config: |
+    version: 1
+    rules:
+      - id: min-50
+        kind: file_min_size
+        paths: ["**/*.txt", "**/*.md"]
+        min_bytes: 50
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: min-50, level: warning, path: tiny.txt}

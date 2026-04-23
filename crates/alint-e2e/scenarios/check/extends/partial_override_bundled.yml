@@ -20,12 +20,17 @@ given:
     extends:
       - alint://bundled/oss-baseline@v1
     rules:
-      # Opt out of one bundled rule without touching the others.
+      # Opt out of the rules this tree doesn't satisfy, each in
+      # one line — the canonical use of field-level override.
       - id: oss-security-policy-exists
         level: off
       - id: oss-code-of-conduct-exists
         level: off
       - id: oss-gitignore-exists
+        level: off
+      - id: oss-readme-non-stub
+        level: off
+      - id: oss-license-non-empty
         level: off
 
 when: [check]

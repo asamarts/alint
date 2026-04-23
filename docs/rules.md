@@ -141,6 +141,30 @@ File must be at most `max_bytes` in size. Catches accidental large-blob commits.
   level: warning
 ```
 
+### `file_min_size` (alias: `min_size`)
+
+File must be at least `min_bytes` in size. Catches placeholder / stub files that pass existence checks but add no information (a 0-byte `LICENSE`, a `README.md` with only a title).
+
+```yaml
+- id: license-non-empty
+  kind: min_size
+  paths: ["LICENSE", "LICENSE.md", "LICENSE-APACHE", "LICENSE-MIT"]
+  min_bytes: 200
+  level: warning
+```
+
+### `file_min_lines` (alias: `min_lines`)
+
+File must have at least `min_lines` lines (`\n`-terminated, with an unterminated trailing segment counting as one more — `wc -l` semantics). Use for "README has more than a title and a TODO".
+
+```yaml
+- id: readme-non-stub
+  kind: min_lines
+  paths: ["README.md", "README"]
+  min_lines: 5
+  level: info
+```
+
 ### `file_is_text` (alias: `is_text`) / `file_is_binary`
 
 Content is detected as text (magic bytes + UTF-8 validity check) / binary.
@@ -559,7 +583,9 @@ The minimal hygiene baseline most open-source repos want. Nine rules:
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
 | `oss-readme-exists` | `file_exists` | warning | — |
+| `oss-readme-non-stub` | `file_min_lines` (3) | info | — |
 | `oss-license-exists` | `file_exists` | warning | — |
+| `oss-license-non-empty` | `file_min_size` (200 B) | info | — |
 | `oss-security-policy-exists` | `file_exists` | info | — |
 | `oss-code-of-conduct-exists` | `file_exists` | info | — |
 | `oss-gitignore-exists` | `file_exists` | info | — |
