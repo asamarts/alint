@@ -165,6 +165,58 @@ File must have at least `min_lines` lines (`\n`-terminated, with an unterminated
   level: info
 ```
 
+### `json_path_equals`, `yaml_path_equals`, `toml_path_equals`
+
+Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. YAML and TOML are parsed through serde and then treated as JSON-shaped trees, so the same JSONPath engine handles all three formats.
+
+```yaml
+- id: require-mit-license
+  kind: json_path_equals
+  paths: "packages/*/package.json"
+  path: "$.license"
+  equals: "MIT"
+  level: error
+
+- id: workflow-contents-read
+  kind: yaml_path_equals
+  paths: ".github/workflows/*.yml"
+  path: "$.permissions.contents"
+  equals: "read"
+  level: error
+
+- id: rust-edition-2024
+  kind: toml_path_equals
+  paths: "crates/*/Cargo.toml"
+  path: "$.package.edition"
+  equals: "2024"
+  level: warning
+```
+
+**Semantics**:
+- Multiple matches — every match must equal the expected value.
+- Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
+- Unparseable files — one violation per file (not silently skipped).
+
+### `json_path_matches`, `yaml_path_matches`, `toml_path_matches`
+
+Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
+
+```yaml
+- id: semver-version
+  kind: json_path_matches
+  paths: "packages/*/package.json"
+  path: "$.version"
+  matches: '^\d+\.\d+\.\d+$'
+  level: error
+
+- id: pin-actions-to-sha
+  kind: yaml_path_matches
+  paths: ".github/workflows/*.yml"
+  path: "$.jobs.*.steps[*].uses"
+  matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+  level: warning
+```
+
 ### `file_is_text` (alias: `is_text`) / `file_is_binary`
 
 Content is detected as text (magic bytes + UTF-8 validity check) / binary.

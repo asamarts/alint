@@ -59,6 +59,8 @@ anstyle = "1"
 anstream = "0.6"
 supports-hyperlinks = "3"
 terminal_size = "0.4"
+serde_json_path = "0.7"
+toml = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

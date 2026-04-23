@@ -51,6 +51,7 @@ pub mod no_trailing_whitespace;
 pub mod no_zero_width_chars;
 pub mod pair;
 pub mod shebang_has_executable;
+pub mod structured_path;
 pub mod unique_by;
 
 /// Register every built-in rule kind into the given registry.
@@ -79,6 +80,24 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("min_size", file_min_size::build);
     registry.register("file_min_lines", file_min_lines::build);
     registry.register("min_lines", file_min_lines::build);
+
+    // Structured-query family — JSONPath queries over
+    // JSON / YAML / TOML documents.
+    registry.register("json_path_equals", structured_path::json_path_equals_build);
+    registry.register(
+        "json_path_matches",
+        structured_path::json_path_matches_build,
+    );
+    registry.register("yaml_path_equals", structured_path::yaml_path_equals_build);
+    registry.register(
+        "yaml_path_matches",
+        structured_path::yaml_path_matches_build,
+    );
+    registry.register("toml_path_equals", structured_path::toml_path_equals_build);
+    registry.register(
+        "toml_path_matches",
+        structured_path::toml_path_matches_build,
+    );
     registry.register("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
@@ -172,6 +191,13 @@ mod registry_tests {
             "min_size",
             "file_min_lines",
             "min_lines",
+            // Structured-query family.
+            "json_path_equals",
+            "json_path_matches",
+            "yaml_path_equals",
+            "yaml_path_matches",
+            "toml_path_equals",
+            "toml_path_matches",
             "file_is_text",
             "is_text",
             // Short-only.

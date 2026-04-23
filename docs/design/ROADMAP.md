@@ -112,7 +112,7 @@ overridable, and monorepo-friendly. Ranked by leverage ÷ effort.
 
 ### Other scope
 
-- ⏳ Structured-query primitives: `json_path_equals`, `json_path_matches`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`.
+- ✅ Structured-query primitives (shipped 2026-04-23): `json_path_equals`, `json_path_matches`, `yaml_path_equals`, `yaml_path_matches`, `toml_path_equals`, `toml_path_matches`. JSONPath per RFC 9535; YAML and TOML coerce through serde into the same tree shape. `json_schema_passes` still ⏳.
 - ⏳ Additional content primitives: `file_footer`, `file_max_lines`, `file_shebang`.
 - ⏳ Output formats: `markdown`, `junit`, `gitlab`.
 - ⏳ `alint facts` subcommand (for debugging `when` clauses).

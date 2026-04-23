@@ -13,11 +13,14 @@ authors.workspace = true
 [dependencies]
 alint-core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde_yaml_ng.workspace = true
 regex.workspace = true
 globset.workspace = true
 content_inspector.workspace = true
 sha2.workspace = true
+serde_json_path.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

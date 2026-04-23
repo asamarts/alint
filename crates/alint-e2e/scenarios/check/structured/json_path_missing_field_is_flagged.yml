@@ -1,0 +1,26 @@
+name: missing field at JSONPath is treated as a violation (not silently skipped)
+tags: [check, json_path_equals, structured]
+
+# Conservative default: if the JSONPath query returns zero
+# matches, that's a violation (the value the rule is enforcing
+# simply doesn't exist). Scope rules carefully or relax the
+# path if you need optional keys.
+
+given:
+  tree:
+    "package.json": '{"name": "demo"}'
+  config: |
+    version: 1
+    rules:
+      - id: require-license-key
+        kind: json_path_equals
+        paths: "package.json"
+        path: "$.license"
+        equals: "MIT"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: require-license-key, level: error, path: package.json}

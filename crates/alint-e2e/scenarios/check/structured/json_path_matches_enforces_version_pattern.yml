@@ -1,0 +1,25 @@
+name: json_path_matches flags a semver that fails the regex
+tags: [check, json_path_matches, structured]
+
+given:
+  tree:
+    packages:
+      ok:
+        "package.json": '{"name": "@demo/ok", "version": "1.2.3"}'
+      bad:
+        "package.json": '{"name": "@demo/bad", "version": "not-a-semver"}'
+  config: |
+    version: 1
+    rules:
+      - id: require-semver-version
+        kind: json_path_matches
+        paths: "packages/*/package.json"
+        path: "$.version"
+        matches: '^\d+\.\d+\.\d+$'
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: require-semver-version, level: error, path: packages/bad/package.json}

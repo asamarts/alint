@@ -1,0 +1,30 @@
+name: toml_path_matches flags pyproject versions that don't satisfy the pin pattern
+tags: [check, toml_path_matches, structured]
+
+given:
+  tree:
+    "pyproject.toml": |
+      [project]
+      name = "demo"
+      version = "0.1.0"
+      requires-python = "3.12"
+
+    "other.toml": |
+      [project]
+      name = "sloppy"
+      version = "dev"
+  config: |
+    version: 1
+    rules:
+      - id: semver-project-version
+        kind: toml_path_matches
+        paths: "*.toml"
+        path: "$.project.version"
+        matches: '^\d+\.\d+\.\d+(-[\w.-]+)?$'
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: semver-project-version, level: error, path: other.toml}

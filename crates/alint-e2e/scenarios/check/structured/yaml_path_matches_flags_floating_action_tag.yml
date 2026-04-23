@@ -1,0 +1,48 @@
+name: yaml_path_matches flags workflow action refs that aren't pinned to SHAs
+tags: [check, yaml_path_matches, structured]
+
+# Security practice: pin third-party GitHub Actions to full
+# commit SHAs rather than floating tags. The JSONPath
+# `$.jobs.*.steps[*].uses` iterates every `uses:` in the
+# workflow; the regex rejects anything that isn't @<40 hex>.
+#
+# This is deliberately strict — teams often accept `@v4`-style
+# pins from trusted publishers. Disable or relax if so.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ok.yml": |
+          name: OK
+          on: push
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b
+                - run: echo hi
+        "bad.yml": |
+          name: Bad
+          on: push
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: pin-actions-to-sha
+        kind: yaml_path_matches
+        paths: ".github/workflows/*.yml"
+        path: "$.jobs.*.steps[*].uses"
+        matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pin-actions-to-sha, level: warning, path: .github/workflows/bad.yml}

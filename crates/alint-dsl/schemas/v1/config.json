@@ -344,6 +344,12 @@
         { "$ref": "#/$defs/rule_file_min_size" },
         { "$ref": "#/$defs/rule_file_min_lines" },
         { "$ref": "#/$defs/rule_file_is_text" },
+        { "$ref": "#/$defs/rule_json_path_equals" },
+        { "$ref": "#/$defs/rule_json_path_matches" },
+        { "$ref": "#/$defs/rule_yaml_path_equals" },
+        { "$ref": "#/$defs/rule_yaml_path_matches" },
+        { "$ref": "#/$defs/rule_toml_path_equals" },
+        { "$ref": "#/$defs/rule_toml_path_matches" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
@@ -529,6 +535,86 @@
       "properties": {
         "kind": { "enum": ["file_is_text", "is_text"] },
         "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_json_path_equals": {
+      "description": "Value at a JSONPath (RFC 9535) expression in every JSON file in `paths` must deep-equal `equals`. Multiple matches all must match; zero matches is a violation (value missing). Typical use: `$.license == \"MIT\"` on every `packages/*/package.json`.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "json_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": {
+          "type": "string",
+          "description": "JSONPath expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct."
+        },
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        }
+      }
+    },
+
+    "rule_json_path_matches": {
+      "description": "Value at a JSONPath in every JSON file in `paths` must be a string and must match `matches` (a Rust regex). Non-string matches produce a clear 'not a string' violation.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "json_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": {
+          "type": "string",
+          "description": "Rust-regex pattern to match against the value at `path`."
+        }
+      }
+    },
+
+    "rule_yaml_path_equals": {
+      "description": "YAML sibling of `json_path_equals`. Parses the file as YAML before applying the JSONPath query. Use this on GitHub Actions workflows, docker-compose.yml, kubernetes manifests, `.gitlab-ci.yml`, etc.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "yaml_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "equals": {}
+      }
+    },
+
+    "rule_yaml_path_matches": {
+      "description": "YAML sibling of `json_path_matches`.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "yaml_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": { "type": "string" }
+      }
+    },
+
+    "rule_toml_path_equals": {
+      "description": "TOML sibling of `json_path_equals`. Typical use: enforce `[package].edition == \"2024\"` on every `Cargo.toml`.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "toml_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "equals": {}
+      }
+    },
+
+    "rule_toml_path_matches": {
+      "description": "TOML sibling of `json_path_matches`.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "toml_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": { "type": "string" }
       }
     },
 

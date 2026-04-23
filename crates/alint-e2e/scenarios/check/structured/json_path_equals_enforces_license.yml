@@ -1,0 +1,25 @@
+name: json_path_equals catches a package.json with the wrong license
+tags: [check, json_path_equals, structured]
+
+given:
+  tree:
+    packages:
+      ok:
+        "package.json": '{"name": "@demo/ok", "license": "MIT"}'
+      bad:
+        "package.json": '{"name": "@demo/bad", "license": "UNLICENSED"}'
+  config: |
+    version: 1
+    rules:
+      - id: require-mit-license
+        kind: json_path_equals
+        paths: "packages/*/package.json"
+        path: "$.license"
+        equals: "MIT"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: require-mit-license, level: error, path: packages/bad/package.json}

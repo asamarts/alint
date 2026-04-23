@@ -1,0 +1,44 @@
+name: yaml_path_equals catches GitHub workflows without minimal permissions
+tags: [check, yaml_path_equals, structured]
+
+given:
+  tree:
+    ".github":
+      workflows:
+        # OK — explicit `permissions.contents: read`.
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        # Wrong — grants write by default.
+        "bad.yml": |
+          name: Bad
+          on: push
+          permissions:
+            contents: write
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: workflow-contents-read
+        kind: yaml_path_equals
+        paths: ".github/workflows/*.yml"
+        path: "$.permissions.contents"
+        equals: "read"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: workflow-contents-read, level: error, path: .github/workflows/bad.yml}
