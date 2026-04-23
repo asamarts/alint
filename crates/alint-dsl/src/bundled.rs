@@ -30,6 +30,7 @@
 /// the crate (rather than at the repo root) so `cargo publish`
 /// bundles them into the crates.io tarball.
 const REGISTRY: &[(&str, &str, &str)] = &[
+    // Ecosystem / project-shape baselines.
     (
         "oss-baseline",
         "v1",
@@ -42,6 +43,30 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         include_str!("../rulesets/v1/monorepo.yml"),
     ),
     ("node", "v1", include_str!("../rulesets/v1/node.yml")),
+    // Namespaced utility rulesets. Slash-separated names are
+    // resolved through the usual `alint://bundled/<name>@<rev>`
+    // URI — the `@` separator splits name from rev, so slashes
+    // inside the name are unambiguous.
+    (
+        "hygiene/no-tracked-artifacts",
+        "v1",
+        include_str!("../rulesets/v1/hygiene/no-tracked-artifacts.yml"),
+    ),
+    (
+        "hygiene/lockfiles",
+        "v1",
+        include_str!("../rulesets/v1/hygiene/lockfiles.yml"),
+    ),
+    (
+        "tooling/editorconfig",
+        "v1",
+        include_str!("../rulesets/v1/tooling/editorconfig.yml"),
+    ),
+    (
+        "docs/adr",
+        "v1",
+        include_str!("../rulesets/v1/docs/adr.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an

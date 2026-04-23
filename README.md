@@ -141,20 +141,33 @@ For common cases you don't want to hand-roll, alint ships a small catalogue of r
 ```yaml
 version: 1
 extends:
-  - alint://bundled/oss-baseline@v1    # community docs + content hygiene
-  - alint://bundled/rust@v1            # Rust project (no-op if Cargo.toml absent)
-  - alint://bundled/node@v1            # Node project (no-op if package.json absent)
-  - alint://bundled/monorepo@v1        # packages/* / crates/* layout checks
+  - alint://bundled/oss-baseline@v1                    # community docs + content hygiene
+  - alint://bundled/rust@v1                            # Rust project (no-op if Cargo.toml absent)
+  - alint://bundled/node@v1                            # Node project (no-op if package.json absent)
+  - alint://bundled/monorepo@v1                        # packages/* / crates/* layout checks
+  - alint://bundled/hygiene/no-tracked-artifacts@v1    # node_modules, .DS_Store, .env, big blobs
+  - alint://bundled/hygiene/lockfiles@v1               # lockfiles at workspace root only
+  - alint://bundled/tooling/editorconfig@v1            # .editorconfig + .gitattributes hygiene
+  - alint://bundled/docs/adr@v1                        # MADR-style Architecture Decision Records
 ```
 
 Currently shipped (see [docs/rules.md](docs/rules.md#bundled-rulesets) for each ruleset's full rule list):
+
+**Ecosystem + project-shape baselines**
 
 - **`oss-baseline@v1`** — README / LICENSE / SECURITY.md / CODE_OF_CONDUCT.md / .gitignore existence; merge-marker + bidi-control bans; trailing-whitespace and final-newline hygiene (auto-fixable).
 - **`rust@v1`** — Cargo.toml / Cargo.lock / rust-toolchain.toml existence; no committed `target/`; snake_case source filenames; Trojan-Source defenses. Gated with `when: facts.is_rust`.
 - **`node@v1`** — package.json + lockfile; no committed `node_modules/`, `dist/`, `.next/`, etc.; Node-version pin via `.nvmrc` or `engines`; JS/TS source hygiene. Gated with `when: facts.is_node`.
 - **`monorepo@v1`** — every `packages/*`, `crates/*`, `apps/*`, `services/*` directory has a README + ecosystem manifest; unique basenames.
 
-All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). You can upgrade severity, disable individual rules with `level: off`, or override scope by redeclaring the rule id in your own `.alint.yml`. More rulesets (`python`, `java`, `go`, `compliance/reuse`) are planned for v0.5.
+**Namespaced utilities**
+
+- **`hygiene/no-tracked-artifacts@v1`** — build outputs (`node_modules`, `target`, `dist`, `__pycache__`, …), OS junk (`.DS_Store`, `Thumbs.db`), editor backups (`*~`, `*.swp`), secret-shaped files (`.env` and locals), and files over 10 MiB. Several rules auto-fixable via `file_remove`.
+- **`hygiene/lockfiles@v1`** — enforce lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `package-lock.json`, `bun.lock`, `Cargo.lock`, `poetry.lock`, `uv.lock`) live only at the workspace root.
+- **`tooling/editorconfig@v1`** — root `.editorconfig` + `.gitattributes` with line-ending normalization.
+- **`docs/adr@v1`** — MADR-style Architecture Decision Records under `docs/adr/`: `NNNN-kebab-title.md` filename + required `## Status` / `## Context` / `## Decision` sections.
+
+All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). You can upgrade severity, disable individual rules with `level: off`, or override scope by redeclaring the rule id in your own `.alint.yml`. More rulesets (`python`, `java`, `go`, `ci/github-actions`, `compliance/reuse`) are planned for v0.5.
 
 Then run:
 

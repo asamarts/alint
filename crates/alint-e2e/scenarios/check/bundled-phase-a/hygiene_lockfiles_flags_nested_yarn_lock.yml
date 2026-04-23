@@ -1,0 +1,27 @@
+name: alint://bundled/hygiene/lockfiles flags nested yarn.lock but ignores root lockfile
+tags: [check, extends, bundled, hygiene]
+
+# A monorepo-shaped tree with a legitimate root yarn.lock and
+# an illegitimate nested one. Proves the include/exclude glob
+# pattern correctly exempts the root file while flagging the
+# nested one.
+
+given:
+  tree:
+    "package.json": '{"name": "root", "private": true}'
+    "yarn.lock": "# root lockfile — allowed\n"
+    packages:
+      sub:
+        "package.json": '{"name": "@demo/sub"}'
+        # A nested lockfile — almost always a tooling mishap.
+        "yarn.lock": "# nested — disallowed\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/hygiene/lockfiles@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: lockfiles-no-nested-yarn, level: warning, path: packages/sub/yarn.lock}

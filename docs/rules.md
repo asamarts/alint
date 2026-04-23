@@ -628,6 +628,36 @@ Language-agnostic monorepo-shape checks. Fires for every directory under `packag
 | `monorepo-crates-have-cargo-toml` | `for_each_dir` | error | — |
 | `monorepo-unique-package-names` | `unique_by` | warning | — |
 
+### `alint://bundled/hygiene/no-tracked-artifacts@v1`
+
+The set of paths / files that essentially no repository should commit: build outputs, dependency caches, OS & editor junk, secret-shaped files, oversized blobs. Gitignored directories pass trivially — these rules catch the case where someone committed an artefact and forgot the `.gitignore` entry.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `hygiene-no-node-modules` | `dir_absent` | error | — |
+| `hygiene-no-python-cache` | `dir_absent` | error | — |
+| `hygiene-no-ruby-bundler-cache` | `dir_absent` | warning | — |
+| `hygiene-no-cargo-target` | `dir_absent` | error | — |
+| `hygiene-no-js-build-outputs` | `dir_absent` | warning | — |
+| `hygiene-no-go-build-cache` | `dir_absent` | info | — |
+| `hygiene-no-macos-junk` | `file_absent` | error | `file_remove` |
+| `hygiene-no-windows-junk` | `file_absent` | error | `file_remove` |
+| `hygiene-no-editor-backups` | `file_absent` | warning | `file_remove` |
+| `hygiene-no-env-files` | `file_absent` | error | — |
+| `hygiene-no-huge-files` | `file_max_size` | warning (10 MiB) | — |
+
+### `alint://bundled/hygiene/lockfiles@v1`
+
+Lockfiles belong at the workspace root only; nested ones almost always indicate a tooling misconfiguration and cause version drift. One rule per common package manager (npm / pnpm / yarn / bun / Cargo / Poetry / uv). Each uses an `include/exclude` path pair so the root lockfile is exempted while nested copies are flagged.
+
+### `alint://bundled/tooling/editorconfig@v1`
+
+Cross-editor standardization at the root: `.editorconfig` + `.gitattributes` (with a `text=` normalization directive). Three info-level rules — useful as nudges, non-blocking by default.
+
+### `alint://bundled/docs/adr@v1`
+
+Architecture Decision Records following [MADR](https://adr.github.io/madr/) conventions. Files under `docs/adr/` match `NNNN-kebab-case-title.md`; each ADR has `## Status`, `## Context`, and `## Decision` sections. Gap-free numbering is a planned addition once the `numeric_sequence` primitive lands.
+
 ## Nested `.alint.yml` (monorepo layering)
 
 Opt into per-subtree configs by setting `nested_configs: true` on the root `.alint.yml`:

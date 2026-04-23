@@ -119,7 +119,25 @@ overridable, and monorepo-friendly. Ranked by leverage ÷ effort.
 - ⏳ `command` plugin kind.
 - ⏳ npm shim (`@alint/alint`), Homebrew formula, Docker image (distroless).
 - ⏳ Git-aware primitives: `git_tracked_only`, `git_no_denied_paths`, `git_commit_message`.
-- ⏳ Additional bundled rulesets: `python`, `java`, `go`, `compliance/reuse`, `compliance/apache-2`.
+- ⏳ Additional bundled rulesets: `python`, `java`, `go`, `ci/github-actions`, `compliance/reuse`, `compliance/apache-2`.
+
+### Generic hygiene rulesets (shipped as of v0.4.3-unreleased)
+
+Identified in a research pass across Turborepo/Nx/Bazel/Cargo/
+pnpm docs, OpenSSF Scorecard, Repolinter's archived corpus, and
+large orgs' community-health-file conventions. Four rulesets
+built on the existing primitive set — no new rule kinds needed.
+
+- ✅ `hygiene/no-tracked-artifacts@v1` — node_modules, target,
+  dist, .next, .DS_Store, editor backups, .env variants, 10 MiB
+  size gate. Several auto-fixable.
+- ✅ `hygiene/lockfiles@v1` — one rule per package manager
+  (npm/pnpm/yarn/bun/Cargo/Poetry/uv) forbidding nested lockfiles.
+- ✅ `tooling/editorconfig@v1` — `.editorconfig` + `.gitattributes`
+  existence with a `text=` normalization directive.
+- ✅ `docs/adr@v1` — MADR naming pattern + required `## Status`,
+  `## Context`, `## Decision` sections. Gap-free numbering
+  deferred (needs `numeric_sequence` primitive).
 
 ## v0.6 — LSP
 

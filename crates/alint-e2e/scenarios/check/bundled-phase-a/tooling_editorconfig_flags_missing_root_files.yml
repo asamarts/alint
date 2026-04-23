@@ -1,0 +1,21 @@
+name: alint://bundled/tooling/editorconfig flags missing root .editorconfig and .gitattributes
+tags: [check, extends, bundled, tooling]
+
+given:
+  tree:
+    # Neither .editorconfig nor .gitattributes present.
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/tooling/editorconfig@v1
+
+when: [check]
+
+expect:
+  # Both advisories fire at info level. The content-match rule
+  # is silent because the file doesn't exist, so it doesn't
+  # report a violation of its own.
+  - violations:
+      - {rule: tooling-editorconfig-exists, level: info}
+      - {rule: tooling-gitattributes-exists, level: info}

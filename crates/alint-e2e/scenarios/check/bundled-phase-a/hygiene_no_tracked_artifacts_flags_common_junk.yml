@@ -1,0 +1,33 @@
+name: alint://bundled/hygiene/no-tracked-artifacts flags node_modules, .DS_Store, .env
+tags: [check, extends, bundled, hygiene]
+
+# A repo that committed several of the classic "shouldn't be
+# tracked" artefacts. Exercises dir_absent against node_modules,
+# file_absent against the macOS `.DS_Store` and the secret-
+# shaped `.env`, and confirms that the OK fixtures (a
+# legitimate `.env.example`) pass cleanly.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    # OS junk: alint walks even dot-files; these should fire.
+    ".DS_Store": ""
+    # Secret-shaped file — the ruleset's error-level rule.
+    ".env": "SECRET=x\n"
+    # Explicitly allowed: the *.example convention for docs.
+    ".env.example": "SECRET=\n"
+    # The canonical committed-artefact — build output dir.
+    node_modules:
+      ".placeholder": ""
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: hygiene-no-macos-junk, level: error, path: .DS_Store}
+      - {rule: hygiene-no-env-files, level: error, path: .env}
+      - {rule: hygiene-no-node-modules, level: error, path: node_modules}

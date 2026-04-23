@@ -1,0 +1,36 @@
+name: alint://bundled/docs/adr flags bad filenames and missing MADR sections
+tags: [check, extends, bundled, docs]
+
+given:
+  tree:
+    docs:
+      adr:
+        # Wrong filename — no NNNN prefix.
+        "pick-framework.md": |
+          # Pick framework
+          ## Status
+          Accepted
+          ## Context
+          We need one.
+          ## Decision
+          React.
+        # Correct filename but missing the Decision section.
+        "0001-use-typescript.md": |
+          # Use TypeScript
+          ## Status
+          Proposed
+          ## Context
+          Types are useful.
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/docs/adr@v1
+
+when: [check]
+
+expect:
+  - violations:
+      # pick-framework.md: filename only; sections are all present.
+      - {rule: adr-filename-pattern, level: warning, path: docs/adr/pick-framework.md}
+      # 0001-use-typescript.md: filename ok, but Decision missing.
+      - {rule: adr-has-decision-section, level: info, path: docs/adr/0001-use-typescript.md}
