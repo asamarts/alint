@@ -6,6 +6,119 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-04-23
+
+Composition ergonomics + monorepo support + four new bundled
+rulesets. Schema-compatible; every v0.4.2 config runs unchanged.
+JSON output gains no new keys; SARIF and GitHub outputs are
+byte-equivalent.
+
+### Added
+
+#### Composition
+
+- **Field-level rule override.** Children in the `extends:`
+  chain can specify only the fields that change. A common
+  override shrinks from four lines to two:
+
+  ```yaml
+  # before — had to restate kind + paths to tweak level
+  rules:
+    - id: no-bak
+      kind: file_absent
+      paths: "**/*.bak"
+      level: warning
+  ```
+
+  ```yaml
+  # after — id + changed fields are enough; rest inherits
+  rules:
+    - id: no-bak
+      level: warning
+  ```
+
+  The loader keeps rules as raw `serde_yaml_ng::Mapping`s
+  through the `extends:` chain and field-merges by id. After
+  all extends resolve, each merged mapping is deserialized
+  once into a `RuleSpec` — a rule that never receives a
+  `kind` anywhere in its chain surfaces as a clean error
+  referencing the offending id. Facts still replace wholesale
+  by id (their kind is a discriminated union).
+
+- **Nested `.alint.yml` discovery for monorepos.** Opt in with
+  `nested_configs: true` on the root config. The loader walks
+  the tree (respecting `.gitignore` + `ignore:`), picks up
+  every nested `.alint.yml` / `.alint.yaml`, and prefixes each
+  nested rule's path-like fields (`paths`, `select`, `primary`)
+  with the nested config's relative directory. A rule declared
+  in `packages/frontend/.alint.yml` with `paths: "**/*.ts"`
+  evaluates as if it read `paths: "packages/frontend/**/*.ts"`
+  at the root.
+
+  MVP guardrails: nested configs can only declare `version:`
+  and `rules:`; every nested rule must have at least one
+  scope field; absolute paths and `..`-prefixed globs are
+  rejected; rule-id collisions across configs error with a
+  clear message (per-subtree overrides are a follow-up).
+
+#### Bundled rulesets
+
+Four new rulesets pulled from a research pass across
+Turborepo/Nx/Bazel/Cargo/pnpm docs, OpenSSF Scorecard, and
+Repolinter's archived corpus. Buildable on the existing
+primitive set — no new rule kinds required.
+
+- **`alint://bundled/hygiene/no-tracked-artifacts@v1`** — 11
+  rules. `dir_absent` on `node_modules`, `target`, `dist`,
+  `build`, `out`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`,
+  `coverage`, `__pycache__`, `.venv`, `.mypy_cache`,
+  `.pytest_cache`, `.ruff_cache`, `.bundle`, `vendor/bundle`,
+  `.go-build`. `file_absent` on `.DS_Store`, `._*`, `Thumbs.db`,
+  `desktop.ini`, `*~`, `*.swp`, `*.swo`, `*.bak`, `*.orig`,
+  `.env`, `.env.local`, `.env.*.local`, `.env.development` /
+  `production` / `staging` (`.env.example` is exempt). 10 MiB
+  size gate. Several rules auto-fixable via `file_remove`.
+
+- **`alint://bundled/hygiene/lockfiles@v1`** — 7 rules, one per
+  package manager (npm / pnpm / yarn / bun / Cargo / Poetry /
+  uv). Each uses an `include/exclude` path pair so the root
+  lockfile is exempted while nested copies are flagged as a
+  workspace-misconfiguration smell.
+
+- **`alint://bundled/tooling/editorconfig@v1`** — 3 info-level
+  rules: root `.editorconfig` + `.gitattributes` exist, and
+  `.gitattributes` contains a `text=` normalization directive.
+
+- **`alint://bundled/docs/adr@v1`** — 4 rules. Files under
+  `docs/adr/` match `NNNN-kebab-case-title.md`; each ADR has
+  `## Status`, `## Context`, `## Decision` sections. Gap-free
+  ADR numbering deferred to a future `numeric_sequence`
+  primitive.
+
+Bundled catalog now: 8 rulesets (4 ecosystem + 4 namespaced).
+Slash-namespaced names (`hygiene/*`, `tooling/*`, `docs/*`)
+route through the existing `alint://bundled/<name>@<rev>` URI
+scheme — the `@` separator parses cleanly around slashes in
+the name.
+
+#### Config
+
+- **`nested_configs: true`** field on the root `Config` to
+  opt in to nested-config discovery.
+
+### Changed
+
+- **`extends:` schema description** refreshed to cover SRI
+  syntax, `alint://bundled/` URLs, merge semantics, and the
+  `level: off` disable idiom. Old description claimed HTTPS
+  was "reserved for a future version" (shipped in v0.2.1).
+
+### Tests
+
+Workspace: 422 → 437 tests (+15). Includes 6 new unit tests
+on nested-discovery, 3 e2e on field-level override, 2 e2e on
+nested discovery, 4 e2e on Phase A bundled rulesets.
+
 ## [0.4.2] — 2026-04-22
 
 Pretty-output overhaul of the `human` formatter. Schema-compatible;
@@ -535,7 +648,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/asamarts/alint/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/asamarts/alint/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/asamarts/alint/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/asamarts/alint/compare/v0.3.2...v0.4.0
