@@ -1,0 +1,3 @@
+is_python   any_file_exists  false
+has_readme  any_file_exists  true
+n_rs_files  count_files      0

@@ -1,0 +1,24 @@
+name: alint://bundled/go - well-formed module has zero violations
+tags: [check, extends, bundled, go]
+
+given:
+  tree:
+    "go.mod": |
+      module github.com/example/demo
+
+      go 1.22
+    "go.sum": ""
+    "main.go": |
+      package main
+
+      func main() {
+      }
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/go@v1
+
+when: [check]
+
+expect:
+  - violations: []

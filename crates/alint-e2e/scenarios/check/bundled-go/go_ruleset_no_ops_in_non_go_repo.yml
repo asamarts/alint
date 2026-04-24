@@ -1,0 +1,15 @@
+name: alint://bundled/go - every rule is silent when facts.is_go is false
+tags: [check, extends, bundled, go]
+
+given:
+  tree:
+    "README.md": "# not a go project\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/go@v1
+
+when: [check]
+
+expect:
+  - violations: []

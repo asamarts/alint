@@ -1,0 +1,20 @@
+name: alint://bundled/go - missing go.sum triggers the lockfile-equivalent warning
+tags: [check, extends, bundled, go]
+
+given:
+  tree:
+    "go.mod": |
+      module github.com/example/demo
+
+      go 1.22
+    "main.go": "package main\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/go@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: go-sum-exists, level: warning}

@@ -1,0 +1,7 @@
+version: 1
+facts:
+  - id: is_go
+    any_file_exists: [go.mod]
+  - id: is_python
+    any_file_exists: [pyproject.toml]
+rules: []

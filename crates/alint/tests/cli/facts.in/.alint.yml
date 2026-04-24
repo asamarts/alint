@@ -1,0 +1,9 @@
+version: 1
+facts:
+  - id: is_python
+    any_file_exists: [pyproject.toml]
+  - id: has_readme
+    any_file_exists: [README.md]
+  - id: n_rs_files
+    count_files: "**/*.rs"
+rules: []

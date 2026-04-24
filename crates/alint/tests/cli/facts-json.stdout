@@ -1,0 +1,14 @@
+{
+  "facts": [
+    {
+      "id": "is_go",
+      "kind": "any_file_exists",
+      "value": false
+    },
+    {
+      "id": "is_python",
+      "kind": "any_file_exists",
+      "value": false
+    }
+  ]
+}

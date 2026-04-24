@@ -1,0 +1,98 @@
+# alint://bundled/go@v1
+#
+# Hygiene checks for Go modules. Adopt it with:
+#
+#     extends:
+#       - alint://bundled/go@v1
+#
+# Every rule is gated with `when: facts.is_go`, so it's safe to
+# extend from a polyglot repo — rules only apply when `go.mod` is
+# present at the root. Override `is_go` with your own `facts:`
+# block if your project uses a non-standard location.
+#
+# go.mod is a Go-specific format (not TOML/YAML/JSON), so shape
+# checks use `file_content_matches` rather than the structured-
+# query family.
+
+version: 1
+
+facts:
+  - id: is_go
+    any_file_exists: [go.mod]
+
+rules:
+  # --- Module manifest ---------------------------------------------
+  - id: go-mod-exists
+    when: facts.is_go
+    kind: file_exists
+    paths: go.mod
+    root_only: true
+    level: error
+    message: "Go module: go.mod at the repo root is required."
+    policy_url: "https://go.dev/ref/mod#go-mod-file"
+
+  - id: go-sum-exists
+    when: facts.is_go
+    # go.sum pins every transitive dependency's hash — missing it
+    # means non-reproducible builds. Modules with zero deps
+    # legitimately omit go.sum; disable via `level: off` in that
+    # case.
+    kind: file_exists
+    paths: go.sum
+    root_only: true
+    level: warning
+    message: >-
+      go.sum pins the hashes of every transitive dependency;
+      commit it for reproducible builds. Modules with zero
+      dependencies legitimately omit it.
+    policy_url: "https://go.dev/ref/mod#go-sum-files"
+
+  # --- go.mod shape ------------------------------------------------
+  - id: go-mod-declares-module-path
+    when: facts.is_go
+    # Every go.mod starts with `module <path>`. Absent or empty
+    # module path means `go build` will refuse the module.
+    kind: file_content_matches
+    paths: go.mod
+    pattern: '(?m)^module\s+\S+'
+    level: error
+    message: "go.mod must declare a `module <path>` on its first directive."
+
+  - id: go-mod-declares-go-version
+    when: facts.is_go
+    # Every go.mod should declare a `go <major>.<minor>` toolchain
+    # floor. Missing it means the toolchain selects its default,
+    # which changes across Go releases.
+    kind: file_content_matches
+    paths: go.mod
+    pattern: '(?m)^go\s+\d+\.\d+'
+    level: warning
+    message: >-
+      go.mod should declare a `go <version>` directive (e.g.
+      `go 1.22`) so the toolchain version is explicit.
+    policy_url: "https://go.dev/ref/mod#go-mod-file-go"
+
+  # --- Trojan Source defense on Go sources -------------------------
+  - id: go-sources-no-bidi
+    when: facts.is_go
+    kind: no_bidi_controls
+    paths: "**/*.go"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidi override chars in Go sources are rejected."
+    policy_url: "https://trojansource.codes/"
+
+  - id: go-sources-no-zero-width
+    when: facts.is_go
+    kind: no_zero_width_chars
+    paths: "**/*.go"
+    level: error
+    message: "Zero-width characters in Go sources are rejected (review hazard)."
+
+  # --- Source-file hygiene on Go sources ---------------------------
+  - id: go-sources-final-newline
+    when: facts.is_go
+    kind: final_newline
+    paths: "**/*.go"
+    level: info
+    fix:
+      file_append_final_newline: {}

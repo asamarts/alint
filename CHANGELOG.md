@@ -6,7 +6,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.5] — 2026-04-23
+## [0.4.6] — 2026-04-23
+
+Ecosystem coverage + debugging ergonomics. Schema-compatible;
+every v0.4.5 config runs unchanged. JSON output unchanged for
+existing commands; SARIF and GitHub outputs byte-equivalent.
+
+### Added
+
+#### Two new bundled rulesets
+
+- **`alint://bundled/python@v1`** (7 rules). Canonical
+  Python-project hygiene:
+  - `python-manifest-exists` — pyproject.toml / setup.py /
+    setup.cfg at the root (error).
+  - `python-has-lockfile` — uv.lock / poetry.lock / Pipfile.lock
+    / pdm.lock (warning).
+  - `python-pyproject-declares-name` — PEP 621 `$.project.name`
+    via `toml_path_matches` (warning).
+  - `python-pyproject-declares-requires-python` — a
+    `requires-python` floor via `toml_path_matches` on
+    `$.project['requires-python']` (info).
+  - `python-module-snake-case` — PEP 8 snake_case filenames
+    for top-level and `src/**/*.py` (info).
+  - `python-sources-final-newline` + `python-sources-no-trailing-whitespace`
+    (info, auto-fixable).
+  - `python-sources-no-bidi` — Trojan Source defense (error).
+
+  Every rule gated with `when: facts.is_python`, so the ruleset
+  silently no-ops on non-Python repos.
+
+- **`alint://bundled/go@v1`** (7 rules). Go-module hygiene:
+  - `go-mod-exists` — go.mod at the root (error).
+  - `go-sum-exists` — go.sum at the root (warning).
+  - `go-mod-declares-module-path` — `module <path>` directive
+    (error, `file_content_matches`).
+  - `go-mod-declares-go-version` — `go <major>.<minor>` directive
+    (warning, `file_content_matches`).
+  - `go-sources-no-bidi` / `go-sources-no-zero-width` —
+    Trojan Source defenses (error).
+  - `go-sources-final-newline` (info, auto-fixable).
+
+  Every rule gated with `when: facts.is_go`.
+
+  Brings the bundled catalog to eleven rulesets.
+
+#### `alint facts` subcommand
+
+- New top-level subcommand that evaluates every `facts:` entry
+  in the effective config and prints the resolved value.
+  Debugging aid for `when:` clauses — quickly answers "did my
+  `facts.is_python` actually match?" without running the full
+  check pass. Supports `--format human` (columnar) and
+  `--format json` (`{facts: [{id, kind, value}, ...]}`).
+
+### Changed
+
+- `alint-core::FactKind::name()` added — returns the YAML
+  discriminator string (`any_file_exists`, `count_files`, etc.).
+  Used by the `facts` subcommand's renderers; available to
+  external embedders.
+
+
 
 Supply-chain hardening ruleset + composition ergonomics.
 Schema-compatible; every v0.4.4 config runs unchanged. JSON

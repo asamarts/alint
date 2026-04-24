@@ -1,0 +1,26 @@
+name: alint://bundled/python - requirements.txt-only project triggers manifest + lockfile rules
+tags: [check, extends, bundled, python]
+
+# `facts.is_python` fires on `requirements.txt` alone (an older
+# but real shape). The project lacks pyproject.toml / setup.py /
+# setup.cfg, so `python-manifest-exists` fires. The pyproject
+# shape rules stay silent because `if_present: true` skips
+# missing pyproject files. Lockfile rule fires too since no
+# uv.lock / poetry.lock is present.
+
+given:
+  tree:
+    "requirements.txt": "requests==2.31.0\n"
+    "src":
+      "demo.py": "print('ok')\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/python@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: python-manifest-exists, level: error}
+      - {rule: python-has-lockfile, level: warning}

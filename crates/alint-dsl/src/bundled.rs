@@ -43,6 +43,8 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         include_str!("../rulesets/v1/monorepo.yml"),
     ),
     ("node", "v1", include_str!("../rulesets/v1/node.yml")),
+    ("python", "v1", include_str!("../rulesets/v1/python.yml")),
+    ("go", "v1", include_str!("../rulesets/v1/go.yml")),
     // Namespaced utility rulesets. Slash-separated names are
     // resolved through the usual `alint://bundled/<name>@<rev>`
     // URI — the `@` separator splits name from rev, so slashes

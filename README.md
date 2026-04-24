@@ -25,10 +25,10 @@ v0.4 ships **~50 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Auto-fix** — 12 file ops covering content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append). Preview with `alint fix --dry-run`. Content-editing ops honour a configurable `fix_size_limit` (default 1 MiB) that skips oversize files rather than rewriting them.
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Composition** — `extends:` pulls in other configs by local path, HTTPS URL (with SRI pinning), or `alint://bundled/<name>@<rev>`. Children override inherited rules field-by-field. Monorepos can opt into `nested_configs: true` to auto-discover `.alint.yml` files in subdirectories and scope their rules to each subtree.
-- **Nine bundled rulesets** — `oss-baseline`, `rust`, `node`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
+- **Eleven bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.4.5`.
+- **Official GitHub Action** — `asamarts/alint@v0.4.6`.
 
 ## Non-goals
 
@@ -88,6 +88,7 @@ alint fix --dry-run   # preview the auto-fixes that would be applied
 alint fix             # apply every fixable violation in place
 alint list            # list effective rules (useful after extends / overrides)
 alint explain <id>    # show a rule's full, resolved definition
+alint facts           # evaluate facts against the repo — debug `when:` clauses
 ```
 
 Output formats:
@@ -416,6 +417,8 @@ Eight rulesets ship in the binary — zero network round-trip, pinned to the ver
 - **`oss-baseline@v1`** — README / LICENSE / SECURITY.md / CODE_OF_CONDUCT.md / .gitignore existence; minimum sensible file sizes; merge-marker + bidi-control bans; trailing-whitespace and final-newline hygiene (auto-fixable).
 - **`rust@v1`** — Cargo.toml / Cargo.lock / rust-toolchain.toml existence; no committed `target/`; snake_case source filenames; Trojan-Source defenses. Gated with `when: facts.is_rust`.
 - **`node@v1`** — package.json + lockfile; no committed `node_modules/`, `dist/`, `.next/`, etc.; Node-version pin via `.nvmrc` or `engines`; JS/TS source hygiene. Gated with `when: facts.is_node`.
+- **`python@v1`** — manifest (pyproject.toml / setup.py / setup.cfg) exists; lockfile (uv / poetry / Pipenv / PDM); pyproject.toml declares `project.name` + `project.requires-python` via structured-query; PEP 8 snake_case module filenames; Trojan-Source defenses. Gated with `when: facts.is_python`.
+- **`go@v1`** — go.mod + go.sum at root; go.mod declares `module <path>` + `go <version>`; Trojan-Source defenses on `*.go`. Gated with `when: facts.is_go`.
 - **`monorepo@v1`** — every `packages/*`, `crates/*`, `apps/*`, `services/*` directory has a README + ecosystem manifest; unique basenames.
 
 **Namespaced utilities**
@@ -426,7 +429,7 @@ Eight rulesets ship in the binary — zero network round-trip, pinned to the ver
 - **`docs/adr@v1`** — MADR-style Architecture Decision Records under `docs/adr/`: `NNNN-kebab-title.md` filename + required `## Status` / `## Context` / `## Decision` sections.
 - **`ci/github-actions@v1`** — GitHub Actions hardening guided by OpenSSF Scorecard: workflow-level `permissions.contents: read`, pin third-party actions to full commit SHAs, every workflow declares a `name:`. Scoped to `.github/workflows/*.y{,a}ml`, so it no-ops in repos that don't use GitHub Actions.
 
-All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets). More rulesets (`python`, `java`, `go`, `compliance/reuse`) are planned for v0.5.
+All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets). More rulesets (`java`, `compliance/reuse`, `compliance/apache-2`) are planned for v0.5.
 
 ## Use in CI
 
@@ -435,15 +438,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.4.5
+- uses: asamarts/alint@v0.4.6
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.4.5
+- uses: asamarts/alint@v0.4.6
   with:
-    version: v0.4.5        # alint release tag (default: latest)
+    version: v0.4.6        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -455,7 +458,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.4.5
+- uses: asamarts/alint@v0.4.6
   id: alint
   with:
     format: sarif
@@ -473,7 +476,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.4.5
+    rev: v0.4.6
     hooks:
       - id: alint
 ```

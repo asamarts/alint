@@ -1,0 +1,29 @@
+name: alint://bundled/python - well-formed project has zero violations
+tags: [check, extends, bundled, python]
+
+# A canonical modern Python project: pyproject.toml with
+# project.name + requires-python, a uv.lock, a snake_case
+# module, a final-newline-terminated source file with no bidi
+# content. Every rule should stay silent.
+
+given:
+  tree:
+    "pyproject.toml": |
+      [project]
+      name = "demo"
+      version = "0.1.0"
+      requires-python = ">=3.10"
+    "uv.lock": "version = 1\n"
+    "src":
+      "demo":
+        "__init__.py": "\"\"\"demo package.\"\"\"\n"
+        "core.py": "def ok() -> int:\n    return 0\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/python@v1
+
+when: [check]
+
+expect:
+  - violations: []

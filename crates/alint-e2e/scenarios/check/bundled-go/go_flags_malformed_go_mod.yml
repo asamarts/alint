@@ -1,0 +1,26 @@
+name: alint://bundled/go - go.mod without module path or go version fires shape rules
+tags: [check, extends, bundled, go]
+
+# A go.mod that exists but lacks the `module <path>` and `go
+# <version>` directives. Both shape rules fire; go-mod-exists
+# stays silent (the file does exist); go-sum-exists fires on
+# the missing go.sum.
+
+given:
+  tree:
+    # `require` block only — no module path, no go version.
+    "go.mod": |
+      require github.com/pkg/errors v0.9.1
+    "main.go": "package main\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/go@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: go-sum-exists, level: warning}
+      - {rule: go-mod-declares-module-path, level: error, path: go.mod}
+      - {rule: go-mod-declares-go-version, level: warning, path: go.mod}

@@ -99,6 +99,21 @@ pub enum FactKind {
     },
 }
 
+impl FactKind {
+    /// The YAML-facing discriminator for the fact kind, suitable for
+    /// user-facing renderers like `alint facts` output.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::AnyFileExists { .. } => "any_file_exists",
+            Self::AllFilesExist { .. } => "all_files_exist",
+            Self::CountFiles { .. } => "count_files",
+            Self::FileContentMatches { .. } => "file_content_matches",
+            Self::GitBranch { .. } => "git_branch",
+            Self::Custom { .. } => "custom",
+        }
+    }
+}
+
 /// Fact-kind body for `custom`. Spawns `argv` as a child process
 /// rooted at the repo; the process's stdout (trimmed of trailing
 /// whitespace) becomes the fact's `String` value. A non-zero

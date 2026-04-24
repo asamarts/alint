@@ -1,0 +1,37 @@
+name: alint://bundled/python - pyproject.toml without project.name or requires-python triggers the structured-query rules
+tags: [check, extends, bundled, python]
+
+# A pyproject.toml exists but is missing `project.name` and
+# `project.requires-python`. Both structured-query rules fire.
+# `python-manifest-exists` stays silent (pyproject.toml is a
+# valid manifest); `python-has-lockfile` fires because no
+# lockfile is present.
+
+given:
+  tree:
+    # pyproject.toml with an empty [project] table — both
+    # structured-query matches should be empty, but `if_present:
+    # true` only silences zero matches when the parent path is
+    # not present. Here [project] *is* present, so `$.project.name`
+    # and `$.project.requires-python` resolve to Null and produce
+    # matches that fail the regex "^.+$".
+    "pyproject.toml": |
+      [build-system]
+      requires = ["hatchling"]
+
+      [project]
+      version = "0.1.0"
+    "src":
+      "demo.py": "print('ok')\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/python@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: python-pyproject-declares-name, level: warning, path: pyproject.toml}
+      - {rule: python-pyproject-declares-requires-python, level: info, path: pyproject.toml}
+      - {rule: python-has-lockfile, level: warning}
