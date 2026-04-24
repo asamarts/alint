@@ -26,6 +26,14 @@
 //! returns zero matches, that's one "path not found" violation
 //! — the option the user is enforcing doesn't exist.
 //!
+//! The optional **`if_present: true`** flag flips the zero-match
+//! case: under it, zero matches are silently OK, and only
+//! actual matches that fail the op produce violations. Useful
+//! for predicates that only apply when a field is present —
+//! e.g. "every `uses:` in a GitHub Actions workflow must be
+//! pinned to a commit SHA" (a workflow with only `run:` steps
+//! has no `uses:` at all and shouldn't be flagged).
+//!
 //! Unparseable files (bad JSON / YAML / TOML) produce one
 //! violation per file. An unparseable file is a documentation
 //! problem, not the structured rule's concern — but better to
@@ -87,6 +95,8 @@ pub enum Op {
 struct EqualsOptions {
     path: String,
     equals: Value,
+    #[serde(default)]
+    if_present: bool,
 }
 
 /// Options shared by every `*_path_matches` rule kind.
@@ -94,6 +104,8 @@ struct EqualsOptions {
 struct MatchesOptions {
     path: String,
     matches: String,
+    #[serde(default)]
+    if_present: bool,
 }
 
 // ---------------------------------------------------------------
@@ -111,6 +123,14 @@ pub struct StructuredPathRule {
     path_expr: JsonPath,
     path_src: String,
     op: Op,
+    /// When `true`, a `JSONPath` query that produces zero matches
+    /// is silently OK. When `false` (default), a zero-match query
+    /// is reported as a single violation — the "value being
+    /// enforced doesn't exist" case. Use `true` for predicates
+    /// that are conditional on the field being present (e.g.
+    /// "every `uses:` in a workflow must be SHA-pinned" — a
+    /// workflow with no `uses:` at all shouldn't be flagged).
+    if_present: bool,
 }
 
 impl Rule for StructuredPathRule {
@@ -151,6 +171,9 @@ impl Rule for StructuredPathRule {
             };
             let matches = self.path_expr.query(&root_value);
             if matches.is_empty() {
+                if self.if_present {
+                    continue;
+                }
                 let msg = self
                     .message
                     .clone()
@@ -284,6 +307,7 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         path_expr,
         path_src: opts.path,
         op: Op::Equals(opts.equals),
+        if_present: opts.if_present,
     }))
 }
 
@@ -310,5 +334,6 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         path_expr,
         path_src: opts.path,
         op: Op::Matches(re),
+        if_present: opts.if_present,
     }))
 }

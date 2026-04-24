@@ -13,8 +13,8 @@
     },
     "extends": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "Configs to inherit from. Three source kinds are accepted:\n  • Local paths (relative to the current file, or absolute): `./base.yml`, `../shared/team.yml`, `/etc/alint/global.yml`.\n  • HTTPS URLs with required SHA-256 SRI: `https://raw.githubusercontent.com/org/repo/v1/rules.yml#sha256-<64-hex>`. Plain `http://` is rejected; SRI is non-negotiable.\n  • Bundled rulesets: `alint://bundled/<name>@<rev>`. Currently shipped: `oss-baseline@v1`, `rust@v1`, `node@v1`, `monorepo@v1`. Offline-resolved (no network, no cache).\n\nEntries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends.\n\n**Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it.\n\nRemote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead."
+      "items": { "$ref": "#/$defs/extends_entry" },
+      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging.\n\nEntries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends.\n\n**Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it.\n\n**Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately.\n\nRemote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead."
     },
     "ignore": {
       "type": "array",
@@ -71,6 +71,36 @@
       "oneOf": [
         { "type": "string" },
         { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
+    "extends_entry": {
+      "description": "One extends entry. Bare string = classic form (url-only). Mapping form lets you filter with `only:` / `except:` (mutually exclusive).",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["url"],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Local path, `https://...#sha256-<hex>`, or `alint://bundled/<name>@<rev>`."
+            },
+            "only": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Keep only these rule ids from the extended config; drop everything else."
+            },
+            "except": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Drop these rule ids from the extended config."
+            }
+          }
+        }
       ]
     },
 
@@ -539,7 +569,7 @@
     },
 
     "rule_json_path_equals": {
-      "description": "Value at a JSONPath (RFC 9535) expression in every JSON file in `paths` must deep-equal `equals`. Multiple matches all must match; zero matches is a violation (value missing). Typical use: `$.license == \"MIT\"` on every `packages/*/package.json`.",
+      "description": "Value at a JSONPath (RFC 9535) expression in every JSON file in `paths` must deep-equal `equals`. Multiple matches all must match; zero matches is a violation (value missing) unless `if_present: true`. Typical use: `$.license == \"MIT\"` on every `packages/*/package.json`.",
       "type": "object",
       "required": ["paths", "path", "equals"],
       "properties": {
@@ -551,7 +581,8 @@
         },
         "equals": {
           "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
-        }
+        },
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
     },
 
@@ -566,7 +597,8 @@
         "matches": {
           "type": "string",
           "description": "Rust-regex pattern to match against the value at `path`."
-        }
+        },
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
     },
 
@@ -578,7 +610,8 @@
         "kind": { "const": "yaml_path_equals" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "path": { "type": "string" },
-        "equals": {}
+        "equals": {},
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
     },
 
@@ -590,7 +623,8 @@
         "kind": { "const": "yaml_path_matches" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "path": { "type": "string" },
-        "matches": { "type": "string" }
+        "matches": { "type": "string" },
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
     },
 
@@ -602,7 +636,8 @@
         "kind": { "const": "toml_path_equals" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "path": { "type": "string" },
-        "equals": {}
+        "equals": {},
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
     },
 
@@ -614,8 +649,15 @@
         "kind": { "const": "toml_path_matches" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "path": { "type": "string" },
-        "matches": { "type": "string" }
+        "matches": { "type": "string" },
+        "if_present": { "$ref": "#/$defs/if_present" }
       }
+    },
+
+    "if_present": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, a JSONPath query returning zero matches is silently OK — only real matches that fail the op produce violations. Use for predicates conditional on a field's presence (e.g. \"every `uses:` must be SHA-pinned\" where a workflow without `uses:` steps shouldn't be flagged)."
     },
 
     "rule_filename_case": {

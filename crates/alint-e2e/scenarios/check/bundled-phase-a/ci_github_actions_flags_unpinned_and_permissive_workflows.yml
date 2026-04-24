@@ -1,0 +1,42 @@
+name: alint://bundled/ci/github-actions flags unpinned action + missing permissions + missing name
+tags: [check, extends, bundled, ci]
+
+given:
+  tree:
+    ".github":
+      workflows:
+        # Hardened workflow — should pass all three bundled rules.
+        "ok.yml": |
+          name: OK
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b
+                - run: echo hi
+        # Missing `name:`, missing `permissions.contents: read`,
+        # and one `uses:` is `@v4` (not SHA-pinned).
+        "bad.yml": |
+          on: push
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: echo hi
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  # Three separate advisories fire on bad.yml. ok.yml is silent.
+  - violations:
+      - {rule: gha-workflow-contents-read, level: warning, path: .github/workflows/bad.yml}
+      - {rule: gha-pin-actions-to-sha, level: warning, path: .github/workflows/bad.yml}
+      - {rule: gha-workflow-has-name, level: info, path: .github/workflows/bad.yml}

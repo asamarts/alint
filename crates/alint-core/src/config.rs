@@ -15,11 +15,11 @@ pub struct Config {
     /// left-to-right; later entries override earlier ones; the
     /// current file's own definitions override everything it extends.
     ///
-    /// Each entry is a local path (relative to the containing file
-    /// or absolute). Remote `https://` URLs are reserved but not yet
-    /// supported; the loader rejects them with a clear error.
+    /// Each entry is either a bare string (local path, `https://`
+    /// URL with SRI, or `alint://bundled/...`) or a mapping with
+    /// `url:` and optional `only:` / `except:` filters.
     #[serde(default)]
-    pub extends: Vec<String>,
+    pub extends: Vec<ExtendsEntry>,
     #[serde(default)]
     pub ignore: Vec<String>,
     #[serde(default = "default_respect_gitignore")]
@@ -75,6 +75,68 @@ fn default_respect_gitignore() -> bool {
 
 impl Config {
     pub const CURRENT_VERSION: u32 = 1;
+}
+
+/// A single `extends:` entry. Accepts either a bare string (the
+/// classic form — a local path, `https://` URL with SRI, or
+/// `alint://bundled/<name>@<rev>`) or a mapping that adds
+/// `only:` / `except:` filters on the inherited rule set.
+///
+/// ```yaml
+/// extends:
+///   - alint://bundled/oss-baseline@v1             # classic form
+///   - url: alint://bundled/rust@v1                # filtered form
+///     except: [rust-no-target-dir]                # drop by id
+///   - url: ./team-defaults.yml
+///     only: [team-copyright-header]               # keep by id
+/// ```
+///
+/// Filters resolve against the *fully-resolved* rule set of the
+/// entry (i.e. anything it transitively extends). `only:` and
+/// `except:` are mutually exclusive on a single entry; listing an
+/// unknown rule id is a config error so typos surface at load
+/// time.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ExtendsEntry {
+    Url(String),
+    Filtered {
+        url: String,
+        #[serde(default)]
+        only: Option<Vec<String>>,
+        #[serde(default)]
+        except: Option<Vec<String>>,
+    },
+}
+
+impl ExtendsEntry {
+    /// The URL / path of the extended config. Uniform across both
+    /// enum variants.
+    pub fn url(&self) -> &str {
+        match self {
+            Self::Url(s) | Self::Filtered { url: s, .. } => s,
+        }
+    }
+
+    /// Rule ids to keep (drop everything else). `None` when no
+    /// `only:` filter is specified.
+    pub fn only(&self) -> Option<&[String]> {
+        match self {
+            Self::Filtered { only: Some(v), .. } => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Rule ids to drop. `None` when no `except:` filter is
+    /// specified.
+    pub fn except(&self) -> Option<&[String]> {
+        match self {
+            Self::Filtered {
+                except: Some(v), ..
+            } => Some(v),
+            _ => None,
+        }
+    }
 }
 
 /// YAML shape for a rule's `paths:` field — a single glob, an array (with

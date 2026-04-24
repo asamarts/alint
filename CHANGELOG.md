@@ -6,7 +6,80 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.4] — 2026-04-23
+## [0.4.5] — 2026-04-23
+
+Supply-chain hardening ruleset + composition ergonomics.
+Schema-compatible; every v0.4.4 config runs unchanged. JSON
+output gains no new keys; SARIF and GitHub outputs are
+byte-equivalent.
+
+### Added
+
+#### New bundled ruleset
+
+- **`alint://bundled/ci/github-actions@v1`** (3 rules). GitHub
+  Actions hardening guided by the two OpenSSF Scorecard checks
+  with the strongest supply-chain signal:
+  - `gha-workflow-contents-read` — every workflow declares
+    `permissions.contents: read` at the workflow level
+    (`yaml_path_equals`, warning).
+  - `gha-pin-actions-to-sha` — every `uses:` across every job
+    is pinned to a 40-char commit SHA, not a mutable tag
+    (`yaml_path_matches` with `if_present: true`, warning).
+  - `gha-workflow-has-name` — every workflow declares a
+    `name:` so the Actions UI shows something friendlier than
+    the filename (`yaml_path_matches`, info).
+
+  Scoped to `.github/workflows/*.y{,a}ml`, so it no-ops in
+  repos that don't use GitHub Actions. Brings the bundled
+  catalogue to nine rulesets.
+
+#### Structured-query `if_present`
+
+- **`if_present: true`** option on every structured-query rule
+  kind (`{json,yaml,toml}_path_{equals,matches}`). When
+  enabled, a JSONPath query that returns zero matches is
+  silently OK — only actual matches that fail the op produce
+  violations. Preserves the default "missing = violation"
+  semantics (`if_present: false`, the existing behaviour).
+  Required for conditional predicates like "every `uses:` is
+  SHA-pinned" where a workflow with only `run:` steps
+  shouldn't be flagged.
+
+#### Selective bundled adoption
+
+- **`only:` / `except:` on `extends:` entries.** An entry can
+  now be a mapping that filters the inherited rule set by id
+  before merging:
+
+  ```yaml
+  extends:
+    - url: alint://bundled/oss-baseline@v1
+      except: [oss-code-of-conduct-exists]      # drop one rule
+
+    - url: alint://bundled/ci/github-actions@v1
+      only: [gha-pin-actions-to-sha]            # keep one rule
+  ```
+
+  Filters resolve against the fully-resolved rule set of the
+  entry (i.e. anything it transitively extends). `only:` and
+  `except:` are mutually exclusive on a single entry. Listing
+  an unknown id is a load-time error so typos don't silently
+  drop anything.
+
+  Closes the "all-or-nothing" limitation on bundled-ruleset
+  adoption that forced users to extend + then restate overrides
+  with `level: off` for every rule they wanted to skip.
+
+### Changed
+
+- `Config.extends` type changed from `Vec<String>` to
+  `Vec<ExtendsEntry>`. `ExtendsEntry` is an untagged enum that
+  accepts either a bare string (classic form) or a mapping
+  `{url, only?, except?}`. YAML ergonomics unchanged for the
+  string form; existing configs continue to parse as before.
+
+
 
 Rule-catalogue expansion + README rewrite. Schema-compatible;
 every v0.4.3 config runs unchanged. JSON output gains no new

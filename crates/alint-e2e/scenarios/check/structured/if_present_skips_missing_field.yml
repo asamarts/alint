@@ -1,0 +1,48 @@
+name: if_present=true silences zero-match queries (conditional predicate)
+tags: [check, yaml_path_matches, structured, if_present]
+
+# The canonical use case: "every `uses:` in a workflow must be
+# pinned to a SHA". A workflow with only `run:` steps has no
+# `uses:` at all and shouldn't be flagged. With `if_present: true`,
+# zero-match queries are silently OK; real matches still fail
+# the regex as before.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        # Only `run:` steps — no `uses:`. Should be silent.
+        "run-only.yml": |
+          name: Run only
+          on: push
+          jobs:
+            x:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        # Real `uses:` but not SHA-pinned — still caught.
+        "unpinned.yml": |
+          name: Unpinned
+          on: push
+          jobs:
+            x:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: pin-actions-if-present
+        kind: yaml_path_matches
+        paths: ".github/workflows/*.yml"
+        path: "$.jobs.*.steps[*].uses"
+        matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+        if_present: true
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pin-actions-if-present, level: warning, path: .github/workflows/unpinned.yml}

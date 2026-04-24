@@ -17,10 +17,11 @@ mod walker;
 pub mod when;
 
 pub use config::{
-    Config, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
-    FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
-    FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
+    Config, ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec,
+    FileCollapseBlankLinesFixSpec, FileCreateFixSpec, FileNormalizeLineEndingsFixSpec,
+    FilePrependFixSpec, FileRemoveFixSpec, FileRenameFixSpec, FileStripBidiFixSpec,
+    FileStripBomFixSpec, FileStripZeroWidthFixSpec, FileTrimTrailingWhitespaceFixSpec, FixSpec,
+    NestedRuleSpec, PathsSpec, RuleSpec,
 };
 pub use engine::{Engine, RuleEntry};
 pub use error::{Error, Result};

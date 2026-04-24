@@ -1,0 +1,31 @@
+name: extends entry with `except:` drops listed rules from a bundled ruleset
+tags: [check, extends, bundled, only_except]
+
+# A user wants oss-baseline's README + merge-marker coverage but
+# doesn't want CODE_OF_CONDUCT nagging. `except:` filters the
+# inherited rule set by id before merging — no need to restate
+# overrides for every dropped rule.
+
+given:
+  tree:
+    # Empty tree — no README, no LICENSE, no SECURITY, no
+    # CODE_OF_CONDUCT. Every bundled existence rule would normally
+    # fire; the `except:` list below drops one of them.
+    ".keep": ""
+  config: |
+    version: 1
+    extends:
+      - url: alint://bundled/oss-baseline@v1
+        except: [oss-code-of-conduct-exists]
+
+when: [check]
+
+expect:
+  # oss-code-of-conduct-exists was dropped, so it doesn't appear
+  # in any violation. The remaining existence advisories still
+  # fire.
+  - violations:
+      - {rule: oss-readme-exists}
+      - {rule: oss-license-exists}
+      - {rule: oss-security-policy-exists}
+      - {rule: oss-gitignore-exists}

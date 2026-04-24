@@ -108,7 +108,7 @@ struct RawConfig {
     #[serde(default)]
     version: u32,
     #[serde(default)]
-    extends: Vec<String>,
+    extends: Vec<alint_core::ExtendsEntry>,
     #[serde(default)]
     ignore: Vec<String>,
     #[serde(default = "default_respect_gitignore")]
@@ -253,23 +253,25 @@ fn load_recursive(
         ..RawConfig::default()
     };
     for entry in &extends {
-        let parent = if entry.starts_with("http://") {
+        let url = entry.url();
+        let mut parent = if url.starts_with("http://") {
             return Err(Error::Other(format!(
-                "plain http:// is not allowed in `extends:` (entry {entry:?}); \
+                "plain http:// is not allowed in `extends:` (entry {url:?}); \
                  use https:// with an SRI hash instead"
             )));
-        } else if entry.starts_with("https://") {
-            load_remote(entry, opts, visiting)?
-        } else if let Some(spec) = entry.strip_prefix("alint://bundled/") {
+        } else if url.starts_with("https://") {
+            load_remote(url, opts, visiting)?
+        } else if let Some(spec) = url.strip_prefix("alint://bundled/") {
             load_bundled(spec)?
         } else {
-            let target = resolve_relative(&source_dir, entry);
+            let target = resolve_relative(&source_dir, url);
             load_recursive(&target, visiting, opts)?
         };
         // Extended configs cannot introduce `custom:` facts —
         // those would spawn arbitrary processes on behalf of a
         // ruleset whose code the user didn't write.
-        alint_core::facts::reject_custom_facts_in(&parent.facts, entry)?;
+        alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
+        parent.rules = apply_rule_filter(parent.rules, entry)?;
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
@@ -360,6 +362,87 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
         candidate.to_path_buf()
     } else {
         source_dir.join(candidate)
+    }
+}
+
+/// Apply an `extends:` entry's `only:` / `except:` filters to the
+/// fully-resolved rule set of the extended config. Validates that
+/// the two filters are mutually exclusive, that the filter list is
+/// non-empty, and that every listed id actually exists in the
+/// ruleset (unknown ids are almost always typos worth catching at
+/// load time).
+fn apply_rule_filter(
+    rules: Vec<serde_yaml_ng::Mapping>,
+    entry: &alint_core::ExtendsEntry,
+) -> Result<Vec<serde_yaml_ng::Mapping>> {
+    let url = entry.url();
+    if entry.only().is_some() && entry.except().is_some() {
+        return Err(Error::Other(format!(
+            "`extends:` entry {url:?}: `only:` and `except:` are mutually exclusive"
+        )));
+    }
+    let Some((filter_ids, mode)) = entry
+        .only()
+        .map(|ids| (ids, FilterMode::Only))
+        .or_else(|| entry.except().map(|ids| (ids, FilterMode::Except)))
+    else {
+        return Ok(rules);
+    };
+    if filter_ids.is_empty() {
+        return Err(Error::Other(format!(
+            "`extends:` entry {url:?}: `{}:` is empty; list at least one rule id",
+            mode.field_name()
+        )));
+    }
+
+    let available: std::collections::HashSet<String> = rules
+        .iter()
+        .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    let unknown: Vec<&String> = filter_ids
+        .iter()
+        .filter(|id| !available.contains(*id))
+        .collect();
+    if !unknown.is_empty() {
+        let mut known: Vec<&String> = available.iter().collect();
+        known.sort();
+        return Err(Error::Other(format!(
+            "`extends:` entry {url:?}: {} references unknown rule id(s) {:?}; ruleset ships: {:?}",
+            mode.field_name(),
+            unknown,
+            known,
+        )));
+    }
+
+    let keep: std::collections::HashSet<&str> = filter_ids.iter().map(String::as_str).collect();
+    Ok(rules
+        .into_iter()
+        .filter(|m| {
+            let Some(id) = m.get("id").and_then(|v| v.as_str()) else {
+                // No id yet — leave it; downstream deserialize
+                // will flag the missing id with a clear error.
+                return true;
+            };
+            match mode {
+                FilterMode::Only => keep.contains(id),
+                FilterMode::Except => !keep.contains(id),
+            }
+        })
+        .collect())
+}
+
+#[derive(Clone, Copy)]
+enum FilterMode {
+    Only,
+    Except,
+}
+
+impl FilterMode {
+    fn field_name(self) -> &'static str {
+        match self {
+            Self::Only => "only",
+            Self::Except => "except",
+        }
     }
 }
 
@@ -879,6 +962,172 @@ rules: []
         std::fs::write(&b, "version: 1\nextends: [./a.yml]\nrules: []\n").unwrap();
         let err = load(&a).unwrap_err().to_string();
         assert!(err.contains("cycle"), "{err}");
+    }
+
+    #[test]
+    fn extends_only_keeps_listed_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1
+rules:
+  - id: a
+    kind: file_exists
+    paths: A
+    level: error
+  - id: b
+    kind: file_exists
+    paths: B
+    level: error
+  - id: c
+    kind: file_exists
+    paths: C
+    level: error
+",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "version: 1
+extends:
+  - url: ./base.yml
+    only: [b]
+rules: []
+",
+        )
+        .unwrap();
+        let cfg = load(&child).unwrap();
+        let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["b"]);
+    }
+
+    #[test]
+    fn extends_except_drops_listed_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1
+rules:
+  - id: a
+    kind: file_exists
+    paths: A
+    level: error
+  - id: b
+    kind: file_exists
+    paths: B
+    level: error
+",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "version: 1
+extends:
+  - url: ./base.yml
+    except: [a]
+rules: []
+",
+        )
+        .unwrap();
+        let cfg = load(&child).unwrap();
+        let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["b"]);
+    }
+
+    #[test]
+    fn extends_rejects_only_and_except_together() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1
+rules:
+  - id: a
+    kind: file_exists
+    paths: A
+    level: error
+",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "version: 1
+extends:
+  - url: ./base.yml
+    only: [a]
+    except: [a]
+rules: []
+",
+        )
+        .unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
+    #[test]
+    fn extends_rejects_unknown_rule_id_in_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1
+rules:
+  - id: a
+    kind: file_exists
+    paths: A
+    level: error
+",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "version: 1
+extends:
+  - url: ./base.yml
+    only: [does-not-exist]
+rules: []
+",
+        )
+        .unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("does-not-exist"), "{err}");
+        assert!(err.contains("unknown rule id"), "{err}");
+    }
+
+    #[test]
+    fn extends_rejects_empty_filter_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1
+rules:
+  - id: a
+    kind: file_exists
+    paths: A
+    level: error
+",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "version: 1
+extends:
+  - url: ./base.yml
+    only: []
+rules: []
+",
+        )
+        .unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("empty"), "{err}");
     }
 
     #[test]

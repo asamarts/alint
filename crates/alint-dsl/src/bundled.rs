@@ -67,6 +67,11 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         "v1",
         include_str!("../rulesets/v1/docs/adr.yml"),
     ),
+    (
+        "ci/github-actions",
+        "v1",
+        include_str!("../rulesets/v1/ci/github-actions.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an

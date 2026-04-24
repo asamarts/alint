@@ -1,0 +1,23 @@
+name: extends entry with `only:` keeps only the listed rules from a bundled ruleset
+tags: [check, extends, bundled, only_except]
+
+# `only:` is the inverse of `except:` — keep these rules, drop
+# everything else from the inherited ruleset. Useful when you
+# want one or two rules out of a larger bundle without importing
+# the rest.
+
+given:
+  tree:
+    ".keep": ""
+  config: |
+    version: 1
+    extends:
+      - url: alint://bundled/oss-baseline@v1
+        only: [oss-readme-exists]
+
+when: [check]
+
+expect:
+  # Only the one rule we opted in to should fire.
+  - violations:
+      - {rule: oss-readme-exists}
