@@ -15,7 +15,7 @@ members = [
 default-members = ["crates/alint"]
 
 [workspace.package]
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"
@@ -23,12 +23,12 @@ repository = "https://github.com/asamarts/alint"
 authors = ["alint contributors"]
 
 [workspace.dependencies]
-alint-core = { path = "crates/alint-core", version = "0.4.3" }
-alint-dsl = { path = "crates/alint-dsl", version = "0.4.3" }
-alint-rules = { path = "crates/alint-rules", version = "0.4.3" }
-alint-output = { path = "crates/alint-output", version = "0.4.3" }
-alint-bench = { path = "crates/alint-bench", version = "0.4.3" }
-alint-testkit = { path = "crates/alint-testkit", version = "0.4.3" }
+alint-core = { path = "crates/alint-core", version = "0.4.4" }
+alint-dsl = { path = "crates/alint-dsl", version = "0.4.4" }
+alint-rules = { path = "crates/alint-rules", version = "0.4.4" }
+alint-output = { path = "crates/alint-output", version = "0.4.4" }
+alint-bench = { path = "crates/alint-bench", version = "0.4.4" }
+alint-testkit = { path = "crates/alint-testkit", version = "0.4.4" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

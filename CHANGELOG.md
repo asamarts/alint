@@ -6,7 +6,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.3] — 2026-04-23
+## [0.4.4] — 2026-04-23
+
+Rule-catalogue expansion + README rewrite. Schema-compatible;
+every v0.4.3 config runs unchanged. JSON output gains no new
+keys; SARIF and GitHub outputs are byte-equivalent.
+
+### Added
+
+#### Content-family additions
+
+- **`file_min_size`** — files in scope must be at least
+  `min_bytes` bytes. Complements `file_max_size`. Picks up the
+  "zero-byte LICENSE" case that passes `file_exists` but carries
+  no information.
+- **`file_min_lines`** — files in scope must have at least
+  `min_lines` lines (`wc -l` semantics: every `\n` terminates a
+  line, plus one more when the file has trailing unterminated
+  content). Catches the classic "README is a title plus
+  `TODO`" stub. Both kinds register short aliases (`min_size`,
+  `min_lines`) alongside the prefixed names.
+
+#### Structured-query family (six new rule kinds)
+
+JSONPath (RFC 9535) queries over JSON / YAML / TOML documents,
+powered by `serde_json_path`. YAML and TOML files are
+deserialized through serde into a `serde_json::Value` so the
+same path-expression engine applies to all three. Missing
+JSONPath matches are treated as violations (conservative — scope
+narrowly or relax the path for optional keys); when a query
+returns multiple matches, every match must satisfy the rule.
+Unparseable files surface a single per-file violation rather
+than being silently skipped.
+
+- **`json_path_equals`** / **`json_path_matches`** — `equals`
+  compares by value (string / number / bool / null); `matches`
+  runs a regex against the string form of the matched value.
+  Canonical use: enforce a `package.json` license, require a
+  semver `version`, lock a `private: true` flag.
+- **`yaml_path_equals`** / **`yaml_path_matches`** — same
+  engine over YAML. Canonical use: lock GitHub Actions
+  workflows to `permissions.contents: read`, require every
+  `uses:` across every job to be pinned to a 40-char commit
+  SHA.
+- **`toml_path_equals`** / **`toml_path_matches`** — same
+  engine over TOML. Canonical use: require `edition = "2024"`
+  across every `Cargo.toml` in a workspace, enforce
+  `$.project.version` semver in `pyproject.toml`.
+
+#### `oss-baseline` ruleset extensions
+
+- `oss-license-non-empty` — `file_min_size` at 200 bytes on the
+  LICENSE, catching zero-byte placeholders.
+- `oss-readme-non-stub` — `file_min_lines` at 3 on the README,
+  gentle enough to pass for early-stage repos.
+
+### Changed
+
+- **README rewrite.** Replaced the single monolithic `.alint.yml`
+  example with a 12-pattern cookbook covering the real-world use
+  cases v0.4 now spans: bundled-ruleset adoption, composition
+  overrides, structured queries against `package.json` / GitHub
+  workflows / `Cargo.toml`, monorepo per-package rules via
+  `for_each_dir`, nested-config subtree scoping, auto-fix
+  hygiene, fact-gated conditionals, cross-file `pair` / `unique_by`,
+  and the security-family bans. Bumped the family count from
+  ten to eleven and the rule-kind count from ~42 to ~50.
+
+
 
 Composition ergonomics + monorepo support + four new bundled
 rulesets. Schema-compatible; every v0.4.2 config runs unchanged.
