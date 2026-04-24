@@ -28,7 +28,7 @@ v0.4 ships **~50 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Eleven bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.4.6`.
+- **Official GitHub Action** — `asamarts/alint@v0.4.7`.
 
 ## Non-goals
 
@@ -44,13 +44,42 @@ Scope is the filesystem shape and contents of a repository, not the semantics of
 
 ## Install
 
-### From a tagged release (recommended)
+### Homebrew (macOS + Linuxbrew)
+
+```bash
+brew tap asamarts/alint
+brew install alint
+```
+
+The [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint) tap is auto-updated on every alint release — the formula downloads the matching pre-built binary, verifies its SHA-256, and installs to the Homebrew cellar.
+
+### install.sh (Linux + macOS + Windows tarballs)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
 ```
 
 Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases).
+
+### Docker
+
+A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghcr.io on each release:
+
+```bash
+# Lint the current directory:
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
+
+# Pin to an exact version:
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.4.7 check
+```
+
+The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
+
+```bash
+docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
+```
+
+Also published: `:<major>.<minor>` (e.g. `:0.4`) and the raw git tag (`:v0.4.7`).
 
 ### From crates.io
 
@@ -438,15 +467,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.4.6
+- uses: asamarts/alint@v0.4.7
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.4.6
+- uses: asamarts/alint@v0.4.7
   with:
-    version: v0.4.6        # alint release tag (default: latest)
+    version: v0.4.7        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -458,7 +487,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.4.6
+- uses: asamarts/alint@v0.4.7
   id: alint
   with:
     format: sarif
@@ -476,7 +505,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.4.6
+    rev: v0.4.7
     hooks:
       - id: alint
 ```

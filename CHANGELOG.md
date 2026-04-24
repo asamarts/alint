@@ -6,7 +6,73 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.6] — 2026-04-23
+## [0.4.7] — 2026-04-24
+
+Distribution breadth. Schema-compatible; every v0.4.6 config
+runs unchanged. JSON/SARIF/GitHub outputs byte-equivalent. No
+Rust code changes — this release ships new install paths only.
+
+### Added
+
+#### Docker image
+
+- **`ghcr.io/asamarts/alint`** — distroless multi-arch
+  (`linux/amd64`, `linux/arm64`) image based on
+  `gcr.io/distroless/static-debian12:nonroot`. Built by the
+  release workflow from the same statically-linked musl
+  binaries shipped in the GitHub Release tarballs, so the
+  in-image binary matches the tarballed one byte-for-byte.
+  Tags published per release: the exact git tag (`:v0.4.7`),
+  the bare semver (`:0.4.7`), the `<major>.<minor>` channel
+  (`:0.4`), and `:latest`.
+
+  ```bash
+  docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
+  ```
+
+  Runs as the distroless `nonroot` user (UID 65532). For
+  `alint fix` workflows that need to write with host
+  ownership, pass `-u $(id -u):$(id -g)`.
+
+#### Homebrew tap
+
+- **`asamarts/alint`** — dedicated Homebrew tap at
+  [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint)
+  shipping a `Formula/alint.rb` that resolves the right
+  pre-built tarball for each platform (macOS arm64 + x86_64,
+  Linuxbrew arm64 + x86_64) and verifies its SHA-256.
+
+  ```bash
+  brew tap asamarts/alint
+  brew install alint
+  ```
+
+  The formula is regenerated on every tagged release by a new
+  `homebrew` job in `.github/workflows/release.yml` driving
+  `ci/scripts/update-homebrew-formula.sh`. The script takes
+  SHAs directly from the release's `SHA256SUMS` artifact —
+  no re-download, no re-build — and pushes via a per-repo
+  ed25519 deploy key scoped to the tap.
+
+### Infrastructure
+
+- New release-workflow jobs: `docker` (builds + pushes the
+  multi-arch image to ghcr.io) and `homebrew` (regenerates
+  the formula and pushes to the tap). Both run after the
+  existing `build` / `release` jobs; failures there skip the
+  distribution jobs cleanly.
+- New script `ci/scripts/update-homebrew-formula.sh` emits a
+  complete `Formula/alint.rb` given `VERSION` + a
+  `SHA256SUMS` path. Handles both `sha256sum`-style and
+  Windows-mode (`*file`) sum lines, errors clearly on
+  missing platforms, validates required env up front.
+- New test harness `ci/scripts/test-update-homebrew-formula.sh`
+  (14 assertions — happy path, asterisk-prefix handling,
+  missing-platform + missing-env error paths, version /
+  license / test-block shape). Wired into `ci/scripts/test.sh`
+  so it runs on every CI pass.
+
+
 
 Ecosystem coverage + debugging ergonomics. Schema-compatible;
 every v0.4.5 config runs unchanged. JSON output unchanged for

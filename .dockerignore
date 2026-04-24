@@ -1,0 +1,5 @@
+# The image expects a pre-staged `linux-<arch>/alint` from the
+# release workflow — everything else is context bloat.
+*
+!linux-amd64/alint
+!linux-arm64/alint

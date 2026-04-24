@@ -6,3 +6,6 @@ cd "$REPO_ROOT"
 
 echo "==> Running cargo test --workspace"
 cargo test --workspace --locked
+
+echo "==> Running shell-script tests"
+ci/scripts/test-update-homebrew-formula.sh
