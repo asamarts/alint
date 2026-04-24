@@ -82,7 +82,7 @@ pub enum Op {
     Equals(Value),
     /// Value at `path` must be a string that the regex matches.
     /// A non-string match produces a violation with a clear
-    /// "expected string, got <kind>" message.
+    /// `expected string, got <kind>` message.
     Matches(Regex),
 }
 

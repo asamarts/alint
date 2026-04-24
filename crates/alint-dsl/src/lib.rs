@@ -5,10 +5,10 @@
 //!
 //! `extends:` resolution happens at the YAML-`Value` layer, not
 //! the typed-`Config` layer. Each `.alint.yml` (local, HTTPS,
-//! bundled) is parsed into a [`RawConfig`] that keeps each rule
-//! as a `serde_yaml_ng::Mapping` rather than a [`RuleSpec`]. This
-//! lets children in the extends chain specify only the fields
-//! they want to override — e.g.,
+//! bundled) is parsed into a private `RawConfig` that keeps each
+//! rule as a `serde_yaml_ng::Mapping` rather than an
+//! [`alint_core::RuleSpec`]. This lets children in the extends
+//! chain specify only the fields they want to override — e.g.,
 //!
 //! ```yaml
 //! extends: [./base.yml]
@@ -20,9 +20,10 @@
 //! Merge semantics for rules: group by `id` (insertion-preserving
 //! across sources), merge the mapping fields last-wins. After all
 //! extends resolve, each merged mapping is deserialized once into
-//! a [`RuleSpec`] — validation (`kind` required, `level` required,
-//! kind-specific fields valid) fires there, so a rule that never
-//! gets a `kind` assigned anywhere in its chain is a clean error.
+//! an [`alint_core::RuleSpec`] — validation (`kind` required,
+//! `level` required, kind-specific fields valid) fires there, so
+//! a rule that never gets a `kind` assigned anywhere in its chain
+//! is a clean error.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -244,8 +244,8 @@ pub struct HumanOptions {
     pub width: Option<usize>,
     /// Use the one-line-per-violation compact renderer instead of
     /// the grouped full layout. Designed for piping into editors /
-    /// grep / `wc -l`. The full-layout formatter calls through to
-    /// [`crate::write_human_compact`] when this is `true`.
+    /// grep / `wc -l`. When this is `true`, the full-layout
+    /// formatter delegates to the internal compact writer.
     pub compact: bool,
 }
 
