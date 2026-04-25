@@ -2619,6 +2619,8 @@ name = "xtask"
 version = "0.4.7"
 dependencies = [
  "alint-bench",
+ "alint-core",
+ "alint-rules",
  "anyhow",
  "clap",
  "serde_yaml_ng",

@@ -364,13 +364,17 @@ fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
         &target_dir.join("about/roadmap.md"),
         Some("Roadmap"),
     )?;
-    // Rule reference: slice docs/rules.md by H2 (= family) into
-    // one page per family, plus a generated index. See
-    // `generate_rules_pages` for the slicing rules.
-    generate_rules_pages(&workspace, &target_dir)?;
+    // Rule reference: slice docs/rules.md by H2 (= family) →
+    // H3 (= rule kind) into one page per kind, plus per-family
+    // overviews and a master alphabetical index. Returns a
+    // kind → family-slug map used below to render kind names
+    // as links from the bundled-ruleset pages.
+    let kind_to_family = generate_rules_pages(&workspace, &target_dir)?;
 
-    // 3. Per-bundled-ruleset reference page.
-    generate_bundled_ruleset_pages(&workspace, &target_dir)?;
+    // 3. Per-bundled-ruleset reference page. `kind_to_family`
+    //    drives the cross-links from `**kind**: <name>` →
+    //    `/docs/rules/<family>/<name>/`.
+    generate_bundled_ruleset_pages(&workspace, &target_dir, &kind_to_family)?;
 
     // 4. The JSON Schema, kept as JSON for programmatic use.
     let schema_dest = target_dir.join("configuration/schema.json");
@@ -463,80 +467,526 @@ fn strip_first_h1(body: &str) -> &str {
     body
 }
 
-/// Slice `docs/rules.md` by H2 (= rule family) into one
-/// Starlight page per family, plus a synthesized `rules/index.md`.
-/// The single-page rules.md is too long to be useful as a docs
-/// landing; per-family pages are the unit users actually want
-/// to bookmark.
+/// Per-rule-kind pages from `docs/rules.md`.
 ///
-/// Sections we drop:
-/// - "Contents" (the source file's TOC; we generate our own)
+/// rules.md is structured H2 (family) → H3 (one heading per
+/// rule kind, sometimes covering paired/triplet kinds via a
+/// slash- or comma-separated list of backtick'd names). We
+/// slice into:
+/// - `rules/<family-slug>/<kind>.md` — one Starlight page per
+///   rule kind. Multi-kind H3s emit one page per kind; the
+///   pages share the H3 body and cross-link via "See also".
+/// - `rules/<family-slug>/index.md` — family overview with
+///   one-line summaries linking to each kind page.
+/// - `rules/index.md` — alphabetical master index of every
+///   kind shipped in this build.
+///
+/// Two H2 sections are special-cased out of the rules tree
+/// because they're concepts rather than rule kinds:
+/// - "Fix operations" → `concepts/fix-operations.md`
+/// - "Nested .alint.yml (monorepo layering)" →
+///   `concepts/nested-configs.md`
+///
+/// Sections we drop entirely:
+/// - "Contents" (the source's TOC; redundant with our generated
+///   index)
 /// - "Bundled rulesets" (per-ruleset pages already generated
-///   from the YAML bodies — having both would cause confusing
-///   sidebar duplication)
-fn generate_rules_pages(workspace: &Path, target_dir: &Path) -> Result<()> {
+///   from the YAML bodies)
+///
+/// Returns a `kind → family-slug` map so the bundled-ruleset
+/// generator can produce links like
+/// `[json_path_equals](/docs/rules/content/json_path_equals/)`.
+fn generate_rules_pages(
+    workspace: &Path,
+    target_dir: &Path,
+) -> Result<std::collections::HashMap<String, String>> {
+    use std::collections::{HashMap, HashSet};
+
     let src = fs::read_to_string(workspace.join(docs_paths::RULES_DOC))
         .with_context(|| format!("reading {}", docs_paths::RULES_DOC))?;
-    let sections = split_h2_sections(&src);
+
+    // Authoritative list of rule kinds from the registry. We
+    // cross-check against this so a typo in rules.md surfaces
+    // at export time, not at site render time.
+    let registry = alint_rules::builtin_registry();
+    let known_kinds: HashSet<String> = registry.known_kinds().map(str::to_string).collect();
+
+    // Aliases declared in rules.md H3 titles via `(alias: \`X\`)`.
+    // The registry has no concept of "alias" — both canonical and
+    // alias names are registered as independent builders that
+    // happen to share an implementation. We harvest the alias
+    // names from rules.md so the "registered but missing" check
+    // below doesn't false-positive on aliases that ARE
+    // documented, just under their canonical name's heading.
+    let aliases: HashSet<String> = harvest_aliases(&src);
 
     let rules_dir = target_dir.join("rules");
     fs::create_dir_all(&rules_dir)?;
 
-    let mut emitted: Vec<(String, String)> = Vec::new(); // (title, slug)
-    for (order, section) in sections.iter().enumerate() {
-        let lc = section.title.to_lowercase();
+    let mut kind_to_family: HashMap<String, String> = HashMap::new();
+    let mut all_kinds: Vec<KindEntry> = Vec::new();
+    let mut family_summaries: Vec<FamilySummary> = Vec::new();
+
+    let mut family_order: u32 = 0;
+    for h2 in split_h2_sections(&src) {
+        let lc = h2.title.to_lowercase();
         if lc == "contents" || lc.starts_with("bundled rulesets") {
             continue;
         }
-        let slug = slugify(&section.title);
-        let mut page = String::new();
-        let _ = writeln!(&mut page, "---");
-        let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(&section.title));
-        let _ = writeln!(
-            &mut page,
-            "description: 'Rule reference: the {} family.'",
-            section.title.to_lowercase()
-        );
-        let _ = writeln!(&mut page, "sidebar:");
-        // `order` is the input index — preserves rules.md ordering
-        // in the sidebar instead of going alphabetical.
-        let _ = writeln!(&mut page, "  order: {}", order + 2);
-        let _ = writeln!(&mut page, "---");
-        let _ = writeln!(&mut page);
-        page.push_str(section.body.trim_start());
+        if lc.starts_with("fix operations") {
+            emit_concept_page(target_dir, "fix-operations", "Fix operations", &h2.body)?;
+            continue;
+        }
+        if lc.starts_with("nested") {
+            emit_concept_page(
+                target_dir,
+                "nested-configs",
+                "Nested .alint.yml (monorepo layering)",
+                &h2.body,
+            )?;
+            continue;
+        }
+
+        family_order += 1;
+        let family_slug = slugify(&h2.title);
+        let family_dir = rules_dir.join(&family_slug);
+        fs::create_dir_all(&family_dir)?;
+
+        let family_rules = process_family_h3s(
+            &h2,
+            &family_dir,
+            &family_slug,
+            &known_kinds,
+            &mut kind_to_family,
+            &mut all_kinds,
+        )?;
+
+        emit_family_index(
+            &family_dir,
+            &h2.title,
+            family_order,
+            &family_slug,
+            &family_rules,
+        )?;
+        family_summaries.push(FamilySummary {
+            title: h2.title.clone(),
+            slug: family_slug.clone(),
+            rule_count: family_rules.len(),
+        });
+    }
+
+    // Warn about any registered kind that rules.md doesn't
+    // document. Aliases (declared inline in their canonical
+    // H3's `(alias: …)`) are exempt — they ride on the
+    // canonical page rather than getting their own.
+    for kind in &known_kinds {
+        if !kind_to_family.contains_key(kind) && !aliases.contains(kind) {
+            eprintln!("[xtask] WARN: rule kind '{kind}' is registered but missing from rules.md");
+        }
+    }
+
+    emit_rules_master_index(&rules_dir, &all_kinds, &family_summaries)?;
+    Ok(kind_to_family)
+}
+
+/// Walk every H3 in a family, emit per-rule pages, and collect
+/// the family's rule list for later index generation. Split out
+/// of `generate_rules_pages` because clippy's `too_many_lines`
+/// flagged the original — and even ignoring that, "process one
+/// family" is its own logical chunk worth naming.
+fn process_family_h3s(
+    h2: &H2Section,
+    family_dir: &Path,
+    family_slug: &str,
+    known_kinds: &std::collections::HashSet<String>,
+    kind_to_family: &mut std::collections::HashMap<String, String>,
+    all_kinds: &mut Vec<KindEntry>,
+) -> Result<Vec<RuleEntry>> {
+    let mut family_rules: Vec<RuleEntry> = Vec::new();
+    let mut kind_order: u32 = 0;
+    for h3 in split_h3_sections(&h2.body) {
+        let mut group_kinds = extract_kinds(&h3.title);
+        group_kinds.retain(|k| {
+            if known_kinds.contains(k) {
+                true
+            } else {
+                eprintln!(
+                    "[xtask] WARN: rules.md heading '{}' mentions unknown rule kind '{}' — skipping",
+                    h3.title, k
+                );
+                false
+            }
+        });
+        if group_kinds.is_empty() {
+            continue;
+        }
+        let summary = first_sentence(&h3.body);
+        for kind in &group_kinds {
+            kind_order += 1;
+            let siblings: Vec<&str> = group_kinds
+                .iter()
+                .filter(|k| *k != kind)
+                .map(String::as_str)
+                .collect();
+            emit_rule_page(
+                family_dir,
+                kind,
+                family_slug,
+                &h2.title,
+                &h3.body,
+                &siblings,
+                kind_order,
+            )?;
+            kind_to_family.insert(kind.clone(), family_slug.to_string());
+            family_rules.push(RuleEntry {
+                kind: kind.clone(),
+                summary: summary.clone(),
+            });
+            all_kinds.push(KindEntry {
+                kind: kind.clone(),
+                family_title: h2.title.clone(),
+                family_slug: family_slug.to_string(),
+                summary: summary.clone(),
+            });
+        }
+    }
+    Ok(family_rules)
+}
+
+#[derive(Clone)]
+struct RuleEntry {
+    kind: String,
+    summary: String,
+}
+
+#[derive(Clone)]
+struct KindEntry {
+    kind: String,
+    family_title: String,
+    family_slug: String,
+    summary: String,
+}
+
+struct FamilySummary {
+    title: String,
+    slug: String,
+    rule_count: usize,
+}
+
+/// Sections of a markdown document split at H3 headers (`### …`).
+/// Used inside an H2 body. Anything before the first H3 is
+/// dropped (it's typically a family-level intro paragraph that
+/// belongs on the family index, not on any rule's page).
+struct H3Section {
+    title: String,
+    body: String,
+}
+
+fn split_h3_sections(src: &str) -> Vec<H3Section> {
+    let mut sections: Vec<H3Section> = Vec::new();
+    let mut current: Option<H3Section> = None;
+    for line in src.lines() {
+        if let Some(rest) = line.strip_prefix("### ") {
+            if let Some(prev) = current.take() {
+                sections.push(prev);
+            }
+            current = Some(H3Section {
+                title: rest.trim().to_string(),
+                body: String::new(),
+            });
+        } else if let Some(sec) = current.as_mut() {
+            sec.body.push_str(line);
+            sec.body.push('\n');
+        }
+    }
+    if let Some(prev) = current.take() {
+        sections.push(prev);
+    }
+    sections
+}
+
+/// Extract rule-kind tokens from an H3 title. Each kind name in
+/// the heading is wrapped in single backticks; aliases live
+/// inside `(alias: ...)` parens. Strip the parens, then collect
+/// every backtick-delimited token that looks like a rule kind.
+///
+/// A multi-kind heading (the structured-query family's three
+/// path-equals or path-matches kinds, comma-separated and
+/// individually backticked) yields one kind per backtick'd
+/// token. A single-kind heading yields one. Alias declarations
+/// inside parens are skipped here and harvested separately by
+/// [`harvest_aliases`].
+fn extract_kinds(h3_title: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut paren_depth = 0i32;
+    let mut in_backtick = false;
+    let mut current = String::new();
+    for ch in h3_title.chars() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = (paren_depth - 1).max(0),
+            '`' if paren_depth == 0 => {
+                if in_backtick {
+                    if looks_like_kind(&current) {
+                        out.push(current.clone());
+                    }
+                    current.clear();
+                }
+                in_backtick = !in_backtick;
+            }
+            c if in_backtick && paren_depth == 0 => current.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn looks_like_kind(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Scan the entire rules.md source for the alias declarations
+/// `(alias: ...)` (each name in single backticks) and collect the
+/// alias names. Used to suppress "registered but missing"
+/// warnings for aliases that share their canonical rule's page.
+fn harvest_aliases(src: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let needle = "alias:";
+    let mut idx = 0;
+    while let Some(pos) = src[idx..].find(needle) {
+        let abs = idx + pos + needle.len();
+        // After "alias:", skip whitespace, then expect a backtick-
+        // delimited identifier. Multiple aliases per H3 aren't
+        // currently used in rules.md but we'll handle them anyway.
+        let mut cursor = abs;
+        let bytes = src.as_bytes();
+        while cursor < bytes.len() && (bytes[cursor] as char).is_whitespace() {
+            cursor += 1;
+        }
+        if cursor < bytes.len() && bytes[cursor] == b'`' {
+            cursor += 1;
+            let start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != b'`' && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            if cursor < bytes.len() && bytes[cursor] == b'`' {
+                let name = &src[start..cursor];
+                if looks_like_kind(name) {
+                    out.insert(name.to_string());
+                }
+            }
+        }
+        idx = abs;
+    }
+    out
+}
+
+/// Heuristic one-liner for sidebar / index summaries. Takes the
+/// first markdown paragraph of an H3 body, strips trailing
+/// whitespace, takes up to the first sentence-ending `.`. Skips
+/// blank lines / fenced code at the top.
+fn first_sentence(body: &str) -> String {
+    let mut paragraph = String::new();
+    let mut in_code_block = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !paragraph.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if !paragraph.is_empty() {
+            paragraph.push(' ');
+        }
+        paragraph.push_str(trimmed);
+    }
+    if let Some(idx) = paragraph.find(". ") {
+        paragraph.truncate(idx + 1);
+    }
+    paragraph.trim().to_string()
+}
+
+/// Render one `rules/<family>/<kind>.md` page. Frontmatter
+/// `title` is the bare kind name so URLs and Starlight headings
+/// match what the user types in `.alint.yml`. The page body is
+/// the H3's content plus a "See also" footer for paired rules.
+fn emit_rule_page(
+    family_dir: &Path,
+    kind: &str,
+    family_slug: &str,
+    family_title: &str,
+    body: &str,
+    siblings: &[&str],
+    sidebar_order: u32,
+) -> Result<()> {
+    let mut page = String::new();
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page, "title: '{kind}'");
+    let _ = writeln!(
+        &mut page,
+        "description: 'alint rule kind `{kind}` ({family_title} family).'"
+    );
+    let _ = writeln!(&mut page, "sidebar:");
+    let _ = writeln!(&mut page, "  order: {sidebar_order}");
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page);
+    page.push_str(body.trim_start_matches('\n'));
+    if !siblings.is_empty() {
+        // Trim trailing newlines so the footer doesn't have a
+        // gaping gap above it.
+        while page.ends_with("\n\n") {
+            page.pop();
+        }
         if !page.ends_with('\n') {
             page.push('\n');
         }
-        fs::write(rules_dir.join(format!("{slug}.md")), &page)
-            .with_context(|| format!("writing rules/{slug}.md"))?;
-        emitted.push((section.title.clone(), slug));
+        let _ = writeln!(&mut page);
+        let _ = writeln!(&mut page, "## See also");
+        let _ = writeln!(&mut page);
+        for sib in siblings {
+            let _ = writeln!(&mut page, "- [`{sib}`](/docs/rules/{family_slug}/{sib}/)");
+        }
     }
+    if !page.ends_with('\n') {
+        page.push('\n');
+    }
+    let dest = family_dir.join(format!("{kind}.md"));
+    fs::write(&dest, page).with_context(|| format!("writing {}", dest.display()))?;
+    Ok(())
+}
 
-    // Index page — short intro + a flat TOC. `order: 1` so it
-    // sits at the top of the Rules sidebar group regardless of
-    // alphabetical sort.
-    let mut idx = String::new();
-    let _ = writeln!(&mut idx, "---");
-    let _ = writeln!(&mut idx, "title: Rules");
+/// Family overview: one paragraph on what the family is for plus
+/// a flat table-of-contents linking to each kind. Sidebar `order`
+/// preserves rules.md's H2 ordering (Existence first, Cross-file
+/// last) instead of alphabetical.
+fn emit_family_index(
+    family_dir: &Path,
+    family_title: &str,
+    family_order: u32,
+    family_slug: &str,
+    rules: &[RuleEntry],
+) -> Result<()> {
+    let mut page = String::new();
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(family_title));
     let _ = writeln!(
-        &mut idx,
-        "description: Every rule kind alint ships, organised by family."
+        &mut page,
+        "description: 'Rule reference: the {} family.'",
+        family_title.to_lowercase()
     );
-    let _ = writeln!(&mut idx, "sidebar:");
-    let _ = writeln!(&mut idx, "  order: 1");
-    let _ = writeln!(&mut idx, "---");
-    let _ = writeln!(&mut idx);
+    let _ = writeln!(&mut page, "sidebar:");
+    let _ = writeln!(&mut page, "  order: {family_order}");
+    let _ = writeln!(&mut page, "  label: '{}'", escape_yaml_string(family_title));
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page);
     let _ = writeln!(
-        &mut idx,
-        "alint ships ~50 rule kinds across eleven families. Each rule is one entry in your `.alint.yml` under `rules:`. The pages below cover every kind shipped in the current alint release."
+        &mut page,
+        "Rule kinds in the **{family_title}** family. Each entry below has its own page with options, an example, and any auto-fix support."
     );
-    let _ = writeln!(&mut idx);
-    let _ = writeln!(&mut idx, "## Reference by family");
-    let _ = writeln!(&mut idx);
-    for (title, slug) in &emitted {
-        let _ = writeln!(&mut idx, "- [{title}](/docs/rules/{slug}/)");
+    let _ = writeln!(&mut page);
+    for r in rules {
+        let _ = writeln!(
+            &mut page,
+            "- [`{kind}`](/docs/rules/{family_slug}/{kind}/) — {summary}",
+            kind = r.kind,
+            summary = r.summary
+        );
     }
-    fs::write(rules_dir.join("index.md"), idx)?;
+    fs::write(family_dir.join("index.md"), page)?;
+    Ok(())
+}
+
+/// Master `/docs/rules/` page: alphabetical index of every
+/// registered rule kind. This is the canonical "where do I find
+/// rule X?" landing.
+fn emit_rules_master_index(
+    rules_dir: &Path,
+    all_kinds: &[KindEntry],
+    families: &[FamilySummary],
+) -> Result<()> {
+    let mut sorted: Vec<&KindEntry> = all_kinds.iter().collect();
+    sorted.sort_by(|a, b| a.kind.cmp(&b.kind));
+
+    let mut page = String::new();
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page, "title: Rules");
+    let _ = writeln!(
+        &mut page,
+        "description: Every rule kind alint ships, with one-line summaries and links to family + per-rule pages."
+    );
+    let _ = writeln!(&mut page, "sidebar:");
+    let _ = writeln!(&mut page, "  order: 1");
+    let _ = writeln!(&mut page, "  label: 'Index'");
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page);
+    let _ = writeln!(
+        &mut page,
+        "alint ships {kc} rule kinds across {fc} families. Each rule is one entry in your `.alint.yml` under `rules:`.",
+        kc = all_kinds.len(),
+        fc = families.len()
+    );
+    let _ = writeln!(&mut page);
+    let _ = writeln!(&mut page, "## By family");
+    let _ = writeln!(&mut page);
+    for f in families {
+        let _ = writeln!(
+            &mut page,
+            "- [{title}](/docs/rules/{slug}/) — {n} rule{plural}",
+            title = f.title,
+            slug = f.slug,
+            n = f.rule_count,
+            plural = if f.rule_count == 1 { "" } else { "s" }
+        );
+    }
+    let _ = writeln!(&mut page);
+    let _ = writeln!(&mut page, "## Alphabetical");
+    let _ = writeln!(&mut page);
+    for k in sorted {
+        let _ = writeln!(
+            &mut page,
+            "- [`{kind}`](/docs/rules/{family}/{kind}/) — {summary} _({family_title})_",
+            kind = k.kind,
+            family = k.family_slug,
+            family_title = k.family_title,
+            summary = k.summary
+        );
+    }
+    fs::write(rules_dir.join("index.md"), page)?;
+    Ok(())
+}
+
+/// Emit a non-rule concept page (Fix operations, Nested
+/// configs). Lives under `concepts/` rather than `rules/` so
+/// the rules tree is purely about rule kinds.
+fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> Result<()> {
+    let dir = target_dir.join("concepts");
+    fs::create_dir_all(&dir)?;
+    let mut page = String::new();
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(title));
+    let _ = writeln!(
+        &mut page,
+        "description: 'alint concept: {}.'",
+        title.to_lowercase()
+    );
+    let _ = writeln!(&mut page, "---");
+    let _ = writeln!(&mut page);
+    page.push_str(body.trim_start_matches('\n'));
+    if !page.ends_with('\n') {
+        page.push('\n');
+    }
+    fs::write(dir.join(format!("{slug}.md")), page)?;
     Ok(())
 }
 
@@ -606,7 +1056,11 @@ fn escape_yaml_string(s: &str) -> String {
 /// / policy URL. Slash-separated names (`hygiene/lockfiles`,
 /// `ci/github-actions`) are flattened with a `-` for the bundle
 /// filename so Starlight's autogen sidebar produces a flat list.
-fn generate_bundled_ruleset_pages(workspace: &Path, target_dir: &Path) -> Result<()> {
+fn generate_bundled_ruleset_pages(
+    workspace: &Path,
+    target_dir: &Path,
+    kind_to_family: &std::collections::HashMap<String, String>,
+) -> Result<()> {
     let rulesets_root = workspace.join(docs_paths::RULESETS_DIR);
     let bundled_dir = target_dir.join("bundled-rulesets");
     fs::create_dir_all(&bundled_dir)?;
@@ -632,7 +1086,7 @@ fn generate_bundled_ruleset_pages(workspace: &Path, target_dir: &Path) -> Result
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml_text)
             .with_context(|| format!("parsing {}", entry.display()))?;
 
-        let page = render_ruleset_page(&pretty_str, &yaml);
+        let page = render_ruleset_page(&pretty_str, &yaml, kind_to_family);
         let dest = bundled_dir.join(&flat_filename);
         fs::write(&dest, page).with_context(|| format!("writing {}", dest.display()))?;
 
@@ -676,7 +1130,17 @@ fn generate_bundled_ruleset_pages(workspace: &Path, target_dir: &Path) -> Result
 /// Render the markdown body for a single bundled ruleset. Reads
 /// `version` and the `rules:` array; pulls each rule's `id`,
 /// `kind`, `level`, `message`, `policy_url`, and `when:`.
-fn render_ruleset_page(name: &str, yaml: &serde_yaml_ng::Value) -> String {
+///
+/// `kind_to_family` is consulted to render each rule's `kind` as
+/// a link into the rules tree (`/docs/rules/<family>/<kind>/`).
+/// Kinds not in the map (e.g. a brand-new kind missing from
+/// rules.md) render as plain code; the rules-pages generator
+/// emits a warning in that case so the gap surfaces.
+fn render_ruleset_page(
+    name: &str,
+    yaml: &serde_yaml_ng::Value,
+    kind_to_family: &std::collections::HashMap<String, String>,
+) -> String {
     let mut out = String::new();
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out, "title: '{name}@v1'");
@@ -712,7 +1176,13 @@ fn render_ruleset_page(name: &str, yaml: &serde_yaml_ng::Value) -> String {
         let _ = writeln!(&mut out, "### `{id}`");
         let _ = writeln!(&mut out);
         if !kind.is_empty() {
-            let _ = writeln!(&mut out, "- **kind**: `{kind}`");
+            let kind_md = match kind_to_family.get(kind) {
+                Some(family) => {
+                    format!("[`{kind}`](/docs/rules/{family}/{kind}/)")
+                }
+                None => format!("`{kind}`"),
+            };
+            let _ = writeln!(&mut out, "- **kind**: {kind_md}");
         }
         if !level.is_empty() {
             let _ = writeln!(&mut out, "- **level**: `{level}`");

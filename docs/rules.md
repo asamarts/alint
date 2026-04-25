@@ -217,9 +217,16 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
   level: warning
 ```
 
-### `file_is_text` (alias: `is_text`) / `file_is_binary`
+### `file_is_text` (alias: `is_text`)
 
-Content is detected as text (magic bytes + UTF-8 validity check) / binary.
+Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
+
+```yaml
+- id: configs-are-text
+  kind: file_is_text
+  paths: ".github/**/*.{yml,yaml}"
+  level: error
+```
 
 ### `file_is_ascii`
 
