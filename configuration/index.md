@@ -61,17 +61,29 @@ Bundled and HTTPS configs cannot themselves declare `extends:` — relative-path
 
 ### `ignore`
 
-Extra glob patterns to exclude from the walk, on top of `.gitignore`.
+Extra glob patterns to exclude from the walk, on top of `.gitignore`. Same gitignore-style syntax. Use this for repo-specific exclusions you don't want in `.gitignore` itself (because they're an alint concern, not a git concern):
 
 ```yaml
 ignore:
   - "vendor/**"
   - "**/*.snapshot.json"
+  - "fixtures/golden/**"
 ```
+
+`ignore:` patterns apply regardless of `respect_gitignore`. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for what gets filtered by default and how absence-style rules interpret git state.
 
 ### `respect_gitignore`
 
-Whether to honor `.gitignore` files during the walk. Default `true`. Set to `false` to lint every file regardless of git's ignore rules — useful for CI runs that want to enforce policy on otherwise-ignored content.
+Whether to honor `.gitignore` files (and `.git/info/exclude`, the global gitignore, and `.ignore` files) during the walk. Default `true`.
+
+```yaml
+respect_gitignore: true   # default — honor .gitignore
+# respect_gitignore: false  # lint everything on disk regardless
+```
+
+Setting it to `false` is rarely useful during normal development because absence-style rules (`dir_absent`, `file_absent`) start firing on every locally-built artefact (`target/`, `node_modules/`, `__pycache__/`, …). It's appropriate for one-off audits or for directories that aren't git repos at all. The CLI's `--no-gitignore` flag overrides this for one invocation.
+
+The full implications — including how absence-style rules interpret "tracked" vs "ignored" and where this approximation diverges from git's actual index — live in [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/).
 
 ### `vars`
 

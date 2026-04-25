@@ -5,10 +5,13 @@ sidebar:
   order: 3
 ---
 
-Directory-flavored counterparts of the above.
+Directory counterpart of `file_exists`. Every match must correspond to a real directory in the walked tree.
 
----
+```yaml
+- id: docs-dir-exists
+  kind: dir_exists
+  paths: "docs"
+  root_only: true
+  level: error
+```
 
-## See also
-
-- [`dir_absent`](/docs/rules/existence/dir_absent/)
