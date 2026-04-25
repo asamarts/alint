@@ -26,6 +26,11 @@ pub struct FileExistsRule {
     scope: Scope,
     patterns: Vec<String>,
     root_only: bool,
+    /// When `true`, only consider walked entries that are also
+    /// in git's index. Outside a git repo this becomes a silent
+    /// no-op — no entries qualify, so the rule reports the
+    /// "missing" violation as if no file existed.
+    git_tracked_only: bool,
     fixer: Option<FileCreateFixer>,
 }
 
@@ -46,12 +51,22 @@ impl Rule for FileExistsRule {
         self.policy_url.as_deref()
     }
 
+    fn wants_git_tracked(&self) -> bool {
+        self.git_tracked_only
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = ctx.index.files().any(|entry| {
             if self.root_only && entry.path.components().count() != 1 {
                 return false;
             }
-            self.scope.matches(&entry.path)
+            if !self.scope.matches(&entry.path) {
+                return false;
+            }
+            if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
+                return false;
+            }
+            true
         });
         if found {
             Ok(Vec::new())
@@ -62,8 +77,13 @@ impl Rule for FileExistsRule {
                 } else {
                     ""
                 };
+                let tracked = if self.git_tracked_only {
+                    " (tracked in git)"
+                } else {
+                    ""
+                };
                 format!(
-                    "expected a file matching [{}]{scope}",
+                    "expected a file matching [{}]{scope}{tracked}",
                     self.describe_patterns()
                 )
             });
@@ -123,6 +143,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope,
         patterns,
         root_only: opts.root_only,
+        git_tracked_only: spec.git_tracked_only,
         fixer,
     }))
 }

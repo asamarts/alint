@@ -66,6 +66,11 @@ impl RuleResult {
 ///   nested evaluation can set this to `None`.
 /// - `facts` — resolved fact values, computed once per `Engine::run`.
 /// - `vars` — user-supplied string variables from the config's `vars:` section.
+/// - `git_tracked` — set of repo paths reported by `git ls-files`,
+///   computed once per run when at least one rule has
+///   `git_tracked_only: true`. `None` outside a git repo or when
+///   no rule asked for it. Rules that opt in consult it via
+///   [`Context::is_git_tracked`].
 #[derive(Debug)]
 pub struct Context<'a> {
     pub root: &'a Path,
@@ -73,6 +78,33 @@ pub struct Context<'a> {
     pub registry: Option<&'a RuleRegistry>,
     pub facts: Option<&'a FactValues>,
     pub vars: Option<&'a HashMap<String, String>>,
+    pub git_tracked: Option<&'a std::collections::HashSet<std::path::PathBuf>>,
+}
+
+impl Context<'_> {
+    /// True if `rel_path` is in git's index. Returns `false` when
+    /// no tracked-set was computed (no git repo, or no rule asked
+    /// for it). Rules that opt into `git_tracked_only` therefore
+    /// silently skip every entry outside a git repo, which is the
+    /// right behaviour for the canonical "don't let X be
+    /// committed" use case.
+    pub fn is_git_tracked(&self, rel_path: &Path) -> bool {
+        match self.git_tracked {
+            Some(set) => set.contains(rel_path),
+            None => false,
+        }
+    }
+
+    /// True if the directory at `rel_path` contains at least one
+    /// git-tracked file. Used by `dir_*` rules opting into
+    /// `git_tracked_only`. Same `None`-means-untracked semantics
+    /// as [`Context::is_git_tracked`].
+    pub fn dir_has_tracked_files(&self, rel_path: &Path) -> bool {
+        match self.git_tracked {
+            Some(set) => crate::git::dir_has_tracked_files(rel_path, set),
+            None => false,
+        }
+    }
 }
 
 /// Trait every built-in and plugin rule implements.
@@ -81,6 +113,16 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn level(&self) -> Level;
     fn policy_url(&self) -> Option<&str> {
         None
+    }
+    /// Whether this rule needs the git-tracked-paths set on
+    /// [`Context`]. Default `false`; rule kinds that support
+    /// `git_tracked_only` override to return `true` only when
+    /// the user actually opted in. The engine collects the set
+    /// (via `git ls-files`) once per run when ANY rule returns
+    /// `true`, so the cost is paid at most once even if many
+    /// rules opt in.
+    fn wants_git_tracked(&self) -> bool {
+        false
     }
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
 

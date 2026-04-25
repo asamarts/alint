@@ -10,6 +10,11 @@ pub struct DirExistsRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    /// When `true`, only consider directories that contain at
+    /// least one git-tracked file. Outside a git repo the
+    /// tracked set is empty, so the rule reports the "missing"
+    /// violation as if no matching directory existed.
+    git_tracked_only: bool,
 }
 
 impl Rule for DirExistsRule {
@@ -22,18 +27,31 @@ impl Rule for DirExistsRule {
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
     }
+    fn wants_git_tracked(&self) -> bool {
+        self.git_tracked_only
+    }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let found = ctx
-            .index
-            .dirs()
-            .any(|entry| self.scope.matches(&entry.path));
+        let found = ctx.index.dirs().any(|entry| {
+            if !self.scope.matches(&entry.path) {
+                return false;
+            }
+            if self.git_tracked_only && !ctx.dir_has_tracked_files(&entry.path) {
+                return false;
+            }
+            true
+        });
         if found {
             Ok(Vec::new())
         } else {
             let msg = self.message.clone().unwrap_or_else(|| {
+                let tracked = if self.git_tracked_only {
+                    " (with tracked content)"
+                } else {
+                    ""
+                };
                 format!(
-                    "expected a directory matching [{}]",
+                    "expected a directory matching [{}]{tracked}",
                     self.patterns.join(", ")
                 )
             });
@@ -56,6 +74,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
+        git_tracked_only: spec.git_tracked_only,
     }))
 }
 

@@ -1,0 +1,39 @@
+name: dir_absent + git_tracked_only stays silent on a gitignored target/
+tags: [check, dir_absent, git_tracked_only, git]
+
+# Canonical use case: a Rust developer has built locally
+# (`target/` exists on disk) but it's properly gitignored, so
+# git's index doesn't contain anything under target/. With
+# git_tracked_only: true the rule should NOT fire — the build
+# artefacts are visible to the walker only because we run with
+# `respect_gitignore: false` here, but git itself doesn't track
+# them.
+
+given:
+  tree:
+    .gitignore: "target/\n"
+    README.md: "# demo\n"
+    target:
+      release:
+        binary: "fake build artefact"
+  config: |
+    version: 1
+    # Force the walker to surface target/ so we can prove the
+    # filtering happens at the rule layer (via git_tracked_only),
+    # not at the walker.
+    respect_gitignore: false
+    rules:
+      - id: no-tracked-target
+        kind: dir_absent
+        paths: "**/target"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

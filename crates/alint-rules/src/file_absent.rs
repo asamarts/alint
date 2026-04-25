@@ -14,6 +14,13 @@ pub struct FileAbsentRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    /// When `true`, only fire on entries that are also tracked
+    /// in git's index. Outside a git repo or with no rules
+    /// opting in, the tracked-set is `None` and every entry
+    /// reads as "untracked," so the rule becomes a no-op —
+    /// which is the right default for "don't let X be
+    /// committed" semantics.
+    git_tracked_only: bool,
     fixer: Option<FileRemoveFixer>,
 }
 
@@ -27,20 +34,32 @@ impl Rule for FileAbsentRule {
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
     }
+    fn wants_git_tracked(&self) -> bool {
+        self.git_tracked_only
+    }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if self.scope.matches(&entry.path) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "file is forbidden (matches [{}]): {}",
-                        self.patterns.join(", "),
-                        entry.path.display()
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+            if !self.scope.matches(&entry.path) {
+                continue;
             }
+            if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
+                continue;
+            }
+            let msg = self.message.clone().unwrap_or_else(|| {
+                let tracked = if self.git_tracked_only {
+                    " and tracked in git"
+                } else {
+                    ""
+                };
+                format!(
+                    "file is forbidden (matches [{}]{tracked}): {}",
+                    self.patterns.join(", "),
+                    entry.path.display()
+                )
+            });
+            violations.push(Violation::new(msg).with_path(&entry.path));
         }
         Ok(violations)
     }
@@ -74,6 +93,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
+        git_tracked_only: spec.git_tracked_only,
         fixer,
     }))
 }

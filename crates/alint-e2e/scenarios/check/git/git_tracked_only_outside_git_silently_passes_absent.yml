@@ -1,0 +1,29 @@
+name: dir_absent + git_tracked_only is a no-op outside a git repo
+tags: [check, dir_absent, git_tracked_only, git]
+
+# Outside a git repo, the tracked-set is None and every entry
+# reads as "untracked." For an absence-style rule with
+# git_tracked_only: true that means the rule is a silent no-op
+# — a sane default for "don't let X be committed" semantics
+# when there's no repo to commit anything to.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    target:
+      release:
+        binary: "build artefact"
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-target
+        kind: dir_absent
+        paths: "**/target"
+        git_tracked_only: true
+        level: error
+  # No `git:` block — tempdir is a plain non-git directory.
+
+when: [check]
+
+expect:
+  - violations: []

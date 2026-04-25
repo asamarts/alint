@@ -194,6 +194,7 @@ mod tests {
             registry: None,
             facts: None,
             vars: None,
+            git_tracked: None,
         };
         rule.evaluate(&ctx).unwrap()
     }

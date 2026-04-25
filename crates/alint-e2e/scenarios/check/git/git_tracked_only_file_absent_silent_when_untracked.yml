@@ -1,0 +1,30 @@
+name: file_absent + git_tracked_only stays silent on an untracked .env
+tags: [check, file_absent, git_tracked_only, git]
+
+# Same shape for files: a `.env` exists on disk (we're forcing
+# the walker to see it via respect_gitignore: false) but isn't
+# tracked. git_tracked_only: true keeps the rule silent.
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    README.md: "# demo\n"
+    .env: "SECRET=swordfish\n"
+  config: |
+    version: 1
+    respect_gitignore: false
+    rules:
+      - id: no-tracked-env
+        kind: file_absent
+        paths: ".env"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

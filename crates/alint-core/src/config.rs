@@ -193,6 +193,19 @@ pub struct RuleSpec {
     /// at build time.
     #[serde(default)]
     pub fix: Option<FixSpec>,
+    /// Restrict the rule to files / directories tracked in git's index.
+    /// When `true`, the rule's `paths`-matched entries are intersected
+    /// with the set of git-tracked files; entries that exist in the
+    /// walked tree but aren't in `git ls-files` output are skipped.
+    /// Only meaningful for rule kinds that opt in (currently the
+    /// existence family — `file_exists`, `file_absent`, `dir_exists`,
+    /// `dir_absent`); rule kinds that don't support it surface a clean
+    /// config error when this is `true` so silent mis-configuration
+    /// doesn't slip through.
+    ///
+    /// Default `false`. Has no effect outside a git repo.
+    #[serde(default)]
+    pub git_tracked_only: bool,
     /// The entire YAML mapping, retained so each rule builder can deserialize
     /// its kind-specific fields without every option being represented here.
     #[serde(flatten)]
@@ -414,6 +427,12 @@ impl NestedRuleSpec {
             policy_url: self.policy_url.clone(),
             when: self.when.clone(),
             fix: None,
+            // Nested rules don't currently expose
+            // `git_tracked_only` from their parent's spec — the
+            // option is meaningful on top-level rules only for
+            // now. If/when `for_each_dir`'s nested rules need it,
+            // plumb it through here.
+            git_tracked_only: false,
             extra: crate::template::render_mapping(self.extra.clone(), tokens),
         }
     }

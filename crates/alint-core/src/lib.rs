@@ -7,6 +7,7 @@ mod config;
 mod engine;
 mod error;
 pub mod facts;
+pub mod git;
 mod level;
 mod registry;
 mod report;

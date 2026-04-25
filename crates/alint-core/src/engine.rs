@@ -96,12 +96,14 @@ impl Engine {
 
     pub fn run(&self, root: &Path, index: &FileIndex) -> Result<Report> {
         let fact_values = evaluate_facts(&self.facts, root, index)?;
+        let git_tracked = self.collect_git_tracked_if_needed(root);
         let ctx = Context {
             root,
             index,
             registry: Some(&self.registry),
             facts: Some(&fact_values),
             vars: Some(&self.vars),
+            git_tracked: git_tracked.as_ref(),
         };
         let when_env = WhenEnv {
             facts: &fact_values,
@@ -123,12 +125,14 @@ impl Engine {
     /// result, same as [`Engine::run`]'s usual behaviour.
     pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
         let fact_values = evaluate_facts(&self.facts, root, index)?;
+        let git_tracked = self.collect_git_tracked_if_needed(root);
         let ctx = Context {
             root,
             index,
             registry: Some(&self.registry),
             facts: Some(&fact_values),
             vars: Some(&self.vars),
+            git_tracked: git_tracked.as_ref(),
         };
         let when_env = WhenEnv {
             facts: &fact_values,
@@ -191,6 +195,25 @@ impl Engine {
             });
         }
         Ok(FixReport { results })
+    }
+
+    /// Collect git's tracked-paths set, but only if at least one
+    /// loaded rule asked for it. Most repos / configs never opt
+    /// in, so this returns `None` zero-cost in the common case.
+    /// Inside a non-git directory, or when `git` exits non-zero
+    /// (corrupt repo, missing binary), the helper also returns
+    /// `None` — rules that consult it then treat every entry as
+    /// "untracked," which is the right default for absence-style
+    /// rules with `git_tracked_only: true`.
+    fn collect_git_tracked_if_needed(
+        &self,
+        root: &Path,
+    ) -> Option<std::collections::HashSet<std::path::PathBuf>> {
+        let any_wants = self.entries.iter().any(|e| e.rule.wants_git_tracked());
+        if !any_wants {
+            return None;
+        }
+        crate::git::collect_tracked_paths(root)
     }
 }
 

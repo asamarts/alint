@@ -6,7 +6,54 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.7] — 2026-04-24
+## [0.4.8] — 2026-04-25
+
+First git-aware primitive lands. Schema-compatible; every v0.4.7
+config runs unchanged. JSON / SARIF / GitHub outputs gain no new
+keys.
+
+### Added
+
+- **`git_tracked_only: bool`** option on `RuleSpec`, currently
+  honoured by `file_exists`, `file_absent`, `dir_exists`, and
+  `dir_absent`. When `true`, the rule's `paths`-matched entries
+  are intersected with `git ls-files`'s output so only files /
+  directories actually in git's index participate. Closes the
+  approximation gap documented on the
+  [walker-and-gitignore concept page](https://alint.org/docs/concepts/walker-and-gitignore/):
+  a `dir_absent` rule on `**/target` with `git_tracked_only: true`
+  fires only when `target/` was actually committed, never on a
+  developer's locally-built `target/` (gitignored or not). Outside
+  a git repo, or when `git` isn't on PATH, the tracked-set is
+  empty and rules with the flag set become silent no-ops — the
+  right default for "don't let X be committed" semantics.
+
+  ```yaml
+  - id: target-not-tracked
+    kind: dir_absent
+    paths: "**/target"
+    git_tracked_only: true
+    level: error
+  ```
+
+  Other rule kinds currently ignore the field; we'll extend
+  coverage as concrete use cases come up. The roadmap'd
+  `git_no_denied_paths` and `git_commit_message` primitives are
+  still pending.
+
+### Changed
+
+- `alint-core::Context` gains a `git_tracked: Option<&HashSet<PathBuf>>`
+  field, plus `is_git_tracked` / `dir_has_tracked_files` helpers.
+  External embedders constructing a `Context` by hand need to add
+  `git_tracked: None`. The engine collects the set at most once
+  per `run` / `fix`, only when at least one rule's
+  `wants_git_tracked()` is true — zero cost when no rule opts in.
+- `alint-testkit`'s `Given` block accepts an optional `git: { init,
+  add, commit }` block so e2e scenarios can stand up a real git
+  repo in their tempdir before alint runs.
+
+
 
 Distribution breadth. Schema-compatible; every v0.4.6 config
 runs unchanged. JSON/SARIF/GitHub outputs byte-equivalent. No

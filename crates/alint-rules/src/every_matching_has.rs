@@ -127,6 +127,7 @@ mod tests {
             registry: Some(&reg),
             facts: None,
             vars: None,
+            git_tracked: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         // `{path}` resolves to "packages/a" (dir) and "packages/x.md" (file).

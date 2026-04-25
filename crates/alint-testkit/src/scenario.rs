@@ -61,6 +61,40 @@ pub struct Given {
     pub tree: TreeSpec,
     /// Raw YAML body of the `.alint.yml` the scenario exercises.
     pub config: String,
+    /// Optional git-init + commit step for scenarios that exercise
+    /// `git_tracked_only` or any other primitive that needs a real
+    /// git index. Nothing happens when this field is absent.
+    #[serde(default)]
+    pub git: Option<GivenGit>,
+}
+
+/// `given.git:` block — initialise a git repo in the scenario
+/// tempdir, optionally `git add` listed paths, optionally commit.
+/// Paths are relative to the tempdir (i.e. they reference files
+/// already materialised by the `tree:` block).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GivenGit {
+    /// Run `git init` in the tempdir. Defaults to `true` so a
+    /// bare `git: {}` block is enough to enable a repo.
+    #[serde(default = "default_true")]
+    pub init: bool,
+    /// Paths to `git add` after init. Empty means "no `git add`,
+    /// the working tree stays untracked." When non-empty AND
+    /// `commit` is `true`, the runner then `git commit`s.
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Whether to make a commit after `git add`. Defaults to
+    /// `true` because `git ls-files` reports both staged and
+    /// committed files identically — but a never-committed repo
+    /// is an unusual real-world state, so the default mirrors
+    /// "fully checked-in repo."
+    #[serde(default = "default_true")]
+    pub commit: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

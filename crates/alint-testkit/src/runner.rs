@@ -3,12 +3,13 @@
 //! harness to assert on.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use alint_core::{Engine, FixReport, FixStatus, Level, Report, RuleEntry, WalkOptions, walk};
 use tempfile::TempDir;
 
 use crate::error::{Error, Result};
-use crate::scenario::{ExpectStep, Scenario, Step};
+use crate::scenario::{ExpectStep, GivenGit, Scenario, Step};
 use crate::treespec::{VerifyReport, materialize, verify};
 
 /// Concrete outcome of one step. The runner collects these in order;
@@ -50,6 +51,10 @@ pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
         source,
     })?;
 
+    if let Some(git_spec) = &scenario.given.git {
+        init_git_for_scenario(&root, git_spec)?;
+    }
+
     let mut steps = Vec::with_capacity(scenario.when.len());
     for step in &scenario.when {
         let outcome = run_step(*step, &root)?;
@@ -61,6 +66,65 @@ pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
         _tmp: tmp,
         steps,
     })
+}
+
+/// Run the scenario's `given.git:` setup against the tempdir.
+/// Each git invocation is shelled out via the `git` on PATH;
+/// scenarios in environments without git skip the setup with a
+/// clear error rather than silently producing a non-git tempdir.
+///
+/// The runner sets minimal user.name / user.email config so
+/// `git commit` doesn't fail in CI environments whose default
+/// identity isn't configured. Both values are scoped to the
+/// scenario tempdir (`-c user.…=`) and don't touch the host's
+/// global config.
+fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
+    if !spec.init {
+        return Ok(());
+    }
+    git(root, &["init", "-q", "-b", "main"])?;
+    if spec.add.is_empty() {
+        return Ok(());
+    }
+    let mut args: Vec<&str> = vec!["add", "--"];
+    args.extend(spec.add.iter().map(String::as_str));
+    git(root, &args)?;
+    if spec.commit {
+        git(
+            root,
+            &[
+                "-c",
+                "user.name=alint scenario",
+                "-c",
+                "user.email=scenario@alint.test",
+                "commit",
+                "-q",
+                "-m",
+                "scenario commit",
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<()> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|source| Error::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(Error::scenario(format!(
+            "git {args:?} in {} failed: {stderr}",
+            root.display()
+        )));
+    }
+    Ok(())
 }
 
 fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {

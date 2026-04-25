@@ -1,0 +1,32 @@
+name: dir_absent + git_tracked_only fires when target/ has tracked content
+tags: [check, dir_absent, git_tracked_only, git]
+
+# The other half of the contract: somebody actually committed
+# build artefacts (no .gitignore, target/ added to the index).
+# git_tracked_only: true should still fire — that's the
+# situation the rule exists to catch.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    target:
+      release:
+        binary: "checked-in build artefact"
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-target
+        kind: dir_absent
+        paths: "**/target"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, target]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-tracked-target, level: error, path: target}

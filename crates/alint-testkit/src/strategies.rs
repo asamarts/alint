@@ -62,7 +62,11 @@ pub fn any_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<Value
         Scenario {
             name: "property-any".into(),
             tags: vec!["proptest".into()],
-            given: Given { tree, config },
+            given: Given {
+                tree,
+                config,
+                git: None,
+            },
             when: vec![],
             expect: vec![],
             expect_tree: None,
@@ -86,7 +90,11 @@ pub fn fixable_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<V
         Scenario {
             name: "property-fixable".into(),
             tags: vec!["proptest".into()],
-            given: Given { tree, config },
+            given: Given {
+                tree,
+                config,
+                git: None,
+            },
             when: vec![],
             expect: vec![],
             expect_tree: None,
