@@ -1,0 +1,101 @@
+name: Docs bundle
+
+on:
+  push:
+    branches: [main]
+    # Tag pushes don't trigger a fresh bundle build — the bundle
+    # is rolling-latest, tied to `main`. Versioned bundles are a
+    # Phase 4 follow-up (one branch per tag, e.g. `docs-bundle-v1.0`).
+  workflow_dispatch:
+    # Lets the alint.org repo (or a maintainer) re-trigger a
+    # rebuild without a code change — useful when only a brand-
+    # new alint.org consumer is being onboarded.
+
+permissions:
+  contents: write   # required to push to the docs-bundle branch
+
+concurrency:
+  # Coalesce rapid main-branch pushes — only one bundle build at
+  # a time per ref, and a newer push cancels an older still-
+  # running one.
+  group: docs-bundle
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: Build + push docs bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: docs-bundle
+
+      - name: Generate docs-bundle/
+        run: cargo run -q -p xtask -- docs-export
+        # Output lives at target/docs-bundle/.
+
+      - name: Push to docs-bundle branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Stage the bundle in a fresh worktree so we can commit
+          # it as the *only* content of the docs-bundle branch
+          # (orphan history — no source files, just the export).
+          BUNDLE_DIR="$(pwd)/target/docs-bundle"
+          if [[ ! -d "$BUNDLE_DIR" ]]; then
+            echo "Expected bundle at $BUNDLE_DIR but it's missing."
+            exit 1
+          fi
+
+          # Worktree in /tmp so we don't need to clean .gitignored
+          # build artifacts before committing.
+          PUBLISH_DIR="$(mktemp -d)"
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$PUBLISH_DIR" || true
+          cd "$PUBLISH_DIR"
+
+          # If the docs-bundle branch already exists, check it out;
+          # otherwise create as orphan.
+          if git ls-remote --heads origin docs-bundle | grep -q docs-bundle; then
+            git fetch origin docs-bundle
+            git checkout docs-bundle
+            # Wipe everything tracked so removed pages don't
+            # linger in the published bundle.
+            git rm -rf . >/dev/null 2>&1 || true
+          else
+            git checkout --orphan docs-bundle
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          cp -r "${BUNDLE_DIR}/." .
+          git add -A
+          git -c user.name="alint docs bot" \
+              -c user.email="aliaksandr.samartsau@gmail.com" \
+              commit -m "Docs bundle from ${SOURCE_SHA}" || {
+            echo "No bundle changes; skipping push."
+            exit 0
+          }
+          git push origin docs-bundle --force
+
+      - name: Trigger alint.org rebuild
+        # Cloudflare Pages exposes a deploy-hook URL per project
+        # (Settings → Builds & deployments → Deploy Hooks). Stored
+        # as a repo secret on asamarts/alint so the docs-bundle
+        # update propagates to alint.org within seconds. If the
+        # secret isn't set yet, the step is a no-op.
+        env:
+          HOOK: ${{ secrets.ALINT_ORG_DEPLOY_HOOK }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOOK:-}" ]]; then
+            echo "ALINT_ORG_DEPLOY_HOOK not set — skipping site rebuild trigger."
+            exit 0
+          fi
+          curl -fsSL -X POST "$HOOK" -o /dev/null
+          echo "Pinged alint.org deploy hook."

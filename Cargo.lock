@@ -2621,6 +2621,7 @@ dependencies = [
  "alint-bench",
  "anyhow",
  "clap",
+ "serde_yaml_ng",
  "tempfile",
 ]
 

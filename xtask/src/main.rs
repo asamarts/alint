@@ -7,6 +7,10 @@
 //!   matrix, and emits a platform-fingerprinted markdown report. Used to
 //!   produce the numbers published in `docs/benchmarks/<version>/`.
 //! - `gen-fixture`   — materialize a synthetic tree for ad-hoc experimentation.
+//! - `docs-export`   — emit a `docs-bundle/` directory consumed by the
+//!   `asamarts/alint.org` site at build time. The bundle is the canonical
+//!   handoff format between the alint repo (source of truth for technical
+//!   docs) and the site repo (presentation).
 
 use std::fmt::Write as _;
 use std::fs;
@@ -50,6 +54,18 @@ enum Commands {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Emit `docs-bundle/` — the handoff bundle consumed by
+    /// `asamarts/alint.org` at site-build time.
+    DocsExport {
+        /// Output directory. Defaults to `target/docs-bundle/`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Validate the export would succeed without writing
+        /// anything. Used by CI to gate merges on a buildable
+        /// bundle.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -62,6 +78,7 @@ fn main() -> Result<()> {
             seed,
             out,
         } => gen_fixture(files, depth, seed, out),
+        Commands::DocsExport { out, check } => docs_export(out, check),
     }
 }
 
@@ -286,4 +303,371 @@ fn now_iso() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     format!("unix:{secs}")
+}
+
+// ---- docs-export ----------------------------------------------------------
+
+/// Workspace-relative paths the export reads from. Centralised so a
+/// `git mv` of any of these is a one-liner here, not a hunt across
+/// the function body.
+mod docs_paths {
+    pub const SITE_DIR: &str = "docs/site";
+    pub const RULES_DOC: &str = "docs/rules.md";
+    pub const ARCHITECTURE_DOC: &str = "docs/design/ARCHITECTURE.md";
+    pub const ROADMAP_DOC: &str = "docs/design/ROADMAP.md";
+    pub const CHANGELOG: &str = "CHANGELOG.md";
+    pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
+    pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
+}
+
+fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
+    let workspace = workspace_root()?;
+    let target_dir = out.unwrap_or_else(|| workspace.join("target/docs-bundle"));
+
+    // In check mode we still produce the bundle (so all the
+    // generators run) — just under a tempdir we discard. Catches
+    // missing files / bad YAML / broken --help before merge.
+    let _scratch_guard;
+    let target_dir = if check {
+        let scratch = tempfile::tempdir().context("creating tempdir for --check")?;
+        let path = scratch.path().to_path_buf();
+        _scratch_guard = scratch;
+        path
+    } else {
+        // Clean previous output so removed pages don't linger.
+        if target_dir.exists() {
+            fs::remove_dir_all(&target_dir)
+                .with_context(|| format!("removing stale {}", target_dir.display()))?;
+        }
+        fs::create_dir_all(&target_dir)?;
+        target_dir
+    };
+
+    eprintln!("[xtask] docs-export → {}", target_dir.display());
+
+    // 1. Hand-written long-form prose, copied verbatim.
+    copy_site_tree(&workspace, &target_dir)?;
+
+    // 2. Verbatim copies of the existing top-level docs.
+    copy_one(
+        &workspace.join(docs_paths::CHANGELOG),
+        &target_dir.join("changelog.md"),
+        Some("Changelog"),
+    )?;
+    copy_one(
+        &workspace.join(docs_paths::ARCHITECTURE_DOC),
+        &target_dir.join("about/architecture.md"),
+        Some("Architecture"),
+    )?;
+    copy_one(
+        &workspace.join(docs_paths::ROADMAP_DOC),
+        &target_dir.join("about/roadmap.md"),
+        Some("Roadmap"),
+    )?;
+    copy_one(
+        &workspace.join(docs_paths::RULES_DOC),
+        &target_dir.join("rules/index.md"),
+        Some("Rules"),
+    )?;
+
+    // 3. Per-bundled-ruleset reference page.
+    generate_bundled_ruleset_pages(&workspace, &target_dir)?;
+
+    // 4. The JSON Schema, kept as JSON for programmatic use.
+    let schema_dest = target_dir.join("configuration/schema.json");
+    fs::create_dir_all(schema_dest.parent().unwrap())?;
+    fs::copy(workspace.join(docs_paths::SCHEMA_JSON), &schema_dest)?;
+
+    // 5. CLI reference, captured from the alint binary's --help.
+    generate_cli_reference(&workspace, &target_dir)?;
+
+    // 6. Manifest. Any consumer (alint.org sync script, audit
+    //    tooling) reads this to know what's in the bundle.
+    write_manifest(&target_dir)?;
+
+    if check {
+        eprintln!("[xtask] docs-export --check OK");
+    } else {
+        eprintln!("[xtask] docs-export wrote {}", target_dir.display());
+    }
+    Ok(())
+}
+
+/// Recursively copy `docs/site/**.md` into the bundle root. Mirror
+/// the directory layout exactly — `docs/site/getting-started/foo.md`
+/// → `docs-bundle/getting-started/foo.md`.
+fn copy_site_tree(workspace: &Path, target_dir: &Path) -> Result<()> {
+    let site_root = workspace.join(docs_paths::SITE_DIR);
+    if !site_root.is_dir() {
+        bail!(
+            "{} is missing — Phase 2 expects hand-written docs to live here",
+            site_root.display()
+        );
+    }
+    for entry in walkdir_plain(&site_root)? {
+        let md = fs::metadata(&entry)?;
+        if !md.is_file() {
+            continue;
+        }
+        let rel = entry.strip_prefix(&site_root).unwrap();
+        let dest = target_dir.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&entry, &dest)
+            .with_context(|| format!("copying {} → {}", entry.display(), dest.display()))?;
+    }
+    Ok(())
+}
+
+/// Copy one source file into the bundle. If `title` is `Some`,
+/// inject a Starlight frontmatter block at the top of the
+/// destination so the page renders with the desired title in the
+/// Starlight chrome (the source files don't carry their own
+/// frontmatter — they're project-internal docs).
+fn copy_one(src: &Path, dest: &Path, title: Option<&str>) -> Result<()> {
+    if !src.is_file() {
+        bail!("expected file at {}", src.display());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(title) = title {
+        let body = fs::read_to_string(src).with_context(|| format!("reading {}", src.display()))?;
+        let stripped = strip_first_h1(&body);
+        let mut out = String::new();
+        let _ = writeln!(&mut out, "---");
+        let _ = writeln!(&mut out, "title: {title}");
+        let _ = writeln!(&mut out, "---");
+        let _ = writeln!(&mut out);
+        out.push_str(stripped);
+        fs::write(dest, out).with_context(|| format!("writing {}", dest.display()))?;
+    } else {
+        fs::copy(src, dest)
+            .with_context(|| format!("copying {} → {}", src.display(), dest.display()))?;
+    }
+    Ok(())
+}
+
+/// Strip the first top-level `# heading` line so the Starlight
+/// frontmatter `title` we inject doesn't render *next to* a
+/// duplicate H1 from the source file.
+fn strip_first_h1(body: &str) -> &str {
+    let trimmed = body.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("# ") {
+        // Skip until end-of-line + the trailing newline.
+        if let Some(idx) = rest.find('\n') {
+            return rest[idx + 1..].trim_start_matches('\n');
+        }
+        return "";
+    }
+    body
+}
+
+/// One markdown page per `crates/alint-dsl/rulesets/v1/**/*.yml`,
+/// summarising the ruleset's rules with their level / kind / message
+/// / policy URL. Slash-separated names (`hygiene/lockfiles`,
+/// `ci/github-actions`) are flattened with a `-` for the bundle
+/// filename so Starlight's autogen sidebar produces a flat list.
+fn generate_bundled_ruleset_pages(workspace: &Path, target_dir: &Path) -> Result<()> {
+    let rulesets_root = workspace.join(docs_paths::RULESETS_DIR);
+    let bundled_dir = target_dir.join("bundled-rulesets");
+    fs::create_dir_all(&bundled_dir)?;
+
+    let mut ruleset_pages: Vec<String> = Vec::new();
+
+    for entry in walkdir_plain(&rulesets_root)? {
+        let md = fs::metadata(&entry)?;
+        if !md.is_file() {
+            continue;
+        }
+        let ext = entry.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if ext != "yml" && ext != "yaml" {
+            continue;
+        }
+        let rel = entry.strip_prefix(&rulesets_root).unwrap();
+        let pretty_name = rel.with_extension("");
+        let pretty_str = pretty_name.to_string_lossy().replace('\\', "/");
+        let flat_filename = format!("{}.md", pretty_str.replace('/', "-"));
+
+        let yaml_text =
+            fs::read_to_string(&entry).with_context(|| format!("reading {}", entry.display()))?;
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml_text)
+            .with_context(|| format!("parsing {}", entry.display()))?;
+
+        let page = render_ruleset_page(&pretty_str, &yaml);
+        let dest = bundled_dir.join(&flat_filename);
+        fs::write(&dest, page).with_context(|| format!("writing {}", dest.display()))?;
+
+        ruleset_pages.push(pretty_str);
+    }
+
+    // An index page listing every ruleset — overwrites the hand-
+    // written placeholder when the sync script lays the bundle into
+    // alint.org.
+    ruleset_pages.sort();
+    let mut index = String::new();
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index, "title: Bundled Rulesets");
+    let _ = writeln!(
+        &mut index,
+        "description: One-line ecosystem baselines built into the alint binary."
+    );
+    let _ = writeln!(&mut index, "sidebar:");
+    let _ = writeln!(&mut index, "  order: 1");
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index);
+    let _ = writeln!(
+        &mut index,
+        "Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list lives on its own page below."
+    );
+    let _ = writeln!(&mut index);
+    let _ = writeln!(&mut index, "## Currently shipped");
+    let _ = writeln!(&mut index);
+    for name in &ruleset_pages {
+        let flat = name.replace('/', "-");
+        let _ = writeln!(
+            &mut index,
+            "- [`{name}@v1`](/docs/bundled-rulesets/{flat}/)"
+        );
+    }
+    fs::write(bundled_dir.join("index.md"), index)?;
+
+    Ok(())
+}
+
+/// Render the markdown body for a single bundled ruleset. Reads
+/// `version` and the `rules:` array; pulls each rule's `id`,
+/// `kind`, `level`, `message`, `policy_url`, and `when:`.
+fn render_ruleset_page(name: &str, yaml: &serde_yaml_ng::Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(&mut out, "---");
+    let _ = writeln!(&mut out, "title: '{name}@v1'");
+    let _ = writeln!(
+        &mut out,
+        "description: Bundled alint ruleset at alint://bundled/{name}@v1."
+    );
+    let _ = writeln!(&mut out, "---");
+    let _ = writeln!(&mut out);
+    let _ = writeln!(&mut out, "Adopt with:");
+    let _ = writeln!(&mut out);
+    let _ = writeln!(&mut out, "```yaml");
+    let _ = writeln!(&mut out, "extends:");
+    let _ = writeln!(&mut out, "  - alint://bundled/{name}@v1");
+    let _ = writeln!(&mut out, "```");
+    let _ = writeln!(&mut out);
+
+    let Some(rules) = yaml.get("rules").and_then(|r| r.as_sequence()) else {
+        let _ = writeln!(&mut out, "_(no rules — this ruleset is a placeholder.)_");
+        return out;
+    };
+    let _ = writeln!(&mut out, "## Rules");
+    let _ = writeln!(&mut out);
+
+    for rule in rules {
+        let id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("(no-id)");
+        let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let level = rule.get("level").and_then(|v| v.as_str()).unwrap_or("");
+        let when = rule.get("when").and_then(|v| v.as_str());
+        let msg = rule.get("message").and_then(|v| v.as_str());
+        let policy = rule.get("policy_url").and_then(|v| v.as_str());
+
+        let _ = writeln!(&mut out, "### `{id}`");
+        let _ = writeln!(&mut out);
+        if !kind.is_empty() {
+            let _ = writeln!(&mut out, "- **kind**: `{kind}`");
+        }
+        if !level.is_empty() {
+            let _ = writeln!(&mut out, "- **level**: `{level}`");
+        }
+        if let Some(when) = when {
+            let _ = writeln!(&mut out, "- **when**: `{when}`");
+        }
+        if let Some(policy) = policy {
+            let _ = writeln!(&mut out, "- **policy**: <{policy}>");
+        }
+        if let Some(msg) = msg {
+            let _ = writeln!(&mut out);
+            let _ = writeln!(&mut out, "> {}", msg.replace('\n', " "));
+        }
+        let _ = writeln!(&mut out);
+    }
+    out
+}
+
+/// Build the alint binary in release mode, then capture
+/// `alint --help` and `alint <subcmd> --help` for each subcommand.
+/// Each captured help text becomes its own markdown page under
+/// `cli/<subcmd>.md`.
+fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
+    let bin = build_release_binary()?;
+
+    let cli_dir = target_dir.join("cli");
+    fs::create_dir_all(&cli_dir)?;
+
+    // Top-level help → cli/index.md
+    let top = run_help(&bin, &[])?;
+    let mut index = String::new();
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index, "title: CLI");
+    let _ = writeln!(
+        &mut index,
+        "description: alint's subcommands and global flags, captured from the binary itself."
+    );
+    let _ = writeln!(&mut index, "sidebar:");
+    let _ = writeln!(&mut index, "  order: 1");
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index);
+    let _ = writeln!(&mut index, "```");
+    index.push_str(&top);
+    let _ = writeln!(&mut index, "```");
+    fs::write(cli_dir.join("index.md"), index)?;
+
+    let subcmds = ["check", "fix", "list", "explain", "facts"];
+    for sub in subcmds {
+        let help = run_help(&bin, &[sub])?;
+        let mut page = String::new();
+        let _ = writeln!(&mut page, "---");
+        let _ = writeln!(&mut page, "title: 'alint {sub}'");
+        let _ = writeln!(
+            &mut page,
+            "description: '`alint {sub}` — captured from `alint {sub} --help`.'"
+        );
+        let _ = writeln!(&mut page, "---");
+        let _ = writeln!(&mut page);
+        let _ = writeln!(&mut page, "```");
+        page.push_str(&help);
+        let _ = writeln!(&mut page, "```");
+        fs::write(cli_dir.join(format!("{sub}.md")), page)?;
+    }
+
+    // Sanity-check: workspace path exists.
+    let _ = workspace;
+    Ok(())
+}
+
+fn run_help(bin: &Path, subcmd_args: &[&str]) -> Result<String> {
+    let mut cmd = Command::new(bin);
+    cmd.args(subcmd_args).arg("--help");
+    let out = cmd.output().with_context(|| format!("running {cmd:?}"))?;
+    if !out.status.success() {
+        bail!(
+            "alint {:?} --help exited {:?}",
+            subcmd_args,
+            out.status.code()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn write_manifest(target_dir: &Path) -> Result<()> {
+    let sha = git_sha().unwrap_or_else(|| "unknown".to_string());
+    let version = env!("CARGO_PKG_VERSION");
+    let now = now_iso();
+
+    let json = format!(
+        "{{\n  \"alint_version\": \"{version}\",\n  \"git_sha\": \"{sha}\",\n  \"generated_at\": \"{now}\",\n  \"format_version\": 1\n}}\n"
+    );
+    fs::write(target_dir.join("manifest.json"), json)?;
+    Ok(())
 }

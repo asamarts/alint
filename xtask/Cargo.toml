@@ -17,6 +17,7 @@ path = "src/main.rs"
 alint-bench.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+serde_yaml_ng.workspace = true
 tempfile.workspace = true
 
 [lints]
