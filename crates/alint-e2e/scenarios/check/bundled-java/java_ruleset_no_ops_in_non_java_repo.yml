@@ -1,0 +1,15 @@
+name: alint://bundled/java - every rule is silent when facts.is_java is false
+tags: [check, extends, bundled, java]
+
+given:
+  tree:
+    "README.md": "# not a java project\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/java@v1
+
+when: [check]
+
+expect:
+  - violations: []

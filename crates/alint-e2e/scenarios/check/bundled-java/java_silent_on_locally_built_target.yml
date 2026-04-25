@@ -1,0 +1,52 @@
+name: alint://bundled/java - locally-built target/ stays silent (git_tracked_only at work)
+tags: [check, extends, bundled, java, git_tracked_only]
+
+# The classic Java developer state: pom.xml committed, target/
+# exists on disk from a local `mvn package`, but it's gitignored
+# so nothing under target/ is in the index. The bundled
+# `java-no-tracked-target` rule has `git_tracked_only: true` —
+# this scenario proves it correctly stays silent.
+
+given:
+  tree:
+    "pom.xml": |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <project><modelVersion>4.0.0</modelVersion>
+        <groupId>com.example</groupId>
+        <artifactId>demo</artifactId>
+        <version>1.0.0</version></project>
+    ".gitignore": "target/\n"
+    "src":
+      "main":
+        "java":
+          "com":
+            "example":
+              "Demo.java": "package com.example;\npublic class Demo {}\n"
+    # Locally-built artefacts. Forced visible to the walker via
+    # respect_gitignore: false below — proving the filtering
+    # happens at the rule layer (git_tracked_only), not the
+    # walker.
+    "target":
+      "classes":
+        "com":
+          "example":
+            "Demo.class": "fake bytecode"
+  config: |
+    version: 1
+    respect_gitignore: false
+    extends:
+      - alint://bundled/java@v1
+    rules:
+      # Quiet the wrapper-script advisory + final-newline-on-pom
+      # noise so this scenario isolates the target/ behaviour.
+      - id: java-build-wrapper-committed
+        level: off
+  git:
+    init: true
+    add: [pom.xml, .gitignore, src]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

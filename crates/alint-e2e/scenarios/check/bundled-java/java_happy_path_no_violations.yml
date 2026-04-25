@@ -1,0 +1,36 @@
+name: alint://bundled/java - well-formed Maven project has zero violations
+tags: [check, extends, bundled, java]
+
+# Maven layout, pom.xml at root, mvnw committed, PascalCase
+# class with a final newline. No `target/` directory in git.
+
+given:
+  tree:
+    "pom.xml": |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <project>
+        <modelVersion>4.0.0</modelVersion>
+        <groupId>com.example</groupId>
+        <artifactId>demo</artifactId>
+        <version>1.0.0</version>
+      </project>
+    "mvnw": "#!/bin/sh\nexec mvn \"$@\"\n"
+    "src":
+      "main":
+        "java":
+          "com":
+            "example":
+              "Demo.java": "package com.example;\npublic class Demo {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/java@v1
+  git:
+    init: true
+    add: [pom.xml, mvnw, src]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

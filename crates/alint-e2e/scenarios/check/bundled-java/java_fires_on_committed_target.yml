@@ -1,0 +1,38 @@
+name: alint://bundled/java - committed target/ fires the no-tracked-target rule
+tags: [check, extends, bundled, java, git_tracked_only]
+
+# The bug-case: someone added target/ to the index. With
+# git_tracked_only: true, the rule SHOULD fire — that's exactly
+# what it's there to catch.
+
+given:
+  tree:
+    "pom.xml": |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <project><modelVersion>4.0.0</modelVersion>
+        <groupId>com.example</groupId>
+        <artifactId>demo</artifactId>
+        <version>1.0.0</version></project>
+    "target":
+      "classes":
+        "com":
+          "example":
+            "Demo.class": "checked-in bytecode"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/java@v1
+    rules:
+      - id: java-build-wrapper-committed
+        level: off
+  git:
+    init: true
+    add: [pom.xml, target]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: java-no-tracked-target, level: error, path: target}
+      - {rule: java-no-class-files, level: error, path: target/classes/com/example/Demo.class}

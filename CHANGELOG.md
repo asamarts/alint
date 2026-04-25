@@ -6,7 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.8] — 2026-04-25
+## [0.4.9] — 2026-04-25
+
+Java bundled ruleset. Schema-compatible; every v0.4.8 config
+runs unchanged. JSON / SARIF / GitHub outputs byte-equivalent.
+
+### Added
+
+- **`alint://bundled/java@v1`** (10 rules). Maven + Gradle
+  hygiene, gated `when: facts.is_java`:
+  - `java-manifest-exists` — `pom.xml`, `build.gradle`, or
+    `build.gradle.kts` at the root (error).
+  - `java-build-wrapper-committed` — `mvnw` / `gradlew` checked
+    in for reproducible builds (info).
+  - `java-no-tracked-target` / `java-no-tracked-build` —
+    Maven's `target/` and Gradle's `build/` not committed.
+    Both use `git_tracked_only: true` (the v0.4.8 primitive)
+    so a developer's locally-built directories stay silent;
+    only directories whose contents made it into git's index
+    fire (error).
+  - `java-no-class-files` — `*.class` files not committed
+    (`git_tracked_only: true`, error).
+  - `java-sources-pascal-case` — PascalCase filenames for
+    `*.java`, with `package-info.java` / `module-info.java`
+    excluded (warning).
+  - `java-sources-final-newline` /
+    `java-sources-no-trailing-whitespace` — text hygiene,
+    auto-fixable (info).
+  - `java-sources-no-bidi` / `java-sources-no-zero-width` —
+    Trojan Source defenses (error).
+
+  Brings the bundled catalogue to 12 rulesets. The
+  `git_tracked_only` rules in this ruleset are the first
+  bundled use of v0.4.8's git-aware primitive — the
+  `silent_on_locally_built_target` e2e scenario proves the
+  wiring end-to-end.
+
+
 
 First git-aware primitive lands. Schema-compatible; every v0.4.7
 config runs unchanged. JSON / SARIF / GitHub outputs gain no new
