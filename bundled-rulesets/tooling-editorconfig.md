@@ -14,7 +14,7 @@ extends:
 
 ### `tooling-editorconfig-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **policy**: <https://editorconfig.org/>
 
@@ -22,7 +22,7 @@ extends:
 
 ### `tooling-gitattributes-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **policy**: <https://git-scm.com/docs/gitattributes>
 
@@ -30,7 +30,7 @@ extends:
 
 ### `tooling-gitattributes-normalizes-line-endings`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `info`
 
 > `.gitattributes` exists but has no `* text=...` line; line-ending normalization is the main reason to ship a `.gitattributes` in the first place.

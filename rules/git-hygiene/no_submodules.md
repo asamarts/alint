@@ -1,11 +1,9 @@
 ---
-title: 'Git hygiene'
-description: 'Rule reference: the git hygiene family.'
+title: 'no_submodules'
+description: 'alint rule kind `no_submodules` (Git hygiene family).'
 sidebar:
-  order: 12
+  order: 1
 ---
-
-### `no_submodules`
 
 Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`. For general "file X must not exist" checks, use `file_absent`.
 

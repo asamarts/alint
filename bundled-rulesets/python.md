@@ -14,7 +14,7 @@ extends:
 
 ### `python-manifest-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
 - **when**: `facts.is_python`
 - **policy**: <https://packaging.python.org/en/latest/guides/writing-pyproject-toml/>
@@ -23,7 +23,7 @@ extends:
 
 ### `python-has-lockfile`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **when**: `facts.is_python`
 
@@ -31,7 +31,7 @@ extends:
 
 ### `python-pyproject-declares-name`
 
-- **kind**: `toml_path_matches`
+- **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
 - **level**: `warning`
 - **when**: `facts.is_python`
 - **policy**: <https://peps.python.org/pep-0621/>
@@ -40,7 +40,7 @@ extends:
 
 ### `python-pyproject-declares-requires-python`
 
-- **kind**: `toml_path_matches`
+- **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
 - **level**: `info`
 - **when**: `facts.is_python`
 
@@ -48,7 +48,7 @@ extends:
 
 ### `python-module-snake-case`
 
-- **kind**: `filename_case`
+- **kind**: [`filename_case`](/docs/rules/naming/filename_case/)
 - **level**: `info`
 - **when**: `facts.is_python`
 - **policy**: <https://peps.python.org/pep-0008/#package-and-module-names>
@@ -57,19 +57,19 @@ extends:
 
 ### `python-sources-final-newline`
 
-- **kind**: `final_newline`
+- **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
 - **when**: `facts.is_python`
 
 ### `python-sources-no-trailing-whitespace`
 
-- **kind**: `no_trailing_whitespace`
+- **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
 - **when**: `facts.is_python`
 
 ### `python-sources-no-bidi`
 
-- **kind**: `no_bidi_controls`
+- **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
 - **when**: `facts.is_python`
 - **policy**: <https://trojansource.codes/>

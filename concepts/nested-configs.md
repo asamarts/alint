@@ -1,8 +1,6 @@
 ---
-title: 'Nested `.alint.yml` (monorepo layering)'
-description: 'Rule reference: the nested `.alint.yml` (monorepo layering) family.'
-sidebar:
-  order: 16
+title: 'Nested .alint.yml (monorepo layering)'
+description: 'alint concept: nested .alint.yml (monorepo layering).'
 ---
 
 Opt into per-subtree configs by setting `nested_configs: true` on the root `.alint.yml`:

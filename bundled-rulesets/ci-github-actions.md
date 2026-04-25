@@ -14,7 +14,7 @@ extends:
 
 ### `gha-workflow-contents-read`
 
-- **kind**: `yaml_path_equals`
+- **kind**: [`yaml_path_equals`](/docs/rules/content/yaml_path_equals/)
 - **level**: `warning`
 - **policy**: <https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token>
 
@@ -22,7 +22,7 @@ extends:
 
 ### `gha-pin-actions-to-sha`
 
-- **kind**: `yaml_path_matches`
+- **kind**: [`yaml_path_matches`](/docs/rules/content/yaml_path_matches/)
 - **level**: `warning`
 - **policy**: <https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions>
 
@@ -30,7 +30,7 @@ extends:
 
 ### `gha-workflow-has-name`
 
-- **kind**: `yaml_path_matches`
+- **kind**: [`yaml_path_matches`](/docs/rules/content/yaml_path_matches/)
 - **level**: `info`
 
 > Workflow has no `name:` field; the Actions UI will show the filename instead. Add a human-readable `name:` at the top.

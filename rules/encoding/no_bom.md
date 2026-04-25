@@ -1,11 +1,9 @@
 ---
-title: 'Encoding'
-description: 'Rule reference: the encoding family.'
+title: 'no_bom'
+description: 'alint rule kind `no_bom` (Encoding family).'
 sidebar:
-  order: 8
+  order: 1
 ---
-
-### `no_bom`
 
 Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips whichever BOM is detected.
 

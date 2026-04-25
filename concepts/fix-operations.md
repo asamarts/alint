@@ -1,8 +1,6 @@
 ---
 title: 'Fix operations'
-description: 'Rule reference: the fix operations family.'
-sidebar:
-  order: 14
+description: 'alint concept: fix operations.'
 ---
 
 Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.

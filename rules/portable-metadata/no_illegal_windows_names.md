@@ -1,17 +1,9 @@
 ---
-title: 'Portable metadata'
-description: 'Rule reference: the portable metadata family.'
+title: 'no_illegal_windows_names'
+description: 'alint rule kind `no_illegal_windows_names` (Portable metadata family).'
 sidebar:
-  order: 10
+  order: 2
 ---
-
-Checks that reject tree shapes which work on one OS but break checkouts elsewhere.
-
-### `no_case_conflicts`
-
-Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
-
-### `no_illegal_windows_names`
 
 Reject path components Windows can't represent:
 
