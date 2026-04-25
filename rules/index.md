@@ -24,14 +24,14 @@ alint ships 50 rule kinds across 11 families. Each rule is one entry in your `.a
 
 ## Alphabetical
 
-- [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory-flavored counterparts of the above. _(Existence)_
+- [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `paths` must contain files matching `require:`. _(Cross-file)_
-- [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory-flavored counterparts of the above. _(Existence)_
+- [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_
 - [`dir_only_contains`](/docs/rules/cross-file/dir_only_contains/) — Every directory matching `paths` may contain only files matching `allow:`. _(Cross-file)_
 - [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) — For every file matching `paths`, at least one of `require:` must also exist (at a template-derived location). _(Cross-file)_
 - [`executable_bit`](/docs/rules/unix-metadata/executable_bit/) — Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`). _(Unix metadata)_
 - [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) — Every file with `+x` set must begin with `#!`. _(Unix metadata)_
-- [`file_absent`](/docs/rules/existence/file_absent/) — No file matching `paths` may exist. _(Existence)_
+- [`file_absent`](/docs/rules/existence/file_absent/) — No file matching `paths` may exist in the walked tree. _(Existence)_
 - [`file_content_forbidden`](/docs/rules/content/file_content_forbidden/) — File contents must NOT match a regex. _(Content)_
 - [`file_content_matches`](/docs/rules/content/file_content_matches/) — File contents must contain at least one match for a regex. _(Content)_
 - [`file_ends_with`](/docs/rules/content/file_ends_with/) — Byte-level prefix / suffix check. _(Content)_
