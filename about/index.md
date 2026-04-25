@@ -19,7 +19,7 @@ alint is deliberately **not**:
 - a commit-message linter — use [commitlint](https://commitlint.js.org/)
 - a secret scanner — use [gitleaks](https://github.com/gitleaks/gitleaks), [trufflehog](https://github.com/trufflesecurity/trufflehog)
 
-Scope is the filesystem shape and contents of a repository, not the semantics of the code inside it.
+Scope is the filesystem shape and contents of a repository, not the semantics of the code inside it. For where alint fits in monorepo workflows specifically — including when to reach for Bazel, Cargo, pre-commit, or OpenSSF Scorecard instead — see [alint and monorepos](./monorepos/).
 
 ## Project links
 
