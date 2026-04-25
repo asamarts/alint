@@ -1,0 +1,24 @@
+name: file_shebang flags scripts without the required shebang
+tags: [check, file_shebang, content]
+
+given:
+  tree:
+    scripts:
+      ok.sh: "#!/usr/bin/env bash\necho ok\n"
+      hardcoded.sh: "#!/bin/bash\necho legacy\n"
+      missing.sh: "echo no shebang\n"
+  config: |
+    version: 1
+    rules:
+      - id: scripts-use-env-bash
+        kind: file_shebang
+        paths: "scripts/*.sh"
+        shebang: '^#!/usr/bin/env bash$'
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: scripts-use-env-bash, level: error, path: scripts/hardcoded.sh}
+      - {rule: scripts-use-env-bash, level: error, path: scripts/missing.sh}

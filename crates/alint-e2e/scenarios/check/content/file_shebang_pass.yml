@@ -1,0 +1,21 @@
+name: file_shebang is silent when scripts have the required interpreter
+tags: [check, file_shebang, content]
+
+given:
+  tree:
+    scripts:
+      build.sh: "#!/usr/bin/env bash\nset -euo pipefail\necho ok\n"
+      ci.sh: "#!/usr/bin/env bash\necho ok\n"
+  config: |
+    version: 1
+    rules:
+      - id: scripts-use-env-bash
+        kind: file_shebang
+        paths: "scripts/*.sh"
+        shebang: '^#!/usr/bin/env bash$'
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

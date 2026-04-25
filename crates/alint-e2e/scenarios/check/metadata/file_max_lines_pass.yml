@@ -1,0 +1,21 @@
+name: file_max_lines passes files at or under the threshold
+tags: [check, file_max_lines, metadata]
+
+given:
+  tree:
+    src:
+      tiny.rs: "fn a() {}\n"
+      medium.rs: "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\nfn e() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: cap-source-file
+        kind: file_max_lines
+        paths: "src/**/*.rs"
+        max_lines: 5
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

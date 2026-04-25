@@ -1,0 +1,29 @@
+name: file_max_lines flags files exceeding the threshold
+tags: [check, file_max_lines, metadata]
+
+given:
+  tree:
+    src:
+      tiny.rs: "fn a() {}\n"
+      bloated.rs: |
+        fn a() {}
+        fn b() {}
+        fn c() {}
+        fn d() {}
+        fn e() {}
+        fn f() {}
+        fn g() {}
+  config: |
+    version: 1
+    rules:
+      - id: cap-source-file
+        kind: file_max_lines
+        paths: "src/**/*.rs"
+        max_lines: 5
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: cap-source-file, level: warning, path: src/bloated.rs}

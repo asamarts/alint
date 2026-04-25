@@ -18,13 +18,16 @@ pub mod file_content_forbidden;
 pub mod file_content_matches;
 pub mod file_ends_with;
 pub mod file_exists;
+pub mod file_footer;
 pub mod file_hash;
 pub mod file_header;
 pub mod file_is_ascii;
 pub mod file_is_text;
+pub mod file_max_lines;
 pub mod file_max_size;
 pub mod file_min_lines;
 pub mod file_min_size;
+pub mod file_shebang;
 pub mod file_starts_with;
 pub mod filename_case;
 pub mod filename_regex;
@@ -80,6 +83,12 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("min_size", file_min_size::build);
     registry.register("file_min_lines", file_min_lines::build);
     registry.register("min_lines", file_min_lines::build);
+    registry.register("file_max_lines", file_max_lines::build);
+    registry.register("max_lines", file_max_lines::build);
+    registry.register("file_footer", file_footer::build);
+    registry.register("footer", file_footer::build);
+    registry.register("file_shebang", file_shebang::build);
+    registry.register("shebang", file_shebang::build);
 
     // Structured-query family — JSONPath queries over
     // JSON / YAML / TOML documents.
@@ -191,6 +200,12 @@ mod registry_tests {
             "min_size",
             "file_min_lines",
             "min_lines",
+            "file_max_lines",
+            "max_lines",
+            "file_footer",
+            "footer",
+            "file_shebang",
+            "shebang",
             // Structured-query family.
             "json_path_equals",
             "json_path_matches",

@@ -373,6 +373,9 @@
         { "$ref": "#/$defs/rule_file_max_size" },
         { "$ref": "#/$defs/rule_file_min_size" },
         { "$ref": "#/$defs/rule_file_min_lines" },
+        { "$ref": "#/$defs/rule_file_max_lines" },
+        { "$ref": "#/$defs/rule_file_footer" },
+        { "$ref": "#/$defs/rule_file_shebang" },
         { "$ref": "#/$defs/rule_file_is_text" },
         { "$ref": "#/$defs/rule_json_path_equals" },
         { "$ref": "#/$defs/rule_json_path_matches" },
@@ -565,6 +568,56 @@
           "type": "integer",
           "minimum": 0,
           "description": "Minimum allowed line count."
+        }
+      }
+    },
+
+    "rule_file_max_lines": {
+      "description": "Files in scope must have at most `max_lines` lines, with the same `wc -l`-style accounting as `file_min_lines`. Use to catch the everything-module anti-pattern.",
+      "type": "object",
+      "required": ["paths", "max_lines"],
+      "properties": {
+        "kind": { "enum": ["file_max_lines", "max_lines"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum allowed line count."
+        }
+      }
+    },
+
+    "rule_file_footer": {
+      "description": "Last `lines` lines of each file in scope must match `pattern` (Rust regex). Mirror of `file_header` anchored at the END of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.",
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "enum": ["file_footer", "footer"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. The last `lines` lines of each file must match."
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Number of trailing lines to consider."
+        }
+      }
+    },
+
+    "rule_file_shebang": {
+      "description": "First line of each file in scope must match the `shebang` regex. Pairs with `executable_has_shebang` (presence) and `shebang_has_executable` (the inverse) to enforce shebang shape, e.g. require `^#!/usr/bin/env bash$`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "enum": ["file_shebang", "shebang"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "shebang": {
+          "type": "string",
+          "default": "^#!",
+          "description": "Rust regex; the first line of every matched file must match. Default `^#!` only enforces shebang presence."
         }
       }
     },

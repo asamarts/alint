@@ -212,6 +212,47 @@ File must have at least `min_lines` lines (`\n`-terminated, with an unterminated
   level: info
 ```
 
+### `file_max_lines` (alias: `max_lines`)
+
+File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. Catches the everything-module anti-pattern — a `lib.rs` / `index.ts` / `helpers.py` that grew unbounded.
+
+```yaml
+- id: cap-source-file-size
+  kind: max_lines
+  paths: "src/**/*.rs"
+  max_lines: 800
+  level: warning
+```
+
+### `file_footer` (alias: `footer`)
+
+Last `lines` lines of each file in scope must match a regex. Mirror of `file_header` anchored at the end of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.
+
+```yaml
+- id: license-footer
+  kind: footer
+  paths: "src/**/*.rs"
+  pattern: "Licensed under the Apache License, Version 2\\.0"
+  lines: 3
+  level: error
+```
+
+Fix: `file_append` — append a declared `content`. With no fix declared, violations are unfixable.
+
+### `file_shebang` (alias: `shebang`)
+
+First line of each file in scope must match the `shebang` regex. Pairs with `executable_has_shebang` (which checks shebang *presence* on `+x` files) — `file_shebang` checks shebang *shape*.
+
+```yaml
+- id: scripts-use-env-bash
+  kind: shebang
+  paths: "scripts/*.sh"
+  shebang: '^#!/usr/bin/env bash$'
+  level: error
+```
+
+Default `shebang:` is `^#!`, which only enforces presence; almost every useful config supplies a tighter regex pinning the interpreter.
+
 ### `json_path_equals`, `yaml_path_equals`, `toml_path_equals`
 
 Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. YAML and TOML are parsed through serde and then treated as JSON-shaped trees, so the same JSONPath engine handles all three formats.

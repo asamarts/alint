@@ -1,0 +1,23 @@
+name: file_footer flags files whose tail doesn't match the required pattern
+tags: [check, file_footer, content]
+
+given:
+  tree:
+    src:
+      ok.rs: "fn a() {}\n// Licensed under the Apache License, Version 2.0\n"
+      missing.rs: "fn b() {}\n// no footer here\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-footer
+        kind: file_footer
+        paths: "src/**/*.rs"
+        pattern: "Licensed under the Apache License"
+        lines: 3
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: license-footer, level: warning, path: src/missing.rs}

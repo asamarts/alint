@@ -1,0 +1,22 @@
+name: file_footer is silent when every file ends with the required footer
+tags: [check, file_footer, content]
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\n\n// Licensed under the Apache License, Version 2.0\n"
+      b.rs: "fn b() {}\n// Licensed under the Apache License, Version 2.0\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-footer
+        kind: file_footer
+        paths: "src/**/*.rs"
+        pattern: "Licensed under the Apache License"
+        lines: 3
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []
