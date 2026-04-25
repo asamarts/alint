@@ -1,0 +1,1167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json",
+  "title": "alint configuration (v1)",
+  "description": "Schema for .alint.yml configuration files. Authoritative reference: docs/design/ARCHITECTURE.md in the alint repository.",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Config schema version. Always 1 for this schema."
+    },
+    "extends": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/extends_entry" },
+      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging.\n\nEntries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends.\n\n**Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it.\n\n**Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately.\n\nRemote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead."
+    },
+    "ignore": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Additional glob patterns excluded on top of .gitignore."
+    },
+    "respect_gitignore": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to honor .gitignore files during the walk."
+    },
+    "vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Free-form string variables referenced from rule messages as {{vars.<name>}} and from `when` clauses as vars.<name>."
+    },
+    "facts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact" },
+      "description": "Properties of the repository evaluated once per run; referenced from `when` clauses as facts.<id>."
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" },
+      "description": "Rules evaluated against the repository tree."
+    },
+    "fix_size_limit": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "default": 1048576,
+      "description": "Max bytes a content-editing fix will touch. Files over this limit are reported as Skipped with a stderr warning. Default: 1 MiB. Explicit null disables the cap. Path-only fixes (file_create, file_remove, file_rename) ignore this setting."
+    },
+    "nested_configs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt in to discovery of nested `.alint.yml` / `.alint.yaml` files in subdirectories. When true, the loader walks the tree from this config's directory (honoring `.gitignore` + `ignore`) and finds any nested config files. Each nested rule's path-like scope fields (`paths`, `select`, `primary`) are automatically prefixed with the nested config's relative directory, so rules declared in `packages/frontend/.alint.yml` apply only under `packages/frontend/**`. Id collisions across configs are rejected with a clear error — per-subtree overrides aren't supported in this release (use `when:` on the root rule for that). Only the root config sets this; nested configs can't spawn further nested discovery."
+    }
+  },
+
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "off"],
+      "description": "Severity. `off` disables a rule (useful when overriding inherited rules)."
+    },
+
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Unique kebab-case identifier for the rule."
+    },
+
+    "string_or_string_array": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
+    "extends_entry": {
+      "description": "One extends entry. Bare string = classic form (url-only). Mapping form lets you filter with `only:` / `except:` (mutually exclusive).",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["url"],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Local path, `https://...#sha256-<hex>`, or `alint://bundled/<name>@<rev>`."
+            },
+            "only": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Keep only these rule ids from the extended config; drop everything else."
+            },
+            "except": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Drop these rule ids from the extended config."
+            }
+          }
+        }
+      ]
+    },
+
+    "paths_spec": {
+      "description": "A single glob, an array of globs (with optional `!negation`), or an explicit include/exclude pair.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "include": { "$ref": "#/$defs/string_or_string_array" },
+            "exclude": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        }
+      ]
+    },
+
+    "case_convention": {
+      "type": "string",
+      "description": "Case convention. Aliases like PascalCase / pascal / pascal-case / UpperCamelCase all resolve to the same canonical form.",
+      "enum": [
+        "lower", "lowercase",
+        "upper", "uppercase",
+        "pascal", "pascalcase", "PascalCase", "UpperCamelCase", "upper_camel", "upper_camel_case",
+        "camel", "camelcase", "camelCase", "lowerCamelCase", "lower_camel", "lower_camel_case",
+        "snake", "snakecase", "snake_case",
+        "kebab", "kebabcase", "kebab-case", "dash", "dashcase", "dash-case",
+        "screaming-snake", "screamingsnake", "screamingsnakecase", "SCREAMING_SNAKE_CASE", "upper_snake", "upper_snake_case",
+        "flat", "flatcase"
+      ]
+    },
+
+    "rule_common": {
+      "type": "object",
+      "required": ["id", "kind", "level"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" },
+        "kind": {
+          "type": "string",
+          "description": "The primitive rule kind. See docs/design/ARCHITECTURE.md §4.4 for the full catalog."
+        },
+        "level": { "$ref": "#/$defs/level" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "message": {
+          "type": "string",
+          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution."
+        },
+        "policy_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Link to a human-readable policy justification."
+        },
+        "when": {
+          "type": "string",
+          "description": "Gate the rule on a fact-based expression (available from v0.2)."
+        },
+        "fix": { "$ref": "#/$defs/fix" }
+      }
+    },
+
+    "fix": {
+      "description": "Automatic-fix strategy applied by `alint fix`. Each rule kind accepts a specific op — alint errors at load time when the op and kind are incompatible.",
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["file_create"],
+          "additionalProperties": false,
+          "properties": {
+            "file_create": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Literal bytes to write. Required — pass \"\" for an empty file."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Target path, relative to the repo root. When omitted, the first literal entry from the rule's `paths:` list is used."
+                },
+                "create_parents": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Create intermediate directories if missing."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_remove"],
+          "additionalProperties": false,
+          "properties": {
+            "file_remove": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_prepend"],
+          "additionalProperties": false,
+          "properties": {
+            "file_prepend": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Bytes to insert at the start of each violating file. A trailing newline in `content` is the caller's responsibility."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_append"],
+          "additionalProperties": false,
+          "properties": {
+            "file_append": {
+              "type": "object",
+              "required": ["content"],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Bytes to append to each violating file. A leading newline in `content` is the caller's responsibility."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_rename"],
+          "additionalProperties": false,
+          "properties": {
+            "file_rename": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Rename the violating file's stem to the parent rule's target convention (e.g. filename_case's `case:`). Extension is preserved; the file stays in the same directory. No parameters."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_trim_trailing_whitespace"],
+          "additionalProperties": false,
+          "properties": {
+            "file_trim_trailing_whitespace": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Read the violating file, strip trailing space/tab on every line, write back. Preserves LF or CRLF endings. Skipped on files larger than `fix_size_limit`."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_append_final_newline"],
+          "additionalProperties": false,
+          "properties": {
+            "file_append_final_newline": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Append a single `\\n` byte when the file has content but doesn't end with one. No-op on empty files."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_normalize_line_endings"],
+          "additionalProperties": false,
+          "properties": {
+            "file_normalize_line_endings": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Rewrite every line ending in the file to the parent rule's `target` (lf or crlf). Skipped on files larger than `fix_size_limit`."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_bidi"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_bidi": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove every Unicode bidi control character (U+202A–202E, U+2066–2069). Skipped on files larger than `fix_size_limit` or on non-UTF-8 content."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_zero_width"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_zero_width": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove every zero-width character (U+200B/C/D, body-internal U+FEFF). A leading BOM is preserved — use `no_bom` to strip that."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_strip_bom"],
+          "additionalProperties": false,
+          "properties": {
+            "file_strip_bom": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Remove a leading UTF-8 / UTF-16 / UTF-32 BOM from the file. No-op when no BOM is present."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["file_collapse_blank_lines"],
+          "additionalProperties": false,
+          "properties": {
+            "file_collapse_blank_lines": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Collapse runs of blank lines longer than the parent rule's `max` down to exactly `max` blank lines. Preserves the file's line endings (LF vs CRLF). Skipped on files larger than `fix_size_limit` or on non-UTF-8 content."
+            }
+          }
+        }
+      ]
+    },
+
+    "rule": {
+      "allOf": [
+        { "$ref": "#/$defs/rule_common" },
+        { "$ref": "#/$defs/rule_kind_dispatch" }
+      ],
+      "unevaluatedProperties": false
+    },
+
+    "rule_kind_dispatch": {
+      "description": "Dispatch on the `kind` discriminator. Each branch sets the required kind-specific fields.",
+      "oneOf": [
+        { "$ref": "#/$defs/rule_file_exists" },
+        { "$ref": "#/$defs/rule_file_absent" },
+        { "$ref": "#/$defs/rule_dir_exists" },
+        { "$ref": "#/$defs/rule_dir_absent" },
+        { "$ref": "#/$defs/rule_file_content_matches" },
+        { "$ref": "#/$defs/rule_file_content_forbidden" },
+        { "$ref": "#/$defs/rule_file_header" },
+        { "$ref": "#/$defs/rule_file_max_size" },
+        { "$ref": "#/$defs/rule_file_min_size" },
+        { "$ref": "#/$defs/rule_file_min_lines" },
+        { "$ref": "#/$defs/rule_file_is_text" },
+        { "$ref": "#/$defs/rule_json_path_equals" },
+        { "$ref": "#/$defs/rule_json_path_matches" },
+        { "$ref": "#/$defs/rule_yaml_path_equals" },
+        { "$ref": "#/$defs/rule_yaml_path_matches" },
+        { "$ref": "#/$defs/rule_toml_path_equals" },
+        { "$ref": "#/$defs/rule_toml_path_matches" },
+        { "$ref": "#/$defs/rule_filename_case" },
+        { "$ref": "#/$defs/rule_filename_regex" },
+        { "$ref": "#/$defs/rule_pair" },
+        { "$ref": "#/$defs/rule_for_each_dir" },
+        { "$ref": "#/$defs/rule_for_each_file" },
+        { "$ref": "#/$defs/rule_dir_only_contains" },
+        { "$ref": "#/$defs/rule_unique_by" },
+        { "$ref": "#/$defs/rule_dir_contains" },
+        { "$ref": "#/$defs/rule_every_matching_has" },
+        { "$ref": "#/$defs/rule_no_trailing_whitespace" },
+        { "$ref": "#/$defs/rule_final_newline" },
+        { "$ref": "#/$defs/rule_line_endings" },
+        { "$ref": "#/$defs/rule_line_max_width" },
+        { "$ref": "#/$defs/rule_no_merge_conflict_markers" },
+        { "$ref": "#/$defs/rule_no_bidi_controls" },
+        { "$ref": "#/$defs/rule_no_zero_width_chars" },
+        { "$ref": "#/$defs/rule_file_is_ascii" },
+        { "$ref": "#/$defs/rule_no_bom" },
+        { "$ref": "#/$defs/rule_file_hash" },
+        { "$ref": "#/$defs/rule_max_directory_depth" },
+        { "$ref": "#/$defs/rule_max_files_per_directory" },
+        { "$ref": "#/$defs/rule_no_empty_files" },
+        { "$ref": "#/$defs/rule_no_case_conflicts" },
+        { "$ref": "#/$defs/rule_no_illegal_windows_names" },
+        { "$ref": "#/$defs/rule_no_symlinks" },
+        { "$ref": "#/$defs/rule_executable_bit" },
+        { "$ref": "#/$defs/rule_executable_has_shebang" },
+        { "$ref": "#/$defs/rule_shebang_has_executable" },
+        { "$ref": "#/$defs/rule_no_submodules" },
+        { "$ref": "#/$defs/rule_indent_style" },
+        { "$ref": "#/$defs/rule_max_consecutive_blank_lines" },
+        { "$ref": "#/$defs/rule_file_starts_with" },
+        { "$ref": "#/$defs/rule_file_ends_with" }
+      ]
+    },
+
+    "nested_rule": {
+      "description": "A nested rule inside `require:`. Unlike top-level rules, `id` and `level` are synthesized from the parent; the user supplies only `kind` plus kind-specific options.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "message": { "type": "string" },
+        "policy_url": { "type": "string", "format": "uri" },
+        "when": { "type": "string" }
+      }
+    },
+
+    "rule_file_exists": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_exists" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "root_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, only files directly at the repository root satisfy the rule."
+        }
+      }
+    },
+
+    "rule_file_absent": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_absent" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_dir_exists": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "dir_exists" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_dir_absent": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "dir_absent" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_content_matches": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "enum": ["file_content_matches", "content_matches"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. File contents must match."
+        }
+      }
+    },
+
+    "rule_file_content_forbidden": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "enum": ["file_content_forbidden", "content_forbidden"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. File contents must NOT match."
+        }
+      }
+    },
+
+    "rule_file_header": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "enum": ["file_header", "header"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex. The first `lines` lines of each file in scope must match."
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Number of leading lines to consider."
+        }
+      }
+    },
+
+    "rule_file_max_size": {
+      "type": "object",
+      "required": ["paths", "max_bytes"],
+      "properties": {
+        "kind": { "enum": ["file_max_size", "max_size"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum allowed file size in bytes."
+        }
+      }
+    },
+
+    "rule_file_min_size": {
+      "description": "Files in scope must be at least `min_bytes` bytes. Catches placeholder / stub files that pass existence checks but contain no useful content (e.g. a 20-byte README).",
+      "type": "object",
+      "required": ["paths", "min_bytes"],
+      "properties": {
+        "kind": { "enum": ["file_min_size", "min_size"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "min_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum allowed file size in bytes."
+        }
+      }
+    },
+
+    "rule_file_min_lines": {
+      "description": "Files in scope must have at least `min_lines` lines (where a line is `\\n`-terminated, with an unterminated trailing segment counting as one more, matching `wc -l` semantics). Common use: require README / CHANGELOG / SECURITY.md to be more than a title plus one sentence.",
+      "type": "object",
+      "required": ["paths", "min_lines"],
+      "properties": {
+        "kind": { "enum": ["file_min_lines", "min_lines"] },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "min_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum allowed line count."
+        }
+      }
+    },
+
+    "rule_file_is_text": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "enum": ["file_is_text", "is_text"] },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_json_path_equals": {
+      "description": "Value at a JSONPath (RFC 9535) expression in every JSON file in `paths` must deep-equal `equals`. Multiple matches all must match; zero matches is a violation (value missing) unless `if_present: true`. Typical use: `$.license == \"MIT\"` on every `packages/*/package.json`.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "json_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": {
+          "type": "string",
+          "description": "JSONPath expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct."
+        },
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        },
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_json_path_matches": {
+      "description": "Value at a JSONPath in every JSON file in `paths` must be a string and must match `matches` (a Rust regex). Non-string matches produce a clear 'not a string' violation.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "json_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": {
+          "type": "string",
+          "description": "Rust-regex pattern to match against the value at `path`."
+        },
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_yaml_path_equals": {
+      "description": "YAML sibling of `json_path_equals`. Parses the file as YAML before applying the JSONPath query. Use this on GitHub Actions workflows, docker-compose.yml, kubernetes manifests, `.gitlab-ci.yml`, etc.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "yaml_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "equals": {},
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_yaml_path_matches": {
+      "description": "YAML sibling of `json_path_matches`.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "yaml_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": { "type": "string" },
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_toml_path_equals": {
+      "description": "TOML sibling of `json_path_equals`. Typical use: enforce `[package].edition == \"2024\"` on every `Cargo.toml`.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "toml_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "equals": {},
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_toml_path_matches": {
+      "description": "TOML sibling of `json_path_matches`.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "toml_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": { "type": "string" },
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "if_present": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, a JSONPath query returning zero matches is silently OK — only real matches that fail the op produce violations. Use for predicates conditional on a field's presence (e.g. \"every `uses:` must be SHA-pinned\" where a workflow without `uses:` steps shouldn't be flagged)."
+    },
+
+    "rule_filename_case": {
+      "type": "object",
+      "required": ["paths", "case"],
+      "properties": {
+        "kind": { "const": "filename_case" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "case": { "$ref": "#/$defs/case_convention" }
+      }
+    },
+
+    "rule_filename_regex": {
+      "type": "object",
+      "required": ["paths", "pattern"],
+      "properties": {
+        "kind": { "const": "filename_regex" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust regex, automatically anchored with ^...$ by the engine."
+        },
+        "stem": {
+          "type": "boolean",
+          "default": false,
+          "description": "Match the file stem (no extension) instead of the full basename."
+        }
+      }
+    },
+
+    "rule_pair": {
+      "description": "For every file matching `primary`, a file matching the `partner` template must exist. Template tokens: {dir}, {stem}, {ext}, {basename}, {path}, {parent_name}.",
+      "type": "object",
+      "required": ["primary", "partner"],
+      "properties": {
+        "kind": { "const": "pair" },
+        "primary": {
+          "type": "string",
+          "description": "Glob selecting the primary files."
+        },
+        "partner": {
+          "type": "string",
+          "description": "Path template resolved per primary match. Example: \"{dir}/{stem}.h\"."
+        }
+      }
+    },
+
+    "rule_for_each_dir": {
+      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "for_each_dir" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the directories to iterate."
+        },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" },
+          "description": "Nested rules evaluated against each matched directory."
+        }
+      }
+    },
+
+    "rule_for_each_file": {
+      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "for_each_file" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the files to iterate."
+        },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" },
+          "description": "Nested rules evaluated against each matched file."
+        }
+      }
+    },
+
+    "rule_dir_only_contains": {
+      "description": "Every direct child *file* of directories matching `select` must match at least one glob in `allow`. Subdirectories of the matched dir are not checked. Allow globs match the child's basename.",
+      "type": "object",
+      "required": ["select", "allow"],
+      "properties": {
+        "kind": { "const": "dir_only_contains" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the directories to enumerate."
+        },
+        "allow": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "Basename glob(s) accepted as direct children. Anything else is a violation."
+        }
+      }
+    },
+
+    "rule_unique_by": {
+      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`.",
+      "type": "object",
+      "required": ["select"],
+      "properties": {
+        "kind": { "const": "unique_by" },
+        "select": {
+          "type": "string",
+          "description": "Glob selecting the files to deduplicate."
+        },
+        "key": {
+          "type": "string",
+          "default": "{basename}",
+          "description": "Path-template producing a key per matched file. Default: {basename}."
+        }
+      }
+    },
+
+    "rule_dir_contains": {
+      "description": "Every directory matching `select` must have at least one direct child basename matching each glob in `require`. Sugar over for_each_dir + file_exists; use for_each_dir for deeper semantics.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "dir_contains" },
+        "select": { "type": "string" },
+        "require": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "Basename glob(s) — every dir matching `select` must have at least one child matching each."
+        }
+      }
+    },
+
+    "rule_every_matching_has": {
+      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule.",
+      "type": "object",
+      "required": ["select", "require"],
+      "properties": {
+        "kind": { "const": "every_matching_has" },
+        "select": { "type": "string" },
+        "require": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nested_rule" }
+        }
+      }
+    },
+
+    "rule_no_trailing_whitespace": {
+      "description": "No line in any file in scope ends with a space or tab. Non-UTF-8 files are skipped silently.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_trailing_whitespace" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_final_newline": {
+      "description": "Every non-empty file in scope must end with a newline byte. Empty files are considered fine.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "final_newline" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_line_endings": {
+      "description": "Every line ending in every file in scope must use the `target` style (`lf` or `crlf`). Mixed endings within a file also fail.",
+      "type": "object",
+      "required": ["paths", "target"],
+      "properties": {
+        "kind": { "const": "line_endings" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "target": { "type": "string", "enum": ["lf", "crlf"] }
+      }
+    },
+
+    "rule_line_max_width": {
+      "description": "No line in any file in scope exceeds `max_width` Unicode scalar values (chars). Display width is NOT computed — use a formatter for that. Check-only; truncation is not a safe auto-fix.",
+      "type": "object",
+      "required": ["paths", "max_width"],
+      "properties": {
+        "kind": { "const": "line_max_width" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_width": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_no_merge_conflict_markers": {
+      "description": "Flag files that still contain git conflict markers at the start of a line (`<<<<<<< `, `=======`, `>>>>>>> `, `||||||| `). Check-only; conflict resolution requires human judgment.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_merge_conflict_markers" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_bidi_controls": {
+      "description": "Flag Unicode bidirectional control characters (U+202A–202E, U+2066–2069) anywhere in a file. Trojan Source (CVE-2021-42574) defense. Fixable via `file_strip_bidi`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_bidi_controls" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_zero_width_chars": {
+      "description": "Flag zero-width characters (U+200B/C/D, plus body-internal U+FEFF). A leading U+FEFF (BOM) is not flagged here — use `no_bom` for that. Fixable via `file_strip_zero_width`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_zero_width_chars" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_is_ascii": {
+      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII). Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "file_is_ascii" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_bom": {
+      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. Fixable via `file_strip_bom`.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_bom" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_file_hash": {
+      "description": "Each file in scope must have content whose SHA-256 equals the declared `sha256`. Accepts a bare 64-char hex string or a `sha256:`-prefixed form.",
+      "type": "object",
+      "required": ["paths", "sha256"],
+      "properties": {
+        "kind": { "const": "file_hash" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "sha256": { "type": "string", "pattern": "^(sha256:)?[0-9a-fA-F]{64}$" }
+      }
+    },
+
+    "rule_max_directory_depth": {
+      "description": "Every path in scope must sit at depth ≤ `max_depth` (number of `/`-separated components). Check-only; file relocation is a human decision.",
+      "type": "object",
+      "required": ["paths", "max_depth"],
+      "properties": {
+        "kind": { "const": "max_directory_depth" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_depth": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_max_files_per_directory": {
+      "description": "Every directory containing at least one in-scope file must hold ≤ `max_files` in-scope files (immediate children, non-recursive). Check-only.",
+      "type": "object",
+      "required": ["paths", "max_files"],
+      "properties": {
+        "kind": { "const": "max_files_per_directory" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max_files": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "rule_no_empty_files": {
+      "description": "Flag zero-byte files. Fixable via `file_remove`, which deletes the empty file.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_empty_files" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_case_conflicts": {
+      "description": "Flag pairs of paths that differ only by case (e.g. README.md + readme.md). These can't coexist on macOS HFS+/APFS or Windows NTFS.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_case_conflicts" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_illegal_windows_names": {
+      "description": "Reject path components Windows can't represent: reserved device names (CON/PRN/AUX/NUL/COM1-9/LPT1-9 regardless of extension), trailing dots or spaces, and the forbidden chars <>:\"|?*.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_illegal_windows_names" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_symlinks": {
+      "description": "Flag tracked paths that are symbolic links. Symlinks are a portability headache across Windows/macOS/Linux and CI runners. Fixable via `file_remove`, which deletes the symlink.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "no_symlinks" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_executable_bit": {
+      "description": "Assert that every file in scope either has the Unix +x bit set (`require: true`) or does not (`require: false`). No-op on non-Unix platforms. No fix op (chmod auto-apply deferred).",
+      "type": "object",
+      "required": ["paths", "require"],
+      "properties": {
+        "kind": { "const": "executable_bit" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "require": {
+          "type": "boolean",
+          "description": "`true`: +x must be set. `false`: +x must not be set."
+        }
+      }
+    },
+
+    "rule_executable_has_shebang": {
+      "description": "Every file with the +x bit set must begin with a shebang (`#!`). Catches scripts that were marked executable but whose content is a plain text file or missing a shebang. No-op on non-Unix.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "executable_has_shebang" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_shebang_has_executable": {
+      "description": "Every file that starts with `#!` must have the Unix +x bit set. The inverse of `executable_has_shebang`. No-op on non-Unix. No fix op (chmod auto-apply deferred).",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "shebang_has_executable" },
+        "paths": { "$ref": "#/$defs/paths_spec" }
+      }
+    },
+
+    "rule_no_submodules": {
+      "description": "Flag the presence of `.gitmodules` at the repo root. Always targets `.gitmodules` — no `paths` field accepted. Fixable via `file_remove`.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "no_submodules" }
+      },
+      "not": {
+        "required": ["paths"]
+      }
+    },
+
+    "rule_indent_style": {
+      "description": "Every non-blank line must indent with the configured style. `tabs` rejects any leading space; `spaces` rejects any leading tab and optionally requires the leading-space count to be a multiple of `width`. Check-only — tab-width-aware reindentation is deferred.",
+      "type": "object",
+      "required": ["paths", "style"],
+      "properties": {
+        "kind": { "const": "indent_style" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "style": {
+          "type": "string",
+          "enum": ["tabs", "spaces"]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "When `style: spaces`, the leading-space count on every non-blank line must be a multiple of this. Ignored for `style: tabs`."
+        }
+      }
+    },
+
+    "rule_max_consecutive_blank_lines": {
+      "description": "Cap the number of blank lines that may appear in a row. A blank line is empty or only whitespace. Fixable via `file_collapse_blank_lines`, which collapses over-long runs to exactly `max` blank lines.",
+      "type": "object",
+      "required": ["paths", "max"],
+      "properties": {
+        "kind": { "const": "max_consecutive_blank_lines" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of blank lines allowed in a row. `0` means no blank lines at all."
+        }
+      }
+    },
+
+    "rule_file_starts_with": {
+      "description": "Every file in scope must begin with the given prefix (byte-level). Useful for SPDX headers, generated-file sentinels, magic bytes. Check-only; pair with `file_prepend` if you want auto-prepend (prevents silent duplication on near-matches).",
+      "type": "object",
+      "required": ["paths", "prefix"],
+      "properties": {
+        "kind": { "const": "file_starts_with" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "prefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required prefix, matched byte-for-byte."
+        }
+      }
+    },
+
+    "rule_file_ends_with": {
+      "description": "Every file in scope must end with the given suffix (byte-level). For a simple trailing-newline check, prefer `final_newline`. Check-only; pair with `file_append` if you want auto-append.",
+      "type": "object",
+      "required": ["paths", "suffix"],
+      "properties": {
+        "kind": { "const": "file_ends_with" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "suffix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required suffix, matched byte-for-byte."
+        }
+      }
+    },
+
+    "fact": {
+      "description": "A single fact declaration. Each fact has an `id` plus exactly one kind-specific field.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" }
+      },
+      "oneOf": [
+        {
+          "required": ["any_file_exists"],
+          "properties": {
+            "any_file_exists": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        },
+        {
+          "required": ["all_files_exist"],
+          "properties": {
+            "all_files_exist": { "$ref": "#/$defs/string_or_string_array" }
+          }
+        },
+        {
+          "required": ["count_files"],
+          "properties": {
+            "count_files": { "type": "string" }
+          }
+        },
+        {
+          "required": ["file_content_matches"],
+          "properties": {
+            "file_content_matches": {
+              "type": "object",
+              "required": ["paths", "pattern"],
+              "additionalProperties": false,
+              "properties": {
+                "paths": { "$ref": "#/$defs/string_or_string_array" },
+                "pattern": {
+                  "type": "string",
+                  "description": "Rust-regex pattern matched against the content of every file in `paths`. The fact is true iff at least one file contains a match. Non-UTF-8 files are skipped."
+                }
+              }
+            }
+          }
+        },
+        {
+          "required": ["git_branch"],
+          "properties": {
+            "git_branch": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "description": "Read `<repo>/.git/HEAD` and return the current branch name (string). Detached HEAD, no `.git/` directory, or any unrecognized layout resolves to an empty string (falsy under `when:`)."
+            }
+          }
+        },
+        {
+          "required": ["custom"],
+          "properties": {
+            "custom": {
+              "type": "object",
+              "required": ["argv"],
+              "additionalProperties": false,
+              "properties": {
+                "argv": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" },
+                  "description": "Program + arguments, passed verbatim to the OS (no shell). Fact value is the process's stdout (trimmed). Non-zero exit, spawn failure, or non-UTF-8 output all resolve to an empty string. SECURITY: `custom:` is only valid in the user's top-level config — alint refuses to load an extended config that declares one."
+                }
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
