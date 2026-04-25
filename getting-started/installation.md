@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-alint ships as a single static Rust binary. Pick whichever path matches your environment.
+alint ships as a single static Rust binary — no runtime, no JVM, nothing else to install. Pick whichever path matches your environment.
 
 ## Homebrew (macOS + Linuxbrew)
 
