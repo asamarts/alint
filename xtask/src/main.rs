@@ -867,9 +867,11 @@ fn emit_rule_page(
 }
 
 /// Family overview: one paragraph on what the family is for plus
-/// a flat table-of-contents linking to each kind. Sidebar `order`
-/// preserves rules.md's H2 ordering (Existence first, Cross-file
-/// last) instead of alphabetical.
+/// a flat table-of-contents linking to each kind. alint.org
+/// references this page explicitly via a `link:` "Overview"
+/// item in `astro.config.mjs` (it's NOT picked up by
+/// autogenerate — the Rules section uses hand-rolled
+/// sub-groups, see the comment over the Rules sidebar entry).
 fn emit_family_index(
     family_dir: &Path,
     family_title: &str,
