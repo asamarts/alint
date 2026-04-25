@@ -17,3 +17,5 @@ Every glob match in `paths` must correspond to a real file. Use an array to acce
 
 Fix: `file_create` — write a declared `content`. With an array of `paths`, the fix creates the first entry.
 
+**Optional `git_tracked_only: true`** further requires that the matching file be in git's index — useful for rules like "every release must commit a CHANGELOG entry" where local-only files shouldn't satisfy the requirement. Outside a git repo, the rule fails (no file qualifies). See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
+

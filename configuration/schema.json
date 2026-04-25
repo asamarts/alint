@@ -439,7 +439,8 @@
           "type": "boolean",
           "default": false,
           "description": "If true, only files directly at the repository root satisfy the rule."
-        }
+        },
+        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" }
       }
     },
 
@@ -448,7 +449,8 @@
       "required": ["paths"],
       "properties": {
         "kind": { "const": "file_absent" },
-        "paths": { "$ref": "#/$defs/paths_spec" }
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" }
       }
     },
 
@@ -457,7 +459,8 @@
       "required": ["paths"],
       "properties": {
         "kind": { "const": "dir_exists" },
-        "paths": { "$ref": "#/$defs/paths_spec" }
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" }
       }
     },
 
@@ -466,8 +469,15 @@
       "required": ["paths"],
       "properties": {
         "kind": { "const": "dir_absent" },
-        "paths": { "$ref": "#/$defs/paths_spec" }
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" }
       }
+    },
+
+    "git_tracked_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; other rule kinds ignore the field. See https://alint.org/docs/concepts/walker-and-gitignore/ for the full semantics."
     },
 
     "rule_file_content_matches": {

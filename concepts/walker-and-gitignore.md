@@ -87,14 +87,11 @@ Rare, but legitimate cases:
 
 Don't reach for `--no-gitignore` casually. With it on, every `dir_absent` / `file_absent` rule fires on any developer who has built locally — `target/`, `node_modules/`, `__pycache__/`, `.next/` all become violations. That's almost never what you want during normal development.
 
-## The git-aware future
+## Tightening the rule with `git_tracked_only`
 
-The current model — observe the filesystem, filter by `.gitignore` — is fast, simple, and works on non-git directories. Its blind spot is the index/working-tree distinction.
-
-[ROADMAP.md](https://github.com/asamarts/alint/blob/main/docs/design/ROADMAP.md) under v0.5 lists *git-aware primitives* as a planned addition: `git_tracked_only` (a scope modifier that filters to files actually in git's index), `git_no_denied_paths`, and `git_commit_message`. When those land, you'll be able to write rules like:
+The walker's gitignore-based approximation works for most repos, but if you want a rule that fires *only* when a path is actually in git's index — independent of `.gitignore` state — set `git_tracked_only: true` on the rule:
 
 ```yaml
-# (planned for v0.5 — not yet shipped)
 - id: target-not-tracked
   kind: dir_absent
   paths: "**/target"
@@ -102,4 +99,20 @@ The current model — observe the filesystem, filter by `.gitignore` — is fast
   level: error
 ```
 
-…which would fire only when `target/` is actually in git's index, regardless of `.gitignore` state. Until then, the gitignore-based approximation is the supported path.
+This is the canonical "don't let `target/` be committed" rule. With the flag set, the rule only fires when `target/` contains at least one file in `git ls-files`. A locally-built `target/` that's properly gitignored stays silent (no tracked content). A `target/` whose contents have been added with `git add -f` or before `.gitignore` was set up — the cases the [walker approximation misses](#what-this-is-not-a-check-against-gits-index) — does fire, because `git ls-files` reports them.
+
+Behaviour summary:
+
+| `target/` state | Without `git_tracked_only` | With `git_tracked_only` |
+|---|---|---|
+| Gitignored, never built | silent | silent |
+| Gitignored, built locally | silent | silent |
+| Not gitignored, exists on disk | **fires** | silent (not in index) |
+| Tracked in git's index | **fires** | **fires** |
+| Repo isn't a git repo | **fires** | silent (no index) |
+
+`git_tracked_only` currently applies to four rule kinds — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`. The other rule kinds ignore the field; we'll extend coverage as use cases come up.
+
+When `alint` runs outside a git repo (no `.git/`), or when `git` isn't on `PATH`, the tracked-set is empty and absence-style rules with `git_tracked_only: true` become silent no-ops. That's the right default for "don't let X be committed" — if there's no repo, there's nothing to commit. Existence rules with the flag set fail in that case (no file qualifies), which is also the correct conservative behaviour.
+
+The other roadmap'd git primitives — `git_no_denied_paths`, `git_commit_message` — are still pending.
