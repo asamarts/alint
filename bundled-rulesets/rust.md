@@ -14,7 +14,7 @@ extends:
 
 ### `rust-cargo-toml-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 
@@ -22,7 +22,7 @@ extends:
 
 ### `rust-cargo-lock-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **when**: `facts.is_rust`
 - **policy**: <https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html>
@@ -31,7 +31,7 @@ extends:
 
 ### `rust-toolchain-pinned`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **when**: `facts.is_rust`
 
@@ -39,7 +39,7 @@ extends:
 
 ### `rust-no-tracked-target`
 
-- **kind**: `dir_absent`
+- **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 
@@ -47,7 +47,7 @@ extends:
 
 ### `rust-sources-snake-case`
 
-- **kind**: `filename_case`
+- **kind**: [`filename_case`](/docs/rules/naming/filename_case/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 
@@ -55,19 +55,19 @@ extends:
 
 ### `rust-sources-final-newline`
 
-- **kind**: `final_newline`
+- **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `warning`
 - **when**: `facts.is_rust`
 
 ### `rust-sources-no-trailing-whitespace`
 
-- **kind**: `no_trailing_whitespace`
+- **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
 - **when**: `facts.is_rust`
 
 ### `rust-sources-no-bidi`
 
-- **kind**: `no_bidi_controls`
+- **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 - **policy**: <https://trojansource.codes/>
@@ -76,7 +76,7 @@ extends:
 
 ### `rust-sources-no-zero-width`
 
-- **kind**: `no_zero_width_chars`
+- **kind**: [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 
@@ -84,7 +84,7 @@ extends:
 
 ### `rust-no-merge-markers-in-manifests`
 
-- **kind**: `no_merge_conflict_markers`
+- **kind**: [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/)
 - **level**: `error`
 - **when**: `facts.is_rust`
 

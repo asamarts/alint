@@ -14,7 +14,7 @@ extends:
 
 ### `oss-readme-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **policy**: <https://opensource.guide/starting-a-project/#writing-a-readme>
 
@@ -22,7 +22,7 @@ extends:
 
 ### `oss-license-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **policy**: <https://opensource.guide/legal/#which-open-source-license-is-appropriate-for-my-project>
 
@@ -30,21 +30,21 @@ extends:
 
 ### `oss-license-non-empty`
 
-- **kind**: `file_min_size`
+- **kind**: [`file_min_size`](/docs/rules/content/file_min_size/)
 - **level**: `info`
 
 > LICENSE file is suspiciously short; paste the full license text rather than a stub.
 
 ### `oss-readme-non-stub`
 
-- **kind**: `file_min_lines`
+- **kind**: [`file_min_lines`](/docs/rules/content/file_min_lines/)
 - **level**: `info`
 
 > README is very short; add a brief description and at least a usage / install section.
 
 ### `oss-security-policy-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **policy**: <https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository>
 
@@ -52,7 +52,7 @@ extends:
 
 ### `oss-code-of-conduct-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **policy**: <https://www.contributor-covenant.org/>
 
@@ -60,21 +60,21 @@ extends:
 
 ### `oss-gitignore-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 
 > Most OSS repos should have a .gitignore to keep build artefacts and secrets out of git.
 
 ### `oss-no-merge-conflict-markers`
 
-- **kind**: `no_merge_conflict_markers`
+- **kind**: [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/)
 - **level**: `error`
 
 > Merge-conflict markers must not be committed.
 
 ### `oss-no-bidi-controls`
 
-- **kind**: `no_bidi_controls`
+- **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
 - **policy**: <https://trojansource.codes/>
 
@@ -82,11 +82,11 @@ extends:
 
 ### `oss-final-newline`
 
-- **kind**: `final_newline`
+- **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
 
 ### `oss-no-trailing-whitespace`
 
-- **kind**: `no_trailing_whitespace`
+- **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
 

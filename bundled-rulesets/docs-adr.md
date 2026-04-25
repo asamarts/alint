@@ -14,7 +14,7 @@ extends:
 
 ### `adr-filename-pattern`
 
-- **kind**: `filename_regex`
+- **kind**: [`filename_regex`](/docs/rules/naming/filename_regex/)
 - **level**: `warning`
 - **policy**: <https://adr.github.io/madr/>
 
@@ -22,21 +22,21 @@ extends:
 
 ### `adr-has-status-section`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `info`
 
 > MADR ADRs include a ## Status section.
 
 ### `adr-has-context-section`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `info`
 
 > MADR ADRs include a ## Context section.
 
 ### `adr-has-decision-section`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `info`
 
 > MADR ADRs include a ## Decision section.

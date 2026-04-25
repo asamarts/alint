@@ -14,7 +14,7 @@ extends:
 
 ### `go-mod-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
 - **when**: `facts.is_go`
 - **policy**: <https://go.dev/ref/mod#go-mod-file>
@@ -23,7 +23,7 @@ extends:
 
 ### `go-sum-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **when**: `facts.is_go`
 - **policy**: <https://go.dev/ref/mod#go-sum-files>
@@ -32,7 +32,7 @@ extends:
 
 ### `go-mod-declares-module-path`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `error`
 - **when**: `facts.is_go`
 
@@ -40,7 +40,7 @@ extends:
 
 ### `go-mod-declares-go-version`
 
-- **kind**: `file_content_matches`
+- **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `warning`
 - **when**: `facts.is_go`
 - **policy**: <https://go.dev/ref/mod#go-mod-file-go>
@@ -49,7 +49,7 @@ extends:
 
 ### `go-sources-no-bidi`
 
-- **kind**: `no_bidi_controls`
+- **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
 - **when**: `facts.is_go`
 - **policy**: <https://trojansource.codes/>
@@ -58,7 +58,7 @@ extends:
 
 ### `go-sources-no-zero-width`
 
-- **kind**: `no_zero_width_chars`
+- **kind**: [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/)
 - **level**: `error`
 - **when**: `facts.is_go`
 
@@ -66,7 +66,7 @@ extends:
 
 ### `go-sources-final-newline`
 
-- **kind**: `final_newline`
+- **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
 - **when**: `facts.is_go`
 

@@ -14,28 +14,28 @@ extends:
 
 ### `monorepo-packages-have-readme`
 
-- **kind**: `for_each_dir`
+- **kind**: [`for_each_dir`](/docs/rules/cross-file/for_each_dir/)
 - **level**: `warning`
 
 > Every monorepo package directory should have a README.md.
 
 ### `monorepo-packages-have-package-json`
 
-- **kind**: `for_each_dir`
+- **kind**: [`for_each_dir`](/docs/rules/cross-file/for_each_dir/)
 - **level**: `error`
 
 > Every `packages/*` entry should have a package.json.
 
 ### `monorepo-crates-have-cargo-toml`
 
-- **kind**: `for_each_dir`
+- **kind**: [`for_each_dir`](/docs/rules/cross-file/for_each_dir/)
 - **level**: `error`
 
 > Every `crates/*` entry should have a Cargo.toml.
 
 ### `monorepo-unique-package-names`
 
-- **kind**: `unique_by`
+- **kind**: [`unique_by`](/docs/rules/cross-file/unique_by/)
 - **level**: `warning`
 
 > Package-directory basenames should be unique across the monorepo.

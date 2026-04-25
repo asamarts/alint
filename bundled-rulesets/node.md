@@ -14,7 +14,7 @@ extends:
 
 ### `node-package-json-exists`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
 - **when**: `facts.is_node`
 
@@ -22,7 +22,7 @@ extends:
 
 ### `node-has-lockfile`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
 - **when**: `facts.is_node`
 - **policy**: <https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json>
@@ -31,7 +31,7 @@ extends:
 
 ### `node-no-tracked-node-modules`
 
-- **kind**: `dir_absent`
+- **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `error`
 - **when**: `facts.is_node`
 
@@ -39,7 +39,7 @@ extends:
 
 ### `node-no-tracked-dist`
 
-- **kind**: `dir_absent`
+- **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `info`
 - **when**: `facts.is_node`
 
@@ -47,7 +47,7 @@ extends:
 
 ### `node-engine-or-nvmrc`
 
-- **kind**: `file_exists`
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
 - **when**: `facts.is_node`
 
@@ -55,19 +55,19 @@ extends:
 
 ### `node-sources-final-newline`
 
-- **kind**: `final_newline`
+- **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
 - **when**: `facts.is_node`
 
 ### `node-sources-no-trailing-whitespace`
 
-- **kind**: `no_trailing_whitespace`
+- **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
 - **when**: `facts.is_node`
 
 ### `node-sources-no-bidi`
 
-- **kind**: `no_bidi_controls`
+- **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
 - **when**: `facts.is_node`
 - **policy**: <https://trojansource.codes/>
