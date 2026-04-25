@@ -364,11 +364,10 @@ fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
         &target_dir.join("about/roadmap.md"),
         Some("Roadmap"),
     )?;
-    copy_one(
-        &workspace.join(docs_paths::RULES_DOC),
-        &target_dir.join("rules/index.md"),
-        Some("Rules"),
-    )?;
+    // Rule reference: slice docs/rules.md by H2 (= family) into
+    // one page per family, plus a generated index. See
+    // `generate_rules_pages` for the slicing rules.
+    generate_rules_pages(&workspace, &target_dir)?;
 
     // 3. Per-bundled-ruleset reference page.
     generate_bundled_ruleset_pages(&workspace, &target_dir)?;
@@ -462,6 +461,144 @@ fn strip_first_h1(body: &str) -> &str {
         return "";
     }
     body
+}
+
+/// Slice `docs/rules.md` by H2 (= rule family) into one
+/// Starlight page per family, plus a synthesized `rules/index.md`.
+/// The single-page rules.md is too long to be useful as a docs
+/// landing; per-family pages are the unit users actually want
+/// to bookmark.
+///
+/// Sections we drop:
+/// - "Contents" (the source file's TOC; we generate our own)
+/// - "Bundled rulesets" (per-ruleset pages already generated
+///   from the YAML bodies — having both would cause confusing
+///   sidebar duplication)
+fn generate_rules_pages(workspace: &Path, target_dir: &Path) -> Result<()> {
+    let src = fs::read_to_string(workspace.join(docs_paths::RULES_DOC))
+        .with_context(|| format!("reading {}", docs_paths::RULES_DOC))?;
+    let sections = split_h2_sections(&src);
+
+    let rules_dir = target_dir.join("rules");
+    fs::create_dir_all(&rules_dir)?;
+
+    let mut emitted: Vec<(String, String)> = Vec::new(); // (title, slug)
+    for (order, section) in sections.iter().enumerate() {
+        let lc = section.title.to_lowercase();
+        if lc == "contents" || lc.starts_with("bundled rulesets") {
+            continue;
+        }
+        let slug = slugify(&section.title);
+        let mut page = String::new();
+        let _ = writeln!(&mut page, "---");
+        let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(&section.title));
+        let _ = writeln!(
+            &mut page,
+            "description: 'Rule reference: the {} family.'",
+            section.title.to_lowercase()
+        );
+        let _ = writeln!(&mut page, "sidebar:");
+        // `order` is the input index — preserves rules.md ordering
+        // in the sidebar instead of going alphabetical.
+        let _ = writeln!(&mut page, "  order: {}", order + 2);
+        let _ = writeln!(&mut page, "---");
+        let _ = writeln!(&mut page);
+        page.push_str(section.body.trim_start());
+        if !page.ends_with('\n') {
+            page.push('\n');
+        }
+        fs::write(rules_dir.join(format!("{slug}.md")), &page)
+            .with_context(|| format!("writing rules/{slug}.md"))?;
+        emitted.push((section.title.clone(), slug));
+    }
+
+    // Index page — short intro + a flat TOC. `order: 1` so it
+    // sits at the top of the Rules sidebar group regardless of
+    // alphabetical sort.
+    let mut idx = String::new();
+    let _ = writeln!(&mut idx, "---");
+    let _ = writeln!(&mut idx, "title: Rules");
+    let _ = writeln!(
+        &mut idx,
+        "description: Every rule kind alint ships, organised by family."
+    );
+    let _ = writeln!(&mut idx, "sidebar:");
+    let _ = writeln!(&mut idx, "  order: 1");
+    let _ = writeln!(&mut idx, "---");
+    let _ = writeln!(&mut idx);
+    let _ = writeln!(
+        &mut idx,
+        "alint ships ~50 rule kinds across eleven families. Each rule is one entry in your `.alint.yml` under `rules:`. The pages below cover every kind shipped in the current alint release."
+    );
+    let _ = writeln!(&mut idx);
+    let _ = writeln!(&mut idx, "## Reference by family");
+    let _ = writeln!(&mut idx);
+    for (title, slug) in &emitted {
+        let _ = writeln!(&mut idx, "- [{title}](/docs/rules/{slug}/)");
+    }
+    fs::write(rules_dir.join("index.md"), idx)?;
+    Ok(())
+}
+
+/// Sections of a markdown document split at H2 headers (`## …`).
+/// Anything before the first H2 is dropped (it's typically the
+/// document's H1 + intro paragraph; we don't carry that into the
+/// per-family pages).
+struct H2Section {
+    title: String,
+    body: String,
+}
+
+fn split_h2_sections(src: &str) -> Vec<H2Section> {
+    let mut sections: Vec<H2Section> = Vec::new();
+    let mut current: Option<H2Section> = None;
+    for line in src.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            if let Some(prev) = current.take() {
+                sections.push(prev);
+            }
+            current = Some(H2Section {
+                title: rest.trim().to_string(),
+                body: String::new(),
+            });
+        } else if let Some(sec) = current.as_mut() {
+            sec.body.push_str(line);
+            sec.body.push('\n');
+        }
+    }
+    if let Some(prev) = current.take() {
+        sections.push(prev);
+    }
+    sections
+}
+
+/// URL-safe slug from a heading. Lowercases, drops any character
+/// that isn't `[a-z0-9-]`, collapses runs of `-`. Adequate for
+/// headings like "Security / Unicode sanity" → "security-unicode-sanity".
+fn slugify(s: &str) -> String {
+    let lc = s.to_lowercase();
+    let mut out = String::with_capacity(lc.len());
+    let mut last_dash = false;
+    for ch in lc.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// Quote a string safely for a single-quoted YAML scalar — only
+/// `'` needs escaping (doubled). Frontmatter titles like
+/// `Security / Unicode sanity` need this.
+fn escape_yaml_string(s: &str) -> String {
+    s.replace('\'', "''")
 }
 
 /// One markdown page per `crates/alint-dsl/rulesets/v1/**/*.yml`,
