@@ -43,34 +43,30 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # Stage the bundle in a fresh worktree so we can commit
-          # it as the *only* content of the docs-bundle branch
-          # (orphan history — no source files, just the export).
           BUNDLE_DIR="$(pwd)/target/docs-bundle"
           if [[ ! -d "$BUNDLE_DIR" ]]; then
             echo "Expected bundle at $BUNDLE_DIR but it's missing."
             exit 1
           fi
 
-          # Worktree in /tmp so we don't need to clean .gitignored
-          # build artifacts before committing.
           PUBLISH_DIR="$(mktemp -d)"
-          git clone --depth 1 \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "$PUBLISH_DIR" || true
-          cd "$PUBLISH_DIR"
+          REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          # If the docs-bundle branch already exists, check it out;
-          # otherwise create as orphan.
-          if git ls-remote --heads origin docs-bundle | grep -q docs-bundle; then
-            git fetch origin docs-bundle
-            git checkout docs-bundle
-            # Wipe everything tracked so removed pages don't
-            # linger in the published bundle.
+          # Branch may or may not exist yet on first run. Two
+          # paths: if it does, clone it directly so we have a
+          # live working tree we can wipe + repopulate; if not,
+          # init a fresh orphan branch from scratch.
+          if git ls-remote --heads "$REPO_URL" docs-bundle | grep -q refs/heads/docs-bundle; then
+            git clone --depth 1 --branch docs-bundle "$REPO_URL" "$PUBLISH_DIR"
+            cd "$PUBLISH_DIR"
+            # Wipe tracked files so removed pages don't linger
+            # in the published bundle.
             git rm -rf . >/dev/null 2>&1 || true
           else
-            git checkout --orphan docs-bundle
-            git rm -rf . >/dev/null 2>&1 || true
+            mkdir -p "$PUBLISH_DIR"
+            cd "$PUBLISH_DIR"
+            git init -b docs-bundle
+            git remote add origin "$REPO_URL"
           fi
 
           cp -r "${BUNDLE_DIR}/." .
