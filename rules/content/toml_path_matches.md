@@ -2,7 +2,7 @@
 title: 'toml_path_matches'
 description: 'alint rule kind `toml_path_matches` (Content family).'
 sidebar:
-  order: 15
+  order: 18
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.

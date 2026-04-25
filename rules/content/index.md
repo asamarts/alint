@@ -17,6 +17,9 @@ Rule kinds in the **Content** family. Each entry below has its own page with opt
 - [`file_max_size`](/docs/rules/content/file_max_size/) — File must be at most `max_bytes` in size.
 - [`file_min_size`](/docs/rules/content/file_min_size/) — File must be at least `min_bytes` in size.
 - [`file_min_lines`](/docs/rules/content/file_min_lines/) — File must have at least `min_lines` lines (`\n`-terminated, with an unterminated trailing segment counting as one more — `wc -l` semantics).
+- [`file_max_lines`](/docs/rules/content/file_max_lines/) — File must have at most `max_lines` lines, using the same accounting as `file_min_lines`.
+- [`file_footer`](/docs/rules/content/file_footer/) — Last `lines` lines of each file in scope must match a regex.
+- [`file_shebang`](/docs/rules/content/file_shebang/) — First line of each file in scope must match the `shebang` regex.
 - [`json_path_equals`](/docs/rules/content/json_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value.
 - [`yaml_path_equals`](/docs/rules/content/yaml_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value.
 - [`toml_path_equals`](/docs/rules/content/toml_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value.

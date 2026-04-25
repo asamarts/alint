@@ -2,7 +2,7 @@
 title: 'yaml_path_matches'
 description: 'alint rule kind `yaml_path_matches` (Content family).'
 sidebar:
-  order: 14
+  order: 17
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.

@@ -6,12 +6,12 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 50 rule kinds across 11 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 53 rule kinds across 11 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 17 rules
+- [Content](/docs/rules/content/) — 20 rules
 - [Naming](/docs/rules/naming/) — 2 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 6 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 3 rules
@@ -36,13 +36,16 @@ alint ships 50 rule kinds across 11 families. Each rule is one entry in your `.a
 - [`file_content_matches`](/docs/rules/content/file_content_matches/) — File contents must contain at least one match for a regex. _(Content)_
 - [`file_ends_with`](/docs/rules/content/file_ends_with/) — Byte-level prefix / suffix check. _(Content)_
 - [`file_exists`](/docs/rules/existence/file_exists/) — Every glob match in `paths` must correspond to a real file. _(Existence)_
+- [`file_footer`](/docs/rules/content/file_footer/) — Last `lines` lines of each file in scope must match a regex. _(Content)_
 - [`file_hash`](/docs/rules/content/file_hash/) — Content SHA-256 must equal the expected digest. _(Content)_
 - [`file_header`](/docs/rules/content/file_header/) — The first N lines must match a regex (line-oriented). _(Content)_
 - [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80. _(Content)_
 - [`file_is_text`](/docs/rules/content/file_is_text/) — Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`. _(Content)_
+- [`file_max_lines`](/docs/rules/content/file_max_lines/) — File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. _(Content)_
 - [`file_max_size`](/docs/rules/content/file_max_size/) — File must be at most `max_bytes` in size. _(Content)_
 - [`file_min_lines`](/docs/rules/content/file_min_lines/) — File must have at least `min_lines` lines (`\n`-terminated, with an unterminated trailing segment counting as one more — `wc -l` semantics). _(Content)_
 - [`file_min_size`](/docs/rules/content/file_min_size/) — File must be at least `min_bytes` in size. _(Content)_
+- [`file_shebang`](/docs/rules/content/file_shebang/) — First line of each file in scope must match the `shebang` regex. _(Content)_
 - [`file_starts_with`](/docs/rules/content/file_starts_with/) — Byte-level prefix / suffix check. _(Content)_
 - [`filename_case`](/docs/rules/naming/filename_case/) — Basename (stem only or full) matches a case convention: `snake`, `kebab`, `pascal`, `camel`, `screaming-snake`, `flat`, `lower`, `upper`. _(Naming)_
 - [`filename_regex`](/docs/rules/naming/filename_regex/) — Basename matches a regex. _(Naming)_

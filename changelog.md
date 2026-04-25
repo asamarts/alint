@@ -8,6 +8,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-04-25
+
+Three new content-family rule kinds rounding out the family.
+Schema-compatible; every v0.4.9 config runs unchanged. JSON /
+SARIF / GitHub outputs byte-equivalent.
+
+### Added
+
+- **`file_max_lines`** (alias `max_lines`). Mirror of
+  `file_min_lines`: files in scope must have AT MOST
+  `max_lines` lines. Same `wc -l` accounting. Catches the
+  everything-module anti-pattern.
+- **`file_footer`** (alias `footer`). Mirror of `file_header`
+  anchored at the END of the file: the last `lines:` lines
+  must match a regex. Use cases: license footers, signed-off-by
+  trailers, generated-file sentinels. Fix op: `file_append`.
+- **`file_shebang`** (alias `shebang`). First line of each
+  file must match a regex. Pairs with `executable_has_shebang`
+  (which checks shebang *presence*) — `file_shebang` checks
+  shebang *shape*, e.g. `^#!/usr/bin/env bash$` to enforce a
+  specific interpreter. Defaults to `^#!` (presence only).
+
+  Brings the rule catalogue to ~55 kinds.
+
+- 6 new e2e scenarios covering pass/fail paths for the three
+  new kinds.
+
 ## [0.4.9] — 2026-04-25
 
 Java bundled ruleset. Schema-compatible; every v0.4.8 config

@@ -2,7 +2,7 @@
 title: 'toml_path_equals'
 description: 'alint rule kind `toml_path_equals` (Content family).'
 sidebar:
-  order: 12
+  order: 15
 ---
 
 Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. YAML and TOML are parsed through serde and then treated as JSON-shaped trees, so the same JSONPath engine handles all three formats.

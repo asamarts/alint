@@ -2,7 +2,7 @@
 title: 'json_path_matches'
 description: 'alint rule kind `json_path_matches` (Content family).'
 sidebar:
-  order: 13
+  order: 16
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
