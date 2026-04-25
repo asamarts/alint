@@ -44,7 +44,7 @@ Fix: `file_create` — write a declared `content`. With an array of `paths`, the
 
 ### `file_absent`
 
-No file matching `paths` may exist. The inverse of `file_exists`.
+No file matching `paths` may exist in the walked tree. The inverse of `file_exists`.
 
 ```yaml
 - id: no-backup-files
@@ -55,9 +55,32 @@ No file matching `paths` may exist. The inverse of `file_exists`.
 
 Fix: `file_remove` — delete every violating file.
 
-### `dir_exists` / `dir_absent`
+**What "exists" means**: alint walks the filesystem and honours `.gitignore` by default, so a `file_absent` rule fires whenever a matching file is **present in the walked tree**, not when it's tracked in git. Files filtered by `.gitignore` are invisible to the rule. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics, the `--no-gitignore` flag, and the gap between this and git's actual index.
 
-Directory-flavored counterparts of the above.
+### `dir_exists`
+
+Directory counterpart of `file_exists`. Every match must correspond to a real directory in the walked tree.
+
+```yaml
+- id: docs-dir-exists
+  kind: dir_exists
+  paths: "docs"
+  root_only: true
+  level: error
+```
+
+### `dir_absent`
+
+Directory counterpart of `file_absent`. The match-and-fire semantics are the same as `file_absent` — including the `.gitignore` interaction. A `dir_absent` rule with `paths: "**/target"` only fires when `target/` exists in the walked tree; if it's gitignored, the walker filters it out and the rule stays silent.
+
+```yaml
+- id: no-tracked-target
+  kind: dir_absent
+  paths: "**/target"
+  level: error
+```
+
+See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
 
 ---
 
