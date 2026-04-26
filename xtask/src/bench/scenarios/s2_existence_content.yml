@@ -1,0 +1,52 @@
+# Scenario S2 — Existence + content.
+#
+# Eight rules covering layout (file_exists / file_absent),
+# content forbidden patterns, and basic hygiene. The scope
+# alint shares with Repolinter; v0.5.7 will benchmark alint
+# vs Repolinter here. Content rules read every matching file,
+# so perf is dominated by walker + content-IO + regex.
+
+version: 1
+
+rules:
+  # Layout
+  - id: readme
+    kind: file_exists
+    paths: ["README.md", "README"]
+    root_only: true
+    level: warning
+  - id: license
+    kind: file_exists
+    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt"]
+    root_only: true
+    level: warning
+  - id: no-bak
+    kind: file_absent
+    paths: "**/*.bak"
+    level: error
+  - id: no-orig
+    kind: file_absent
+    paths: "**/*.orig"
+    level: error
+
+  # Content
+  - id: rs-no-todo
+    kind: file_content_forbidden
+    paths: "**/*.rs"
+    pattern: '\b(TODO|XXX|FIXME)\b'
+    level: warning
+  - id: ts-no-debugger
+    kind: file_content_forbidden
+    paths: ["**/*.ts", "**/*.tsx"]
+    pattern: '\bdebugger\s*;'
+    level: error
+  - id: py-no-print
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: '^\s*print\s*\('
+    level: warning
+  - id: no-huge
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 10485760
+    level: warning

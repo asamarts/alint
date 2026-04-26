@@ -21,6 +21,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
+mod bench;
+
 #[derive(Parser)]
 #[command(name = "xtask", about = "alint developer helpers")]
 struct Cli {
@@ -31,6 +33,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Build alint in release mode and run hyperfine across a tree × rules matrix.
+    /// Legacy v0.1 single-config harness — see `bench-scale` for the v0.5
+    /// scenario × size × mode matrix.
     BenchRelease {
         /// Skip the large tree sizes; produce a smoke-test-sized report in ~seconds.
         #[arg(long)]
@@ -41,6 +45,46 @@ enum Commands {
         /// Seed used to generate the synthetic trees.
         #[arg(long, default_value_t = 0xA11E47)]
         seed: u64,
+    },
+    /// Scale-ceiling benchmark: hyperfine across a (size × scenario × mode)
+    /// matrix with hardware fingerprint capture and JSON + Markdown
+    /// publication. Default sizes 1k/10k/100k; opt into 1m via
+    /// `--include-1m`.
+    BenchScale {
+        /// Comma-separated sizes (1k,10k,100k,1m).
+        #[arg(long, default_value = "1k,10k,100k", value_delimiter = ',')]
+        sizes: Vec<String>,
+        /// Include the 1M-file size (multi-GB working set, slow).
+        #[arg(long)]
+        include_1m: bool,
+        /// Comma-separated scenarios (S1,S2,S3).
+        #[arg(long, default_value = "S1,S2,S3", value_delimiter = ',')]
+        scenarios: Vec<String>,
+        /// Comma-separated modes (full,changed).
+        #[arg(long, default_value = "full,changed", value_delimiter = ',')]
+        modes: Vec<String>,
+        /// Hyperfine warmup runs.
+        #[arg(long, default_value_t = 3)]
+        warmup: u32,
+        /// Hyperfine measured runs.
+        #[arg(long, default_value_t = 10)]
+        runs: u32,
+        /// Tree-generator seed.
+        #[arg(long, default_value_t = 0xA11E47)]
+        seed: u64,
+        /// Percent of files modified for `changed` mode (1-100).
+        #[arg(long, default_value_t = 10.0)]
+        diff_pct: f64,
+        /// Output directory. Defaults to
+        /// `docs/benchmarks/v0.5/scale/<os>-<arch>/`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Smoke mode: collapses the matrix to a single 1k/S1/full row in seconds.
+        #[arg(long)]
+        quick: bool,
+        /// Skip the Markdown reports; emit JSON only.
+        #[arg(long)]
+        json_only: bool,
     },
     /// Materialize a synthetic tree (persistent) for manual experimentation.
     GenFixture {
@@ -72,6 +116,22 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::BenchRelease { quick, out, seed } => bench_release(quick, out, seed),
+        Commands::BenchScale {
+            sizes,
+            include_1m,
+            scenarios,
+            modes,
+            warmup,
+            runs,
+            seed,
+            diff_pct,
+            out,
+            quick,
+            json_only,
+        } => dispatch_bench_scale(
+            &sizes, include_1m, &scenarios, &modes, warmup, runs, seed, diff_pct, out, quick,
+            json_only,
+        ),
         Commands::GenFixture {
             files,
             depth,
@@ -80,6 +140,58 @@ fn main() -> Result<()> {
         } => gen_fixture(files, depth, seed, out),
         Commands::DocsExport { out, check } => docs_export(out, check),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_bench_scale(
+    sizes: &[String],
+    include_1m: bool,
+    scenarios: &[String],
+    modes: &[String],
+    warmup: u32,
+    runs: u32,
+    seed: u64,
+    diff_pct: f64,
+    out: Option<PathBuf>,
+    quick: bool,
+    json_only: bool,
+) -> Result<()> {
+    // Parse + filter the matrix args before handing to the
+    // bench module. Keeps the bench module typed (Size /
+    // Scenario / Mode) and the CLI surface stringy.
+    let mut parsed_sizes: Vec<bench::Size> = sizes
+        .iter()
+        .map(|s| bench::Size::parse(s))
+        .collect::<Result<_>>()?;
+    if !include_1m {
+        parsed_sizes.retain(|s| !s.is_opt_in());
+    }
+    if parsed_sizes.is_empty() {
+        bail!("no sizes selected — pass --include-1m if you only requested `1m`");
+    }
+    let parsed_scenarios: Vec<bench::Scenario> = scenarios
+        .iter()
+        .map(|s| bench::Scenario::parse(s))
+        .collect::<Result<_>>()?;
+    let parsed_modes: Vec<bench::Mode> = modes
+        .iter()
+        .map(|s| bench::Mode::parse(s))
+        .collect::<Result<_>>()?;
+    if !(0.0..=100.0).contains(&diff_pct) {
+        bail!("--diff-pct must be in [0, 100]; got {diff_pct}");
+    }
+    bench::bench_scale(bench::ScaleArgs {
+        sizes: parsed_sizes,
+        scenarios: parsed_scenarios,
+        modes: parsed_modes,
+        warmup,
+        runs,
+        seed,
+        diff_pct,
+        out,
+        quick,
+        json_only,
+    })
 }
 
 fn gen_fixture(files: usize, depth: usize, seed: u64, out: Option<PathBuf>) -> Result<()> {

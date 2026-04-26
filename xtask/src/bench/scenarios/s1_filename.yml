@@ -1,0 +1,50 @@
+# Scenario S1 — Filename hygiene.
+#
+# Eight rules, naming-only. The narrowest scope alint shares
+# with ls-lint; v0.5.7 will benchmark alint vs ls-lint here on
+# the same logical config. Content is never read; perf is
+# dominated by the walker + glob matcher.
+
+version: 1
+
+rules:
+  - id: rs-snake
+    kind: filename_case
+    paths: "**/*.rs"
+    case: snake
+    level: warning
+  - id: tsx-pascal
+    kind: filename_case
+    paths: "**/*.tsx"
+    case: pascal
+    level: warning
+  - id: ts-kebab
+    kind: filename_case
+    paths: "**/*.ts"
+    case: kebab
+    level: warning
+  - id: yaml-kebab
+    kind: filename_case
+    paths: "**/*.yaml"
+    case: kebab
+    level: info
+  - id: yml-kebab
+    kind: filename_case
+    paths: "**/*.yml"
+    case: kebab
+    level: info
+  - id: md-any
+    kind: filename_regex
+    paths: "**/*.md"
+    pattern: "^[a-zA-Z0-9_.-]+$"
+    level: info
+  - id: json-any
+    kind: filename_regex
+    paths: "**/*.json"
+    pattern: "^[a-zA-Z0-9_.-]+$"
+    level: info
+  - id: py-snake
+    kind: filename_case
+    paths: "**/*.py"
+    case: snake
+    level: warning

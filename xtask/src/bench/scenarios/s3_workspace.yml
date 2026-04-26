@@ -1,0 +1,19 @@
+# Scenario S3 — Workspace-tier real-world.
+#
+# Bundled `oss-baseline + rust + monorepo + monorepo/cargo-workspace`.
+# This is what `alint init --monorepo` (v0.5.4) emits for a Cargo
+# workspace; the synthetic monorepo fixture is shaped to satisfy
+# the cargo-workspace ruleset's `[workspace]` and `[package].name`
+# expectations. Closest to real-world end-to-end perf.
+#
+# Bundled rulesets ship inline in the binary, so this config has
+# no I/O cost beyond the alint binary boot.
+
+version: 1
+nested_configs: true
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
