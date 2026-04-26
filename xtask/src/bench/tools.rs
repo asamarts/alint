@@ -9,9 +9,9 @@
 //! — that's how ls-lint is gated to S1 only, Repolinter (later)
 //! to S2 only, etc.
 //!
-//! Phase 1 ships `Alint` + `LsLint`. Future phases will add
-//! `GrepPipeline` (find + ripgrep baseline) and `Repolinter`
-//! behind the same abstraction.
+//! Phases 1-2 ship `Alint`, `LsLint`, and `GrepPipeline`.
+//! `Repolinter` follows in a subsequent commit behind the same
+//! abstraction.
 
 use std::fs;
 use std::path::Path;
@@ -25,19 +25,26 @@ use super::{Mode, Scenario};
 pub enum Tool {
     Alint,
     LsLint,
+    /// `find` + `ripgrep` pipelines — the small-team status
+    /// quo. Universal on Unix; doesn't ship its own config so
+    /// the per-scenario shell command embeds the rule set
+    /// inline. Useful as a baseline for "how much does a
+    /// dedicated tool actually buy you over piped one-liners?"
+    GrepPipeline,
 }
 
 /// All tool variants in iteration order. Used by `--tools all`
 /// to expand to "every known tool, skip missing." When new
 /// variants are added, list them here.
-pub const ALL: &[Tool] = &[Tool::Alint, Tool::LsLint];
+pub const ALL: &[Tool] = &[Tool::Alint, Tool::LsLint, Tool::GrepPipeline];
 
 impl Tool {
     pub fn parse(s: &str) -> Result<Self> {
         match s.trim().to_lowercase().as_str() {
             "alint" => Ok(Self::Alint),
             "ls-lint" | "lslint" => Ok(Self::LsLint),
-            other => bail!("unknown tool {other:?}; expected one of alint, ls-lint, all"),
+            "grep" | "grep-pipeline" | "rg" => Ok(Self::GrepPipeline),
+            other => bail!("unknown tool {other:?}; expected one of alint, ls-lint, grep, all"),
         }
     }
 
@@ -45,6 +52,7 @@ impl Tool {
         match self {
             Self::Alint => "alint",
             Self::LsLint => "ls-lint",
+            Self::GrepPipeline => "grep",
         }
     }
 
@@ -53,17 +61,21 @@ impl Tool {
     /// the orchestrator level rather than producing zero or
     /// nonsense rows. ls-lint is filename-only and has no
     /// `--changed`-equivalent; Repolinter (when added) covers
-    /// content + existence with no filename support.
+    /// content + existence with no filename support; the grep
+    /// pipeline doesn't model the workspace bundle's
+    /// cross-file rules so S3 is out of scope.
     pub fn supports(self, scenario: Scenario, mode: Mode) -> bool {
         // Clippy thinks the `true` arms could be merged with
         // `|`, but keeping them split makes adding the
-        // GrepPipeline / Repolinter arms in follow-up commits
-        // a one-line change instead of a re-split.
+        // Repolinter arm in a follow-up commit a one-line
+        // change instead of a re-split.
         #[allow(clippy::match_same_arms)]
         match (self, scenario, mode) {
             (Self::Alint, _, _) => true,
             (Self::LsLint, Scenario::S1, Mode::Full) => true,
             (Self::LsLint, _, _) => false,
+            (Self::GrepPipeline, Scenario::S1 | Scenario::S2, Mode::Full) => true,
+            (Self::GrepPipeline, _, _) => false,
         }
     }
 
@@ -75,6 +87,15 @@ impl Tool {
         match self {
             Self::Alint => Some(env!("CARGO_PKG_VERSION").to_string()),
             Self::LsLint => detect_via_version_flag("ls-lint", "--version"),
+            Self::GrepPipeline => {
+                // The pipeline needs both `find` (POSIX) and
+                // `rg` (ripgrep) on PATH. Report the rg
+                // version as the version-string handle since
+                // it's the more interesting moving target;
+                // `find` is essentially fixed across distros.
+                detect_via_version_flag("rg", "--version")
+                    .filter(|_| Command::new("find").arg("--help").output().is_ok())
+            }
         }
     }
 
@@ -82,8 +103,8 @@ impl Tool {
     /// scenario. Idempotent — overwrites any existing copy.
     /// Called once per `(tool, size, scenario)` before the
     /// row's hyperfine runs. Tools whose config is purely
-    /// CLI-arg-driven (e.g. a future grep-pipeline) just
-    /// return `Ok(())`.
+    /// CLI-arg-driven (like the grep pipeline) just return
+    /// `Ok(())`.
     pub fn setup_config(self, root: &Path, scenario: Scenario) -> Result<()> {
         match self {
             Self::Alint => {
@@ -93,23 +114,27 @@ impl Tool {
                 debug_assert_eq!(scenario, Scenario::S1, "ls-lint only supports S1");
                 fs::write(root.join(".ls-lint.yml"), LS_LINT_S1_CONFIG)?;
             }
+            // The grep pipeline embeds its rules inline in the
+            // shell command (see `grep_pipeline_*`); no
+            // tool-specific config file is written.
+            Self::GrepPipeline => {}
         }
         Ok(())
     }
 
     /// Full shell command line handed to hyperfine for one
     /// row. Hyperfine spawns this via `sh -c`, so pipes /
-    /// semicolons / globs work as a user would type them —
-    /// future tools like `GrepPipeline` will exploit that;
-    /// single-binary tools like alint and ls-lint just
-    /// produce a `bin args...` string. `alint_bin` is the
-    /// path to the locally-built alint binary; ignored by
-    /// non-alint tools (which find their binary on `PATH`).
+    /// semicolons / globs work exactly as a user would type
+    /// them — important for `GrepPipeline`, which strings
+    /// together multiple `find` + `rg` invocations.
+    /// `alint_bin` is the path to the locally-built alint
+    /// binary; ignored by non-alint tools (which find their
+    /// binary on `PATH`).
     pub fn invocation(
         self,
         alint_bin: &Path,
         tree_root: &Path,
-        _scenario: Scenario,
+        scenario: Scenario,
         mode: Mode,
     ) -> String {
         let root = quote_for_shell(&tree_root.to_string_lossy());
@@ -123,6 +148,11 @@ impl Tool {
                 }
             }
             Self::LsLint => format!("ls-lint -workdir {root}"),
+            Self::GrepPipeline => match scenario {
+                Scenario::S1 => grep_pipeline_s1(&root),
+                Scenario::S2 => grep_pipeline_s2(&root),
+                Scenario::S3 => unreachable!("supports() filters S3 out for GrepPipeline"),
+            },
         }
     }
 }
@@ -143,6 +173,71 @@ fn quote_for_shell(s: &str) -> String {
     }
     out.push('\'');
     out
+}
+
+/// S1 (filename hygiene) as eight `find ... | grep -vE '...'`
+/// pipelines chained with `;`. Each pipeline lists files of
+/// one extension and filters out names that match the case
+/// pattern — the leftover lines are the would-be violations.
+/// Output goes to `/dev/null` because we measure walker +
+/// regex throughput, not formatting; alint and ls-lint also
+/// suppress repeat output via hyperfine after the first run.
+///
+/// The case-class regexes are intentionally simpler than
+/// alint's / ls-lint's full implementations (no Unicode
+/// folding, no leading-digit handling, no extension-handling
+/// nuances). The work shape — walk + per-file basename match
+/// against a regex — is what the bench measures, and that
+/// matches across all three tools. Documented in
+/// methodology.md so readers don't read more into the numbers
+/// than is there.
+fn grep_pipeline_s1(root: &str) -> String {
+    [
+        // *.rs → snake_case
+        format!("find {root} -name '*.rs' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.rs$' >/dev/null"),
+        // *.tsx → PascalCase
+        format!("find {root} -name '*.tsx' -type f -printf '%f\\n' | grep -vE '^[A-Z][a-zA-Z0-9]*\\.tsx$' >/dev/null"),
+        // *.ts → kebab-case
+        format!("find {root} -name '*.ts' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.ts$' >/dev/null"),
+        // *.yaml → kebab-case
+        format!("find {root} -name '*.yaml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yaml$' >/dev/null"),
+        // *.yml → kebab-case
+        format!("find {root} -name '*.yml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yml$' >/dev/null"),
+        // *.md → broad alphanumeric
+        format!("find {root} -name '*.md' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$' >/dev/null"),
+        // *.json → broad alphanumeric
+        format!("find {root} -name '*.json' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$' >/dev/null"),
+        // *.py → snake_case
+        format!("find {root} -name '*.py' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.py$' >/dev/null"),
+    ]
+    .join("; ")
+}
+
+/// S2 (existence + content) as eight shell commands. Layout
+/// rules use `test -e` / `find ... -name`; content rules use
+/// `rg` (ripgrep, parallel + Rust regex), which is what
+/// small-team baselines actually reach for these days.
+/// Tracks the rule-shape ratio of alint's S2: 4 layout
+/// checks, 3 content checks (Rust / TS / Python forbidden
+/// patterns), 1 size check.
+fn grep_pipeline_s2(root: &str) -> String {
+    [
+        // Layout — README + LICENSE existence at root.
+        format!("test -f {root}/README.md || test -f {root}/README"),
+        format!("test -f {root}/LICENSE || test -f {root}/LICENSE.md || test -f {root}/LICENSE.txt"),
+        // Layout — forbidden file extensions anywhere.
+        format!("find {root} -name '*.bak' -type f >/dev/null"),
+        format!("find {root} -name '*.orig' -type f >/dev/null"),
+        // Content — TODO / XXX / FIXME in Rust.
+        format!("rg --type rust --no-messages '\\b(TODO|XXX|FIXME)\\b' {root} >/dev/null || true"),
+        // Content — `debugger;` in TS / TSX.
+        format!("rg --type ts --no-messages '\\bdebugger\\s*;' {root} >/dev/null || true"),
+        // Content — top-level print() in Python.
+        format!("rg --type py --no-messages '^\\s*print\\s*\\(' {root} >/dev/null || true"),
+        // Size — files larger than 10 MiB.
+        format!("find {root} -type f -size +10M >/dev/null"),
+    ]
+    .join("; ")
 }
 
 fn detect_via_version_flag(program: &str, version_arg: &str) -> Option<String> {
