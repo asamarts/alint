@@ -893,6 +893,30 @@ Workspace-aware overlay for Yarn / npm workspaces (both encode the workspace dec
 | `yarn-workspace-member-has-readme` | `for_each_dir` | warning | — |
 | `yarn-workspace-member-declares-name` | `for_each_dir` | warning | — |
 
+### `alint://bundled/compliance/reuse@v1`
+
+License-compliance overlay for the FSFE [REUSE Specification](https://reuse.software/) — every licensable file declares its license + copyright via SPDX headers, and the full license texts live under `LICENSES/`. No fact gate; extending the ruleset is the user's signal of intent.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `reuse-licenses-dir-exists` | `dir_exists` | error | — |
+| `reuse-source-has-spdx-identifier` | `file_header` | warning | — |
+| `reuse-source-has-copyright-text` | `file_header` | warning | — |
+
+Source-file rules cover common code extensions and exclude vendored / build / dist directories. If your project uses `.license` companion files or `REUSE.toml` mappings to license files that can't carry inline headers (binaries, generated code), narrow `paths:` on the source rules.
+
+### `alint://bundled/compliance/apache-2@v1`
+
+License-compliance overlay for projects distributed under the Apache License, Version 2.0. Verifies the three artefacts the license text itself requires of redistributors: a LICENSE with the Apache-2.0 text, a root NOTICE file, and the canonical Apache header on each source file.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `apache-2-license-text-present` | `file_content_matches` | error | — |
+| `apache-2-notice-file-exists` | `file_exists` | warning | — |
+| `apache-2-source-has-license-header` | `file_header` | warning | — |
+
+Pattern-matches the canonical "Licensed under the Apache License, Version 2.0" substring rather than full bit-for-bit comparison so SPDX templates, apache.org's template, and GitHub's auto-init all parse as compliant. Dual-licensed projects (e.g. Apache-2.0 OR MIT) can extend this ruleset and use `level: off` on rules they don't want firing strictly.
+
 ### `alint://bundled/hygiene/no-tracked-artifacts@v1`
 
 The set of paths / files that essentially no repository should commit: build outputs, dependency caches, OS & editor junk, secret-shaped files, oversized blobs. Gitignored directories pass trivially — these rules catch the case where someone committed an artefact and forgot the `.gitignore` entry.

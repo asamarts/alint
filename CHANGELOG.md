@@ -6,6 +6,86 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-04-26
+
+Two license-compliance bundled rulesets — the v0.5 cycle's
+expansion beyond the workspace-tier monorepo audience to
+OSS maintainers and corporate-policy teams.
+Schema-compatible; every v0.5.4 config runs unchanged.
+
+### Added
+
+- **`alint://bundled/compliance/reuse@v1`** — FSFE
+  [REUSE Specification](https://reuse.software/)
+  compliance. Three rules covering the spec's two
+  load-bearing requirements:
+  - `reuse-licenses-dir-exists` — top-level `LICENSES/`
+    directory present (per
+    [§ License files](https://reuse.software/spec/#license-files)).
+  - `reuse-source-has-spdx-identifier` — every source
+    file carries an `SPDX-License-Identifier:` header in
+    its first ~10 lines.
+  - `reuse-source-has-copyright-text` — every source
+    file carries an `SPDX-FileCopyrightText:` header.
+
+  Source-file rules cover the common code extensions
+  (`*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,
+  hh,sh,rb,swift}`) and exclude vendored / build /
+  dist directories. Projects that license files via
+  `.license` companions or `REUSE.toml` mappings can
+  narrow `paths:` on the source rules.
+
+  ```yaml
+  extends:
+    - alint://bundled/compliance/reuse@v1
+  ```
+
+- **`alint://bundled/compliance/apache-2@v1`** —
+  compliance for projects distributed under the Apache
+  License, Version 2.0. Three rules verifying the
+  artefacts the license text itself requires of
+  redistributors:
+  - `apache-2-license-text-present` — LICENSE (or
+    LICENSE.md / LICENSE.txt / COPYING) contains the
+    canonical "Apache License, Version 2.0" text.
+  - `apache-2-notice-file-exists` — root NOTICE file
+    present (per Apache-2.0 §4(d)).
+  - `apache-2-source-has-license-header` — every source
+    file carries the canonical "Licensed under the
+    Apache License, Version 2.0" header in its first
+    ~25 lines.
+
+  Substring-matches the canonical license title rather
+  than doing full bit-for-bit comparison, so SPDX
+  templates, apache.org's template, and GitHub's
+  auto-init all parse as compliant. Dual-licensed
+  projects (e.g. Apache-2.0 OR MIT) can extend this
+  ruleset and use `level: off` on rules they don't want
+  firing strictly.
+
+  Bundled catalog: 15 → 17.
+
+### Internal
+
+- New ruleset directory
+  `crates/alint-dsl/rulesets/v1/compliance/` with two
+  `.yml` files; registered in
+  `alint_dsl::bundled::REGISTRY`. Neither ruleset uses a
+  fact gate — adopting a compliance ruleset is the
+  user's signal that the project intends to be
+  compliant with the named scheme.
+- 6 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/bundled-compliance/`:
+  per ruleset, happy-path + missing-core-artefact +
+  missing-source-header.
+
+### Compatibility
+
+- Schema version remains `1`. Pure config — no new rule
+  kinds, no new core APIs.
+- JSON / SARIF / GitHub outputs byte-equivalent for
+  configs that don't extend the new rulesets.
+
 ## [0.5.4] — 2026-04-26
 
 `alint init` — the missing one-line adoption story.
@@ -1442,7 +1522,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/asamarts/alint/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/asamarts/alint/compare/v0.5.1...v0.5.2

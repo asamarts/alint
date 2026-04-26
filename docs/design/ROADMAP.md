@@ -4,15 +4,15 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.4** (2026-04-26). Headline: `alint
-init [--monorepo]` — auto-detects ecosystem (Rust / Node /
-Python / Go / Java) and workspace shape (Cargo / pnpm /
-Yarn) and scaffolds a `.alint.yml` with the right
-`extends:` lines. Closes the v0.5 monorepo theme on the
-adoption side. Catalogue still ~56 rule kinds; bundled
-catalog still 15. Next planned (rest of v0.5): npm shim,
-documented scale ceiling, remaining git-aware primitives,
-compliance rulesets.
+**Latest release: v0.5.5** (2026-04-26). Headline: two
+license-compliance bundled rulesets —
+`compliance/reuse@v1` (FSFE REUSE: SPDX headers +
+`LICENSES/`) and `compliance/apache-2@v1` (LICENSE +
+NOTICE + Apache header). Bundled catalog 15 → 17.
+Catalogue still ~56 rule kinds. Next planned (rest of
+v0.5): npm shim, documented scale ceiling, remaining
+git-aware primitives, `json_schema_passes`, additional
+output formats.
 
 ## Positioning
 
@@ -249,7 +249,7 @@ Ranked by leverage.
 - ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
 - ⏳ Git-aware primitives: `git_no_denied_paths`, `git_commit_message`.
 - ⏳ `json_schema_passes` primitive.
-- ⏳ Remaining bundled rulesets: `compliance/reuse`, `compliance/apache-2`. (Compliance rulesets are higher-leverage now that v0.4 has the structured-query + content primitives needed to express SPDX-Identifier headers, REUSE conformance, and Apache-2 NOTICE/headers.)
+- ✅ Remaining bundled rulesets: `compliance/reuse@v1` + `compliance/apache-2@v1` shipped in v0.5.5 (2026-04-26). Both use `file_header` for SPDX / Apache header checks; reuse adds a `dir_exists` on `LICENSES/`; apache-2 adds `file_content_matches` for the LICENSE text + `file_exists` for NOTICE. Both extend without a fact gate — adopting the ruleset signals intent.
 - ⏳ Additional Scorecard-overlap rules in `ci/github-actions@v1` and `oss-baseline@v1`. Specifically: SECURITY.md presence + non-empty (already partial), `dependabot.yml` / `renovate.json` presence (Dependency-Update-Tool check), branch protection hints via `.github/CODEOWNERS` shape (Code-Review check).
 
 ### Generic hygiene rulesets (shipped in v0.4.3)
