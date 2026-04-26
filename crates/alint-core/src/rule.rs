@@ -124,6 +124,40 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn wants_git_tracked(&self) -> bool {
         false
     }
+
+    /// In `--changed` mode, return `true` to evaluate this rule
+    /// against the **full** [`FileIndex`] rather than the
+    /// changed-only filtered subset. Default `false` (per-file
+    /// semantics — the rule sees only changed files in scope).
+    ///
+    /// Cross-file rules (`pair`, `for_each_dir`,
+    /// `every_matching_has`, `unique_by`, `dir_contains`,
+    /// `dir_only_contains`) override to `true` because their
+    /// inputs span the whole tree by definition — a verdict on
+    /// the changed file depends on what's still in the rest of
+    /// the tree. Existence rules (`file_exists`, `file_absent`,
+    /// `dir_exists`, `dir_absent`) likewise consult the whole
+    /// tree to answer "is X present?" correctly.
+    fn requires_full_index(&self) -> bool {
+        false
+    }
+
+    /// In `--changed` mode, return the [`Scope`](crate::Scope)
+    /// this rule is scoped to (typically the rule's `paths:`
+    /// field). The engine intersects the scope with the
+    /// changed-set; rules whose scope doesn't intersect are
+    /// skipped, which is the optimisation `--changed` exists
+    /// for.
+    ///
+    /// Default `None` ("no scope information") means the rule is
+    /// always evaluated. Cross-file rules deliberately leave this
+    /// as `None` (they always evaluate per the roadmap contract).
+    /// Per-file rules with a single `Scope` field should override
+    /// to return `Some(&self.scope)`.
+    fn path_scope(&self) -> Option<&crate::scope::Scope> {
+        None
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
 
     /// Optional automatic-fix strategy. Rules whose violations can be

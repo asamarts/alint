@@ -61,6 +61,68 @@ pub fn collect_tracked_paths(root: &Path) -> Option<HashSet<PathBuf>> {
     Some(out)
 }
 
+/// Resolve the set of paths that have changed in the working tree
+/// (and optionally relative to a base ref), expressed as paths
+/// relative to `root`.
+///
+/// `base` selects the diff:
+/// - `Some("main")` — `git diff --name-only --relative main...HEAD`
+///   (three-dot — diff against the merge-base of `main` and
+///   `HEAD`). Right shape for PR-check use cases.
+/// - `None` — `git ls-files --modified --others --exclude-standard`
+///   from `root`. Right shape for pre-commit / local-dev use
+///   cases. Untracked-but-not-gitignored files are included so a
+///   freshly-added `.env` in the working tree shows up; deleted
+///   files are also returned (they're in the diff but not on
+///   disk, so the engine's intersect-with-walked-index step
+///   filters them out naturally).
+///
+/// Returns `None` on the same conditions as
+/// [`collect_tracked_paths`]: `git` not on PATH, `root` outside
+/// a repo, or the invocation exits non-zero. Callers should
+/// treat `None` as "no changed-set available" and fall back to
+/// a full check (or surface a hard error, depending on intent —
+/// `alint check --changed` errors out rather than fall back, so
+/// the user's "diff-only" intent isn't silently broken).
+pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<PathBuf>> {
+    // Two distinct invocations: ref-based diff vs. working-tree
+    // status. Both emit NUL-separated output so paths with
+    // newlines / non-UTF-8 bytes round-trip.
+    let output = match base {
+        Some(base) => Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["diff", "--name-only", "--relative", "-z"])
+            .arg(format!("{base}...HEAD"))
+            .output()
+            .ok()?,
+        None => Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "ls-files",
+                "--modified",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ])
+            .output()
+            .ok()?,
+    };
+    if !output.status.success() {
+        return None;
+    }
+    let mut out = HashSet::new();
+    for chunk in output.stdout.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let s = std::str::from_utf8(chunk).ok()?;
+        out.insert(PathBuf::from(s));
+    }
+    Some(out)
+}
+
 /// Test whether `dir_rel` (a relative-to-root directory path)
 /// "exists in git" — defined as: at least one tracked file lives
 /// underneath it. Used by `dir_exists` / `dir_absent` when
@@ -94,6 +156,16 @@ mod tests {
         // construct a real repo via fixtures elsewhere.
         let result = collect_tracked_paths(tmp.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn collect_changed_returns_none_outside_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Both diff modes shell out to git; both should report
+        // None outside a repo so callers can decide between
+        // hard-error (CLI's `--changed`) and silent fallback.
+        assert!(collect_changed_paths(tmp.path(), None).is_none());
+        assert!(collect_changed_paths(tmp.path(), Some("main")).is_none());
     }
 
     #[test]
