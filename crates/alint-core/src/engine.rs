@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
@@ -46,6 +46,11 @@ pub struct Engine {
     facts: Vec<FactSpec>,
     vars: HashMap<String, String>,
     fix_size_limit: Option<u64>,
+    /// In `--changed` mode, the set of paths (relative to root)
+    /// that the user wants linted. `None` means "full check"; the
+    /// engine bypasses every changed-set short-circuit. See
+    /// [`Engine::with_changed_paths`] for the contract.
+    changed_paths: Option<HashSet<PathBuf>>,
 }
 
 impl Engine {
@@ -58,6 +63,7 @@ impl Engine {
             facts: Vec::new(),
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
+            changed_paths: None,
         }
     }
 
@@ -69,6 +75,7 @@ impl Engine {
             facts: Vec::new(),
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
+            changed_paths: None,
         }
     }
 
@@ -90,14 +97,40 @@ impl Engine {
         self
     }
 
+    /// Restrict evaluation to the given set of paths (relative to
+    /// the alint root). Per-file rules see a [`FileIndex`]
+    /// filtered to only these paths; rules that override
+    /// [`Rule::requires_full_index`] (cross-file + existence
+    /// rules) still see the full index but are skipped when
+    /// their [`Rule::path_scope`] doesn't intersect the set.
+    ///
+    /// An empty set short-circuits to a no-op report — there's
+    /// nothing to lint. Pass `None` (or omit) to disable
+    /// `--changed` semantics entirely.
+    #[must_use]
+    pub fn with_changed_paths(mut self, set: HashSet<PathBuf>) -> Self {
+        self.changed_paths = Some(set);
+        self
+    }
+
     pub fn rule_count(&self) -> usize {
         self.entries.len()
     }
 
     pub fn run(&self, root: &Path, index: &FileIndex) -> Result<Report> {
+        // Empty changed-set fast path: nothing to lint, return
+        // an empty report rather than walk the entries list at
+        // all. Saves the fact-evaluation pass too.
+        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
+            return Ok(Report {
+                results: Vec::new(),
+            });
+        }
+
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
-        let ctx = Context {
+        let filtered_index = self.build_filtered_index(index);
+        let full_ctx = Context {
             root,
             index,
             registry: Some(&self.registry),
@@ -105,6 +138,14 @@ impl Engine {
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
         };
+        let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
+            root,
+            index: fi,
+            registry: Some(&self.registry),
+            facts: Some(&fact_values),
+            vars: Some(&self.vars),
+            git_tracked: git_tracked.as_ref(),
+        });
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
@@ -112,7 +153,13 @@ impl Engine {
         let results: Vec<RuleResult> = self
             .entries
             .par_iter()
-            .filter_map(|entry| run_entry(entry, &ctx, &when_env, &fact_values))
+            .filter_map(|entry| {
+                if self.skip_for_changed(entry.rule.as_ref()) {
+                    return None;
+                }
+                let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
+                run_entry(entry, ctx, &when_env, &fact_values)
+            })
             .collect();
         Ok(Report { results })
     }
@@ -124,9 +171,16 @@ impl Engine {
     /// report. Rules that pass (no violations) are omitted from the
     /// result, same as [`Engine::run`]'s usual behaviour.
     pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
+        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
+            return Ok(FixReport {
+                results: Vec::new(),
+            });
+        }
+
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
-        let ctx = Context {
+        let filtered_index = self.build_filtered_index(index);
+        let full_ctx = Context {
             root,
             index,
             registry: Some(&self.registry),
@@ -134,6 +188,14 @@ impl Engine {
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
         };
+        let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
+            root,
+            index: fi,
+            registry: Some(&self.registry),
+            facts: Some(&fact_values),
+            vars: Some(&self.vars),
+            git_tracked: git_tracked.as_ref(),
+        });
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
@@ -146,6 +208,10 @@ impl Engine {
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         for entry in &self.entries {
+            if self.skip_for_changed(entry.rule.as_ref()) {
+                continue;
+            }
+            let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
             if let Some(expr) = &entry.when {
                 match expr.evaluate(&when_env) {
                     Ok(true) => {}
@@ -163,7 +229,7 @@ impl Engine {
                     }
                 }
             }
-            let violations = match entry.rule.evaluate(&ctx) {
+            let violations = match entry.rule.evaluate(ctx) {
                 Ok(v) => v,
                 Err(e) => vec![Violation::new(format!("rule error: {e}"))],
             };
@@ -214,6 +280,52 @@ impl Engine {
             return None;
         }
         crate::git::collect_tracked_paths(root)
+    }
+
+    /// Build a [`FileIndex`] containing only the entries the user
+    /// said they care about (the `--changed` set). Returns `None`
+    /// when no changed-set is configured — callers fall back to
+    /// the full index.
+    fn build_filtered_index(&self, full: &FileIndex) -> Option<FileIndex> {
+        let set = self.changed_paths.as_ref()?;
+        let entries = full
+            .entries
+            .iter()
+            .filter(|e| set.contains(&e.path))
+            .cloned()
+            .collect();
+        Some(FileIndex { entries })
+    }
+
+    /// True when `--changed` mode is active AND the rule's
+    /// `path_scope` exists AND no path in the changed-set
+    /// satisfies it. Cross-file rules return `path_scope = None`
+    /// per the roadmap contract — so they always return `false`
+    /// here (i.e. never skipped).
+    fn skip_for_changed(&self, rule: &dyn Rule) -> bool {
+        let Some(set) = &self.changed_paths else {
+            return false;
+        };
+        let Some(scope) = rule.path_scope() else {
+            return false;
+        };
+        !set.iter().any(|p| scope.matches(p))
+    }
+}
+
+/// Pick the [`Context`] a rule should evaluate against:
+/// `full_ctx` if it [`requires_full_index`](Rule::requires_full_index),
+/// otherwise the changed-only filtered context (falling back to
+/// `full_ctx` when no `--changed` set is configured).
+fn pick_ctx<'a>(
+    rule: &dyn Rule,
+    full_ctx: &'a Context<'a>,
+    filtered_ctx: Option<&'a Context<'a>>,
+) -> &'a Context<'a> {
+    if rule.requires_full_index() {
+        full_ctx
+    } else {
+        filtered_ctx.unwrap_or(full_ctx)
     }
 }
 
