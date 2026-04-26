@@ -76,6 +76,22 @@ enum Command {
         /// Root of the repository to lint. Defaults to the current directory.
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// Restrict the check to files in the working-tree diff.
+        /// Without `--base`, uses
+        /// `git ls-files --modified --others --exclude-standard`
+        /// (right shape for pre-commit). With `--base`, uses
+        /// `git diff --name-only <base>...HEAD` (right shape for
+        /// PR checks). Cross-file rules (`pair`, `for_each_dir`,
+        /// `every_matching_has`, `unique_by`, `dir_contains`,
+        /// `dir_only_contains`) and existence rules (`file_exists`
+        /// et al.) still consult the full tree by definition.
+        #[arg(long)]
+        changed: bool,
+        /// Base ref for `--changed` (uses three-dot
+        /// `<base>...HEAD`, i.e. merge-base diff). Implies
+        /// `--changed`.
+        #[arg(long, value_name = "REF")]
+        base: Option<String>,
     },
     /// List all rules loaded from the effective config.
     List,
@@ -92,6 +108,14 @@ enum Command {
         /// Print what would be done without writing anything.
         #[arg(long)]
         dry_run: bool,
+        /// Restrict the fix pass to files in the working-tree
+        /// diff (see `alint check --changed`). Cross-file +
+        /// existence rules still see the full tree.
+        #[arg(long)]
+        changed: bool,
+        /// Base ref for `--changed`. Implies `--changed`.
+        #[arg(long, value_name = "REF")]
+        base: Option<String>,
     },
     /// Evaluate every `facts:` entry in the effective config and
     /// print the resolved value. Debugging aid for `when:` clauses.
@@ -123,22 +147,79 @@ fn init_tracing() {
 fn run(mut cli: Cli) -> Result<ExitCode> {
     let command = cli.command.take().unwrap_or(Command::Check {
         path: PathBuf::from("."),
+        changed: false,
+        base: None,
     });
     match command {
-        Command::Check { path } => cmd_check(&path, &cli),
+        Command::Check {
+            path,
+            changed,
+            base,
+        } => cmd_check(&path, &ChangedMode::new(changed, base), &cli),
         Command::List => cmd_list(&cli),
         Command::Explain { rule_id } => cmd_explain(&rule_id, &cli),
-        Command::Fix { path, dry_run } => cmd_fix(&path, dry_run, &cli),
+        Command::Fix {
+            path,
+            dry_run,
+            changed,
+            base,
+        } => cmd_fix(&path, dry_run, &ChangedMode::new(changed, base), &cli),
         Command::Facts { path } => cmd_facts(&path, &cli),
     }
 }
 
-fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
+/// Resolved `--changed` / `--base` state. `--base` implies
+/// `--changed`; both together identify the diff source.
+#[derive(Debug)]
+struct ChangedMode {
+    enabled: bool,
+    base: Option<String>,
+}
+
+impl ChangedMode {
+    fn new(changed_flag: bool, base: Option<String>) -> Self {
+        // `--base=<ref>` without `--changed` is treated as if
+        // `--changed` was passed. The flag is the verb; the ref
+        // is its argument. Surfacing `--base` on its own as an
+        // error would be pedantic.
+        let enabled = changed_flag || base.is_some();
+        Self { enabled, base }
+    }
+
+    /// Resolve the changed-set from git, or `None` when the user
+    /// didn't ask for `--changed`. Hard-errors when the user DID
+    /// ask but git can't deliver — silently falling back to a
+    /// full check would violate the user's intent.
+    fn resolve(&self, root: &Path) -> Result<Option<std::collections::HashSet<PathBuf>>> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        let set = alint_core::git::collect_changed_paths(root, self.base.as_deref()).ok_or_else(
+            || {
+                let what = self.base.as_deref().map_or_else(
+                    || "git ls-files --modified --others --exclude-standard".to_string(),
+                    |r| format!("git diff --name-only {r}...HEAD"),
+                );
+                anyhow::anyhow!(
+                    "--changed requires a git repository (and `git` on PATH); \
+                     `{what}` failed at {}. Run without --changed for a full check.",
+                    root.display()
+                )
+            },
+        )?;
+        Ok(Some(set))
+    }
+}
+
+fn cmd_check(path: &Path, changed: &ChangedMode, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
     let rule_count = loaded.entries.len();
-    let engine = Engine::from_entries(loaded.entries, loaded.registry)
+    let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
+    if let Some(set) = changed.resolve(path)? {
+        engine = engine.with_changed_paths(set);
+    }
 
     let effective_gitignore = if cli.no_gitignore {
         false
@@ -172,12 +253,15 @@ fn cmd_check(path: &Path, cli: &Cli) -> Result<ExitCode> {
     Ok(exit)
 }
 
-fn cmd_fix(path: &Path, dry_run: bool, cli: &Cli) -> Result<ExitCode> {
+fn cmd_fix(path: &Path, dry_run: bool, changed: &ChangedMode, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
-    let engine = Engine::from_entries(loaded.entries, loaded.registry)
+    let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
         .with_fix_size_limit(loaded.fix_size_limit);
+    if let Some(set) = changed.resolve(path)? {
+        engine = engine.with_changed_paths(set);
+    }
 
     let effective_gitignore = if cli.no_gitignore {
         false
