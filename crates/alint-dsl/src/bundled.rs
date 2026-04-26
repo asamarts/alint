@@ -75,6 +75,26 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         "v1",
         include_str!("../rulesets/v1/ci/github-actions.yml"),
     ),
+    // Workspace-aware overlays — thin extensions of `monorepo@v1`
+    // gated by a workspace-flavor fact (Cargo `[workspace]` /
+    // pnpm-workspace.yaml / package.json `"workspaces"`). Use
+    // `iter.has_file(...)` (v0.5.2) to scope per-member checks
+    // to actual package directories.
+    (
+        "monorepo/cargo-workspace",
+        "v1",
+        include_str!("../rulesets/v1/monorepo/cargo-workspace.yml"),
+    ),
+    (
+        "monorepo/pnpm-workspace",
+        "v1",
+        include_str!("../rulesets/v1/monorepo/pnpm-workspace.yml"),
+    ),
+    (
+        "monorepo/yarn-workspace",
+        "v1",
+        include_str!("../rulesets/v1/monorepo/yarn-workspace.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
