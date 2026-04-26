@@ -268,10 +268,12 @@ fn load_recursive(
             let target = resolve_relative(&source_dir, url);
             load_recursive(&target, visiting, opts)?
         };
-        // Extended configs cannot introduce `custom:` facts —
-        // those would spawn arbitrary processes on behalf of a
-        // ruleset whose code the user didn't write.
+        // Extended configs cannot introduce `custom:` facts or
+        // `kind: command` rules — both spawn arbitrary processes
+        // on behalf of a ruleset whose code the user didn't
+        // write. Same trust model on both sides.
         alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
+        reject_command_rules_in(&parent.rules, url)?;
         parent.rules = apply_rule_filter(parent.rules, entry)?;
         merged = merge(merged, parent);
     }
@@ -372,6 +374,31 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
 /// non-empty, and that every listed id actually exists in the
 /// ruleset (unknown ids are almost always typos worth catching at
 /// load time).
+/// Reject `kind: command` rules in the given mapping list. Used
+/// by the `extends:` resolver to enforce that only the user's
+/// own top-level config can declare process-spawning rules. Same
+/// trust model as `alint_core::facts::reject_custom_facts_in` —
+/// extending a ruleset must never gain you arbitrary code
+/// execution. `source` is shown in the error to help the user
+/// identify which extended config introduced the violation.
+pub fn reject_command_rules_in(rules: &[Mapping], source: &str) -> Result<()> {
+    for rule in rules {
+        let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        if kind == "command" {
+            let id = rule
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(unknown)");
+            return Err(Error::Other(format!(
+                "rule {id:?}: `kind: command` is only allowed in the user's top-level \
+                 config; declaring one in an extended config ({source}) is refused because \
+                 it would let a ruleset spawn arbitrary processes"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn apply_rule_filter(
     rules: Vec<serde_yaml_ng::Mapping>,
     entry: &alint_core::ExtendsEntry,
@@ -1230,6 +1257,54 @@ rules: []
         let cfg = load(&path).unwrap();
         assert_eq!(cfg.facts.len(), 1);
         assert_eq!(cfg.facts[0].id, "whoami");
+    }
+
+    #[test]
+    fn load_rejects_command_rule_declared_in_local_extends() {
+        // Mirror of the custom-fact gate. A `kind: command` rule
+        // hidden in an extended config must be refused — otherwise
+        // adopting a published ruleset would imply granting it
+        // arbitrary process execution on the user's machine.
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            r#"version: 1
+rules:
+  - id: shellcheck-from-base
+    kind: command
+    paths: "**/*.sh"
+    command: ["shellcheck", "{path}"]
+    level: error
+"#,
+        )
+        .unwrap();
+        std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("command"), "{err}");
+        assert!(err.contains("base.yml"), "{err}");
+    }
+
+    #[test]
+    fn load_allows_command_rule_in_top_level_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &path,
+            r#"version: 1
+rules:
+  - id: shellcheck
+    kind: command
+    paths: "**/*.sh"
+    command: ["shellcheck", "{path}"]
+    level: error
+"#,
+        )
+        .unwrap();
+        let cfg = load(&path).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+        assert_eq!(cfg.rules[0].id, "shellcheck");
     }
 
     #[test]
