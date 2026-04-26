@@ -64,23 +64,31 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
         .follow_links(true)
         .require_git(false);
 
-    if !opts.extra_ignores.is_empty() {
-        let mut overrides = OverrideBuilder::new(root);
-        for pattern in &opts.extra_ignores {
-            let pattern = if pattern.starts_with('!') {
-                pattern.clone()
-            } else {
-                format!("!{pattern}")
-            };
-            overrides
-                .add(&pattern)
-                .map_err(|e| Error::Other(format!("ignore pattern {pattern:?}: {e}")))?;
-        }
-        let overrides = overrides
-            .build()
-            .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))?;
-        builder.overrides(overrides);
+    // Always exclude `.git/` — descending into git's internal
+    // packfiles + loose objects is wasted work for every alint
+    // rule (none of them target `.git/objects/*`), and it races
+    // git's auto-gc / pack-rewrite on large repos. We set
+    // `hidden(false)` and `require_git(false)` so the `ignore`
+    // crate doesn't apply its own implicit `.git/` exclusion;
+    // this override puts it back.
+    let mut overrides_builder = OverrideBuilder::new(root);
+    overrides_builder
+        .add("!.git")
+        .map_err(|e| Error::Other(format!("ignore pattern .git: {e}")))?;
+    for pattern in &opts.extra_ignores {
+        let pattern = if pattern.starts_with('!') {
+            pattern.clone()
+        } else {
+            format!("!{pattern}")
+        };
+        overrides_builder
+            .add(&pattern)
+            .map_err(|e| Error::Other(format!("ignore pattern {pattern:?}: {e}")))?;
     }
+    let overrides = overrides_builder
+        .build()
+        .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))?;
+    builder.overrides(overrides);
 
     let mut entries = Vec::new();
     for result in builder.build() {
