@@ -1,0 +1,410 @@
+//! `alint init` — scaffold a starter `.alint.yml` based on a
+//! lightweight detection of the repo's ecosystem and (optionally)
+//! its workspace shape.
+//!
+//! Two distinct steps: [`detect`] reads a few root-level files to
+//! decide which bundled rulesets apply; [`render`] turns that
+//! detection into the YAML body that will be written to
+//! `.alint.yml`. The split keeps detection unit-testable against
+//! a tempdir without going through the CLI.
+
+use std::fs;
+use std::path::Path;
+
+/// What `detect` figured out about the repo at the path it was
+/// given. Pure data — `render` consumes it without re-reading
+/// the disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Detection {
+    pub languages: Vec<Language>,
+    pub workspace: Option<WorkspaceFlavor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Language {
+    Rust,
+    Node,
+    Python,
+    Go,
+    Java,
+}
+
+impl Language {
+    fn ruleset(self) -> &'static str {
+        match self {
+            Self::Rust => "alint://bundled/rust@v1",
+            Self::Node => "alint://bundled/node@v1",
+            Self::Python => "alint://bundled/python@v1",
+            Self::Go => "alint://bundled/go@v1",
+            Self::Java => "alint://bundled/java@v1",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::Node => "Node",
+            Self::Python => "Python",
+            Self::Go => "Go",
+            Self::Java => "Java",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceFlavor {
+    Cargo,
+    Pnpm,
+    Yarn,
+}
+
+impl WorkspaceFlavor {
+    fn ruleset(self) -> &'static str {
+        match self {
+            Self::Cargo => "alint://bundled/monorepo/cargo-workspace@v1",
+            Self::Pnpm => "alint://bundled/monorepo/pnpm-workspace@v1",
+            Self::Yarn => "alint://bundled/monorepo/yarn-workspace@v1",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Cargo => "Cargo workspace",
+            Self::Pnpm => "pnpm workspace",
+            Self::Yarn => "Yarn / npm workspace",
+        }
+    }
+}
+
+/// Detect ecosystem + (optionally) workspace shape by reading a
+/// fixed set of root files. `with_monorepo` switches workspace
+/// detection on; without it, the result's `workspace` is always
+/// `None` even if the repo would qualify.
+pub fn detect(root: &Path, with_monorepo: bool) -> Detection {
+    let mut languages = Vec::new();
+
+    if root.join("Cargo.toml").is_file() {
+        languages.push(Language::Rust);
+    }
+    if root.join("package.json").is_file() {
+        languages.push(Language::Node);
+    }
+    if ["pyproject.toml", "setup.py", "setup.cfg"]
+        .iter()
+        .any(|f| root.join(f).is_file())
+    {
+        languages.push(Language::Python);
+    }
+    if root.join("go.mod").is_file() {
+        languages.push(Language::Go);
+    }
+    if ["pom.xml", "build.gradle", "build.gradle.kts"]
+        .iter()
+        .any(|f| root.join(f).is_file())
+    {
+        languages.push(Language::Java);
+    }
+
+    let workspace = if with_monorepo {
+        detect_workspace(root)
+    } else {
+        None
+    };
+
+    Detection {
+        languages,
+        workspace,
+    }
+}
+
+fn detect_workspace(root: &Path) -> Option<WorkspaceFlavor> {
+    // Cargo: root Cargo.toml has a `[workspace]` table. Read +
+    // grep — full TOML parsing is overkill for a string-shape
+    // check.
+    if let Ok(content) = fs::read_to_string(root.join("Cargo.toml")) {
+        if content
+            .lines()
+            .any(|l| l.trim_start().starts_with("[workspace]"))
+        {
+            return Some(WorkspaceFlavor::Cargo);
+        }
+    }
+    // pnpm: root pnpm-workspace.yaml / .yml exists. The fact
+    // gate inside the bundled ruleset re-checks this; here we
+    // only need a presence test to decide what to scaffold.
+    if root.join("pnpm-workspace.yaml").is_file() || root.join("pnpm-workspace.yml").is_file() {
+        return Some(WorkspaceFlavor::Pnpm);
+    }
+    // Yarn / npm: root package.json contains a `"workspaces"`
+    // field. Same string-shape check rather than full JSON
+    // parsing.
+    if let Ok(content) = fs::read_to_string(root.join("package.json")) {
+        if content.contains("\"workspaces\"") {
+            return Some(WorkspaceFlavor::Yarn);
+        }
+    }
+    None
+}
+
+/// Render a complete `.alint.yml` body from a [`Detection`].
+/// Always emits `oss-baseline@v1`; appends ecosystem rulesets
+/// for each detected language and (when applicable) the
+/// monorepo + workspace overlay. Output is hand-formatted YAML
+/// (not serialized via serde) so the generated file can carry
+/// header comments that survive subsequent edits.
+pub fn render(detection: &Detection) -> String {
+    let mut out = String::with_capacity(512);
+    out.push_str("# Generated by `alint init`. Adjust as needed.\n");
+    let summary = render_summary(detection);
+    if !summary.is_empty() {
+        out.push_str("# Detected: ");
+        out.push_str(&summary);
+        out.push_str(".\n");
+    }
+    out.push_str("# Run `alint check` to lint, `alint fix` to apply auto-fixable rules.\n");
+    out.push_str("# See https://alint.org for the full ruleset reference.\n");
+    out.push('\n');
+    out.push_str("version: 1\n");
+    if detection.workspace.is_some() {
+        // `nested_configs: true` lets each subdirectory layer
+        // its own `.alint.yml` on top of this one — the canonical
+        // shape for workspace-tier monorepos where individual
+        // packages may want to extend or override.
+        out.push_str("nested_configs: true\n");
+    }
+    out.push('\n');
+    out.push_str("extends:\n");
+    out.push_str("  - alint://bundled/oss-baseline@v1\n");
+    for lang in &detection.languages {
+        out.push_str("  - ");
+        out.push_str(lang.ruleset());
+        out.push('\n');
+    }
+    if let Some(flavor) = detection.workspace {
+        out.push_str("  - alint://bundled/monorepo@v1\n");
+        out.push_str("  - ");
+        out.push_str(flavor.ruleset());
+        out.push('\n');
+    }
+    out
+}
+
+/// Human-readable summary of what `detect` found, for the
+/// generated header comment AND the CLI's stdout summary line.
+pub fn render_summary(detection: &Detection) -> String {
+    let mut parts: Vec<&str> = detection.languages.iter().map(|l| l.label()).collect();
+    if let Some(flavor) = detection.workspace {
+        parts.push(flavor.label());
+    }
+    parts.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn td() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("alint-init-")
+            .tempdir()
+            .unwrap()
+    }
+
+    fn touch(root: &Path, rel: &str, content: &str) {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn detects_no_languages_in_empty_dir() {
+        let tmp = td();
+        let det = detect(tmp.path(), false);
+        assert!(det.languages.is_empty());
+        assert_eq!(det.workspace, None);
+    }
+
+    #[test]
+    fn detects_rust_via_cargo_toml() {
+        let tmp = td();
+        touch(tmp.path(), "Cargo.toml", "[package]\nname = \"x\"\n");
+        let det = detect(tmp.path(), false);
+        assert_eq!(det.languages, vec![Language::Rust]);
+    }
+
+    #[test]
+    fn detects_node_via_package_json() {
+        let tmp = td();
+        touch(tmp.path(), "package.json", "{\"name\":\"x\"}\n");
+        let det = detect(tmp.path(), false);
+        assert_eq!(det.languages, vec![Language::Node]);
+    }
+
+    #[test]
+    fn detects_python_via_any_of_three_manifests() {
+        for manifest in ["pyproject.toml", "setup.py", "setup.cfg"] {
+            let tmp = td();
+            touch(tmp.path(), manifest, "");
+            let det = detect(tmp.path(), false);
+            assert_eq!(
+                det.languages,
+                vec![Language::Python],
+                "manifest: {manifest}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_go_via_go_mod() {
+        let tmp = td();
+        touch(tmp.path(), "go.mod", "module example.com/x\n");
+        let det = detect(tmp.path(), false);
+        assert_eq!(det.languages, vec![Language::Go]);
+    }
+
+    #[test]
+    fn detects_java_via_pom_or_gradle() {
+        for manifest in ["pom.xml", "build.gradle", "build.gradle.kts"] {
+            let tmp = td();
+            touch(tmp.path(), manifest, "");
+            let det = detect(tmp.path(), false);
+            assert_eq!(det.languages, vec![Language::Java], "manifest: {manifest}");
+        }
+    }
+
+    #[test]
+    fn detects_polyglot_repos() {
+        let tmp = td();
+        touch(tmp.path(), "Cargo.toml", "[package]\nname = \"x\"\n");
+        touch(tmp.path(), "package.json", "{}");
+        let det = detect(tmp.path(), false);
+        assert_eq!(det.languages, vec![Language::Rust, Language::Node]);
+    }
+
+    #[test]
+    fn workspace_detection_off_by_default() {
+        let tmp = td();
+        touch(tmp.path(), "Cargo.toml", "[workspace]\nmembers = []\n");
+        let det = detect(tmp.path(), false);
+        assert_eq!(det.workspace, None);
+    }
+
+    #[test]
+    fn detects_cargo_workspace_with_monorepo_flag() {
+        let tmp = td();
+        touch(
+            tmp.path(),
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\n",
+        );
+        let det = detect(tmp.path(), true);
+        assert_eq!(det.workspace, Some(WorkspaceFlavor::Cargo));
+        assert_eq!(det.languages, vec![Language::Rust]);
+    }
+
+    #[test]
+    fn cargo_without_workspace_table_is_not_a_workspace() {
+        let tmp = td();
+        touch(tmp.path(), "Cargo.toml", "[package]\nname = \"x\"\n");
+        let det = detect(tmp.path(), true);
+        assert_eq!(det.workspace, None);
+    }
+
+    #[test]
+    fn detects_pnpm_workspace() {
+        for f in ["pnpm-workspace.yaml", "pnpm-workspace.yml"] {
+            let tmp = td();
+            touch(tmp.path(), "package.json", "{}");
+            touch(tmp.path(), f, "packages:\n  - 'packages/*'\n");
+            let det = detect(tmp.path(), true);
+            assert_eq!(det.workspace, Some(WorkspaceFlavor::Pnpm), "file: {f}");
+        }
+    }
+
+    #[test]
+    fn detects_yarn_workspace_via_package_json_workspaces_field() {
+        let tmp = td();
+        touch(
+            tmp.path(),
+            "package.json",
+            "{\"name\":\"root\",\"workspaces\":[\"packages/*\"]}\n",
+        );
+        let det = detect(tmp.path(), true);
+        assert_eq!(det.workspace, Some(WorkspaceFlavor::Yarn));
+    }
+
+    #[test]
+    fn cargo_workspace_takes_precedence_over_yarn_when_both_match() {
+        // A repo with a Cargo workspace AND a package.json with
+        // `"workspaces"` (rare but possible — e.g. a Rust + JS
+        // monorepo) gets the Cargo flavour, since the Cargo
+        // workspace check runs first. Heuristic — if a user has
+        // both, they can override the generated config.
+        let tmp = td();
+        touch(
+            tmp.path(),
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\n",
+        );
+        touch(
+            tmp.path(),
+            "package.json",
+            "{\"workspaces\":[\"packages/*\"]}\n",
+        );
+        let det = detect(tmp.path(), true);
+        assert_eq!(det.workspace, Some(WorkspaceFlavor::Cargo));
+    }
+
+    #[test]
+    fn render_minimal_repo_extends_only_oss_baseline() {
+        let det = Detection::default();
+        let out = render(&det);
+        assert!(out.contains("alint://bundled/oss-baseline@v1"));
+        assert!(!out.contains("rust@v1"));
+        assert!(!out.contains("monorepo@v1"));
+        assert!(!out.contains("nested_configs"));
+    }
+
+    #[test]
+    fn render_polyglot_extends_each_language() {
+        let det = Detection {
+            languages: vec![Language::Rust, Language::Node],
+            workspace: None,
+        };
+        let out = render(&det);
+        assert!(out.contains("rust@v1"));
+        assert!(out.contains("node@v1"));
+        assert!(!out.contains("monorepo@v1"));
+    }
+
+    #[test]
+    fn render_workspace_adds_monorepo_overlay_and_nested_configs() {
+        let det = Detection {
+            languages: vec![Language::Rust],
+            workspace: Some(WorkspaceFlavor::Cargo),
+        };
+        let out = render(&det);
+        assert!(out.contains("nested_configs: true"));
+        assert!(out.contains("alint://bundled/monorepo@v1"));
+        assert!(out.contains("alint://bundled/monorepo/cargo-workspace@v1"));
+    }
+
+    #[test]
+    fn render_includes_detection_summary_in_header() {
+        let det = Detection {
+            languages: vec![Language::Rust],
+            workspace: Some(WorkspaceFlavor::Cargo),
+        };
+        let out = render(&det);
+        assert!(out.contains("# Detected: Rust, Cargo workspace."));
+    }
+
+    #[test]
+    fn render_omits_detection_line_for_empty_detection() {
+        let det = Detection::default();
+        let out = render(&det);
+        assert!(!out.contains("# Detected:"));
+    }
+}

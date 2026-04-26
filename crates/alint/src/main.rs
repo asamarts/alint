@@ -12,6 +12,8 @@ use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
+mod init;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "alint",
@@ -124,6 +126,25 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Scaffold a starter `.alint.yml` based on the repo's
+    /// detected ecosystem (and optionally workspace shape).
+    /// Refuses to overwrite an existing config — delete the
+    /// existing one first if you really mean it.
+    Init {
+        /// Root of the repository to write the config into.
+        /// Defaults to the current directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Detect workspace shape (Cargo `[workspace]`,
+        /// pnpm-workspace.yaml, or `package.json` `workspaces`)
+        /// and add the corresponding `monorepo@v1` +
+        /// `monorepo/<flavor>-workspace@v1` overlays.
+        /// `nested_configs: true` is set on the generated
+        /// config so each subdirectory can layer its own
+        /// `.alint.yml` on top.
+        #[arg(long)]
+        monorepo: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -165,7 +186,47 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             base,
         } => cmd_fix(&path, dry_run, &ChangedMode::new(changed, base), &cli),
         Command::Facts { path } => cmd_facts(&path, &cli),
+        Command::Init { path, monorepo } => cmd_init(&path, monorepo),
     }
+}
+
+fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
+    // Refuse to overwrite an existing `.alint.yml` (or any of
+    // the other names the loader recognises). The user-visible
+    // contract is: `alint init` is a one-shot scaffold; if a
+    // config already exists, the user knows their setup better
+    // than we do.
+    for name in [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] {
+        let candidate = path.join(name);
+        if candidate.is_file() {
+            bail!(
+                "{} already exists; refusing to overwrite. Delete it first if you really \
+                 want to regenerate, or edit it directly.",
+                candidate.display()
+            );
+        }
+    }
+
+    let detection = init::detect(path, monorepo);
+    let body = init::render(&detection);
+    let target = path.join(".alint.yml");
+    std::fs::write(&target, &body).with_context(|| format!("writing {}", target.display()))?;
+
+    let summary = init::render_summary(&detection);
+    if summary.is_empty() {
+        println!(
+            "Wrote {} — extends `oss-baseline@v1` only.",
+            target.display()
+        );
+        println!(
+            "  No language manifests detected. Add an `extends:` line for your stack \
+             (`alint://bundled/rust@v1`, `node@v1`, …) when ready."
+        );
+    } else {
+        println!("Wrote {} — detected: {}.", target.display(), summary);
+        println!("  Run `alint check` to lint against the generated config.");
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Resolved `--changed` / `--base` state. `--base` implies
