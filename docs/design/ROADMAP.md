@@ -4,12 +4,13 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.4.10** (2026-04-25). Headline: `file_max_lines`,
-`file_footer`, `file_shebang` round out the content family
-(catalogue at ~55 rule kinds). Next planned: v0.5 — monorepo
-scale (`--changed` mode, `--monorepo` preset, per-iteration
-`when:` on `for_each_dir`), `command` plugin kind, npm shim,
-remaining git-aware primitives, compliance rulesets.
+**Latest release: v0.5.0** (2026-04-26). Headline: `alint
+check --changed` for incremental pre-commit and PR-check
+paths — opens the v0.5 monorepo-scale cut. Catalogue still
+~55 rule kinds. Next planned (rest of v0.5): `--monorepo`
+preset, per-iteration `when:` on `for_each_dir`, `command`
+plugin kind, npm shim, remaining git-aware primitives,
+compliance rulesets.
 
 ## Positioning
 
@@ -173,18 +174,21 @@ the largest delta between alint's current shape and what
 workspace-tier + OSS-polyglot monorepos typically reach for.
 Ranked by leverage.
 
-- ⏳ **`alint check --changed [--base=<ref>]`.** Incremental
+- ✅ **`alint check --changed [--base=<ref>]`.** Incremental
   mode: diff `git diff --name-only <base>...HEAD` (or
-  `git ls-files --modified` when no base) and only evaluate
-  rules whose path scopes intersect the changed-file set.
-  Cross-file rules (`pair`, `for_each_dir`,
-  `every_matching_has`, `unique_by`, `dir_contains`,
-  `dir_only_contains`) opt out of the filter — their inputs
-  span the whole tree by definition. The leverage move for
-  large repos: today, every check runs the full rule set
-  over the full tree; this lets pre-commit and PR-check
-  paths run in milliseconds on most diffs without changing
-  the rule shape. Pairs naturally with `git_tracked_only`.
+  `git ls-files --modified --others --exclude-standard` when
+  no base) and only evaluate rules whose path scopes
+  intersect the changed-file set. Cross-file rules (`pair`,
+  `for_each_dir`, `every_matching_has`, `unique_by`,
+  `dir_contains`, `dir_only_contains`) and existence rules
+  (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`)
+  opt out of the changed-set filter for iteration — their
+  verdicts span the whole tree by definition — but existence
+  rules still skip when their `paths:` scope doesn't
+  intersect the diff, so an unchanged-but-missing LICENSE
+  doesn't fire on every PR. Empty diffs short-circuit to an
+  empty report. Pairs naturally with `git_tracked_only`.
+  Shipped in v0.5.0.
 - ⏳ **Per-iteration `when:` filter on `for_each_dir`.** Today
   `for_each_dir` iterates every directory matching `paths:`;
   the inner rules then short-circuit if a marker file is

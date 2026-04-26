@@ -6,6 +6,89 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-26
+
+First v0.5 cut. Headline: incremental `alint check --changed`
+mode for pre-commit and PR-check paths. Schema-compatible;
+every v0.4.10 config runs unchanged. JSON / SARIF / GitHub
+outputs byte-equivalent for full-tree runs.
+
+### Added
+
+- **`alint check --changed [--base=<ref>]`** and the same
+  flags on `alint fix`. With `--base`, the changed-set is
+  derived from `git diff --name-only --relative
+  <base>...HEAD` (three-dot — merge-base diff, the right
+  shape for PR checks). Without `--base`, it's
+  `git ls-files --modified --others --exclude-standard`
+  (working-tree diff, the right shape for pre-commit). The
+  engine evaluates per-file rules against a [`FileIndex`]
+  filtered to the changed-set, so a Java license-header rule
+  scoped to `**/*.java` skips entirely when no `.java` file
+  is in the diff. Cross-file rules (`pair`, `for_each_dir`,
+  `every_matching_has`, `unique_by`, `dir_contains`,
+  `dir_only_contains`) and existence rules (`file_exists`,
+  `file_absent`, `dir_exists`, `dir_absent`) keep full-tree
+  semantics for iteration; existence rules additionally skip
+  when their `paths:` scope doesn't intersect the diff so an
+  unchanged-but-missing LICENSE doesn't fire on every PR.
+  Empty diffs short-circuit to an empty report (the
+  no-op-commit case in pre-commit). Outside a git repo or
+  when `git` isn't on PATH, `--changed` exits non-zero with
+  a clear message rather than silently fall back to a full
+  check.
+
+  ```bash
+  # Pre-commit: lint the working-tree diff.
+  alint check --changed
+
+  # PR check: lint everything that diverged from main.
+  alint check --changed --base=main --format=sarif
+  ```
+
+- **`Rule::requires_full_index() -> bool`** and
+  **`Rule::path_scope() -> Option<&Scope>`** on the public
+  `alint-core::Rule` trait. Both default to "no opt-in", so
+  out-of-tree rule implementations compile unchanged.
+  Internal rules override on the eleven cases that need
+  full-tree semantics: the six cross-file kinds plus the
+  four existence kinds. Per-file rules need no override —
+  the engine hands them the filtered index and their
+  existing `Scope::matches` loops do the right thing.
+
+- **`alint_core::git::collect_changed_paths(root, base)`**
+  helper, parallel to the existing
+  `collect_tracked_paths`. Returns the changed-set as a
+  `HashSet<PathBuf>` of paths relative to `root`, or `None`
+  outside a git repo / when `git` exits non-zero.
+
+- **`Engine::with_changed_paths(set)`** builder method.
+  Threads the changed-set through `Engine::run` and
+  `Engine::fix`. Every call costs one walk over the
+  index entries to build a filtered subset; absent the
+  builder call, the engine behaves exactly as before.
+
+- **`Step::CheckChanged`** in `alint-testkit`'s scenario
+  harness. Five new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/changed/` cover:
+  per-file rule skipped when scope misses the diff,
+  per-file rule fires only on changed files, cross-file
+  `pair` keeps full-tree semantics, existence rule skips
+  when scope doesn't intersect, and the empty-diff
+  short-circuit.
+
+### Compatibility
+
+- Schema version remains `1`. Every v0.4 config runs
+  unchanged.
+- Public API additions are non-breaking: `Rule` trait
+  methods have defaults, `Engine::with_changed_paths` is
+  additive. Embedders that hand-construct an `Engine` keep
+  compiling.
+- `alint-testkit::Step` gained a variant
+  (`Step::CheckChanged`); embedders that exhaustively
+  matched on `Step` need to add an arm for it.
+
 ## [0.4.10] — 2026-04-25
 
 Three new content-family rule kinds rounding out the family.
@@ -1025,7 +1108,15 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.0
+[0.4.10]: https://github.com/asamarts/alint/compare/v0.4.9...v0.4.10
+[0.4.9]: https://github.com/asamarts/alint/compare/v0.4.8...v0.4.9
+[0.4.8]: https://github.com/asamarts/alint/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/asamarts/alint/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/asamarts/alint/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/asamarts/alint/compare/v0.4.4...v0.4.5
+[0.4.4]: https://github.com/asamarts/alint/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/asamarts/alint/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/asamarts/alint/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/asamarts/alint/compare/v0.4.0...v0.4.1

@@ -28,7 +28,7 @@ v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Twelve bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.4.10`.
+- **Official GitHub Action** — `asamarts/alint@v0.5.0`.
 
 ## Non-goals
 
@@ -70,7 +70,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.4.10 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.0 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -79,7 +79,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.4`) and the raw git tag (`:v0.4.10`).
+Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.0`).
 
 ### From crates.io
 
@@ -437,6 +437,31 @@ rules:
     level: error
 ```
 
+### 13. Lint only what changed (pre-commit / PR-fast-path)
+
+`--changed` restricts the check to files in the working-tree
+diff (or `<base>...HEAD`'s merge-base diff). Per-file rules
+evaluate only against changed files in scope; cross-file
+rules (`pair`, `for_each_dir`, `every_matching_has`,
+`unique_by`, `dir_contains`, `dir_only_contains`) and
+existence rules (`file_exists`, `file_absent`, …) keep
+full-tree semantics so an unchanged-but-broken state still
+surfaces. Empty diffs short-circuit to an empty report.
+
+```bash
+# Pre-commit: lint the working-tree diff
+# (`git ls-files --modified --others --exclude-standard`).
+alint check --changed
+
+# PR check: lint everything that diverged from main
+# (`git diff --name-only --relative main...HEAD`).
+alint check --changed --base=main --format=sarif
+```
+
+Pairs with the pre-commit hook (the hook can pass
+`--changed` via `args:`) and with `git_tracked_only: true`
+on absence rules so locally-built artefacts never fire.
+
 ## Bundled rulesets
 
 Eight rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
@@ -468,15 +493,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.4.10
+- uses: asamarts/alint@v0.5.0
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.4.10
+- uses: asamarts/alint@v0.5.0
   with:
-    version: v0.4.10        # alint release tag (default: latest)
+    version: v0.5.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -488,7 +513,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.4.10
+- uses: asamarts/alint@v0.5.0
   id: alint
   with:
     format: sarif
@@ -506,7 +531,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.4.10
+    rev: v0.5.0
     hooks:
       - id: alint
 ```
