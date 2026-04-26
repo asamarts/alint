@@ -6,6 +6,103 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-04-26
+
+Scale-ceiling bench publication + a latent walker bug fix
+that the bench surfaced. New `xtask bench-scale` subcommand
+runs alint across a (size × scenario × mode) matrix with
+hardware-fingerprint capture and JSON + Markdown
+publication; v0.5.7 will layer competitive comparisons
+(ls-lint, Repolinter, find/grep) on top of the same
+infrastructure. Schema-compatible; every v0.5.5 config
+runs unchanged.
+
+### Added
+
+- **`xtask bench-scale`** — scale-ceiling benchmark
+  driver. Runs alint across:
+  - **Sizes**: `1k` / `10k` / `100k` (default), opt into
+    `1m` via `--include-1m`. Synthetic monorepo trees
+    generated deterministically from the seed
+    (default `0xa11e47`).
+  - **Scenarios**: `S1` (filename hygiene, 8 rules) /
+    `S2` (existence + content, 8 rules) / `S3` (workspace
+    bundle: `oss-baseline` + `rust` + `monorepo` +
+    `monorepo/cargo-workspace`).
+  - **Modes**: `full` (every file evaluated) and
+    `changed` (`alint check --changed` against a
+    deterministic 10% diff — measures the v0.5.0
+    incremental path).
+
+  Per-row hyperfine measurement (3 warmup + 10 measured
+  runs by default); JSON + Markdown output under
+  `docs/benchmarks/v0.5/scale/<os>-<arch>/`. Hardware
+  fingerprint (CPU model + cores, RAM, FS type, kernel,
+  rustc, alint version + git SHA, hyperfine version)
+  embedded in every report so cross-machine comparisons
+  stay honest.
+
+- **`alint_bench::tree::generate_monorepo`** — new
+  Cargo-workspace-shaped synthetic-tree generator with
+  real workspace `[workspace]` + per-package
+  `[package].name` Cargo.toml content (so the
+  `monorepo/cargo-workspace@v1` ruleset's structured-query
+  rules see well-formed manifests). Full determinism for
+  byte-identical trees across platforms.
+
+- **`alint_bench::tree::select_subset`** — deterministic
+  Fisher-Yates partial shuffle for picking a fraction of
+  files to "touch" in `--changed`-mode benches.
+
+- **First published numbers**:
+  `docs/benchmarks/v0.5/scale/linux-x86_64/` with 18 rows
+  (3 sizes × 3 scenarios × 2 modes) on AMD Ryzen 9 3900X /
+  62 GB / ext4 / Linux 6.1. Companion
+  `docs/benchmarks/v0.5/scale/{README.md,methodology.md}`
+  documents the harness + scenario definitions + how to
+  reproduce.
+
+- **CLI flags**: `--sizes`, `--scenarios`, `--modes`,
+  `--warmup`, `--runs`, `--seed`, `--diff-pct`, `--out`,
+  `--include-1m`, `--quick`, `--json-only`. The default
+  (`cargo xtask bench-scale` with no args) produces the
+  full publication-grade matrix.
+
+### Fixed
+
+- **Walker no longer descends into `.git/`.** `alint
+  check` against a tree containing a `.git/` directory
+  used to walk into git's internal storage — wasted work
+  for every alint rule (none of them target
+  `.git/objects/*`) and a TOCTOU hazard during git's
+  auto-gc / packfile rewrites. The walker now adds
+  `.git` to its exclusion overrides unconditionally.
+  No user-visible behaviour change for repos whose
+  `.gitignore` already covers `.git/`-shaped paths;
+  benchmark and large-monorepo runs become both faster
+  and reliable.
+
+### Internal
+
+- New `xtask/src/bench/` module: `mod.rs` (orchestration
+  + types), `fingerprint.rs` (hardware capture per OS),
+  `scenarios/*.yml` (S1/S2/S3 alint configs embedded via
+  `include_str!`).
+- `xtask` gains `serde` (with `derive`) and `serde_json`
+  dev-deps for hyperfine `--export-json` parsing and the
+  results.json schema.
+- 11 new unit tests on `alint_bench::tree` covering the
+  monorepo shape, file-count exactness, deterministic
+  output for the same seed, and `select_subset`'s
+  fraction / clamping / determinism semantics.
+
+### Compatibility
+
+- Schema version remains `1`. No rule-config changes.
+- Public API additions are non-breaking. Walker
+  `.git/`-exclusion is a behaviour fix, not a config
+  change.
+
 ## [0.5.5] — 2026-04-26
 
 Two license-compliance bundled rulesets — the v0.5 cycle's
@@ -1522,7 +1619,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/asamarts/alint/compare/v0.5.2...v0.5.3

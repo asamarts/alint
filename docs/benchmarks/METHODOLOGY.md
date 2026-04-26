@@ -2,9 +2,12 @@
 
 > Short version: two layers. **criterion** for pure-CPU micro-benchmarks
 > (stable, cross-platform). **hyperfine** driven by `xtask bench-release`
-> for end-to-end CLI wall-time (cross-platform, reproducible, honest about
-> variance). Results are committed per version, per platform, under
-> `docs/benchmarks/<version>/<platform>.md`.
+> (v0.1, single-config) and `xtask bench-scale` (v0.5+, scenario × size ×
+> mode matrix) for end-to-end CLI wall-time (cross-platform, reproducible,
+> honest about variance). Results are committed per version, per platform.
+>
+> Latest: v0.5 scale-ceiling — see [`v0.5/scale/`](v0.5/scale/) for the
+> reproduction recipe, scenario definitions, and per-platform numbers.
 
 ## What we measure and why
 

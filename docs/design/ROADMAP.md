@@ -4,15 +4,19 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.5** (2026-04-26). Headline: two
-license-compliance bundled rulesets —
-`compliance/reuse@v1` (FSFE REUSE: SPDX headers +
-`LICENSES/`) and `compliance/apache-2@v1` (LICENSE +
-NOTICE + Apache header). Bundled catalog 15 → 17.
-Catalogue still ~56 rule kinds. Next planned (rest of
-v0.5): npm shim, documented scale ceiling, remaining
-git-aware primitives, `json_schema_passes`, additional
-output formats.
+**Latest release: v0.5.6** (2026-04-26). Headline:
+documented scale ceiling — `xtask bench-scale` publishes
+hyperfine timings for alint at 1k / 10k / 100k files
+across three scenarios (filename / existence+content /
+workspace bundle) and both `full` + `--changed` modes,
+with full hardware-fingerprint capture. First numbers
+under
+[`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
+v0.5.7 layers competitive comparisons (ls-lint,
+Repolinter, find/grep) on top. Also: walker no longer
+descends into `.git/` (latent bug surfaced by the bench).
+Next planned: npm shim, `json_schema_passes`, remaining
+git-aware primitives, additional output formats.
 
 ## Positioning
 
@@ -226,13 +230,15 @@ Ranked by leverage.
   per-member checks to actual package directories — no
   false positives on stray `crates/notes/` or
   `packages/drafts/`.
-- ⏳ **Documented scale ceiling.** Bench `alint check` on a
-  synthetic 100k-file tree (representative of the
-  workspace-tier upper bound) and a 1M-file tree
-  (Bazel-territory). Publish the numbers under
-  `docs/benchmarks/scale/`. Honest baseline — keeps the
-  positioning claims falsifiable and tells adopters where
-  to stop.
+- ✅ **Documented scale ceiling** — shipped in v0.5.6
+  (2026-04-26) as `xtask bench-scale`. Publishes
+  hyperfine timings across (size × scenario × mode)
+  matrix with hardware fingerprint; first numbers under
+  [`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
+  1M-file size opt-in via `--include-1m`. v0.5.7 layers
+  competitive comparisons (ls-lint, Repolinter,
+  find/grep + Docker-pinned reproduction) on top of the
+  same harness.
 
 ### Other scope
 
