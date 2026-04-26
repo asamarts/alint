@@ -1,0 +1,91 @@
+# alint://bundled/compliance/reuse@v1
+#
+# Hygiene checks for repositories that follow the FSFE REUSE
+# Specification (https://reuse.software/) — every licensable
+# file declares its license + copyright via an SPDX header (or
+# a `.license` companion / REUSE.toml entry), and the full
+# license texts live under `LICENSES/`.
+#
+# Adopt with:
+#
+#     extends:
+#       - alint://bundled/compliance/reuse@v1
+#
+# This ruleset has no fact gate — extending it is the user's
+# signal that they intend to be REUSE-compliant. If you need
+# narrower coverage, override `paths:` on the SPDX-header rule
+# (e.g. limit to one source tree) or `level: off` rules you
+# don't want.
+
+version: 1
+
+rules:
+  # The REUSE spec mandates a top-level `LICENSES/` directory
+  # containing the full text of every license used in the
+  # project (named by SPDX identifier, e.g. `LICENSES/MIT.txt`).
+  # `reuse lint` rejects a project without it; we mirror that.
+  - id: reuse-licenses-dir-exists
+    kind: dir_exists
+    paths: "LICENSES"
+    level: error
+    message: >-
+      REUSE-compliant projects need a `LICENSES/` directory
+      containing the full text of each license referenced by
+      `SPDX-License-Identifier:` headers (named e.g.
+      `LICENSES/Apache-2.0.txt`). Run `reuse download --all`
+      to populate it from the SPDX corpus.
+    policy_url: "https://reuse.software/spec/#license-files"
+
+  # Every common-source-extension file should carry an
+  # SPDX-License-Identifier header in its first ~10 lines.
+  # Files that license-via-companion (`*.license`) or via
+  # `REUSE.toml` mappings legitimately lack inline headers —
+  # narrow `paths:` to your source trees if your project uses
+  # those mechanisms heavily.
+  - id: reuse-source-has-spdx-identifier
+    kind: file_header
+    paths:
+      include:
+        ["**/*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,hh,sh,rb,swift}"]
+      exclude:
+        - "**/vendor/**"
+        - "**/node_modules/**"
+        - "**/target/**"
+        - "**/build/**"
+        - "**/dist/**"
+        - "**/.cargo/**"
+    lines: 10
+    pattern: "SPDX-License-Identifier:"
+    level: warning
+    message: >-
+      REUSE: every source file should declare its license
+      with an `SPDX-License-Identifier:` header in the first
+      few lines (in a comment). Use a `.license` companion
+      file or a `REUSE.toml` mapping if the file format
+      can't carry comments.
+    policy_url: "https://reuse.software/spec/#comment-headers"
+
+  # Every common-source-extension file should also carry a
+  # SPDX FileCopyrightText header naming the copyright
+  # holder. Required by the REUSE spec alongside
+  # `SPDX-License-Identifier:`.
+  - id: reuse-source-has-copyright-text
+    kind: file_header
+    paths:
+      include:
+        ["**/*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,hh,sh,rb,swift}"]
+      exclude:
+        - "**/vendor/**"
+        - "**/node_modules/**"
+        - "**/target/**"
+        - "**/build/**"
+        - "**/dist/**"
+        - "**/.cargo/**"
+    lines: 10
+    pattern: "SPDX-FileCopyrightText:"
+    level: warning
+    message: >-
+      REUSE: every source file should declare its copyright
+      with an `SPDX-FileCopyrightText: <year> <holder>`
+      header alongside the SPDX-License-Identifier.
+    policy_url: "https://reuse.software/spec/#format"

@@ -95,6 +95,19 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         "v1",
         include_str!("../rulesets/v1/monorepo/yarn-workspace.yml"),
     ),
+    // License-compliance overlays. Adopting one of these is
+    // the user's signal that the project intends to be
+    // compliant with the named scheme — no fact gating.
+    (
+        "compliance/reuse",
+        "v1",
+        include_str!("../rulesets/v1/compliance/reuse.yml"),
+    ),
+    (
+        "compliance/apache-2",
+        "v1",
+        include_str!("../rulesets/v1/compliance/apache-2.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
