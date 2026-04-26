@@ -1,0 +1,35 @@
+name: --changed skips per-file rule whose scope misses the diff
+tags: [check, check_changed, changed]
+
+# `Bar.java` was committed long ago without a license header —
+# a full check fires on it. With `--changed` the only diff
+# entry is `src/foo.rs` (untracked), so the rule's
+# `**/*.java` scope doesn't intersect and the per-file
+# iteration sees no java files. No violation fires.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    src:
+      Bar.java: "package demo;\nclass Bar {}\n"
+      foo.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: java-license-header
+        kind: file_header
+        paths: "**/*.java"
+        lines: 5
+        pattern: "(?m)^// Copyright"
+        level: error
+  git:
+    init: true
+    add: [README.md, src/Bar.java]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: java-license-header, level: error, path: "src/Bar.java"}
+  - violations: []

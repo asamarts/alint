@@ -1,0 +1,34 @@
+name: --changed skips existence rule whose scope misses the diff
+tags: [check, check_changed, changed, file_absent]
+
+# A `.env` was committed long ago. The current diff only adds
+# an untracked `src/foo.rs`. `file_absent`'s scope `**/.env`
+# doesn't intersect the changed-set, so the engine skips the
+# rule entirely — even though `.env` is still on disk. The
+# user accepted "show only diff-relevant findings" by passing
+# `--changed`. The full check, by contrast, fires.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    .env: "SECRET=oops\n"
+    src:
+      foo.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-env
+        kind: file_absent
+        paths: "**/.env"
+        level: error
+  git:
+    init: true
+    add: [README.md, .env]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: no-env, level: error, path: ".env"}
+  - violations: []

@@ -149,7 +149,7 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
         }
         entries.push(entry);
     }
-    let engine = Engine::from_entries(entries, registry)
+    let mut engine = Engine::from_entries(entries, registry)
         .with_facts(config.facts.clone())
         .with_vars(config.vars.clone())
         .with_fix_size_limit(config.fix_size_limit);
@@ -160,8 +160,19 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
     };
     let index = walk(root, &walk_opts)?;
 
+    if matches!(step, Step::CheckChanged) {
+        let set = alint_core::git::collect_changed_paths(root, None).ok_or_else(|| {
+            Error::scenario(format!(
+                "scenario uses `check_changed` but `git ls-files --modified` failed at {} \
+                 — make sure the scenario has a `given.git:` block",
+                root.display()
+            ))
+        })?;
+        engine = engine.with_changed_paths(set);
+    }
+
     Ok(match step {
-        Step::Check => StepOutcome::Check(engine.run(root, &index)?),
+        Step::Check | Step::CheckChanged => StepOutcome::Check(engine.run(root, &index)?),
         Step::Fix => StepOutcome::Fix(engine.fix(root, &index, false)?),
         Step::FixDryRun => StepOutcome::Fix(engine.fix(root, &index, true)?),
     })

@@ -1,0 +1,32 @@
+name: --changed with an empty diff produces an empty report
+tags: [check, check_changed, changed]
+
+# Fully-committed tree, no untracked files, no working-tree
+# modifications. `git ls-files --modified --others
+# --exclude-standard` returns nothing — the engine
+# short-circuits to an empty report rather than walk the
+# rule list at all. Pre-commit's "ran on a no-op commit"
+# path takes this branch.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    .env: "SECRET=oops\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-env
+        kind: file_absent
+        paths: "**/.env"
+        level: error
+  git:
+    init: true
+    add: [README.md, .env]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: no-env, level: error, path: ".env"}
+  - violations: []

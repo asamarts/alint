@@ -1,0 +1,40 @@
+name: --changed keeps cross-file `pair` on full-tree semantics
+tags: [check, check_changed, changed, pair]
+
+# `bar.c` has no matching `bar.h`. The diff contains an
+# unrelated `notes.md` (untracked). Cross-file rules
+# (`requires_full_index = true`) opt out of the changed-mode
+# filter and still iterate the whole tree, so the missing
+# `bar.h` violation fires under both the full check and the
+# `--changed` check. Asserts the roadmap contract:
+# cross-file rules are not silenced by an unrelated diff.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    notes.md: "# scratch\n"
+    src:
+      foo.c: "/* foo */\n"
+      foo.h: "/* foo header */\n"
+      bar.c: "/* bar */\n"
+  config: |
+    version: 1
+    rules:
+      - id: c-needs-h
+        kind: pair
+        primary: "**/*.c"
+        partner: "{dir}/{stem}.h"
+        level: error
+  git:
+    init: true
+    add: [README.md, src/foo.c, src/foo.h, src/bar.c]
+    commit: true
+    # notes.md is untracked → diff = {notes.md}
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: c-needs-h, level: error, path: "src/bar.c"}
+  - violations:
+      - {rule: c-needs-h, level: error, path: "src/bar.c"}

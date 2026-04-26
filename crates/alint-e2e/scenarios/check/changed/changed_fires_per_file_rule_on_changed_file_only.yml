@@ -1,0 +1,36 @@
+name: --changed fires per-file rule on changed files but not unchanged ones
+tags: [check, check_changed, changed]
+
+# `Foo.java` was committed with a valid header. `Bar.java` is
+# untracked and missing the header. With `--changed`,
+# `git ls-files --modified --others` reports {src/Bar.java};
+# the rule iterates only that subset and fires once on
+# `Bar.java`. `Foo.java` is invisible to the changed-mode
+# pass — even though it's missing nothing, that's the
+# point: an unchanged passing file never enters the picture.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    src:
+      Foo.java: "// Copyright Acme\npackage demo;\nclass Foo {}\n"
+      Bar.java: "package demo;\nclass Bar {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: java-license-header
+        kind: file_header
+        paths: "**/*.java"
+        lines: 5
+        pattern: "(?m)^// Copyright"
+        level: error
+  git:
+    init: true
+    add: [README.md, src/Foo.java]
+    commit: true
+
+when: [check_changed]
+
+expect:
+  - violations:
+      - {rule: java-license-header, level: error, path: "src/Bar.java"}

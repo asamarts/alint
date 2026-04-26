@@ -103,6 +103,12 @@ pub enum Step {
     Check,
     Fix,
     FixDryRun,
+    /// `alint check --changed` (working-tree diff, no `--base`).
+    /// The runner shells out to `git ls-files --modified --others
+    /// --exclude-standard` to derive the changed-set, so the
+    /// scenario's `given.git:` setup must produce one. Scenarios
+    /// without a git block reach the runner's hard-error path.
+    CheckChanged,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
