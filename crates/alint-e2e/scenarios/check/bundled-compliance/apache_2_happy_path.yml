@@ -1,0 +1,44 @@
+name: compliance/apache-2@v1 — happy path with LICENSE, NOTICE, headers
+tags: [check, bundled, compliance, apache-2]
+
+# An Apache-2.0 project with all three artefacts in place:
+# LICENSE containing the Apache text, root NOTICE file, and
+# the canonical "Licensed under the Apache License, Version
+# 2.0" header on each source file.
+
+given:
+  tree:
+    LICENSE: |
+      Apache License
+      Version 2.0, January 2004
+      http://www.apache.org/licenses/
+
+      (full license text would be here)
+    NOTICE: |
+      Demo project
+      Copyright 2026 Acme Corp
+    src:
+      lib.rs: |
+        // Copyright 2026 Acme Corp
+        //
+        // Licensed under the Apache License, Version 2.0 (the "License");
+        // you may not use this file except in compliance with the License.
+
+        pub fn hello() {}
+      util.py: |
+        # Copyright 2026 Acme Corp
+        #
+        # Licensed under the Apache License, Version 2.0 (the "License");
+        # you may not use this file except in compliance with the License.
+
+        def util():
+            pass
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/compliance/apache-2@v1
+
+when: [check]
+
+expect:
+  - violations: []

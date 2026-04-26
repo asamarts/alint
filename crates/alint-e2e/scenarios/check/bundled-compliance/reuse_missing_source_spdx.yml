@@ -1,0 +1,32 @@
+name: compliance/reuse@v1 — source files missing SPDX headers fire
+tags: [check, bundled, compliance, reuse]
+
+# `LICENSES/` is present, but `src/lib.rs` lacks both SPDX
+# headers — fires both source-rules. `src/util.py` is fully
+# compliant and stays silent.
+
+given:
+  tree:
+    LICENSES:
+      Apache-2.0.txt: "Apache License Version 2.0\n"
+    src:
+      lib.rs: |
+        // No SPDX header at all.
+        pub fn hello() {}
+      util.py: |
+        # SPDX-FileCopyrightText: 2026 Acme Corp
+        # SPDX-License-Identifier: Apache-2.0
+
+        def util():
+            pass
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/compliance/reuse@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: reuse-source-has-spdx-identifier, level: warning, path: "src/lib.rs"}
+      - {rule: reuse-source-has-copyright-text, level: warning, path: "src/lib.rs"}

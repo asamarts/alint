@@ -1,0 +1,34 @@
+name: compliance/reuse@v1 — happy path with LICENSES dir + SPDX headers
+tags: [check, bundled, compliance, reuse]
+
+# A REUSE-compliant repo: top-level `LICENSES/` directory
+# with the license texts, and every source file declares
+# both `SPDX-License-Identifier:` and `SPDX-FileCopyrightText:`
+# in its first ~10 lines.
+
+given:
+  tree:
+    LICENSES:
+      Apache-2.0.txt: "Apache License Version 2.0\n(full text would be here)\n"
+      MIT.txt: "MIT License\n(full text would be here)\n"
+    src:
+      lib.rs: |
+        // SPDX-FileCopyrightText: 2026 Acme Corp
+        // SPDX-License-Identifier: Apache-2.0
+
+        pub fn hello() {}
+      util.py: |
+        # SPDX-FileCopyrightText: 2026 Acme Corp
+        # SPDX-License-Identifier: MIT
+
+        def util():
+            pass
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/compliance/reuse@v1
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,25 @@
+name: compliance/reuse@v1 — missing LICENSES dir fires
+tags: [check, bundled, compliance, reuse]
+
+# Source files have correct SPDX headers, but the project
+# is missing the top-level `LICENSES/` directory that the
+# REUSE spec mandates. Only the dir-existence rule fires.
+
+given:
+  tree:
+    src:
+      lib.rs: |
+        // SPDX-FileCopyrightText: 2026 Acme Corp
+        // SPDX-License-Identifier: Apache-2.0
+
+        pub fn hello() {}
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/compliance/reuse@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: reuse-licenses-dir-exists, level: error}
