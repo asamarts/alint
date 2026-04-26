@@ -6,6 +6,97 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.4] — 2026-04-26
+
+`alint init` — the missing one-line adoption story.
+Detects the repo's ecosystem (Rust / Node / Python / Go /
+Java) and optionally its workspace shape (Cargo / pnpm /
+Yarn-or-npm), then writes a `.alint.yml` extending the
+right bundled rulesets. Closes the v0.5 monorepo theme on
+the adoption side: every primitive shipped in v0.5.0–v0.5.3
+now has a one-line on-ramp. Schema-compatible; every v0.5.3
+config runs unchanged.
+
+### Added
+
+- **`alint init [PATH]`** — new subcommand. Detects the
+  repo's ecosystem from root manifests and writes a
+  `.alint.yml` with `extends:` lines for
+  `oss-baseline@v1` plus each detected language ruleset.
+  Detection is deliberately a presence check (file
+  exists, no parsing) so it stays fast and predictable:
+  - Rust: `Cargo.toml`
+  - Node: `package.json`
+  - Python: `pyproject.toml` / `setup.py` / `setup.cfg`
+  - Go: `go.mod`
+  - Java: `pom.xml` / `build.gradle` / `build.gradle.kts`
+
+  Refuses to overwrite an existing config (any of
+  `.alint.yml` / `.alint.yaml` / `alint.yml` /
+  `alint.yaml`) — exits non-zero with a clear message
+  pointing the user at deletion.
+
+- **`alint init --monorepo`** — adds workspace detection
+  on top of the language scan. Recognises:
+  - **Cargo workspaces** — root `Cargo.toml` contains a
+    `[workspace]` table (line-prefix check, no TOML
+    parsing).
+  - **pnpm workspaces** — root `pnpm-workspace.yaml` /
+    `.yml` exists.
+  - **Yarn / npm workspaces** — root `package.json`
+    contains `"workspaces"`.
+
+  When a workspace is detected, the generated config also
+  extends `monorepo@v1` and the matching
+  `monorepo/<flavor>-workspace@v1` overlay, plus sets
+  `nested_configs: true` so each subdirectory can layer
+  its own `.alint.yml` on top.
+
+  ```yaml
+  # `alint init --monorepo` in a Cargo workspace produces:
+  version: 1
+  nested_configs: true
+
+  extends:
+    - alint://bundled/oss-baseline@v1
+    - alint://bundled/rust@v1
+    - alint://bundled/monorepo@v1
+    - alint://bundled/monorepo/cargo-workspace@v1
+  ```
+
+  Bazel / Lerna / Nx / Turbo detection deferred — the
+  three flavours that have bundled overlays cover the
+  workspace-tier sweet spot.
+
+### Internal
+
+- New `crates/alint/src/init.rs` module with `Detection` /
+  `Language` / `WorkspaceFlavor` types, a pure `detect()`
+  function and a deterministic `render()` emitter. Output
+  is hand-formatted YAML (not serialized via serde) so the
+  generated file can carry header comments documenting
+  what was detected and how to use it.
+- 17 new unit tests covering the detector + emitter
+  (per-language detection, polyglot repos, workspace
+  precedence, header summary).
+- 3 new trycmd CLI tests under `tests/cli/init-*.toml`:
+  empty-repo init, monorepo-cargo init, refuses-overwrite.
+  The trycmd `fs.sandbox = true` mode lets us assert on
+  the post-run sandbox state (the generated `.alint.yml`)
+  alongside stdout / stderr / exit.
+- `help-top-level` snapshot regenerated to include the
+  `init` subcommand line.
+
+### Compatibility
+
+- Schema version remains `1`. Pure additive — no rule,
+  config, or output changes.
+- Public API unchanged (the `init` module is private to
+  the binary crate).
+- New `tempfile` dev-dependency on `alint` (already a
+  workspace dep elsewhere; the binary needs it for the
+  init unit tests).
+
 ## [0.5.3] — 2026-04-26
 
 Three workspace-aware bundled rulesets layered on top of
@@ -1351,7 +1442,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/asamarts/alint/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/asamarts/alint/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/asamarts/alint/compare/v0.5.0...v0.5.1

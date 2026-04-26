@@ -28,7 +28,7 @@ v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Twelve bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.5.3`.
+- **Official GitHub Action** — `asamarts/alint@v0.5.4`.
 
 ## Non-goals
 
@@ -70,7 +70,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.3 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.4 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -79,7 +79,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.3`).
+Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.4`).
 
 ### From crates.io
 
@@ -98,8 +98,14 @@ cargo build --release -p alint
 
 ## Quick start
 
-The fastest on-ramp is a one-line bundled baseline — readable enough to
-extend when you're ready:
+The fastest on-ramp is `alint init` — it scans your repo for the obvious markers (Cargo.toml, package.json, pnpm-workspace.yaml, …) and writes a `.alint.yml` with the right `extends:` lines:
+
+```bash
+alint init             # ecosystem-aware (rust@v1, node@v1, …)
+alint init --monorepo  # plus workspace overlays for Cargo / pnpm / Yarn
+```
+
+The generated file is editable — start there, override or extend as needed. If you'd rather hand-roll, the minimum viable shape is:
 
 ```yaml
 # .alint.yml
@@ -118,6 +124,7 @@ alint fix             # apply every fixable violation in place
 alint list            # list effective rules (useful after extends / overrides)
 alint explain <id>    # show a rule's full, resolved definition
 alint facts           # evaluate facts against the repo — debug `when:` clauses
+alint init [--monorepo]  # scaffold a `.alint.yml` based on detected ecosystem + workspace shape
 ```
 
 Output formats:
@@ -577,15 +584,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.5.3
+- uses: asamarts/alint@v0.5.4
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.5.3
+- uses: asamarts/alint@v0.5.4
   with:
-    version: v0.5.3        # alint release tag (default: latest)
+    version: v0.5.4        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -597,7 +604,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.5.3
+- uses: asamarts/alint@v0.5.4
   id: alint
   with:
     format: sarif
@@ -615,7 +622,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.5.3
+    rev: v0.5.4
     hooks:
       - id: alint
 ```

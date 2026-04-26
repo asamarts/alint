@@ -4,14 +4,15 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.3** (2026-04-26). Headline: three
-workspace-aware bundled rulesets — `monorepo/cargo-workspace@v1`,
-`monorepo/pnpm-workspace@v1`, `monorepo/yarn-workspace@v1` —
-each gated by an `is_*_workspace` fact and using
-`when_iter:` to scope per-member checks. Bundled catalog
-12 → 15. Catalogue still ~56 rule kinds. Next planned
-(rest of v0.5): `--monorepo` discovery preset, npm shim,
-remaining git-aware primitives, compliance rulesets.
+**Latest release: v0.5.4** (2026-04-26). Headline: `alint
+init [--monorepo]` — auto-detects ecosystem (Rust / Node /
+Python / Go / Java) and workspace shape (Cargo / pnpm /
+Yarn) and scaffolds a `.alint.yml` with the right
+`extends:` lines. Closes the v0.5 monorepo theme on the
+adoption side. Catalogue still ~56 rule kinds; bundled
+catalog still 15. Next planned (rest of v0.5): npm shim,
+documented scale ceiling, remaining git-aware primitives,
+compliance rulesets.
 
 ## Positioning
 
@@ -202,18 +203,19 @@ Ranked by leverage.
   iter.has_file("BUILD.bazel")` cover the
   Cargo / Bazel-style workspace gates without a
   language-specific parser.
-- ⏳ **`--monorepo` discovery preset.** A new flag on `alint
-  init` and `alint check` that auto-detects workspace
-  layout — Cargo workspace (`[workspace]` in root
-  `Cargo.toml`), pnpm workspace (root `pnpm-workspace.yaml`),
-  yarn / npm workspaces (root `package.json` `workspaces`
-  field), Lerna (`lerna.json`), Bazel (root `WORKSPACE` /
-  `MODULE.bazel`), Nx (`nx.json`), Turborepo (`turbo.json`)
-  — and emits / applies a sensible scaffold:
-  `nested_configs: true`, the right `for_each_dir` paths
-  pulled from the workspace globs, and the relevant
-  ecosystem ruleset extends. Removes the boilerplate that
-  workspace-tier adopters currently re-derive each time.
+- ✅ **`alint init [--monorepo]` discovery preset** — shipped
+  in v0.5.4 (2026-04-26). New `alint init` subcommand
+  detects ecosystem (Rust / Node / Python / Go / Java) from
+  root manifests and writes a `.alint.yml` extending the
+  matching bundled rulesets. With `--monorepo`, also
+  detects Cargo `[workspace]`, pnpm-workspace.yaml, and
+  `package.json` `workspaces` field, and emits
+  `monorepo@v1` + `monorepo/<flavor>-workspace@v1` plus
+  `nested_configs: true`. Bazel / Lerna / Nx / Turbo
+  detection deferred (the three covered flavours match the
+  bundled-overlay set). The runtime-side `--monorepo` flag
+  on `alint check` is deferred too — `alint init` is the
+  primary adoption shape.
 - ✅ **Workspace-aware bundled rulesets** — shipped in
   v0.5.3 (2026-04-26). Three thin overlays on
   `monorepo@v1`: `monorepo/cargo-workspace@v1`,
