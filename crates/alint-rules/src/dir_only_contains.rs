@@ -65,6 +65,13 @@ impl Rule for DirOnlyContainsRule {
         self.policy_url.as_deref()
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: every selected dir's verdict depends on
+        // its full child set, including unchanged children. Per
+        // roadmap, opts out of `--changed` filtering.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for dir in ctx.index.dirs() {

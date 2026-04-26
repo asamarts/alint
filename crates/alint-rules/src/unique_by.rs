@@ -58,6 +58,15 @@ impl Rule for UniqueByRule {
         self.policy_url.as_deref()
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: detecting duplicate keys is only valid over
+        // the full set. A new file in the diff might collide with
+        // an unchanged-but-existing file elsewhere — invisible if
+        // we only see the diff. Per roadmap, opts out of
+        // `--changed` filtering.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         // BTreeMap gives a stable (sorted) iteration order → deterministic output.
         let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();

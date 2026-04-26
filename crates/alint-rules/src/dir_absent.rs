@@ -33,6 +33,14 @@ impl Rule for DirAbsentRule {
         self.git_tracked_only
     }
 
+    fn requires_full_index(&self) -> bool {
+        // See `dir_exists::requires_full_index` — directory
+        // scopes don't intersect a file-path-based changed-set
+        // cleanly, so we always evaluate this rule on the full
+        // tree in `--changed` mode. One O(N) scan per rule.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.dirs() {

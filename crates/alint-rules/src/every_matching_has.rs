@@ -46,6 +46,14 @@ impl Rule for EveryMatchingHasRule {
         self.policy_url.as_deref()
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: every entry matching `select` must satisfy
+        // `require`, regardless of whether it (or its required
+        // partners) was in the diff. Per roadmap, opts out of
+        // `--changed` filtering.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
             &self.id,

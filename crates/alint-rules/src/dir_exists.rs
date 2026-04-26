@@ -31,6 +31,16 @@ impl Rule for DirExistsRule {
         self.git_tracked_only
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Aggregate verdict over the whole tree. Note we
+        // deliberately don't expose `path_scope` here: directory
+        // scopes (e.g. `src/foo`) don't naturally intersect a
+        // changed-set built from file paths (`src/foo/main.rs`),
+        // so the engine evaluates dir-existence rules on every
+        // `--changed` run. Cheap (one O(N) scan) and correct.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = ctx.index.dirs().any(|entry| {
             if !self.scope.matches(&entry.path) {

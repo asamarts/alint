@@ -38,6 +38,19 @@ impl Rule for FileAbsentRule {
         self.git_tracked_only
     }
 
+    fn requires_full_index(&self) -> bool {
+        // The verdict on "is X forbidden?" is over the whole tree —
+        // an unchanged-but-already-committed `.env` should still
+        // be visible. The engine skips this rule entirely when its
+        // scope doesn't intersect the diff, which is the usual
+        // user expectation in `--changed` mode.
+        true
+    }
+
+    fn path_scope(&self) -> Option<&Scope> {
+        Some(&self.scope)
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {

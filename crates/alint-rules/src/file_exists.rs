@@ -55,6 +55,19 @@ impl Rule for FileExistsRule {
         self.git_tracked_only
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Existence is an aggregate verdict over the whole tree —
+        // "is at least one matching file present?". In `--changed`
+        // mode, evaluate against the full index (so an unchanged
+        // LICENSE still counts) but let the engine skip the rule
+        // entirely when its scope doesn't intersect the diff.
+        true
+    }
+
+    fn path_scope(&self) -> Option<&Scope> {
+        Some(&self.scope)
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = ctx.index.files().any(|entry| {
             if self.root_only && entry.path.components().count() != 1 {

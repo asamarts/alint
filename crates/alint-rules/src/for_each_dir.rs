@@ -60,6 +60,15 @@ impl Rule for ForEachDirRule {
         self.policy_url.as_deref()
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: per-directory verdicts depend on what's in
+        // each iterated dir as a whole, not just changed entries.
+        // A `for_each_dir` over `src/*` requiring `mod.rs` must
+        // see every `src/*` even if only one file inside it
+        // changed. Per roadmap, opts out of `--changed` filtering.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
             &self.id,

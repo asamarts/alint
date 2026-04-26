@@ -51,6 +51,16 @@ impl Rule for PairRule {
         self.policy_url.as_deref()
     }
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: a verdict on a primary file depends on
+        // whether its partner exists *anywhere* in the tree, not
+        // just in the diff. Roadmap §"Monorepo & scale" defines
+        // this rule as opting out of `--changed` filtering. We
+        // also leave `path_scope` as `None` so the engine doesn't
+        // skip-by-intersection — pair always evaluates.
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
