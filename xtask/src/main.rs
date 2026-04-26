@@ -63,6 +63,13 @@ enum Commands {
         /// Comma-separated modes (full,changed).
         #[arg(long, default_value = "full,changed", value_delimiter = ',')]
         modes: Vec<String>,
+        /// Comma-separated tools (alint, ls-lint, or `all`).
+        /// Default `alint` (preserves v0.5.6's alint-only
+        /// publication shape). `all` expands to every known
+        /// tool variant; tools not on PATH are auto-skipped
+        /// with a stderr note rather than aborting the run.
+        #[arg(long, default_value = "alint", value_delimiter = ',')]
+        tools: Vec<String>,
         /// Hyperfine warmup runs.
         #[arg(long, default_value_t = 3)]
         warmup: u32,
@@ -121,6 +128,7 @@ fn main() -> Result<()> {
             include_1m,
             scenarios,
             modes,
+            tools,
             warmup,
             runs,
             seed,
@@ -129,8 +137,8 @@ fn main() -> Result<()> {
             quick,
             json_only,
         } => dispatch_bench_scale(
-            &sizes, include_1m, &scenarios, &modes, warmup, runs, seed, diff_pct, out, quick,
-            json_only,
+            &sizes, include_1m, &scenarios, &modes, &tools, warmup, runs, seed, diff_pct, out,
+            quick, json_only,
         ),
         Commands::GenFixture {
             files,
@@ -148,6 +156,7 @@ fn dispatch_bench_scale(
     include_1m: bool,
     scenarios: &[String],
     modes: &[String],
+    tools: &[String],
     warmup: u32,
     runs: u32,
     seed: u64,
@@ -158,7 +167,7 @@ fn dispatch_bench_scale(
 ) -> Result<()> {
     // Parse + filter the matrix args before handing to the
     // bench module. Keeps the bench module typed (Size /
-    // Scenario / Mode) and the CLI surface stringy.
+    // Scenario / Mode / Tool) and the CLI surface stringy.
     let mut parsed_sizes: Vec<bench::Size> = sizes
         .iter()
         .map(|s| bench::Size::parse(s))
@@ -186,6 +195,7 @@ fn dispatch_bench_scale(
         .iter()
         .map(|s| bench::Mode::parse(s))
         .collect::<Result<_>>()?;
+    let parsed_tools = bench::tools::resolve(tools)?;
     if !(0.0..=100.0).contains(&diff_pct) {
         bail!("--diff-pct must be in [0, 100]; got {diff_pct}");
     }
@@ -193,6 +203,7 @@ fn dispatch_bench_scale(
         sizes: parsed_sizes,
         scenarios: parsed_scenarios,
         modes: parsed_modes,
+        tools: parsed_tools,
         warmup,
         runs,
         seed,

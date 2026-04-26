@@ -9,12 +9,15 @@
 //! best-effort: failures degrade to a `"<unknown>"` placeholder
 //! rather than aborting the run.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+use super::tools::Tool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fingerprint {
@@ -29,6 +32,14 @@ pub struct Fingerprint {
     pub alint_version: String,
     pub alint_git_sha: String,
     pub hyperfine_version: String,
+    /// Versions of every benchmarked tool present on the
+    /// machine, keyed by `Tool::name()` (`"alint"`, `"ls-lint"`,
+    /// …). Built from the `--tools` set, so a 0.5.6-shape
+    /// alint-only run produces just `{"alint": "0.5.6"}` here
+    /// — the field is always present, never empty when at
+    /// least one tool ran. Sorted via `BTreeMap` for
+    /// deterministic JSON output.
+    pub tool_versions: BTreeMap<String, String>,
     pub timestamp: String,
 }
 
@@ -36,7 +47,11 @@ pub struct Fingerprint {
 /// component degrades to `"<unknown>"` (or `0`) on failure
 /// rather than aborting; benchmark publication should never
 /// die just because we couldn't read `/proc/meminfo`.
-pub fn capture() -> Fingerprint {
+pub fn capture(tools: &[Tool]) -> Fingerprint {
+    let tool_versions: BTreeMap<String, String> = tools
+        .iter()
+        .filter_map(|t| t.detect().map(|v| (t.name().to_string(), v)))
+        .collect();
     Fingerprint {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
@@ -49,6 +64,7 @@ pub fn capture() -> Fingerprint {
         alint_version: alint_version().unwrap_or_else(unknown),
         alint_git_sha: alint_git_sha().unwrap_or_else(unknown),
         hyperfine_version: hyperfine_version().unwrap_or_else(unknown),
+        tool_versions,
         timestamp: timestamp(),
     }
 }

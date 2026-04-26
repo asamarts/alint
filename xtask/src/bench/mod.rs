@@ -31,6 +31,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 mod fingerprint;
+pub mod tools;
+
+pub use tools::Tool;
 
 /// Embedded scenario YAMLs. Each ships in the xtask binary so
 /// running on any cloned checkout produces byte-identical
@@ -48,6 +51,7 @@ pub struct ScaleArgs {
     pub sizes: Vec<Size>,
     pub scenarios: Vec<Scenario>,
     pub modes: Vec<Mode>,
+    pub tools: Vec<Tool>,
     pub warmup: u32,
     pub runs: u32,
     pub seed: u64,
@@ -191,6 +195,9 @@ impl Mode {
 /// the output schema stays fixed at "ms").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row {
+    /// Tool name (`alint`, `ls-lint`, …). Identifies which
+    /// implementation produced this row.
+    pub tool: String,
     pub size_files: usize,
     pub size_label: String,
     pub scenario: String,
@@ -223,6 +230,7 @@ pub struct ReportArgs {
     pub sizes: Vec<String>,
     pub scenarios: Vec<String>,
     pub modes: Vec<String>,
+    pub tools: Vec<String>,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────
@@ -237,16 +245,18 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         args.sizes = vec![Size::K1];
         args.scenarios = vec![Scenario::S1];
         args.modes = vec![Mode::Full];
+        args.tools = vec![Tool::Alint];
         args.warmup = 1;
         args.runs = 3;
     }
 
     ensure_hyperfine()?;
     let alint_bin = build_release_binary()?;
-    let fingerprint = fingerprint::capture();
+    let fingerprint = fingerprint::capture(&args.tools);
 
     eprintln!(
-        "[xtask] bench-scale: sizes={} scenarios={} modes={} warmup={} runs={} seed={:#x}",
+        "[xtask] bench-scale: tools={} sizes={} scenarios={} modes={} warmup={} runs={} seed={:#x}",
+        join_labels(&args.tools, Tool::name),
         join_labels(&args.sizes, Size::label),
         join_labels(&args.scenarios, Scenario::label),
         join_labels(&args.modes, Mode::label),
@@ -269,8 +279,14 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
 
         // Initialise git so `--changed` mode has something to
         // diff against. Done once per tree — hyperfine then
-        // measures the same disk state across runs.
-        if args.modes.contains(&Mode::Changed) {
+        // measures the same disk state across runs. Skipped
+        // when no tool requested `Mode::Changed` to save time.
+        let needs_git = args.modes.contains(&Mode::Changed)
+            && args
+                .tools
+                .iter()
+                .any(|t| args.scenarios.iter().any(|s| t.supports(*s, Mode::Changed)));
+        if needs_git {
             init_git_for_changed_mode(&tree_root)?;
             let to_touch = alint_bench::tree::select_subset(
                 &tree.files,
@@ -287,19 +303,25 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         }
 
         for &scenario in &args.scenarios {
-            // Scenario config is written to the tree root once
-            // per (size, scenario) pair; modes share it.
-            let cfg_path = tree_root.join(".alint.yml");
-            fs::write(&cfg_path, scenario.config_yaml())?;
-            for &mode in &args.modes {
-                eprintln!(
-                    "[xtask] hyperfine {}/{}/{} ...",
-                    size.label(),
-                    scenario.label(),
-                    mode.label(),
-                );
-                let row = run_one(&alint_bin, &tree_root, size, scenario, mode, &args)?;
-                rows.push(row);
+            for &tool in &args.tools {
+                // Tool decides whether to write a config; ls-lint's
+                // `.ls-lint.yml` and alint's `.alint.yml` coexist
+                // since they're keyed on different filenames.
+                tool.setup_config(&tree_root, scenario)?;
+                for &mode in &args.modes {
+                    if !tool.supports(scenario, mode) {
+                        continue;
+                    }
+                    eprintln!(
+                        "[xtask] hyperfine {}/{}/{}/{} ...",
+                        tool.name(),
+                        size.label(),
+                        scenario.label(),
+                        mode.label(),
+                    );
+                    let row = run_one(&alint_bin, &tree_root, tool, size, scenario, mode, &args)?;
+                    rows.push(row);
+                }
             }
         }
     }
@@ -319,6 +341,7 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
                 .map(|s| s.label().to_string())
                 .collect(),
             modes: args.modes.iter().map(|m| m.label().to_string()).collect(),
+            tools: args.tools.iter().map(|t| t.name().to_string()).collect(),
         },
         rows,
     };
@@ -354,30 +377,25 @@ struct HfResult {
     times: Vec<f64>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_one(
     alint: &Path,
     tree_root: &Path,
+    tool: Tool,
     size: Size,
     scenario: Scenario,
     mode: Mode,
     args: &ScaleArgs,
 ) -> Result<Row> {
-    // Build the alint argv.
-    let mut alint_args: Vec<String> = vec!["check".into(), tree_root.to_string_lossy().into()];
-    if mode == Mode::Changed {
-        alint_args.push("--changed".into());
-    }
-    let cmd_str = format!(
-        "{} {}",
-        shell_quote(alint.to_str().unwrap()),
-        alint_args
-            .iter()
-            .map(|s| shell_quote(s))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
+    // Tool returns the full shell command line. Hyperfine
+    // spawns commands via `sh -c`, so pipes / semicolons /
+    // globs in `GrepPipeline`'s output work as written;
+    // single-program tools like alint and ls-lint reduce to a
+    // simple `bin args...` string.
+    let cmd_str = tool.invocation(alint, tree_root, scenario, mode);
     let label = format!(
-        "alint check ({size}/{scen}/{mode_label})",
+        "{tool} ({size}/{scen}/{mode_label})",
+        tool = tool.name(),
         size = size.label(),
         scen = scenario.label(),
         mode_label = mode.label(),
@@ -431,6 +449,7 @@ fn run_one(
         .context("hyperfine produced no results")?;
 
     Ok(Row {
+        tool: tool.name().into(),
         size_files: size.file_count(),
         size_label: size.label().into(),
         scenario: scenario.label().into(),
@@ -582,13 +601,14 @@ fn render_index(report: &Report) -> String {
     let _ = writeln!(&mut out);
     let _ = writeln!(
         &mut out,
-        "| Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |"
+        "| Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |"
     );
-    let _ = writeln!(&mut out, "|---|---|---|---:|---:|---:|---:|---:|");
+    let _ = writeln!(&mut out, "|---|---|---|---|---:|---:|---:|---:|---:|");
     for r in &report.rows {
         let _ = writeln!(
             &mut out,
-            "| {size} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+            "| {tool} | {size} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+            tool = r.tool,
             size = r.size_label,
             scen = r.scenario,
             mode = r.mode,
@@ -612,13 +632,14 @@ fn render_per_size(report: &Report, size: Size) -> String {
     let _ = writeln!(&mut out);
     let _ = writeln!(
         &mut out,
-        "| Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |"
+        "| Tool | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |"
     );
-    let _ = writeln!(&mut out, "|---|---|---:|---:|---:|---:|---:|");
+    let _ = writeln!(&mut out, "|---|---|---|---:|---:|---:|---:|---:|");
     for r in report.rows.iter().filter(|r| r.size_label == size.label()) {
         let _ = writeln!(
             &mut out,
-            "| {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+            "| {tool} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+            tool = r.tool,
             scen = r.scenario,
             mode = r.mode,
             mean = r.mean_ms,
@@ -655,6 +676,15 @@ fn write_fingerprint_block(out: &mut String, fp: &fingerprint::Fingerprint, args
         fp.alint_version, fp.alint_git_sha
     );
     let _ = writeln!(out, "**hyperfine:** `{}`  ", fp.hyperfine_version);
+    if !fp.tool_versions.is_empty() {
+        let listing: String = fp
+            .tool_versions
+            .iter()
+            .map(|(name, ver)| format!("{name}=`{ver}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "**Tools:** {listing}  ");
+    }
     let _ = writeln!(out, "**Seed:** `{}`  ", args.seed);
     let _ = writeln!(out, "**Warmup/runs:** {} / {}  ", args.warmup, args.runs);
     let _ = writeln!(out, "**Generated:** `{}`  ", fp.timestamp);
@@ -704,14 +734,6 @@ fn workspace_root() -> Result<PathBuf> {
         .parent()
         .context("xtask has no parent directory")?;
     Ok(root.to_path_buf())
-}
-
-fn shell_quote(s: &str) -> String {
-    if s.chars().any(|c| c == ' ' || c == '\t') {
-        format!("\"{s}\"")
-    } else {
-        s.to_string()
-    }
 }
 
 #[allow(dead_code)] // re-exported by main.rs but the linter doesn't see across mods.
