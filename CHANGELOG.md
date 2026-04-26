@@ -6,6 +6,89 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-04-26
+
+Plugin tier 1: `command` rule kind. Wraps any CLI on `PATH`
+into alint's report. Continues the v0.5 monorepo-scale theme
+— pairs naturally with `--changed` so per-file external
+checks (actionlint, shellcheck, kubeconform, …) become
+incremental in CI. Schema-compatible; every v0.5.0 config
+runs unchanged.
+
+### Added
+
+- **`kind: command`** — per-file rule that spawns argv with
+  path-template substitution (`{path}`, `{dir}`, `{stem}`,
+  `{ext}`, `{basename}`, `{parent_name}`). Exit `0` is a
+  pass; non-zero produces a violation whose message is the
+  truncated stdout+stderr. Working dir is the repo root;
+  stdin is closed (`/dev/null`). Output is capped at 16 KiB
+  per stream to keep reports legible.
+
+  ```yaml
+  - id: workflows-clean
+    kind: command
+    paths: ".github/workflows/*.{yml,yaml}"
+    command: ["actionlint", "{path}"]
+    level: error
+  ```
+
+  Environment threaded into each invocation: `ALINT_PATH`
+  (relative to root), `ALINT_ROOT` (absolute), `ALINT_RULE_ID`,
+  `ALINT_LEVEL`, plus `ALINT_VAR_<NAME>` per top-level
+  `vars:` entry and `ALINT_FACT_<NAME>` per resolved fact.
+
+- **`timeout: <seconds>`** option on `command` rules. Default
+  30s. Past the limit, the child process is killed and a
+  violation reports the timeout. Bounds runaway tools so a
+  hung child never stalls the whole run.
+
+- **`--changed` interaction.** `command` is per-file (no
+  `requires_full_index` override), so it inherits the v0.5
+  filtered-index iteration: `alint check --changed` spawns
+  the wrapped tool only for files in the diff. A
+  `shellcheck` rule on a 200-script repo invokes
+  `shellcheck` zero times when the diff doesn't touch any
+  `.sh`. Largest practical multiplier on CI cost for
+  external-linter wrappers.
+
+### Security
+
+- **Trust gate.** `command` rules are only permitted in the
+  user's own top-level `.alint.yml`. A `kind: command` rule
+  introduced via `extends:` — local file, HTTPS URL, or
+  `alint://bundled/<name>@<rev>` — is rejected at load time
+  with a clear error pointing at the offending source.
+  Adopting a published ruleset must never gain it arbitrary
+  process execution. New public function
+  `alint_dsl::reject_command_rules_in` mirrors the existing
+  `alint_core::facts::reject_custom_facts_in` gate.
+
+### Internal
+
+- New `alint_rules::command` module (~330 LOC including 9
+  unit tests). Polling-based wait loop with 10ms granularity
+  for the timeout path; output capping via
+  `Read::take(OUTPUT_CAP_BYTES)`. JSON Schema gains a
+  `rule_command` branch; root + in-crate copies kept
+  byte-identical by the existing drift-guard test.
+
+- 3 new e2e integration tests under
+  `crates/alint-e2e/tests/command_plugin.rs` (`#[cfg(unix)]`
+  — relies on `/bin/sh`): full-engine pass case, full-engine
+  fail case (one violation per failing file), and the
+  `--changed` interaction (only invoked for files in the
+  diff). 2 new unit tests in `alint-dsl` covering the trust
+  gate (rejected from `extends:`, allowed in top-level).
+
+### Compatibility
+
+- Schema version remains `1`. JSON / SARIF / GitHub outputs
+  byte-equivalent for configs that don't use `command`.
+- Public API additions are non-breaking. `Rule` trait
+  unchanged; the new `reject_command_rules_in` is a new
+  public function in `alint-dsl`.
+
 ## [0.5.0] — 2026-04-26
 
 First v0.5 cut. Headline: incremental `alint check --changed`
@@ -1108,7 +1191,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/asamarts/alint/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.0
 [0.4.10]: https://github.com/asamarts/alint/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/asamarts/alint/compare/v0.4.8...v0.4.9

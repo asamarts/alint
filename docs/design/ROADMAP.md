@@ -4,13 +4,13 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.0** (2026-04-26). Headline: `alint
-check --changed` for incremental pre-commit and PR-check
-paths — opens the v0.5 monorepo-scale cut. Catalogue still
-~55 rule kinds. Next planned (rest of v0.5): `--monorepo`
-preset, per-iteration `when:` on `for_each_dir`, `command`
-plugin kind, npm shim, remaining git-aware primitives,
-compliance rulesets.
+**Latest release: v0.5.1** (2026-04-26). Headline: `command`
+plugin kind — wrap any CLI on `PATH` (`actionlint`,
+`shellcheck`, `kubeconform`, …) per-file, with the v0.5
+`--changed` mode making external checks incremental in CI.
+Catalogue at ~56 rule kinds. Next planned (rest of v0.5):
+`--monorepo` preset, per-iteration `when:` on `for_each_dir`,
+npm shim, remaining git-aware primitives, compliance rulesets.
 
 ## Positioning
 
@@ -240,7 +240,7 @@ Ranked by leverage.
 - ✅ Git-aware primitive: `git_tracked_only` (v0.4.8).
 - ✅ Additional bundled rulesets: `python` (v0.4.6), `go` (v0.4.6), `ci/github-actions` (v0.4.5), `java` (v0.4.9).
 - ⏳ Output formats: `markdown`, `junit`, `gitlab`.
-- ⏳ `command` plugin kind. (Plugin v1 lever — lets a rule shell out to a checker like `actionlint` / `shellcheck` / `taplo` / `markdownlint` and bridge their findings into alint's report. Path to ecosystem reach without growing the core rule set.)
+- ✅ `command` plugin kind (v0.5.1, 2026-04-26). Per-file rule wrapping any CLI on `PATH` (`actionlint` / `shellcheck` / `taplo` / `kubeconform` / etc.); exit `0` = pass, non-zero = violation carrying stdout+stderr. Trust-gated: only the user's own top-level config can declare these (mirror of the `custom:` fact gate). Pairs naturally with `--changed` so external checks become incremental in CI.
 - ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
 - ⏳ Git-aware primitives: `git_no_denied_paths`, `git_commit_message`.
 - ⏳ `json_schema_passes` primitive.
