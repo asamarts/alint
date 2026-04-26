@@ -30,6 +30,7 @@
 //! ```
 
 use alint_core::template::PathTokens;
+use alint_core::when::{IterEnv, WhenExpr};
 use alint_core::{Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
@@ -37,6 +38,12 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Options {
     select: String,
+    /// Optional per-iteration filter — evaluated against each
+    /// iterated entry's `iter` context. Common shape:
+    /// `iter.has_file("Cargo.toml")` to scope the iteration to
+    /// directories that look like a workspace member.
+    #[serde(default)]
+    when_iter: Option<String>,
     require: Vec<NestedRuleSpec>,
 }
 
@@ -46,6 +53,7 @@ pub struct ForEachDirRule {
     level: Level,
     policy_url: Option<String>,
     select_scope: Scope,
+    when_iter: Option<WhenExpr>,
     require: Vec<NestedRuleSpec>,
 }
 
@@ -74,6 +82,7 @@ impl Rule for ForEachDirRule {
             &self.id,
             self.level,
             &self.select_scope,
+            self.when_iter.as_ref(),
             &self.require,
             ctx,
             IterateMode::Dirs,
@@ -92,13 +101,26 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     }
     let select_scope = Scope::from_patterns(&[opts.select])?;
+    let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
     Ok(Box::new(ForEachDirRule {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         select_scope,
+        when_iter,
         require: opts.require,
     }))
+}
+
+/// Compile a `when_iter:` source string into a `WhenExpr` at
+/// rule-build time. Public to the crate so the sibling
+/// `for_each_file` and `every_matching_has` rules can reuse the
+/// same error shape.
+pub(crate) fn parse_when_iter(spec: &RuleSpec, src: Option<&str>) -> Result<Option<WhenExpr>> {
+    let Some(src) = src else { return Ok(None) };
+    alint_core::when::parse(src)
+        .map(Some)
+        .map_err(|e| Error::rule_config(&spec.id, format!("invalid `when_iter:`: {e}")))
 }
 
 /// What to iterate in [`evaluate_for_each`].
@@ -112,10 +134,14 @@ pub(crate) enum IterateMode {
 
 /// Shared evaluation logic for `for_each_dir`, `for_each_file`, and
 /// `every_matching_has`. `mode` selects which entries to iterate.
+/// `when_iter` (compiled at rule-build time) gates each iteration:
+/// when present and false for an entry, that entry is skipped
+/// before any nested rule is built or evaluated.
 pub(crate) fn evaluate_for_each(
     parent_id: &str,
     level: Level,
     select_scope: &Scope,
+    when_iter: Option<&WhenExpr>,
     require: &[NestedRuleSpec],
     ctx: &Context<'_>,
     mode: IterateMode,
@@ -138,10 +164,44 @@ pub(crate) fn evaluate_for_each(
         if !select_scope.matches(&entry.path) {
             continue;
         }
+
+        // Per-iteration `when_iter:` filter. Cheap to evaluate
+        // (one IterEnv build + one expression walk per matched
+        // entry); skips the nested-rule build entirely on a
+        // false verdict, which is the whole point of the field.
+        let iter_env = IterEnv {
+            path: &entry.path,
+            is_dir: entry.is_dir,
+            index: ctx.index,
+        };
+        if let Some(expr) = when_iter {
+            if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
+                let env = alint_core::WhenEnv {
+                    facts,
+                    vars,
+                    iter: Some(iter_env),
+                };
+                match expr.evaluate(&env) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        violations.push(
+                            Violation::new(format!("{parent_id}: when_iter error: {e}"))
+                                .with_path(&entry.path),
+                        );
+                        continue;
+                    }
+                }
+            }
+        }
+
         let tokens = PathTokens::from_path(&entry.path);
         for (i, nested) in require.iter().enumerate() {
             let nested_spec = nested.instantiate(parent_id, i, level, &tokens);
-            // Gate the nested rule on its `when:` clause (if present).
+            // Gate the nested rule on its `when:` clause (if
+            // present). Same `iter.*` context is available, so a
+            // nested rule can reach back to the iteration just
+            // like the outer `when_iter:` does.
             if let Some(when_src) = &nested_spec.when {
                 if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
                     let expr = alint_core::when::parse(when_src).map_err(|e| {
@@ -150,7 +210,11 @@ pub(crate) fn evaluate_for_each(
                             format!("nested rule #{i}: invalid when: {e}"),
                         )
                     })?;
-                    let env = alint_core::WhenEnv { facts, vars };
+                    let env = alint_core::WhenEnv {
+                        facts,
+                        vars,
+                        iter: Some(iter_env),
+                    };
                     match expr.evaluate(&env) {
                         Ok(true) => {}
                         Ok(false) => continue,
@@ -234,6 +298,7 @@ mod tests {
             level: Level::Error,
             policy_url: None,
             select_scope: Scope::from_patterns(&[select.to_string()]).unwrap(),
+            when_iter: None,
             require,
         }
     }

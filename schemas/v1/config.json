@@ -770,7 +770,7 @@
     },
 
     "rule_for_each_dir": {
-      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself.",
+      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself. Optional `when_iter:` filters which iterations are evaluated, e.g. `iter.has_file(\"Cargo.toml\")` to scope to workspace members.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
@@ -778,6 +778,10 @@
         "select": {
           "type": "string",
           "description": "Glob selecting the directories to iterate."
+        },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — evaluated against `iter.*` in the iterated entry's context. Iterations whose verdict is false are skipped before any nested rule is built. Examples: `iter.has_file(\"Cargo.toml\")`, `iter.basename matches \"^pkg-\"`."
         },
         "require": {
           "type": "array",
@@ -789,7 +793,7 @@
     },
 
     "rule_for_each_file": {
-      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration.",
+      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration. Optional `when_iter:` filters iterations.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
@@ -797,6 +801,10 @@
         "select": {
           "type": "string",
           "description": "Glob selecting the files to iterate."
+        },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter. `iter.has_file(...)` always evaluates to false on file iteration; useful predicates here include `iter.basename`, `iter.ext`, `iter.parent_name`."
         },
         "require": {
           "type": "array",
@@ -863,12 +871,16 @@
     },
 
     "rule_every_matching_has": {
-      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule.",
+      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule. Optional `when_iter:` filters iterations.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
         "kind": { "const": "every_matching_has" },
         "select": { "type": "string" },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter."
+        },
         "require": {
           "type": "array",
           "minItems": 1,

@@ -149,6 +149,7 @@ impl Engine {
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
+            iter: None,
         };
         let results: Vec<RuleResult> = self
             .entries
@@ -199,6 +200,7 @@ impl Engine {
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
+            iter: None,
         };
         let fix_ctx = FixContext {
             root,

@@ -9,18 +9,22 @@
 //! not_expr   := ['not'] cmp_expr
 //! cmp_expr   := primary [cmp_op primary]
 //! cmp_op     := '==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'matches'
-//! primary    := literal | ident | '(' expr ')'
+//! primary    := literal | ident_or_call | '(' expr ')'
 //! literal    := STRING | INT | BOOL | 'null' | list
 //! list       := '[' [expr (',' expr)*] ']'
-//! ident      := 'facts.' NAME | 'vars.' NAME
+//! ident_or_call := NS '.' NAME ['(' [expr (',' expr)*] ')']
+//! NS         := 'facts' | 'vars' | 'iter'
 //! ```
 //!
 //! Design choices (all load-bearing):
 //!
 //! - **No arithmetic.** Only comparison.
-//! - **No function calls.** Use declared `facts:` if you want `count_files`.
-//! - **`ctx.*` is out of scope for v0.2** — `when` sees repo-wide facts and
-//!   vars only. Per-iteration gating is done by `for_each_*` naturally.
+//! - **Function calls limited to a fixed set on the `iter` namespace.**
+//!   `iter.has_file("Cargo.toml")` is supported; arbitrary user-defined
+//!   calls are not. Use declared `facts:` for repo-level computation.
+//! - **`iter.*` is only meaningful in iteration contexts** (per-iteration
+//!   `when_iter:` on `for_each_*`, and nested rules' `when:`). Outside
+//!   those, `iter.X` evaluates to `null` and `iter.has_file(_)` to `false`.
 //! - **`matches` RHS must be a string literal.** This lets us compile the
 //!   regex at parse time; dynamic patterns stay out of the hot path.
 //! - **Short-circuit `and` / `or`.** Unevaluated branches don't even touch
@@ -29,11 +33,14 @@
 //!   is an error, not `false`.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use regex::Regex;
 use thiserror::Error;
 
 use crate::facts::{FactValue, FactValues};
+use crate::scope::Scope;
+use crate::walker::FileIndex;
 
 // ─── Errors ──────────────────────────────────────────────────────────
 
@@ -96,6 +103,12 @@ impl From<&FactValue> for Value {
 pub enum Namespace {
     Facts,
     Vars,
+    /// Per-iteration context. Available only when an `IterEnv`
+    /// is threaded into the evaluator (via
+    /// [`WhenEnv::with_iter`]). Outside those, `iter.X`
+    /// evaluates to `null` and `iter.has_file(_)` to `false` —
+    /// matching the "missing fact is falsy" rule.
+    Iter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +128,16 @@ pub enum WhenExpr {
     Ident {
         ns: Namespace,
         name: String,
+    },
+    /// `<ns>.<method>(args...)`. Currently only the `iter`
+    /// namespace exposes callable methods; an unknown
+    /// (namespace, method) pair is rejected at parse time so
+    /// typos don't silently coerce to `null` like value-style
+    /// idents do.
+    Call {
+        ns: Namespace,
+        method: String,
+        args: Vec<WhenExpr>,
     },
     Not(Box<WhenExpr>),
     And(Box<WhenExpr>, Box<WhenExpr>),
@@ -138,6 +161,53 @@ pub enum WhenExpr {
 pub struct WhenEnv<'a> {
     pub facts: &'a FactValues,
     pub vars: &'a HashMap<String, String>,
+    /// Per-iteration context, populated when this `WhenEnv`
+    /// gates an iterated rule (`for_each_dir` /
+    /// `for_each_file` / `every_matching_has`). `None` for
+    /// top-level rule gating, where `iter.*` references
+    /// resolve to falsy / null per the "unknown fact is
+    /// falsy" convention.
+    pub iter: Option<IterEnv<'a>>,
+}
+
+impl<'a> WhenEnv<'a> {
+    /// Construct a `WhenEnv` without iteration context — the
+    /// shape every existing call site uses. `iter.*` references
+    /// in the expression resolve to null / false.
+    #[must_use]
+    pub fn new(facts: &'a FactValues, vars: &'a HashMap<String, String>) -> Self {
+        Self {
+            facts,
+            vars,
+            iter: None,
+        }
+    }
+
+    /// Attach an iteration context. The same `WhenEnv` shape can
+    /// then evaluate `iter.path`, `iter.basename`, and
+    /// `iter.has_file(...)` against the supplied path + index.
+    #[must_use]
+    pub fn with_iter(mut self, iter: IterEnv<'a>) -> Self {
+        self.iter = Some(iter);
+        self
+    }
+}
+
+/// Iteration context exposed to `when:` expressions through the
+/// `iter.*` namespace. Built once per iterated entry by
+/// `for_each_*` rules and threaded into both the outer
+/// `when_iter:` filter and any nested rule's `when:`.
+#[derive(Debug, Clone, Copy)]
+pub struct IterEnv<'a> {
+    /// Relative path of the iterated entry (as walker reported).
+    pub path: &'a Path,
+    /// Whether the iterated entry is a directory. `iter.has_file`
+    /// only does meaningful work when this is `true`; for files
+    /// it returns `false`.
+    pub is_dir: bool,
+    /// File index, used by `iter.has_file(pattern)` to look up
+    /// children of the iterated path.
+    pub index: &'a FileIndex,
 }
 
 // ─── Public entry points ─────────────────────────────────────────────
@@ -357,6 +427,13 @@ fn is_ident_cont(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
+/// Closed list of methods callable on `iter`. Adding new ones is
+/// a deliberate API extension — typos in user configs surface as
+/// "unknown iter method" rather than silently coercing to false.
+fn is_known_iter_method(name: &str) -> bool {
+    matches!(name, "has_file")
+}
+
 // ─── Parser ──────────────────────────────────────────────────────────
 
 struct Parser {
@@ -474,6 +551,7 @@ impl Parser {
         Ok(left)
     }
 
+    #[allow(clippy::too_many_lines)] // Single match per primary form keeps the dispatch obvious; splitting it costs more than it saves.
     fn parse_primary(&mut self) -> Result<WhenExpr, WhenError> {
         let pos = self.pos_here();
         match self.advance() {
@@ -513,11 +591,13 @@ impl Parser {
                 let ns = match name_owned.as_str() {
                     "facts" => Namespace::Facts,
                     "vars" => Namespace::Vars,
+                    "iter" => Namespace::Iter,
                     other => {
                         return Err(WhenError::Parse {
                             pos,
                             message: format!(
-                                "unknown identifier {other:?}; only `facts.NAME` and `vars.NAME` are allowed"
+                                "unknown identifier {other:?}; only `facts.NAME`, \
+                                 `vars.NAME`, and `iter.NAME` are allowed"
                             ),
                         });
                     }
@@ -538,6 +618,50 @@ impl Parser {
                         });
                     }
                 };
+                // Optional `(args...)` — function-call syntax.
+                if matches!(self.peek(), Some(Tok::LParen)) {
+                    self.advance(); // consume '('
+                    if ns != Namespace::Iter {
+                        return Err(WhenError::Parse {
+                            pos: field_pos,
+                            message: format!(
+                                "function-call syntax is only available on `iter` \
+                                 (got `{name_owned}.{field}(...)`)"
+                            ),
+                        });
+                    }
+                    if !is_known_iter_method(&field) {
+                        return Err(WhenError::Parse {
+                            pos: field_pos,
+                            message: format!(
+                                "unknown iter method {field:?}; the only callable \
+                                 method on `iter` is `has_file`"
+                            ),
+                        });
+                    }
+                    let mut args = Vec::new();
+                    if !matches!(self.peek(), Some(Tok::RParen)) {
+                        args.push(self.parse_expr()?);
+                        while matches!(self.peek(), Some(Tok::Comma)) {
+                            self.advance();
+                            args.push(self.parse_expr()?);
+                        }
+                    }
+                    match self.advance() {
+                        Some((Tok::RParen, _)) => {}
+                        _ => {
+                            return Err(WhenError::Parse {
+                                pos: field_pos,
+                                message: "expected ')'".into(),
+                            });
+                        }
+                    }
+                    return Ok(WhenExpr::Call {
+                        ns,
+                        method: field,
+                        args,
+                    });
+                }
                 Ok(WhenExpr::Ident { ns, name: field })
             }
             _ => Err(WhenError::Parse {
@@ -562,6 +686,15 @@ fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> {
                 Some(v) => Ok(Value::String(v.clone())),
                 None => Ok(Value::Null),
             },
+            Namespace::Iter => Ok(eval_iter_value(name, env.iter.as_ref())),
+        },
+        WhenExpr::Call { ns, method, args } => match ns {
+            Namespace::Iter => eval_iter_call(method, args, env),
+            // Parser rejects calls on non-iter namespaces, but be
+            // defensive in case the AST is hand-built somewhere.
+            _ => Err(WhenError::Eval(format!(
+                "function-call evaluation not supported on namespace {ns:?}"
+            ))),
         },
         WhenExpr::Not(inner) => Ok(Value::Bool(!eval(inner, env)?.truthy())),
         WhenExpr::And(l, r) => {
@@ -601,6 +734,92 @@ fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> {
             Ok(Value::List(out))
         }
     }
+}
+
+/// Resolve an `iter.<name>` value-style reference. Returns
+/// `Null` when no iteration context is attached or the name is
+/// unrecognised — matching the "missing is falsy" convention so
+/// that a stray `iter.X` outside an iteration doesn't error.
+fn eval_iter_value(name: &str, iter: Option<&IterEnv<'_>>) -> Value {
+    let Some(iter) = iter else {
+        return Value::Null;
+    };
+    match name {
+        "path" => Value::String(iter.path.to_string_lossy().into_owned()),
+        "basename" => match iter.path.file_name().and_then(|s| s.to_str()) {
+            Some(s) => Value::String(s.to_string()),
+            None => Value::Null,
+        },
+        "parent_name" => iter
+            .path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .map_or(Value::Null, |s| Value::String(s.to_string())),
+        "stem" => iter
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map_or(Value::Null, |s| Value::String(s.to_string())),
+        "ext" => iter
+            .path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map_or(Value::Null, |s| Value::String(s.to_string())),
+        "is_dir" => Value::Bool(iter.is_dir),
+        _ => Value::Null,
+    }
+}
+
+/// Resolve an `iter.<method>(args...)` call. The parser
+/// guarantees `method` is one of the known callables (currently
+/// just `has_file`); arity / arg-type errors surface as
+/// [`WhenError::Eval`] at evaluation time so a parse-clean
+/// expression with bad args still reports clearly.
+fn eval_iter_call(method: &str, args: &[WhenExpr], env: &WhenEnv<'_>) -> Result<Value, WhenError> {
+    match method {
+        "has_file" => {
+            if args.len() != 1 {
+                return Err(WhenError::Eval(format!(
+                    "iter.has_file expects exactly 1 argument; got {}",
+                    args.len()
+                )));
+            }
+            let pattern = match eval(&args[0], env)? {
+                Value::String(s) => s,
+                other => {
+                    return Err(WhenError::Eval(format!(
+                        "iter.has_file argument must be a string; got {}",
+                        other.type_name()
+                    )));
+                }
+            };
+            Ok(Value::Bool(iter_has_file(env.iter.as_ref(), &pattern)?))
+        }
+        _ => Err(WhenError::Eval(format!(
+            "unknown iter method {method:?} (parser should have caught this)"
+        ))),
+    }
+}
+
+/// Implementation of `iter.has_file(pattern)`. `pattern` is a
+/// Git-style glob evaluated relative to the iterated path —
+/// `iter.has_file("Cargo.toml")` matches any tracked file at
+/// `<iter.path>/Cargo.toml`; `iter.has_file("**/*.bzl")` matches
+/// any `.bzl` under the iterated dir at any depth. Returns
+/// `false` when the iteration context is absent or the iterated
+/// entry isn't a directory (files don't "contain" anything).
+fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, WhenError> {
+    let Some(iter) = iter else {
+        return Ok(false);
+    };
+    if !iter.is_dir {
+        return Ok(false);
+    }
+    let combined = format!("{}/{}", iter.path.to_string_lossy(), pattern);
+    let scope = Scope::from_patterns(std::slice::from_ref(&combined))
+        .map_err(|e| WhenError::Eval(format!("iter.has_file: invalid glob: {e}")))?;
+    Ok(iter.index.files().any(|e| scope.matches(&e.path)))
 }
 
 fn apply_cmp(l: &Value, op: CmpOp, r: &Value) -> Result<bool, WhenError> {
@@ -684,6 +903,7 @@ mod tests {
         expr.evaluate(&WhenEnv {
             facts: &facts,
             vars: &vars,
+            iter: None,
         })
         .unwrap()
     }
@@ -804,6 +1024,7 @@ mod tests {
         let result = expr.evaluate(&WhenEnv {
             facts: &facts,
             vars: &vars,
+            iter: None,
         });
         assert!(result.is_err());
     }
@@ -816,6 +1037,7 @@ mod tests {
             expr.evaluate(&WhenEnv {
                 facts: &facts,
                 vars: &vars,
+                iter: None,
             })
             .unwrap()
         );
@@ -826,5 +1048,195 @@ mod tests {
         assert!(check(
             "not (facts.is_node or (facts.n_files == 0 and facts.is_rust))"
         ));
+    }
+
+    // ─── iter namespace ──────────────────────────────────────────
+
+    use crate::walker::{FileEntry, FileIndex};
+    use std::path::{Path, PathBuf};
+
+    fn idx(paths: &[(&str, bool)]) -> FileIndex {
+        FileIndex {
+            entries: paths
+                .iter()
+                .map(|(p, is_dir)| FileEntry {
+                    path: PathBuf::from(p),
+                    is_dir: *is_dir,
+                    size: 1,
+                })
+                .collect(),
+        }
+    }
+
+    fn check_iter(src: &str, iter_path: &Path, is_dir: bool, index: &FileIndex) -> bool {
+        let (facts, vars) = env();
+        let expr = parse(src).unwrap();
+        expr.evaluate(&WhenEnv {
+            facts: &facts,
+            vars: &vars,
+            iter: Some(IterEnv {
+                path: iter_path,
+                is_dir,
+                index,
+            }),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn iter_namespace_parses_and_resolves_value_fields() {
+        let index = idx(&[("crates/alint-core", true)]);
+        assert!(check_iter(
+            "iter.path == \"crates/alint-core\"",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+        assert!(check_iter(
+            "iter.basename == \"alint-core\"",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+        assert!(check_iter(
+            "iter.parent_name == \"crates\"",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+        assert!(check_iter(
+            "iter.is_dir",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
+    fn iter_has_file_matches_literal_child() {
+        let index = idx(&[
+            ("crates/alint-core", true),
+            ("crates/alint-core/Cargo.toml", false),
+            ("crates/alint-core/src", true),
+            ("crates/alint-core/src/lib.rs", false),
+            ("crates/other", true),
+            ("crates/other/Cargo.toml", false),
+        ]);
+        assert!(check_iter(
+            "iter.has_file(\"Cargo.toml\")",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+        assert!(!check_iter(
+            "iter.has_file(\"package.json\")",
+            Path::new("crates/alint-core"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
+    fn iter_has_file_supports_recursive_glob() {
+        let index = idx(&[
+            ("pkg", true),
+            ("pkg/src", true),
+            ("pkg/src/main.rs", false),
+            ("pkg/src/inner", true),
+            ("pkg/src/inner/lib.rs", false),
+        ]);
+        assert!(check_iter(
+            "iter.has_file(\"**/*.rs\")",
+            Path::new("pkg"),
+            true,
+            &index,
+        ));
+        assert!(!check_iter(
+            "iter.has_file(\"**/*.py\")",
+            Path::new("pkg"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
+    fn iter_has_file_returns_false_for_file_iteration() {
+        let index = idx(&[("a.rs", false)]);
+        assert!(!check_iter(
+            "iter.has_file(\"x\")",
+            Path::new("a.rs"),
+            false,
+            &index,
+        ));
+    }
+
+    #[test]
+    fn iter_references_outside_iter_context_are_falsy() {
+        // Outside an iteration, `iter.X` resolves to null and
+        // `iter.has_file(...)` to false — same "missing fact"
+        // convention that `facts.unknown` already follows.
+        assert!(!check("iter.path"));
+        assert!(check("iter.path == null"));
+        assert!(!check("iter.has_file(\"X\")"));
+    }
+
+    #[test]
+    fn iter_has_file_can_compose_with_boolean_logic() {
+        let index = idx(&[("pkg", true), ("pkg/Cargo.toml", false), ("other", true)]);
+        assert!(check_iter(
+            "iter.has_file(\"Cargo.toml\") and iter.is_dir",
+            Path::new("pkg"),
+            true,
+            &index,
+        ));
+        assert!(!check_iter(
+            "iter.has_file(\"BUILD\") or iter.has_file(\"BUILD.bazel\")",
+            Path::new("pkg"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_call_on_non_iter_namespace() {
+        let e = parse("facts.something(\"x\")").unwrap_err();
+        let WhenError::Parse { message, .. } = e else {
+            panic!("expected parse error, got {e:?}");
+        };
+        assert!(
+            message.contains("only available on `iter`"),
+            "msg: {message}"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_unknown_iter_method() {
+        let e = parse("iter.bogus(\"x\")").unwrap_err();
+        let WhenError::Parse { message, .. } = e else {
+            panic!("expected parse error, got {e:?}");
+        };
+        assert!(message.contains("unknown iter method"), "msg: {message}");
+    }
+
+    #[test]
+    fn evaluate_rejects_has_file_with_non_string_arg() {
+        let (facts, vars) = env();
+        let index = FileIndex { entries: vec![] };
+        let expr = parse("iter.has_file(42)").unwrap();
+        let err = expr
+            .evaluate(&WhenEnv {
+                facts: &facts,
+                vars: &vars,
+                iter: Some(IterEnv {
+                    path: Path::new("p"),
+                    is_dir: true,
+                    index: &index,
+                }),
+            })
+            .unwrap_err();
+        let WhenError::Eval(msg) = err else {
+            panic!("expected eval error");
+        };
+        assert!(msg.contains("must be a string"), "msg: {msg}");
     }
 }

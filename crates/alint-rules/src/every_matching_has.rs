@@ -14,15 +14,18 @@
 //!   level: error
 //! ```
 
+use alint_core::when::WhenExpr;
 use alint_core::{Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-use crate::for_each_dir::{IterateMode, evaluate_for_each};
+use crate::for_each_dir::{IterateMode, evaluate_for_each, parse_when_iter};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Options {
     select: String,
+    #[serde(default)]
+    when_iter: Option<String>,
     require: Vec<NestedRuleSpec>,
 }
 
@@ -32,6 +35,7 @@ pub struct EveryMatchingHasRule {
     level: Level,
     policy_url: Option<String>,
     select_scope: Scope,
+    when_iter: Option<WhenExpr>,
     require: Vec<NestedRuleSpec>,
 }
 
@@ -59,6 +63,7 @@ impl Rule for EveryMatchingHasRule {
             &self.id,
             self.level,
             &self.select_scope,
+            self.when_iter.as_ref(),
             &self.require,
             ctx,
             IterateMode::Both,
@@ -77,11 +82,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     }
     let select_scope = Scope::from_patterns(&[opts.select])?;
+    let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
     Ok(Box::new(EveryMatchingHasRule {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         select_scope,
+        when_iter,
         require: opts.require,
     }))
 }
@@ -121,6 +128,7 @@ mod tests {
             level: Level::Error,
             policy_url: None,
             select_scope: Scope::from_patterns(&["packages/*".to_string()]).unwrap(),
+            when_iter: None,
             require,
         };
         let idx = index(&[
