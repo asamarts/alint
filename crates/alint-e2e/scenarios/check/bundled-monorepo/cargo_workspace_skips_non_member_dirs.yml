@@ -1,0 +1,41 @@
+name: cargo-workspace ruleset filters non-member dirs via when_iter
+tags: [check, bundled, cargo-workspace, when_iter]
+
+# Showcase the v0.5.2 `when_iter:` behaviour through the
+# bundled ruleset: `crates/notes/` (no Cargo.toml) is
+# filtered out by `iter.has_file("Cargo.toml")` so it
+# doesn't fire the missing-README rule. Only real workspace
+# members get checked. `crates/alpha/` (a member missing
+# its README) and `crates/beta/` (a member missing its
+# `[package].name`) each contribute a violation.
+
+given:
+  tree:
+    Cargo.toml: |
+      [workspace]
+      members = ["crates/alpha", "crates/beta"]
+    crates:
+      alpha:
+        Cargo.toml: |
+          [package]
+          name = "alpha"
+          version = "0.1.0"
+        # README missing — fires.
+      beta:
+        Cargo.toml: |
+          # No [package] table — fires the name rule.
+        README.md: "# beta\n"
+      notes:
+        # No Cargo.toml — when_iter excludes; rules silent.
+        scratch.md: "draft\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/cargo-workspace@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: cargo-workspace-member-has-readme, level: warning, path: "crates/alpha"}
+      - {rule: cargo-workspace-member-declares-name, level: warning, path: "crates/beta/Cargo.toml"}

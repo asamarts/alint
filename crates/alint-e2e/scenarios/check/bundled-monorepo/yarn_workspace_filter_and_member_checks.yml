@@ -1,0 +1,44 @@
+name: yarn-workspace filters non-member dirs and fires on real-member gaps
+tags: [check, bundled, yarn-workspace, when_iter]
+
+# Root package.json declares `"workspaces": ["packages/*",
+# "apps/*"]` — the array form. Two members under packages/,
+# one under apps/, one stray dir without package.json.
+# when_iter scopes the iteration to the three real members;
+# only `apps/web/` (no README) fires.
+
+given:
+  tree:
+    package.json: |
+      {
+        "name": "root",
+        "private": true,
+        "workspaces": ["packages/*", "apps/*"]
+      }
+    packages:
+      alpha:
+        package.json: |
+          {"name": "@workspace/alpha", "version": "0.1.0"}
+        README.md: "# alpha\n"
+      beta:
+        package.json: |
+          {"name": "@workspace/beta", "version": "0.1.0"}
+        README.md: "# beta\n"
+      drafts:
+        # No package.json — when_iter excludes.
+        notes.md: "wip\n"
+    apps:
+      web:
+        package.json: |
+          {"name": "@workspace/web", "version": "0.1.0"}
+        # README missing — fires.
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/yarn-workspace@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: yarn-workspace-member-has-readme, level: warning, path: "apps/web"}

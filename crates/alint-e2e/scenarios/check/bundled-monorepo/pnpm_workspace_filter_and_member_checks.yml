@@ -1,0 +1,36 @@
+name: pnpm-workspace filters non-member dirs and fires on real-member gaps
+tags: [check, bundled, pnpm-workspace, when_iter]
+
+# `packages/notes/` has no package.json — when_iter excludes
+# it from per-member checks. `packages/alpha/` is a real
+# member missing its README. Only one violation expected.
+
+given:
+  tree:
+    pnpm-workspace.yaml: |
+      packages:
+        - "packages/*"
+    package.json: |
+      {"name": "root", "private": true}
+    packages:
+      alpha:
+        package.json: |
+          {"name": "@workspace/alpha", "version": "0.1.0"}
+        # README missing — fires.
+      beta:
+        package.json: |
+          {"name": "@workspace/beta", "version": "0.1.0"}
+        README.md: "# beta\n"
+      notes:
+        # No package.json → when_iter excludes.
+        scratch.md: "draft\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/pnpm-workspace@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pnpm-workspace-member-has-readme, level: warning, path: "packages/alpha"}

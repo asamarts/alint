@@ -1,0 +1,23 @@
+name: cargo-workspace ruleset fires when [workspace] has no members
+tags: [check, bundled, cargo-workspace]
+
+# A `[workspace]` table without `members = [...]` is broken —
+# Cargo can't resolve the package graph. The
+# `cargo-workspace-members-declared` rule catches this at
+# the alint layer so the failure is local + descriptive.
+
+given:
+  tree:
+    Cargo.toml: |
+      [workspace]
+      # members deliberately missing
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/cargo-workspace@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: cargo-workspace-members-declared, level: error, path: "Cargo.toml"}

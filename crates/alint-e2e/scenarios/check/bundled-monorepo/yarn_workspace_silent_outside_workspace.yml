@@ -1,0 +1,22 @@
+name: yarn-workspace ruleset is silent without `workspaces` field
+tags: [check, bundled, yarn-workspace]
+
+# Root package.json without `workspaces`.
+# `is_yarn_workspace` resolves to false; the ruleset is
+# silent.
+
+given:
+  tree:
+    package.json: |
+      {"name": "demo", "version": "0.1.0"}
+    src:
+      index.js: "console.log('hi');\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/yarn-workspace@v1
+
+when: [check]
+
+expect:
+  - violations: []

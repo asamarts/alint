@@ -1,0 +1,26 @@
+name: cargo-workspace ruleset is silent outside a Cargo workspace
+tags: [check, bundled, cargo-workspace]
+
+# Single-crate Cargo project (no `[workspace]` table). The
+# `is_cargo_workspace` fact resolves to false; every rule's
+# `when:` gate is false; the ruleset is a clean no-op. This
+# is what makes the ruleset safe to extend from a polyglot
+# repo's root config without conditional logic.
+
+given:
+  tree:
+    Cargo.toml: |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+    src:
+      lib.rs: "pub fn hi() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/cargo-workspace@v1
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,22 @@
+name: pnpm-workspace ruleset is silent without pnpm-workspace.yaml
+tags: [check, bundled, pnpm-workspace]
+
+# A plain Node project (root package.json, no
+# `pnpm-workspace.yaml`). `is_pnpm_workspace` resolves to
+# false; the ruleset stays quiet.
+
+given:
+  tree:
+    package.json: |
+      {"name": "demo", "version": "0.1.0"}
+    src:
+      index.js: "console.log('hi');\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/pnpm-workspace@v1
+
+when: [check]
+
+expect:
+  - violations: []
