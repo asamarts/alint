@@ -9,9 +9,8 @@
 //! — that's how ls-lint is gated to S1 only, Repolinter (later)
 //! to S2 only, etc.
 //!
-//! Phases 1-2 ship `Alint`, `LsLint`, and `GrepPipeline`.
-//! `Repolinter` follows in a subsequent commit behind the same
-//! abstraction.
+//! Phases 1-3 ship `Alint`, `LsLint`, `GrepPipeline`, and
+//! `Repolinter`.
 
 use std::fs;
 use std::path::Path;
@@ -31,12 +30,27 @@ pub enum Tool {
     /// inline. Useful as a baseline for "how much does a
     /// dedicated tool actually buy you over piped one-liners?"
     GrepPipeline,
+    /// Repolinter (TODO Group) — Node.js-based existence +
+    /// content + structural rules. Pinned to the last
+    /// pre-archive release (0.11.2, Aug 2023; repo archived
+    /// 2026-02-06). Gated to (S2, Full) — its rule shape
+    /// matches existence + content cleanly but has no
+    /// built-in filename-class or file-size primitives, so S1
+    /// and the size-check portion of S2 fall outside its
+    /// remit. The bench documents that gap rather than
+    /// papering over it with custom rules.
+    Repolinter,
 }
 
 /// All tool variants in iteration order. Used by `--tools all`
 /// to expand to "every known tool, skip missing." When new
 /// variants are added, list them here.
-pub const ALL: &[Tool] = &[Tool::Alint, Tool::LsLint, Tool::GrepPipeline];
+pub const ALL: &[Tool] = &[
+    Tool::Alint,
+    Tool::LsLint,
+    Tool::GrepPipeline,
+    Tool::Repolinter,
+];
 
 impl Tool {
     pub fn parse(s: &str) -> Result<Self> {
@@ -44,7 +58,10 @@ impl Tool {
             "alint" => Ok(Self::Alint),
             "ls-lint" | "lslint" => Ok(Self::LsLint),
             "grep" | "grep-pipeline" | "rg" => Ok(Self::GrepPipeline),
-            other => bail!("unknown tool {other:?}; expected one of alint, ls-lint, grep, all"),
+            "repolinter" => Ok(Self::Repolinter),
+            other => bail!(
+                "unknown tool {other:?}; expected one of alint, ls-lint, grep, repolinter, all"
+            ),
         }
     }
 
@@ -53,6 +70,7 @@ impl Tool {
             Self::Alint => "alint",
             Self::LsLint => "ls-lint",
             Self::GrepPipeline => "grep",
+            Self::Repolinter => "repolinter",
         }
     }
 
@@ -76,6 +94,8 @@ impl Tool {
             (Self::LsLint, _, _) => false,
             (Self::GrepPipeline, Scenario::S1 | Scenario::S2, Mode::Full) => true,
             (Self::GrepPipeline, _, _) => false,
+            (Self::Repolinter, Scenario::S2, Mode::Full) => true,
+            (Self::Repolinter, _, _) => false,
         }
     }
 
@@ -96,6 +116,7 @@ impl Tool {
                 detect_via_version_flag("rg", "--version")
                     .filter(|_| Command::new("find").arg("--help").output().is_ok())
             }
+            Self::Repolinter => detect_via_version_flag("repolinter", "--version"),
         }
     }
 
@@ -118,6 +139,10 @@ impl Tool {
             // shell command (see `grep_pipeline_*`); no
             // tool-specific config file is written.
             Self::GrepPipeline => {}
+            Self::Repolinter => {
+                debug_assert_eq!(scenario, Scenario::S2, "repolinter only supports S2");
+                fs::write(root.join("repolinter.json"), REPOLINTER_S2_CONFIG)?;
+            }
         }
         Ok(())
     }
@@ -153,6 +178,11 @@ impl Tool {
                 Scenario::S2 => grep_pipeline_s2(&root),
                 Scenario::S3 => unreachable!("supports() filters S3 out for GrepPipeline"),
             },
+            // `repolinter lint <root>` reads `repolinter.json`
+            // at the tree root by default. We pass the tree
+            // path positionally rather than via `-r` so a
+            // run mirrors how a user would invoke it locally.
+            Self::Repolinter => format!("repolinter lint {root}"),
         }
     }
 }
@@ -294,6 +324,92 @@ pub fn resolve(specs: &[String]) -> Result<Vec<Tool>> {
     }
     Ok(present)
 }
+
+/// `repolinter.json` body for scenario S2 (existence +
+/// content). Maps to seven of alint's eight S2 rules:
+///
+/// | alint rule           | Repolinter rule       |
+/// |----------------------|-----------------------|
+/// | README must exist    | `file-existence`      |
+/// | LICENSE must exist   | `file-existence`      |
+/// | no `*.bak` files     | `file-not-exists`     |
+/// | no `*.orig` files    | `file-not-exists`     |
+/// | no TODO/FIXME (Rust) | `file-not-contents`   |
+/// | no `debugger;` (TS)  | `file-not-contents`   |
+/// | no top-level `print()` | `file-not-contents` |
+/// | no files >10 MiB     | *(skipped)*           |
+///
+/// The size rule is dropped: Repolinter has no built-in
+/// size-bounded primitive, and emulating it via a `script`
+/// rule would fork Node per match and skew timings beyond
+/// recognition. The methodology page documents the gap so
+/// readers don't read the row as a 1:1 comparison.
+const REPOLINTER_S2_CONFIG: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/todogroup/repolinter/master/rulesets/schema.json",
+  "version": 2,
+  "axioms": {},
+  "rules": {
+    "readme-exists": {
+      "level": "error",
+      "rule": {
+        "type": "file-existence",
+        "options": { "globsAny": ["README", "README.md"] }
+      }
+    },
+    "license-exists": {
+      "level": "error",
+      "rule": {
+        "type": "file-existence",
+        "options": { "globsAny": ["LICENSE", "LICENSE.md", "LICENSE.txt"] }
+      }
+    },
+    "no-bak-files": {
+      "level": "error",
+      "rule": {
+        "type": "file-not-exists",
+        "options": { "globsAll": ["**/*.bak"] }
+      }
+    },
+    "no-orig-files": {
+      "level": "error",
+      "rule": {
+        "type": "file-not-exists",
+        "options": { "globsAll": ["**/*.orig"] }
+      }
+    },
+    "no-todo-rust": {
+      "level": "error",
+      "rule": {
+        "type": "file-not-contents",
+        "options": {
+          "globsAll": ["**/*.rs"],
+          "content": "\\b(TODO|XXX|FIXME)\\b"
+        }
+      }
+    },
+    "no-debugger-ts": {
+      "level": "error",
+      "rule": {
+        "type": "file-not-contents",
+        "options": {
+          "globsAll": ["**/*.ts", "**/*.tsx"],
+          "content": "\\bdebugger\\s*;"
+        }
+      }
+    },
+    "no-toplevel-print-py": {
+      "level": "error",
+      "rule": {
+        "type": "file-not-contents",
+        "options": {
+          "globsAll": ["**/*.py"],
+          "content": "^\\s*print\\s*\\("
+        }
+      }
+    }
+  }
+}
+"#;
 
 /// `.ls-lint.yml` body for scenario S1 — the same eight
 /// filename rules alint S1 enforces, expressed in ls-lint's
