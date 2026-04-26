@@ -1,0 +1,2 @@
+Wrote ./.alint.yml — extends `oss-baseline@v1` only.
+  No language manifests detected. Add an `extends:` line for your stack (`alint://bundled/rust@v1`, `node@v1`, …) when ready.

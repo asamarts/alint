@@ -1,0 +1,2 @@
+Wrote ./.alint.yml — detected: Rust, Cargo workspace.
+  Run `alint check` to lint against the generated config.
