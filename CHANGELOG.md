@@ -6,6 +6,94 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-04-26
+
+Per-iteration `when:` filter on iterating rules — closes the
+second monorepo-scale gap from the v0.5 roadmap. Combined
+with `--changed` (v0.5.0) and `command` plugin (v0.5.1),
+this is the third leg of the v0.5 monorepo theme.
+Schema-compatible; every v0.5.1 config runs unchanged.
+
+### Added
+
+- **`when_iter:`** field on `for_each_dir`, `for_each_file`,
+  and `every_matching_has`. Optional expression evaluated
+  against each iterated entry's `iter` context; iterations
+  whose verdict is false are skipped before any nested rule
+  is built. Closes the Bazel/Cargo/pnpm-workspace gap where
+  users previously had to widen `select:` and rely on inner
+  rules to short-circuit.
+
+  ```yaml
+  - id: workspace-member-has-readme
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+  ```
+
+  Without `when_iter:`, `crates/notes/` (no `Cargo.toml`)
+  would have fired the missing-README rule. With it, only
+  workspace members are evaluated.
+
+- **`iter.*` namespace in `when:` expressions** — exposes
+  the iterated entry's metadata to the existing `when:`
+  grammar. Same expression compiles in `when_iter:` (outer
+  iteration filter) and in any nested rule's `when:`
+  (per-iteration nested gate). Outside an iteration
+  context, `iter.X` resolves to `null` and
+  `iter.has_file(_)` to `false`, matching the
+  "missing fact is falsy" convention.
+
+  | Reference | Type | Notes |
+  |---|---|---|
+  | `iter.path` | string | Relative path of the iterated entry. |
+  | `iter.basename` | string | Basename. |
+  | `iter.parent_name` | string | Parent dir name. |
+  | `iter.stem` | string | Basename minus final extension. |
+  | `iter.ext` | string | Final extension without the dot. |
+  | `iter.is_dir` | bool | `true` for `for_each_dir`, `false` for `for_each_file`. |
+  | `iter.has_file(pattern)` | bool | Glob match relative to the iterated directory. Always `false` on file iteration. |
+
+- **Function-call syntax in the `when:` grammar.** Limited
+  to a fixed allow-list of methods on `iter` (currently just
+  `has_file`); typos in user configs surface as
+  "unknown iter method" parse errors instead of silently
+  coercing to `false`. Calls on non-iter namespaces are a
+  parse error.
+
+### Internal
+
+- New public types `IterEnv` and `WhenEnv::with_iter()` in
+  `alint-core::when`. New `WhenExpr::Call` AST variant.
+  `WhenEnv::new()` constructor for callers without
+  iteration context.
+- Shared parser helper `for_each_dir::parse_when_iter`
+  reused by `for_each_file` and `every_matching_has`.
+- 9 new unit tests in `alint-core::when` covering the iter
+  namespace + function-call grammar + outside-iter
+  fallback. 4 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/when_iter/`: marker-file
+  filter, basename predicate, recursive-glob predicate,
+  composition with `facts.*`.
+
+### Compatibility
+
+- Schema version remains `1`. `when_iter:` is opt-in; rules
+  that don't use it behave identically to v0.5.1.
+- Public API additions are non-breaking. `WhenEnv` gains an
+  `iter: Option<IterEnv>` field; the new `WhenEnv::new()`
+  constructor and existing struct-literal syntax both work.
+  Out-of-tree code constructing `WhenEnv { facts, vars }`
+  (without explicit `iter`) needs to add `iter: None` (or
+  switch to `WhenEnv::new(facts, vars)`).
+- `evaluate_for_each` (an `alint-rules` crate-private
+  helper) gained a `when_iter` parameter — only matters if
+  you've forked the crate.
+
 ## [0.5.1] — 2026-04-26
 
 Plugin tier 1: `command` rule kind. Wraps any CLI on `PATH`
@@ -1191,7 +1279,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/asamarts/alint/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/asamarts/alint/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.0
 [0.4.10]: https://github.com/asamarts/alint/compare/v0.4.9...v0.4.10

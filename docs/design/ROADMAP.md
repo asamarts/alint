@@ -4,13 +4,15 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.1** (2026-04-26). Headline: `command`
-plugin kind — wrap any CLI on `PATH` (`actionlint`,
-`shellcheck`, `kubeconform`, …) per-file, with the v0.5
-`--changed` mode making external checks incremental in CI.
-Catalogue at ~56 rule kinds. Next planned (rest of v0.5):
-`--monorepo` preset, per-iteration `when:` on `for_each_dir`,
-npm shim, remaining git-aware primitives, compliance rulesets.
+**Latest release: v0.5.2** (2026-04-26). Headline:
+per-iteration `when_iter:` filter on `for_each_dir` /
+`for_each_file` / `every_matching_has`, with a new `iter.*`
+namespace in the `when:` grammar. Closes the workspace-tier
+monorepo gap — `iter.has_file("Cargo.toml")` and friends
+make iteration scoping a one-liner. Catalogue still ~56
+rule kinds. Next planned (rest of v0.5): `--monorepo`
+preset, npm shim, remaining git-aware primitives,
+compliance rulesets.
 
 ## Positioning
 
@@ -189,17 +191,18 @@ Ranked by leverage.
   doesn't fire on every PR. Empty diffs short-circuit to an
   empty report. Pairs naturally with `git_tracked_only`.
   Shipped in v0.5.0.
-- ⏳ **Per-iteration `when:` filter on `for_each_dir`.** Today
-  `for_each_dir` iterates every directory matching `paths:`;
-  the inner rules then short-circuit if a marker file is
-  missing. The Bazel-shaped pattern wants the iteration
-  itself gated: "iterate only directories whose contents
-  satisfy *this fact-style predicate* (e.g., contains a
-  `BUILD`, `Cargo.toml`, `package.json`, `go.mod`)." Reuses
-  the existing `when:` grammar with per-iteration facts
-  (`facts.dir.has_file`, `facts.dir.contains`, etc.).
-  Closes the most common gap when applying alint to Bazel-style
-  monorepos without adding a Starlark parser.
+- ✅ **Per-iteration `when_iter:` filter on `for_each_dir` /
+  `for_each_file` / `every_matching_has`** — shipped in
+  v0.5.2 (2026-04-26). New `iter.*` namespace in the
+  existing `when:` grammar exposes the iterated entry's
+  `path`, `basename`, `parent_name`, `stem`, `ext`,
+  `is_dir`, and `has_file(pattern)`; iterations whose
+  verdict is false are skipped before any nested rule is
+  built. `iter.has_file("Cargo.toml")` /
+  `iter.has_file("**/*.bzl")` / `iter.has_file("BUILD") or
+  iter.has_file("BUILD.bazel")` cover the
+  Cargo / Bazel-style workspace gates without a
+  language-specific parser.
 - ⏳ **`--monorepo` discovery preset.** A new flag on `alint
   init` and `alint check` that auto-detects workspace
   layout — Cargo workspace (`[workspace]` in root

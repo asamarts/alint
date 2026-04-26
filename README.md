@@ -28,7 +28,7 @@ v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Twelve bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.5.1`.
+- **Official GitHub Action** — `asamarts/alint@v0.5.2`.
 
 ## Non-goals
 
@@ -70,7 +70,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.1 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.2 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -79,7 +79,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.1`).
+Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.2`).
 
 ### From crates.io
 
@@ -494,6 +494,52 @@ rules:
 
 `command` rules are only allowed in your own top-level `.alint.yml`. A `kind: command` rule that arrives via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — adopting someone else's ruleset never grants it arbitrary process execution. Same trust model as `custom:` facts.
 
+### 15. Per-iteration filter with `when_iter:`
+
+`for_each_dir` / `for_each_file` / `every_matching_has` accept an optional `when_iter:` expression that filters iterations. Inside it, `iter.*` references the entry currently being iterated — useful for "iterate only the dirs that look like a workspace member."
+
+```yaml
+version: 1
+rules:
+  # Only iterate `crates/*` dirs that contain a Cargo.toml.
+  # `crates/notes/` (no Cargo.toml) is skipped silently —
+  # without when_iter:, the missing-README rule would have
+  # fired on it.
+  - id: workspace-member-has-readme
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+
+  # Bazel-style dirs: anything under services/* with at least
+  # one .proto under it.
+  - id: proto-pkg-has-readme
+    kind: for_each_dir
+    select: "services/*"
+    when_iter: 'iter.has_file("**/*.proto")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+
+  # Compose with facts.*:
+  - id: rust-pkg-license-set
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'facts.is_rust and iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_matches
+        paths: "{path}/Cargo.toml"
+        path: "$.package.license"
+        matches: "^Apache-2\\.0|MIT$"
+    level: warning
+```
+
+`iter.*` exposes `path`, `basename`, `parent_name`, `stem`, `ext`, `is_dir`, and `has_file(pattern)`. The full `when:` grammar applies — boolean logic, comparisons, `matches`, `in`. See [docs/rules.md](docs/rules.md#for_each_dir--for_each_file) for the full reference.
+
 ## Bundled rulesets
 
 Eight rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
@@ -525,15 +571,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.5.1
+- uses: asamarts/alint@v0.5.2
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.5.1
+- uses: asamarts/alint@v0.5.2
   with:
-    version: v0.5.1        # alint release tag (default: latest)
+    version: v0.5.2        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -545,7 +591,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.5.1
+- uses: asamarts/alint@v0.5.2
   id: alint
   with:
     format: sarif
@@ -563,7 +609,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.5.1
+    rev: v0.5.2
     hooks:
       - id: alint
 ```
