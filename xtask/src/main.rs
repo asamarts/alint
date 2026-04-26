@@ -92,6 +92,13 @@ enum Commands {
         /// Skip the Markdown reports; emit JSON only.
         #[arg(long)]
         json_only: bool,
+        /// Re-execute inside the published `alint-bench` Docker
+        /// image so every competitor tool's version is fixed by
+        /// the image tag. Bind-mounts the workspace at /work and
+        /// uses a named volume for the cargo target dir.
+        /// Override the image with `ALINT_BENCH_IMAGE=...`.
+        #[arg(long)]
+        docker: bool,
     },
     /// Materialize a synthetic tree (persistent) for manual experimentation.
     GenFixture {
@@ -136,9 +143,10 @@ fn main() -> Result<()> {
             out,
             quick,
             json_only,
+            docker,
         } => dispatch_bench_scale(
             &sizes, include_1m, &scenarios, &modes, &tools, warmup, runs, seed, diff_pct, out,
-            quick, json_only,
+            quick, json_only, docker,
         ),
         Commands::GenFixture {
             files,
@@ -150,7 +158,7 @@ fn main() -> Result<()> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn dispatch_bench_scale(
     sizes: &[String],
     include_1m: bool,
@@ -164,7 +172,31 @@ fn dispatch_bench_scale(
     out: Option<PathBuf>,
     quick: bool,
     json_only: bool,
+    docker: bool,
 ) -> Result<()> {
+    if docker {
+        // The `--docker` path forwards args verbatim into the
+        // image's entrypoint. Skip host-side parse so the
+        // container's xtask sees the exact same flags the
+        // user typed (including `--include-1m`, `--quick`,
+        // etc.); the container's matrix-parse and tool-detect
+        // happen against the image's installed toolset.
+        return bench::docker::run_in_docker(&bench::docker::ForwardedArgs {
+            sizes: sizes.to_vec(),
+            include_1m,
+            scenarios: scenarios.to_vec(),
+            modes: modes.to_vec(),
+            tools: tools.to_vec(),
+            warmup,
+            runs,
+            seed,
+            diff_pct,
+            out,
+            quick,
+            json_only,
+        });
+    }
+
     // Parse + filter the matrix args before handing to the
     // bench module. Keeps the bench module typed (Size /
     // Scenario / Mode / Tool) and the CLI surface stringy.
@@ -340,7 +372,7 @@ fn build_release_binary() -> Result<PathBuf> {
     Ok(bin)
 }
 
-fn workspace_root() -> Result<PathBuf> {
+pub(crate) fn workspace_root() -> Result<PathBuf> {
     // xtask is inside the workspace; CARGO_MANIFEST_DIR = alint/xtask; parent = workspace root.
     let manifest = env!("CARGO_MANIFEST_DIR");
     let root = Path::new(manifest)

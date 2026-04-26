@@ -1,0 +1,12 @@
+# Most of the repo isn't needed for the bench image. The image
+# is purely tools + a Rust toolchain; the actual alint source
+# is bind-mounted at runtime via `-v $PWD:/work`. So .dockerignore
+# is aggressive: only the Dockerfile itself reaches the build
+# context.
+
+# Allow nothing by default.
+*
+
+# Then re-include only the Dockerfile + this file.
+!Dockerfile
+!.dockerignore

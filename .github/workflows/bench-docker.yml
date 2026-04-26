@@ -1,0 +1,95 @@
+name: bench-docker
+
+# Builds and pushes the `ghcr.io/asamarts/alint-bench` image —
+# the reproducible-benchmark environment used by `xtask
+# bench-scale --docker`. Tags published per release (`0.5.7`
+# etc.) and on the floating `:edge` for the current main; tags
+# match the alint workspace version so a consumer can pin
+# bench environment to alint version.
+#
+# Triggered on:
+# - tag pushes (v0.5.x): publish `:0.5.x` + `:latest`.
+# - main pushes:         publish `:edge` (overwrites previous).
+# - manual dispatch:     publish `:edge` (or a custom tag).
+#
+# Not triggered on PRs — image build is several minutes and
+# the Dockerfile rarely changes; no need to gate every PR on it.
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+    paths:
+      - "bench/Dockerfile"
+      - "bench/.dockerignore"
+      - ".github/workflows/bench-docker.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag override (default: edge)."
+        required: false
+        default: "edge"
+
+jobs:
+  build:
+    name: build + push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: derive image tags
+        id: tags
+        shell: bash
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          OVERRIDE: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          owner_lc="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner_lc}/alint-bench"
+          tags=()
+          if [[ "$REF" == refs/tags/v* ]]; then
+            # Strip leading `v`: refs/tags/v0.5.7 → 0.5.7
+            ver="${REF_NAME#v}"
+            tags+=("${image}:${ver}" "${image}:latest")
+          elif [[ "$REF" == refs/heads/main ]]; then
+            tags+=("${image}:edge")
+          else
+            # workflow_dispatch
+            t="${OVERRIDE:-edge}"
+            tags+=("${image}:${t}")
+          fi
+          # Comma-joined for docker/build-push-action.
+          IFS=,
+          printf 'tags=%s\n' "${tags[*]}" >>"$GITHUB_OUTPUT"
+
+      - name: build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: bench
+          file: bench/Dockerfile
+          # amd64 only for v0.5.7. arm64 + qemu-builds add
+          # ~30 minutes for cargo-install + npm; fold it in
+          # when there's a Linux/arm64 publish-grade machine
+          # whose numbers we want to compare against.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: false
