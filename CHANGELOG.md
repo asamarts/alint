@@ -6,6 +6,78 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-04-26
+
+Three workspace-aware bundled rulesets layered on top of
+`monorepo@v1`. Each is gated by a workspace-flavor fact and
+uses the v0.5.2 `when_iter:` filter to scope per-member
+checks to actual package directories — `crates/notes/`
+(no `Cargo.toml`) or `packages/drafts/` (no `package.json`)
+are filtered out without firing false positives.
+Schema-compatible; every v0.5.2 config runs unchanged.
+
+### Added
+
+- **`alint://bundled/monorepo/cargo-workspace@v1`** —
+  Cargo workspaces. Gated by `facts.is_cargo_workspace`
+  (root `Cargo.toml` declares `[workspace]`). Three rules:
+  `members = [...]` declared at the workspace root
+  (`toml_path_matches`); every `crates/*` directory with
+  its own `Cargo.toml` has a README; every member's
+  `Cargo.toml` declares `[package].name`.
+
+  ```yaml
+  extends:
+    - alint://bundled/monorepo@v1
+    - alint://bundled/rust@v1
+    - alint://bundled/monorepo/cargo-workspace@v1
+  ```
+
+- **`alint://bundled/monorepo/pnpm-workspace@v1`** —
+  pnpm workspaces. Gated by `facts.is_pnpm_workspace`
+  (root `pnpm-workspace.yaml` / `.yml` exists). Three
+  rules: `packages: [...]` declared in
+  `pnpm-workspace.yaml` (`yaml_path_matches`); every
+  `packages/*` with a `package.json` has a README; every
+  member's `package.json` declares `name`.
+
+- **`alint://bundled/monorepo/yarn-workspace@v1`** —
+  Yarn / npm workspaces (the workspace declaration lives
+  in the root `package.json` for both). Gated by
+  `facts.is_yarn_workspace` (root `package.json` contains
+  `"workspaces"`). Three rules: `workspaces: [...]` is
+  non-empty (`json_path_matches` against
+  `$.workspaces[*]`); every `{packages,apps}/*` with a
+  `package.json` has a README; every member's
+  `package.json` declares `name`. Validates the array
+  form; the rarer object form
+  (`"workspaces": {"packages": [...]}`) is gated by the
+  fact but not field-validated here.
+
+  Bundled catalog: 12 → 15 rulesets.
+
+### Internal
+
+- New ruleset directory
+  `crates/alint-dsl/rulesets/v1/monorepo/` with three
+  `.yml` files; registered in `alint_dsl::bundled::REGISTRY`.
+  Each ruleset declares its own `is_*_workspace` fact
+  inline rather than promoting them to the core `facts:`
+  catalogue — the facts are workspace-specific and not
+  meant to be referenced from user configs.
+- 7 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/bundled-monorepo/`:
+  per-flavor "filters non-member dirs" + "silent outside
+  workspace" pair, plus `cargo-workspace`'s "fires on
+  missing members" case.
+
+### Compatibility
+
+- Schema version remains `1`. All three rulesets are
+  pure config — no new rule kinds, no new core APIs.
+- JSON / SARIF / GitHub outputs byte-equivalent for
+  configs that don't extend the new rulesets.
+
 ## [0.5.2] — 2026-04-26
 
 Per-iteration `when:` filter on iterating rules — closes the
@@ -1279,7 +1351,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/asamarts/alint/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/asamarts/alint/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/asamarts/alint/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.0

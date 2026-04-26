@@ -863,6 +863,36 @@ Language-agnostic monorepo-shape checks. Fires for every directory under `packag
 | `monorepo-crates-have-cargo-toml` | `for_each_dir` | error | — |
 | `monorepo-unique-package-names` | `unique_by` | warning | — |
 
+### `alint://bundled/monorepo/cargo-workspace@v1`
+
+Workspace-aware overlay for Cargo workspaces. Layered on top of `monorepo@v1` and `rust@v1`. Gated by `facts.is_cargo_workspace` (the root `Cargo.toml` declares `[workspace]`); silently no-ops otherwise. Uses `when_iter: 'iter.has_file("Cargo.toml")'` to scope per-member checks to actual package directories — `crates/notes/` (or any other non-package dir under `crates/`) is filtered out without firing false positives.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `cargo-workspace-members-declared` | `toml_path_matches` | error | — |
+| `cargo-workspace-member-has-readme` | `for_each_dir` | warning | — |
+| `cargo-workspace-member-declares-name` | `for_each_dir` | warning | — |
+
+### `alint://bundled/monorepo/pnpm-workspace@v1`
+
+Workspace-aware overlay for pnpm workspaces. Gated by `facts.is_pnpm_workspace` (root `pnpm-workspace.yaml` exists). Same `when_iter:` filter pattern, scoped to `packages/*` with `package.json`.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `pnpm-workspace-declares-packages` | `yaml_path_matches` | error | — |
+| `pnpm-workspace-member-has-readme` | `for_each_dir` | warning | — |
+| `pnpm-workspace-member-declares-name` | `for_each_dir` | warning | — |
+
+### `alint://bundled/monorepo/yarn-workspace@v1`
+
+Workspace-aware overlay for Yarn / npm workspaces (both encode the workspace declaration in the root `package.json`'s `workspaces` field). Gated by `facts.is_yarn_workspace`. Filters per-member iteration to `packages/*` and `apps/*` directories that contain a `package.json`.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `yarn-workspace-declares-workspaces` | `json_path_matches` | error | — |
+| `yarn-workspace-member-has-readme` | `for_each_dir` | warning | — |
+| `yarn-workspace-member-declares-name` | `for_each_dir` | warning | — |
+
 ### `alint://bundled/hygiene/no-tracked-artifacts@v1`
 
 The set of paths / files that essentially no repository should commit: build outputs, dependency caches, OS & editor junk, secret-shaped files, oversized blobs. Gitignored directories pass trivially — these rules catch the case where someone committed an artefact and forgot the `.gitignore` entry.

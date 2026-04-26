@@ -4,15 +4,14 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.2** (2026-04-26). Headline:
-per-iteration `when_iter:` filter on `for_each_dir` /
-`for_each_file` / `every_matching_has`, with a new `iter.*`
-namespace in the `when:` grammar. Closes the workspace-tier
-monorepo gap — `iter.has_file("Cargo.toml")` and friends
-make iteration scoping a one-liner. Catalogue still ~56
-rule kinds. Next planned (rest of v0.5): `--monorepo`
-preset, npm shim, remaining git-aware primitives,
-compliance rulesets.
+**Latest release: v0.5.3** (2026-04-26). Headline: three
+workspace-aware bundled rulesets — `monorepo/cargo-workspace@v1`,
+`monorepo/pnpm-workspace@v1`, `monorepo/yarn-workspace@v1` —
+each gated by an `is_*_workspace` fact and using
+`when_iter:` to scope per-member checks. Bundled catalog
+12 → 15. Catalogue still ~56 rule kinds. Next planned
+(rest of v0.5): `--monorepo` discovery preset, npm shim,
+remaining git-aware primitives, compliance rulesets.
 
 ## Positioning
 
@@ -215,15 +214,16 @@ Ranked by leverage.
   pulled from the workspace globs, and the relevant
   ecosystem ruleset extends. Removes the boilerplate that
   workspace-tier adopters currently re-derive each time.
-- ⏳ **Workspace-aware bundled rulesets.** Three thin overlays
-  on top of `monorepo@v1`: `monorepo/cargo-workspace@v1`,
-  `monorepo/pnpm-workspace@v1`, `monorepo/yarn-workspace@v1`.
-  Each adds one rule: every workspace-member directory has
-  the manifest the workspace declared (`Cargo.toml` /
-  `package.json`). Gated by the `is_cargo_workspace` /
-  `is_pnpm_workspace` / `is_yarn_workspace` facts (new —
-  thin wrappers over existing `any_file_exists` +
-  `file_content_matches`).
+- ✅ **Workspace-aware bundled rulesets** — shipped in
+  v0.5.3 (2026-04-26). Three thin overlays on
+  `monorepo@v1`: `monorepo/cargo-workspace@v1`,
+  `monorepo/pnpm-workspace@v1`,
+  `monorepo/yarn-workspace@v1`. Each gated by an
+  `is_*_workspace` fact (declared inline in the ruleset)
+  and uses `when_iter: 'iter.has_file(...)'` to scope
+  per-member checks to actual package directories — no
+  false positives on stray `crates/notes/` or
+  `packages/drafts/`.
 - ⏳ **Documented scale ceiling.** Bench `alint check` on a
   synthetic 100k-file tree (representative of the
   workspace-tier upper bound) and a 1M-file tree

@@ -28,7 +28,7 @@ v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Twelve bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `monorepo`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `ci/github-actions`. Built into the binary — no network round-trip.
 - **Four output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations).
 - **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.5.2`.
+- **Official GitHub Action** — `asamarts/alint@v0.5.3`.
 
 ## Non-goals
 
@@ -70,7 +70,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.2 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.3 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -79,7 +79,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.2`).
+Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.3`).
 
 ### From crates.io
 
@@ -542,7 +542,7 @@ rules:
 
 ## Bundled rulesets
 
-Eight rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
+Fifteen rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
 
 **Ecosystem + project-shape baselines**
 
@@ -554,6 +554,12 @@ Eight rulesets ship in the binary — zero network round-trip, pinned to the ver
 - **`java@v1`** — Maven (`pom.xml`) or Gradle (`build.gradle` / `build.gradle.kts`) manifest; build wrapper (`mvnw` / `gradlew`); no committed `target/` / `build/` (using `git_tracked_only` so locally-built dirs stay silent); no committed `*.class`; PascalCase Java filenames; Trojan-Source defenses. Gated with `when: facts.is_java`.
 - **`monorepo@v1`** — every `packages/*`, `crates/*`, `apps/*`, `services/*` directory has a README + ecosystem manifest; unique basenames.
 
+**Workspace-aware overlays** (use `when_iter:` to scope per-member checks to actual package directories — non-package dirs under `crates/` / `packages/` don't fire false positives)
+
+- **`monorepo/cargo-workspace@v1`** — Cargo workspaces. Gated by `facts.is_cargo_workspace` (root `Cargo.toml` has `[workspace]`). Verifies `members = [...]` is declared and every workspace member has a README + `[package].name`.
+- **`monorepo/pnpm-workspace@v1`** — pnpm workspaces. Gated by `facts.is_pnpm_workspace` (root `pnpm-workspace.yaml` exists). Verifies the `packages:` declaration and per-member README + `name`.
+- **`monorepo/yarn-workspace@v1`** — Yarn / npm workspaces. Gated by `facts.is_yarn_workspace` (root `package.json` has `"workspaces"`). Per-member README + `name`, scoped to `{packages,apps}/*`.
+
 **Namespaced utilities**
 
 - **`hygiene/no-tracked-artifacts@v1`** — build outputs (`node_modules`, `target`, `dist`, `__pycache__`, …), OS junk (`.DS_Store`, `Thumbs.db`), editor backups (`*~`, `*.swp`), secret-shaped files (`.env` and locals), and files over 10 MiB. Several rules auto-fixable via `file_remove`.
@@ -562,7 +568,7 @@ Eight rulesets ship in the binary — zero network round-trip, pinned to the ver
 - **`docs/adr@v1`** — MADR-style Architecture Decision Records under `docs/adr/`: `NNNN-kebab-title.md` filename + required `## Status` / `## Context` / `## Decision` sections.
 - **`ci/github-actions@v1`** — GitHub Actions hardening guided by OpenSSF Scorecard: workflow-level `permissions.contents: read`, pin third-party actions to full commit SHAs, every workflow declares a `name:`. Scoped to `.github/workflows/*.y{,a}ml`, so it no-ops in repos that don't use GitHub Actions.
 
-All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets). More rulesets (`java`, `compliance/reuse`, `compliance/apache-2`) are planned for v0.5.
+All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets). More rulesets (`compliance/reuse`, `compliance/apache-2`) are planned for v0.5.
 
 ## Use in CI
 
@@ -571,15 +577,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.5.2
+- uses: asamarts/alint@v0.5.3
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.5.2
+- uses: asamarts/alint@v0.5.3
   with:
-    version: v0.5.2        # alint release tag (default: latest)
+    version: v0.5.3        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -591,7 +597,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.5.2
+- uses: asamarts/alint@v0.5.3
   id: alint
   with:
     format: sarif
@@ -609,7 +615,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.5.2
+    rev: v0.5.3
     hooks:
       - id: alint
 ```
