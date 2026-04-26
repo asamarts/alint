@@ -1,0 +1,34 @@
+name: when_iter filters for_each_dir on iter.basename
+tags: [check, for_each_dir, when_iter]
+
+# Verify `iter.basename` resolves correctly per iteration:
+# only iterate dirs whose basename starts with "pkg-".
+
+given:
+  tree:
+    pkg-frontend:
+      README.md: "# frontend\n"
+    pkg-backend:
+      # README missing — should fire.
+      src:
+        main.rs: "fn main() {}\n"
+    docs:
+      # Not "pkg-*", skipped by basename predicate.
+      intro.md: "# Intro\n"
+  config: |
+    version: 1
+    rules:
+      - id: pkg-needs-readme
+        kind: for_each_dir
+        select: "*"
+        when_iter: 'iter.basename matches "^pkg-"'
+        require:
+          - kind: file_exists
+            paths: "{path}/README.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pkg-needs-readme, level: error, path: "pkg-backend"}

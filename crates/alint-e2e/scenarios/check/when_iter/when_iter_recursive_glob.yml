@@ -1,0 +1,35 @@
+name: when_iter has_file accepts recursive globs
+tags: [check, for_each_dir, when_iter]
+
+# A `**/*.proto` glob anywhere under the iterated dir
+# qualifies it as a "proto package." Iteration is scoped to
+# those; rule fires only on the matched ones.
+
+given:
+  tree:
+    services:
+      api:
+        v1:
+          api.proto: "syntax = \"proto3\";\n"
+        # README missing under api/ — should fire because
+        # api/ has a *.proto somewhere underneath.
+      web:
+        index.html: "<!doctype html>\n"
+        # No proto under web/ → skipped by when_iter.
+  config: |
+    version: 1
+    rules:
+      - id: proto-pkg-needs-readme
+        kind: for_each_dir
+        select: "services/*"
+        when_iter: 'iter.has_file("**/*.proto")'
+        require:
+          - kind: file_exists
+            paths: "{path}/README.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: proto-pkg-needs-readme, level: error, path: "services/api"}

@@ -1,0 +1,40 @@
+name: when_iter scopes for_each_dir to dirs containing a marker file
+tags: [check, for_each_dir, when_iter]
+
+# Canonical Cargo-workspace shape: only iterate `crates/*`
+# directories that actually look like a workspace member
+# (contain a Cargo.toml). The legacy `crates/notes/` dir
+# without a Cargo.toml is skipped — without `when_iter:` it
+# would have fired the missing-README rule.
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/*\"]\n"
+    crates:
+      alint-core:
+        Cargo.toml: "[package]\nname = \"alint-core\"\n"
+        README.md: "# alint-core\n"
+      alint-rules:
+        Cargo.toml: "[package]\nname = \"alint-rules\"\n"
+        # README.md missing on purpose — should fire.
+      notes:
+        # No Cargo.toml: skipped by `when_iter`. README missing,
+        # but the iteration filter excludes it.
+        scratch.md: "WIP notes.\n"
+  config: |
+    version: 1
+    rules:
+      - id: cargo-pkg-needs-readme
+        kind: for_each_dir
+        select: "crates/*"
+        when_iter: 'iter.has_file("Cargo.toml")'
+        require:
+          - kind: file_exists
+            paths: "{path}/README.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: cargo-pkg-needs-readme, level: error, path: "crates/alint-rules"}

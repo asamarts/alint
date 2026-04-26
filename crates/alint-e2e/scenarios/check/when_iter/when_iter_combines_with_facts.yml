@@ -1,0 +1,42 @@
+name: when_iter composes with whole-rule facts
+tags: [check, for_each_dir, when_iter]
+
+# `iter.*` references compose with `facts.*` and boolean
+# logic in the same expression — the engine evaluates both
+# in the IterEnv-aware environment per iteration. A
+# Cargo-workspace-only iteration filter can be expressed in
+# one line.
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\n"
+    crates:
+      alpha:
+        Cargo.toml: "[package]\nname = \"alpha\"\n"
+        # README missing — should fire.
+      beta:
+        Cargo.toml: "[package]\nname = \"beta\"\n"
+        README.md: "# beta\n"
+      gamma:
+        # No Cargo.toml — when_iter excludes.
+        notes.md: "draft\n"
+  config: |
+    version: 1
+    facts:
+      - id: is_workspace
+        any_file_exists: ["Cargo.toml"]
+    rules:
+      - id: workspace-member-needs-readme
+        kind: for_each_dir
+        select: "crates/*"
+        when_iter: 'facts.is_workspace and iter.has_file("Cargo.toml")'
+        require:
+          - kind: file_exists
+            paths: "{path}/README.md"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: workspace-member-needs-readme, level: error, path: "crates/alpha"}
