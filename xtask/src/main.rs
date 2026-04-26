@@ -163,7 +163,16 @@ fn dispatch_bench_scale(
         .iter()
         .map(|s| bench::Size::parse(s))
         .collect::<Result<_>>()?;
-    if !include_1m {
+    if include_1m {
+        // Implicit add: `--include-1m` should produce a run
+        // that includes 1m even if `--sizes` was left at its
+        // default (1k,10k,100k). The opt-in flag's job is to
+        // gate the 1m size against accidental inclusion, not
+        // to require also retyping the size list.
+        if !parsed_sizes.contains(&bench::Size::M1) {
+            parsed_sizes.push(bench::Size::M1);
+        }
+    } else {
         parsed_sizes.retain(|s| !s.is_opt_in());
     }
     if parsed_sizes.is_empty() {

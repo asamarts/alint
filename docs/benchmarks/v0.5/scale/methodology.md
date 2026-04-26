@@ -79,6 +79,12 @@ Defaults: `--warmup 3 --min-runs 10 --max-runs 10 --ignore-failure --export-json
 
 Per-row hyperfine reports mean / median / stddev / min / max in seconds; the harness rescales to milliseconds in the JSON output for legibility.
 
+### 1M-size auto-reduction
+
+At `1m`, the harness caps warmup at 1 and measured runs at 3 (down from the default 3 / 10), regardless of what `--warmup` and `--runs` were passed. A single `S3 / 1m` invocation runs for several minutes; thirteen of them per row would push the full matrix to several hours. The reduction keeps a publication-grade run finishing in roughly an hour on a workstation while still emitting honest mean / min / max numbers — the trade-off is wider stddev. **Read `1m`-row stddev with that in mind: it isn't directly comparable to the smaller-size rows' stddev, where 10 measured samples narrow the band considerably.**
+
+Stddev for 1m rows where `runs == 1` is reported as `0.0` rather than `null` — hyperfine's JSON omits the field when it has no variance to compute, and our schema fills the gap. Min / max / mean are still meaningful; they're the same number on a single-run row.
+
 ## What the JSON looks like
 
 ```json

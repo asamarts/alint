@@ -341,7 +341,13 @@ struct HfOutput {
 struct HfResult {
     command: String,
     mean: f64,
-    stddev: f64,
+    /// Hyperfine reports `null` for stddev when only one
+    /// measured run was made (no variance to compute). The
+    /// 1M-size auto-reduction can hit `runs=1` legitimately;
+    /// surface it as 0.0 in our schema rather than failing
+    /// the whole bench.
+    #[serde(default)]
+    stddev: Option<f64>,
     median: f64,
     min: f64,
     max: f64,
@@ -380,10 +386,24 @@ fn run_one(
     let json_file = tempfile::NamedTempFile::new()?;
     let json_path = json_file.path().to_path_buf();
 
+    // Auto-reduce sampling at the 1M size: at the upper bound a
+    // single S3 invocation can run for minutes, and 13 runs
+    // (3 warmup + 10 measured) per row would push the full
+    // matrix to several hours. Cap warmup at 1 and runs at 3
+    // — the resulting stddev is wider but the means stay
+    // representative, and the bench finishes in a sitting.
+    // Document this in methodology.md so readers don't compare
+    // 1M's stddev to the smaller-size rows like-for-like.
+    let (warmup, runs) = if size == Size::M1 {
+        (args.warmup.min(1), args.runs.min(3))
+    } else {
+        (args.warmup, args.runs)
+    };
+
     let status = Command::new("hyperfine")
-        .args(["--warmup", &args.warmup.to_string()])
-        .args(["--min-runs", &args.runs.to_string()])
-        .args(["--max-runs", &args.runs.to_string()])
+        .args(["--warmup", &warmup.to_string()])
+        .args(["--min-runs", &runs.to_string()])
+        .args(["--max-runs", &runs.to_string()])
         // alint exits 1 when rules fire — that's fine for the
         // bench, we measure wall-time regardless of verdict.
         // Synthetic trees don't satisfy `oss-baseline@v1`'s
@@ -416,7 +436,7 @@ fn run_one(
         scenario: scenario.label().into(),
         mode: mode.label().into(),
         mean_ms: r.mean * 1000.0,
-        stddev_ms: r.stddev * 1000.0,
+        stddev_ms: r.stddev.unwrap_or(0.0) * 1000.0,
         median_ms: r.median * 1000.0,
         min_ms: r.min * 1000.0,
         max_ms: r.max * 1000.0,

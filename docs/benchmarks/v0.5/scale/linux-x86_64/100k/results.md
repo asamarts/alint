@@ -5,11 +5,11 @@
 **RAM:** 62 GB  
 **FS:** `ext4`  
 **rustc:** `rustc 1.95.0 (59807616e 2026-04-14)`  
-**alint:** `0.5.6` (8cda086)  
+**alint:** `0.5.6` (25d3683)  
 **hyperfine:** `1.20.0`  
 **Seed:** `0xa11e47`  
 **Warmup/runs:** 3 / 10  
-**Generated:** `unix:1777191168`  
+**Generated:** `unix:1777224389`  
 
 Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compare numbers like-for-like (same fingerprint), never absolutely.
 
@@ -17,11 +17,11 @@ Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compar
 
 | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |
 |---|---|---:|---:|---:|---:|---:|
-| S1 | full | 359.4 | 8.8 | 352.0 | 377.8 | 10 |
-| S1 | changed | 621.2 | 20.3 | 589.2 | 654.9 | 10 |
-| S2 | full | 960.6 | 14.5 | 936.0 | 990.4 | 10 |
-| S2 | changed | 690.0 | 13.0 | 669.6 | 713.0 | 10 |
-| S3 | full | 11436.0 | 109.6 | 11258.1 | 11608.8 | 10 |
-| S3 | changed | 11068.2 | 113.0 | 10937.5 | 11231.3 | 10 |
+| S1 | full | 369.8 | 6.8 | 360.9 | 381.5 | 10 |
+| S1 | changed | 641.5 | 11.1 | 622.3 | 657.0 | 10 |
+| S2 | full | 986.8 | 15.8 | 962.3 | 1007.2 | 10 |
+| S2 | changed | 705.9 | 16.4 | 666.4 | 723.4 | 10 |
+| S3 | full | 11936.2 | 267.2 | 11683.0 | 12579.9 | 10 |
+| S3 | changed | 11712.4 | 214.4 | 11407.7 | 12063.6 | 10 |
 
 Tree shape: monorepo (`packages=1000, files_per_package=98, total=100000`).

@@ -6,6 +6,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Published 1M-file numbers** under
+  `docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md`.
+  Six new rows (`1m × {S1,S2,S3} × {full,changed}`) on the
+  same hardware as v0.5.6's 1k/10k/100k publication.
+  Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
+  1m / S3 / full ≈ 9.5min — the cross-file rules in the
+  workspace bundle scale superlinearly with N, exactly as
+  the methodology predicted. `--changed` saves ~34% on
+  S2's content rules at 1m but barely helps S3 (cross-file
+  rules can't be filtered).
+
+- **Auto-reduced sampling at 1m**. The harness caps
+  `1m`-row warmup at 1 and measured runs at 3 regardless
+  of `--warmup` / `--runs`. A single `1m / S3` invocation
+  runs for several minutes; thirteen of them per row would
+  push the matrix to many hours. The trade-off is wider
+  stddev at 1m — `methodology.md` is updated to flag this
+  so readers don't compare 1m's stddev to the smaller-size
+  rows like-for-like. Stddev is reported as `0.0` when
+  hyperfine emits `null` (single-run rows) instead of
+  failing the whole bench.
+
+### Fixed
+
+- **`--include-1m` now actually adds the 1m size** to the
+  matrix when `--sizes` is at its default (1k,10k,100k).
+  Previously the flag only filtered 1m out unless you
+  also retyped the size list — the opposite of what the
+  help text implied.
+
 ## [0.5.6] — 2026-04-26
 
 Scale-ceiling bench publication + a latent walker bug fix
