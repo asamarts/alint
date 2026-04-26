@@ -186,7 +186,14 @@ fn rustc_version() -> Option<String> {
     run_capturing("rustc", &["--version"]).map(|s| s.trim().to_string())
 }
 
-fn alint_version() -> Option<String> {
+/// Live workspace alint version, read at runtime from
+/// Cargo.toml. Reused by `Tool::Alint::detect()` so the
+/// fingerprint's `alint_version` field and
+/// `tool_versions["alint"]` entry always agree — embedding the
+/// version via `env!("CARGO_PKG_VERSION")` is compile-time and
+/// drifts from the workspace's actual version any time xtask
+/// hasn't been rebuilt since a `Cargo.toml` bump.
+pub(super) fn alint_version() -> Option<String> {
     // Pull from the workspace's Cargo.toml — runs even before
     // the alint binary is built. Avoids a chicken-and-egg
     // ordering with `build_release_binary`.
@@ -196,7 +203,7 @@ fn alint_version() -> Option<String> {
     for line in body.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("version") {
-            // version = "0.5.6"
+            // version = "0.5.7"
             return Some(
                 rest.trim_start_matches([' ', '='])
                     .trim_matches('"')

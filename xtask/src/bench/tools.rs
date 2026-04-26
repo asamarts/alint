@@ -105,7 +105,12 @@ impl Tool {
     /// never aborts because a competitor tool is missing.
     pub fn detect(self) -> Option<String> {
         match self {
-            Self::Alint => Some(env!("CARGO_PKG_VERSION").to_string()),
+            // Read live from workspace Cargo.toml so this
+            // matches `fingerprint::alint_version()` even when
+            // xtask itself was last built before the most
+            // recent version bump (env!() captures the version
+            // at xtask compile time).
+            Self::Alint => super::fingerprint::alint_version(),
             Self::LsLint => detect_via_version_flag("ls-lint", "--version"),
             Self::GrepPipeline => {
                 // The pipeline needs both `find` (POSIX) and

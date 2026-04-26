@@ -6,11 +6,81 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.7] — 2026-04-26
+
+Competitive bench publication. The v0.5.6 harness becomes a
+multi-tool driver: alint, ls-lint, Repolinter, and `find` +
+`ripgrep` pipelines all run against the same synthetic
+trees on the same hardware, producing wall-time numbers
+that are directly comparable. Reproducibility via a new
+`ghcr.io/asamarts/alint-bench` Docker image (every
+competitor pinned by version) and an `xtask bench-scale
+--docker` flag that re-execs the bench inside the image.
+Schema-compatible; every v0.5.6 config runs unchanged.
+
 ### Added
+
+- **`xtask bench-scale --tools <list>`** — the bench
+  harness now runs an arbitrary set of tools across the
+  same `(size × scenario × mode)` matrix v0.5.6
+  introduced. Default `alint` (preserves the v0.5.6
+  publication shape), `all` expands to every known tool,
+  comma lists pick a subset (`alint,grep`,
+  `alint,ls-lint`). Tools missing on `PATH` are
+  log-and-dropped at resolve time so a partial
+  installation still produces alint-only rows without
+  aborting.
+  - **alint** — full matrix (every scenario × mode).
+  - **ls-lint** — gated to (S1, full); ls-lint is
+    extension/case-class only and has no
+    `--changed`-equivalent.
+  - **Repolinter** — gated to (S2, full); pinned to
+    0.11.2 (last pre-archive release, repo archived
+    2026-02-06). The size-bound check (no files >10 MiB)
+    is dropped: Repolinter has no built-in primitive
+    and emulating via `script` rules would distort
+    timings beyond recognition.
+  - **find + ripgrep pipeline** (`grep`) — gated to
+    (S1, full) and (S2, full); shell-pipeline baseline
+    representing the small-team "we just chain `find`
+    and `rg`" status quo. S3's cross-file rules have no
+    sane shell expression and are out of scope.
+
+- **`bench/Dockerfile` + `ghcr.io/asamarts/alint-bench`
+  image** — the canonical competitive-bench environment.
+  Built and pushed by `.github/workflows/bench-docker.yml`
+  on tag pushes (`:<ver>` + `:latest`), main pushes
+  (`:edge`), and manual dispatch. Pinned versions of
+  hyperfine, ripgrep, repolinter, ls-lint, Node 20, and
+  the Rust toolchain so a given image tag IS the bench
+  environment for that release.
+
+- **`xtask bench-scale --docker`** — re-execs the bench
+  inside the published image. Bind-mounts the workspace
+  at `/work`, uses a named volume for the cargo target
+  dir so target/ artefacts persist across runs without
+  shadowing the host. Image override via
+  `ALINT_BENCH_IMAGE=...`.
+
+- **First competitive numbers** under
+  `docs/benchmarks/v0.5/scale/linux-x86_64/`. Same
+  fingerprint as v0.5.6's alint-only publication; rows
+  for ls-lint / repolinter / grep added at the
+  scenarios + sizes each tool supports. Headline
+  ratios (linux-x86_64, 100k files):
+  - **S1 (filename hygiene)**: alint vs ls-lint vs
+    `find | grep` pipelines.
+  - **S2 (existence + content)**: alint vs Repolinter
+    vs `find` + `rg` pipelines.
+  - **S3 (workspace bundle)**: alint only — no
+    competitor models cross-file rules.
+
+  Per-row markdown plus a `results.json` with the full
+  matrix; the new `Tool` column makes pivoting trivial.
 
 - **Published 1M-file numbers** under
   `docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md`.
-  Six new rows (`1m × {S1,S2,S3} × {full,changed}`) on the
+  Six rows (`1m × {S1,S2,S3} × {full,changed}`) on the
   same hardware as v0.5.6's 1k/10k/100k publication.
   Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
   1m / S3 / full ≈ 9.5min — the cross-file rules in the
@@ -37,6 +107,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Previously the flag only filtered 1m out unless you
   also retyped the size list — the opposite of what the
   help text implied.
+
+- **Tool-version fingerprint stays one line**. Multi-line
+  `--version` banners (notably ripgrep's) were being
+  stored verbatim in the fingerprint's `tool_versions`
+  map, blowing up the rendered "**Tools:** ..." line in
+  committed reports. Capture now keeps just the first
+  line of each tool's `--version` output.
+
+## [0.5.6] — 2026-04-26
+
+Scale-ceiling bench publication + a latent walker bug fix
+that the bench surfaced. New `xtask bench-scale` subcommand
+runs alint across a (size × scenario × mode) matrix with
+hardware-fingerprint capture and JSON + Markdown
+publication; v0.5.7 layers competitive comparisons
+(ls-lint, Repolinter, find/grep) on top of the same
+infrastructure. Schema-compatible; every v0.5.5 config
+runs unchanged.
 
 ## [0.5.6] — 2026-04-26
 

@@ -4,17 +4,16 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.6** (2026-04-26). Headline:
-documented scale ceiling — `xtask bench-scale` publishes
-hyperfine timings for alint at 1k / 10k / 100k files
-across three scenarios (filename / existence+content /
-workspace bundle) and both `full` + `--changed` modes,
-with full hardware-fingerprint capture. First numbers
-under
+**Latest release: v0.5.7** (2026-04-26). Headline:
+competitive bench numbers — `xtask bench-scale` now runs
+ls-lint, Repolinter, and `find` + `ripgrep` pipelines
+alongside alint across the same (size × scenario × mode)
+matrix v0.5.6 introduced, so readers can compare wall-time
+like-for-like on a single fingerprint. Reproducible via the
+new `ghcr.io/asamarts/alint-bench` Docker image (pinned
+versions of every competitor) and the `--docker` flag.
+Numbers under
 [`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
-v0.5.7 layers competitive comparisons (ls-lint,
-Repolinter, find/grep) on top. Also: walker no longer
-descends into `.git/` (latent bug surfaced by the bench).
 Next planned: npm shim, `json_schema_passes`, remaining
 git-aware primitives, additional output formats.
 
@@ -233,12 +232,17 @@ Ranked by leverage.
 - ✅ **Documented scale ceiling** — shipped in v0.5.6
   (2026-04-26) as `xtask bench-scale`. Publishes
   hyperfine timings across (size × scenario × mode)
-  matrix with hardware fingerprint; first numbers under
+  matrix with hardware fingerprint; numbers under
   [`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
-  1M-file size opt-in via `--include-1m`. v0.5.7 layers
-  competitive comparisons (ls-lint, Repolinter,
-  find/grep + Docker-pinned reproduction) on top of the
-  same harness.
+  1M-file size opt-in via `--include-1m`.
+- ✅ **Competitive comparisons** — shipped in v0.5.7
+  (2026-04-26). Same harness now drives ls-lint,
+  Repolinter, and `find` + `ripgrep` pipelines alongside
+  alint, gated to the scenarios each tool can sanely
+  express. Reproducibility via the
+  `ghcr.io/asamarts/alint-bench` Docker image (pinned
+  versions of every competitor) plus a `--docker` flag
+  that re-execs the bench inside the image.
 
 ### Other scope
 

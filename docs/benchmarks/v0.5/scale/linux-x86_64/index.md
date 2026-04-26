@@ -5,15 +5,24 @@
 **RAM:** 62 GB  
 **FS:** `ext4`  
 **rustc:** `rustc 1.95.0 (59807616e 2026-04-14)`  
-**alint:** `0.5.6` (25d3683)  
+**alint:** `0.5.7` (7ff4ed5)  
 **hyperfine:** `1.20.0`  
+**Tools:** alint=`0.5.7`, grep=`ripgrep 15.1.0`, ls-lint=`ls-lint v2.2.3`, repolinter=`0.11.2`  
 **Seed:** `0xa11e47`  
 **Warmup/runs:** 3 / 10  
-**Generated:** `unix:1777224389`  
+**Generated:** `unix:1777233844`  
 
 Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compare numbers like-for-like (same fingerprint), never absolutely.
 
 Per-size detail under `<size>/results.md`. JSON: `results.json`.
+
+> **1M-file numbers** (alint-only) live under
+> [`1m/results.md`](1m/results.md) — preserved from the
+> v0.5.7-prep run. `repolinter` at the 1m / S2 size would
+> exceed an hour per row at default sampling, so the
+> competitive matrix above tops out at 100k. Future runs
+> may include 1m once we publish a sampling-reduced
+> "competitive 1m" mode.
 
 ## Scenarios
 
@@ -23,29 +32,35 @@ Per-size detail under `<size>/results.md`. JSON: `results.json`.
 
 ## Summary (mean ± stddev, ms)
 
-| Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |
-|---|---|---|---:|---:|---:|---:|---:|
-| 1k | S1 | full | 8.7 | 0.3 | 8.2 | 9.1 | 10 |
-| 1k | S1 | changed | 21.0 | 0.6 | 20.4 | 22.4 | 10 |
-| 1k | S2 | full | 15.3 | 0.4 | 14.9 | 16.3 | 10 |
-| 1k | S2 | changed | 22.6 | 0.5 | 22.2 | 23.6 | 10 |
-| 1k | S3 | full | 29.6 | 1.4 | 28.0 | 33.0 | 10 |
-| 1k | S3 | changed | 40.1 | 11.6 | 33.8 | 72.1 | 10 |
-| 10k | S1 | full | 43.9 | 0.3 | 43.4 | 44.3 | 10 |
-| 10k | S1 | changed | 70.6 | 1.2 | 69.1 | 73.0 | 10 |
-| 10k | S2 | full | 105.1 | 1.2 | 103.4 | 106.8 | 10 |
-| 10k | S2 | changed | 78.4 | 3.3 | 75.8 | 87.4 | 10 |
-| 10k | S3 | full | 360.2 | 9.4 | 350.6 | 378.0 | 10 |
-| 10k | S3 | changed | 332.1 | 12.2 | 320.1 | 357.7 | 10 |
-| 100k | S1 | full | 369.8 | 6.8 | 360.9 | 381.5 | 10 |
-| 100k | S1 | changed | 641.5 | 11.1 | 622.3 | 657.0 | 10 |
-| 100k | S2 | full | 986.8 | 15.8 | 962.3 | 1007.2 | 10 |
-| 100k | S2 | changed | 705.9 | 16.4 | 666.4 | 723.4 | 10 |
-| 100k | S3 | full | 11936.2 | 267.2 | 11683.0 | 12579.9 | 10 |
-| 100k | S3 | changed | 11712.4 | 214.4 | 11407.7 | 12063.6 | 10 |
-| 1m | S1 | full | 3534.7 | 104.1 | 3460.8 | 3653.7 | 3 |
-| 1m | S1 | changed | 6377.7 | 212.2 | 6195.6 | 6610.8 | 3 |
-| 1m | S2 | full | 10289.5 | 662.8 | 9786.4 | 11040.5 | 3 |
-| 1m | S2 | changed | 6782.6 | 35.9 | 6751.3 | 6821.8 | 3 |
-| 1m | S3 | full | 569077.5 | 60910.6 | 532134.4 | 639380.5 | 3 |
-| 1m | S3 | changed | 528103.3 | 2536.8 | 525966.7 | 530906.9 | 3 |
+| Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| alint | 1k | S1 | full | 8.9 | 0.2 | 8.6 | 9.4 | 10 |
+| alint | 1k | S1 | changed | 13.3 | 0.3 | 12.9 | 14.0 | 10 |
+| ls-lint | 1k | S1 | full | 27.9 | 0.7 | 27.1 | 29.8 | 10 |
+| grep | 1k | S1 | full | 58.4 | 0.8 | 57.5 | 60.1 | 10 |
+| alint | 1k | S2 | full | 14.8 | 0.2 | 14.4 | 15.3 | 10 |
+| alint | 1k | S2 | changed | 14.7 | 0.3 | 14.4 | 15.3 | 10 |
+| grep | 1k | S2 | full | 42.5 | 1.0 | 40.8 | 43.8 | 10 |
+| repolinter | 1k | S2 | full | 486.5 | 25.3 | 444.5 | 532.0 | 10 |
+| alint | 1k | S3 | full | 28.6 | 1.1 | 27.4 | 31.3 | 10 |
+| alint | 1k | S3 | changed | 27.6 | 0.5 | 27.2 | 28.9 | 10 |
+| alint | 10k | S1 | full | 43.1 | 0.7 | 41.6 | 43.6 | 10 |
+| alint | 10k | S1 | changed | 72.8 | 6.3 | 69.6 | 86.1 | 10 |
+| ls-lint | 10k | S1 | full | 28.2 | 0.9 | 26.5 | 29.6 | 10 |
+| grep | 10k | S1 | full | 194.5 | 2.6 | 191.3 | 200.9 | 10 |
+| alint | 10k | S2 | full | 103.6 | 1.3 | 101.5 | 105.8 | 10 |
+| alint | 10k | S2 | changed | 83.0 | 14.8 | 74.0 | 112.8 | 10 |
+| grep | 10k | S2 | full | 133.1 | 11.5 | 127.2 | 165.1 | 10 |
+| repolinter | 10k | S2 | full | 1637.9 | 37.0 | 1592.8 | 1700.8 | 10 |
+| alint | 10k | S3 | full | 355.9 | 9.8 | 343.3 | 374.1 | 10 |
+| alint | 10k | S3 | changed | 324.3 | 4.3 | 318.3 | 331.1 | 10 |
+| alint | 100k | S1 | full | 365.7 | 21.0 | 352.6 | 424.2 | 10 |
+| alint | 100k | S1 | changed | 623.0 | 8.7 | 605.9 | 637.1 | 10 |
+| ls-lint | 100k | S1 | full | 27.4 | 0.4 | 27.1 | 28.4 | 10 |
+| grep | 100k | S1 | full | 1412.4 | 10.7 | 1395.2 | 1429.3 | 10 |
+| alint | 100k | S2 | full | 965.4 | 9.3 | 949.7 | 976.8 | 10 |
+| alint | 100k | S2 | changed | 685.2 | 12.5 | 659.8 | 699.7 | 10 |
+| grep | 100k | S2 | full | 926.7 | 8.3 | 913.7 | 940.0 | 10 |
+| repolinter | 100k | S2 | full | 13761.1 | 108.4 | 13616.8 | 13981.0 | 10 |
+| alint | 100k | S3 | full | 11391.9 | 73.4 | 11293.4 | 11525.6 | 10 |
+| alint | 100k | S3 | changed | 11063.4 | 74.9 | 10963.7 | 11181.4 | 10 |
