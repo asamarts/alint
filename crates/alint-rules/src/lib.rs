@@ -6,6 +6,7 @@
 use alint_core::RuleRegistry;
 
 pub mod case;
+pub mod command;
 pub mod dir_absent;
 pub mod dir_contains;
 pub mod dir_exists;
@@ -163,6 +164,11 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("file_starts_with", file_starts_with::build);
     registry.register("file_ends_with", file_ends_with::build);
+
+    // Plugin tier 1 — shell out to an external CLI per matched
+    // file. Trust-gated at config-load: only the user's own
+    // top-level config can declare these.
+    registry.register("command", command::build);
 }
 
 /// Convenience constructor that returns a fresh registry pre-populated with
@@ -256,6 +262,8 @@ mod registry_tests {
             "max_consecutive_blank_lines",
             "file_starts_with",
             "file_ends_with",
+            // Plugin (tier 1).
+            "command",
         ] {
             assert!(
                 known.contains(&kind),

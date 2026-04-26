@@ -415,7 +415,8 @@
         { "$ref": "#/$defs/rule_indent_style" },
         { "$ref": "#/$defs/rule_max_consecutive_blank_lines" },
         { "$ref": "#/$defs/rule_file_starts_with" },
-        { "$ref": "#/$defs/rule_file_ends_with" }
+        { "$ref": "#/$defs/rule_file_ends_with" },
+        { "$ref": "#/$defs/rule_command" }
       ]
     },
 
@@ -1147,6 +1148,27 @@
           "type": "string",
           "minLength": 1,
           "description": "Required suffix, matched byte-for-byte."
+        }
+      }
+    },
+
+    "rule_command": {
+      "description": "Shell out to an external CLI per matched file. argv[0] is the program; remaining tokens support path-template substitution (`{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`). Working dir = repo root; stdin = /dev/null. Env: ALINT_PATH, ALINT_ROOT, ALINT_RULE_ID, ALINT_LEVEL, plus ALINT_VAR_<NAME> per `vars:` and ALINT_FACT_<NAME> per resolved fact. Verdict: exit 0 = pass; non-zero = one violation whose message is the (truncated) stdout+stderr. Trust-gated: only allowed in the user's top-level config (rejected at load-time when introduced via `extends:` or a bundled ruleset).",
+      "type": "object",
+      "required": ["paths", "command"],
+      "properties": {
+        "kind": { "const": "command" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout."
         }
       }
     },
