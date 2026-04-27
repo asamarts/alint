@@ -26,5 +26,6 @@ Rule kinds in the **Content** family. Each entry below has its own page with opt
 - [`json_path_matches`](/docs/rules/content/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values.
 - [`yaml_path_matches`](/docs/rules/content/yaml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values.
 - [`toml_path_matches`](/docs/rules/content/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values.
+- [`json_schema_passes`](/docs/rules/content/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document.
 - [`file_is_text`](/docs/rules/content/file_is_text/) — Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
 - [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80.

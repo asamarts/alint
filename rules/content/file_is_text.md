@@ -2,7 +2,7 @@
 title: 'file_is_text'
 description: 'alint rule kind `file_is_text` (Content family).'
 sidebar:
-  order: 19
+  order: 20
 ---
 
 Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
