@@ -4,16 +4,16 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.9** (2026-04-27). Headline:
-`json_schema_passes` (last unshipped structured-query
-primitive), two git-aware rule kinds (`git_no_denied_paths`
-+ `git_commit_message`), and four OpenSSF Scorecard-overlap
-rules in `oss-baseline@v1` covering Security-Policy
-non-empty + Dependency-Update-Tool + Code-Review's on-disk
-piece (CODEOWNERS shape). Schema-compatible: every v0.5.8
-config runs unchanged. Next planned: rule templates,
-`.alint.d/` drop-ins, `content_from:` for fix ops, npm
-shim.
+**Latest release: v0.5.10** (2026-04-27). Headline: DSL
+ergonomics — `content_from:` for fix ops (LICENSE / NOTICE
+boilerplate lives in a templates dir, fix-ops reference it
+by relative path), `.alint.d/*.yml` drop-ins (auto-merged
+alphabetically next to `.alint.yml`, ops convention for
+layered team configs), and rule templates (define a rule
+shape once via top-level `templates:`, instantiate N times
+via `extends_template:` with `{{vars.X}}` substitution).
+Schema-compatible: every v0.5.9 config runs unchanged.
+Next planned: npm shim — that closes the v0.5 milestone.
 
 ## Positioning
 
@@ -155,20 +155,28 @@ overridable, and monorepo-friendly. Ranked by leverage ÷ effort.
   auto-prefix with the config's relative directory. Cross-
   subtree id collisions are rejected for MVP. Shipped
   2026-04-22.
-- ⏳ **Rule templates / parameterized rules.** Define a rule
-  shape once, instantiate N times with different arguments.
-  Example: "every `{{dir}}` has `{{file}}`" instantiated for
-  README, LICENSE, package.json. Reuses existing `{{vars.*}}`
-  machinery, extended to rule option fields.
+- ✅ **Rule templates / parameterized rules** — shipped in
+  v0.5.10 (2026-04-27). New top-level `templates:` block
+  defines reusable rule bodies; rules instantiate them via
+  `extends_template: <id>` and a `vars:` map for the
+  `{{vars.<name>}}` substitution. Templates merge through
+  the `extends:` chain by id. Leaf-only — a template can't
+  itself reference another, mirroring the bundled-rulesets
+  restriction.
 - ✅ **Selective bundled adoption.** Mapping form on `extends:`
   entries with `only: [...]` (keep listed rules) or
   `except: [...]` (drop listed rules); mutually exclusive;
   unknown ids error at load. Closes the all-or-nothing
   limitation. Shipped 2026-04-23 in v0.4.5.
-- ⏳ **`.alint.d/*.yml` drop-ins.** Auto-discover and merge YAML
-  files in a `.alint.d/` directory alphabetically, same merge
-  semantics as `extends`. Ops convention for layered team
-  configs.
+- ✅ **`.alint.d/*.yml` drop-ins** — shipped in v0.5.10
+  (2026-04-27). Auto-discovered next to the top-level
+  `.alint.yml` and merged alphabetically; the last drop-in
+  wins on field-level conflict (`/etc/*.d/` shape).
+  Trust-equivalent to the main config — drop-ins live in
+  the same workspace and CAN declare `custom:` facts and
+  `kind: command` rules. Non-yaml files in the dir are
+  skipped silently. Sub-extended configs don't get their
+  own `.alint.d/`; only the top-level config does.
 
 ### Monorepo & scale
 

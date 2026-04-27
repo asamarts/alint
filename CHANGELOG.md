@@ -6,6 +6,94 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.10] — 2026-04-27
+
+DSL ergonomics: three composition primitives that close
+common monorepo / ops pain points. Schema-compatible: every
+v0.5.9 config runs unchanged.
+
+### Added
+
+- **`content_from: <path>` on fix ops** —
+  `file_create` / `file_prepend` / `file_append` accept a
+  path-relative-to-lint-root as an alternative to inline
+  `content:`. The two are mutually exclusive (XOR
+  enforced at config-load time). Read at fix-apply time
+  via the new `ContentSourceSpec` enum on the fixer
+  struct; missing source produces a `Skipped` outcome
+  with a clear message rather than aborting the run.
+  Use case: LICENSE / NOTICE / CONTRIBUTING /
+  SPDX-header boilerplate that's awkward to inline lives
+  in `.alint/templates/` and gets referenced by short
+  relative path.
+
+- **`.alint.d/*.yml` drop-ins** — auto-discovered next to
+  the top-level `.alint.yml` and merged in alphabetical
+  order. The last drop-in wins on field-level conflict,
+  mirroring the `/etc/*.d/` convention. Stage `00-base.yml`
+  for ops defaults, `50-team.yml` for team policies,
+  `99-local.yml` for developer-local tweaks. Trust-
+  equivalent to the main config (same workspace) — drop-
+  ins CAN declare `custom:` facts and `kind: command`
+  rules without the trust-gate that protects HTTPS /
+  bundled extends. Non-yaml files in the dir are
+  silently skipped. Sub-extended configs don't get their
+  own `.alint.d/`; only the top-level config does.
+
+- **Rule templates / parameterized rules** — top-level
+  `templates:` block defines reusable rule bodies; rules
+  instantiate them via `extends_template: <id>` and a
+  `vars:` map for the `{{vars.<name>}}` substitution.
+  Recursive substitution walks lists and nested mappings,
+  so `paths:` / `fix.file_create.content` / etc all get
+  vars-expanded. Unknown placeholders preserve literally
+  so typos surface. Leaf-only (a template can't itself
+  `extends_template:` another, mirroring the bundled
+  rulesets restriction). Templates merge through
+  `extends:` chains by id.
+
+  ```yaml
+  templates:
+    - id: dir-has-readme
+      kind: file_exists
+      paths: ["{{vars.dir}}/README.md"]
+      level: warning
+      message: "{{vars.dir}} is missing a README"
+  rules:
+    - extends_template: dir-has-readme
+      id: packages-have-readme
+      vars: { dir: packages }
+    - extends_template: dir-has-readme
+      id: services-have-readme
+      vars: { dir: services }
+  ```
+
+### Internal
+
+- New `ContentSourceSpec` (`Inline(String)` /
+  `File(PathBuf)`) and `resolve_content_source` helper in
+  `alint-core::config`, exported through the crate root.
+  `From<String>` / `From<&str>` impls keep inline-string
+  construction terse for tests.
+- `RawConfig` gains `templates: Vec<Mapping>`; `merge()`
+  merges templates by id; `finalize()` runs the
+  `expand_template` pass before each rule deserializes
+  into `RuleSpec`.
+- New `expand_template` + `substitute_template_vars` /
+  `_value` helpers in `alint-dsl` reuse the existing
+  `alint_core::template::render_message` engine for the
+  `{{namespace.key}}` substitution layer.
+- JSON Schema (`schemas/v1/config.json` + the in-crate
+  copy) defines top-level `templates: []`, the new
+  `rule_template_instance` shape (`oneOf`-branch with
+  the kind-driven shape), and the `oneOf` between
+  `content` / `content_from` on each affected fix op.
+  Drift test passes.
+- 12 new unit tests across the three features (3 fixer
+  tests for content_from, 3 lib tests for drop-in
+  collection + merge, 6 lib tests for template
+  expansion).
+
 ## [0.5.9] — 2026-04-27
 
 `json_schema_passes` (last unshipped structured-query
