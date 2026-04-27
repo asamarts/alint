@@ -226,6 +226,14 @@ jobs:
     # being live.
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for the OIDC handshake — GitHub mints a
+      # short-lived token, npm exchanges it for an ephemeral
+      # publish credential keyed to the trusted-publisher
+      # config on npmjs.com (org `@alint`, repo `asamarts/alint`,
+      # workflow `release.yml`).
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -234,10 +242,6 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: stamp package version from tag + publish
         env:
-          # Set this in repo Settings → Secrets → Actions. Token
-          # comes from https://www.npmjs.com/settings/<user>/tokens;
-          # needs `automation`-class auth (publish without 2FA prompt).
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
@@ -256,7 +260,12 @@ jobs:
             fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "==> package.json version set to $ver"
-          npm publish --access public
+          # `--provenance` triggers npm CLI 10+ to do the OIDC
+          # handshake against the configured trusted publisher
+          # and attach a signed attestation linking the
+          # published artefact to this exact commit + workflow.
+          # No `NODE_AUTH_TOKEN` env var, no NPM_TOKEN secret.
+          npm publish --provenance --access public
 
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)
