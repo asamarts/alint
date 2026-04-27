@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.12] — 2026-04-27
+
+Maintenance release. Verifies the npm auto-publish CI wiring
+end-to-end after v0.5.11's `publish-npm` job failed (the
+`NPM_TOKEN` secret hadn't been provisioned yet, and a detour
+through Trusted Publishing was blocked by a broken 2FA
+configuration UI on npmjs.com).
+
+No code changes. Every v0.5.11 config runs unchanged.
+
+### Changed
+
+- The npm scope is now `@asamarts/alint` (matches the
+  `asamarts/alint` GitHub repo, `asamarts/homebrew-alint`
+  tap, and `ghcr.io/asamarts/alint` Docker image). The
+  v0.5.11 entry referenced `@alint/alint`, then `@a-lint/alint`
+  during the org-name dance; both were placeholders. The
+  install snippet now matches what's actually published.
+
+```bash
+npm install --save-dev @asamarts/alint
+npx alint check
+```
+
 ## [0.5.11] — 2026-04-27
 
 npm install channel. Closes the v0.5 milestone — every

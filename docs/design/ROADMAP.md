@@ -4,13 +4,14 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.11** (2026-04-27). Headline: npm
-install path — the `@alint/alint` package downloads the
-matching pre-built binary at install time and stages it
-under its own `bin-platform/`, exposing the `alint` command
-through npm's bin shimming. Same SHA-256 verification as
-`install.sh` and Homebrew. **Closes the v0.5 milestone**:
-every ⏳ in the v0.5 roadmap is now ✅. Next planned: v0.6
+**Latest release: v0.5.12** (2026-04-27). Maintenance
+release: verifies the npm auto-publish CI wiring after
+v0.5.11 hit Trusted-Publishing setup blockers and was
+re-routed back to the `NPM_TOKEN`-based path. The npm
+package's published name is now `@asamarts/alint`
+(matches GitHub username; `@alint` was taken, `@a-lint`
+was a placeholder during the TP detour). No code changes;
+every v0.5.11 config runs unchanged. Next planned: v0.6
 performance & test-floor — a comprehensive regression-
 guard test layer first, then the per-file-rule dispatch
 flip and parallel walker.
