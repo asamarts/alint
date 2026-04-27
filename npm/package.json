@@ -1,0 +1,33 @@
+{
+  "name": "@alint/alint",
+  "version": "0.5.10",
+  "description": "Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. This package downloads and wraps the platform-matched native alint binary.",
+  "keywords": ["lint", "linter", "repository", "filename", "policy", "compliance"],
+  "homepage": "https://github.com/asamarts/alint",
+  "bugs": "https://github.com/asamarts/alint/issues",
+  "license": "(Apache-2.0 OR MIT)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asamarts/alint.git",
+    "directory": "npm"
+  },
+  "bin": {
+    "alint": "bin/alint.js"
+  },
+  "files": [
+    "install.js",
+    "bin/alint.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "dependencies": {
+    "tar": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"]
+}

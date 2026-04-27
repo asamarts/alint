@@ -1,0 +1,10 @@
+# Files NOT to ship in the npm tarball. The `files:` array in
+# package.json is the positive allow-list; .npmignore is the
+# defense-in-depth deny-list so a stray dotfile or dev artefact
+# never ships.
+.gitignore
+.dockerignore
+node_modules/
+bin-platform/
+*.log
+*.tgz
