@@ -216,6 +216,48 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: ci/scripts/publish-crates.sh
 
+  publish-npm:
+    name: publish @alint/alint to npm
+    # `needs: release` so the npm package's postinstall download
+    # always finds the matching binary tarballs on GitHub
+    # Releases. The npm tarball itself contains only the
+    # install script + bin shim — no native bytes — so the build
+    # matrix is irrelevant here; we just gate on the GH Release
+    # being live.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: stamp package version from tag + publish
+        env:
+          # Set this in repo Settings → Secrets → Actions. Token
+          # comes from https://www.npmjs.com/settings/<user>/tokens;
+          # needs `automation`-class auth (publish without 2FA prompt).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd npm
+          # Strip leading v: v0.5.11 → 0.5.11. The committed
+          # source can stay at any past version (so local
+          # `npm install` against the previous release still
+          # works during development); CI rewrites to match
+          # the release tag immediately before publishing.
+          ver="${TAG#v}"
+          node -e "
+            const fs = require('fs');
+            const pkg = require('./package.json');
+            pkg.version = '$ver';
+            fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "==> package.json version set to $ver"
+          npm publish --access public
+
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)
     needs: release
