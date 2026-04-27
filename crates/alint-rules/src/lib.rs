@@ -36,6 +36,8 @@ pub mod final_newline;
 pub mod fixers;
 pub mod for_each_dir;
 pub mod for_each_file;
+pub mod git_commit_message;
+pub mod git_no_denied_paths;
 pub mod indent_style;
 pub mod io;
 pub mod json_schema_passes;
@@ -110,6 +112,8 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         structured_path::toml_path_matches_build,
     );
     registry.register("json_schema_passes", json_schema_passes::build);
+    registry.register("git_no_denied_paths", git_no_denied_paths::build);
+    registry.register("git_commit_message", git_commit_message::build);
     registry.register("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
@@ -222,6 +226,8 @@ mod registry_tests {
             "toml_path_equals",
             "toml_path_matches",
             "json_schema_passes",
+            "git_no_denied_paths",
+            "git_commit_message",
             "file_is_text",
             "is_text",
             // Short-only.

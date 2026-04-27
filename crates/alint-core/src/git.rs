@@ -123,6 +123,36 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
     Some(out)
 }
 
+/// HEAD's commit message, as a single string with newlines
+/// preserved between subject and body. The subject is the first
+/// line; everything after the first blank line is the body.
+///
+/// Returns `None` when:
+/// - `git` isn't on PATH
+/// - `root` (or any ancestor) isn't inside a git repo
+/// - the repo has no commits yet (HEAD is unborn)
+/// - the `git log` invocation otherwise exits non-zero
+///
+/// Used by the `git_commit_message` rule kind. Same advisory
+/// posture as the rest of the git module: a non-git workspace
+/// silently no-ops the rule rather than raising a hard error.
+pub fn head_commit_message(root: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    // `git log --format=%B` appends a trailing newline that's not
+    // part of the message body — trim once at the end so length
+    // checks against the subject and body don't trip on it.
+    Some(raw.trim_end_matches('\n').to_string())
+}
+
 /// Test whether `dir_rel` (a relative-to-root directory path)
 /// "exists in git" — defined as: at least one tracked file lives
 /// underneath it. Used by `dir_exists` / `dir_absent` when
@@ -166,6 +196,15 @@ mod tests {
         // hard-error (CLI's `--changed`) and silent fallback.
         assert!(collect_changed_paths(tmp.path(), None).is_none());
         assert!(collect_changed_paths(tmp.path(), Some("main")).is_none());
+    }
+
+    #[test]
+    fn head_message_returns_none_outside_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Same advisory posture: the `git_commit_message` rule
+        // silently no-ops outside a repo rather than failing
+        // a check on workspaces that don't track in git yet.
+        assert!(head_commit_message(tmp.path()).is_none());
     }
 
     #[test]
