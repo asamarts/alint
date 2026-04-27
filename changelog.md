@@ -8,6 +8,65 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.8] — 2026-04-26
+
+Three new output formats. Brings the count to seven and
+closes the v0.5 output-format roadmap item. Schema-compatible:
+every v0.5.7 config runs unchanged.
+
+### Added
+
+- **`--format markdown`** (alias `md`) — GitHub-Flavored
+  Markdown suited to PR comments, mkdocs report pages, and
+  Slack via webhook bridges. H1 banner + one-line summary
+  (`**N violations across M files** (E errors, W warnings)`)
+  + one H2 section per file with bulleted violations + a
+  trailing "Cross-file" section for path-less / cross-file
+  violations. Output is byte-deterministic so PR-comment
+  workflows can diff alint output across runs without
+  spurious churn. `alint fix --format markdown` gets a
+  dedicated renderer too — lists each rule's items with
+  `applied` / `skipped` / `unfixable` status.
+
+- **`--format junit`** (alias `junit-xml`) — the de-facto-
+  standard CI test-report XML consumed by Jenkins, Azure
+  DevOps, GitHub's `dorny/test-reporter`, and GitLab CI's
+  JUnit integration. Common-denominator schema: a single
+  `<testsuites>` wrapping a single `<testsuite name="alint">`,
+  with one `<testcase>` per (rule, file/path-less-bucket).
+  Passing rules contribute self-closed testcases; each
+  violation becomes a testcase with a `<failure>` whose
+  `type` attribute carries the alint level (`error` /
+  `warning` / `info`) so consumers can filter
+  level-specifically. XML 1.0-illegal control characters
+  are stripped on the way out.
+
+- **`--format gitlab`** (aliases `gitlab-codequality`,
+  `code-quality`) — GitLab CI's native Code Quality JSON,
+  which is the upstream Code Climate "Issue" specification.
+  One issue object per violation:
+  `{ description, check_name, fingerprint, severity,
+  location: { path, lines: { begin } } }`. Severity
+  mapping: `Error → major`, `Warning → minor`,
+  `Info → info`. Fingerprint is the SHA-256 hex of
+  `rule_id|path|message` — the line number is intentionally
+  omitted so a violation that drifts up or down by a few
+  lines stays the same issue across runs. Path-less /
+  cross-file violations emit `location.path = "."`
+  (repository root) so the report still validates against
+  the GitLab schema.
+
+### Internal
+
+- `alint-output` gains a `sha2` dep for the GitLab
+  fingerprint (already a workspace dep used by
+  `alint-rules` + `alint-dsl`).
+- 38 new unit tests across the three formatters cover empty
+  reports, level-mapping, cross-file edge cases,
+  determinism, special-character escaping, and (for
+  GitLab) fingerprint stability across line-drift +
+  sensitivity to message changes.
+
 ## [0.5.7] — 2026-04-26
 
 Competitive bench publication. The v0.5.6 harness becomes a
