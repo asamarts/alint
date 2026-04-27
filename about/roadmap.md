@@ -6,18 +6,17 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.7** (2026-04-26). Headline:
-competitive bench numbers — `xtask bench-scale` now runs
-ls-lint, Repolinter, and `find` + `ripgrep` pipelines
-alongside alint across the same (size × scenario × mode)
-matrix v0.5.6 introduced, so readers can compare wall-time
-like-for-like on a single fingerprint. Reproducible via the
-new `ghcr.io/asamarts/alint-bench` Docker image (pinned
-versions of every competitor) and the `--docker` flag.
-Numbers under
-[`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
-Next planned: npm shim, `json_schema_passes`, remaining
-git-aware primitives, additional output formats.
+**Latest release: v0.5.8** (2026-04-26). Headline:
+three new output formats — `markdown` (GFM, suited to PR
+comments and mkdocs report pages), `junit` (the de-facto-
+standard CI test-report XML consumed by Jenkins, Azure
+DevOps, GitHub's `dorny/test-reporter`, and GitLab's JUnit
+integration), and `gitlab` (Code Climate-spec JSON for
+GitLab CI's Code Quality reports). Brings the format count
+to seven. Schema-compatible: every v0.5.7 config runs
+unchanged. Next planned: `json_schema_passes`, remaining
+git-aware primitives, rule templates, `.alint.d/`
+drop-ins, npm shim.
 
 ## Positioning
 
@@ -256,7 +255,7 @@ Ranked by leverage.
 - ✅ Distroless Docker image at `ghcr.io/asamarts/alint` (v0.4.7).
 - ✅ Git-aware primitive: `git_tracked_only` (v0.4.8).
 - ✅ Additional bundled rulesets: `python` (v0.4.6), `go` (v0.4.6), `ci/github-actions` (v0.4.5), `java` (v0.4.9).
-- ⏳ Output formats: `markdown`, `junit`, `gitlab`.
+- ✅ Output formats: `markdown`, `junit`, `gitlab` — shipped in v0.5.8 (2026-04-26). Brings the format count to seven; SARIF / GitHub / `JUnit` / GitLab fall through to the human formatter on `alint fix` since they describe findings, not remediations.
 - ✅ `command` plugin kind (v0.5.1, 2026-04-26). Per-file rule wrapping any CLI on `PATH` (`actionlint` / `shellcheck` / `taplo` / `kubeconform` / etc.); exit `0` = pass, non-zero = violation carrying stdout+stderr. Trust-gated: only the user's own top-level config can declare these (mirror of the `custom:` fact gate). Pairs naturally with `--changed` so external checks become incremental in CI.
 - ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
 - ⏳ Git-aware primitives: `git_no_denied_paths`, `git_commit_message`.
