@@ -107,7 +107,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
     let fixer = match &spec.fix {
         Some(FixSpec::FilePrepend { file_prepend }) => {
-            Some(FilePrependFixer::new(file_prepend.content.clone()))
+            let source = alint_core::resolve_content_source(
+                &spec.id,
+                "file_prepend",
+                &file_prepend.content,
+                &file_prepend.content_from,
+            )?;
+            Some(FilePrependFixer::new(source))
         }
         Some(other) => {
             return Err(Error::rule_config(

@@ -8,7 +8,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use alint_core::{Error, FixContext, FixOutcome, Fixer, Result, Violation};
+use alint_core::{ContentSourceSpec, Error, FixContext, FixOutcome, Fixer, Result, Violation};
 
 use crate::case::CaseConvention;
 
@@ -18,19 +18,20 @@ const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
 /// Creates a file with pre-declared content. Target path is set at
 /// rule-build time (either explicit `fix.file_create.path` or the
-/// rule's first literal `paths:` entry).
+/// rule's first literal `paths:` entry). Content is either inline
+/// or read at apply time from a path-relative-to-root.
 #[derive(Debug)]
 pub struct FileCreateFixer {
     path: PathBuf,
-    content: String,
+    source: ContentSourceSpec,
     create_parents: bool,
 }
 
 impl FileCreateFixer {
-    pub fn new(path: PathBuf, content: String, create_parents: bool) -> Self {
+    pub fn new(path: PathBuf, source: ContentSourceSpec, create_parents: bool) -> Self {
         Self {
             path,
-            content,
+            source,
             create_parents,
         }
     }
@@ -38,12 +39,19 @@ impl FileCreateFixer {
 
 impl Fixer for FileCreateFixer {
     fn describe(&self) -> String {
-        format!(
-            "create {} ({} byte{})",
-            self.path.display(),
-            self.content.len(),
-            if self.content.len() == 1 { "" } else { "s" }
-        )
+        match &self.source {
+            ContentSourceSpec::Inline(s) => format!(
+                "create {} ({} byte{})",
+                self.path.display(),
+                s.len(),
+                if s.len() == 1 { "" } else { "s" }
+            ),
+            ContentSourceSpec::File(rel) => format!(
+                "create {} (content from {})",
+                self.path.display(),
+                rel.display()
+            ),
+        }
     }
 
     fn apply(&self, _violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -54,21 +62,25 @@ impl Fixer for FileCreateFixer {
                 self.path.display()
             )));
         }
+        let content = match resolve_source_bytes(&self.source, ctx.root) {
+            Ok(bytes) => bytes,
+            Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
+        };
         if ctx.dry_run {
             return Ok(FixOutcome::Applied(format!(
                 "would create {}",
                 self.path.display()
             )));
         }
-        if self.create_parents {
-            if let Some(parent) = abs.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| Error::Io {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
+        if self.create_parents
+            && let Some(parent) = abs.parent()
+        {
+            std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
-        std::fs::write(&abs, &self.content).map_err(|source| Error::Io {
+        std::fs::write(&abs, &content).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -76,6 +88,30 @@ impl Fixer for FileCreateFixer {
             "created {}",
             self.path.display()
         )))
+    }
+}
+
+/// Read a `ContentSourceSpec` to bytes. Returns the raw payload
+/// for inline content; for file-sourced content, reads the file
+/// at apply time, resolving its path relative to `ctx_root`. A
+/// missing or unreadable source produces a `Skipped`-friendly
+/// `Err(String)` so the caller can degrade gracefully rather
+/// than abort the whole fix run.
+fn resolve_source_bytes(
+    source: &ContentSourceSpec,
+    ctx_root: &std::path::Path,
+) -> std::result::Result<Vec<u8>, String> {
+    match source {
+        ContentSourceSpec::Inline(s) => Ok(s.as_bytes().to_vec()),
+        ContentSourceSpec::File(rel) => {
+            let abs = ctx_root.join(rel);
+            std::fs::read(&abs).map_err(|e| {
+                format!(
+                    "content_from `{}` could not be read: {e}",
+                    rel.display()
+                )
+            })
+        }
     }
 }
 
@@ -116,29 +152,35 @@ impl Fixer for FileRemoveFixer {
     }
 }
 
-/// Prepends `content` to the start of each violating file. Paired with
-/// `file_header` to inject the required header comment/boilerplate.
+/// Prepends `source` content to the start of each violating
+/// file. Paired with `file_header` to inject a required header
+/// comment / boilerplate.
 ///
-/// If the file starts with a UTF-8 BOM, `content` is inserted *after*
-/// the BOM so editors that rely on it don't break.
+/// If the file starts with a UTF-8 BOM, the prepended bytes go
+/// *after* the BOM so editors that rely on it don't break.
 #[derive(Debug)]
 pub struct FilePrependFixer {
-    content: String,
+    source: ContentSourceSpec,
 }
 
 impl FilePrependFixer {
-    pub fn new(content: String) -> Self {
-        Self { content }
+    pub fn new(source: ContentSourceSpec) -> Self {
+        Self { source }
     }
 }
 
 impl Fixer for FilePrependFixer {
     fn describe(&self) -> String {
-        format!(
-            "prepend {} byte{} to each violating file",
-            self.content.len(),
-            if self.content.len() == 1 { "" } else { "s" }
-        )
+        match &self.source {
+            ContentSourceSpec::Inline(s) => format!(
+                "prepend {} byte{} to each violating file",
+                s.len(),
+                if s.len() == 1 { "" } else { "s" }
+            ),
+            ContentSourceSpec::File(rel) => {
+                format!("prepend content from {} to each violating file", rel.display())
+            }
+        }
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -148,10 +190,14 @@ impl Fixer for FilePrependFixer {
             ));
         };
         let abs = ctx.root.join(path);
+        let prepend = match resolve_source_bytes(&self.source, ctx.root) {
+            Ok(b) => b,
+            Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
+        };
         if ctx.dry_run {
             return Ok(FixOutcome::Applied(format!(
                 "would prepend {} byte(s) to {}",
-                self.content.len(),
+                prepend.len(),
                 path.display()
             )));
         }
@@ -159,13 +205,13 @@ impl Fixer for FilePrependFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
-        let mut out = Vec::with_capacity(existing.len() + self.content.len());
+        let mut out = Vec::with_capacity(existing.len() + prepend.len());
         if existing.starts_with(UTF8_BOM) {
             out.extend_from_slice(UTF8_BOM);
-            out.extend_from_slice(self.content.as_bytes());
+            out.extend_from_slice(&prepend);
             out.extend_from_slice(&existing[UTF8_BOM.len()..]);
         } else {
-            out.extend_from_slice(self.content.as_bytes());
+            out.extend_from_slice(&prepend);
             out.extend_from_slice(&existing);
         }
         std::fs::write(&abs, &out).map_err(|source| Error::Io {
@@ -176,27 +222,32 @@ impl Fixer for FilePrependFixer {
     }
 }
 
-/// Appends `content` to the end of each violating file. Paired with
-/// `file_content_matches` when the required pattern is satisfied by
-/// the content appearing anywhere in the file.
+/// Appends `source` content to the end of each violating file.
+/// Paired with `file_content_matches` / `file_footer` when the
+/// required content is satisfied by the appended bytes.
 #[derive(Debug)]
 pub struct FileAppendFixer {
-    content: String,
+    source: ContentSourceSpec,
 }
 
 impl FileAppendFixer {
-    pub fn new(content: String) -> Self {
-        Self { content }
+    pub fn new(source: ContentSourceSpec) -> Self {
+        Self { source }
     }
 }
 
 impl Fixer for FileAppendFixer {
     fn describe(&self) -> String {
-        format!(
-            "append {} byte{} to each violating file",
-            self.content.len(),
-            if self.content.len() == 1 { "" } else { "s" }
-        )
+        match &self.source {
+            ContentSourceSpec::Inline(s) => format!(
+                "append {} byte{} to each violating file",
+                s.len(),
+                if s.len() == 1 { "" } else { "s" }
+            ),
+            ContentSourceSpec::File(rel) => {
+                format!("append content from {} to each violating file", rel.display())
+            }
+        }
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -206,10 +257,14 @@ impl Fixer for FileAppendFixer {
             ));
         };
         let abs = ctx.root.join(path);
+        let payload = match resolve_source_bytes(&self.source, ctx.root) {
+            Ok(b) => b,
+            Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
+        };
         if ctx.dry_run {
             return Ok(FixOutcome::Applied(format!(
                 "would append {} byte(s) to {}",
-                self.content.len(),
+                payload.len(),
                 path.display()
             )));
         }
@@ -223,11 +278,10 @@ impl Fixer for FileAppendFixer {
                 path: abs.clone(),
                 source,
             })?;
-        f.write_all(self.content.as_bytes())
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
+        f.write_all(&payload).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
         Ok(FixOutcome::Applied(format!(
             "appended to {}",
             path.display()
@@ -812,6 +866,76 @@ mod tests {
         assert!(matches!(outcome, FixOutcome::Applied(_)));
         let written = std::fs::read_to_string(tmp.path().join("LICENSE")).unwrap();
         assert_eq!(written, "Apache-2.0\n");
+    }
+
+    #[test]
+    fn file_create_reads_content_from_relative_path() {
+        // `content_from` relative to ctx.root: stage a template
+        // file in the tempdir, point the fixer at it via a
+        // relative path, and verify the apply step reads from
+        // disk at apply time.
+        let tmp = TempDir::new().unwrap();
+        let template_dir = tmp.path().join(".alint/templates");
+        std::fs::create_dir_all(&template_dir).unwrap();
+        std::fs::write(
+            template_dir.join("LICENSE-MIT.txt"),
+            "MIT License\n\nCopyright (c) 2026 demo\n",
+        )
+        .unwrap();
+        let fixer = FileCreateFixer::new(
+            PathBuf::from("LICENSE"),
+            ContentSourceSpec::File(PathBuf::from(".alint/templates/LICENSE-MIT.txt")),
+            true,
+        );
+        let outcome = fixer
+            .apply(&Violation::new("missing LICENSE"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        let written = std::fs::read_to_string(tmp.path().join("LICENSE")).unwrap();
+        assert!(written.starts_with("MIT License"));
+        assert!(written.contains("Copyright (c) 2026"));
+    }
+
+    #[test]
+    fn file_create_skips_when_content_from_missing() {
+        // Missing source file produces a `Skipped` outcome
+        // rather than aborting the whole fix run — same posture
+        // as the rest of the fixer module.
+        let tmp = TempDir::new().unwrap();
+        let fixer = FileCreateFixer::new(
+            PathBuf::from("LICENSE"),
+            ContentSourceSpec::File(PathBuf::from("does/not/exist.txt")),
+            true,
+        );
+        let outcome = fixer
+            .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &outcome else {
+            panic!("expected Skipped, got {outcome:?}")
+        };
+        assert!(msg.contains("could not be read"));
+        // The target file should NOT have been created since
+        // we skipped before the write.
+        assert!(!tmp.path().join("LICENSE").exists());
+    }
+
+    #[test]
+    fn file_prepend_with_content_from_reads_at_apply() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("hdr.txt"), "// SPDX-License-Identifier: MIT\n")
+            .unwrap();
+        std::fs::write(tmp.path().join("a.rs"), "fn main() {}\n").unwrap();
+        let fixer = FilePrependFixer::new(ContentSourceSpec::File(PathBuf::from("hdr.txt")));
+        let outcome = fixer
+            .apply(
+                &Violation::new("missing header").with_path(PathBuf::from("a.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        let updated = std::fs::read_to_string(tmp.path().join("a.rs")).unwrap();
+        assert!(updated.starts_with("// SPDX-License-Identifier: MIT\n"));
+        assert!(updated.contains("fn main() {}"));
     }
 
     #[test]

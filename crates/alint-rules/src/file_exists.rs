@@ -134,11 +134,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                          entries is a literal filename",
                     )
                 })?;
-            Some(FileCreateFixer::new(
-                target,
-                cfg.content.clone(),
-                cfg.create_parents,
-            ))
+            let source = alint_core::resolve_content_source(
+                &spec.id,
+                "file_create",
+                &cfg.content,
+                &cfg.content_from,
+            )?;
+            Some(FileCreateFixer::new(target, source, cfg.create_parents))
         }
         Some(other) => {
             return Err(Error::rule_config(

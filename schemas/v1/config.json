@@ -177,12 +177,19 @@
           "properties": {
             "file_create": {
               "type": "object",
-              "required": ["content"],
               "additionalProperties": false,
+              "oneOf": [
+                { "required": ["content"] },
+                { "required": ["content_from"] }
+              ],
               "properties": {
                 "content": {
                   "type": "string",
-                  "description": "Literal bytes to write. Required — pass \"\" for an empty file."
+                  "description": "Literal bytes to write. Mutually exclusive with `content_from`. Pass \"\" for an empty file."
+                },
+                "content_from": {
+                  "type": "string",
+                  "description": "Path to a file whose bytes will be the content, relative to the lint root. Mutually exclusive with `content`. Read at fix-apply time; missing source produces a `Skipped` outcome rather than an error. Useful for LICENSE / NOTICE / boilerplate too long to inline."
                 },
                 "path": {
                   "type": "string",
@@ -216,12 +223,19 @@
           "properties": {
             "file_prepend": {
               "type": "object",
-              "required": ["content"],
               "additionalProperties": false,
+              "oneOf": [
+                { "required": ["content"] },
+                { "required": ["content_from"] }
+              ],
               "properties": {
                 "content": {
                   "type": "string",
-                  "description": "Bytes to insert at the start of each violating file. A trailing newline in `content` is the caller's responsibility."
+                  "description": "Bytes to insert at the start of each violating file. Mutually exclusive with `content_from`. A trailing newline is the caller's responsibility."
+                },
+                "content_from": {
+                  "type": "string",
+                  "description": "Path to a file whose bytes will be prepended, relative to the lint root. Mutually exclusive with `content`. Read at fix-apply time."
                 }
               }
             }
@@ -234,12 +248,19 @@
           "properties": {
             "file_append": {
               "type": "object",
-              "required": ["content"],
               "additionalProperties": false,
+              "oneOf": [
+                { "required": ["content"] },
+                { "required": ["content_from"] }
+              ],
               "properties": {
                 "content": {
                   "type": "string",
-                  "description": "Bytes to append to each violating file. A leading newline in `content` is the caller's responsibility."
+                  "description": "Bytes to append to each violating file. Mutually exclusive with `content_from`. A leading newline is the caller's responsibility."
+                },
+                "content_from": {
+                  "type": "string",
+                  "description": "Path to a file whose bytes will be appended, relative to the lint root. Mutually exclusive with `content`. Read at fix-apply time."
                 }
               }
             }

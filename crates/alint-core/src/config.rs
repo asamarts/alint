@@ -278,9 +278,19 @@ impl FixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCreateFixSpec {
-    /// Content to write. Required — there is no implicit empty default;
-    /// for an empty file, pass `content: ""` explicitly.
-    pub content: String,
+    /// Inline content to write. Mutually exclusive with
+    /// `content_from`; exactly one of the two must be set. For
+    /// an empty file, pass `content: ""` explicitly.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Path to a file (relative to the lint root) whose bytes
+    /// will be the content. Mutually exclusive with `content`.
+    /// Read at fix-apply time; missing source produces a
+    /// `Skipped` outcome rather than a panic. Useful for
+    /// LICENSE / NOTICE / CONTRIBUTING boilerplate that's too
+    /// long to inline in YAML.
+    #[serde(default)]
+    pub content_from: Option<PathBuf>,
     /// Path to create, relative to the repo root. When omitted, the
     /// rule builder substitutes the first literal entry from the rule's
     /// `paths:` list.
@@ -302,17 +312,76 @@ pub struct FileRemoveFixSpec {}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FilePrependFixSpec {
-    /// Bytes to insert at the beginning of each violating file. A
-    /// trailing newline in `content` is the caller's responsibility.
-    pub content: String,
+    /// Inline bytes to insert at the beginning of each
+    /// violating file. Mutually exclusive with `content_from`.
+    /// A trailing newline is the caller's responsibility.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Path to a file (relative to the lint root) whose bytes
+    /// will be prepended. Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileAppendFixSpec {
-    /// Bytes to append to each violating file. A leading newline in
-    /// `content` is the caller's responsibility.
-    pub content: String,
+    /// Inline bytes to append to each violating file. Mutually
+    /// exclusive with `content_from`. A leading newline is the
+    /// caller's responsibility.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Path to a file (relative to the lint root) whose bytes
+    /// will be appended. Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<PathBuf>,
+}
+
+/// Resolution of an `(content, content_from)` pair to a single
+/// content source. Used by the three fixers that take either.
+/// Errors when neither or both are set.
+pub fn resolve_content_source(
+    rule_id: &str,
+    op_name: &str,
+    inline: &Option<String>,
+    from: &Option<PathBuf>,
+) -> crate::error::Result<ContentSourceSpec> {
+    match (inline, from) {
+        (Some(_), Some(_)) => Err(crate::error::Error::rule_config(
+            rule_id,
+            format!("fix.{op_name}: `content` and `content_from` are mutually exclusive"),
+        )),
+        (None, None) => Err(crate::error::Error::rule_config(
+            rule_id,
+            format!("fix.{op_name}: one of `content` or `content_from` is required"),
+        )),
+        (Some(s), None) => Ok(ContentSourceSpec::Inline(s.clone())),
+        (None, Some(p)) => Ok(ContentSourceSpec::File(p.clone())),
+    }
+}
+
+/// Pre-validated content source — exactly one of inline or
+/// from-file. Resolved at config-parse time so fixers don't
+/// need to reproduce the XOR check at apply time.
+#[derive(Debug, Clone)]
+pub enum ContentSourceSpec {
+    /// Inline string body.
+    Inline(String),
+    /// Path relative to the lint root; bytes are read at fix-
+    /// apply time.
+    File(PathBuf),
+}
+
+impl From<String> for ContentSourceSpec {
+    fn from(s: String) -> Self {
+        Self::Inline(s)
+    }
+}
+
+impl From<&str> for ContentSourceSpec {
+    fn from(s: &str) -> Self {
+        Self::Inline(s.to_string())
+    }
 }
 
 /// Empty marker: `file_rename` takes no parameters. The target name
