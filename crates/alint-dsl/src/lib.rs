@@ -178,6 +178,15 @@ struct RawConfig {
     vars: std::collections::HashMap<String, String>,
     #[serde(default)]
     facts: Vec<FactSpec>,
+    /// Reusable rule shapes referenced by `extends_template:` in
+    /// `rules:` entries. Each template has its own `id:` and any
+    /// other rule-spec fields; placeholders `{{vars.<name>}}` in
+    /// those fields are substituted from the instance's `vars:`
+    /// map at expansion time. Templates are kept as raw
+    /// `Mapping`s here so the expansion step has the same
+    /// field-level granularity as rule overrides.
+    #[serde(default)]
+    templates: Vec<Mapping>,
     #[serde(default)]
     rules: Vec<Mapping>,
     #[serde(default = "default_fix_size_limit")]
@@ -200,17 +209,31 @@ impl RawConfig {
     /// where kind-specific validation fires: a rule that never
     /// received a `kind` anywhere in its extends chain produces a
     /// serde error here, referencing the offending rule's id.
+    /// Also where `extends_template:` instances expand against
+    /// the `templates:` block: the template body is cloned, its
+    /// `{{vars.<name>}}` placeholders substituted from the
+    /// instance's `vars:` map, and the instance's own
+    /// non-template fields field-merge on top.
     fn finalize(self) -> Result<Config> {
+        let templates_by_id: std::collections::HashMap<String, &Mapping> = self
+            .templates
+            .iter()
+            .filter_map(|t| {
+                t.get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| (id.to_string(), t))
+            })
+            .collect();
+
         let mut rules = Vec::with_capacity(self.rules.len());
-        for m in self.rules {
-            // Extract the id first so a deserialization error can
-            // name the offending rule.
+        for m in &self.rules {
             let id_hint = m
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+            let expanded = expand_template(m, &templates_by_id)?;
             let spec: alint_core::RuleSpec =
-                serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(m)).map_err(|e| {
+                serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(expanded)).map_err(|e| {
                     Error::rule_config(&id_hint, format!("could not deserialize merged rule: {e}"))
                 })?;
             rules.push(spec);
@@ -226,6 +249,124 @@ impl RawConfig {
             fix_size_limit: self.fix_size_limit,
             nested_configs: self.nested_configs,
         })
+    }
+}
+
+/// Expand a rule mapping that references `extends_template:`,
+/// or pass it through unchanged if it doesn't. The expansion
+/// looks up the named template, rejects unknown ids and
+/// chained templates, substitutes `{{vars.<name>}}` placeholders
+/// throughout the cloned body, drops the template-only fields
+/// (`id`, `extends_template`, `vars`), and field-merges the
+/// instance's remaining keys on top.
+fn expand_template(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+) -> Result<Mapping> {
+    let Some(template_id) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return Ok(rule.clone());
+    };
+
+    let id_hint = rule
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+
+    let template = templates_by_id.get(&template_id).ok_or_else(|| {
+        Error::rule_config(
+            &id_hint,
+            format!("`extends_template: {template_id}` references an unknown template"),
+        )
+    })?;
+
+    if template.contains_key("extends_template") {
+        return Err(Error::rule_config(
+            &id_hint,
+            format!(
+                "template `{template_id}` itself references `extends_template:` — \
+                 templates are leaf-only (mirrors the bundled-rulesets restriction)"
+            ),
+        ));
+    }
+
+    let vars: std::collections::HashMap<String, String> = rule
+        .get("vars")
+        .and_then(|v| v.as_mapping())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| match (k.as_str(), v) {
+                    (Some(key), serde_yaml_ng::Value::String(s)) => {
+                        Some((key.to_string(), s.clone()))
+                    }
+                    (Some(key), serde_yaml_ng::Value::Number(n)) => {
+                        Some((key.to_string(), n.to_string()))
+                    }
+                    (Some(key), serde_yaml_ng::Value::Bool(b)) => {
+                        Some((key.to_string(), b.to_string()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut expanded = (*template).clone();
+    expanded = substitute_template_vars(expanded, &vars);
+    expanded.remove("id");
+
+    for (k, v) in rule {
+        let key = k.as_str().unwrap_or_default();
+        if matches!(key, "extends_template" | "vars") {
+            continue;
+        }
+        expanded.insert(k.clone(), v.clone());
+    }
+    Ok(expanded)
+}
+
+/// Recursively walk a YAML mapping and substitute
+/// `{{vars.<name>}}` placeholders in every string value with
+/// the corresponding entry from `vars`. Unknown placeholders
+/// are preserved literally so a typo surfaces in the rule's
+/// error / output rather than silently blanking a field.
+fn substitute_template_vars(
+    m: Mapping,
+    vars: &std::collections::HashMap<String, String>,
+) -> Mapping {
+    let mut out = Mapping::with_capacity(m.len());
+    for (k, v) in m {
+        out.insert(k, substitute_template_vars_value(v, vars));
+    }
+    out
+}
+
+fn substitute_template_vars_value(
+    value: serde_yaml_ng::Value,
+    vars: &std::collections::HashMap<String, String>,
+) -> serde_yaml_ng::Value {
+    use serde_yaml_ng::Value;
+    match value {
+        Value::String(s) => {
+            let rendered = alint_core::template::render_message(&s, |ns, key| {
+                if ns == "vars" {
+                    vars.get(key).cloned()
+                } else {
+                    None
+                }
+            });
+            Value::String(rendered)
+        }
+        Value::Sequence(seq) => Value::Sequence(
+            seq.into_iter()
+                .map(|v| substitute_template_vars_value(v, vars))
+                .collect(),
+        ),
+        Value::Mapping(inner) => Value::Mapping(substitute_template_vars(inner, vars)),
+        other => other,
     }
 }
 
@@ -583,6 +724,33 @@ fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         .map(|id| facts_by_id.remove(&id).unwrap())
         .collect();
 
+    // Templates merge by id, same shape as rules — later wins
+    // on field-level conflict. A child config can replace an
+    // upstream template's body wholesale by re-defining the id.
+    let mut templates_by_id: std::collections::BTreeMap<String, Mapping> =
+        std::collections::BTreeMap::new();
+    let mut template_order: Vec<String> = Vec::new();
+    let mut template_orphans: Vec<Mapping> = Vec::new();
+    for m in a.templates.into_iter().chain(b.templates) {
+        let Some(id) = m.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+            template_orphans.push(m);
+            continue;
+        };
+        if let Some(existing) = templates_by_id.get_mut(&id) {
+            for (k, v) in m {
+                existing.insert(k, v);
+            }
+        } else {
+            template_order.push(id.clone());
+            templates_by_id.insert(id, m);
+        }
+    }
+    let mut templates: Vec<Mapping> = template_order
+        .into_iter()
+        .map(|id| templates_by_id.remove(&id).unwrap())
+        .collect();
+    templates.extend(template_orphans);
+
     // Rules: field-merge mappings by id. Rules without an id key
     // can't participate in merge and are passed through unchanged
     // (the final `finalize` step will reject them — RuleSpec
@@ -624,6 +792,7 @@ fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         respect_gitignore,
         vars,
         facts,
+        templates,
         rules,
         fix_size_limit,
         nested_configs,
@@ -948,6 +1117,150 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_str().unwrap())
             .collect();
         assert_eq!(names, ["00-early.yml", "50-mid.yml", "99-late.yaml"]);
+    }
+
+    #[test]
+    fn template_expands_into_concrete_rule() {
+        let yaml = r"
+version: 1
+templates:
+  - id: dir-has-readme
+    kind: pair
+    primary: '{{vars.dir}}/**/*'
+    partner: '{{vars.dir}}/README.md'
+    level: warning
+    message: 'every {{vars.dir}}/* should have a README'
+rules:
+  - extends_template: dir-has-readme
+    id: pkgs-have-readme
+    vars:
+      dir: packages
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let final_cfg = cfg.finalize().unwrap();
+        assert_eq!(final_cfg.rules.len(), 1);
+        let r = &final_cfg.rules[0];
+        assert_eq!(r.id, "pkgs-have-readme");
+        assert_eq!(r.kind, "pair");
+    }
+
+    #[test]
+    fn template_supports_multiple_instances() {
+        let yaml = r"
+version: 1
+templates:
+  - id: dir-has-readme
+    kind: pair
+    primary: '{{vars.dir}}/**/*'
+    partner: '{{vars.dir}}/README.md'
+    level: warning
+rules:
+  - extends_template: dir-has-readme
+    id: pkgs-have-readme
+    vars: { dir: packages }
+  - extends_template: dir-has-readme
+    id: services-have-readme
+    vars: { dir: services }
+  - extends_template: dir-has-readme
+    id: apps-have-readme
+    vars: { dir: apps }
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let final_cfg = cfg.finalize().unwrap();
+        let ids: Vec<&str> = final_cfg.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["pkgs-have-readme", "services-have-readme", "apps-have-readme"]);
+    }
+
+    #[test]
+    fn template_instance_can_override_field() {
+        let yaml = r"
+version: 1
+templates:
+  - id: dir-has-readme
+    kind: pair
+    primary: '{{vars.dir}}/**/*'
+    partner: '{{vars.dir}}/README.md'
+    level: warning
+rules:
+  - extends_template: dir-has-readme
+    id: critical-readme
+    level: error
+    vars: { dir: services }
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let final_cfg = cfg.finalize().unwrap();
+        assert_eq!(final_cfg.rules[0].level, alint_core::Level::Error);
+    }
+
+    #[test]
+    fn template_unknown_id_errors_clearly() {
+        let yaml = r"
+version: 1
+templates:
+  - id: real-template
+    kind: file_exists
+    paths: [X]
+rules:
+  - extends_template: typo-template
+    id: my-rule
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = cfg.finalize().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("typo-template"));
+        assert!(msg.contains("unknown template"));
+    }
+
+    #[test]
+    fn template_cannot_extend_another_template() {
+        let yaml = r"
+version: 1
+templates:
+  - id: outer
+    extends_template: inner
+    kind: file_exists
+    paths: [X]
+  - id: inner
+    kind: file_exists
+    paths: [Y]
+rules:
+  - extends_template: outer
+    id: my-rule
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = cfg.finalize().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("leaf-only"));
+    }
+
+    #[test]
+    fn template_substitutes_inside_lists_and_nested_mappings() {
+        let yaml = r"
+version: 1
+templates:
+  - id: list-and-nested
+    kind: file_exists
+    level: warning
+    paths:
+      - '{{vars.dir}}/README.md'
+      - '{{vars.dir}}/LICENSE'
+    fix:
+      file_create:
+        content: 'Hello, {{vars.dir}}!'
+        path: '{{vars.dir}}/README.md'
+rules:
+  - extends_template: list-and-nested
+    id: my-rule
+    vars: { dir: pkg }
+";
+        let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let final_cfg = cfg.finalize().unwrap();
+        let r = &final_cfg.rules[0];
+        let paths = r.paths.as_ref().unwrap();
+        let paths_str = format!("{paths:?}");
+        assert!(paths_str.contains("pkg/README.md"));
+        assert!(paths_str.contains("pkg/LICENSE"));
+        assert!(matches!(r.fix, Some(alint_core::FixSpec::FileCreate { .. })));
     }
 
     #[test]

@@ -41,6 +41,11 @@
       "items": { "$ref": "#/$defs/rule" },
       "description": "Rules evaluated against the repository tree."
     },
+    "templates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/template" },
+      "description": "Reusable rule shapes referenced by `extends_template:` in `rules:` entries. Each template carries an `id:` and any other rule-spec fields; `{{vars.<name>}}` placeholders in those fields substitute from each instance's `vars:` map at expansion time. Templates are leaf-only — a template may not itself `extends_template:` another. Templates merge through the `extends:` chain by id, so a downstream config can override an upstream template's body."
+    },
     "fix_size_limit": {
       "type": ["integer", "null"],
       "minimum": 0,
@@ -374,11 +379,49 @@
     },
 
     "rule": {
-      "allOf": [
-        { "$ref": "#/$defs/rule_common" },
-        { "$ref": "#/$defs/rule_kind_dispatch" }
-      ],
-      "unevaluatedProperties": false
+      "description": "A rule entry — either a kind-driven rule (with `kind` and the kind-specific fields) or a template instance (with `extends_template` referencing a template id and optional `vars` overrides).",
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/rule_common" },
+            { "$ref": "#/$defs/rule_kind_dispatch" }
+          ],
+          "unevaluatedProperties": false
+        },
+        { "$ref": "#/$defs/rule_template_instance" }
+      ]
+    },
+
+    "rule_template_instance": {
+      "description": "A rule entry that expands a `templates:` body. The instance's `id:` is required; `vars:` provides the substitutions for the template's `{{vars.<name>}}` placeholders. Any other field overrides the corresponding field in the expanded template.",
+      "type": "object",
+      "required": ["id", "extends_template"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" },
+        "extends_template": {
+          "type": "string",
+          "description": "Id of an entry in the top-level `templates:` block to instantiate."
+        },
+        "vars": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] },
+          "description": "Map of `name → value` to substitute into `{{vars.<name>}}` placeholders in the template body."
+        },
+        "level": { "$ref": "#/$defs/level" },
+        "message": { "type": "string" },
+        "policy_url": { "type": "string", "format": "uri" },
+        "when": { "type": "string" }
+      }
+    },
+
+    "template": {
+      "description": "A reusable rule shape. Identical to a regular rule except `level` is optional (instances may add it) and the body is matched after `{{vars.<name>}}` substitution.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" }
+      },
+      "additionalProperties": true
     },
 
     "rule_kind_dispatch": {
