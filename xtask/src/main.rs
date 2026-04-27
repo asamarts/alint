@@ -1222,16 +1222,31 @@ fn escape_yaml_string(s: &str) -> String {
 /// / policy URL. Slash-separated names (`hygiene/lockfiles`,
 /// `ci/github-actions`) are flattened with a `-` for the bundle
 /// filename so Starlight's autogen sidebar produces a flat list.
+///
+/// Each page now also carries:
+/// - An overview parsed from the YAML's leading comment block
+///   (the natural-language description the ruleset author wrote
+///   above `version: 1`).
+/// - A `## Source` section with a link back to the canonical YAML
+///   in the alint repo plus the full file embedded as a fenced
+///   code block, so readers can see the exact rule definitions
+///   without leaving the docs.
 fn generate_bundled_ruleset_pages(
     workspace: &Path,
     target_dir: &Path,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
+    struct RulesetEntry {
+        pretty: String,
+        flat_slug: String,
+        summary: String,
+    }
+
     let rulesets_root = workspace.join(docs_paths::RULESETS_DIR);
     let bundled_dir = target_dir.join("bundled-rulesets");
     fs::create_dir_all(&bundled_dir)?;
 
-    let mut ruleset_pages: Vec<String> = Vec::new();
+    let mut entries: Vec<RulesetEntry> = Vec::new();
 
     for entry in walkdir_plain(&rulesets_root)? {
         let md = fs::metadata(&entry)?;
@@ -1245,24 +1260,46 @@ fn generate_bundled_ruleset_pages(
         let rel = entry.strip_prefix(&rulesets_root).unwrap();
         let pretty_name = rel.with_extension("");
         let pretty_str = pretty_name.to_string_lossy().replace('\\', "/");
-        let flat_filename = format!("{}.md", pretty_str.replace('/', "-"));
+        let flat_slug = pretty_str.replace('/', "-");
+        let flat_filename = format!("{flat_slug}.md");
 
         let yaml_text =
             fs::read_to_string(&entry).with_context(|| format!("reading {}", entry.display()))?;
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml_text)
             .with_context(|| format!("parsing {}", entry.display()))?;
 
-        let page = render_ruleset_page(&pretty_str, &yaml, kind_to_family);
+        // Repo-relative path for the source link, always forward-
+        // slashed regardless of host OS so the URL is portable.
+        let rel_path_str = rel.to_string_lossy().replace('\\', "/");
+        let rel_repo_path = format!("{}/{}", docs_paths::RULESETS_DIR, rel_path_str);
+
+        let overview_md = render_overview_from_comments(&yaml_text);
+        let summary = first_overview_sentence(&overview_md);
+
+        let page = render_ruleset_page(
+            &pretty_str,
+            &overview_md,
+            &yaml_text,
+            &rel_repo_path,
+            &yaml,
+            kind_to_family,
+        );
         let dest = bundled_dir.join(&flat_filename);
         fs::write(&dest, page).with_context(|| format!("writing {}", dest.display()))?;
 
-        ruleset_pages.push(pretty_str);
+        entries.push(RulesetEntry {
+            pretty: pretty_str,
+            flat_slug,
+            summary,
+        });
     }
 
     // An index page listing every ruleset — overwrites the hand-
     // written placeholder when the sync script lays the bundle into
-    // alint.org.
-    ruleset_pages.sort();
+    // alint.org. Each entry shows a one-line summary (the first
+    // sentence of the ruleset's leading comment block) so the
+    // index is scannable without opening every page.
+    entries.sort_by(|a, b| a.pretty.cmp(&b.pretty));
     let mut index = String::new();
     let _ = writeln!(&mut index, "---");
     let _ = writeln!(&mut index, "title: Bundled Rulesets");
@@ -1281,29 +1318,67 @@ fn generate_bundled_ruleset_pages(
     let _ = writeln!(&mut index);
     let _ = writeln!(&mut index, "## Currently shipped");
     let _ = writeln!(&mut index);
-    for name in &ruleset_pages {
-        let flat = name.replace('/', "-");
-        let _ = writeln!(
-            &mut index,
-            "- [`{name}@v1`](/docs/bundled-rulesets/{flat}/)"
-        );
+    for e in &entries {
+        if e.summary.is_empty() {
+            let _ = writeln!(
+                &mut index,
+                "- [`{name}@v1`](/docs/bundled-rulesets/{slug}/)",
+                name = e.pretty,
+                slug = e.flat_slug
+            );
+        } else {
+            let _ = writeln!(
+                &mut index,
+                "- [`{name}@v1`](/docs/bundled-rulesets/{slug}/) — {summary}",
+                name = e.pretty,
+                slug = e.flat_slug,
+                summary = e.summary,
+            );
+        }
     }
     fs::write(bundled_dir.join("index.md"), index)?;
 
     Ok(())
 }
 
-/// Render the markdown body for a single bundled ruleset. Reads
-/// `version` and the `rules:` array; pulls each rule's `id`,
-/// `kind`, `level`, `message`, `policy_url`, and `when:`.
+/// GitHub repo-relative base for source-of-truth links rendered
+/// into the bundled-ruleset pages. Pinned to `main` so readers
+/// always land on the latest version of each ruleset; the page
+/// also embeds a verbatim snapshot of the YAML below the link
+/// for offline / point-in-time reference.
+const ALINT_REPO_BLOB_URL: &str = "https://github.com/asamarts/alint/blob/main";
+
+/// Render the markdown body for a single bundled ruleset. The
+/// page has four sections, in order:
+///
+/// 1. **Overview** — the leading comment block from the YAML,
+///    rendered as natural-language prose (with any inline YAML
+///    code samples promoted to fenced ```yaml``` blocks for
+///    syntax highlighting).
+/// 2. **Adopt with** — a copy-pasteable `extends:` snippet. We
+///    suppress this when the overview already contains an
+///    `alint://bundled/...` reference (that's the layered-overlay
+///    case where the comment author specifies a multi-ruleset
+///    adoption recipe — auto-generating a single-line snippet on
+///    top would be redundant and incorrect).
+/// 3. **Rules** — table-of-contents-style list of every `id` in
+///    the ruleset with kind / level / when / policy / message
+///    pulled from the YAML. Each `kind` is a link into the rule
+///    reference (`/docs/rules/<family>/<kind>/`) when
+///    `kind_to_family` knows about it.
+/// 4. **Source** — a permalink into the alint repo plus the full
+///    YAML file embedded as a fenced code block.
 ///
 /// `kind_to_family` is consulted to render each rule's `kind` as
-/// a link into the rules tree (`/docs/rules/<family>/<kind>/`).
-/// Kinds not in the map (e.g. a brand-new kind missing from
-/// rules.md) render as plain code; the rules-pages generator
-/// emits a warning in that case so the gap surfaces.
+/// a link into the rules tree. Kinds not in the map (e.g. a
+/// brand-new kind missing from rules.md) render as plain code;
+/// the rules-pages generator emits a warning in that case so the
+/// gap surfaces.
 fn render_ruleset_page(
     name: &str,
+    overview_md: &str,
+    yaml_text: &str,
+    rel_repo_path: &str,
     yaml: &serde_yaml_ng::Value,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) -> String {
@@ -1316,56 +1391,225 @@ fn render_ruleset_page(
     );
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out);
-    let _ = writeln!(&mut out, "Adopt with:");
-    let _ = writeln!(&mut out);
-    let _ = writeln!(&mut out, "```yaml");
-    let _ = writeln!(&mut out, "extends:");
-    let _ = writeln!(&mut out, "  - alint://bundled/{name}@v1");
-    let _ = writeln!(&mut out, "```");
-    let _ = writeln!(&mut out);
 
-    let Some(rules) = yaml.get("rules").and_then(|r| r.as_sequence()) else {
-        let _ = writeln!(&mut out, "_(no rules — this ruleset is a placeholder.)_");
-        return out;
-    };
-    let _ = writeln!(&mut out, "## Rules");
-    let _ = writeln!(&mut out);
-
-    for rule in rules {
-        let id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("(no-id)");
-        let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-        let level = rule.get("level").and_then(|v| v.as_str()).unwrap_or("");
-        let when = rule.get("when").and_then(|v| v.as_str());
-        let msg = rule.get("message").and_then(|v| v.as_str());
-        let policy = rule.get("policy_url").and_then(|v| v.as_str());
-
-        let _ = writeln!(&mut out, "### `{id}`");
+    if !overview_md.is_empty() {
+        out.push_str(overview_md);
         let _ = writeln!(&mut out);
-        if !kind.is_empty() {
-            let kind_md = match kind_to_family.get(kind) {
-                Some(family) => {
-                    format!("[`{kind}`](/docs/rules/{family}/{kind}/)")
-                }
-                None => format!("`{kind}`"),
-            };
-            let _ = writeln!(&mut out, "- **kind**: {kind_md}");
-        }
-        if !level.is_empty() {
-            let _ = writeln!(&mut out, "- **level**: `{level}`");
-        }
-        if let Some(when) = when {
-            let _ = writeln!(&mut out, "- **when**: `{when}`");
-        }
-        if let Some(policy) = policy {
-            let _ = writeln!(&mut out, "- **policy**: <{policy}>");
-        }
-        if let Some(msg) = msg {
-            let _ = writeln!(&mut out);
-            let _ = writeln!(&mut out, "> {}", msg.replace('\n', " "));
-        }
         let _ = writeln!(&mut out);
     }
+
+    // The overlay-style rulesets (e.g. monorepo/cargo-workspace)
+    // already document a multi-ruleset `extends:` recipe in their
+    // leading comment. Re-rendering a single-line snippet under
+    // them would be both redundant and misleading, so we suppress
+    // the auto-gen Adopt-with whenever the overview already
+    // mentions the bundled-URI scheme.
+    let overview_has_adoption = overview_md.contains("alint://bundled/");
+    if !overview_has_adoption {
+        let _ = writeln!(&mut out, "## Adopt with");
+        let _ = writeln!(&mut out);
+        let _ = writeln!(&mut out, "```yaml");
+        let _ = writeln!(&mut out, "extends:");
+        let _ = writeln!(&mut out, "  - alint://bundled/{name}@v1");
+        let _ = writeln!(&mut out, "```");
+        let _ = writeln!(&mut out);
+    }
+
+    if let Some(rules) = yaml.get("rules").and_then(|r| r.as_sequence()) {
+        let _ = writeln!(&mut out, "## Rules");
+        let _ = writeln!(&mut out);
+
+        for rule in rules {
+            let id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("(no-id)");
+            let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let level = rule.get("level").and_then(|v| v.as_str()).unwrap_or("");
+            let when = rule.get("when").and_then(|v| v.as_str());
+            let msg = rule.get("message").and_then(|v| v.as_str());
+            let policy = rule.get("policy_url").and_then(|v| v.as_str());
+
+            let _ = writeln!(&mut out, "### `{id}`");
+            let _ = writeln!(&mut out);
+            if !kind.is_empty() {
+                let kind_md = match kind_to_family.get(kind) {
+                    Some(family) => {
+                        format!("[`{kind}`](/docs/rules/{family}/{kind}/)")
+                    }
+                    None => format!("`{kind}`"),
+                };
+                let _ = writeln!(&mut out, "- **kind**: {kind_md}");
+            }
+            if !level.is_empty() {
+                let _ = writeln!(&mut out, "- **level**: `{level}`");
+            }
+            if let Some(when) = when {
+                let _ = writeln!(&mut out, "- **when**: `{when}`");
+            }
+            if let Some(policy) = policy {
+                let _ = writeln!(&mut out, "- **policy**: <{policy}>");
+            }
+            if let Some(msg) = msg {
+                let _ = writeln!(&mut out);
+                let _ = writeln!(&mut out, "> {}", msg.replace('\n', " "));
+            }
+            let _ = writeln!(&mut out);
+        }
+    } else {
+        let _ = writeln!(&mut out, "_(no rules — this ruleset is a placeholder.)_");
+        let _ = writeln!(&mut out);
+    }
+
+    let _ = writeln!(&mut out, "## Source");
+    let _ = writeln!(&mut out);
+    let _ = writeln!(
+        &mut out,
+        "The full ruleset definition is committed at \
+         [`{rel_repo_path}`]({ALINT_REPO_BLOB_URL}/{rel_repo_path}) in the alint repo \
+         (the snapshot below is generated verbatim from that file).",
+    );
+    let _ = writeln!(&mut out);
+    let _ = writeln!(&mut out, "```yaml");
+    out.push_str(yaml_text.trim_end_matches('\n'));
+    out.push('\n');
+    let _ = writeln!(&mut out, "```");
     out
+}
+
+/// Parse the leading comment block of a ruleset YAML into
+/// markdown. The first line is expected to be the canonical
+/// `# alint://bundled/<name>@<rev>` URI tag and is stripped.
+/// Subsequent comment lines are emitted as paragraphs (preserving
+/// the author's line breaks so list items render correctly) or,
+/// when a paragraph starts with a 4-space indent, as a fenced
+/// `yaml` code block — that's the convention authors use for
+/// the "here's the `extends:` snippet" mini-blocks.
+///
+/// Reading stops at the first non-comment, non-blank line. By
+/// convention the rule body starts right after the leading
+/// comment block, so this naturally captures only the file's
+/// top-of-file description.
+fn render_overview_from_comments(yaml_text: &str) -> String {
+    enum Block {
+        Para(Vec<String>),
+        Code(Vec<String>),
+    }
+
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut comment_started = false;
+    // Treat start-of-input as a paragraph break so the very first
+    // non-blank comment line opens a new block.
+    let mut paragraph_break = true;
+
+    for raw in yaml_text.lines() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            if !comment_started {
+                continue;
+            }
+            // A literal blank line (no `#`) ends the leading
+            // comment block. Authors use blank `#` lines for
+            // paragraph breaks INSIDE the block — those are
+            // handled below.
+            break;
+        }
+        if !line.starts_with('#') {
+            break;
+        }
+        comment_started = true;
+
+        // Strip the `#` marker and exactly one trailing space.
+        let after_hash = &line[1..];
+        let body = after_hash.strip_prefix(' ').unwrap_or(after_hash);
+
+        if body.is_empty() {
+            paragraph_break = true;
+            continue;
+        }
+        // Skip the canonical `# alint://bundled/<name>@<rev>` URI
+        // header — it's metadata, not prose.
+        if body.starts_with("alint://bundled/") {
+            continue;
+        }
+
+        // 4-space indent at the START of a block = code block.
+        // Continuation lines inside an existing block keep that
+        // block's kind regardless of their own indent (so
+        // bulleted lists with hanging-indent continuations
+        // stay in a single Para block).
+        if paragraph_break {
+            if let Some(rest) = body.strip_prefix("    ") {
+                blocks.push(Block::Code(vec![rest.to_string()]));
+            } else {
+                blocks.push(Block::Para(vec![body.to_string()]));
+            }
+        } else {
+            match blocks
+                .last_mut()
+                .expect("paragraph_break=false implies a current block exists")
+            {
+                Block::Para(lines) => lines.push(body.to_string()),
+                Block::Code(lines) => {
+                    // Inside a code block, dedent up to 4 spaces so
+                    // the rendered code matches the opening line's
+                    // visual indentation.
+                    let dedented = body.strip_prefix("    ").unwrap_or(body);
+                    lines.push(dedented.to_string());
+                }
+            }
+        }
+        paragraph_break = false;
+    }
+
+    let mut out = String::new();
+    for (i, b) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        match b {
+            Block::Para(lines) => out.push_str(&lines.join("\n")),
+            Block::Code(lines) => {
+                out.push_str("```yaml\n");
+                for l in lines {
+                    out.push_str(l);
+                    out.push('\n');
+                }
+                out.push_str("```");
+            }
+        }
+    }
+    out
+}
+
+/// First-sentence summary of a rendered overview, used to
+/// populate the bundled-rulesets index page. Skips fenced code
+/// blocks, takes the first paragraph of natural-language prose,
+/// and truncates at the first sentence-ending `. ` boundary.
+fn first_overview_sentence(overview_md: &str) -> String {
+    let mut paragraph = String::new();
+    let mut in_code = false;
+    for line in overview_md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !paragraph.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if !paragraph.is_empty() {
+            paragraph.push(' ');
+        }
+        paragraph.push_str(trimmed);
+    }
+    if let Some(idx) = paragraph.find(". ") {
+        paragraph.truncate(idx + 1);
+    }
+    paragraph.trim().to_string()
 }
 
 /// Build the alint binary in release mode, then capture
@@ -1444,3 +1688,124 @@ fn write_manifest(target_dir: &Path) -> Result<()> {
     fs::write(target_dir.join("manifest.json"), json)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overview_strips_uri_header_and_renders_paragraphs() {
+        let yaml = "\
+# alint://bundled/oss-baseline@v1
+#
+# A minimal OSS-hygiene baseline — what most repos follow.
+# Multi-line prose stays on one paragraph.
+#
+# Second paragraph here.
+
+version: 1
+rules: []
+";
+        let out = render_overview_from_comments(yaml);
+        assert!(!out.contains("alint://bundled/oss-baseline@v1"));
+        assert!(out.contains("A minimal OSS-hygiene baseline"));
+        assert!(out.contains("Multi-line prose stays on one paragraph."));
+        assert!(out.contains("Second paragraph here."));
+        // Two paragraphs separated by a blank line.
+        assert!(out.contains("paragraph.\n\nSecond"));
+    }
+
+    #[test]
+    fn overview_promotes_indented_block_to_fenced_yaml() {
+        let yaml = "\
+# alint://bundled/oss-baseline@v1
+#
+# Adopt it with:
+#
+#     extends:
+#       - alint://bundled/oss-baseline@v1
+#
+# Trailing prose.
+
+version: 1
+";
+        let out = render_overview_from_comments(yaml);
+        assert!(out.contains("```yaml\nextends:\n  - alint://bundled/oss-baseline@v1\n```"));
+        assert!(out.contains("Trailing prose."));
+    }
+
+    #[test]
+    fn overview_keeps_bulleted_lists_with_hanging_indent() {
+        // Bulleted lists with 4-space hanging-indent continuations
+        // (the ci/github-actions style) must NOT be split into
+        // separate code blocks. They stay as one Para block so
+        // CommonMark renders them as a list with continuation.
+        let yaml = "\
+# alint://bundled/ci/github-actions@v1
+#
+# GitHub Actions hardening:
+#
+#   - \"Token-Permissions\" — declare scope explicitly
+#     at workflow level (or narrower).
+#   - \"Pinned-Dependencies\" — third-party actions pinned
+#     to commit SHAs.
+
+version: 1
+";
+        let out = render_overview_from_comments(yaml);
+        // The hanging-indent continuation must NOT trigger a
+        // code-block fence in the middle of the list.
+        assert!(
+            !out.contains("```yaml"),
+            "got unexpected code fence in:\n{out}"
+        );
+        assert!(out.contains("  - \"Token-Permissions\""));
+        assert!(out.contains("    at workflow level (or narrower)."));
+    }
+
+    #[test]
+    fn overview_stops_at_yaml_body() {
+        // Reading must stop at the first non-comment, non-blank
+        // line (the YAML body).
+        let yaml = "\
+# alint://bundled/x@v1
+#
+# Description goes here.
+
+version: 1
+# This is a comment INSIDE the body, not part of the overview.
+rules:
+  # Inline rule comment, also not part of the overview.
+  - id: foo
+";
+        let out = render_overview_from_comments(yaml);
+        assert!(out.contains("Description goes here."));
+        assert!(!out.contains("INSIDE the body"));
+        assert!(!out.contains("Inline rule comment"));
+    }
+
+    #[test]
+    fn overview_handles_no_leading_comments() {
+        let yaml = "version: 1\nrules: []\n";
+        assert_eq!(render_overview_from_comments(yaml), "");
+    }
+
+    #[test]
+    fn first_overview_sentence_truncates_at_period() {
+        let s = first_overview_sentence(
+            "Hygiene checks for Go modules. Adopt with the snippet below.",
+        );
+        assert_eq!(s, "Hygiene checks for Go modules.");
+    }
+
+    #[test]
+    fn first_overview_sentence_skips_code_blocks() {
+        let s = first_overview_sentence(
+            "Lockfile discipline: one per workspace.\n\n\
+             ```yaml\nextends: []\n```\n\n\
+             Second paragraph.",
+        );
+        assert_eq!(s, "Lockfile discipline: one per workspace.");
+    }
+}
+
