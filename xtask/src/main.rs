@@ -1792,9 +1792,8 @@ rules:
 
     #[test]
     fn first_overview_sentence_truncates_at_period() {
-        let s = first_overview_sentence(
-            "Hygiene checks for Go modules. Adopt with the snippet below.",
-        );
+        let s =
+            first_overview_sentence("Hygiene checks for Go modules. Adopt with the snippet below.");
         assert_eq!(s, "Hygiene checks for Go modules.");
     }
 
@@ -1808,4 +1807,3 @@ rules:
         assert_eq!(s, "Lockfile discipline: one per workspace.");
     }
 }
-
