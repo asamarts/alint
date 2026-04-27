@@ -383,6 +383,7 @@
         { "$ref": "#/$defs/rule_yaml_path_matches" },
         { "$ref": "#/$defs/rule_toml_path_equals" },
         { "$ref": "#/$defs/rule_toml_path_matches" },
+        { "$ref": "#/$defs/rule_json_schema_passes" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
@@ -715,6 +716,25 @@
         "path": { "type": "string" },
         "matches": { "type": "string" },
         "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_json_schema_passes": {
+      "description": "Validate every JSON / YAML / TOML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
+      "type": "object",
+      "required": ["paths", "schema_path"],
+      "properties": {
+        "kind": { "const": "json_schema_passes" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "schema_path": {
+          "type": "string",
+          "description": "Path to a JSON Schema file relative to the lint root. Schema must itself be JSON even when validating YAML / TOML targets."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["json", "yaml", "yml", "toml"],
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+        }
       }
     },
 

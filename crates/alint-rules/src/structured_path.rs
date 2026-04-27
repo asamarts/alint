@@ -56,7 +56,7 @@ pub enum Format {
 }
 
 impl Format {
-    fn parse(self, text: &str) -> std::result::Result<Value, String> {
+    pub(crate) fn parse(self, text: &str) -> std::result::Result<Value, String> {
         match self {
             Self::Json => serde_json::from_str(text).map_err(|e| e.to_string()),
             Self::Yaml => serde_yaml_ng::from_str(text).map_err(|e| e.to_string()),
@@ -64,11 +64,24 @@ impl Format {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Json => "JSON",
             Self::Yaml => "YAML",
             Self::Toml => "TOML",
+        }
+    }
+
+    /// Detect the format from a path's extension. Returns `None`
+    /// for unknown extensions; callers decide how to fall back
+    /// (require an explicit `format:` override, default to JSON,
+    /// emit a per-file violation, etc).
+    pub(crate) fn detect_from_path(path: &std::path::Path) -> Option<Self> {
+        match path.extension()?.to_str()? {
+            "json" => Some(Self::Json),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "toml" => Some(Self::Toml),
+            _ => None,
         }
     }
 }

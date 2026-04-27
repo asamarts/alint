@@ -38,6 +38,7 @@ pub mod for_each_dir;
 pub mod for_each_file;
 pub mod indent_style;
 pub mod io;
+pub mod json_schema_passes;
 pub mod line_endings;
 pub mod line_max_width;
 pub mod max_consecutive_blank_lines;
@@ -108,6 +109,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         "toml_path_matches",
         structured_path::toml_path_matches_build,
     );
+    registry.register("json_schema_passes", json_schema_passes::build);
     registry.register("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
@@ -219,6 +221,7 @@ mod registry_tests {
             "yaml_path_matches",
             "toml_path_equals",
             "toml_path_matches",
+            "json_schema_passes",
             "file_is_text",
             "is_text",
             // Short-only.

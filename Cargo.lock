@@ -141,6 +141,7 @@ dependencies = [
  "alint-core",
  "content_inspector",
  "globset",
+ "jsonschema",
  "regex",
  "serde",
  "serde_json",
