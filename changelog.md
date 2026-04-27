@@ -8,6 +8,720 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.7] — 2026-04-26
+
+Competitive bench publication. The v0.5.6 harness becomes a
+multi-tool driver: alint, ls-lint, Repolinter, and `find` +
+`ripgrep` pipelines all run against the same synthetic
+trees on the same hardware, producing wall-time numbers
+that are directly comparable. Reproducibility via a new
+`ghcr.io/asamarts/alint-bench` Docker image (every
+competitor pinned by version) and an `xtask bench-scale
+--docker` flag that re-execs the bench inside the image.
+Schema-compatible; every v0.5.6 config runs unchanged.
+
+### Added
+
+- **`xtask bench-scale --tools <list>`** — the bench
+  harness now runs an arbitrary set of tools across the
+  same `(size × scenario × mode)` matrix v0.5.6
+  introduced. Default `alint` (preserves the v0.5.6
+  publication shape), `all` expands to every known tool,
+  comma lists pick a subset (`alint,grep`,
+  `alint,ls-lint`). Tools missing on `PATH` are
+  log-and-dropped at resolve time so a partial
+  installation still produces alint-only rows without
+  aborting.
+  - **alint** — full matrix (every scenario × mode).
+  - **ls-lint** — gated to (S1, full); ls-lint is
+    extension/case-class only and has no
+    `--changed`-equivalent.
+  - **Repolinter** — gated to (S2, full); pinned to
+    0.11.2 (last pre-archive release, repo archived
+    2026-02-06). The size-bound check (no files >10 MiB)
+    is dropped: Repolinter has no built-in primitive
+    and emulating via `script` rules would distort
+    timings beyond recognition.
+  - **find + ripgrep pipeline** (`grep`) — gated to
+    (S1, full) and (S2, full); shell-pipeline baseline
+    representing the small-team "we just chain `find`
+    and `rg`" status quo. S3's cross-file rules have no
+    sane shell expression and are out of scope.
+
+- **`bench/Dockerfile` + `ghcr.io/asamarts/alint-bench`
+  image** — the canonical competitive-bench environment.
+  Built and pushed by `.github/workflows/bench-docker.yml`
+  on tag pushes (`:<ver>` + `:latest`), main pushes
+  (`:edge`), and manual dispatch. Pinned versions of
+  hyperfine, ripgrep, repolinter, ls-lint, Node 20, and
+  the Rust toolchain so a given image tag IS the bench
+  environment for that release.
+
+- **`xtask bench-scale --docker`** — re-execs the bench
+  inside the published image. Bind-mounts the workspace
+  at `/work`, uses a named volume for the cargo target
+  dir so target/ artefacts persist across runs without
+  shadowing the host. Image override via
+  `ALINT_BENCH_IMAGE=...`.
+
+- **First competitive numbers** under
+  `docs/benchmarks/v0.5/scale/linux-x86_64/`. Same
+  fingerprint as v0.5.6's alint-only publication; rows
+  for ls-lint / repolinter / grep added at the
+  scenarios + sizes each tool supports. Headline
+  ratios (linux-x86_64, 100k files):
+  - **S1 (filename hygiene)**: alint vs ls-lint vs
+    `find | grep` pipelines.
+  - **S2 (existence + content)**: alint vs Repolinter
+    vs `find` + `rg` pipelines.
+  - **S3 (workspace bundle)**: alint only — no
+    competitor models cross-file rules.
+
+  Per-row markdown plus a `results.json` with the full
+  matrix; the new `Tool` column makes pivoting trivial.
+
+- **Published 1M-file numbers** under
+  `docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md`.
+  Six rows (`1m × {S1,S2,S3} × {full,changed}`) on the
+  same hardware as v0.5.6's 1k/10k/100k publication.
+  Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
+  1m / S3 / full ≈ 9.5min — the cross-file rules in the
+  workspace bundle scale superlinearly with N, exactly as
+  the methodology predicted. `--changed` saves ~34% on
+  S2's content rules at 1m but barely helps S3 (cross-file
+  rules can't be filtered).
+
+- **Auto-reduced sampling at 1m**. The harness caps
+  `1m`-row warmup at 1 and measured runs at 3 regardless
+  of `--warmup` / `--runs`. A single `1m / S3` invocation
+  runs for several minutes; thirteen of them per row would
+  push the matrix to many hours. The trade-off is wider
+  stddev at 1m — `methodology.md` is updated to flag this
+  so readers don't compare 1m's stddev to the smaller-size
+  rows like-for-like. Stddev is reported as `0.0` when
+  hyperfine emits `null` (single-run rows) instead of
+  failing the whole bench.
+
+### Fixed
+
+- **`--include-1m` now actually adds the 1m size** to the
+  matrix when `--sizes` is at its default (1k,10k,100k).
+  Previously the flag only filtered 1m out unless you
+  also retyped the size list — the opposite of what the
+  help text implied.
+
+- **Tool-version fingerprint stays one line**. Multi-line
+  `--version` banners (notably ripgrep's) were being
+  stored verbatim in the fingerprint's `tool_versions`
+  map, blowing up the rendered "**Tools:** ..." line in
+  committed reports. Capture now keeps just the first
+  line of each tool's `--version` output.
+
+## [0.5.6] — 2026-04-26
+
+Scale-ceiling bench publication + a latent walker bug fix
+that the bench surfaced. New `xtask bench-scale` subcommand
+runs alint across a (size × scenario × mode) matrix with
+hardware-fingerprint capture and JSON + Markdown
+publication; v0.5.7 layers competitive comparisons
+(ls-lint, Repolinter, find/grep) on top of the same
+infrastructure. Schema-compatible; every v0.5.5 config
+runs unchanged.
+
+## [0.5.6] — 2026-04-26
+
+Scale-ceiling bench publication + a latent walker bug fix
+that the bench surfaced. New `xtask bench-scale` subcommand
+runs alint across a (size × scenario × mode) matrix with
+hardware-fingerprint capture and JSON + Markdown
+publication; v0.5.7 will layer competitive comparisons
+(ls-lint, Repolinter, find/grep) on top of the same
+infrastructure. Schema-compatible; every v0.5.5 config
+runs unchanged.
+
+### Added
+
+- **`xtask bench-scale`** — scale-ceiling benchmark
+  driver. Runs alint across:
+  - **Sizes**: `1k` / `10k` / `100k` (default), opt into
+    `1m` via `--include-1m`. Synthetic monorepo trees
+    generated deterministically from the seed
+    (default `0xa11e47`).
+  - **Scenarios**: `S1` (filename hygiene, 8 rules) /
+    `S2` (existence + content, 8 rules) / `S3` (workspace
+    bundle: `oss-baseline` + `rust` + `monorepo` +
+    `monorepo/cargo-workspace`).
+  - **Modes**: `full` (every file evaluated) and
+    `changed` (`alint check --changed` against a
+    deterministic 10% diff — measures the v0.5.0
+    incremental path).
+
+  Per-row hyperfine measurement (3 warmup + 10 measured
+  runs by default); JSON + Markdown output under
+  `docs/benchmarks/v0.5/scale/<os>-<arch>/`. Hardware
+  fingerprint (CPU model + cores, RAM, FS type, kernel,
+  rustc, alint version + git SHA, hyperfine version)
+  embedded in every report so cross-machine comparisons
+  stay honest.
+
+- **`alint_bench::tree::generate_monorepo`** — new
+  Cargo-workspace-shaped synthetic-tree generator with
+  real workspace `[workspace]` + per-package
+  `[package].name` Cargo.toml content (so the
+  `monorepo/cargo-workspace@v1` ruleset's structured-query
+  rules see well-formed manifests). Full determinism for
+  byte-identical trees across platforms.
+
+- **`alint_bench::tree::select_subset`** — deterministic
+  Fisher-Yates partial shuffle for picking a fraction of
+  files to "touch" in `--changed`-mode benches.
+
+- **First published numbers**:
+  `docs/benchmarks/v0.5/scale/linux-x86_64/` with 18 rows
+  (3 sizes × 3 scenarios × 2 modes) on AMD Ryzen 9 3900X /
+  62 GB / ext4 / Linux 6.1. Companion
+  `docs/benchmarks/v0.5/scale/{README.md,methodology.md}`
+  documents the harness + scenario definitions + how to
+  reproduce.
+
+- **CLI flags**: `--sizes`, `--scenarios`, `--modes`,
+  `--warmup`, `--runs`, `--seed`, `--diff-pct`, `--out`,
+  `--include-1m`, `--quick`, `--json-only`. The default
+  (`cargo xtask bench-scale` with no args) produces the
+  full publication-grade matrix.
+
+### Fixed
+
+- **Walker no longer descends into `.git/`.** `alint
+  check` against a tree containing a `.git/` directory
+  used to walk into git's internal storage — wasted work
+  for every alint rule (none of them target
+  `.git/objects/*`) and a TOCTOU hazard during git's
+  auto-gc / packfile rewrites. The walker now adds
+  `.git` to its exclusion overrides unconditionally.
+  No user-visible behaviour change for repos whose
+  `.gitignore` already covers `.git/`-shaped paths;
+  benchmark and large-monorepo runs become both faster
+  and reliable.
+
+### Internal
+
+- New `xtask/src/bench/` module: `mod.rs` (orchestration
+  + types), `fingerprint.rs` (hardware capture per OS),
+  `scenarios/*.yml` (S1/S2/S3 alint configs embedded via
+  `include_str!`).
+- `xtask` gains `serde` (with `derive`) and `serde_json`
+  dev-deps for hyperfine `--export-json` parsing and the
+  results.json schema.
+- 11 new unit tests on `alint_bench::tree` covering the
+  monorepo shape, file-count exactness, deterministic
+  output for the same seed, and `select_subset`'s
+  fraction / clamping / determinism semantics.
+
+### Compatibility
+
+- Schema version remains `1`. No rule-config changes.
+- Public API additions are non-breaking. Walker
+  `.git/`-exclusion is a behaviour fix, not a config
+  change.
+
+## [0.5.5] — 2026-04-26
+
+Two license-compliance bundled rulesets — the v0.5 cycle's
+expansion beyond the workspace-tier monorepo audience to
+OSS maintainers and corporate-policy teams.
+Schema-compatible; every v0.5.4 config runs unchanged.
+
+### Added
+
+- **`alint://bundled/compliance/reuse@v1`** — FSFE
+  [REUSE Specification](https://reuse.software/)
+  compliance. Three rules covering the spec's two
+  load-bearing requirements:
+  - `reuse-licenses-dir-exists` — top-level `LICENSES/`
+    directory present (per
+    [§ License files](https://reuse.software/spec/#license-files)).
+  - `reuse-source-has-spdx-identifier` — every source
+    file carries an `SPDX-License-Identifier:` header in
+    its first ~10 lines.
+  - `reuse-source-has-copyright-text` — every source
+    file carries an `SPDX-FileCopyrightText:` header.
+
+  Source-file rules cover the common code extensions
+  (`*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,
+  hh,sh,rb,swift}`) and exclude vendored / build /
+  dist directories. Projects that license files via
+  `.license` companions or `REUSE.toml` mappings can
+  narrow `paths:` on the source rules.
+
+  ```yaml
+  extends:
+    - alint://bundled/compliance/reuse@v1
+  ```
+
+- **`alint://bundled/compliance/apache-2@v1`** —
+  compliance for projects distributed under the Apache
+  License, Version 2.0. Three rules verifying the
+  artefacts the license text itself requires of
+  redistributors:
+  - `apache-2-license-text-present` — LICENSE (or
+    LICENSE.md / LICENSE.txt / COPYING) contains the
+    canonical "Apache License, Version 2.0" text.
+  - `apache-2-notice-file-exists` — root NOTICE file
+    present (per Apache-2.0 §4(d)).
+  - `apache-2-source-has-license-header` — every source
+    file carries the canonical "Licensed under the
+    Apache License, Version 2.0" header in its first
+    ~25 lines.
+
+  Substring-matches the canonical license title rather
+  than doing full bit-for-bit comparison, so SPDX
+  templates, apache.org's template, and GitHub's
+  auto-init all parse as compliant. Dual-licensed
+  projects (e.g. Apache-2.0 OR MIT) can extend this
+  ruleset and use `level: off` on rules they don't want
+  firing strictly.
+
+  Bundled catalog: 15 → 17.
+
+### Internal
+
+- New ruleset directory
+  `crates/alint-dsl/rulesets/v1/compliance/` with two
+  `.yml` files; registered in
+  `alint_dsl::bundled::REGISTRY`. Neither ruleset uses a
+  fact gate — adopting a compliance ruleset is the
+  user's signal that the project intends to be
+  compliant with the named scheme.
+- 6 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/bundled-compliance/`:
+  per ruleset, happy-path + missing-core-artefact +
+  missing-source-header.
+
+### Compatibility
+
+- Schema version remains `1`. Pure config — no new rule
+  kinds, no new core APIs.
+- JSON / SARIF / GitHub outputs byte-equivalent for
+  configs that don't extend the new rulesets.
+
+## [0.5.4] — 2026-04-26
+
+`alint init` — the missing one-line adoption story.
+Detects the repo's ecosystem (Rust / Node / Python / Go /
+Java) and optionally its workspace shape (Cargo / pnpm /
+Yarn-or-npm), then writes a `.alint.yml` extending the
+right bundled rulesets. Closes the v0.5 monorepo theme on
+the adoption side: every primitive shipped in v0.5.0–v0.5.3
+now has a one-line on-ramp. Schema-compatible; every v0.5.3
+config runs unchanged.
+
+### Added
+
+- **`alint init [PATH]`** — new subcommand. Detects the
+  repo's ecosystem from root manifests and writes a
+  `.alint.yml` with `extends:` lines for
+  `oss-baseline@v1` plus each detected language ruleset.
+  Detection is deliberately a presence check (file
+  exists, no parsing) so it stays fast and predictable:
+  - Rust: `Cargo.toml`
+  - Node: `package.json`
+  - Python: `pyproject.toml` / `setup.py` / `setup.cfg`
+  - Go: `go.mod`
+  - Java: `pom.xml` / `build.gradle` / `build.gradle.kts`
+
+  Refuses to overwrite an existing config (any of
+  `.alint.yml` / `.alint.yaml` / `alint.yml` /
+  `alint.yaml`) — exits non-zero with a clear message
+  pointing the user at deletion.
+
+- **`alint init --monorepo`** — adds workspace detection
+  on top of the language scan. Recognises:
+  - **Cargo workspaces** — root `Cargo.toml` contains a
+    `[workspace]` table (line-prefix check, no TOML
+    parsing).
+  - **pnpm workspaces** — root `pnpm-workspace.yaml` /
+    `.yml` exists.
+  - **Yarn / npm workspaces** — root `package.json`
+    contains `"workspaces"`.
+
+  When a workspace is detected, the generated config also
+  extends `monorepo@v1` and the matching
+  `monorepo/<flavor>-workspace@v1` overlay, plus sets
+  `nested_configs: true` so each subdirectory can layer
+  its own `.alint.yml` on top.
+
+  ```yaml
+  # `alint init --monorepo` in a Cargo workspace produces:
+  version: 1
+  nested_configs: true
+
+  extends:
+    - alint://bundled/oss-baseline@v1
+    - alint://bundled/rust@v1
+    - alint://bundled/monorepo@v1
+    - alint://bundled/monorepo/cargo-workspace@v1
+  ```
+
+  Bazel / Lerna / Nx / Turbo detection deferred — the
+  three flavours that have bundled overlays cover the
+  workspace-tier sweet spot.
+
+### Internal
+
+- New `crates/alint/src/init.rs` module with `Detection` /
+  `Language` / `WorkspaceFlavor` types, a pure `detect()`
+  function and a deterministic `render()` emitter. Output
+  is hand-formatted YAML (not serialized via serde) so the
+  generated file can carry header comments documenting
+  what was detected and how to use it.
+- 17 new unit tests covering the detector + emitter
+  (per-language detection, polyglot repos, workspace
+  precedence, header summary).
+- 3 new trycmd CLI tests under `tests/cli/init-*.toml`:
+  empty-repo init, monorepo-cargo init, refuses-overwrite.
+  The trycmd `fs.sandbox = true` mode lets us assert on
+  the post-run sandbox state (the generated `.alint.yml`)
+  alongside stdout / stderr / exit.
+- `help-top-level` snapshot regenerated to include the
+  `init` subcommand line.
+
+### Compatibility
+
+- Schema version remains `1`. Pure additive — no rule,
+  config, or output changes.
+- Public API unchanged (the `init` module is private to
+  the binary crate).
+- New `tempfile` dev-dependency on `alint` (already a
+  workspace dep elsewhere; the binary needs it for the
+  init unit tests).
+
+## [0.5.3] — 2026-04-26
+
+Three workspace-aware bundled rulesets layered on top of
+`monorepo@v1`. Each is gated by a workspace-flavor fact and
+uses the v0.5.2 `when_iter:` filter to scope per-member
+checks to actual package directories — `crates/notes/`
+(no `Cargo.toml`) or `packages/drafts/` (no `package.json`)
+are filtered out without firing false positives.
+Schema-compatible; every v0.5.2 config runs unchanged.
+
+### Added
+
+- **`alint://bundled/monorepo/cargo-workspace@v1`** —
+  Cargo workspaces. Gated by `facts.is_cargo_workspace`
+  (root `Cargo.toml` declares `[workspace]`). Three rules:
+  `members = [...]` declared at the workspace root
+  (`toml_path_matches`); every `crates/*` directory with
+  its own `Cargo.toml` has a README; every member's
+  `Cargo.toml` declares `[package].name`.
+
+  ```yaml
+  extends:
+    - alint://bundled/monorepo@v1
+    - alint://bundled/rust@v1
+    - alint://bundled/monorepo/cargo-workspace@v1
+  ```
+
+- **`alint://bundled/monorepo/pnpm-workspace@v1`** —
+  pnpm workspaces. Gated by `facts.is_pnpm_workspace`
+  (root `pnpm-workspace.yaml` / `.yml` exists). Three
+  rules: `packages: [...]` declared in
+  `pnpm-workspace.yaml` (`yaml_path_matches`); every
+  `packages/*` with a `package.json` has a README; every
+  member's `package.json` declares `name`.
+
+- **`alint://bundled/monorepo/yarn-workspace@v1`** —
+  Yarn / npm workspaces (the workspace declaration lives
+  in the root `package.json` for both). Gated by
+  `facts.is_yarn_workspace` (root `package.json` contains
+  `"workspaces"`). Three rules: `workspaces: [...]` is
+  non-empty (`json_path_matches` against
+  `$.workspaces[*]`); every `{packages,apps}/*` with a
+  `package.json` has a README; every member's
+  `package.json` declares `name`. Validates the array
+  form; the rarer object form
+  (`"workspaces": {"packages": [...]}`) is gated by the
+  fact but not field-validated here.
+
+  Bundled catalog: 12 → 15 rulesets.
+
+### Internal
+
+- New ruleset directory
+  `crates/alint-dsl/rulesets/v1/monorepo/` with three
+  `.yml` files; registered in `alint_dsl::bundled::REGISTRY`.
+  Each ruleset declares its own `is_*_workspace` fact
+  inline rather than promoting them to the core `facts:`
+  catalogue — the facts are workspace-specific and not
+  meant to be referenced from user configs.
+- 7 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/bundled-monorepo/`:
+  per-flavor "filters non-member dirs" + "silent outside
+  workspace" pair, plus `cargo-workspace`'s "fires on
+  missing members" case.
+
+### Compatibility
+
+- Schema version remains `1`. All three rulesets are
+  pure config — no new rule kinds, no new core APIs.
+- JSON / SARIF / GitHub outputs byte-equivalent for
+  configs that don't extend the new rulesets.
+
+## [0.5.2] — 2026-04-26
+
+Per-iteration `when:` filter on iterating rules — closes the
+second monorepo-scale gap from the v0.5 roadmap. Combined
+with `--changed` (v0.5.0) and `command` plugin (v0.5.1),
+this is the third leg of the v0.5 monorepo theme.
+Schema-compatible; every v0.5.1 config runs unchanged.
+
+### Added
+
+- **`when_iter:`** field on `for_each_dir`, `for_each_file`,
+  and `every_matching_has`. Optional expression evaluated
+  against each iterated entry's `iter` context; iterations
+  whose verdict is false are skipped before any nested rule
+  is built. Closes the Bazel/Cargo/pnpm-workspace gap where
+  users previously had to widen `select:` and rely on inner
+  rules to short-circuit.
+
+  ```yaml
+  - id: workspace-member-has-readme
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+  ```
+
+  Without `when_iter:`, `crates/notes/` (no `Cargo.toml`)
+  would have fired the missing-README rule. With it, only
+  workspace members are evaluated.
+
+- **`iter.*` namespace in `when:` expressions** — exposes
+  the iterated entry's metadata to the existing `when:`
+  grammar. Same expression compiles in `when_iter:` (outer
+  iteration filter) and in any nested rule's `when:`
+  (per-iteration nested gate). Outside an iteration
+  context, `iter.X` resolves to `null` and
+  `iter.has_file(_)` to `false`, matching the
+  "missing fact is falsy" convention.
+
+  | Reference | Type | Notes |
+  |---|---|---|
+  | `iter.path` | string | Relative path of the iterated entry. |
+  | `iter.basename` | string | Basename. |
+  | `iter.parent_name` | string | Parent dir name. |
+  | `iter.stem` | string | Basename minus final extension. |
+  | `iter.ext` | string | Final extension without the dot. |
+  | `iter.is_dir` | bool | `true` for `for_each_dir`, `false` for `for_each_file`. |
+  | `iter.has_file(pattern)` | bool | Glob match relative to the iterated directory. Always `false` on file iteration. |
+
+- **Function-call syntax in the `when:` grammar.** Limited
+  to a fixed allow-list of methods on `iter` (currently just
+  `has_file`); typos in user configs surface as
+  "unknown iter method" parse errors instead of silently
+  coercing to `false`. Calls on non-iter namespaces are a
+  parse error.
+
+### Internal
+
+- New public types `IterEnv` and `WhenEnv::with_iter()` in
+  `alint-core::when`. New `WhenExpr::Call` AST variant.
+  `WhenEnv::new()` constructor for callers without
+  iteration context.
+- Shared parser helper `for_each_dir::parse_when_iter`
+  reused by `for_each_file` and `every_matching_has`.
+- 9 new unit tests in `alint-core::when` covering the iter
+  namespace + function-call grammar + outside-iter
+  fallback. 4 new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/when_iter/`: marker-file
+  filter, basename predicate, recursive-glob predicate,
+  composition with `facts.*`.
+
+### Compatibility
+
+- Schema version remains `1`. `when_iter:` is opt-in; rules
+  that don't use it behave identically to v0.5.1.
+- Public API additions are non-breaking. `WhenEnv` gains an
+  `iter: Option<IterEnv>` field; the new `WhenEnv::new()`
+  constructor and existing struct-literal syntax both work.
+  Out-of-tree code constructing `WhenEnv { facts, vars }`
+  (without explicit `iter`) needs to add `iter: None` (or
+  switch to `WhenEnv::new(facts, vars)`).
+- `evaluate_for_each` (an `alint-rules` crate-private
+  helper) gained a `when_iter` parameter — only matters if
+  you've forked the crate.
+
+## [0.5.1] — 2026-04-26
+
+Plugin tier 1: `command` rule kind. Wraps any CLI on `PATH`
+into alint's report. Continues the v0.5 monorepo-scale theme
+— pairs naturally with `--changed` so per-file external
+checks (actionlint, shellcheck, kubeconform, …) become
+incremental in CI. Schema-compatible; every v0.5.0 config
+runs unchanged.
+
+### Added
+
+- **`kind: command`** — per-file rule that spawns argv with
+  path-template substitution (`{path}`, `{dir}`, `{stem}`,
+  `{ext}`, `{basename}`, `{parent_name}`). Exit `0` is a
+  pass; non-zero produces a violation whose message is the
+  truncated stdout+stderr. Working dir is the repo root;
+  stdin is closed (`/dev/null`). Output is capped at 16 KiB
+  per stream to keep reports legible.
+
+  ```yaml
+  - id: workflows-clean
+    kind: command
+    paths: ".github/workflows/*.{yml,yaml}"
+    command: ["actionlint", "{path}"]
+    level: error
+  ```
+
+  Environment threaded into each invocation: `ALINT_PATH`
+  (relative to root), `ALINT_ROOT` (absolute), `ALINT_RULE_ID`,
+  `ALINT_LEVEL`, plus `ALINT_VAR_<NAME>` per top-level
+  `vars:` entry and `ALINT_FACT_<NAME>` per resolved fact.
+
+- **`timeout: <seconds>`** option on `command` rules. Default
+  30s. Past the limit, the child process is killed and a
+  violation reports the timeout. Bounds runaway tools so a
+  hung child never stalls the whole run.
+
+- **`--changed` interaction.** `command` is per-file (no
+  `requires_full_index` override), so it inherits the v0.5
+  filtered-index iteration: `alint check --changed` spawns
+  the wrapped tool only for files in the diff. A
+  `shellcheck` rule on a 200-script repo invokes
+  `shellcheck` zero times when the diff doesn't touch any
+  `.sh`. Largest practical multiplier on CI cost for
+  external-linter wrappers.
+
+### Security
+
+- **Trust gate.** `command` rules are only permitted in the
+  user's own top-level `.alint.yml`. A `kind: command` rule
+  introduced via `extends:` — local file, HTTPS URL, or
+  `alint://bundled/<name>@<rev>` — is rejected at load time
+  with a clear error pointing at the offending source.
+  Adopting a published ruleset must never gain it arbitrary
+  process execution. New public function
+  `alint_dsl::reject_command_rules_in` mirrors the existing
+  `alint_core::facts::reject_custom_facts_in` gate.
+
+### Internal
+
+- New `alint_rules::command` module (~330 LOC including 9
+  unit tests). Polling-based wait loop with 10ms granularity
+  for the timeout path; output capping via
+  `Read::take(OUTPUT_CAP_BYTES)`. JSON Schema gains a
+  `rule_command` branch; root + in-crate copies kept
+  byte-identical by the existing drift-guard test.
+
+- 3 new e2e integration tests under
+  `crates/alint-e2e/tests/command_plugin.rs` (`#[cfg(unix)]`
+  — relies on `/bin/sh`): full-engine pass case, full-engine
+  fail case (one violation per failing file), and the
+  `--changed` interaction (only invoked for files in the
+  diff). 2 new unit tests in `alint-dsl` covering the trust
+  gate (rejected from `extends:`, allowed in top-level).
+
+### Compatibility
+
+- Schema version remains `1`. JSON / SARIF / GitHub outputs
+  byte-equivalent for configs that don't use `command`.
+- Public API additions are non-breaking. `Rule` trait
+  unchanged; the new `reject_command_rules_in` is a new
+  public function in `alint-dsl`.
+
+## [0.5.0] — 2026-04-26
+
+First v0.5 cut. Headline: incremental `alint check --changed`
+mode for pre-commit and PR-check paths. Schema-compatible;
+every v0.4.10 config runs unchanged. JSON / SARIF / GitHub
+outputs byte-equivalent for full-tree runs.
+
+### Added
+
+- **`alint check --changed [--base=<ref>]`** and the same
+  flags on `alint fix`. With `--base`, the changed-set is
+  derived from `git diff --name-only --relative
+  <base>...HEAD` (three-dot — merge-base diff, the right
+  shape for PR checks). Without `--base`, it's
+  `git ls-files --modified --others --exclude-standard`
+  (working-tree diff, the right shape for pre-commit). The
+  engine evaluates per-file rules against a [`FileIndex`]
+  filtered to the changed-set, so a Java license-header rule
+  scoped to `**/*.java` skips entirely when no `.java` file
+  is in the diff. Cross-file rules (`pair`, `for_each_dir`,
+  `every_matching_has`, `unique_by`, `dir_contains`,
+  `dir_only_contains`) and existence rules (`file_exists`,
+  `file_absent`, `dir_exists`, `dir_absent`) keep full-tree
+  semantics for iteration; existence rules additionally skip
+  when their `paths:` scope doesn't intersect the diff so an
+  unchanged-but-missing LICENSE doesn't fire on every PR.
+  Empty diffs short-circuit to an empty report (the
+  no-op-commit case in pre-commit). Outside a git repo or
+  when `git` isn't on PATH, `--changed` exits non-zero with
+  a clear message rather than silently fall back to a full
+  check.
+
+  ```bash
+  # Pre-commit: lint the working-tree diff.
+  alint check --changed
+
+  # PR check: lint everything that diverged from main.
+  alint check --changed --base=main --format=sarif
+  ```
+
+- **`Rule::requires_full_index() -> bool`** and
+  **`Rule::path_scope() -> Option<&Scope>`** on the public
+  `alint-core::Rule` trait. Both default to "no opt-in", so
+  out-of-tree rule implementations compile unchanged.
+  Internal rules override on the eleven cases that need
+  full-tree semantics: the six cross-file kinds plus the
+  four existence kinds. Per-file rules need no override —
+  the engine hands them the filtered index and their
+  existing `Scope::matches` loops do the right thing.
+
+- **`alint_core::git::collect_changed_paths(root, base)`**
+  helper, parallel to the existing
+  `collect_tracked_paths`. Returns the changed-set as a
+  `HashSet<PathBuf>` of paths relative to `root`, or `None`
+  outside a git repo / when `git` exits non-zero.
+
+- **`Engine::with_changed_paths(set)`** builder method.
+  Threads the changed-set through `Engine::run` and
+  `Engine::fix`. Every call costs one walk over the
+  index entries to build a filtered subset; absent the
+  builder call, the engine behaves exactly as before.
+
+- **`Step::CheckChanged`** in `alint-testkit`'s scenario
+  harness. Five new e2e scenarios under
+  `crates/alint-e2e/scenarios/check/changed/` cover:
+  per-file rule skipped when scope misses the diff,
+  per-file rule fires only on changed files, cross-file
+  `pair` keeps full-tree semantics, existence rule skips
+  when scope doesn't intersect, and the empty-diff
+  short-circuit.
+
+### Compatibility
+
+- Schema version remains `1`. Every v0.4 config runs
+  unchanged.
+- Public API additions are non-breaking: `Rule` trait
+  methods have defaults, `Engine::with_changed_paths` is
+  additive. Embedders that hand-construct an `Engine` keep
+  compiling.
+- `alint-testkit::Step` gained a variant
+  (`Step::CheckChanged`); embedders that exhaustively
+  matched on `Step` need to add an arm for it.
+
 ## [0.4.10] — 2026-04-25
 
 Three new content-family rule kinds rounding out the family.
@@ -1027,7 +1741,21 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
+[0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
+[0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4
+[0.5.3]: https://github.com/asamarts/alint/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/asamarts/alint/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/asamarts/alint/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.0
+[0.4.10]: https://github.com/asamarts/alint/compare/v0.4.9...v0.4.10
+[0.4.9]: https://github.com/asamarts/alint/compare/v0.4.8...v0.4.9
+[0.4.8]: https://github.com/asamarts/alint/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/asamarts/alint/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/asamarts/alint/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/asamarts/alint/compare/v0.4.4...v0.4.5
+[0.4.4]: https://github.com/asamarts/alint/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/asamarts/alint/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/asamarts/alint/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/asamarts/alint/compare/v0.4.0...v0.4.1

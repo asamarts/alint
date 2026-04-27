@@ -13,6 +13,8 @@ Arguments:
 
 Options:
   -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
+      --changed          Restrict the check to files in the working-tree diff. Without `--base`, uses `git ls-files --modified --others --exclude-standard` (right shape for pre-commit). With `--base`, uses `git diff --name-only <base>...HEAD` (right shape for PR checks). Cross-file rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) and existence rules (`file_exists` et al.) still consult the full tree by definition
+      --base <REF>       Base ref for `--changed` (uses three-dot `<base>...HEAD`, i.e. merge-base diff). Implies `--changed`
   -f, --format <FORMAT>  Output format [default: human]
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes
