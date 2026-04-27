@@ -217,7 +217,7 @@ jobs:
         run: ci/scripts/publish-crates.sh
 
   publish-npm:
-    name: publish @a-lint/alint to npm
+    name: publish @asamarts/alint to npm
     # `needs: release` so the npm package's postinstall download
     # always finds the matching binary tarballs on GitHub
     # Releases. The npm tarball itself contains only the
@@ -237,7 +237,7 @@ jobs:
           # Set this in repo Settings → Secrets → Actions. Token
           # is a granular access token (npmjs.com → Access
           # Tokens → Generate → Granular) with `Read and write`
-          # on packages, scoped to `@a-lint`, no IP restriction.
+          # on packages, scoped to `@asamarts`, no IP restriction.
           # We tried Trusted Publishing first but npm's UI
           # currently requires 2FA to enable it and the 2FA
           # configuration UI was broken; revisit when that ships.

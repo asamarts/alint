@@ -106,7 +106,7 @@ function sha256Hex(buf) {
 async function main() {
   const skipReason = shouldSkip();
   if (skipReason) {
-    process.stderr.write(`@a-lint/alint: skipping postinstall (${skipReason})\n`);
+    process.stderr.write(`@asamarts/alint: skipping postinstall (${skipReason})\n`);
     return;
   }
 
@@ -116,7 +116,7 @@ async function main() {
   const tarUrl = `${baseUrl}/${archive}`;
   const shaUrl = `${tarUrl}.sha256`;
 
-  process.stderr.write(`@a-lint/alint: downloading ${archive}\n`);
+  process.stderr.write(`@asamarts/alint: downloading ${archive}\n`);
   const [tarBuf, shaBuf] = await Promise.all([fetch(tarUrl), fetch(shaUrl)]);
 
   // The .sha256 file format mirrors install.sh's expectation:
@@ -132,7 +132,7 @@ async function main() {
         `  got:      ${actualHash}`,
     );
   }
-  process.stderr.write(`@a-lint/alint: SHA-256 verified\n`);
+  process.stderr.write(`@asamarts/alint: SHA-256 verified\n`);
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alint-npm-'));
   const tarPath = path.join(tmpDir, archive);
@@ -167,10 +167,10 @@ async function main() {
     // ignore — tmp dir is OS-managed
   }
 
-  process.stderr.write(`@a-lint/alint: installed ${binaryName} for ${target}\n`);
+  process.stderr.write(`@asamarts/alint: installed ${binaryName} for ${target}\n`);
 }
 
 main().catch((err) => {
-  process.stderr.write(`@a-lint/alint: postinstall failed: ${err.message}\n`);
+  process.stderr.write(`@asamarts/alint: postinstall failed: ${err.message}\n`);
   process.exit(1);
 });

@@ -1,4 +1,4 @@
-# @a-lint/alint
+# @asamarts/alint
 
 npm install path for [alint](https://github.com/asamarts/alint), a
 language-agnostic linter for repository structure, file existence,
@@ -14,16 +14,16 @@ upstream artifacts.
 
 ```bash
 # project-local
-npm install --save-dev @a-lint/alint
+npm install --save-dev @asamarts/alint
 npx alint check
 
 # global (puts `alint` on PATH)
-npm install -g @a-lint/alint
+npm install -g @asamarts/alint
 alint check
 ```
 
 The npm package version tracks alint releases exactly: `npm install
-@a-lint/alint@0.5.11` downloads alint v0.5.11.
+@asamarts/alint@0.5.11` downloads alint v0.5.11.
 
 ## Supported platforms
 
