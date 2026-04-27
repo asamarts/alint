@@ -383,6 +383,9 @@
         { "$ref": "#/$defs/rule_yaml_path_matches" },
         { "$ref": "#/$defs/rule_toml_path_equals" },
         { "$ref": "#/$defs/rule_toml_path_matches" },
+        { "$ref": "#/$defs/rule_json_schema_passes" },
+        { "$ref": "#/$defs/rule_git_no_denied_paths" },
+        { "$ref": "#/$defs/rule_git_commit_message" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
@@ -716,6 +719,67 @@
         "matches": { "type": "string" },
         "if_present": { "$ref": "#/$defs/if_present" }
       }
+    },
+
+    "rule_json_schema_passes": {
+      "description": "Validate every JSON / YAML / TOML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
+      "type": "object",
+      "required": ["paths", "schema_path"],
+      "properties": {
+        "kind": { "const": "json_schema_passes" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "schema_path": {
+          "type": "string",
+          "description": "Path to a JSON Schema file relative to the lint root. Schema must itself be JSON even when validating YAML / TOML targets."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["json", "yaml", "yml", "toml"],
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+        }
+      }
+    },
+
+    "rule_git_no_denied_paths": {
+      "description": "Fire when any tracked path matches a configured glob denylist. Companion of `git_tracked_only` for the absence axis: catches secrets, large binaries, or accidentally-tracked artifacts that would otherwise need a `file_absent` per pattern. Outside a git repo, silently no-ops.",
+      "type": "object",
+      "required": ["denied"],
+      "properties": {
+        "kind": { "const": "git_no_denied_paths" },
+        "denied": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Globset patterns no tracked path may match. Both whole-path patterns (`secrets/**`) and basename-only patterns (`*.env`) work."
+        }
+      }
+    },
+
+    "rule_git_commit_message": {
+      "description": "Validate HEAD's commit message against shape rules: regex, max subject length, body required. At least one of `pattern:` / `subject_max_length:` / `requires_body: true` must be set. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "git_commit_message" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust-regex pattern the full message (subject + body, joined with newlines) must match. Use `(?s)` to make `.` match newlines."
+        },
+        "subject_max_length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of characters allowed in the subject line. Common values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff)."
+        },
+        "requires_body": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the message must have a non-empty body — at least one line of content after the subject's blank-line separator."
+        }
+      },
+      "anyOf": [
+        { "required": ["pattern"] },
+        { "required": ["subject_max_length"] },
+        { "required": ["requires_body"] }
+      ]
     },
 
     "if_present": {

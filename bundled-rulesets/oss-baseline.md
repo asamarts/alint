@@ -50,6 +50,37 @@ extends:
 
 > Consider adding a SECURITY.md so vulnerability reporters know where to disclose.
 
+### `oss-security-policy-non-empty`
+
+- **kind**: [`file_min_size`](/docs/rules/content/file_min_size/)
+- **level**: `info`
+- **policy**: <https://github.com/ossf/scorecard/blob/main/docs/checks.md#security-policy>
+
+> SECURITY.md is suspiciously short; describe how to report vulnerabilities and the supported-versions policy.
+
+### `oss-dependency-update-tool`
+
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
+- **level**: `info`
+- **policy**: <https://github.com/ossf/scorecard/blob/main/docs/checks.md#dependency-update-tool>
+
+> Consider configuring Dependabot or Renovate to keep dependencies and actions up to date.
+
+### `oss-codeowners-exists`
+
+- **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
+- **level**: `info`
+- **policy**: <https://github.com/ossf/scorecard/blob/main/docs/checks.md#code-review>
+
+> Consider adding a CODEOWNERS file so PR reviews are auto-routed.
+
+### `oss-codeowners-non-empty`
+
+- **kind**: [`file_min_size`](/docs/rules/content/file_min_size/)
+- **level**: `info`
+
+> CODEOWNERS exists but appears empty; add at least one ownership rule (e.g. `* @org/team`).
+
 ### `oss-code-of-conduct-exists`
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
