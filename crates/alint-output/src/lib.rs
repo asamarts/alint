@@ -2,6 +2,7 @@
 //! bytes suitable for stdout or a file.
 
 mod github;
+mod gitlab;
 mod human;
 mod json;
 mod junit;
@@ -15,6 +16,7 @@ use std::str::FromStr;
 use alint_core::{FixReport, Report};
 
 pub use github::write_github;
+pub use gitlab::write_gitlab;
 pub use human::{write_fix_human, write_human};
 pub use json::{write_fix_json, write_json};
 pub use junit::write_junit;
@@ -30,6 +32,7 @@ pub enum Format {
     Github,
     Markdown,
     Junit,
+    Gitlab,
 }
 
 impl FromStr for Format {
@@ -42,6 +45,7 @@ impl FromStr for Format {
             "github" | "github-actions" => Ok(Self::Github),
             "markdown" | "md" => Ok(Self::Markdown),
             "junit" | "junit-xml" => Ok(Self::Junit),
+            "gitlab" | "gitlab-codequality" | "code-quality" => Ok(Self::Gitlab),
             other => Err(format!("unknown output format: {other}")),
         }
     }
@@ -71,13 +75,15 @@ impl Format {
             Self::Github => write_github(report, w),
             Self::Markdown => write_markdown(report, w),
             Self::Junit => write_junit(report, w),
+            Self::Gitlab => write_gitlab(report, w),
         }
     }
 
     /// Write a fix-report. `Human`, `Json`, and `Markdown` have
-    /// dedicated renderers; SARIF, GitHub annotations, and
-    /// `JUnit` describe findings, not remediations, so they fall
-    /// back to the human formatter for fix reports.
+    /// dedicated renderers; SARIF, GitHub annotations, `JUnit`,
+    /// and `GitLab` Code Quality describe findings, not
+    /// remediations, so they fall back to the human formatter
+    /// for fix reports.
     pub fn write_fix(self, report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
         self.write_fix_with_options(report, w, HumanOptions::default())
     }
@@ -90,7 +96,7 @@ impl Format {
         opts: HumanOptions,
     ) -> std::io::Result<()> {
         match self {
-            Self::Human | Self::Sarif | Self::Github | Self::Junit => {
+            Self::Human | Self::Sarif | Self::Github | Self::Junit | Self::Gitlab => {
                 write_fix_human(report, w, opts)
             }
             Self::Json => write_fix_json(report, w),
