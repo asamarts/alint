@@ -15,7 +15,7 @@ deferred item from the v0.5 roadmap is now shipped.
 
 ### Added
 
-- **`@alint/alint` npm package** — fifth install channel
+- **`@a-lint/alint` npm package** — fifth install channel
   alongside `cargo install alint`, the Homebrew tap, the
   Docker image, and `install.sh`. The npm package is a thin
   shim that downloads the matching pre-built binary at
@@ -26,11 +26,11 @@ deferred item from the v0.5 roadmap is now shipped.
 
   ```bash
   # project-local
-  npm install --save-dev @alint/alint
+  npm install --save-dev @a-lint/alint
   npx alint check
 
   # global
-  npm install -g @alint/alint
+  npm install -g @a-lint/alint
   alint check
   ```
 
