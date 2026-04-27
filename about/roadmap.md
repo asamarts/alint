@@ -6,16 +6,16 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.10** (2026-04-27). Headline: DSL
-ergonomics — `content_from:` for fix ops (LICENSE / NOTICE
-boilerplate lives in a templates dir, fix-ops reference it
-by relative path), `.alint.d/*.yml` drop-ins (auto-merged
-alphabetically next to `.alint.yml`, ops convention for
-layered team configs), and rule templates (define a rule
-shape once via top-level `templates:`, instantiate N times
-via `extends_template:` with `{{vars.X}}` substitution).
-Schema-compatible: every v0.5.9 config runs unchanged.
-Next planned: npm shim — that closes the v0.5 milestone.
+**Latest release: v0.5.11** (2026-04-27). Headline: npm
+install path — the `@alint/alint` package downloads the
+matching pre-built binary at install time and stages it
+under its own `bin-platform/`, exposing the `alint` command
+through npm's bin shimming. Same SHA-256 verification as
+`install.sh` and Homebrew. **Closes the v0.5 milestone**:
+every ⏳ in the v0.5 roadmap is now ✅. Next planned: v0.6
+performance & test-floor — a comprehensive regression-
+guard test layer first, then the per-file-rule dispatch
+flip and parallel walker.
 
 ## Positioning
 
@@ -264,7 +264,7 @@ Ranked by leverage.
 - ✅ Additional bundled rulesets: `python` (v0.4.6), `go` (v0.4.6), `ci/github-actions` (v0.4.5), `java` (v0.4.9).
 - ✅ Output formats: `markdown`, `junit`, `gitlab` — shipped in v0.5.8 (2026-04-26). Brings the format count to seven; SARIF / GitHub / `JUnit` / GitLab fall through to the human formatter on `alint fix` since they describe findings, not remediations.
 - ✅ `command` plugin kind (v0.5.1, 2026-04-26). Per-file rule wrapping any CLI on `PATH` (`actionlint` / `shellcheck` / `taplo` / `kubeconform` / etc.); exit `0` = pass, non-zero = violation carrying stdout+stderr. Trust-gated: only the user's own top-level config can declare these (mirror of the `custom:` fact gate). Pairs naturally with `--changed` so external checks become incremental in CI.
-- ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
+- ✅ npm shim (`@alint/alint`) — shipped in v0.5.11 (2026-04-27). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary at install time; package itself ships zero JS runtime behaviour. Auto-published from `release.yml` alongside crates.io / Docker / Homebrew.
 - ✅ Git-aware primitives: `git_no_denied_paths`, `git_commit_message` — both shipped in v0.5.9 (2026-04-27). The first fires on tracked paths matching a glob denylist (secrets / artefacts / "do not commit"); the second validates HEAD's commit message shape via regex / max-subject-length / requires-body. Both no-op silently outside a git repo.
 - ✅ `json_schema_passes` primitive — shipped in v0.5.9 (2026-04-27). Validates JSON / YAML / TOML targets against a JSON Schema; reuses the same serde-tree normalisation as `json_path_*`. Schema is loaded + compiled lazily and cached on the rule via `OnceLock`.
 - ✅ Remaining bundled rulesets: `compliance/reuse@v1` + `compliance/apache-2@v1` shipped in v0.5.5 (2026-04-26). Both use `file_header` for SPDX / Apache header checks; reuse adds a `dir_exists` on `LICENSES/`; apache-2 adds `file_content_matches` for the LICENSE text + `file_exists` for NOTICE. Both extend without a fact gate — adopting the ruleset signals intent.
