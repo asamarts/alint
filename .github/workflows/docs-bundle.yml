@@ -2,10 +2,18 @@ name: Docs bundle
 
 on:
   push:
+    # Two triggers, same job:
+    # - **main**: rolling-latest. Every commit to main rebuilds
+    #   the bundle so docs stay current with the working tree
+    #   between releases.
+    # - **tags `v*`**: release-time guarantee. Even if a tag is
+    #   pushed at an older commit (or the prior main-push bundle
+    #   build failed), the tag push re-runs the bundle so the
+    #   release flow always ends with fresh docs on alint.org.
+    #   Treats docs as a sixth distribution channel alongside
+    #   crates.io / npm / Docker / Homebrew / GH Release.
     branches: [main]
-    # Tag pushes don't trigger a fresh bundle build — the bundle
-    # is rolling-latest, tied to `main`. Versioned bundles are a
-    # Phase 4 follow-up (one branch per tag, e.g. `docs-bundle-v1.0`).
+    tags: ["v*"]
   workflow_dispatch:
     # Lets the alint.org repo (or a maintainer) re-trigger a
     # rebuild without a code change — useful when only a brand-
@@ -17,8 +25,10 @@ permissions:
 concurrency:
   # Coalesce rapid main-branch pushes — only one bundle build at
   # a time per ref, and a newer push cancels an older still-
-  # running one.
-  group: docs-bundle
+  # running one. The tag-push trigger uses a separate group so a
+  # release-time bundle build can't get cancelled by an immediate
+  # follow-up main push (or vice versa).
+  group: docs-bundle-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
