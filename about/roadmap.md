@@ -6,12 +6,18 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.4.10** (2026-04-25). Headline: `file_max_lines`,
-`file_footer`, `file_shebang` round out the content family
-(catalogue at ~55 rule kinds). Next planned: v0.5 — monorepo
-scale (`--changed` mode, `--monorepo` preset, per-iteration
-`when:` on `for_each_dir`), `command` plugin kind, npm shim,
-remaining git-aware primitives, compliance rulesets.
+**Latest release: v0.5.7** (2026-04-26). Headline:
+competitive bench numbers — `xtask bench-scale` now runs
+ls-lint, Repolinter, and `find` + `ripgrep` pipelines
+alongside alint across the same (size × scenario × mode)
+matrix v0.5.6 introduced, so readers can compare wall-time
+like-for-like on a single fingerprint. Reproducible via the
+new `ghcr.io/asamarts/alint-bench` Docker image (pinned
+versions of every competitor) and the `--docker` flag.
+Numbers under
+[`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
+Next planned: npm shim, `json_schema_passes`, remaining
+git-aware primitives, additional output formats.
 
 ## Positioning
 
@@ -175,57 +181,70 @@ the largest delta between alint's current shape and what
 workspace-tier + OSS-polyglot monorepos typically reach for.
 Ranked by leverage.
 
-- ⏳ **`alint check --changed [--base=<ref>]`.** Incremental
+- ✅ **`alint check --changed [--base=<ref>]`.** Incremental
   mode: diff `git diff --name-only <base>...HEAD` (or
-  `git ls-files --modified` when no base) and only evaluate
-  rules whose path scopes intersect the changed-file set.
-  Cross-file rules (`pair`, `for_each_dir`,
-  `every_matching_has`, `unique_by`, `dir_contains`,
-  `dir_only_contains`) opt out of the filter — their inputs
-  span the whole tree by definition. The leverage move for
-  large repos: today, every check runs the full rule set
-  over the full tree; this lets pre-commit and PR-check
-  paths run in milliseconds on most diffs without changing
-  the rule shape. Pairs naturally with `git_tracked_only`.
-- ⏳ **Per-iteration `when:` filter on `for_each_dir`.** Today
-  `for_each_dir` iterates every directory matching `paths:`;
-  the inner rules then short-circuit if a marker file is
-  missing. The Bazel-shaped pattern wants the iteration
-  itself gated: "iterate only directories whose contents
-  satisfy *this fact-style predicate* (e.g., contains a
-  `BUILD`, `Cargo.toml`, `package.json`, `go.mod`)." Reuses
-  the existing `when:` grammar with per-iteration facts
-  (`facts.dir.has_file`, `facts.dir.contains`, etc.).
-  Closes the most common gap when applying alint to Bazel-style
-  monorepos without adding a Starlark parser.
-- ⏳ **`--monorepo` discovery preset.** A new flag on `alint
-  init` and `alint check` that auto-detects workspace
-  layout — Cargo workspace (`[workspace]` in root
-  `Cargo.toml`), pnpm workspace (root `pnpm-workspace.yaml`),
-  yarn / npm workspaces (root `package.json` `workspaces`
-  field), Lerna (`lerna.json`), Bazel (root `WORKSPACE` /
-  `MODULE.bazel`), Nx (`nx.json`), Turborepo (`turbo.json`)
-  — and emits / applies a sensible scaffold:
-  `nested_configs: true`, the right `for_each_dir` paths
-  pulled from the workspace globs, and the relevant
-  ecosystem ruleset extends. Removes the boilerplate that
-  workspace-tier adopters currently re-derive each time.
-- ⏳ **Workspace-aware bundled rulesets.** Three thin overlays
-  on top of `monorepo@v1`: `monorepo/cargo-workspace@v1`,
-  `monorepo/pnpm-workspace@v1`, `monorepo/yarn-workspace@v1`.
-  Each adds one rule: every workspace-member directory has
-  the manifest the workspace declared (`Cargo.toml` /
-  `package.json`). Gated by the `is_cargo_workspace` /
-  `is_pnpm_workspace` / `is_yarn_workspace` facts (new —
-  thin wrappers over existing `any_file_exists` +
-  `file_content_matches`).
-- ⏳ **Documented scale ceiling.** Bench `alint check` on a
-  synthetic 100k-file tree (representative of the
-  workspace-tier upper bound) and a 1M-file tree
-  (Bazel-territory). Publish the numbers under
-  `docs/benchmarks/scale/`. Honest baseline — keeps the
-  positioning claims falsifiable and tells adopters where
-  to stop.
+  `git ls-files --modified --others --exclude-standard` when
+  no base) and only evaluate rules whose path scopes
+  intersect the changed-file set. Cross-file rules (`pair`,
+  `for_each_dir`, `every_matching_has`, `unique_by`,
+  `dir_contains`, `dir_only_contains`) and existence rules
+  (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`)
+  opt out of the changed-set filter for iteration — their
+  verdicts span the whole tree by definition — but existence
+  rules still skip when their `paths:` scope doesn't
+  intersect the diff, so an unchanged-but-missing LICENSE
+  doesn't fire on every PR. Empty diffs short-circuit to an
+  empty report. Pairs naturally with `git_tracked_only`.
+  Shipped in v0.5.0.
+- ✅ **Per-iteration `when_iter:` filter on `for_each_dir` /
+  `for_each_file` / `every_matching_has`** — shipped in
+  v0.5.2 (2026-04-26). New `iter.*` namespace in the
+  existing `when:` grammar exposes the iterated entry's
+  `path`, `basename`, `parent_name`, `stem`, `ext`,
+  `is_dir`, and `has_file(pattern)`; iterations whose
+  verdict is false are skipped before any nested rule is
+  built. `iter.has_file("Cargo.toml")` /
+  `iter.has_file("**/*.bzl")` / `iter.has_file("BUILD") or
+  iter.has_file("BUILD.bazel")` cover the
+  Cargo / Bazel-style workspace gates without a
+  language-specific parser.
+- ✅ **`alint init [--monorepo]` discovery preset** — shipped
+  in v0.5.4 (2026-04-26). New `alint init` subcommand
+  detects ecosystem (Rust / Node / Python / Go / Java) from
+  root manifests and writes a `.alint.yml` extending the
+  matching bundled rulesets. With `--monorepo`, also
+  detects Cargo `[workspace]`, pnpm-workspace.yaml, and
+  `package.json` `workspaces` field, and emits
+  `monorepo@v1` + `monorepo/<flavor>-workspace@v1` plus
+  `nested_configs: true`. Bazel / Lerna / Nx / Turbo
+  detection deferred (the three covered flavours match the
+  bundled-overlay set). The runtime-side `--monorepo` flag
+  on `alint check` is deferred too — `alint init` is the
+  primary adoption shape.
+- ✅ **Workspace-aware bundled rulesets** — shipped in
+  v0.5.3 (2026-04-26). Three thin overlays on
+  `monorepo@v1`: `monorepo/cargo-workspace@v1`,
+  `monorepo/pnpm-workspace@v1`,
+  `monorepo/yarn-workspace@v1`. Each gated by an
+  `is_*_workspace` fact (declared inline in the ruleset)
+  and uses `when_iter: 'iter.has_file(...)'` to scope
+  per-member checks to actual package directories — no
+  false positives on stray `crates/notes/` or
+  `packages/drafts/`.
+- ✅ **Documented scale ceiling** — shipped in v0.5.6
+  (2026-04-26) as `xtask bench-scale`. Publishes
+  hyperfine timings across (size × scenario × mode)
+  matrix with hardware fingerprint; numbers under
+  [`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
+  1M-file size opt-in via `--include-1m`.
+- ✅ **Competitive comparisons** — shipped in v0.5.7
+  (2026-04-26). Same harness now drives ls-lint,
+  Repolinter, and `find` + `ripgrep` pipelines alongside
+  alint, gated to the scenarios each tool can sanely
+  express. Reproducibility via the
+  `ghcr.io/asamarts/alint-bench` Docker image (pinned
+  versions of every competitor) plus a `--docker` flag
+  that re-execs the bench inside the image.
 
 ### Other scope
 
@@ -238,11 +257,11 @@ Ranked by leverage.
 - ✅ Git-aware primitive: `git_tracked_only` (v0.4.8).
 - ✅ Additional bundled rulesets: `python` (v0.4.6), `go` (v0.4.6), `ci/github-actions` (v0.4.5), `java` (v0.4.9).
 - ⏳ Output formats: `markdown`, `junit`, `gitlab`.
-- ⏳ `command` plugin kind. (Plugin v1 lever — lets a rule shell out to a checker like `actionlint` / `shellcheck` / `taplo` / `markdownlint` and bridge their findings into alint's report. Path to ecosystem reach without growing the core rule set.)
+- ✅ `command` plugin kind (v0.5.1, 2026-04-26). Per-file rule wrapping any CLI on `PATH` (`actionlint` / `shellcheck` / `taplo` / `kubeconform` / etc.); exit `0` = pass, non-zero = violation carrying stdout+stderr. Trust-gated: only the user's own top-level config can declare these (mirror of the `custom:` fact gate). Pairs naturally with `--changed` so external checks become incremental in CI.
 - ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
 - ⏳ Git-aware primitives: `git_no_denied_paths`, `git_commit_message`.
 - ⏳ `json_schema_passes` primitive.
-- ⏳ Remaining bundled rulesets: `compliance/reuse`, `compliance/apache-2`. (Compliance rulesets are higher-leverage now that v0.4 has the structured-query + content primitives needed to express SPDX-Identifier headers, REUSE conformance, and Apache-2 NOTICE/headers.)
+- ✅ Remaining bundled rulesets: `compliance/reuse@v1` + `compliance/apache-2@v1` shipped in v0.5.5 (2026-04-26). Both use `file_header` for SPDX / Apache header checks; reuse adds a `dir_exists` on `LICENSES/`; apache-2 adds `file_content_matches` for the LICENSE text + `file_exists` for NOTICE. Both extend without a fact gate — adopting the ruleset signals intent.
 - ⏳ Additional Scorecard-overlap rules in `ci/github-actions@v1` and `oss-baseline@v1`. Specifically: SECURITY.md presence + non-empty (already partial), `dependabot.yml` / `renovate.json` presence (Dependency-Update-Tool check), branch protection hints via `.github/CODEOWNERS` shape (Code-Review check).
 
 ### Generic hygiene rulesets (shipped in v0.4.3)

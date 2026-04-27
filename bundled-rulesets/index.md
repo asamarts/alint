@@ -10,12 +10,17 @@ Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list
 ## Currently shipped
 
 - [`ci/github-actions@v1`](/docs/bundled-rulesets/ci-github-actions/)
+- [`compliance/apache-2@v1`](/docs/bundled-rulesets/compliance-apache-2/)
+- [`compliance/reuse@v1`](/docs/bundled-rulesets/compliance-reuse/)
 - [`docs/adr@v1`](/docs/bundled-rulesets/docs-adr/)
 - [`go@v1`](/docs/bundled-rulesets/go/)
 - [`hygiene/lockfiles@v1`](/docs/bundled-rulesets/hygiene-lockfiles/)
 - [`hygiene/no-tracked-artifacts@v1`](/docs/bundled-rulesets/hygiene-no-tracked-artifacts/)
 - [`java@v1`](/docs/bundled-rulesets/java/)
 - [`monorepo@v1`](/docs/bundled-rulesets/monorepo/)
+- [`monorepo/cargo-workspace@v1`](/docs/bundled-rulesets/monorepo-cargo-workspace/)
+- [`monorepo/pnpm-workspace@v1`](/docs/bundled-rulesets/monorepo-pnpm-workspace/)
+- [`monorepo/yarn-workspace@v1`](/docs/bundled-rulesets/monorepo-yarn-workspace/)
 - [`node@v1`](/docs/bundled-rulesets/node/)
 - [`oss-baseline@v1`](/docs/bundled-rulesets/oss-baseline/)
 - [`python@v1`](/docs/bundled-rulesets/python/)

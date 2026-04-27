@@ -14,7 +14,9 @@ Arguments:
 Options:
   -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
       --dry-run          Print what would be done without writing anything
+      --changed          Restrict the fix pass to files in the working-tree diff (see `alint check --changed`). Cross-file + existence rules still see the full tree
   -f, --format <FORMAT>  Output format [default: human]
+      --base <REF>       Base ref for `--changed`. Implies `--changed`
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes
       --color <WHEN>     When to emit ANSI color codes in human output. `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the `human` format; `json` / `sarif` / `github` are always plain bytes [default: auto] [possible values: auto, always, never]

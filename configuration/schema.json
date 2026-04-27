@@ -415,7 +415,8 @@
         { "$ref": "#/$defs/rule_indent_style" },
         { "$ref": "#/$defs/rule_max_consecutive_blank_lines" },
         { "$ref": "#/$defs/rule_file_starts_with" },
-        { "$ref": "#/$defs/rule_file_ends_with" }
+        { "$ref": "#/$defs/rule_file_ends_with" },
+        { "$ref": "#/$defs/rule_command" }
       ]
     },
 
@@ -769,7 +770,7 @@
     },
 
     "rule_for_each_dir": {
-      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself.",
+      "description": "For every directory matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration; use `{path}` to refer to the iterated directory itself. Optional `when_iter:` filters which iterations are evaluated, e.g. `iter.has_file(\"Cargo.toml\")` to scope to workspace members.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
@@ -777,6 +778,10 @@
         "select": {
           "type": "string",
           "description": "Glob selecting the directories to iterate."
+        },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — evaluated against `iter.*` in the iterated entry's context. Iterations whose verdict is false are skipped before any nested rule is built. Examples: `iter.has_file(\"Cargo.toml\")`, `iter.basename matches \"^pkg-\"`."
         },
         "require": {
           "type": "array",
@@ -788,7 +793,7 @@
     },
 
     "rule_for_each_file": {
-      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration.",
+      "description": "For every file matching `select`, every rule in `require` must pass. Path-template tokens in the nested rules are pre-substituted per iteration. Optional `when_iter:` filters iterations.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
@@ -796,6 +801,10 @@
         "select": {
           "type": "string",
           "description": "Glob selecting the files to iterate."
+        },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter. `iter.has_file(...)` always evaluates to false on file iteration; useful predicates here include `iter.basename`, `iter.ext`, `iter.parent_name`."
         },
         "require": {
           "type": "array",
@@ -862,12 +871,16 @@
     },
 
     "rule_every_matching_has": {
-      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule.",
+      "description": "Every file OR directory matching `select` must satisfy every nested rule in `require`. Sugar that combines for_each_file + for_each_dir into one rule. Optional `when_iter:` filters iterations.",
       "type": "object",
       "required": ["select", "require"],
       "properties": {
         "kind": { "const": "every_matching_has" },
         "select": { "type": "string" },
+        "when_iter": {
+          "type": "string",
+          "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter."
+        },
         "require": {
           "type": "array",
           "minItems": 1,
@@ -1147,6 +1160,27 @@
           "type": "string",
           "minLength": 1,
           "description": "Required suffix, matched byte-for-byte."
+        }
+      }
+    },
+
+    "rule_command": {
+      "description": "Shell out to an external CLI per matched file. argv[0] is the program; remaining tokens support path-template substitution (`{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`). Working dir = repo root; stdin = /dev/null. Env: ALINT_PATH, ALINT_ROOT, ALINT_RULE_ID, ALINT_LEVEL, plus ALINT_VAR_<NAME> per `vars:` and ALINT_FACT_<NAME> per resolved fact. Verdict: exit 0 = pass; non-zero = one violation whose message is the (truncated) stdout+stderr. Trust-gated: only allowed in the user's top-level config (rejected at load-time when introduced via `extends:` or a bundled ruleset).",
+      "type": "object",
+      "required": ["paths", "command"],
+      "properties": {
+        "kind": { "const": "command" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout."
         }
       }
     },

@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 53 rule kinds across 11 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 54 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,9 +21,11 @@ alint ships 53 rule kinds across 11 families. Each rule is one entry in your `.a
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 1 rule
 - [Cross-file](/docs/rules/cross-file/) — 7 rules
+- [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
 
+- [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `paths` must contain files matching `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_

@@ -16,6 +16,7 @@ Commands:
   explain  Show a rule's definition
   fix      Apply automatic fixes for violations whose rules declare one
   facts    Evaluate every `facts:` entry in the effective config and print the resolved value. Debugging aid for `when:` clauses
+  init     Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
   help     Print this message or the help of the given subcommand(s)
 
 Options:

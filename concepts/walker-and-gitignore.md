@@ -116,3 +116,29 @@ Behaviour summary:
 When `alint` runs outside a git repo (no `.git/`), or when `git` isn't on `PATH`, the tracked-set is empty and absence-style rules with `git_tracked_only: true` become silent no-ops. That's the right default for "don't let X be committed" — if there's no repo, there's nothing to commit. Existence rules with the flag set fail in that case (no file qualifies), which is also the correct conservative behaviour.
 
 The other roadmap'd git primitives — `git_no_denied_paths`, `git_commit_message` — are still pending.
+
+## Restricting the walk: `--changed`
+
+The walker is the engine's source of truth about what's on disk. `alint check --changed` adds a second filter layer on top: only files that appear in the *diff* are visible to per-file rules. The walked index still spans the whole tree (so cross-file rules and existence rules can answer their full-tree questions), but per-file rules see a filtered view.
+
+Two diff modes:
+
+| Invocation | Diff source | Right shape for |
+|---|---|---|
+| `alint check --changed` | `git ls-files --modified --others --exclude-standard` | Pre-commit / local dev |
+| `alint check --changed --base=main` | `git diff --name-only --relative main...HEAD` | PR checks (three-dot — merge-base) |
+
+The `<base>...HEAD` form (three-dot) diffs against the merge-base of `<base>` and `HEAD`, which is what GitHub PR checks consider "your changes." The two-dot form `<base>..HEAD` is rarely what you want here — it includes commits in `HEAD` since you branched, plus any commits *removed* from `<base>` since the branch point.
+
+**Which rules opt out of the changed-set filter:**
+
+- **Cross-file rules** (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) always evaluate against the full tree. A `pair` rule still fires when a `.h` partner is missing, even if the matching `.c` wasn't in your diff.
+- **Existence rules** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`) evaluate against the full tree, but the engine *skips them entirely* when their `paths:` scope doesn't intersect the diff. So an unchanged-but-missing `LICENSE` doesn't fire on every PR; it only fires on PRs that touched a `LICENSE*` path.
+
+**Edge cases:**
+
+- **Empty diff** (no working-tree changes, no untracked files): the engine short-circuits to an empty report. The "ran on a no-op commit" pre-commit case completes in milliseconds.
+- **Outside a git repo** (or `git` missing from `PATH`): `--changed` exits non-zero with an explicit error rather than silently fall back to a full check. Falling back would violate the intent the user expressed by passing the flag.
+- **Deleted files** are reported by both diff modes. A `LICENSE` deleted in your branch shows up in the diff; the walker doesn't see it on disk (it's gone), so an existence rule for `LICENSE*` evaluates against the full tree (which lacks it) and fires.
+
+`--changed` pairs naturally with `git_tracked_only: true`: the changed-set is a working-tree concept, the tracked-set is an index concept, and an absence-style rule with both is "fire only on tracked entries that are part of this diff." The same flags work for `alint fix --changed`.
