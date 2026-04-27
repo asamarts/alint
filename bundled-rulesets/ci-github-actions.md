@@ -3,7 +3,29 @@ title: 'ci/github-actions@v1'
 description: Bundled alint ruleset at alint://bundled/ci/github-actions@v1.
 ---
 
-Adopt with:
+GitHub Actions hardening. Guided by the two OpenSSF Scorecard
+checks that have the strongest supply-chain signal:
+
+  - "Token-Permissions" — declare the GITHUB_TOKEN scope
+    explicitly at workflow level (or narrower).
+  - "Pinned-Dependencies" — third-party actions are pinned to
+    full commit SHAs, not mutable branches or floating tags.
+
+Plus one readability rule: every workflow has a `name:` so the
+Actions UI doesn't fall back to the filename.
+
+All rules are scoped to `.github/workflows/*.y{,a}ml`, so the
+ruleset no-ops in repos that don't use GitHub Actions.
+
+Defaults are non-blocking:
+  - `warning` for hardening (permissions + action pinning)
+  - `info` for readability
+
+Opt in to stricter enforcement by overriding the rule id in
+your own `.alint.yml` (`level: error`), or disable a rule with
+`level: off`.
+
+## Adopt with
 
 ```yaml
 extends:
@@ -35,3 +57,85 @@ extends:
 
 > Workflow has no `name:` field; the Actions UI will show the filename instead. Add a human-readable `name:` at the top.
 
+## Source
+
+The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/ci/github-actions.yml`](https://github.com/asamarts/alint/blob/main/crates/alint-dsl/rulesets/v1/ci/github-actions.yml) in the alint repo (the snapshot below is generated verbatim from that file).
+
+```yaml
+# alint://bundled/ci/github-actions@v1
+#
+# GitHub Actions hardening. Guided by the two OpenSSF Scorecard
+# checks that have the strongest supply-chain signal:
+#
+#   - "Token-Permissions" — declare the GITHUB_TOKEN scope
+#     explicitly at workflow level (or narrower).
+#   - "Pinned-Dependencies" — third-party actions are pinned to
+#     full commit SHAs, not mutable branches or floating tags.
+#
+# Plus one readability rule: every workflow has a `name:` so the
+# Actions UI doesn't fall back to the filename.
+#
+# All rules are scoped to `.github/workflows/*.y{,a}ml`, so the
+# ruleset no-ops in repos that don't use GitHub Actions.
+#
+# Defaults are non-blocking:
+#   - `warning` for hardening (permissions + action pinning)
+#   - `info` for readability
+#
+# Opt in to stricter enforcement by overriding the rule id in
+# your own `.alint.yml` (`level: error`), or disable a rule with
+# `level: off`.
+
+version: 1
+
+rules:
+  - id: gha-workflow-contents-read
+    # OpenSSF Scorecard Token-Permissions check. Workflows that
+    # need write permissions should override this rule per-file
+    # or set `level: off` in the root config.
+    kind: yaml_path_equals
+    paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    path: "$.permissions.contents"
+    equals: "read"
+    level: warning
+    message: >-
+      GitHub workflows should declare `permissions.contents: read`
+      at the workflow level. Workflows that truly need write can
+      override this rule or set per-job permissions.
+    policy_url: "https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token"
+
+  - id: gha-pin-actions-to-sha
+    # OpenSSF Scorecard Pinned-Dependencies check. `if_present:
+    # true` so workflows with only `run:` steps aren't flagged —
+    # the rule only fires on actual `uses:` values that aren't
+    # SHA-pinned.
+    #
+    # The regex accepts any `<owner>/<repo>@<40-hex>` or
+    # `<owner>/<repo>/<subpath>@<40-hex>` — it does NOT accept
+    # `@v4`, `@main`, or `@v4.1.1`. Teams that trust specific
+    # publishers (e.g. `actions/*`) typically tighten or relax
+    # via a follow-up rule.
+    kind: yaml_path_matches
+    paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    path: "$.jobs.*.steps[*].uses"
+    matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+    if_present: true
+    level: warning
+    message: >-
+      Third-party action is not pinned to a commit SHA. Pin with
+      `@<40-char-sha>  # v4.1.1` so a compromised tag can't
+      silently change what runs.
+    policy_url: "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions"
+
+  - id: gha-workflow-has-name
+    # Workflows without `name:` display as the filename in the
+    # Actions UI. Cheap readability win; purely cosmetic.
+    kind: yaml_path_matches
+    paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    path: "$.name"
+    matches: '^.+$'
+    level: info
+    message: >-
+      Workflow has no `name:` field; the Actions UI will show the
+      filename instead. Add a human-readable `name:` at the top.
+```
