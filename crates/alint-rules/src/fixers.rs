@@ -105,12 +105,8 @@ fn resolve_source_bytes(
         ContentSourceSpec::Inline(s) => Ok(s.as_bytes().to_vec()),
         ContentSourceSpec::File(rel) => {
             let abs = ctx_root.join(rel);
-            std::fs::read(&abs).map_err(|e| {
-                format!(
-                    "content_from `{}` could not be read: {e}",
-                    rel.display()
-                )
-            })
+            std::fs::read(&abs)
+                .map_err(|e| format!("content_from `{}` could not be read: {e}", rel.display()))
         }
     }
 }
@@ -178,7 +174,10 @@ impl Fixer for FilePrependFixer {
                 if s.len() == 1 { "" } else { "s" }
             ),
             ContentSourceSpec::File(rel) => {
-                format!("prepend content from {} to each violating file", rel.display())
+                format!(
+                    "prepend content from {} to each violating file",
+                    rel.display()
+                )
             }
         }
     }
@@ -245,7 +244,10 @@ impl Fixer for FileAppendFixer {
                 if s.len() == 1 { "" } else { "s" }
             ),
             ContentSourceSpec::File(rel) => {
-                format!("append content from {} to each violating file", rel.display())
+                format!(
+                    "append content from {} to each violating file",
+                    rel.display()
+                )
             }
         }
     }
@@ -922,8 +924,11 @@ mod tests {
     #[test]
     fn file_prepend_with_content_from_reads_at_apply() {
         let tmp = TempDir::new().unwrap();
-        std::fs::write(tmp.path().join("hdr.txt"), "// SPDX-License-Identifier: MIT\n")
-            .unwrap();
+        std::fs::write(
+            tmp.path().join("hdr.txt"),
+            "// SPDX-License-Identifier: MIT\n",
+        )
+        .unwrap();
         std::fs::write(tmp.path().join("a.rs"), "fn main() {}\n").unwrap();
         let fixer = FilePrependFixer::new(ContentSourceSpec::File(PathBuf::from("hdr.txt")));
         let outcome = fixer

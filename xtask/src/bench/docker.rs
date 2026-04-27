@@ -55,12 +55,8 @@ pub fn run_in_docker(args: &ForwardedArgs) -> Result<()> {
     super::tools::resolve(&args.tools)?;
 
     let workspace = crate::workspace_root()?;
-    let image = std::env::var("ALINT_BENCH_IMAGE").unwrap_or_else(|_| {
-        format!(
-            "ghcr.io/asamarts/alint-bench:{}",
-            env!("CARGO_PKG_VERSION")
-        )
-    });
+    let image = std::env::var("ALINT_BENCH_IMAGE")
+        .unwrap_or_else(|_| format!("ghcr.io/asamarts/alint-bench:{}", env!("CARGO_PKG_VERSION")));
 
     eprintln!("[xtask] bench-scale --docker → image={image}");
 
@@ -79,8 +75,7 @@ pub fn run_in_docker(args: &ForwardedArgs) -> Result<()> {
         }
     }
 
-    cmd.arg("-v")
-        .arg(format!("{}:/work", workspace.display()));
+    cmd.arg("-v").arg(format!("{}:/work", workspace.display()));
     // Cargo target dir lives on a named volume so the host's
     // `target/` (often gigabytes of incremental artefacts) isn't
     // shadowed and the container's release rebuild persists

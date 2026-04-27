@@ -216,7 +216,9 @@ mod tests {
 
     #[test]
     fn empty_report_has_zero_tests_zero_failures() {
-        let out = render(&Report { results: Vec::new() });
+        let out = render(&Report {
+            results: Vec::new(),
+        });
         assert!(out.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"));
         assert!(out.contains(r#"<testsuites name="alint" tests="0" failures="0" errors="0""#));
         assert!(out.contains("</testsuite>\n</testsuites>\n"));

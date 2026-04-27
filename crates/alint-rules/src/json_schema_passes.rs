@@ -92,9 +92,7 @@ impl Rule for JsonSchemaPassesRule {
         let mut violations = Vec::new();
 
         let schema_abs = ctx.root.join(&self.schema_path);
-        let validator_res = self
-            .compiled
-            .get_or_init(|| compile_schema(&schema_abs));
+        let validator_res = self.compiled.get_or_init(|| compile_schema(&schema_abs));
         let validator = match validator_res {
             Ok(v) => v,
             Err(msg) => {
@@ -156,12 +154,8 @@ impl Rule for JsonSchemaPassesRule {
 fn compile_schema(schema_abs: &std::path::Path) -> std::result::Result<Validator, String> {
     let bytes = std::fs::read(schema_abs)
         .map_err(|e| format!("could not read schema {}: {e}", schema_abs.display()))?;
-    let schema_value: Value = serde_json::from_slice(&bytes).map_err(|e| {
-        format!(
-            "schema {} is not valid JSON: {e}",
-            schema_abs.display()
-        )
-    })?;
+    let schema_value: Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("schema {} is not valid JSON: {e}", schema_abs.display()))?;
     jsonschema::validator_for(&schema_value).map_err(|e| {
         format!(
             "schema {} is not a valid JSON Schema: {e}",

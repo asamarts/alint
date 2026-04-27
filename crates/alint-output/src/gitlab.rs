@@ -70,10 +70,10 @@ struct Lines {
 }
 
 fn build_issue(result: &RuleResult, violation: &Violation) -> Issue {
-    let path = violation.path.as_ref().map_or_else(
-        || ".".to_string(),
-        |p| p.display().to_string(),
-    );
+    let path = violation
+        .path
+        .as_ref()
+        .map_or_else(|| ".".to_string(), |p| p.display().to_string());
 
     Issue {
         description: violation.message.clone(),
@@ -160,7 +160,9 @@ mod tests {
 
     #[test]
     fn empty_report_renders_empty_array() {
-        let out = render(&Report { results: Vec::new() });
+        let out = render(&Report {
+            results: Vec::new(),
+        });
         let arr = parse(&out);
         assert_eq!(arr.len(), 0);
     }
@@ -195,9 +197,21 @@ mod tests {
     fn level_severity_mapping() {
         let report = Report {
             results: vec![
-                rule("e", Level::Error, vec![Violation::new("e").with_path(PathBuf::from("a"))]),
-                rule("w", Level::Warning, vec![Violation::new("w").with_path(PathBuf::from("b"))]),
-                rule("i", Level::Info, vec![Violation::new("i").with_path(PathBuf::from("c"))]),
+                rule(
+                    "e",
+                    Level::Error,
+                    vec![Violation::new("e").with_path(PathBuf::from("a"))],
+                ),
+                rule(
+                    "w",
+                    Level::Warning,
+                    vec![Violation::new("w").with_path(PathBuf::from("b"))],
+                ),
+                rule(
+                    "i",
+                    Level::Info,
+                    vec![Violation::new("i").with_path(PathBuf::from("c"))],
+                ),
             ],
         };
         let arr = parse(&render(&report));

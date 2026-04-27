@@ -259,7 +259,9 @@ fn grep_pipeline_s2(root: &str) -> String {
     [
         // Layout — README + LICENSE existence at root.
         format!("test -f {root}/README.md || test -f {root}/README"),
-        format!("test -f {root}/LICENSE || test -f {root}/LICENSE.md || test -f {root}/LICENSE.txt"),
+        format!(
+            "test -f {root}/LICENSE || test -f {root}/LICENSE.md || test -f {root}/LICENSE.txt"
+        ),
         // Layout — forbidden file extensions anywhere.
         format!("find {root} -name '*.bak' -type f >/dev/null"),
         format!("find {root} -name '*.orig' -type f >/dev/null"),

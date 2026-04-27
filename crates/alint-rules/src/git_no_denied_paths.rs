@@ -19,8 +19,8 @@
 //! `git rm --cached`, which is a sensitive operation alint
 //! should never automate.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use alint_core::git::collect_tracked_paths;
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 
@@ -151,7 +151,10 @@ mod tests {
         // matching write `**/.env`.
         let set = build_set(&["*.env"]);
         assert!(!set.matches(std::path::Path::new(".env")).is_empty());
-        assert!(set.matches(std::path::Path::new("config/.envrc")).is_empty());
+        assert!(
+            set.matches(std::path::Path::new("config/.envrc"))
+                .is_empty()
+        );
         assert!(set.matches(std::path::Path::new("README.md")).is_empty());
     }
 
@@ -159,35 +162,35 @@ mod tests {
     fn double_star_glob_matches_under_any_directory() {
         let set = build_set(&["**/.env"]);
         assert!(!set.matches(std::path::Path::new(".env")).is_empty());
-        assert!(!set.matches(std::path::Path::new("apps/api/.env")).is_empty());
+        assert!(
+            !set.matches(std::path::Path::new("apps/api/.env"))
+                .is_empty()
+        );
     }
 
     #[test]
     fn directory_glob_matches_under_directory() {
         let set = build_set(&["secrets/**"]);
-        assert!(!set
-            .matches(std::path::Path::new("secrets/keys.txt"))
-            .is_empty());
-        assert!(!set
-            .matches(std::path::Path::new("secrets/nested/deep.txt"))
-            .is_empty());
-        assert!(set
-            .matches(std::path::Path::new("public/secrets-doc.md"))
-            .is_empty());
+        assert!(
+            !set.matches(std::path::Path::new("secrets/keys.txt"))
+                .is_empty()
+        );
+        assert!(
+            !set.matches(std::path::Path::new("secrets/nested/deep.txt"))
+                .is_empty()
+        );
+        assert!(
+            set.matches(std::path::Path::new("public/secrets-doc.md"))
+                .is_empty()
+        );
     }
 
     #[test]
     fn multiple_patterns_match_independently() {
         let set = build_set(&["*.env", "*.pem"]);
-        assert_eq!(
-            set.matches(std::path::Path::new("private.pem")).len(),
-            1
-        );
+        assert_eq!(set.matches(std::path::Path::new("private.pem")).len(), 1);
         assert_eq!(set.matches(std::path::Path::new(".env")).len(), 1);
-        assert_eq!(
-            set.matches(std::path::Path::new("README.md")).len(),
-            0
-        );
+        assert_eq!(set.matches(std::path::Path::new("README.md")).len(), 0);
     }
 
     #[test]

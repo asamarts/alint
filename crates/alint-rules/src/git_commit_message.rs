@@ -17,8 +17,8 @@
 //! message, and `git commit --amend` is a sensitive operation
 //! we don't automate.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use alint_core::git::head_commit_message;
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -132,10 +132,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
 
-    if opts.pattern.is_none()
-        && opts.subject_max_length.is_none()
-        && !opts.requires_body
-    {
+    if opts.pattern.is_none() && opts.subject_max_length.is_none() && !opts.requires_body {
         return Err(Error::rule_config(
             &spec.id,
             "git_commit_message needs at least one of `pattern:`, `subject_max_length:`, \

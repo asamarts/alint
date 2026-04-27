@@ -232,10 +232,12 @@ impl RawConfig {
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
             let expanded = expand_template(m, &templates_by_id)?;
-            let spec: alint_core::RuleSpec =
-                serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(expanded)).map_err(|e| {
-                    Error::rule_config(&id_hint, format!("could not deserialize merged rule: {e}"))
-                })?;
+            let spec: alint_core::RuleSpec = serde_yaml_ng::from_value(
+                serde_yaml_ng::Value::Mapping(expanded),
+            )
+            .map_err(|e| {
+                Error::rule_config(&id_hint, format!("could not deserialize merged rule: {e}"))
+            })?;
             rules.push(spec);
         }
         Ok(Config {
@@ -1168,7 +1170,14 @@ rules:
         let cfg: RawConfig = serde_yaml_ng::from_str(yaml).unwrap();
         let final_cfg = cfg.finalize().unwrap();
         let ids: Vec<&str> = final_cfg.rules.iter().map(|r| r.id.as_str()).collect();
-        assert_eq!(ids, ["pkgs-have-readme", "services-have-readme", "apps-have-readme"]);
+        assert_eq!(
+            ids,
+            [
+                "pkgs-have-readme",
+                "services-have-readme",
+                "apps-have-readme"
+            ]
+        );
     }
 
     #[test]
@@ -1260,7 +1269,10 @@ rules:
         let paths_str = format!("{paths:?}");
         assert!(paths_str.contains("pkg/README.md"));
         assert!(paths_str.contains("pkg/LICENSE"));
-        assert!(matches!(r.fix, Some(alint_core::FixSpec::FileCreate { .. })));
+        assert!(matches!(
+            r.fix,
+            Some(alint_core::FixSpec::FileCreate { .. })
+        ));
     }
 
     #[test]
@@ -1289,7 +1301,10 @@ rules:
         let cfg = load(&tmp.path().join(".alint.yml")).unwrap();
         let by_id: std::collections::HashMap<&str, alint_core::Level> =
             cfg.rules.iter().map(|r| (r.id.as_str(), r.level)).collect();
-        assert_eq!(by_id.get("main-rule").copied(), Some(alint_core::Level::Warning));
+        assert_eq!(
+            by_id.get("main-rule").copied(),
+            Some(alint_core::Level::Warning)
+        );
         assert_eq!(
             by_id.get("extra-rule").copied(),
             Some(alint_core::Level::Warning)

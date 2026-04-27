@@ -38,7 +38,12 @@ pub fn write_markdown(report: &Report, w: &mut dyn Write) -> std::io::Result<()>
     let (by_file, cross_file) = bucket_violations(report);
 
     for (path, items) in &by_file {
-        writeln!(w, "## `{}` ({})", md_inline_code(&path.display().to_string()), items.len())?;
+        writeln!(
+            w,
+            "## `{}` ({})",
+            md_inline_code(&path.display().to_string()),
+            items.len()
+        )?;
         writeln!(w)?;
         for (result, violation) in items {
             write_violation_bullet(w, result, violation)?;
@@ -132,7 +137,11 @@ fn write_summary_line(w: &mut dyn Write, report: &Report) -> std::io::Result<()>
     }
 
     if breakdown.is_empty() {
-        writeln!(w, "**{total} violation{} across {file_phrase}.**", plural_s(total))?;
+        writeln!(
+            w,
+            "**{total} violation{} across {file_phrase}.**",
+            plural_s(total)
+        )?;
     } else {
         writeln!(
             w,
@@ -225,7 +234,10 @@ fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
         }
         for violation in &result.violations {
             match &violation.path {
-                Some(p) => by_file.entry(p.clone()).or_default().push((result, violation)),
+                Some(p) => by_file
+                    .entry(p.clone())
+                    .or_default()
+                    .push((result, violation)),
                 None => cross_file.push((result, violation)),
             }
         }
@@ -240,7 +252,11 @@ fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
 }
 
 fn sort_key<'a>(p: &'a (&'a RuleResult, &'a Violation)) -> (&'a str, usize, usize) {
-    (p.0.rule_id.as_str(), p.1.line.unwrap_or(0), p.1.column.unwrap_or(0))
+    (
+        p.0.rule_id.as_str(),
+        p.1.line.unwrap_or(0),
+        p.1.column.unwrap_or(0),
+    )
 }
 
 fn plural_s(n: usize) -> &'static str {
@@ -255,8 +271,8 @@ fn md_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
-            '\\' | '`' | '*' | '_' | '{' | '}' | '[' | ']' | '<' | '>' | '(' | ')'
-            | '#' | '+' | '-' | '.' | '!' | '|' | '~' => {
+            '\\' | '`' | '*' | '_' | '{' | '}' | '[' | ']' | '<' | '>' | '(' | ')' | '#' | '+'
+            | '-' | '.' | '!' | '|' | '~' => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -318,7 +334,9 @@ mod tests {
 
     #[test]
     fn empty_report_renders_clean_banner() {
-        let out = render(&Report { results: Vec::new() });
+        let out = render(&Report {
+            results: Vec::new(),
+        });
         assert_eq!(out, "# alint check\n\nNo violations found.\n");
     }
 
@@ -465,8 +483,9 @@ mod tests {
             results: vec![rule(
                 "r1",
                 Level::Error,
-                vec![Violation::new("use **emphasis** [carefully]")
-                    .with_path(PathBuf::from("a.rs"))],
+                vec![
+                    Violation::new("use **emphasis** [carefully]").with_path(PathBuf::from("a.rs")),
+                ],
             )],
         };
         let out = render(&report);
@@ -531,7 +550,9 @@ mod tests {
 
     #[test]
     fn fix_report_empty_renders_clean() {
-        let out = render_fix(&FixReport { results: Vec::new() });
+        let out = render_fix(&FixReport {
+            results: Vec::new(),
+        });
         assert!(out.contains("No violations found."));
     }
 
