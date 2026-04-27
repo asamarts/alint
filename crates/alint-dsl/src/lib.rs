@@ -76,6 +76,30 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     let mut visiting = std::collections::HashSet::new();
     let mut raw = load_recursive(path, &mut visiting, opts)?;
 
+    // `.alint.d/*.yml` drop-ins — auto-discovered next to the
+    // top-level config and merged in alphabetical order. The
+    // last drop-in alphabetically wins on field-level
+    // overrides, mirroring the `/etc/*.d/` convention: stage
+    // ops conventions as `00-base.yml`, team policies as
+    // `50-team.yml`, developer-local tweaks as `99-local.yml`.
+    //
+    // Trust-equivalent to the main config — drop-ins live in
+    // the same workspace under the user's control, so they
+    // can declare `custom:` facts and `kind: command` rules
+    // without the trust-gate that protects HTTPS / bundled
+    // extends. Sub-extended configs (chains rooted via
+    // `extends:`) do NOT get their own `.alint.d/` discovery —
+    // only the top-level config does, to keep the loading
+    // surface comprehensible.
+    let drop_in_dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".alint.d");
+    for drop_in_path in collect_drop_ins(&drop_in_dir)? {
+        let drop_in = load_recursive(&drop_in_path, &mut visiting, opts)?;
+        raw = merge(raw, drop_in);
+    }
+
     // Nested `.alint.yml` discovery (opt-in via `nested_configs:
     // true` on the root config). Walks from the root config's
     // directory, finds any sub-directory configs, scopes their
@@ -96,6 +120,42 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     let merged = raw.finalize()?;
     validate(&merged)?;
     Ok(merged)
+}
+
+/// List `.alint.d/*.{yml,yaml}` files alphabetically. Returns
+/// an empty Vec when the directory doesn't exist (drop-ins are
+/// purely opt-in by mkdir). Non-YAML files are silently
+/// skipped so a stray `.gitkeep` or `README.md` in the dir
+/// doesn't break loading. Sort order is fixed (lexicographic
+/// over the file name) so the merge result is deterministic
+/// across filesystems whose readdir order isn't.
+fn collect_drop_ins(dir: &Path) -> Result<Vec<PathBuf>> {
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut entries: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|source| Error::Io {
+        path: dir.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| Error::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let is_yaml = matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("yml" | "yaml")
+        );
+        if is_yaml {
+            entries.push(path);
+        }
+    }
+    entries.sort();
+    Ok(entries)
 }
 
 /// Intermediate form used during `extends:` resolution. Identical
@@ -864,6 +924,65 @@ fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_drop_ins_handles_missing_dir() {
+        // Missing `.alint.d/` is the common case (drop-ins
+        // are opt-in by mkdir); should be silent.
+        let dir = std::path::Path::new("/nonexistent/.alint.d");
+        assert_eq!(collect_drop_ins(dir).unwrap(), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn collect_drop_ins_yaml_files_only_alphabetical() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("99-late.yaml"), "version: 1\n").unwrap();
+        std::fs::write(tmp.path().join("00-early.yml"), "version: 1\n").unwrap();
+        std::fs::write(tmp.path().join("50-mid.yml"), "version: 1\n").unwrap();
+        // Non-yaml files in the same dir should be skipped.
+        std::fs::write(tmp.path().join("README.md"), "ignored\n").unwrap();
+        std::fs::write(tmp.path().join(".gitkeep"), "").unwrap();
+        let entries = collect_drop_ins(tmp.path()).unwrap();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, ["00-early.yml", "50-mid.yml", "99-late.yaml"]);
+    }
+
+    #[test]
+    fn drop_ins_merge_into_main_config_with_field_level_override() {
+        // End-to-end: a `.alint.yml` next to a `.alint.d/`
+        // dir; the drop-in's `id: main-rule` field-overrides
+        // the main config's level. Mirrors the `/etc/*.d/`
+        // mental model: drop-ins win on conflict.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.yml"),
+            "version: 1\nrules:\n  - {id: main-rule, kind: file_exists, paths: [X], level: error}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join(".alint.d")).unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.d/00-base.yml"),
+            "version: 1\nrules:\n  - {id: extra-rule, kind: file_exists, paths: [Y], level: warning}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.d/50-override.yml"),
+            "version: 1\nrules:\n  - {id: main-rule, level: warning}\n",
+        )
+        .unwrap();
+        let cfg = load(&tmp.path().join(".alint.yml")).unwrap();
+        let by_id: std::collections::HashMap<&str, alint_core::Level> =
+            cfg.rules.iter().map(|r| (r.id.as_str(), r.level)).collect();
+        assert_eq!(by_id.get("main-rule").copied(), Some(alint_core::Level::Warning));
+        assert_eq!(
+            by_id.get("extra-rule").copied(),
+            Some(alint_core::Level::Warning)
+        );
+        assert_eq!(cfg.rules.len(), 2);
+    }
 
     #[test]
     fn parses_minimal_config() {
