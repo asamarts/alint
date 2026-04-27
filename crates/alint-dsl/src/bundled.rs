@@ -182,4 +182,51 @@ mod tests {
             );
         }
     }
+
+    /// `xtask docs-export` parses the leading comment block of each
+    /// bundled-ruleset YAML and renders it as the doc page's
+    /// overview. The contract is:
+    ///
+    ///     # alint://bundled/<name>@v<rev>
+    ///     #
+    ///     # <prose description>
+    ///     ...
+    ///
+    /// Line 1 is the canonical URI tag (the renderer strips it),
+    /// line 2 is a blank `#`, and line 3 starts the prose. A
+    /// missing tag or empty comment block ships a doc page with
+    /// the wrong title or no overview at all — silently. This
+    /// test catches the gap before merge.
+    ///
+    /// The same contract is enforced as a dogfood rule in the
+    /// repo's `.alint.yml` (`bundled-ruleset-has-uri-header`).
+    /// Both checks exist: the rule surfaces the failure in
+    /// linter output where contributors expect it; this test is
+    /// faster (cargo-test scale) and harder to bypass with bad
+    /// path globs.
+    #[test]
+    fn every_bundled_ruleset_has_uri_header_and_overview() {
+        for (name, rev) in catalog() {
+            let spec = format!("{name}@{rev}");
+            let body = resolve(&spec).unwrap();
+            let mut lines = body.lines();
+            let l1 = lines.next().unwrap_or("");
+            let l2 = lines.next().unwrap_or("");
+            let l3 = lines.next().unwrap_or("");
+
+            let expected_uri = format!("# alint://bundled/{name}@{rev}");
+            assert_eq!(
+                l1, expected_uri,
+                "ruleset '{spec}' line 1 must be the canonical URI tag {expected_uri:?}; got {l1:?}"
+            );
+            assert_eq!(
+                l2, "#",
+                "ruleset '{spec}' line 2 must be a blank `#` (separating URI tag from prose); got {l2:?}"
+            );
+            assert!(
+                l3.starts_with("# ") && l3.len() > 2,
+                "ruleset '{spec}' line 3 must start with `# ` followed by description prose; got {l3:?}"
+            );
+        }
+    }
 }

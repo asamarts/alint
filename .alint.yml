@@ -234,3 +234,32 @@ rules:
     paths: "crates/**/src/**/*.rs"
     max: 1
     level: warning
+
+  # --- Bundled ruleset shape ---------------------------------------------
+  # Each YAML under crates/alint-dsl/rulesets/v1/ is the source of truth for
+  # one bundled ruleset AND the source of truth for that ruleset's docs page
+  # (xtask docs-export parses the leading comment block as the page's
+  # overview, then embeds the YAML verbatim under "## Source"). The format
+  # below is what the docs generator expects:
+  #
+  #     # alint://bundled/<name>@v<rev>
+  #     #
+  #     # <prose description>
+  #     ...
+  #     version: 1
+  #
+  # Without the URI tag on line 1 the page renders with a missing or wrong
+  # title; without the `#`-blank-then-prose pattern the overview is empty
+  # and the page reads as "rules dumped onto a blank slate." The unit test
+  # in alint-dsl/bundled.rs gives faster feedback (cargo-test scale), this
+  # rule surfaces it in the linter output where contributors will see it.
+  - id: bundled-ruleset-has-uri-header
+    kind: file_header
+    paths: "crates/alint-dsl/rulesets/v1/**/*.yml"
+    lines: 3
+    pattern: '\A# alint://bundled/[a-z0-9/_-]+@v\d+\n#\n# \S'
+    level: error
+    message: >-
+      Bundled ruleset YAMLs must start with `# alint://bundled/<name>@v<rev>`
+      on line 1, a blank `#` on line 2, and a prose description starting on
+      line 3 (parsed by xtask docs-export as the page overview).
