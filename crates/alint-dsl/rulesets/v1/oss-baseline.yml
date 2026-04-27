@@ -67,6 +67,57 @@ rules:
     message: "Consider adding a SECURITY.md so vulnerability reporters know where to disclose."
     policy_url: "https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository"
 
+  - id: oss-security-policy-non-empty
+    # Mirrors OpenSSF Scorecard's Security-Policy check: the file
+    # has to actually contain reporting guidance, not be a stub.
+    # 200 bytes is the same floor we use for LICENSE.
+    kind: file_min_size
+    paths: ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]
+    min_bytes: 200
+    level: info
+    message: "SECURITY.md is suspiciously short; describe how to report vulnerabilities and the supported-versions policy."
+    policy_url: "https://github.com/ossf/scorecard/blob/main/docs/checks.md#security-policy"
+
+  - id: oss-dependency-update-tool
+    # OpenSSF Scorecard's Dependency-Update-Tool check. Either
+    # Dependabot or Renovate satisfies it; both are config-only
+    # (no extra Rust deps, no engine work). The wide path list
+    # covers every blessed location each tool reads.
+    kind: file_exists
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/dependabot.yaml"
+      - "renovate.json"
+      - "renovate.json5"
+      - ".renovaterc"
+      - ".renovaterc.json"
+      - ".github/renovate.json"
+      - ".github/renovate.json5"
+    level: info
+    message: "Consider configuring Dependabot or Renovate to keep dependencies and actions up to date."
+    policy_url: "https://github.com/ossf/scorecard/blob/main/docs/checks.md#dependency-update-tool"
+
+  - id: oss-codeowners-exists
+    # OpenSSF Scorecard's Code-Review signal. Branch-protection
+    # itself is GitHub-API state alint can't see, but a CODEOWNERS
+    # file is the on-disk piece — it auto-routes review requests
+    # and signals review expectations to contributors.
+    kind: file_exists
+    paths: ["CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"]
+    level: info
+    message: "Consider adding a CODEOWNERS file so PR reviews are auto-routed."
+    policy_url: "https://github.com/ossf/scorecard/blob/main/docs/checks.md#code-review"
+
+  - id: oss-codeowners-non-empty
+    # Catches the empty / placeholder CODEOWNERS that satisfies
+    # Scorecard's existence check while doing nothing useful.
+    # 10 bytes is the smallest meaningful pattern + owner pair.
+    kind: file_min_size
+    paths: ["CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"]
+    min_bytes: 10
+    level: info
+    message: "CODEOWNERS exists but appears empty; add at least one ownership rule (e.g. `* @org/team`)."
+
   - id: oss-code-of-conduct-exists
     kind: file_exists
     paths: ["CODE_OF_CONDUCT.md", ".github/CODE_OF_CONDUCT.md", "docs/CODE_OF_CONDUCT.md"]

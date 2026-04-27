@@ -28,4 +28,6 @@ expect:
       - {rule: oss-readme-exists}
       - {rule: oss-license-exists}
       - {rule: oss-security-policy-exists}
+      - {rule: oss-dependency-update-tool}
+      - {rule: oss-codeowners-exists}
       - {rule: oss-gitignore-exists}

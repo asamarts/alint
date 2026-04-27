@@ -21,9 +21,32 @@ given:
       person obtaining a copy of this software and associated
       documentation files (the "Software"), to deal in the
       Software without restriction...
-    SECURITY.md: "# Security Policy\n\nReport vulnerabilities to security@example.com.\n"
+    # Non-stub SECURITY.md — clears the 200-byte floor that
+    # mirrors Scorecard's Security-Policy "non-empty" check.
+    SECURITY.md: |
+      # Security Policy
+
+      ## Reporting
+
+      Report vulnerabilities privately to security@example.com.
+      We aim to acknowledge reports within 72 hours and ship a
+      patch within 14 days for high-severity issues.
+
+      ## Supported versions
+
+      Only the latest minor release receives security updates.
     CODE_OF_CONDUCT.md: "# Code of Conduct\n\nBe kind.\n"
     .gitignore: "target/\n"
+    .github:
+      dependabot.yml: |
+        version: 2
+        updates:
+          - package-ecosystem: cargo
+            directory: "/"
+            schedule:
+              interval: weekly
+      CODEOWNERS: |
+        * @demo/maintainers
   config: |
     version: 1
     extends:

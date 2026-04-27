@@ -2,10 +2,13 @@ name: alint://bundled/oss-baseline flags missing community docs
 tags: [check, extends, bundled, oss-baseline]
 
 # A bare repo that declares only a source file — none of the
-# documents the OSS baseline expects are present. All five
-# "file_exists" rules in the bundled ruleset should fire; none
-# of the hygiene rules (merge markers, bidi, trailing ws, final
-# newline) do because `main.py` isn't in their scope.
+# documents the OSS baseline expects are present. All seven
+# "presence" rules in the bundled ruleset should fire; none of
+# the hygiene rules (merge markers, bidi, trailing ws, final
+# newline) do because `main.py` isn't in their scope, and the
+# "non-empty" rules don't fire because their target files
+# don't exist either (they're predicated on the file being
+# present).
 given:
   tree:
     src:
@@ -22,5 +25,7 @@ expect:
       - {rule: oss-readme-exists, level: warning}
       - {rule: oss-license-exists, level: warning}
       - {rule: oss-security-policy-exists, level: info}
+      - {rule: oss-dependency-update-tool, level: info}
+      - {rule: oss-codeowners-exists, level: info}
       - {rule: oss-code-of-conduct-exists, level: info}
       - {rule: oss-gitignore-exists, level: info}

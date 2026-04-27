@@ -24,6 +24,14 @@ given:
       # one line — the canonical use of field-level override.
       - id: oss-security-policy-exists
         level: off
+      - id: oss-security-policy-non-empty
+        level: off
+      - id: oss-dependency-update-tool
+        level: off
+      - id: oss-codeowners-exists
+        level: off
+      - id: oss-codeowners-non-empty
+        level: off
       - id: oss-code-of-conduct-exists
         level: off
       - id: oss-gitignore-exists
