@@ -305,6 +305,29 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
   level: warning
 ```
 
+### `json_schema_passes`
+
+Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
+
+Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml`); pass `format:` to override.
+
+```yaml
+- id: package-json-shape
+  kind: json_schema_passes
+  paths: "packages/*/package.json"
+  schema_path: "schemas/package.schema.json"
+  level: error
+
+- id: workflow-shape
+  kind: json_schema_passes
+  paths: ".github/workflows/*.yml"
+  schema_path: "schemas/workflow.schema.json"
+  format: yaml
+  level: warning
+```
+
+Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
+
 ### `file_is_text` (alias: `is_text`)
 
 Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
@@ -615,6 +638,46 @@ Flag the presence of `.gitmodules` at the repo root — always, regardless of `p
 ```
 
 Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.git/modules/` are still on the user.
+
+### `git_no_denied_paths`
+
+Fire when any tracked file matches a configured glob denylist. The absence-axis companion of `git_tracked_only`: instead of asking "does this tracked path exist?", it asks "is anything tracked that matches my denylist?" One rule covers what would otherwise need one `file_absent` per pattern. Reports every matching denylist entry per offending path so a single file hitting two patterns surfaces both.
+
+```yaml
+- id: no-secrets-or-keys
+  kind: git_no_denied_paths
+  denied:
+    - "*.env"
+    - ".env*"
+    - "*.pem"
+    - "id_rsa"
+    - "secrets/**"
+  level: error
+  message: "Don't commit secrets or credentials."
+```
+
+Outside a git repo (or when `git` isn't on `PATH`) the rule silently no-ops — the rule's intent only makes sense inside a tracked working tree. Check-only — `git rm --cached` is too destructive to automate.
+
+### `git_commit_message`
+
+Validate HEAD's commit-message shape via regex, max-subject-length, or required-body. At least one of the three must be set; combine all three for full Conventional-Commits-style enforcement. Subject length counts characters, not bytes (a 50-char emoji subject is 50, not 200).
+
+```yaml
+- id: conventional-commit
+  kind: git_commit_message
+  pattern: '^(feat|fix|chore|docs|refactor|test)(\([a-z-]+\))?: '
+  subject_max_length: 72
+  level: warning
+
+- id: bug-fixes-need-context
+  kind: git_commit_message
+  pattern: '^fix:'
+  requires_body: true
+  level: error
+  message: "fix: commits must explain what was broken in the body."
+```
+
+Outside a git repo, with no commits yet, or when `git` isn't on `PATH`, the rule silently no-ops. Pairs naturally with `alint check --changed` for per-PR enforcement: every PR's tip commit gets validated automatically.
 
 ---
 
