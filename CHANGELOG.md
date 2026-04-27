@@ -6,6 +6,54 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.11] — 2026-04-27
+
+npm install channel. Closes the v0.5 milestone — every
+deferred item from the v0.5 roadmap is now shipped.
+
+### Added
+
+- **`@alint/alint` npm package** — fifth install channel
+  alongside `cargo install alint`, the Homebrew tap, the
+  Docker image, and `install.sh`. The npm package is a thin
+  shim that downloads the matching pre-built binary at
+  install time, verifies its SHA-256 against the same
+  `.sha256` companions the other paths consume, and stages
+  it under `bin-platform/` for the npm-exposed
+  `bin/alint.js` shim to spawn at runtime.
+
+  ```bash
+  # project-local
+  npm install --save-dev @alint/alint
+  npx alint check
+
+  # global
+  npm install -g @alint/alint
+  alint check
+  ```
+
+  - The package itself ships zero JS runtime behaviour.
+  - Single runtime dep (`tar` for archive extraction).
+  - Skip the postinstall network hop with
+    `ALINT_SKIP_INSTALL=1` (for CI systems that snapshot
+    `node_modules`).
+  - Supported platforms: linux x64/arm64 (musl), macOS
+    x64/arm64, Windows x64.
+  - Auto-published from `release.yml` on tag push,
+    alongside crates.io / Docker / Homebrew. The publish
+    job stamps `package.json`'s version to match the tag
+    immediately before `npm publish --access public`.
+
+### Internal
+
+- New `npm/` directory at the repo root holds
+  `package.json`, `install.js` (postinstall), `bin/alint.js`
+  (runtime shim), `README.md`, and `.npmignore`.
+- `release.yml` gains a `publish-npm` job: `needs: release`
+  (the GH Release must be live before any user's
+  postinstall can fetch the binary tarballs); reads
+  `NPM_TOKEN` secret from repo settings.
+
 ## [0.5.10] — 2026-04-27
 
 DSL ergonomics: three composition primitives that close
