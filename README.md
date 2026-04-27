@@ -91,15 +91,15 @@ cargo install alint
 
 ```bash
 # project-local
-npm install --save-dev @alint/alint
+npm install --save-dev @a-lint/alint
 npx alint check
 
 # global (puts `alint` on PATH)
-npm install -g @alint/alint
+npm install -g @a-lint/alint
 alint check
 ```
 
-The [@alint/alint](https://www.npmjs.com/package/@alint/alint) package is a thin shim that downloads the matching pre-built binary at install time, verifies its SHA-256 against the same `.sha256` companion `install.sh` and Homebrew use, and stages it under the package's `bin-platform/`. The package itself ships zero JS runtime behaviour. Set `ALINT_SKIP_INSTALL=1` to suppress the postinstall network hop in CI environments that snapshot `node_modules`.
+The [@a-lint/alint](https://www.npmjs.com/package/@a-lint/alint) package is a thin shim that downloads the matching pre-built binary at install time, verifies its SHA-256 against the same `.sha256` companion `install.sh` and Homebrew use, and stages it under the package's `bin-platform/`. The package itself ships zero JS runtime behaviour. Set `ALINT_SKIP_INSTALL=1` to suppress the postinstall network hop in CI environments that snapshot `node_modules`.
 
 ### From source
 

@@ -19,9 +19,9 @@ const binaryPath = path.join(__dirname, '..', 'bin-platform', binaryName);
 
 if (!fs.existsSync(binaryPath)) {
   process.stderr.write(
-    `@alint/alint: binary not found at ${binaryPath}\n` +
+    `@a-lint/alint: binary not found at ${binaryPath}\n` +
       `  this usually means the postinstall step failed; try:\n` +
-      `    npm uninstall -g @alint/alint && npm install -g @alint/alint\n` +
+      `    npm uninstall -g @a-lint/alint && npm install -g @a-lint/alint\n` +
       `  or set ALINT_SKIP_INSTALL=0 if your CI suppressed it.\n`,
   );
   process.exit(1);
@@ -32,7 +32,7 @@ const result = child_process.spawnSync(binaryPath, process.argv.slice(2), {
 });
 
 if (result.error) {
-  process.stderr.write(`@alint/alint: failed to spawn ${binaryPath}: ${result.error.message}\n`);
+  process.stderr.write(`@a-lint/alint: failed to spawn ${binaryPath}: ${result.error.message}\n`);
   process.exit(1);
 }
 

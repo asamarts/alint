@@ -217,7 +217,7 @@ jobs:
         run: ci/scripts/publish-crates.sh
 
   publish-npm:
-    name: publish @alint/alint to npm
+    name: publish @a-lint/alint to npm
     # `needs: release` so the npm package's postinstall download
     # always finds the matching binary tarballs on GitHub
     # Releases. The npm tarball itself contains only the
@@ -231,7 +231,7 @@ jobs:
       # Required for the OIDC handshake — GitHub mints a
       # short-lived token, npm exchanges it for an ephemeral
       # publish credential keyed to the trusted-publisher
-      # config on npmjs.com (org `@alint`, repo `asamarts/alint`,
+      # config on npmjs.com (org `@a-lint`, repo `asamarts/alint`,
       # workflow `release.yml`).
       id-token: write
     steps:
