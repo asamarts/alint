@@ -8,6 +8,83 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.9] — 2026-04-27
+
+`json_schema_passes` (last unshipped structured-query
+primitive), two new git-aware rule kinds, and four
+OpenSSF Scorecard-overlap additions to `oss-baseline@v1`.
+Schema-compatible: every v0.5.8 config runs unchanged.
+
+### Added
+
+- **`json_schema_passes`** — validate JSON / YAML / TOML
+  files against a JSON Schema. Targets coerce through
+  serde into the same `serde_json::Value` tree the schema
+  sees, so YAML configs (Kubernetes manifests, GitHub
+  Actions workflows, Helm `values.schema.json`) and TOML
+  manifests (Cargo, pyproject) all work against a JSON
+  schema document. Schema is loaded + compiled lazily on
+  the first `evaluate()` call and cached on the rule via
+  `OnceLock`. Each schema-validation error becomes one
+  violation with the failing instance path; a target that
+  fails to parse produces a single parse-error violation,
+  not a flood. Format is detected from extension; pass
+  `format:` to override.
+
+- **`git_no_denied_paths`** — fire when any tracked file
+  matches a configured glob denylist. The absence-axis
+  companion of `git_tracked_only` (v0.4.8). Catches
+  secrets (`*.env`, `id_rsa`, `*.pem`), bulky generated
+  artefacts (`dist/**`, `*.log`), and "do not commit"
+  sentinels in one rule rather than one `file_absent`
+  per pattern. Reports every matching denylist entry per
+  offending path. Outside a git repo, silently no-ops.
+
+- **`git_commit_message`** — validate HEAD's commit
+  message shape via regex (`pattern:`), max subject
+  length (`subject_max_length:`), and body-required
+  (`requires_body:`). At least one of the three must be
+  set. Subject length counts characters, not bytes.
+  Outside a git repo, with no commits, or when `git`
+  isn't on PATH, silently no-ops. Pairs naturally with
+  `alint check --changed` for per-PR enforcement.
+
+- **`alint-core::git::head_commit_message(root)`** —
+  new helper alongside `collect_tracked_paths` /
+  `collect_changed_paths`, with the same advisory
+  `Option<String>` return shape.
+
+- **Four Scorecard-overlap rules in `oss-baseline@v1`**
+  (info-level, no new rule kinds — composes from
+  existing `file_exists` + `file_min_size`):
+  - `oss-security-policy-non-empty` — 200B floor on
+    SECURITY.md (catches the empty stub that satisfies
+    Scorecard's existence check while providing no
+    reporting guidance).
+  - `oss-dependency-update-tool` — `file_exists`
+    against every blessed Dependabot / Renovate config
+    location.
+  - `oss-codeowners-exists` — CODEOWNERS at root,
+    `.github/`, or `docs/`.
+  - `oss-codeowners-non-empty` — 10B floor on
+    CODEOWNERS.
+
+### Internal
+
+- `alint-rules` gains `jsonschema = "0.29"` as a
+  regular dep (already a workspace dep used by
+  `alint-dsl`'s drift tests).
+- JSON Schema (`schemas/v1/config.json` + the in-crate
+  copy) defines `rule_json_schema_passes`,
+  `rule_git_no_denied_paths`, and
+  `rule_git_commit_message`. Drift test passes.
+- 21 new unit tests across the three rule files (9 for
+  `json_schema_passes`, 5 for `git_no_denied_paths`, 7
+  for `git_commit_message`); 1 new e2e fixture
+  (`oss_baseline_complete_repo_pass` updated for the
+  four new rules); two existing override scenarios
+  updated to account for the new bundled rules.
+
 ## [0.5.8] — 2026-04-26
 
 Three new output formats. Brings the count to seven and
