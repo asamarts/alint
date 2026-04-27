@@ -190,6 +190,32 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0 OR MIT
             org.opencontainers.image.description=Language-agnostic linter for repository structure
 
+  publish-crates:
+    name: publish to crates.io
+    # Same gate as release/docker — confidence the code compiles
+    # cross-platform before pushing to crates.io. cargo publish is
+    # irreversible (only `yank` exists), so the build matrix is
+    # the strongest pre-publish signal we have. Independent of
+    # release/docker/homebrew failure domains: a transient
+    # crates.io error here is fixed by re-running this job
+    # (the script is idempotent — already-published crates are
+    # skipped via the crates.io API check).
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: publish-crates
+      - name: publish all 5 crates in dependency order
+        env:
+          # Set this in repo Settings → Secrets → Actions. Token
+          # comes from https://crates.io/me; needs `publish-update`
+          # scope on each of the five alint crates.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: ci/scripts/publish-crates.sh
+
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)
     needs: release
