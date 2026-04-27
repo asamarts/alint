@@ -4,17 +4,16 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.8** (2026-04-26). Headline:
-three new output formats — `markdown` (GFM, suited to PR
-comments and mkdocs report pages), `junit` (the de-facto-
-standard CI test-report XML consumed by Jenkins, Azure
-DevOps, GitHub's `dorny/test-reporter`, and GitLab's JUnit
-integration), and `gitlab` (Code Climate-spec JSON for
-GitLab CI's Code Quality reports). Brings the format count
-to seven. Schema-compatible: every v0.5.7 config runs
-unchanged. Next planned: `json_schema_passes`, remaining
-git-aware primitives, rule templates, `.alint.d/`
-drop-ins, npm shim.
+**Latest release: v0.5.9** (2026-04-27). Headline:
+`json_schema_passes` (last unshipped structured-query
+primitive), two git-aware rule kinds (`git_no_denied_paths`
++ `git_commit_message`), and four OpenSSF Scorecard-overlap
+rules in `oss-baseline@v1` covering Security-Policy
+non-empty + Dependency-Update-Tool + Code-Review's on-disk
+piece (CODEOWNERS shape). Schema-compatible: every v0.5.8
+config runs unchanged. Next planned: rule templates,
+`.alint.d/` drop-ins, `content_from:` for fix ops, npm
+shim.
 
 ## Positioning
 
@@ -256,10 +255,10 @@ Ranked by leverage.
 - ✅ Output formats: `markdown`, `junit`, `gitlab` — shipped in v0.5.8 (2026-04-26). Brings the format count to seven; SARIF / GitHub / `JUnit` / GitLab fall through to the human formatter on `alint fix` since they describe findings, not remediations.
 - ✅ `command` plugin kind (v0.5.1, 2026-04-26). Per-file rule wrapping any CLI on `PATH` (`actionlint` / `shellcheck` / `taplo` / `kubeconform` / etc.); exit `0` = pass, non-zero = violation carrying stdout+stderr. Trust-gated: only the user's own top-level config can declare these (mirror of the `custom:` fact gate). Pairs naturally with `--changed` so external checks become incremental in CI.
 - ⏳ npm shim (`@alint/alint`). Closes the install-path gap for JS adopters who don't already have Cargo, Homebrew, or Docker. Wraps a download of the matching pre-built binary; package never ships JS.
-- ⏳ Git-aware primitives: `git_no_denied_paths`, `git_commit_message`.
-- ⏳ `json_schema_passes` primitive.
+- ✅ Git-aware primitives: `git_no_denied_paths`, `git_commit_message` — both shipped in v0.5.9 (2026-04-27). The first fires on tracked paths matching a glob denylist (secrets / artefacts / "do not commit"); the second validates HEAD's commit message shape via regex / max-subject-length / requires-body. Both no-op silently outside a git repo.
+- ✅ `json_schema_passes` primitive — shipped in v0.5.9 (2026-04-27). Validates JSON / YAML / TOML targets against a JSON Schema; reuses the same serde-tree normalisation as `json_path_*`. Schema is loaded + compiled lazily and cached on the rule via `OnceLock`.
 - ✅ Remaining bundled rulesets: `compliance/reuse@v1` + `compliance/apache-2@v1` shipped in v0.5.5 (2026-04-26). Both use `file_header` for SPDX / Apache header checks; reuse adds a `dir_exists` on `LICENSES/`; apache-2 adds `file_content_matches` for the LICENSE text + `file_exists` for NOTICE. Both extend without a fact gate — adopting the ruleset signals intent.
-- ⏳ Additional Scorecard-overlap rules in `ci/github-actions@v1` and `oss-baseline@v1`. Specifically: SECURITY.md presence + non-empty (already partial), `dependabot.yml` / `renovate.json` presence (Dependency-Update-Tool check), branch protection hints via `.github/CODEOWNERS` shape (Code-Review check).
+- ✅ Additional Scorecard-overlap rules in `oss-baseline@v1` — shipped in v0.5.9 (2026-04-27). Four new rules: SECURITY.md non-empty, Dependency-Update-Tool (Dependabot OR Renovate), CODEOWNERS exists, CODEOWNERS non-empty. Branch-protection state is GitHub-API-only and out of scope; the on-disk piece (CODEOWNERS) is what alint can see. `ci/github-actions@v1` is unchanged — its scope is workflow content, not on-disk artefacts; CODEOWNERS belongs in oss-baseline.
 
 ### Generic hygiene rulesets (shipped in v0.4.3)
 
