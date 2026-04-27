@@ -424,17 +424,6 @@ publication; v0.5.7 layers competitive comparisons
 infrastructure. Schema-compatible; every v0.5.5 config
 runs unchanged.
 
-## [0.5.6] — 2026-04-26
-
-Scale-ceiling bench publication + a latent walker bug fix
-that the bench surfaced. New `xtask bench-scale` subcommand
-runs alint across a (size × scenario × mode) matrix with
-hardware-fingerprint capture and JSON + Markdown
-publication; v0.5.7 will layer competitive comparisons
-(ls-lint, Repolinter, find/grep) on top of the same
-infrastructure. Schema-compatible; every v0.5.5 config
-runs unchanged.
-
 ### Added
 
 - **`xtask bench-scale`** — scale-ceiling benchmark

@@ -17,5 +17,3 @@ Flag the presence of `.gitmodules` at the repo root — always, regardless of `p
 
 Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.git/modules/` are still on the user.
 
----
-

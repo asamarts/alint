@@ -6,12 +6,12 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 54 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 57 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 20 rules
+- [Content](/docs/rules/content/) — 21 rules
 - [Naming](/docs/rules/naming/) — 2 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 6 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 3 rules
@@ -19,7 +19,7 @@ alint ships 54 rule kinds across 12 families. Each rule is one entry in your `.a
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 1 rule
+- [Git hygiene](/docs/rules/git-hygiene/) — 3 rules
 - [Cross-file](/docs/rules/cross-file/) — 7 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
@@ -54,9 +54,12 @@ alint ships 54 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`final_newline`](/docs/rules/text-hygiene/final_newline/) — File must end with a single `\n`. _(Text hygiene)_
 - [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
 - [`for_each_file`](/docs/rules/cross-file/for_each_file/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
+- [`git_commit_message`](/docs/rules/git-hygiene/git_commit_message/) — Validate HEAD's commit-message shape via regex, max-subject-length, or required-body. _(Git hygiene)_
+- [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_
 - [`json_path_equals`](/docs/rules/content/json_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. _(Content)_
 - [`json_path_matches`](/docs/rules/content/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Content)_
+- [`json_schema_passes`](/docs/rules/content/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. _(Content)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
