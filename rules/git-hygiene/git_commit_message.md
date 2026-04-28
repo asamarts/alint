@@ -24,5 +24,3 @@ Validate HEAD's commit-message shape via regex, max-subject-length, or required-
 
 Outside a git repo, with no commits yet, or when `git` isn't on `PATH`, the rule silently no-ops. Pairs naturally with `alint check --changed` for per-PR enforcement: every PR's tip commit gets validated automatically.
 
----
-

@@ -10,6 +10,45 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`git_blame_age` rule kind** — fire on lines matching a regex
+  whose `git blame` author-time is older than `max_age_days`.
+  Closes the gap between `level: warning` on every TODO (too
+  noisy) and `level: off` (accepts unbounded debt accumulation).
+  Same regex match shape as `file_content_forbidden`, plus a
+  per-line age gate. New `{{ctx.match}}` message placeholder
+  substitutes capture group 1 (or the full match when no
+  capture is present), so messages can be specific about which
+  marker was caught. Outside a git repo, on untracked files, or
+  when blame fails for any other reason, the rule silently
+  no-ops per file — same advisory posture as
+  `git_no_denied_paths` / `git_commit_message`. Check-only.
+
+  ```yaml
+  - id: stale-todos
+    kind: git_blame_age
+    paths: "**/*.{rs,ts,tsx,js,jsx,py,go,java}"
+    pattern: '\b(TODO|FIXME|XXX|HACK)\b'
+    max_age_days: 180
+    level: warning
+    message: "`{{ctx.match}}` is >180 days old — resolve or remove."
+  ```
+
+  Engine plumbing: a new shared `BlameCache` is built once per
+  run when any rule reports `wants_git_blame()`, so multiple
+  blame-aware rules over overlapping `paths:` re-use the parsed
+  output. Cache memoises both successes and failures so a
+  large rule fan-out doesn't re-shell-out to git per file.
+  Heuristic notes (formatting passes reset blame age unless
+  `.git-blame-ignore-revs` is honoured; vendored / imported
+  code carries the import commit's timestamp; squash-merged
+  PRs collapse to a single date) are documented in
+  `docs/rules.md` and `docs/design/v0.7/git_blame_age.md`.
+
+  Pairs naturally with `alint check --changed` so blame only
+  runs over modified files in CI.
+
+  Design doc: `docs/design/v0.7/git_blame_age.md`.
+
 - **`commented_out_code` rule kind** — heuristic detector for
   blocks of commented-out source code (as opposed to prose
   comments, license headers, doc comments, or ASCII banners).
