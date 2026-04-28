@@ -129,6 +129,7 @@ impl Engine {
 
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
+        let git_blame = self.build_blame_cache_if_needed(root);
         let filtered_index = self.build_filtered_index(index);
         let full_ctx = Context {
             root,
@@ -137,6 +138,7 @@ impl Engine {
             facts: Some(&fact_values),
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
+            git_blame: git_blame.as_ref(),
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -145,6 +147,7 @@ impl Engine {
             facts: Some(&fact_values),
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
+            git_blame: git_blame.as_ref(),
         });
         let when_env = WhenEnv {
             facts: &fact_values,
@@ -180,6 +183,7 @@ impl Engine {
 
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
+        let git_blame = self.build_blame_cache_if_needed(root);
         let filtered_index = self.build_filtered_index(index);
         let full_ctx = Context {
             root,
@@ -188,6 +192,7 @@ impl Engine {
             facts: Some(&fact_values),
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
+            git_blame: git_blame.as_ref(),
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -196,6 +201,7 @@ impl Engine {
             facts: Some(&fact_values),
             vars: Some(&self.vars),
             git_tracked: git_tracked.as_ref(),
+            git_blame: git_blame.as_ref(),
         });
         let when_env = WhenEnv {
             facts: &fact_values,
@@ -282,6 +288,31 @@ impl Engine {
             return None;
         }
         crate::git::collect_tracked_paths(root)
+    }
+
+    /// Build the per-file `git blame` cache when at least one
+    /// loaded rule asked for it. Returns `None` otherwise — the
+    /// common case (most configs have no `git_blame_age` rules)
+    /// pays nothing. The cache itself is empty at construction;
+    /// rules trigger blame on first access per file.
+    ///
+    /// We use [`crate::git::collect_tracked_paths`] as the
+    /// is-this-a-git-repo probe so the rule no-ops cleanly
+    /// outside a repo without per-file blame failures littering
+    /// the cache. When the user opts into BOTH `git_tracked_only`
+    /// and `git_blame_age`, the probe runs once via
+    /// [`Engine::collect_git_tracked_if_needed`] and once here —
+    /// negligible cost (sub-ms) compared to the blame work.
+    fn build_blame_cache_if_needed(&self, root: &Path) -> Option<crate::git::BlameCache> {
+        let any_wants = self.entries.iter().any(|e| e.rule.wants_git_blame());
+        if !any_wants {
+            return None;
+        }
+        // Probe: a non-git workspace short-circuits to `None` so
+        // the rule's "silent no-op outside git" path is exercised
+        // at the engine level rather than per-file.
+        crate::git::collect_tracked_paths(root)?;
+        Some(crate::git::BlameCache::new(root.to_path_buf()))
     }
 
     /// Build a [`FileIndex`] containing only the entries the user

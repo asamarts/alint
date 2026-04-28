@@ -452,6 +452,7 @@
         { "$ref": "#/$defs/rule_markdown_paths_resolve" },
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
+        { "$ref": "#/$defs/rule_git_blame_age" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
@@ -914,6 +915,25 @@
         { "required": ["subject_max_length"] },
         { "required": ["requires_body"] }
       ]
+    },
+
+    "rule_git_blame_age": {
+      "description": "Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Closes the gap between `level: warning` on every TODO (too noisy) and `level: off` (accepts unbounded debt accumulation). Use cases: stale TODO / FIXME / XXX / HACK markers, abandoned `@deprecated` JSDoc tags, model-attributed TODOs that nobody followed up on. Outside a git repo, on untracked files, or when blame fails for any other reason, the rule silently no-ops per file. Heuristic notes: formatting passes (cargo fmt, prettier) reset blame age unless the formatting commit is listed in `.git-blame-ignore-revs`; vendored / imported code carries the import commit's timestamp; squash-merged PRs collapse to a single date. Check-only — auto-removing matched lines is destructive.",
+      "type": "object",
+      "required": ["paths", "pattern", "max_age_days"],
+      "properties": {
+        "kind": { "const": "git_blame_age" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "pattern": {
+          "type": "string",
+          "description": "Rust-regex pattern applied to each blame line's content. Capture group 1 (when present) is exposed as `{{ctx.match}}` in the message template; without a capture group, `{{ctx.match}}` substitutes the full match."
+        },
+        "max_age_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum line age (in days) for a matching line to fire as a violation. Lines younger than this pass silently. Common values: 90 (one quarter), 180 (half a year), 365 (a full year of debt)."
+        }
+      }
     },
 
     "if_present": {

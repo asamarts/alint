@@ -141,6 +141,7 @@ mod tests {
             facts: None,
             vars: None,
             git_tracked: None,
+            git_blame: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty(), "unexpected: {v:?}");
@@ -173,6 +174,7 @@ mod tests {
             facts: None,
             vars: None,
             git_tracked: None,
+            git_blame: None,
         };
         let v = r.evaluate(&ctx).unwrap();
         assert_eq!(v.len(), 2);

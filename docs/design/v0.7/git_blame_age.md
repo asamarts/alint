@@ -1,6 +1,24 @@
 # `git_blame_age` rule kind
 
-Status: Design draft.
+Status: Implemented. See `crates/alint-rules/src/git_blame_age.rs`
++ `BlameCache` in `crates/alint-core/src/git.rs`.
+
+Resolved open questions (from the original design draft, listed
+at the bottom of this doc):
+
+1. **Time format input** — days only for v0.7. `max_age_days:
+   <integer>` is the only knob. Humanised input (`6mo`, `1y`)
+   deferred until asked for.
+2. **Bundled-ruleset adoption** — held for a v0.7.x point
+   release once the rule has settled in user configs.
+3. **"Author time" vs. "commit time"** — author time wins.
+   The porcelain parser pulls `author-time` per source line.
+4. **`fix:` support** — none. The build path explicitly
+   rejects a `fix:` block.
+5. **Performance on large monorepos** — `--changed` mode
+   pairs naturally; documented in `docs/rules.md` and
+   the CHANGELOG. No new optimisations beyond the per-file
+   `BlameCache` (memoises both successes and failures).
 
 ## Problem
 

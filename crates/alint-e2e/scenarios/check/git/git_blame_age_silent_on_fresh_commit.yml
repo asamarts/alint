@@ -1,0 +1,37 @@
+name: git_blame_age stays silent on lines committed seconds ago
+tags: [check, git_blame_age, git]
+
+# The scenario commits a file containing a TODO marker; the
+# commit happens at runtime, so its blame age is essentially
+# zero. The rule's `max_age_days: 30` threshold can't be
+# crossed, and the rule must produce zero violations.
+#
+# Pairs with the in-crate integration tests at
+# crates/alint-rules/tests/git_blame_age.rs which use
+# GIT_AUTHOR_DATE to build a multi-commit fixture and verify
+# the firing case.
+
+given:
+  tree:
+    src:
+      main.rs: |
+        // TODO this is fresh
+        fn main() {}
+  config: |
+    version: 1
+    rules:
+      - id: stale-todos
+        kind: git_blame_age
+        paths: "**/*.rs"
+        pattern: '\bTODO\b'
+        max_age_days: 30
+        level: warning
+  git:
+    init: true
+    add: [src/main.rs]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

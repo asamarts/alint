@@ -1,0 +1,26 @@
+name: git_blame_age stays silent outside a git repo
+tags: [check, git_blame_age, git]
+
+# No `given.git:` block — the tempdir is not a git repo. The
+# engine's blame-cache builder probes via `git ls-files` and
+# returns None, so the rule's `ctx.git_blame` is None and
+# evaluate() short-circuits without ever calling `git blame`.
+
+given:
+  tree:
+    src:
+      main.rs: "// TODO ancient marker that would fire if blame worked\nfn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: stale-todos
+        kind: git_blame_age
+        paths: "**/*.rs"
+        pattern: 'TODO'
+        max_age_days: 30
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

@@ -37,6 +37,7 @@ pub mod final_newline;
 pub mod fixers;
 pub mod for_each_dir;
 pub mod for_each_file;
+pub mod git_blame_age;
 pub mod git_commit_message;
 pub mod git_no_denied_paths;
 pub mod indent_style;
@@ -118,6 +119,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("commented_out_code", commented_out_code::build);
     registry.register("git_no_denied_paths", git_no_denied_paths::build);
     registry.register("git_commit_message", git_commit_message::build);
+    registry.register("git_blame_age", git_blame_age::build);
     registry.register("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
@@ -232,6 +234,7 @@ mod registry_tests {
             "json_schema_passes",
             "git_no_denied_paths",
             "git_commit_message",
+            "git_blame_age",
             "file_is_text",
             "is_text",
             // Short-only.

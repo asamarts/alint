@@ -71,6 +71,12 @@ impl RuleResult {
 ///   `git_tracked_only: true`. `None` outside a git repo or when
 ///   no rule asked for it. Rules that opt in consult it via
 ///   [`Context::is_git_tracked`].
+/// - `git_blame` — per-file `git blame` cache, computed lazily
+///   when at least one rule reports `wants_git_blame()`. `None`
+///   when no rule asked for it. Rules consult it via
+///   [`crate::git::BlameCache::get`]; both "outside a git repo"
+///   and "blame failed for this file" surface as a `None`
+///   lookup, which the rule treats as "silent no-op."
 #[derive(Debug)]
 pub struct Context<'a> {
     pub root: &'a Path,
@@ -79,6 +85,7 @@ pub struct Context<'a> {
     pub facts: Option<&'a FactValues>,
     pub vars: Option<&'a HashMap<String, String>>,
     pub git_tracked: Option<&'a std::collections::HashSet<std::path::PathBuf>>,
+    pub git_blame: Option<&'a crate::git::BlameCache>,
 }
 
 impl Context<'_> {
@@ -122,6 +129,16 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     /// `true`, so the cost is paid at most once even if many
     /// rules opt in.
     fn wants_git_tracked(&self) -> bool {
+        false
+    }
+
+    /// Whether this rule needs `git blame` output on
+    /// [`Context`]. Default `false`; the `git_blame_age` rule
+    /// kind overrides to return `true`. The engine builds the
+    /// shared [`crate::git::BlameCache`] once per run when any
+    /// rule opts in, so multiple blame-aware rules over
+    /// overlapping `paths:` re-use the parsed result.
+    fn wants_git_blame(&self) -> bool {
         false
     }
 

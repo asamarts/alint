@@ -186,6 +186,7 @@ mod tests {
             facts: None,
             vars: None,
             git_tracked: None,
+            git_blame: None,
         };
         rule.evaluate(&ctx).unwrap()
     }
