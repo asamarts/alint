@@ -108,6 +108,18 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         "v1",
         include_str!("../rulesets/v1/compliance/apache-2.yml"),
     ),
+    // Agentic-era rulesets (v0.6). Composes with the existing
+    // hygiene/* and tooling/* sets — `agent-hygiene@v1` covers
+    // the patterns that are *distinctly* AI-shaped (versioned
+    // duplicate filenames, scratch-doc sprawl, AI-affirmation
+    // prose, debug residue, model-attributed TODOs) without
+    // duplicating what `hygiene/no-tracked-artifacts@v1`
+    // already catches.
+    (
+        "agent-hygiene",
+        "v1",
+        include_str!("../rulesets/v1/agent-hygiene.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
