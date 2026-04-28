@@ -15,16 +15,18 @@ package's published name is now `@asamarts/alint`
 was a placeholder during the TP detour). No code changes;
 every v0.5.11 config runs unchanged.
 
-**Next: v0.6 — agentic-era rulesets and output.** A
-strategic re-prioritisation announced 2026-04-27 after
-Repolinter's archive (2026-02-06) and the spike of
-agent-coding adoption made structural-lint the natural
-guard rail for AI-driven diffs. v0.6 adds two bundled
-rulesets aimed at common agent leftovers
-(`agent-hygiene@v1`, `agent-context@v1`) and a new
-`--format=agent` JSON shape optimised for agent
-self-correction loops. LSP and WASM each shift out by
-two slots (now v0.8 and v0.9 respectively); see the
+**Next: v0.6 — agent-era bundled rulesets and output.**
+Two new bundled rulesets aimed at common AI-coding
+leftovers (`agent-hygiene@v1`, `agent-context@v1`) plus a
+`--format=agent` JSON output for agents consuming alint
+inside their own self-correction loops. The work
+composes from existing rule kinds and matches the same
+incremental shape as the language-ecosystem bundled
+rulesets (`python@v1`, `go@v1`, `ci/github-actions@v1`,
+…) that have landed in earlier cuts — alint's existing
+niche (filesystem shape and contents of a repository)
+fits agent-driven development naturally. LSP and WASM
+each shift one slot later (now v0.8 and v0.9); see the
 phased sections below.
 
 ## Positioning
@@ -298,14 +300,18 @@ built on the existing primitive set — no new rule kinds needed.
   `## Context`, `## Decision` sections. Gap-free numbering
   deferred (needs `numeric_sequence` primitive).
 
-## v0.6 — Agentic-era rulesets and output
+## v0.6 — Agent-era bundled rulesets and output
 
-The strategic pivot announced 2026-04-27. Two bundled rulesets
-aimed at the most common AI-coding leftovers, plus a new output
-format for agents consuming alint inside their own
-self-correction loops. All Tier-1 work composes from existing
-rule kinds — no engine changes, no new primitives — so the
-binary stays lean and the cut ships fast.
+Two bundled rulesets aimed at the most common AI-coding
+leftovers, plus a new output format for agents consuming alint
+inside their own self-correction loops. All work composes from
+existing rule kinds — no engine changes, no new primitives —
+matching the same shape as the language-ecosystem rulesets
+(`python@v1`, `go@v1`, `ci/github-actions@v1`, …) shipped in
+earlier cuts. The agent-driven-development moment makes
+alint's existing niche especially valuable; v0.6 ships
+ecosystem-specific bundled rulesets to capitalise on that
+without changing the underlying tool.
 
 - ⏳ **`alint://bundled/agent-hygiene@v1`** — backup-suffix
   bans (`*.bak`, `*.orig`, `*~`, `*.swp`), versioned-duplicate
@@ -371,9 +377,8 @@ that bundled rulesets don't.
 
 ## v0.8 — LSP
 
-(Was v0.6 in the pre-2026-04-27 roadmap; pushed out by two
-slots so the agentic-era cut can ship into the open market
-window first.)
+(Was v0.6 in the pre-2026-04-27 roadmap; pushed back two slots
+so the v0.6 + v0.7 cuts can ship first.)
 
 - LSP server (`alint lsp`): inline diagnostics, hover with
   rule documentation, code actions for "add to ignore" and
