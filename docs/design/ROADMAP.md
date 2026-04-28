@@ -346,6 +346,11 @@ exposed. Each needs a short design doc before implementation
 because heuristic detection has a real false-positive surface
 that bundled rulesets don't.
 
+Per-feature design drafts live under
+[`docs/design/v0.7/`](./v0.7/) — each settles schema,
+semantics, false-positive surface, implementation notes,
+and open questions before code starts.
+
 - ⏳ **`commented_out_code` rule kind** — heuristic detector
   for `//` / `/* */` / `#` blocks of N+ consecutive commented
   lines whose content parses as code. Hardest design problem:
