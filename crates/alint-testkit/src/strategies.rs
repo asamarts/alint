@@ -201,11 +201,30 @@ fn insert_file(root: &mut BTreeMap<String, TreeNode>, segments: &[String], conte
 // ─── rule generation ─────────────────────────────────────────────
 
 fn any_rules(max_rules: usize) -> impl Strategy<Value = Vec<String>> {
-    vec(any_rule_yaml(), 0..=max_rules)
+    vec(any_rule_yaml(), 0..=max_rules).prop_map(dedupe_ids)
 }
 
 fn fixable_rules(max_rules: usize) -> impl Strategy<Value = Vec<String>> {
-    vec(fixable_rule_yaml(), 0..=max_rules)
+    vec(fixable_rule_yaml(), 0..=max_rules).prop_map(dedupe_ids)
+}
+
+/// The per-kind `rule_id` generators draw a prefix + 1-4 lowercase
+/// letters from a small space (`fe-a`, `fa-p`, …), so two rules of
+/// the same kind can land on the same id even at small `max_rules`.
+/// alint-dsl rejects duplicate ids at parse time, which makes the
+/// proptest harness panic on `parse(...).unwrap()`.
+///
+/// Prepend each rule's id with an index marker so every emitted
+/// scenario is collision-free regardless of how unlucky the
+/// underlying letter-draw was. We splice into the leading
+/// `  - id: ` prefix once per entry, leaving every other field
+/// untouched.
+fn dedupe_ids(rules: Vec<String>) -> Vec<String> {
+    rules
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| r.replacen("  - id: ", &format!("  - id: i{i}-"), 1))
+        .collect()
 }
 
 fn any_rule_yaml() -> impl Strategy<Value = String> {
