@@ -11,14 +11,15 @@ Language-agnostic linter for repository structure, existence, naming, and conten
 Usage: alint [OPTIONS] [COMMAND]
 
 Commands:
-  check    Run linters against the current (or given) directory. Default command
-  list     List all rules loaded from the effective config
-  explain  Show a rule's definition
-  fix      Apply automatic fixes for violations whose rules declare one
-  facts    Evaluate every `facts:` entry in the effective config and print the resolved value. Debugging aid for `when:` clauses
-  init     Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
-  suggest  Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
-  help     Print this message or the help of the given subcommand(s)
+  check             Run linters against the current (or given) directory. Default command
+  list              List all rules loaded from the effective config
+  explain           Show a rule's definition
+  fix               Apply automatic fixes for violations whose rules declare one
+  facts             Evaluate every `facts:` entry in the effective config and print the resolved value. Debugging aid for `when:` clauses
+  init              Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
+  export-agents-md  Generate (or maintain a section of) `AGENTS.md` from the active rule set, so the agent's pre-prompt directives stay in sync with the lint config. Outputs to stdout by default; use `--output PATH` to write a file or `--inline --output PATH` to splice between `<!-- alint:start -->` / `<!-- alint:end -->` markers
+  suggest           Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
   -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
