@@ -6,28 +6,26 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.5.12** (2026-04-27). Maintenance
-release: verifies the npm auto-publish CI wiring after
-v0.5.11 hit Trusted-Publishing setup blockers and was
-re-routed back to the `NPM_TOKEN`-based path. The npm
-package's published name is now `@asamarts/alint`
-(matches GitHub username; `@alint` was taken, `@a-lint`
-was a placeholder during the TP detour). No code changes;
-every v0.5.11 config runs unchanged.
+**Latest release: v0.7.0** (2026-04-28). Closes the v0.7
+cut. Three new rule kinds (`markdown_paths_resolve`,
+`commented_out_code`, `git_blame_age`) and two new
+subcommands (`alint suggest`, `alint export-agents-md`)
+targeting agent-driven development workflows specifically.
+Where v0.6 was config-only — bundled rulesets composed
+from existing primitives — v0.7 extends the engine itself
+with new rule kinds and new CLI surface. Schema-compatible:
+every v0.6 config runs unchanged; the new rule kinds parse
+new YAML shapes that older configs simply don't use, and
+`version: 1` continues to cover them. See
+[CHANGELOG.md](../../CHANGELOG.md) for the full feature list.
 
-**Next: v0.6 — agent-era bundled rulesets and output.**
-Two new bundled rulesets aimed at common AI-coding
-leftovers (`agent-hygiene@v1`, `agent-context@v1`) plus a
-`--format=agent` JSON output for agents consuming alint
-inside their own self-correction loops. The work
-composes from existing rule kinds and matches the same
-incremental shape as the language-ecosystem bundled
-rulesets (`python@v1`, `go@v1`, `ci/github-actions@v1`,
-…) that have landed in earlier cuts — alint's existing
-niche (filesystem shape and contents of a repository)
-fits agent-driven development naturally. LSP and WASM
-each shift one slot later (now v0.8 and v0.9); see the
-phased sections below.
+**Next: v0.8 — LSP.** Inline diagnostics, hover with rule
+documentation, code actions for "add to ignore" and "apply
+fix." Plus a VS Code extension that bundles the LSP. Pushed
+back from its pre-2026-04 v0.6 slot so the agent-era cuts
+(v0.6 + v0.7) could ship first while the
+agent-driven-development moment was hot. WASM plugins
+(v0.9) follow.
 
 ## Positioning
 
@@ -341,44 +339,53 @@ Out-of-scope for v0.6 (deliberately): new rule kinds, semantic
 analysis, secret-entropy scanning, AGENTS.md export. All of
 those land in v0.7 or later.
 
-## v0.7 — New rule kinds for agentic problems
+## v0.7 — New rule kinds for agentic problems (shipped)
 
 Targeted rule-kind additions that close the gaps Tier-1
-exposed. Each needs a short design doc before implementation
+exposed. Each got a short design doc before implementation
 because heuristic detection has a real false-positive surface
 that bundled rulesets don't.
 
 Per-feature design drafts live under
-[`docs/design/v0.7/`](./v0.7/) — each settles schema,
-semantics, false-positive surface, implementation notes,
-and open questions before code starts.
+[`docs/design/v0.7/`](./v0.7/) — each settled schema,
+semantics, false-positive surface, implementation notes, and
+open questions before code started, then was flipped to
+`Status: Implemented` on the matching feature commit.
 
-- ⏳ **`commented_out_code` rule kind** — heuristic detector
-  for `//` / `/* */` / `#` blocks of N+ consecutive commented
-  lines whose content parses as code. Hardest design problem:
-  false-positive control around license headers, ASCII art,
-  and MDX-style docs.
-- ⏳ **`git_blame_age` rule kind** — escalates a rule's
-  severity when the violating line has been in tree for
-  longer than `max_age_days`. Catches stale agent-leftover
-  TODOs without needing timestamps in the comment. Requires
-  `gix` integration (already on the deps roadmap) plus a
-  non-git fallback.
-- ⏳ **`markdown_paths_resolve` rule kind** — validates that
-  backticked paths in markdown files resolve to real files.
-  Targets the AGENTS.md staleness problem more precisely than
-  the v0.6 regex heuristic. Edge cases: template variables,
-  multi-line paths.
-- ⏳ **`alint suggest` subcommand** — scans the current repo
-  for known antipatterns and proposes rules that would catch
-  them. Acts as a smart `alint init` for retrofitting alint
-  onto a long-running, agent-heavy codebase.
-- ⏳ **`alint export-agents-md` subcommand** — generates (or
-  maintains a section of) `AGENTS.md` from the active rule
-  set. Each rule's `message` + `policy_url` becomes a
-  one-line directive. Solves the "duplicate config across
-  CLAUDE.md, .cursorrules, AGENTS.md" complaint by making
-  alint the single source of truth.
+- ✅ **`markdown_paths_resolve` rule kind** (v0.7.1) —
+  validates that backticked paths in markdown files resolve
+  to real files. Targets the AGENTS.md staleness problem more
+  precisely than the v0.6 regex heuristic. Required
+  `prefixes:` field eliminates the "is this a path or a
+  word" question by construction.
+- ✅ **`commented_out_code` rule kind** (v0.7.2) — heuristic
+  detector for blocks of commented-out source code, scored on
+  punctuation density rather than identifier-token density
+  (English prose has identifier-shaped words too). Severity
+  floor `warning` — heuristics have non-zero FP rate.
+- ✅ **`git_blame_age` rule kind** (v0.7.3) — fire on lines
+  matching a regex whose `git blame` author-time exceeds
+  `max_age_days`. Closes the gap between `level: warning` on
+  every TODO (too noisy) and `level: off` (accepts unbounded
+  debt accumulation). Engine plumbing introduces a shared
+  `BlameCache` and the `{{ctx.match}}` message placeholder.
+- ✅ **`alint suggest` subcommand** (v0.7.4) — scans the
+  current repo for known antipatterns and proposes rules
+  that would catch them. Three suggester families ship:
+  bundled-ruleset (high confidence), antipattern (medium —
+  agent-hygiene leftovers), stale-TODO (medium — eats the
+  v0.7.3 dogfood). Three output formats (human / yaml /
+  json) and a strict stdout-vs-stderr split for slow
+  operations: `--progress=auto|always|never` controls
+  animated bars on stderr, `-q`/`--quiet` silences both.
+- ✅ **`alint export-agents-md` subcommand** (v0.7.5) —
+  renders the active rule set as an `AGENTS.md` directive
+  block. Inline mode splices between
+  `<!-- alint:start -->` / `<!-- alint:end -->` markers;
+  re-runs are byte-identical (no mtime bump on round-trip).
+  Closes the "67% of teams maintain duplicate configs
+  between AGENTS.md and CI lint" gap by making alint the
+  single source of truth.
 
 ## v0.8 — LSP
 
