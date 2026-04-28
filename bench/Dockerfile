@@ -31,7 +31,21 @@
 # Bumping any of these is a meaningful change to the bench
 # environment; bump the image tag and re-run results when you
 # touch them.
-ARG HYPERFINE_VERSION=1.20.0
+#
+# `HYPERFINE_VERSION` is held at 1.19.0 deliberately:
+# hyperfine 1.20 bumped its MSRV to rustc 1.88, but
+# `RUST_VERSION` here mirrors alint's user-facing
+# `rust-version = "1.85"` so benchmarks compile against the
+# same toolchain real users have. Bumping hyperfine would
+# force us to bump alint's MSRV (which we don't want — it's
+# a published compatibility floor), or to maintain a
+# bench-only rustc separate from the alint-build rustc
+# (which would invalidate the "image reflects user reality"
+# property). 1.19 is functionally identical for our use
+# (`--warmup`, `--runs`, `--export-markdown`, `--export-json`
+# are all stable). Re-evaluate if alint's MSRV ever moves
+# past 1.88.
+ARG HYPERFINE_VERSION=1.19.0
 ARG RIPGREP_VERSION=15.1.0
 ARG REPOLINTER_VERSION=0.11.2
 ARG LS_LINT_VERSION=2.2.3
