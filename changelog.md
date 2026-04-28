@@ -46,8 +46,14 @@ kinds, no engine changes, no architectural shift.
 
   Rules:
   - `agent-no-versioned-duplicates` — bans filenames matching
-    `*_v[0-9]*` / `*-v[0-9]*` / `*_old.*` / `*_FINAL.*` /
-    `*_copy.*` / `*_backup.*` / `*.copy.*` (warning).
+    `*_old.*` / `*_new.*` / `*_final.*` / `*_FINAL.*` /
+    `*_copy.*` / `*_backup.*` / `*.copy.*` (warning). The
+    `*_v[0-9]*` / `*-v[0-9]*` patterns were considered and
+    deliberately omitted — too many real codebases use those
+    for legitimate API versioning, schema migrations, release
+    notes, and versioned tests (`gitlab_v1_*.py`,
+    `076_add_v1_tables.py`, `release-notes-v1.md`,
+    `test_v1_api.py`).
   - `agent-no-scratch-docs-at-root` — bans `PLAN.md` /
     `NOTES.md` / `ANALYSIS.md` / `SUMMARY.md` / `FIX.md` /
     `DECISION.md` / `TODO.md` / `SCRATCH.md` / `DEBUG.md` /
@@ -58,12 +64,24 @@ kinds, no engine changes, no architectural shift.
     right"`, `"Excellent question"`, `"Happy to help"`,
     etc.) (info).
   - `agent-no-console-log` — bans `console.log` / `.debug` /
-    `.trace` in non-test JS / TS source (warning).
+    `.trace` in non-test JS / TS source (warning). Excludes
+    test directories (`**/*test*/**` — broader than
+    `test*/**`, catches `cross-sdk-tests/`, `e2e-tests/`,
+    etc.), build / dev tooling configs, `**/scripts/**`,
+    `**/website/**` / `**/public/**` / `**/demo/**`,
+    `**/vendor/**` and `**/.claude/**` (agent-worktree scratch
+    space).
   - `agent-no-debugger-statements` — bans `debugger;` /
-    `breakpoint()` in non-test source (error).
+    `breakpoint()` in non-test source (error). The regex
+    requires `;` immediately after `debugger` so the rule
+    doesn't trip on the WORD "debugger" appearing in prose
+    comments. Same exclusion list as the console-log rule.
   - `agent-no-model-todos` — bans `TODO(claude:)` /
     `FIXME(cursor:)` / `XXX(gpt:)` and similar
-    model-attributed markers (warning).
+    model-attributed markers (warning). Excludes CHANGELOG /
+    ROADMAP / cookbook / test directories — projects that
+    document these patterns trip on their own examples
+    otherwise.
 
 - **`alint://bundled/agent-context@v1`** — four-rule bundled
   ruleset for the agent-instruction files coding agents read

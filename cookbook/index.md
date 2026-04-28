@@ -395,3 +395,27 @@ rules:
   - id: agent-no-affirmation-prose
     level: warning
 ```
+
+### When you're writing about agent patterns
+
+Projects that *document* these patterns (a how-to guide about AI hygiene, an internal style guide that quotes agent stock phrases, etc.) will trip the prose / TODO rules on their own examples. The `agent-hygiene@v1` defaults already exclude `**/CHANGELOG*`, `**/ROADMAP*`, `**/cookbook/**`, `**/*test*/**`, and `**/fixtures/**` for that reason. If your docs live somewhere else, extend the exclude list — `paths.exclude` field-overrides the bundled list, so list everything you want excluded:
+
+```yaml
+version: 1
+extends:
+  - alint://bundled/agent-hygiene@v1
+
+rules:
+  - id: agent-no-affirmation-prose
+    paths:
+      include: ["**/*.{rs,ts,tsx,js,jsx,py,go,java,kt,rb,md}"]
+      exclude:
+        - "**/*test*/**"
+        - "**/__tests__/**"
+        - "**/fixtures/**"
+        - "**/CHANGELOG*"
+        - "**/ROADMAP*"
+        - "**/*.snap"
+        - "docs/agent-style.md"            # your custom doc that quotes the patterns
+        - "docs/style/**"                  # or a whole directory
+```

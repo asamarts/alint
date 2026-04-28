@@ -40,7 +40,7 @@ config once you're ready to enforce.
 - **kind**: [`file_absent`](/docs/rules/existence/file_absent/)
 - **level**: `warning`
 
-> Filename looks like a versioned duplicate (e.g. utils_v2.ts, app_old.js). Replace the original instead of keeping a parallel copy.
+> Filename looks like a versioned duplicate (e.g. app_old.js, api_FINAL.py, utils_copy.ts). Replace the original instead of keeping a parallel copy.
 
 ### `agent-no-scratch-docs-at-root`
 
@@ -116,16 +116,26 @@ version: 1
 
 rules:
   # --- Versioned-duplicate filenames -------------------------------
-  # Agents tend to write `utils_v2.ts` / `app_old.js` /
-  # `api_FINAL.py` instead of replacing the original. Combined
-  # with `hygiene-no-editor-backups` from `no-tracked-artifacts@v1`
-  # (which catches `*.bak` / `*~` / `*.swp`), this gives full
-  # coverage of the leftover-artefact filename surface.
+  # Agents tend to write `app_old.js` / `api_FINAL.py` /
+  # `utils_copy.ts` instead of replacing the original.
+  # Combined with `hygiene-no-editor-backups` from
+  # `no-tracked-artifacts@v1` (which catches `*.bak` / `*~` /
+  # `*.swp`), this gives broad coverage of the
+  # leftover-artefact filename surface.
+  #
+  # Important non-coverage: we deliberately do NOT match
+  # `*_v[0-9]*` / `*-v[0-9]*`. Real codebases use those for
+  # legitimate versioning — API versions
+  # (`gitlab_v1_callback.py`), schema migrations
+  # (`076_add_v1_tables.py`), release notes
+  # (`release-notes-v1.md`), and versioned tests
+  # (`test_v1_api.py`). The other suffixes below are
+  # unambiguous — `_old`, `_new`, `_FINAL`, `_copy`, `_backup`,
+  # `.copy.` are almost never legitimate part of a real
+  # filename's identity.
   - id: agent-no-versioned-duplicates
     kind: file_absent
     paths:
-      - "**/*_v[0-9]*"
-      - "**/*-v[0-9]*"
       - "**/*_old.*"
       - "**/*_old"
       - "**/*_new.*"
@@ -137,8 +147,8 @@ rules:
     level: warning
     message: >-
       Filename looks like a versioned duplicate (e.g.
-      utils_v2.ts, app_old.js). Replace the original instead
-      of keeping a parallel copy.
+      app_old.js, api_FINAL.py, utils_copy.ts). Replace the
+      original instead of keeping a parallel copy.
 
   # --- Planning / scratch docs at repo root ------------------------
   # Agents spawn planning files (PLAN.md, NOTES.md, ANALYSIS.md,
@@ -177,17 +187,20 @@ rules:
   # The pattern is narrow enough that legitimate code shouldn't
   # match — info-level so it's a soft nudge, not a hard gate.
   #
-  # CHANGELOG and snapshot tests are excluded because they may
-  # legitimately quote AI-style text from upstream sources or
-  # captured fixture output.
+  # The exclude list covers content that legitimately QUOTES
+  # AI-style text from upstream sources (CHANGELOG entries,
+  # roadmap rationale, cookbook examples) or captures it as
+  # test fixture output (snapshot tests, fixtures dirs).
   - id: agent-no-affirmation-prose
     kind: file_content_forbidden
     paths:
       include: ["**/*.{rs,ts,tsx,js,jsx,py,go,java,kt,rb,md}"]
       exclude:
-        - "**/test*/**"
+        - "**/*test*/**"
         - "**/__tests__/**"
+        - "**/fixtures/**"
         - "**/CHANGELOG*"
+        - "**/ROADMAP*"
         - "**/*.snap"
     pattern: "(?i)(you'?re absolutely right|excellent question|happy to help|great (point|question)|let me know if you need)"
     level: info
@@ -198,8 +211,9 @@ rules:
 
   # --- Debug residue ------------------------------------------------
   # `console.log` / `.debug` / `.trace` left in non-test JS / TS
-  # sources. Excludes test files and dev-tooling configs that may
-  # legitimately log.
+  # sources. The exclude list balances catching real production
+  # leftovers vs. legitimate logging in build tooling, browser
+  # demos, and vendored content.
   #
   # The leading `(?:^|[\s;{(])` ensures we don't match
   # `myconsole.log(...)` or other false positives where `console`
@@ -209,10 +223,39 @@ rules:
     paths:
       include: ["**/*.{ts,tsx,js,jsx,mjs,cjs}"]
       exclude:
+        # Test files and directories — `**/*test*/**` matches
+        # any segment containing "test" (`tests/`, `e2e-tests/`,
+        # `cross-sdk-tests/`, `test_helpers/`, …) — broader than
+        # `**/test*/**` which only matches segments STARTING
+        # with "test".
         - "**/*.{test,spec}.*"
-        - "**/test*/**"
+        - "**/*test*/**"
         - "**/__tests__/**"
+        - "**/fixtures/**"
+        # Build / dev tooling config files (vite.config.ts,
+        # rollup.config.mjs, etc.) often log intentionally.
         - "**/*.config.*"
+        # Build / utility scripts — agent harnesses and CI
+        # glue legitimately log; src/ is where this rule earns
+        # its keep.
+        - "**/scripts/**"
+        # Browser-facing demos and websites — `console.log` is a
+        # legitimate browser-debugging tool, and the codebase
+        # may keep example logs intentionally.
+        - "**/website/**"
+        - "**/public/**"
+        - "**/demo/**"
+        - "**/demos/**"
+        - "**/examples/**"
+        # Vendored / third-party code we don't own.
+        - "**/vendor/**"
+        - "**/vendored/**"
+        - "**/third_party/**"
+        - "**/3rdparty/**"
+        # Agent worktrees and harness scratch space — these are
+        # ephemeral copies of the working tree (e.g. Claude
+        # Code's `/parallel` worktrees), not real source.
+        - "**/.claude/**"
     pattern: '(?:^|[\s;{(])console\.(log|debug|trace)\s*\('
     level: warning
     message: >-
@@ -226,9 +269,26 @@ rules:
       include: ["**/*.{ts,tsx,js,jsx,mjs,cjs,py}"]
       exclude:
         - "**/*.{test,spec}.*"
-        - "**/test*/**"
+        - "**/*test*/**"
         - "**/__tests__/**"
-    pattern: '(?:^|[\s;{(])(debugger|breakpoint\(\))(?:[\s;)]|$)'
+        - "**/fixtures/**"
+        - "**/scripts/**"
+        - "**/website/**"
+        - "**/public/**"
+        - "**/demo/**"
+        - "**/demos/**"
+        - "**/examples/**"
+        - "**/vendor/**"
+        - "**/vendored/**"
+        - "**/third_party/**"
+        - "**/3rdparty/**"
+        - "**/.claude/**"
+    # Require `;` after `debugger` so the rule doesn't trip
+    # on the WORD "debugger" appearing in prose comments
+    # (`* called by the vscode debugger`). Same idea for
+    # `breakpoint()` — must include the parens, not just the
+    # word.
+    pattern: '(?:^|[\s;{(])(debugger\s*;|breakpoint\s*\(\s*\))'
     level: error
     message: >-
       `debugger;` / `breakpoint()` must not be committed —
@@ -239,11 +299,23 @@ rules:
   # markers that name a coding agent. They outlive the session
   # that wrote them and are typically actionable items the agent
   # intended to come back to but never did.
+  #
+  # Excludes documentation and changelogs — projects that
+  # *describe* these patterns (alint's own ROADMAP / CHANGELOG /
+  # cookbook are the canonical case) trip the rule on their own
+  # examples otherwise.
   - id: agent-no-model-todos
     kind: file_content_forbidden
     paths:
       include:
         ["**/*.{rs,ts,tsx,js,jsx,py,go,java,kt,rb,scala,c,cc,cpp,h,hpp,md}"]
+      exclude:
+        - "**/CHANGELOG*"
+        - "**/ROADMAP*"
+        - "**/cookbook/**"
+        - "**/*test*/**"
+        - "**/__tests__/**"
+        - "**/fixtures/**"
     pattern: '(?i)\b(TODO|FIXME|XXX|HACK)\s*\(\s*(claude|gpt|copilot|cursor|gemini|codex|aider|chatgpt)\b'
     level: warning
     message: >-
