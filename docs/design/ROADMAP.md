@@ -17,13 +17,20 @@ new YAML shapes that older configs simply don't use, and
 `version: 1` continues to cover them. See
 [CHANGELOG.md](../../CHANGELOG.md) for the full feature list.
 
-**Next: v0.8 — LSP.** Inline diagnostics, hover with rule
-documentation, code actions for "add to ignore" and "apply
-fix." Plus a VS Code extension that bundles the LSP. Pushed
-back from its pre-2026-04 v0.6 slot so the agent-era cuts
-(v0.6 + v0.7) could ship first while the
-agent-driven-development moment was hot. WASM plugins
-(v0.9) follow.
+**Next: v0.8 — Performance & test-floor.** Revival of the
+cut that was forward-pointed on 2026-04-27 (v0.5.11 day) and
+then dropped the same afternoon when the v0.6 agent-era
+re-prioritisation took its slot. With the v0.6 / v0.7 cuts
+shipped, the original perf agenda is back on the front
+burner: a regression-guard test layer that gates CI on
+benchmark drift, a per-file-rule dispatch flip in the
+engine (current shape re-walks the index per rule), a
+parallel walker via `ignore::WalkBuilder::build_parallel`,
+and a memory-footprint audit. Self-justified on its own
+merits, and a natural unblocker for v0.9's LSP — which
+also wants per-file dispatch (file change → re-evaluate
+that file's rules). LSP shifts to v0.9; WASM plugins to
+v0.10.
 
 ## Positioning
 
@@ -385,19 +392,136 @@ open questions before code started, then was flipped to
   between AGENTS.md and CI lint" gap by making alint the
   single source of truth.
 
-## v0.8 — LSP
+## v0.8 — Performance & test-floor
 
-(Was v0.6 in the pre-2026-04-27 roadmap; pushed back two slots
-so the v0.6 + v0.7 cuts can ship first.)
+Revival of the cut that was forward-pointed on the v0.5.11
+release (2026-04-27 morning) and then dropped the same
+afternoon when v0.6 was re-prioritised for the agent-era
+bundled rulesets. With v0.6 / v0.7 shipped, the original
+agenda is back on the front burner. Four sub-themes,
+ranked by leverage ÷ risk.
+
+### Regression-guard test layer
+
+A CI gate that fails the build when a benchmarked workload
+regresses past a threshold. The infrastructure already
+exists (criterion micros under `crates/alint-bench/`,
+hyperfine macros via `xtask bench-release`, scale matrix
+under `docs/benchmarks/v0.5/scale/`); what's missing is
+commit-by-commit baseline tracking and the gate itself.
+
+- ⏳ **`xtask bench-regression`** — replays a fixed set
+  of bench scenarios against the current commit, compares
+  to the baseline stored in-tree (or computed from
+  `main`), fails when any scenario regresses past
+  `--threshold` (proposed default ±10%).
+- ⏳ **CI wiring**: gate `bench-regression` on every PR
+  via `ci.yml`; nightly job on `main` refreshes the
+  baseline. Probably stages a small set of representative
+  scenarios at PR-time and the full matrix nightly to
+  keep PR runtime sane.
+- ⏳ **Methodology + reproduction doc** so external
+  contributors can validate or contest a flagged
+  regression. Hardware fingerprinting + warmup-iteration
+  conventions documented alongside the gate.
+- ⏳ **Backfill the baseline against v0.7.0** — anchors
+  "honest now"; everything we improve in v0.8 lands as a
+  win against that mark.
+
+### Per-file-rule dispatch flip
+
+Today the engine's outer loop is rules; each rule walks
+`ctx.index.files()` and filters by scope. For per-file
+rules (the `file_*` family — most of the catalogue), that
+re-walks the index N times. Flipping to file-major
+dispatch — walk files once, fan rules out per file —
+improves cache locality (file content read once, all
+matching rules apply) and trims redundant globset work.
+
+- ⏳ **Engine restructure** — dual-loop where per-file
+  rules run under a file-major outer loop and cross-file
+  rules (`pair`, `for_each_dir`, `every_matching_has`,
+  `unique_by`, `dir_contains`, `dir_only_contains`) keep
+  the rule-major path. Distinguishable via the existing
+  `Rule::requires_full_index()` method.
+- ⏳ **File-content read coalescing** — multiple content
+  rules over the same file each call `std::fs::read`
+  today. Under file-major dispatch the read happens once
+  per file and is shared across all matching rules.
+- ⏳ **Bench acceptance gate** — numbers must show on the
+  `bench-scale` matrix (regression-guard from the previous
+  sub-theme catches a regression here for free).
+
+### Parallel walker
+
+`alint-core::walker::walk` is single-threaded. The
+`ignore` crate's `WalkBuilder::build_parallel` exists
+specifically for trees where syscall bandwidth saturates
+ahead of CPU. Switching to it should help on huge trees
+(Linux kernel, polyglot monorepos with deep node_modules /
+target / venv directories).
+
+- ⏳ Replace `WalkBuilder::build()` with
+  `build_parallel()`; collect into the same
+  `Vec<FileEntry>` shape via a `Mutex<Vec<_>>` or
+  channel.
+- ⏳ Sort the collected vec by relative path before
+  returning so rule evaluation order stays deterministic
+  across runs — output-format snapshot tests depend on
+  this.
+- ⏳ Document the threading-knob behaviour: rayon-style
+  `--jobs N` flag or env var so CI runners with bounded
+  CPU don't over-subscribe.
+
+### Memory-footprint pass
+
+Smaller leverage than the dispatch flip but cheap under
+the same release.
+
+- ⏳ Audit `Violation` / `RuleResult` / `Report` — many
+  fields are owned `String` where `Cow<'_, str>` or
+  `&'static str` would do (rule-kind names, severity
+  labels, message-template-passthrough cases).
+- ⏳ Lazy file-content loading for line-oriented rules
+  (`no_trailing_whitespace`, `final_newline`,
+  `line_max_width`, `max_consecutive_blank_lines`,
+  `indent_style`, …) — `BufReader::lines()` instead of
+  `std::fs::read`.
+- ⏳ Profile via `dhat` or `valgrind massif` against the
+  bench scenarios; publish the report alongside the
+  release.
+
+### Out of scope
+
+- **Switching from `regex` to `regex-lite`** — tempting
+  for binary size but the catalogue uses features
+  (`(?x)`, named captures, lookahead in some rule kinds)
+  that `lite` doesn't support.
+- **Pre-compiling rule chains via macros** — the
+  declarative DSL is the user-facing surface; turning
+  rules into static dispatch would lock in the rule
+  catalogue.
+- **Custom allocators (`mimalloc` / `jemalloc`)** —
+  downstream concern. Users can opt in via `RUSTFLAGS`
+  if they want; alint stays vanilla.
+
+## v0.9 — LSP
+
+(Was v0.6 in the pre-2026-04-27 roadmap; pushed back three
+slots after the agent-era re-prioritisation and the v0.8
+perf revival.)
 
 - LSP server (`alint lsp`): inline diagnostics, hover with
   rule documentation, code actions for "add to ignore" and
   "apply fix."
 - VS Code extension (bundles the LSP).
+- Per-file dispatch shape from v0.8 directly powers the
+  per-file-edit re-evaluation hot path.
 
-## v0.9 — WASM plugins
+## v0.10 — WASM plugins
 
-(Was v0.7 in the pre-2026-04-27 roadmap.)
+(Was v0.7 in the pre-2026-04-27 roadmap; pushed back three
+slots.)
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT
   interface.
