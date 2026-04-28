@@ -9,6 +9,7 @@ Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list
 
 ## Currently shipped
 
+- [`agent-context@v1`](/docs/bundled-rulesets/agent-context/) — Hygiene rules for the agent-instruction files coding agents read on every session — `AGENTS.md` (the cross-tool standard backed by agents.md / OpenAI Codex), `CLAUDE.md`, GitHub Copilot's `.github/copilot-instructions.md`, Cursor's `.cursorrules`, Gemini's `GEMINI.md`.
 - [`agent-hygiene@v1`](/docs/bundled-rulesets/agent-hygiene/) — Hygiene rules for the AI-coding era — patterns that show up disproportionately in commits authored or co-authored by Claude Code, Cursor, Copilot agent, Aider, Codex, and other coding agents.
 - [`ci/github-actions@v1`](/docs/bundled-rulesets/ci-github-actions/) — GitHub Actions hardening.
 - [`compliance/apache-2@v1`](/docs/bundled-rulesets/compliance-apache-2/) — Hygiene checks for repositories distributed under the Apache License, Version 2.0.
