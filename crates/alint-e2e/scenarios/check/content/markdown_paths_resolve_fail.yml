@@ -1,0 +1,37 @@
+name: markdown_paths_resolve flags backticked paths that don't resolve
+tags: [check, markdown_paths_resolve]
+
+given:
+  tree:
+    src:
+      exists.ts: "export const x = 1;\n"
+    docs:
+      "extant.md": "# real doc\n"
+    AGENTS.md: |
+      # Agents file
+
+      See `src/exists.ts` for the implementation.
+      Reference `src/missing.ts` and `docs/gone.md`.
+
+      ```yaml
+      example: `src/in-codeblock.ts`
+      ```
+
+      Inline `npm install` doesn't trigger.
+      Path with line: `src/exists.ts:42`.
+      Template var: `src/{{user_id}}.ts`.
+  config: |
+    version: 1
+    rules:
+      - id: agents-paths-resolve
+        kind: markdown_paths_resolve
+        paths: ["AGENTS.md"]
+        prefixes: ["src/", "docs/"]
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: agents-paths-resolve, level: warning, path: AGENTS.md}
+      - {rule: agents-paths-resolve, level: warning, path: AGENTS.md}

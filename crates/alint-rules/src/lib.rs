@@ -43,6 +43,7 @@ pub mod io;
 pub mod json_schema_passes;
 pub mod line_endings;
 pub mod line_max_width;
+pub mod markdown_paths_resolve;
 pub mod max_consecutive_blank_lines;
 pub mod max_directory_depth;
 pub mod max_files_per_directory;
@@ -112,6 +113,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         structured_path::toml_path_matches_build,
     );
     registry.register("json_schema_passes", json_schema_passes::build);
+    registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
     registry.register("git_no_denied_paths", git_no_denied_paths::build);
     registry.register("git_commit_message", git_commit_message::build);
     registry.register("file_is_text", file_is_text::build);

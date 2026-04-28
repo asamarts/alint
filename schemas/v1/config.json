@@ -448,6 +448,7 @@
         { "$ref": "#/$defs/rule_toml_path_equals" },
         { "$ref": "#/$defs/rule_toml_path_matches" },
         { "$ref": "#/$defs/rule_json_schema_passes" },
+        { "$ref": "#/$defs/rule_markdown_paths_resolve" },
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
         { "$ref": "#/$defs/rule_filename_case" },
@@ -800,6 +801,27 @@
           "type": "string",
           "enum": ["json", "yaml", "yml", "toml"],
           "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+        }
+      }
+    },
+
+    "rule_markdown_paths_resolve": {
+      "description": "Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. Targets the AGENTS.md / CLAUDE.md / .cursorrules staleness problem: agent-context files reference paths in inline backticks, and those paths drift as the codebase evolves. Skips fenced and 4-space-indented code blocks (those contain code samples, not factual claims about the tree). Required `prefixes` field marks which path-shapes to validate (e.g. `[\"src/\", \"crates/\", \"docs/\"]`); backticked tokens not starting with a configured prefix are ignored, eliminating the FP class of `\\`npm\\`` / `\\`function\\`` / etc.",
+      "type": "object",
+      "required": ["paths", "prefixes"],
+      "properties": {
+        "kind": { "const": "markdown_paths_resolve" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "prefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Path-shape prefixes to validate. A backticked token must start with one of these to be considered a path candidate. No defaults — declare the prefixes that mark a path in your codebase."
+        },
+        "ignore_template_vars": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true (default), skip backticked tokens containing `{{ … }}`, `${ … }`, or `<…>` template-variable markers. These are placeholders, not real paths."
         }
       }
     },

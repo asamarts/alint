@@ -1,0 +1,33 @@
+name: markdown_paths_resolve passes when every backticked path resolves
+tags: [check, markdown_paths_resolve]
+
+given:
+  tree:
+    src:
+      api.ts: "export function api() {}\n"
+      utils.ts: "export const u = 1;\n"
+    docs:
+      guide.md: "# guide\n"
+    AGENTS.md: |
+      # Agents file
+
+      Production code lives under `src/api.ts` and `src/utils.ts`.
+      User-facing docs are at `docs/guide.md`.
+
+      ```yaml
+      # In code blocks, references aren't validated:
+      example: `src/anything-goes.ts`
+      ```
+  config: |
+    version: 1
+    rules:
+      - id: agents-paths-resolve
+        kind: markdown_paths_resolve
+        paths: ["AGENTS.md"]
+        prefixes: ["src/", "docs/"]
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []
