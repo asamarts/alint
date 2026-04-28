@@ -1,0 +1,41 @@
+name: commented_out_code passes on prose comments and license headers
+tags: [check, commented_out_code]
+
+given:
+  tree:
+    src:
+      api.ts: |
+        // SPDX-License-Identifier: MIT
+        // Copyright 2026 Acme Corp
+        //
+        // This file is licensed under MIT.
+
+        // ============================================
+        // Section: Public API
+        // ============================================
+
+        // This module exports the api() function.
+        // It accepts a string input and returns a string.
+        // Validation happens at the boundary; see input-types.
+
+        export function api(input: string): string {
+          /// This rustdoc-style comment block is fine.
+          /// Documentation, not commented-out code.
+          /// Should not fire even though it's three lines.
+          return input;
+        }
+  config: |
+    version: 1
+    rules:
+      - id: no-commented-code
+        kind: commented_out_code
+        paths: "src/**/*.{ts,tsx,js,jsx}"
+        min_lines: 3
+        threshold: 0.5
+        skip_leading_lines: 5
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

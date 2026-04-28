@@ -7,6 +7,7 @@ use alint_core::RuleRegistry;
 
 pub mod case;
 pub mod command;
+pub mod commented_out_code;
 pub mod dir_absent;
 pub mod dir_contains;
 pub mod dir_exists;
@@ -114,6 +115,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("json_schema_passes", json_schema_passes::build);
     registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
+    registry.register("commented_out_code", commented_out_code::build);
     registry.register("git_no_denied_paths", git_no_denied_paths::build);
     registry.register("git_commit_message", git_commit_message::build);
     registry.register("file_is_text", file_is_text::build);

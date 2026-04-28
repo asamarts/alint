@@ -8,6 +8,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`commented_out_code` rule kind** — heuristic detector for
+  blocks of commented-out source code (as opposed to prose
+  comments, license headers, doc comments, or ASCII banners).
+  Counts the fraction of non-whitespace characters that are
+  structural punctuation strongly biased toward code
+  (`( ) { } [ ] ; = < > & | ^`); scores ≥ `threshold` (default
+  0.5 after normalisation; midpoint between obvious-prose 0.0
+  and obvious-code 1.0) mark the block as code-shaped.
+  Supports rust / typescript / javascript / python / go / java
+  / c / cpp / ruby / shell. Doc-comment blocks (`///`, `//!`,
+  `/** */`) and the file's first `skip_leading_lines` lines
+  (default 30 — license headers) are excluded by construction.
+  Runs of 5+ identical characters (`============`, `----`,
+  `####`) are dropped before scoring so ASCII-art separators
+  don't flag as code. Severity floor is `warning`, never
+  `error` by default — heuristics have non-zero FP rate.
+  Check-only — auto-removing commented-out code is
+  destructive. Field-tested against 5 repos (alint, alint.org,
+  Aider, Cline, OpenHands) before commit: zero false positives
+  across 16 hits.
+
+  ```yaml
+  - id: no-commented-code
+    kind: commented_out_code
+    paths: "src/**/*.{ts,tsx,js,jsx,rs,py}"
+    min_lines: 3
+    threshold: 0.5
+    level: warning
+  ```
+
+  Design doc: `docs/design/v0.7/commented_out_code.md`.
+
 - **`markdown_paths_resolve` rule kind** — validates that
   backticked workspace paths in markdown files resolve to
   real files or directories. Targets the AGENTS.md /

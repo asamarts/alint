@@ -1,0 +1,34 @@
+name: commented_out_code flags blocks of code-shaped commented lines
+tags: [check, commented_out_code]
+
+given:
+  tree:
+    src:
+      api.ts: |
+        // SPDX-License-Identifier: MIT
+        // Copyright 2026 Acme Corp
+        //
+        // This file is licensed under MIT.
+
+        export function api(input: string): string {
+          // const oldRate = lookupOldRate(input);
+          // if (oldRate > 0.5) { return input.toUpperCase(); }
+          // log("legacy path:", oldRate);
+          return input;
+        }
+  config: |
+    version: 1
+    rules:
+      - id: no-commented-code
+        kind: commented_out_code
+        paths: "src/**/*.{ts,tsx,js,jsx}"
+        min_lines: 3
+        threshold: 0.5
+        skip_leading_lines: 5
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-commented-code, level: warning, path: src/api.ts}

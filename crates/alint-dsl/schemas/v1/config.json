@@ -448,6 +448,7 @@
         { "$ref": "#/$defs/rule_toml_path_equals" },
         { "$ref": "#/$defs/rule_toml_path_matches" },
         { "$ref": "#/$defs/rule_json_schema_passes" },
+        { "$ref": "#/$defs/rule_commented_out_code" },
         { "$ref": "#/$defs/rule_markdown_paths_resolve" },
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
@@ -801,6 +802,53 @@
           "type": "string",
           "enum": ["json", "yaml", "yml", "toml"],
           "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+        }
+      }
+    },
+
+    "rule_commented_out_code": {
+      "description": "Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). For each consecutive run of comment lines (≥ `min_lines`), counts the fraction of non-whitespace characters that are structural punctuation strongly biased toward code (`( ) { } [ ] ; = < > & | ^`). Scores ≥ `threshold` (after a runs-of-5+-identical-chars defang to drop ASCII banners) fire as violations. Doc-comment blocks (`/// `, `/** … */`) are excluded; the file's first `skip_leading_lines` lines are skipped to pass over license headers without false-positive flagging. Severity defaults to `warning`; the rule explicitly does not ship at `error` because heuristics have non-zero FP rate and shouldn't gate commits on first adoption. Check-only — auto-removing commented-out code is destructive.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "kind": { "const": "commented_out_code" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "rust",
+            "typescript",
+            "javascript",
+            "python",
+            "go",
+            "java",
+            "c",
+            "cpp",
+            "ruby",
+            "shell"
+          ],
+          "default": "auto",
+          "description": "Comment-marker set to use. `auto` (default) infers from each file's extension. Files with extensions the resolver doesn't recognise are silently skipped."
+        },
+        "min_lines": {
+          "type": "integer",
+          "minimum": 2,
+          "default": 3,
+          "description": "Minimum consecutive comment-line count for a block to be considered. Default 3 — 1-2 line comments are almost always prose."
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.5,
+          "description": "Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow."
+        },
+        "skip_leading_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "Skip blocks whose first line is at or before this line number. Default 30 — covers typical license headers without false-positive flagging them as commented-out code."
         }
       }
     },
