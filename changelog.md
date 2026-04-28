@@ -8,6 +8,118 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-27
+
+Two bundled rulesets and a new output format aimed at the
+agent-driven-development era. Schema-compatible: every v0.5.12
+config runs unchanged, and the new bundled rulesets compose
+from rule kinds that have shipped since v0.1.
+
+The framing: alint's structural / repo-shape niche
+(filesystem shape and contents of a repository, not the
+semantics of code inside it) fits agent-driven development
+naturally. Coding agents leave characteristic structural
+debris — backup-suffix files, scratch / planning docs,
+debug-print residue, stale model-attributed TODOs — that
+existing rule kinds catch cleanly when packaged into the
+right bundled ruleset. v0.6 does that packaging, plus a
+new output format optimised for agents consuming alint
+inside their own self-correction loops. No new rule
+kinds, no engine changes, no architectural shift.
+
+### Added
+
+- **`alint://bundled/agent-hygiene@v1`** — six-rule bundled
+  ruleset targeting the leftover patterns that show up
+  disproportionately in commits authored or co-authored by
+  Claude Code, Cursor, Copilot agent, Aider, Codex, and
+  similar tools. Composes with the existing `hygiene/*`
+  rulesets — extend all three on agent-heavy projects
+  without overlap:
+
+  ```yaml
+  extends:
+    - alint://bundled/hygiene/no-tracked-artifacts@v1
+    - alint://bundled/hygiene/lockfiles@v1
+    - alint://bundled/agent-hygiene@v1
+  ```
+
+  Rules:
+  - `agent-no-versioned-duplicates` — bans filenames matching
+    `*_v[0-9]*` / `*-v[0-9]*` / `*_old.*` / `*_FINAL.*` /
+    `*_copy.*` / `*_backup.*` / `*.copy.*` (warning).
+  - `agent-no-scratch-docs-at-root` — bans `PLAN.md` /
+    `NOTES.md` / `ANALYSIS.md` / `SUMMARY.md` / `FIX.md` /
+    `DECISION.md` / `TODO.md` / `SCRATCH.md` / `DEBUG.md` /
+    `TEMP.md` / `WIP.md` at the repo root (warning,
+    `root_only: true`).
+  - `agent-no-affirmation-prose` — flags AI-style stock
+    phrases in source / markdown (`"You're absolutely
+    right"`, `"Excellent question"`, `"Happy to help"`,
+    etc.) (info).
+  - `agent-no-console-log` — bans `console.log` / `.debug` /
+    `.trace` in non-test JS / TS source (warning).
+  - `agent-no-debugger-statements` — bans `debugger;` /
+    `breakpoint()` in non-test source (error).
+  - `agent-no-model-todos` — bans `TODO(claude:)` /
+    `FIXME(cursor:)` / `XXX(gpt:)` and similar
+    model-attributed markers (warning).
+
+- **`alint://bundled/agent-context@v1`** — four-rule bundled
+  ruleset for the agent-instruction files coding agents read
+  on every session: `AGENTS.md` (the cross-tool standard
+  backed by agents.md / OpenAI Codex), `CLAUDE.md`,
+  `.cursorrules`, `GEMINI.md`, and
+  `.github/copilot-instructions.md`. Gated by
+  `facts.has_agent_context` so it's a safe no-op in repos
+  without any of these files; extend it unconditionally even
+  from polyglot configs.
+
+  Rules:
+  - `agent-context-recommended` — `file_exists` info-level
+    nudge.
+  - `agent-context-non-stub` — `file_min_lines: 10`
+    (warning).
+  - `agent-context-not-bloated` — `file_max_lines: 300`
+    (info). Threshold from Augment Code's 2026-03 research
+    on AGENTS.md effectiveness.
+  - `agent-context-no-stale-paths` — regex-heuristic
+    info-level reminder that backticked workspace paths
+    drift. The precise check ships in v0.7 as the
+    `markdown_paths_resolve` rule kind.
+
+- **`--format=agent` JSON output** — eighth output format,
+  alongside `human` / `json` / `sarif` / `github` /
+  `markdown` / `junit` / `gitlab`. Shaped for AI coding
+  agents that consume alint inside their own self-correction
+  loops. Differences vs. `--format=json`: violations are a
+  flat list (no per-rule nesting); each violation carries an
+  `agent_instruction` field with templated remediation
+  phrasing (severity + human message + location + fix
+  availability + policy URL); `severity` is the lowercase
+  string (`"error"` / `"warning"` / `"info"`). Aliases:
+  `--format=agent` / `--format=agentic` / `--format=ai`.
+  Stable behind `schema_version: 1`. The fix-report falls
+  back to the human formatter (an agent confirming a fix
+  landed re-runs `alint check --format=agent`).
+
+### Internal
+
+- Two new tests in `crates/alint-dsl/src/bundled.rs` continue
+  to enforce that every shipped ruleset declares its
+  canonical `# alint://bundled/<name>@v<rev>` URI tag and
+  parses as a valid config; the new rulesets are exercised
+  by the existing test loop.
+- Five unit tests for the agent formatter cover empty
+  reports, path-bound violations, fixable violations
+  (suggesting `alint fix --only <id>` in
+  `agent_instruction`), cross-file violations
+  (repository-level phrasing), and severity-count
+  aggregation.
+- Help-text snapshot (`crates/alint/tests/cli/help-top-level.stdout`)
+  refreshed to mention `agent` in the `--color` flag's
+  documented list of plain-bytes formats.
+
 ## [0.5.12] — 2026-04-27
 
 Maintenance release. Verifies the npm auto-publish CI wiring
