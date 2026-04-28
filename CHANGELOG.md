@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-28
+
+Closes the v0.7 cut. Three new rule kinds and two new
+subcommands targeting agent-driven development workflows
+specifically. Where v0.6 was config-only — bundled rulesets
+composed from existing primitives — v0.7 extends the engine
+itself: `markdown_paths_resolve` / `commented_out_code` /
+`git_blame_age` are new rule kinds with their own heuristic
+surfaces, and `alint suggest` / `alint export-agents-md`
+add the first new top-level subcommands since `alint init`
+in v0.5.4.
+
+Schema-compatible: every v0.6 config runs unchanged. The new
+rule kinds parse new YAML shapes that older configs simply
+don't use; `version: 1` continues to cover them.
+
+The two subcommands close the cold-start adoption gap for
+agent-heavy repos. `alint suggest` scans for known
+antipatterns and proposes rules to catch them — its
+stale-TODO suggester eats `git_blame_age`'s own dogfood.
+`alint export-agents-md` makes alint the single source of
+truth for `AGENTS.md` / `CLAUDE.md` / `.cursorrules`
+directive blocks: the agent reads what alint enforces, no
+duplicate config to maintain.
+
 ### Added
 
 - **`alint export-agents-md` subcommand** — generate (or
@@ -2369,7 +2394,9 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/asamarts/alint/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/asamarts/alint/compare/v0.5.12...v0.6.0
 [0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4
