@@ -2,7 +2,7 @@
 title: 'git_commit_message'
 description: 'alint rule kind `git_commit_message` (Git hygiene family).'
 sidebar:
-  order: 3
+  order: 4
 ---
 
 Validate HEAD's commit-message shape via regex, max-subject-length, or required-body. At least one of the three must be set; combine all three for full Conventional-Commits-style enforcement. Subject length counts characters, not bytes (a 50-char emoji subject is 50, not 200).

@@ -8,6 +8,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`markdown_paths_resolve` rule kind** — validates that
+  backticked workspace paths in markdown files resolve to
+  real files or directories. Targets the AGENTS.md /
+  CLAUDE.md / `.cursorrules` staleness problem more
+  precisely than v0.6's regex-heuristic
+  `agent-context-no-stale-paths` rule. Required `prefixes`
+  field declares which path-shapes to validate (eliminating
+  the "is this a path or a word" question by construction).
+  Skips fenced and 4-space-indented code blocks. Strips
+  trailing punctuation, trailing slashes, `:line` /
+  `#L<n>` location suffixes before lookup. Glob characters
+  in the path resolve via the file index. Check-only.
+  Design doc: `docs/design/v0.7/markdown_paths_resolve.md`.
+
+  ```yaml
+  - id: agents-md-paths-resolve
+    kind: markdown_paths_resolve
+    paths: ["AGENTS.md", "CLAUDE.md", ".cursorrules"]
+    prefixes: ["src/", "crates/", "docs/"]
+    level: warning
+  ```
+
 ## [0.6.0] — 2026-04-27
 
 Two bundled rulesets and a new output format aimed at the

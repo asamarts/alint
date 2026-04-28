@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 57 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 58 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -19,7 +19,7 @@ alint ships 57 rule kinds across 12 families. Each rule is one entry in your `.a
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 3 rules
+- [Git hygiene](/docs/rules/git-hygiene/) — 4 rules
 - [Cross-file](/docs/rules/cross-file/) — 7 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
@@ -62,6 +62,7 @@ alint ships 57 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`json_schema_passes`](/docs/rules/content/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. _(Content)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
+- [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
 - [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max`. _(Structure)_
 - [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max`. _(Structure)_
