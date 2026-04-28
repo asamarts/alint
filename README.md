@@ -119,6 +119,15 @@ alint init             # ecosystem-aware (rust@v1, node@v1, …)
 alint init --monorepo  # plus workspace overlays for Cargo / pnpm / Yarn
 ```
 
+For an existing repo with prior debt, follow up with `alint suggest` — it scans for `*.bak` files, scratch docs at root, `console.log` residue in production source, and TODO markers older than 180 days, then proposes the bundled rulesets and rule entries that would catch them. Output is review-only — `suggest` never edits your config:
+
+```bash
+alint suggest                       # human-readable proposal table
+alint suggest --format=yaml         # paste-ready config snippet
+alint suggest --format=json         # stable shape for agent consumption
+alint suggest --explain             # show file-level evidence per proposal
+```
+
 The generated file is editable — start there, override or extend as needed. If you'd rather hand-roll, the minimum viable shape is:
 
 ```yaml
@@ -139,6 +148,7 @@ alint list            # list effective rules (useful after extends / overrides)
 alint explain <id>    # show a rule's full, resolved definition
 alint facts           # evaluate facts against the repo — debug `when:` clauses
 alint init [--monorepo]  # scaffold a `.alint.yml` based on detected ecosystem + workspace shape
+alint suggest            # scan for known antipatterns and propose rules to catch them
 ```
 
 Output formats:

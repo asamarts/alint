@@ -13,6 +13,8 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 mod init;
+mod progress;
+mod suggest;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -67,6 +69,26 @@ struct Cli {
     /// `path:line:col: level: rule-id: message`.
     #[arg(long, global = true)]
     compact: bool,
+
+    /// When to render progress on stderr for slow operations
+    /// (currently `alint suggest`). `auto` (the default)
+    /// renders when stderr is a TTY; `always` forces; `never`
+    /// silences. Progress always lives on stderr — `--format`
+    /// JSON / YAML output on stdout stays byte-clean.
+    #[arg(
+        long,
+        global = true,
+        value_name = "WHEN",
+        default_value = "auto",
+        value_parser = clap::builder::PossibleValuesParser::new(["auto", "always", "never"]),
+    )]
+    progress: String,
+
+    /// Suppress progress and any stderr summary lines. Alias
+    /// for `--progress=never` plus suppression of the
+    /// "found N proposals in Ts" footer that `suggest` prints.
+    #[arg(long, short = 'q', global = true)]
+    quiet: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -146,6 +168,46 @@ enum Command {
         #[arg(long)]
         monorepo: bool,
     },
+    /// Scan the repo for known antipatterns and propose rules
+    /// that would catch them. Prints proposals to stdout for
+    /// review — never edits the user's config. Pairs naturally
+    /// with `alint init` for a smarter cold-start adoption flow.
+    Suggest {
+        /// Root of the repository to scan. Defaults to the
+        /// current directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output format. `human` (default) is colorised for
+        /// terminals; `yaml` is a paste-ready config snippet;
+        /// `json` is a stable shape suitable for agent
+        /// consumption.
+        #[arg(
+            long,
+            short = 'f',
+            value_name = "FORMAT",
+            default_value = "human",
+            value_parser = clap::builder::PossibleValuesParser::new(["human", "yaml", "json"]),
+        )]
+        format: String,
+        /// Lower bound on signal strength for proposals. `low`
+        /// is broadest (helpful when prospecting); `high` is
+        /// strict (only ecosystem-marker hits and equivalents).
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            default_value = "medium",
+            value_parser = clap::builder::PossibleValuesParser::new(["low", "medium", "high"]),
+        )]
+        confidence: String,
+        /// Include bundled-ruleset suggestions even if the
+        /// existing `.alint.yml` already extends them.
+        #[arg(long)]
+        include_bundled: bool,
+        /// Print one-line file-level evidence under each
+        /// proposal so reviewers can decide quickly.
+        #[arg(long)]
+        explain: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -188,7 +250,62 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         } => cmd_fix(&path, dry_run, &ChangedMode::new(changed, base), &cli),
         Command::Facts { path } => cmd_facts(&path, &cli),
         Command::Init { path, monorepo } => cmd_init(&path, monorepo),
+        Command::Suggest {
+            path,
+            format,
+            confidence,
+            include_bundled,
+            explain,
+        } => cmd_suggest(
+            &path,
+            &SuggestOptions {
+                format,
+                confidence,
+                include_bundled,
+                explain,
+            },
+            &cli,
+        ),
     }
+}
+
+#[derive(Debug)]
+struct SuggestOptions {
+    format: String,
+    confidence: String,
+    include_bundled: bool,
+    explain: bool,
+}
+
+fn cmd_suggest(path: &Path, opts: &SuggestOptions, cli: &Cli) -> Result<ExitCode> {
+    use suggest::{Confidence, OutputFormat};
+    let format: OutputFormat = opts
+        .format
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let confidence: Confidence = opts
+        .confidence
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let progress_mode = if cli.quiet {
+        progress::ProgressMode::Never
+    } else {
+        cli.progress
+            .parse()
+            .map_err(|e: String| anyhow::anyhow!(e))?
+    };
+    let progress = progress::Progress::new(progress_mode);
+    suggest::run(
+        path,
+        &suggest::RunOptions {
+            format,
+            confidence,
+            include_bundled: opts.include_bundled,
+            explain: opts.explain,
+            quiet: cli.quiet,
+        },
+        &progress,
+    )
 }
 
 fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {

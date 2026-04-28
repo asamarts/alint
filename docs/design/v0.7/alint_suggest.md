@@ -1,6 +1,58 @@
 # `alint suggest` subcommand
 
-Status: Design draft.
+Status: Implemented in v0.7.4. See `crates/alint/src/suggest/`
++ `crates/alint/src/progress.rs`.
+
+Resolved open questions (from the original design draft, listed
+at the bottom of this doc):
+
+1. **Confidence calibration** — kept as designed. Bundled
+   ecosystem hits ship at HIGH; antipattern + stale-TODO ship
+   at MEDIUM. Default floor is MEDIUM so LOW-confidence noise
+   doesn't surface unless asked for.
+2. **Existing-config bias** — the bundled-ruleset suggester
+   skips proposals already declared in the user's `.alint.yml`
+   `extends:` list. `--include-bundled` overrides for
+   prospecting / what-if mode. Rule-shaped proposals (the
+   `git_blame_age` template from the stale-TODO suggester)
+   always pass through — there's no clean way to detect
+   "user already has a similar rule" without a much heavier
+   semantic check.
+3. **Deterministic ordering** — sorted by `(confidence
+   desc, rule_id asc)`. Two runs over the same repo state
+   produce identical output.
+4. **`--against <future-config>` mode** — deferred per the
+   draft.
+5. **CI usage** — exits 0 unconditionally on scan success.
+   The command is exploration, not a gate. `alint check`
+   remains the CI entry point.
+
+Two suggester families from the original draft were
+**deferred to a later cut**:
+
+- **Convention suggester** (sample-based filename-case at
+  ≥ 80%) — high noise risk; needs careful tuning before
+  shipping.
+- **Cross-file suggester** (`.c` + `.h` `pair` proposals) —
+  niche use case; few projects need it.
+
+Both can land as additive v0.7.x point releases without
+breaking the existing suggester interface.
+
+## Implementation notes (post-design)
+
+- Detection logic is shared between `alint init` and
+  `alint suggest` by importing `crate::init::Detection`
+  directly (both modules live in the binary crate). No
+  extraction to `alint-core` was needed; lifting CLI logic
+  into the engine crate would have grown alint-core's
+  surface for no real reuse.
+- Progress reporting is a separate module
+  (`crate::progress`) using `indicatif`. It's exposed via a
+  `&Progress` handle that suggesters thread without
+  branching on visibility — `Progress::null()` (test-only)
+  and the silent-mode handle (production) are
+  observationally identical.
 
 ## Problem
 

@@ -8,6 +8,64 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`alint suggest` subcommand** — scan the repo for known
+  antipatterns and propose rules that would catch them. Acts
+  as a smart `alint init` for retrofitting alint onto a long-
+  running, agent-heavy codebase. Three output formats:
+
+  - **`--format=human`** (default): colourised proposal table
+    with optional `--explain` evidence block.
+  - **`--format=yaml`**: paste-ready config snippet (`extends:`
+    + `rules:`).
+  - **`--format=json`**: stable shape behind
+    `schema_version: 1` for agent consumption.
+
+  Three suggester families ship in v0.7.4:
+
+  1. **Bundled-ruleset** — high-confidence proposals for
+     `oss-baseline@v1` (always) plus per-language
+     (`rust@v1` / `node@v1` / `python@v1` / `go@v1` /
+     `java@v1`) and workspace-flavour overlays based on the
+     same ecosystem detection `alint init` uses.
+  2. **Antipattern** — medium-confidence proposal of
+     `extends: agent-hygiene@v1` when the repo contains
+     backup-suffix files, scratch / planning docs at root
+     (`PLAN.md`, `NOTES.md`, …), or `console.log`-style debug
+     residue in non-test JS / TS source. `tests/`,
+     `__tests__/`, `fixtures/`, and `snapshots/` paths are
+     skipped automatically.
+  3. **Stale-TODO** — medium-confidence `git_blame_age` rule
+     proposal when ≥ 3 `TODO` / `FIXME` / `XXX` / `HACK`
+     markers are older than 180 days. Eats our own
+     v0.7.3 dogfood.
+
+  `--include-bundled` overrides the already-covered filter
+  (which would otherwise skip a `rust@v1` proposal when the
+  user's existing `.alint.yml` already extends it).
+  `--confidence={low,medium,high}` raises the floor on what
+  surfaces. The command always exits 0 unless the scan
+  itself fails — `suggest` is exploration, not a CI gate.
+
+- **`--progress={auto,always,never}` + `-q` / `--quiet`
+  global flags** — controls stderr-side progress for slow
+  commands. Strict stream split: structured stdout
+  (`--format=json` / `yaml` / `human`) is byte-for-byte
+  clean regardless of progress activity; spinners and
+  status lines live exclusively on stderr.
+
+  - `auto` (default): animated bars when stderr is a TTY;
+    one-line milestones to plain stderr when captured
+    (CI logs).
+  - `always`: same as `auto` plus a stderr summary line.
+    Bars still require a TTY — non-TTY `always` falls back
+    to one-line milestones.
+  - `never`: zero stderr noise. `--quiet` is the alias.
+
+  `indicatif` powers the animated bars; the
+  `crates/alint/src/progress.rs` module wraps it behind a
+  null-handle pattern so suggester code passes
+  `&Progress` without branching on visibility.
+
 - **`git_blame_age` rule kind** — fire on lines matching a regex
   whose `git blame` author-time is older than `max_age_days`.
   Closes the gap between `level: warning` on every TODO (too

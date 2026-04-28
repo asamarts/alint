@@ -25,9 +25,13 @@ anstream.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 miette.workspace = true
+regex.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 supports-hyperlinks.workspace = true
 terminal_size.workspace = true
+indicatif.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

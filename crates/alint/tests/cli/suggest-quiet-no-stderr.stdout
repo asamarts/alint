@@ -1,0 +1,7 @@
+Found 1 proposal (sorted by confidence):
+
+  ✓ [  high] alint://bundled/oss-baseline@v1
+    Universal OSS hygiene baseline.
+
+Run with --format yaml to print as a config snippet.
+Run with --explain to see file-level evidence.
