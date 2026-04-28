@@ -15,6 +15,7 @@
 # Internal planning docs (kept locally, not published).
 # The public-facing design docs live in docs/design/.
 /PROPOSAL.md
+/PROPOSAL-AGENTS.md
 
 # Self-hosted runner credentials (copied from ci/env.example and filled in).
 /ci/.env
