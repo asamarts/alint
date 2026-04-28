@@ -1,0 +1,15 @@
+<!-- alint:start -->
+
+## Lint rules enforced by alint
+
+Generated from `.alint.yml` by `alint export-agents-md`. Re-run after editing the lint config — these directives must stay in sync with what alint blocks at commit time. Manual edits inside this section are overwritten.
+
+### Errors (commit will fail)
+
+- **`no-debugger`**: `debugger;` statements must not land in committed source.
+
+### Warnings (review before merge)
+
+- **`no-todo-without-issue`**: Bare TODOs need a tracked issue link, e.g. `TODO(#123)`. [policy](https://example.com/todo-policy)
+
+<!-- alint:end -->

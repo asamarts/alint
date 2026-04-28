@@ -1,6 +1,63 @@
 # `alint export-agents-md` subcommand
 
-Status: Design draft.
+Status: Implemented in v0.7.5. See
+`crates/alint/src/export_agents_md/`.
+
+Resolved open questions (from the original design draft, listed
+at the bottom of this doc):
+
+1. **Round-trip identity** — implemented. The splicer reads
+   the file, computes the would-be-new content, and skips the
+   write when the bytes already match. `cksum` confirms two
+   `--inline` runs over the same config + target produce
+   identical files.
+2. **Hand-edits inside the marker region** — silently
+   overwritten on re-run. The section header explicitly says
+   "Manual edits inside this section are overwritten." A
+   `--check` mode (compare current vs. would-be-generated, exit
+   non-zero on drift) is deferred — useful but not
+   load-bearing for the v0.7 cut.
+3. **Multiple agent-context files** — pass `--inline` once per
+   target file. Most teams symlink them anyway; orchestrating
+   N targets in a single invocation adds CLI complexity for
+   no real reuse.
+4. **Severity-to-section mapping** — kept as designed.
+   `Errors (commit will fail)`, `Warnings (review before
+   merge)`, `Info (informational nudges)`. RFC-2119 MUST/SHOULD
+   rephrasing is deferred — the rule's `message:` is already
+   the directive text, and the section header carries the
+   "what severity means at commit time" framing.
+5. **Bundled rulesets in the export** — all rules render
+   inline regardless of which ruleset they came from. The
+   `<details>`-collapsibles option from the design draft was
+   considered and dropped: agents see the full content in
+   their context window regardless of HTML collapse, and
+   humans browsing rendered markdown get a complete picture
+   without having to expand each section. `--expand-extended`
+   is a no-op concept once we always inline.
+
+## Implementation notes
+
+- The splicer enforces strict marker pairing: zero pairs →
+  append + warn; one pair → splice; multiple pairs or orphan
+  markers → hard error. Round-trip identity short-circuits
+  the write so re-runs don't bump the file's mtime.
+- Rule loading reuses `alint_dsl::load`; we iterate the
+  resolved rule specs directly rather than building rule
+  objects (we don't need their `evaluate` impls — only their
+  `id` / `level` / `message` / `policy_url` / `kind`).
+- `epoch_to_civil` is duplicated between
+  `crate::suggest::output` and
+  `crate::export_agents_md` rather than lifted into a shared
+  module — both need exactly the RFC-3339 stamp and the
+  duplication is two dozen lines that follow Howard
+  Hinnant's reference algorithm verbatim. Easier to read in
+  context than reach for a shared helper that exists for
+  one symbol.
+- `markdown::render` and `splice::splice_inline_inner` are
+  pure / file-I/O respectively, separated so unit tests can
+  exercise the splice logic without going through the
+  config-load round-trip.
 
 ## Problem
 

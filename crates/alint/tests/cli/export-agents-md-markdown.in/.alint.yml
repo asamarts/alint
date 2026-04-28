@@ -1,0 +1,20 @@
+version: 1
+rules:
+  - id: no-debugger
+    kind: file_content_forbidden
+    paths: "src/**/*.{ts,tsx,js}"
+    pattern: '\bdebugger\b'
+    level: error
+    message: "`debugger;` statements must not land in committed source."
+  - id: no-todo-without-issue
+    kind: file_content_forbidden
+    paths: "src/**/*.rs"
+    pattern: 'TODO(?!\(#\d+\))'
+    level: warning
+    message: "Bare TODOs need a tracked issue link, e.g. `TODO(#123)`."
+    policy_url: "https://example.com/todo-policy"
+  - id: skipped-rule
+    kind: file_exists
+    paths: "DEBUG.md"
+    level: off
+    message: "this should not appear"

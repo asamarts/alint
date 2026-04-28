@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["export-agents-md"]
+fs.sandbox = true

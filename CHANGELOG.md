@@ -8,6 +8,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`alint export-agents-md` subcommand** — generate (or
+  maintain a section of) `AGENTS.md` from the active rule
+  set, so the agent's pre-prompt directives stay in sync with
+  the lint config. Closes the "67% of teams maintain
+  duplicate configs between AGENTS.md and CI lint" gap by
+  making alint the single source of truth.
+
+  Two output formats:
+
+  - `markdown` (default) — section-per-severity bullet
+    list shaped to drop into an `AGENTS.md` /
+    `CLAUDE.md` / `.cursorrules` directive block.
+  - `json` — stable shape behind `schema_version: 1`,
+    parallel to `suggest`'s envelope, suitable for agent
+    consumption.
+
+  Three output destinations:
+
+  - **stdout** (default) — pipe / paste by hand.
+  - **`--output PATH`** — overwrite-create the named
+    file.
+  - **`--inline --output PATH`** — splice the generated
+    section between `<!-- alint:start -->` and
+    `<!-- alint:end -->` markers in the target file. The
+    canonical workflow: humans own the prose outside the
+    markers; alint owns the directive block between
+    them. Re-runs are idempotent — when the existing
+    between-markers content already matches what we'd
+    generate, the file isn't rewritten.
+
+  Inline mode auto-initialises markers when the target
+  file lacks them: the section is appended to the end
+  with a stderr warning, and subsequent runs splice in
+  place. Multiple-pair / orphan-marker shapes hard-error
+  rather than silently overwrite — splicing is destructive
+  and ambiguity surfaces explicitly.
+
+  Severity grouping: `Errors (commit will fail)`,
+  `Warnings (review before merge)`, optional
+  `Info (informational nudges)` (gated by
+  `--include-info` — info-level rules are nudges, not
+  directives, and clutter the agent's context window
+  unless you really want them). Rules without an explicit
+  `message:` fall back to a synthesised "<kind> rule"
+  line so no directive is silently dropped.
+
+  Stable byte-for-byte output across runs: line endings
+  always `\n`, sort by severity desc + rule_id asc within
+  each section. Re-running `--inline` produces identical
+  bytes; round-trip identity short-circuits the write.
+
+  ```bash
+  alint export-agents-md                          # stdout
+  alint export-agents-md --output AGENTS.md       # write a file
+  alint export-agents-md --inline --output AGENTS.md  # splice in place
+  alint export-agents-md --format=json            # stable JSON for agents
+  alint export-agents-md --include-info           # include info-level rules
+  alint export-agents-md --section-title "Lint policy"  # custom heading
+  ```
+
+  Design doc: `docs/design/v0.7/alint_export_agents_md.md`.
+
 - **`alint suggest` subcommand** — scan the repo for known
   antipatterns and propose rules that would catch them. Acts
   as a smart `alint init` for retrofitting alint onto a long-

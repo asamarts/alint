@@ -128,6 +128,15 @@ alint suggest --format=json         # stable shape for agent consumption
 alint suggest --explain             # show file-level evidence per proposal
 ```
 
+For agent-driven workflows where `AGENTS.md` / `CLAUDE.md` / `.cursorrules` carries the directives the agent reads at session start, `alint export-agents-md` renders the active rule set as a markdown directive block — alint becomes the single source of truth, and the agent reads what alint enforces:
+
+```bash
+alint export-agents-md                                # to stdout
+alint export-agents-md --inline --output AGENTS.md    # splice between alint markers
+```
+
+`--inline` writes only between `<!-- alint:start -->` / `<!-- alint:end -->` markers; everything else in `AGENTS.md` is human-owned prose. Re-runs are idempotent (when the on-disk content already matches, no write happens), and missing markers auto-init with a stderr warning so the second run splices cleanly.
+
 The generated file is editable — start there, override or extend as needed. If you'd rather hand-roll, the minimum viable shape is:
 
 ```yaml
@@ -149,6 +158,7 @@ alint explain <id>    # show a rule's full, resolved definition
 alint facts           # evaluate facts against the repo — debug `when:` clauses
 alint init [--monorepo]  # scaffold a `.alint.yml` based on detected ecosystem + workspace shape
 alint suggest            # scan for known antipatterns and propose rules to catch them
+alint export-agents-md   # render the active rule set as an AGENTS.md directive section
 ```
 
 Output formats:

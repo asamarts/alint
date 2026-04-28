@@ -12,6 +12,7 @@ use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
+mod export_agents_md;
 mod init;
 mod progress;
 mod suggest;
@@ -168,6 +169,44 @@ enum Command {
         #[arg(long)]
         monorepo: bool,
     },
+    /// Generate (or maintain a section of) `AGENTS.md` from
+    /// the active rule set, so the agent's pre-prompt
+    /// directives stay in sync with the lint config. Outputs
+    /// to stdout by default; use `--output PATH` to write a
+    /// file or `--inline --output PATH` to splice between
+    /// `<!-- alint:start -->` / `<!-- alint:end -->` markers.
+    ExportAgentsMd {
+        /// Output destination. Without `--inline`, the file is
+        /// overwritten. Omit for stdout.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// Splice the generated section between
+        /// `<!-- alint:start -->` and `<!-- alint:end -->`
+        /// markers in `--output PATH`. Markers are auto-
+        /// created (with a stderr warning) when the target
+        /// file lacks them.
+        #[arg(long, requires = "output")]
+        inline: bool,
+        /// Heading text for the generated section. Default:
+        /// "Lint rules enforced by alint".
+        #[arg(long, value_name = "TEXT")]
+        section_title: Option<String>,
+        /// Include `level: info` rules. Default omits them —
+        /// info-level rules are nudges, not directives.
+        #[arg(long)]
+        include_info: bool,
+        /// Output format. `markdown` (default) is the canonical
+        /// `AGENTS.md` shape; `json` is parallel to `suggest`'s
+        /// JSON envelope for agent consumption.
+        #[arg(
+            long,
+            short = 'f',
+            value_name = "FORMAT",
+            default_value = "markdown",
+            value_parser = clap::builder::PossibleValuesParser::new(["markdown", "json"]),
+        )]
+        format: String,
+    },
     /// Scan the repo for known antipatterns and propose rules
     /// that would catch them. Prints proposals to stdout for
     /// review — never edits the user's config. Pairs naturally
@@ -250,6 +289,22 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         } => cmd_fix(&path, dry_run, &ChangedMode::new(changed, base), &cli),
         Command::Facts { path } => cmd_facts(&path, &cli),
         Command::Init { path, monorepo } => cmd_init(&path, monorepo),
+        Command::ExportAgentsMd {
+            output,
+            inline,
+            section_title,
+            include_info,
+            format,
+        } => cmd_export_agents_md(
+            &ExportAgentsMdOptions {
+                output,
+                inline,
+                section_title,
+                include_info,
+                format,
+            },
+            &cli,
+        ),
         Command::Suggest {
             path,
             format,
@@ -267,6 +322,35 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             &cli,
         ),
     }
+}
+
+#[derive(Debug)]
+struct ExportAgentsMdOptions {
+    output: Option<PathBuf>,
+    inline: bool,
+    section_title: Option<String>,
+    include_info: bool,
+    format: String,
+}
+
+fn cmd_export_agents_md(opts: &ExportAgentsMdOptions, cli: &Cli) -> Result<ExitCode> {
+    use export_agents_md::{OutputFormat, RunOptions};
+    let format: OutputFormat = opts
+        .format
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let section_title = opts
+        .section_title
+        .clone()
+        .unwrap_or_else(|| "Lint rules enforced by alint".to_string());
+    let run_opts = RunOptions {
+        format,
+        output: opts.output.clone(),
+        inline: opts.inline,
+        section_title,
+        include_info: opts.include_info,
+    };
+    export_agents_md::run(cli.config.first().map(PathBuf::as_path), &run_opts)
 }
 
 #[derive(Debug)]

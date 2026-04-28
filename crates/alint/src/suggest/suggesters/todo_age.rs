@@ -164,7 +164,10 @@ fn count_stale_markers(
     blame
         .iter()
         .filter(|line| pattern.is_match(&line.content))
-        .filter(|line| now.duration_since(line.author_time).is_ok_and(|age| age > threshold))
+        .filter(|line| {
+            now.duration_since(line.author_time)
+                .is_ok_and(|age| age > threshold)
+        })
         .count()
 }
 

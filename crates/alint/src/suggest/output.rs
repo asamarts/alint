@@ -194,7 +194,11 @@ fn timestamp_now() -> String {
 /// Convert a Unix epoch seconds count into a (Y, M, D, h, m, s)
 /// UTC tuple. Algorithm from Howard Hinnant's
 /// `chrono::civil_from_days`.
-#[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 fn epoch_to_civil(secs: u64) -> (i64, u32, u32, u32, u32, u32) {
     // The casts here are bounded: `secs` is a real Unix timestamp
     // from `SystemTime::duration_since(UNIX_EPOCH)`, which fits
