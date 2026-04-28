@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 59 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -19,7 +19,7 @@ alint ships 59 rule kinds across 12 families. Each rule is one entry in your `.a
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 5 rules
+- [Git hygiene](/docs/rules/git-hygiene/) — 6 rules
 - [Cross-file](/docs/rules/cross-file/) — 7 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
@@ -55,6 +55,7 @@ alint ships 59 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`final_newline`](/docs/rules/text-hygiene/final_newline/) — File must end with a single `\n`. _(Text hygiene)_
 - [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
 - [`for_each_file`](/docs/rules/cross-file/for_each_file/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
+- [`git_blame_age`](/docs/rules/git-hygiene/git_blame_age/) — Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. _(Git hygiene)_
 - [`git_commit_message`](/docs/rules/git-hygiene/git_commit_message/) — Validate HEAD's commit-message shape via regex, max-subject-length, or required-body. _(Git hygiene)_
 - [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_
