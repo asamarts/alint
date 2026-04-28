@@ -13,10 +13,19 @@ re-routed back to the `NPM_TOKEN`-based path. The npm
 package's published name is now `@asamarts/alint`
 (matches GitHub username; `@alint` was taken, `@a-lint`
 was a placeholder during the TP detour). No code changes;
-every v0.5.11 config runs unchanged. Next planned: v0.6
-performance & test-floor — a comprehensive regression-
-guard test layer first, then the per-file-rule dispatch
-flip and parallel walker.
+every v0.5.11 config runs unchanged.
+
+**Next: v0.6 — agentic-era rulesets and output.** A
+strategic re-prioritisation announced 2026-04-27 after
+Repolinter's archive (2026-02-06) and the spike of
+agent-coding adoption made structural-lint the natural
+guard rail for AI-driven diffs. v0.6 adds two bundled
+rulesets aimed at common agent leftovers
+(`agent-hygiene@v1`, `agent-context@v1`) and a new
+`--format=agent` JSON shape optimised for agent
+self-correction loops. LSP and WASM each shift out by
+two slots (now v0.8 and v0.9 respectively); see the
+phased sections below.
 
 ## Positioning
 
@@ -289,15 +298,99 @@ built on the existing primitive set — no new rule kinds needed.
   `## Context`, `## Decision` sections. Gap-free numbering
   deferred (needs `numeric_sequence` primitive).
 
-## v0.6 — LSP
+## v0.6 — Agentic-era rulesets and output
 
-- LSP server (`alint lsp`): inline diagnostics, hover with rule documentation, code actions for "add to ignore" and "apply fix."
+The strategic pivot announced 2026-04-27. Two bundled rulesets
+aimed at the most common AI-coding leftovers, plus a new output
+format for agents consuming alint inside their own
+self-correction loops. All Tier-1 work composes from existing
+rule kinds — no engine changes, no new primitives — so the
+binary stays lean and the cut ships fast.
+
+- ⏳ **`alint://bundled/agent-hygiene@v1`** — backup-suffix
+  bans (`*.bak`, `*.orig`, `*~`, `*.swp`), versioned-duplicate
+  filename guards (`*_v2.ts`, `*_old.py`), scratch-doc bans at
+  root (`PLAN.md`, `NOTES.md`, `ANALYSIS.md`, …), `.env`-file
+  bans, AI-affirmation regex (`"You're absolutely right"`,
+  emoji watermarks), debug-residue bans (`console.log`,
+  `debugger`, `breakpoint()`), and model-attributed TODO bans
+  (`TODO(claude:)`, `TODO(cursor:)`, …). All composable from
+  `file_absent` / `filename_regex` / `file_content_forbidden`.
+- ⏳ **`alint://bundled/agent-context@v1`** — hygiene rules
+  for `AGENTS.md` / `CLAUDE.md` / `.cursorrules`: existence
+  recommended, stub guard via `file_min_lines`, bloat guard
+  via `file_max_lines` (per Augment Code research, context
+  files >300 lines correlate with worse agent performance),
+  stale-path heuristic via regex. Subsumes ctxlint's niche
+  with no new rule kinds.
+- ⏳ **`--format=agent` JSON output** — sibling of
+  `--format=json` shaped for LLM consumption. Each violation
+  carries an `agent_instruction` field templated from the
+  rule's `message` + `fix` block: a remediation phrasing
+  optimised for an agent to act on, not for a human to read.
+  Closes the "agents already consume our JSON, but the SARIF
+  shape is awkward in their context" feedback gap.
+
+Out-of-scope for v0.6 (deliberately): new rule kinds, semantic
+analysis, secret-entropy scanning, AGENTS.md export. All of
+those land in v0.7 or later.
+
+## v0.7 — New rule kinds for agentic problems
+
+Targeted rule-kind additions that close the gaps Tier-1
+exposed. Each needs a short design doc before implementation
+because heuristic detection has a real false-positive surface
+that bundled rulesets don't.
+
+- ⏳ **`commented_out_code` rule kind** — heuristic detector
+  for `//` / `/* */` / `#` blocks of N+ consecutive commented
+  lines whose content parses as code. Hardest design problem:
+  false-positive control around license headers, ASCII art,
+  and MDX-style docs.
+- ⏳ **`git_blame_age` rule kind** — escalates a rule's
+  severity when the violating line has been in tree for
+  longer than `max_age_days`. Catches stale agent-leftover
+  TODOs without needing timestamps in the comment. Requires
+  `gix` integration (already on the deps roadmap) plus a
+  non-git fallback.
+- ⏳ **`markdown_paths_resolve` rule kind** — validates that
+  backticked paths in markdown files resolve to real files.
+  Targets the AGENTS.md staleness problem more precisely than
+  the v0.6 regex heuristic. Edge cases: template variables,
+  multi-line paths.
+- ⏳ **`alint suggest` subcommand** — scans the current repo
+  for known antipatterns and proposes rules that would catch
+  them. Acts as a smart `alint init` for retrofitting alint
+  onto a long-running, agent-heavy codebase.
+- ⏳ **`alint export-agents-md` subcommand** — generates (or
+  maintains a section of) `AGENTS.md` from the active rule
+  set. Each rule's `message` + `policy_url` becomes a
+  one-line directive. Solves the "duplicate config across
+  CLAUDE.md, .cursorrules, AGENTS.md" complaint by making
+  alint the single source of truth.
+
+## v0.8 — LSP
+
+(Was v0.6 in the pre-2026-04-27 roadmap; pushed out by two
+slots so the agentic-era cut can ship into the open market
+window first.)
+
+- LSP server (`alint lsp`): inline diagnostics, hover with
+  rule documentation, code actions for "add to ignore" and
+  "apply fix."
 - VS Code extension (bundles the LSP).
 
-## v0.7 — WASM plugins
+## v0.9 — WASM plugins
 
-- `wasm` plugin kind with a `wasmtime` host, stable WIT interface.
+(Was v0.7 in the pre-2026-04-27 roadmap.)
+
+- `wasm` plugin kind with a `wasmtime` host, stable WIT
+  interface.
 - Plugin registry scaffolding with signature verification.
+- Bless a few canonical agent-aware semantic plugins
+  (mock-ratio checker, file-similarity / near-dup detector,
+  debug-statement auto-stripper) as documented examples — not
+  bundled, to keep the binary lean.
 
 ## v1.0 — Stability
 
