@@ -114,11 +114,19 @@ const REGISTRY: &[(&str, &str, &str)] = &[
     // duplicate filenames, scratch-doc sprawl, AI-affirmation
     // prose, debug residue, model-attributed TODOs) without
     // duplicating what `hygiene/no-tracked-artifacts@v1`
-    // already catches.
+    // already catches. `agent-context@v1` lints the
+    // agent-instruction files (AGENTS.md / CLAUDE.md /
+    // .cursorrules / GEMINI.md / copilot-instructions.md) for
+    // existence + stub + bloat + stale-path drift.
     (
         "agent-hygiene",
         "v1",
         include_str!("../rulesets/v1/agent-hygiene.yml"),
+    ),
+    (
+        "agent-context",
+        "v1",
+        include_str!("../rulesets/v1/agent-context.yml"),
     ),
 ];
 
