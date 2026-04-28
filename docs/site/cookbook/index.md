@@ -308,3 +308,90 @@ rules:
     paths: [".env", ".env.*.local"]
     level: error
 ```
+
+## 14. Guard an agent-heavy repo
+
+Coding agents (Claude Code, Cursor agent, Copilot agent, Aider, Codex) leave characteristic structural debris — backup-suffix files, scratch / planning docs, debug-print residue, stale `TODO(claude:)` markers, AI-style affirmation prose. The bundled `agent-hygiene@v1` ruleset (shipped in v0.6) catches all of those without overlapping the existing `hygiene/*` set. Pair it with `agent-context@v1` for `AGENTS.md` / `CLAUDE.md` / `.cursorrules` hygiene:
+
+```yaml
+version: 1
+extends:
+  # OS / editor / build / .env junk — covers what agents AND humans leave behind.
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/hygiene/lockfiles@v1
+  # Agent-specific patterns — versioned duplicates, scratch docs,
+  # debug residue, AI-affirmation prose, model-attributed TODOs.
+  - alint://bundled/agent-hygiene@v1
+  # AGENTS.md / CLAUDE.md / .cursorrules hygiene (existence, stub
+  # guard, bloat guard, stale-path heuristic). Fact-gated, safe
+  # no-op when no agent-context file is present.
+  - alint://bundled/agent-context@v1
+```
+
+Layer with the language-ecosystem rulesets if your stack matches one — they're all `when: facts.is_<lang>` gated, so extending them costs nothing in projects where they don't apply:
+
+```yaml
+version: 1
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/agent-hygiene@v1
+  - alint://bundled/agent-context@v1
+  - alint://bundled/rust@v1                # or node / python / go / java
+  - alint://bundled/monorepo@v1            # if multi-package
+```
+
+### Feeding violations back to an agent
+
+`--format=agent` (also accepted as `--format=agentic` or `--format=ai`) emits a flat JSON shape optimised for an LLM to act on. Each violation carries an `agent_instruction` field templated from the rule's message + location + fix availability + policy URL — so an agent loop can read the violation and apply the suggested remediation directly:
+
+```bash
+alint check --format=agent
+```
+
+```json
+{
+  "schema_version": 1,
+  "format": "agent",
+  "summary": {
+    "total_violations": 1,
+    "by_severity": {"error": 0, "warning": 1, "info": 0},
+    "fixable_violations": 0,
+    "passing_rules": 5,
+    "failing_rules": 1
+  },
+  "violations": [
+    {
+      "rule_id": "agent-no-console-log",
+      "severity": "warning",
+      "file": "src/api.ts",
+      "line": 42,
+      "column": 1,
+      "human_message": "`console.log` / `.debug` / `.trace` left in non-test source. Route through the project logger or remove before merge.",
+      "agent_instruction": "warning: `console.log` / `.debug` / `.trace` left in non-test source. Route through the project logger or remove before merge. To resolve: edit src/api.ts:42:1.",
+      "fix_available": false
+    }
+  ]
+}
+```
+
+A typical agent-harness pattern: after each edit, run `alint check --format=agent`, parse the JSON, address the first violation, repeat until empty. The `agent_instruction` field is intentionally verbose — it's optimised for an LLM to act on without having to re-derive the action from `rule_id` and `human_message` separately.
+
+### Severity escalation
+
+The bundled defaults are deliberately non-blocking on the heuristic checks (`info` for AI-prose patterns, `warning` for clean-up debt, `error` for unambiguous bugs like `debugger;` in production source). Override per-rule once your team is ready to enforce — field-level override means you only have to declare the field you change:
+
+```yaml
+version: 1
+extends:
+  - alint://bundled/agent-hygiene@v1
+
+rules:
+  # Promote scratch-doc bans to error before merge, not just warn.
+  - id: agent-no-scratch-docs-at-root
+    level: error
+
+  # Tighten the affirmation-prose check from info to warning.
+  - id: agent-no-affirmation-prose
+    level: warning
+```
