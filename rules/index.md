@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 58 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 59 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -19,13 +19,14 @@ alint ships 58 rule kinds across 12 families. Each rule is one entry in your `.a
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 4 rules
+- [Git hygiene](/docs/rules/git-hygiene/) — 5 rules
 - [Cross-file](/docs/rules/cross-file/) — 7 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
 
 - [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
+- [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). _(Git hygiene)_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `paths` must contain files matching `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_
