@@ -46,8 +46,8 @@ struct Cli {
     /// When to emit ANSI color codes in human output. `auto` (the
     /// default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`.
     /// Only affects the `human` format; `json` / `sarif` /
-    /// `github` / `markdown` / `junit` / `gitlab` are always
-    /// plain bytes.
+    /// `github` / `markdown` / `junit` / `gitlab` / `agent` are
+    /// always plain bytes.
     #[arg(
         long,
         global = true,

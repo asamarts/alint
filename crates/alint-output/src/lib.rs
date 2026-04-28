@@ -1,6 +1,7 @@
 //! Output formatters. Each format converts an [`alint_core::Report`] into
 //! bytes suitable for stdout or a file.
 
+mod agent;
 mod github;
 mod gitlab;
 mod human;
@@ -15,6 +16,7 @@ use std::str::FromStr;
 
 use alint_core::{FixReport, Report};
 
+pub use agent::write_agent;
 pub use github::write_github;
 pub use gitlab::write_gitlab;
 pub use human::{write_fix_human, write_human};
@@ -33,6 +35,7 @@ pub enum Format {
     Markdown,
     Junit,
     Gitlab,
+    Agent,
 }
 
 impl FromStr for Format {
@@ -46,6 +49,7 @@ impl FromStr for Format {
             "markdown" | "md" => Ok(Self::Markdown),
             "junit" | "junit-xml" => Ok(Self::Junit),
             "gitlab" | "gitlab-codequality" | "code-quality" => Ok(Self::Gitlab),
+            "agent" | "agentic" | "ai" => Ok(Self::Agent),
             other => Err(format!("unknown output format: {other}")),
         }
     }
@@ -76,6 +80,7 @@ impl Format {
             Self::Markdown => write_markdown(report, w),
             Self::Junit => write_junit(report, w),
             Self::Gitlab => write_gitlab(report, w),
+            Self::Agent => write_agent(report, w),
         }
     }
 
@@ -96,9 +101,17 @@ impl Format {
         opts: HumanOptions,
     ) -> std::io::Result<()> {
         match self {
-            Self::Human | Self::Sarif | Self::Github | Self::Junit | Self::Gitlab => {
-                write_fix_human(report, w, opts)
-            }
+            Self::Human
+            | Self::Sarif
+            | Self::Github
+            | Self::Junit
+            | Self::Gitlab
+            // Agent format is check-side only; an agent confirming a
+            // fix landed should re-run `alint check --format=agent`
+            // against the now-modified tree. The fix-report itself
+            // falls back to the human formatter so logs from
+            // `alint fix --format=agent` still read sensibly.
+            | Self::Agent => write_fix_human(report, w, opts),
             Self::Json => write_fix_json(report, w),
             Self::Markdown => write_fix_markdown(report, w),
         }
