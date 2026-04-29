@@ -210,7 +210,6 @@ fn preview_paths(paths: &[PathBuf], max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::UNIX_EPOCH;
 
     fn line(n: usize, content: &str, age_days: u64) -> BlameLine {
         let author_time = SystemTime::now() - Duration::from_secs(age_days * 86_400);
@@ -244,15 +243,22 @@ mod tests {
         // A blame timestamp in the future (clock skew) must
         // not crash — duration_since returns Err and the
         // filter drops the line.
+        //
+        // We pin the "future" to a concrete `now + 10 years`
+        // rather than a saturating constant: Windows' SystemTime
+        // is backed by FILETIME with a much narrower range than
+        // Linux, so `UNIX_EPOCH + Duration::from_secs(u64::MAX/2)`
+        // panics during *construction*, before we reach the code
+        // under test.
         let pattern = Regex::new("TODO").unwrap();
-        let future = UNIX_EPOCH + Duration::from_secs(u64::MAX / 2);
+        let now = SystemTime::now();
+        let future = now + Duration::from_secs(86_400 * 365 * 10);
         let lines = vec![BlameLine {
             line_number: 1,
             author_time: future,
             content: "TODO".into(),
         }];
-        let count =
-            count_stale_markers(&lines, &pattern, SystemTime::now(), Duration::from_secs(0));
+        let count = count_stale_markers(&lines, &pattern, now, Duration::from_secs(0));
         assert_eq!(count, 0);
     }
 
