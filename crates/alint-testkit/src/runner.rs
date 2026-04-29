@@ -283,10 +283,15 @@ fn assert_violations(
     let mut actual: Vec<(String, alint_core::Level, Option<String>)> = Vec::new();
     for r in &report.results {
         for v in &r.violations {
+            // Normalise to forward slashes so scenario YAML can
+            // assert `src/main.rs` regardless of host OS.
+            // Windows' Path::display() emits `src\main.rs`.
             actual.push((
                 r.rule_id.clone(),
                 r.level,
-                v.path.as_ref().map(|p| p.display().to_string()),
+                v.path
+                    .as_ref()
+                    .map(|p| p.display().to_string().replace('\\', "/")),
             ));
         }
     }

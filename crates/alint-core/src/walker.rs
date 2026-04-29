@@ -137,9 +137,12 @@ mod tests {
     }
 
     fn paths(idx: &FileIndex) -> Vec<String> {
+        // Normalise to forward slashes so assertions can compare
+        // against literal `"src/foo.rs"` regardless of host OS.
+        // Windows' Path::display() emits `src\foo.rs`.
         idx.entries
             .iter()
-            .map(|e| e.path.display().to_string())
+            .map(|e| e.path.display().to_string().replace('\\', "/"))
             .collect()
     }
 
