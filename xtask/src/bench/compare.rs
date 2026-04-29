@@ -64,11 +64,15 @@ fn collect(root: &Path) -> Result<BTreeMap<String, f64>> {
                 let bench_dir = path.parent().and_then(|p| p.parent()).ok_or_else(|| {
                     anyhow::anyhow!("malformed criterion dir: {}", path.display())
                 })?;
+                // Normalise to forward slashes so tree compare
+                // works across runs from different platforms
+                // (criterion-main from Linux CI vs criterion
+                // from a developer's Windows checkout).
                 let rel = bench_dir
                     .strip_prefix(root)
                     .with_context(|| format!("strip_prefix {}", bench_dir.display()))?
                     .to_string_lossy()
-                    .into_owned();
+                    .replace('\\', "/");
                 let json = std::fs::read_to_string(&path)
                     .with_context(|| format!("read {}", path.display()))?;
                 let est: Estimates = serde_json::from_str(&json)
