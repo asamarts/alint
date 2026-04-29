@@ -1,4 +1,4 @@
 bin.name = "alint"
-args = ["--color=never", "check", "."]
+args = ["--color=auto", "check", "."]
 fs.sandbox = true
 env.add.CLICOLOR_FORCE = "1"

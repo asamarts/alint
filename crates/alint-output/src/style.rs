@@ -144,11 +144,31 @@ impl Default for GlyphSet {
 /// How to resolve whether to emit ANSI color codes. Parsed from
 /// `--color=<auto|always|never>`.
 ///
-/// `Auto` delegates to `anstream::AutoStream`, which consults
-/// `NO_COLOR`, `CLICOLOR_FORCE`, and TTY status. `Always` /
-/// `Never` override those heuristics (useful when piping into a
-/// pager that understands ANSI, or when capturing output for a
-/// snapshot test).
+/// On `Auto`, [`ColorChoice::resolve`] consults the
+/// `CLICOLOR_FORCE` env var (which `anstream` does NOT check on
+/// its own) and pre-resolves to `Always` when it's set to
+/// anything other than `"0"`. The resulting choice is then
+/// handed to `anstream::AutoStream`, which honors `NO_COLOR` and
+/// the TTY check on the remaining `Auto` cases.
+///
+/// `Always` / `Never` are explicit user overrides and bypass the
+/// env-var resolution entirely — useful when piping into a pager
+/// that understands ANSI, or when capturing output for a
+/// snapshot test.
+///
+/// Precedence summary:
+///
+/// | `--color` | env                                | result    |
+/// |-----------|------------------------------------|-----------|
+/// | `always`  | (any)                              | colors on |
+/// | `never`   | (any)                              | colors off|
+/// | `auto`    | `CLICOLOR_FORCE=1`                 | colors on |
+/// | `auto`    | `NO_COLOR=…` (any value)           | colors off|
+/// | `auto`    | TTY                                | colors on |
+/// | `auto`    | non-TTY                            | colors off|
+///
+/// `CLICOLOR_FORCE=0` (or unset) is treated as "no force"; only
+/// `1` (or any non-`"0"` value) forces colors on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ColorChoice {
     #[default]
@@ -158,8 +178,26 @@ pub enum ColorChoice {
 }
 
 impl ColorChoice {
+    /// Pre-resolve `Auto` against the `CLICOLOR_FORCE` env var
+    /// before handing off to `anstream`. `Auto + CLICOLOR_FORCE`
+    /// → `Always`; everything else returns `self` unchanged.
+    ///
+    /// `anstream::ColorChoice::Auto` already honors `NO_COLOR`
+    /// and the TTY check, so we don't intercept those — the
+    /// only env-var contract `anstream` doesn't cover is
+    /// `CLICOLOR_FORCE`, which this method adds.
+    #[must_use]
+    pub fn resolve(self) -> Self {
+        if matches!(self, Self::Auto) && cliclor_force_is_set() {
+            return Self::Always;
+        }
+        self
+    }
+
     /// Map to `anstream`'s own enum so `AutoStream::new` accepts
-    /// it directly.
+    /// it directly. **Callers should normally call
+    /// [`ColorChoice::resolve`] first** to pre-apply the
+    /// `CLICOLOR_FORCE` precedence.
     #[must_use]
     pub fn to_anstream(self) -> anstream::ColorChoice {
         match self {
@@ -167,6 +205,23 @@ impl ColorChoice {
             Self::Always => anstream::ColorChoice::Always,
             Self::Never => anstream::ColorChoice::Never,
         }
+    }
+}
+
+fn cliclor_force_is_set() -> bool {
+    cliclor_force_is_set_in(std::env::var_os("CLICOLOR_FORCE").as_deref())
+}
+
+/// Pure decision function lifted out so unit tests can exercise
+/// the parsing logic without mutating the process env (the
+/// workspace forbids `unsafe` and `set_var` / `remove_var` are
+/// `unsafe` in the 2024 edition).
+fn cliclor_force_is_set_in(env_var: Option<&std::ffi::OsStr>) -> bool {
+    // bixense convention: "1" (or any non-"0" value) forces
+    // colors on; "0" or unset means no force.
+    match env_var {
+        Some(v) => v != "0",
+        None => false,
     }
 }
 
@@ -316,5 +371,51 @@ mod tests {
         let mut out = Vec::new();
         write_hyperlink(&mut out, "https://example.com", "click", false).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "click");
+    }
+
+    // ColorChoice::resolve tests. The workspace forbids
+    // `unsafe`, and `std::env::set_var` is `unsafe` in the 2024
+    // edition. We therefore test the pure decision function
+    // (`cliclor_force_is_set_in`) directly with hand-built
+    // `OsStr` values; the `resolve()` end-to-end behaviour is
+    // covered by the `cliclor-force-emits-on-non-tty.toml`
+    // trycmd snapshot in `crates/alint/tests/cli/`, which sets
+    // the env var via trycmd's per-case `env.*` field.
+
+    use std::ffi::OsStr;
+
+    #[test]
+    fn cliclor_force_helper_treats_one_as_set() {
+        assert!(cliclor_force_is_set_in(Some(OsStr::new("1"))));
+    }
+
+    #[test]
+    fn cliclor_force_helper_treats_other_truthy_values_as_set() {
+        // The bixense convention only specifies "1" → force, but
+        // existing tools (Git, less) treat any non-"0" value as
+        // "force on". We follow that convention.
+        assert!(cliclor_force_is_set_in(Some(OsStr::new("yes"))));
+        assert!(cliclor_force_is_set_in(Some(OsStr::new("true"))));
+        assert!(cliclor_force_is_set_in(Some(OsStr::new(""))));
+    }
+
+    #[test]
+    fn cliclor_force_helper_treats_zero_as_no_force() {
+        assert!(!cliclor_force_is_set_in(Some(OsStr::new("0"))));
+    }
+
+    #[test]
+    fn cliclor_force_helper_unset_returns_false() {
+        assert!(!cliclor_force_is_set_in(None));
+    }
+
+    #[test]
+    fn resolve_is_idempotent_for_explicit_choices() {
+        // `Always` and `Never` are explicit user choices — they
+        // pass through `resolve()` unchanged regardless of the
+        // env. (We don't mutate the env here; the explicit
+        // branches don't read it.)
+        assert_eq!(ColorChoice::Always.resolve(), ColorChoice::Always);
+        assert_eq!(ColorChoice::Never.resolve(), ColorChoice::Never);
     }
 }

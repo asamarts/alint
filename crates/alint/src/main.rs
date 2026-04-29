@@ -724,6 +724,10 @@ fn render_env(
     HumanOptions,
 )> {
     let choice: ColorChoice = cli.color.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    // Pre-resolve `Auto` against CLICOLOR_FORCE before handing
+    // off to anstream — anstream's Auto honors NO_COLOR + TTY
+    // but doesn't consult CLICOLOR_FORCE on its own.
+    let choice = choice.resolve();
     let stdout = io::stdout();
     let is_tty = stdout.is_terminal();
     let lock = stdout.lock();

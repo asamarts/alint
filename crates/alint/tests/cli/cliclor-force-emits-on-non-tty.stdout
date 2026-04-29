@@ -1,0 +1,7 @@
+[2m─── Repository-level ───────────────────────────────────────────────────────────[0m
+  [1m[33m⚠  warning[0m  [2mmust-have-license[0m
+              expected a file matching [LICENSE]
+
+[2mSummary (1 violation):[0m
+  [1m[33m⚠ 1 warning[0m
+  0 passing [2m·[0m 1 failing
