@@ -60,6 +60,7 @@ anstream = "0.6"
 supports-hyperlinks = "3"
 terminal_size = "0.4"
 indicatif = "0.18"
+portable-pty = "0.9"
 serde_json_path = "0.7"
 toml = "0.9"
 

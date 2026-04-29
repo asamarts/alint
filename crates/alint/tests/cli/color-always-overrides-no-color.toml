@@ -1,0 +1,4 @@
+bin.name = "alint"
+args = ["--color=always", "check", "."]
+fs.sandbox = true
+env.NO_COLOR = "1"
