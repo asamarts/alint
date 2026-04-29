@@ -8,13 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-29
+
 The v0.8 cut — five sub-phases (v0.8.1 → v0.8.5) building
 the comprehensive test/bench/rot-prevention foundation that
 v0.9's engine optimization needs to land safely. No new
 user-facing rule kinds, formatters, or subcommands; entirely
-internal. CHANGELOG keeps it under [Unreleased] until the
-v0.8.0 tag is cut. Schema-compatible: every v0.7 config
-runs unchanged.
+internal. Schema-compatible: every v0.7 config runs unchanged.
 
 ### Added — test infrastructure
 
@@ -2530,7 +2530,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/asamarts/alint/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/asamarts/alint/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/asamarts/alint/compare/v0.5.12...v0.6.0
 [0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
