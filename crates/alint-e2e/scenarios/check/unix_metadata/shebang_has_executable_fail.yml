@@ -1,5 +1,9 @@
 name: shebang_has_executable flags #! scripts that lack the +x bit
-tags: [check, shebang_has_executable, unix_metadata]
+# Tagged unix-only — the rule consults the Unix executable bit,
+# which doesn't exist on Windows. The materialiser still creates
+# the files but the rule is a no-op there, so the expected
+# violations never fire.
+tags: [check, shebang_has_executable, unix_metadata, unix-only]
 
 # Tree-spec files are materialized without +x, so any file that starts
 # with `#!` trips this rule on Unix. On non-Unix the rule is a no-op.

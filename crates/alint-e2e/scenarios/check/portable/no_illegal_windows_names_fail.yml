@@ -1,5 +1,12 @@
 name: no_illegal_windows_names flags reserved and forbidden names
-tags: [check, no_illegal_windows_names, portable]
+# Tagged unix-only because the testkit can't actually materialize
+# `CON`/`NUL`/`COM1`/etc. on Windows — the OS rejects the name at
+# create-time, leaving nothing for the rule to flag. The whole
+# point of this rule is to flag those names *before* they ship to
+# a Windows user, so it ironically only exercises on non-Windows
+# CI lanes. The `linux-only` analogue isn't right here since
+# macOS also creates these names freely.
+tags: [check, no_illegal_windows_names, portable, unix-only]
 
 given:
   tree:

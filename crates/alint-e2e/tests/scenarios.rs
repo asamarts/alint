@@ -17,6 +17,11 @@
 //! - `linux-only` — verified on Linux runners; behaves
 //!   inconsistently on macOS/Windows runners (e.g. `/bin/true`
 //!   spawn semantics). Skipped on non-Linux.
+//! - `unix-only` — works on Linux + macOS but the underlying
+//!   primitive is unavailable on Windows: Unix executable-bit
+//!   semantics, `/bin/sh` spawn for custom-fact commands,
+//!   filesystem permission to create reserved Windows names
+//!   (CON, NUL, COM1, etc.). Skipped on Windows.
 
 use alint_testkit::{Scenario, assert_scenario, run_scenario};
 use dir_test::{Fixture, dir_test};
@@ -30,6 +35,9 @@ fn should_skip_for_os(scenario: &Scenario) -> Option<&'static str> {
     }
     if tagged("linux-only") && !cfg!(target_os = "linux") {
         return Some("scenario tagged linux-only");
+    }
+    if tagged("unix-only") && cfg!(target_os = "windows") {
+        return Some("scenario tagged unix-only");
     }
     None
 }
