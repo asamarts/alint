@@ -293,7 +293,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }))
 }
 
-#[cfg(test)]
+// Tests below shell out to `/bin/sh` and `/bin/true` to
+// exercise the spawn / argv-template / timeout paths without
+// pulling in a per-OS test fixture. That doesn't translate to
+// Windows (`/bin/sh` doesn't exist), so the whole module is
+// gated to Unix targets — Cross-Platform / windows-latest skips
+// it cleanly while Linux + macOS continue to exercise it.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
