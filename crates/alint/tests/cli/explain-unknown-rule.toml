@@ -1,0 +1,4 @@
+bin.name = "alint"
+args = ["explain", "no-such-rule"]
+status.code = 2
+fs.sandbox = true

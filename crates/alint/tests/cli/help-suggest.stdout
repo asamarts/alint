@@ -1,0 +1,21 @@
+Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
+
+Usage: alint suggest [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Root of the repository to scan. Defaults to the current directory [default: .]
+
+Options:
+  -c, --config <CONFIG>     Path to a config file (repeatable; later overrides earlier)
+  -f, --format <FORMAT>     Output format. `human` (default) is colorised for terminals; `yaml` is a paste-ready config snippet; `json` is a stable shape suitable for agent consumption [default: human] [possible values: human, yaml, json]
+      --confidence <LEVEL>  Lower bound on signal strength for proposals. `low` is broadest (helpful when prospecting); `high` is strict (only ecosystem-marker hits and equivalents) [default: medium] [possible values: low, medium, high]
+      --include-bundled     Include bundled-ruleset suggestions even if the existing `.alint.yml` already extends them
+      --no-gitignore        Disable .gitignore handling (overrides config)
+      --explain             Print one-line file-level evidence under each proposal so reviewers can decide quickly
+      --fail-on-warning     Treat warnings as errors for exit-code purposes
+      --color <WHEN>        When to emit ANSI color codes in human output. `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the `human` format; `json` / `sarif` / `github` / `markdown` / `junit` / `gitlab` / `agent` are always plain bytes [default: auto] [possible values: auto, always, never]
+      --ascii               Force ASCII glyphs in human output (e.g. `x` instead of `✗`). Auto-enabled when `TERM=dumb`
+      --compact             Compact one-line-per-violation human output, suitable for piping into editors / grep / `wc -l`. Format: `path:line:col: level: rule-id: message`
+      --progress <WHEN>     When to render progress on stderr for slow operations (currently `alint suggest`). `auto` (the default) renders when stderr is a TTY; `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON / YAML output on stdout stays byte-clean [default: auto] [possible values: auto, always, never]
+  -q, --quiet               Suppress progress and any stderr summary lines. Alias for `--progress=never` plus suppression of the "found N proposals in Ts" footer that `suggest` prints
+  -h, --help                Print help

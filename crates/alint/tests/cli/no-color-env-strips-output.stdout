@@ -1,0 +1,7 @@
+─── Repository-level ───────────────────────────────────────────────────────────
+  ⚠  warning  must-have-license
+              expected a file matching [LICENSE]
+
+Summary (1 violation):
+  ⚠ 1 warning
+  0 passing · 1 failing

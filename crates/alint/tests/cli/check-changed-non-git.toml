@@ -1,0 +1,4 @@
+bin.name = "alint"
+args = ["check", "--changed", "."]
+status.code = 2
+fs.sandbox = true

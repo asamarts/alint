@@ -1,0 +1,14 @@
+[
+  {
+    "description": "expected a file matching [LICENSE]",
+    "check_name": "must-have-license",
+    "fingerprint": "da6f6f588e2295ff0a00c9ae9e8af276bf7df5d8ec6359479cc24f3b2a43ec11",
+    "severity": "major",
+    "location": {
+      "path": ".",
+      "lines": {
+        "begin": 1
+      }
+    }
+  }
+]

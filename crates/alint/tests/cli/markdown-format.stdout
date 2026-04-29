@@ -1,0 +1,8 @@
+# alint check
+
+**1 violation across 1 file** (1 error).
+
+## Cross-file (1)
+
+- **error** `must-have-license` — expected a file matching /[LICENSE/]
+

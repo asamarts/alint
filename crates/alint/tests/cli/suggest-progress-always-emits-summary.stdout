@@ -1,0 +1,10 @@
+Found 2 proposals (sorted by confidence):
+
+  ✓ [  high] alint://bundled/oss-baseline@v1
+    Universal OSS hygiene baseline.
+
+  ✓ [  high] alint://bundled/rust@v1
+    Rust project detected — extend the language ruleset.
+
+Run with --format yaml to print as a config snippet.
+Run with --explain to see file-level evidence.

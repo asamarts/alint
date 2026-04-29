@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["--progress=never", "suggest", "--format=human", "."]
+fs.sandbox = true

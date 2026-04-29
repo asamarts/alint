@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["--color=never", "check", "."]
+fs.sandbox = true

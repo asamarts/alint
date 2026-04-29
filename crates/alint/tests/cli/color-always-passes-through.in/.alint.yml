@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: must-have-license
+    kind: file_exists
+    paths: LICENSE
+    level: warning

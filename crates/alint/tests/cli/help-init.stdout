@@ -1,0 +1,19 @@
+Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
+
+Usage: alint init [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Root of the repository to write the config into. Defaults to the current directory [default: .]
+
+Options:
+  -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
+      --monorepo         Detect workspace shape (Cargo `[workspace]`, pnpm-workspace.yaml, or `package.json` `workspaces`) and add the corresponding `monorepo@v1` + `monorepo/<flavor>-workspace@v1` overlays. `nested_configs: true` is set on the generated config so each subdirectory can layer its own `.alint.yml` on top
+  -f, --format <FORMAT>  Output format [default: human]
+      --no-gitignore     Disable .gitignore handling (overrides config)
+      --fail-on-warning  Treat warnings as errors for exit-code purposes
+      --color <WHEN>     When to emit ANSI color codes in human output. `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the `human` format; `json` / `sarif` / `github` / `markdown` / `junit` / `gitlab` / `agent` are always plain bytes [default: auto] [possible values: auto, always, never]
+      --ascii            Force ASCII glyphs in human output (e.g. `x` instead of `✗`). Auto-enabled when `TERM=dumb`
+      --compact          Compact one-line-per-violation human output, suitable for piping into editors / grep / `wc -l`. Format: `path:line:col: level: rule-id: message`
+      --progress <WHEN>  When to render progress on stderr for slow operations (currently `alint suggest`). `auto` (the default) renders when stderr is a TTY; `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON / YAML output on stdout stays byte-clean [default: auto] [possible values: auto, always, never]
+  -q, --quiet            Suppress progress and any stderr summary lines. Alias for `--progress=never` plus suppression of the "found N proposals in Ts" footer that `suggest` prints
+  -h, --help             Print help

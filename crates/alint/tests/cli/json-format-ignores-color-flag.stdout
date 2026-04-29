@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "summary": {
+    "failing_rules": 1,
+    "passing_rules": 0,
+    "total_violations": 1,
+    "has_errors": false,
+    "has_warnings": true
+  },
+  "results": [
+    {
+      "id": "must-have-license",
+      "level": "warning",
+      "passed": false,
+      "fixable": false,
+      "violations": [
+        {
+          "message": "expected a file matching [LICENSE]"
+        }
+      ]
+    }
+  ]
+}

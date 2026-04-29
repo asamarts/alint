@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: have-readme
+    kind: file_exists
+    paths: README.md
+    level: warning

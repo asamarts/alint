@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "format": "agent",
+  "summary": {
+    "total_violations": 1,
+    "by_severity": {
+      "error": 1,
+      "warning": 0,
+      "info": 0
+    },
+    "fixable_violations": 0,
+    "passing_rules": 0,
+    "failing_rules": 1
+  },
+  "violations": [
+    {
+      "rule_id": "must-have-license",
+      "severity": "error",
+      "human_message": "expected a file matching [LICENSE]",
+      "agent_instruction": "error: expected a file matching [LICENSE]. To resolve: this is a repository-level rule with no specific file location; resolve the underlying invariant the rule enforces.",
+      "fix_available": false
+    }
+  ]
+}

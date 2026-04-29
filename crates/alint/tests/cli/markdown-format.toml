@@ -1,0 +1,4 @@
+bin.name = "alint"
+args = ["--format", "markdown", "check", "."]
+status.code = 1
+fs.sandbox = true

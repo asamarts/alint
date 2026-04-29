@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["--color=always", "--format=json", "check", "."]
+fs.sandbox = true

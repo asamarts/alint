@@ -1,0 +1,4 @@
+bin.name = "alint"
+args = ["--fail-on-warning", "check", "."]
+status.code = 1
+fs.sandbox = true

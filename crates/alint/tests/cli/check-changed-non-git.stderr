@@ -1,0 +1,1 @@
+alint: --changed requires a git repository (and `git` on PATH); `git ls-files --modified --others --exclude-standard` failed at [..]. Run without --changed for a full check.
