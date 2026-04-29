@@ -1,9 +1,11 @@
 name: no_case_conflicts flags pairs that differ only by case
 # Note: this scenario only materializes faithfully on case-
-# sensitive filesystems (Linux, most CI runners). On macOS
-# HFS+/APFS or Windows NTFS defaults, the second file would
-# overwrite the first during materialization.
-tags: [check, no_case_conflicts, portable]
+# sensitive filesystems. The `requires-case-sensitive-fs` tag
+# tells the harness to skip this on macOS APFS / Windows NTFS
+# in their default configurations — there the second file
+# would silently overwrite the first during materialization,
+# leaving nothing for the rule to flag.
+tags: [check, no_case_conflicts, portable, requires-case-sensitive-fs]
 
 given:
   tree:

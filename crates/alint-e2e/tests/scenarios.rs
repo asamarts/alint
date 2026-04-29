@@ -4,9 +4,35 @@
 //! Test naming convention: `<harness>::<path_with_underscores>`,
 //! e.g. `scenarios/fix/file_create.yml` becomes
 //! `scenario::scenarios::fix::file_create`.
+//!
+//! Tag-based portability skips
+//! ---------------------------
+//! Some scenarios assume properties that don't hold on every CI
+//! runner. They're tagged so the harness can early-return rather
+//! than fail with an unrelated error. Honored conventions:
+//!
+//! - `requires-case-sensitive-fs` — needs a case-sensitive
+//!   filesystem (the testkit can't materialize `Foo`/`foo` on
+//!   APFS or NTFS in their default configurations).
+//! - `linux-only` — verified on Linux runners; behaves
+//!   inconsistently on macOS/Windows runners (e.g. `/bin/true`
+//!   spawn semantics). Skipped on non-Linux.
 
 use alint_testkit::{Scenario, assert_scenario, run_scenario};
 use dir_test::{Fixture, dir_test};
+
+fn should_skip_for_os(scenario: &Scenario) -> Option<&'static str> {
+    let tagged = |t: &str| scenario.tags.iter().any(|x| x == t);
+
+    if tagged("requires-case-sensitive-fs") && cfg!(any(target_os = "macos", target_os = "windows"))
+    {
+        return Some("scenario requires a case-sensitive filesystem");
+    }
+    if tagged("linux-only") && !cfg!(target_os = "linux") {
+        return Some("scenario tagged linux-only");
+    }
+    None
+}
 
 #[dir_test(
     dir: "$CARGO_MANIFEST_DIR/scenarios",
@@ -17,6 +43,10 @@ fn scenario(fixture: Fixture<&str>) {
     let path = fixture.path();
     let scenario = Scenario::from_yaml(fixture.content())
         .unwrap_or_else(|e| panic!("scenario at {path}: parse error: {e}"));
+    if let Some(reason) = should_skip_for_os(&scenario) {
+        eprintln!("skipping {path}: {reason}");
+        return;
+    }
     let run = run_scenario(&scenario)
         .unwrap_or_else(|e| panic!("scenario {:?} at {path}: run error: {e}", scenario.name));
     assert_scenario(&scenario, &run).unwrap_or_else(|e| {

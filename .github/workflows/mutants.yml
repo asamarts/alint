@@ -57,12 +57,27 @@ jobs:
           fi
 
       - name: Run cargo-mutants
+        # cargo-mutants requires the parent of --output to exist
+        # already. Continue past unkilled mutants (the artifact is
+        # the signal we care about) but still surface infra
+        # failures (compile error, mkdir error, etc.) by checking
+        # the exit code shape.
         run: |
+          mkdir -p target/mutants
+          set +e
           cargo mutants --package "${{ steps.pick.outputs.target }}" \
                        --no-shuffle \
                        --output target/mutants \
-                       --timeout 300 \
-                       || true   # never fail the nightly; the artifact is the signal
+                       --timeout 300
+          rc=$?
+          set -e
+          # cargo-mutants exit codes: 0 = all mutants caught,
+          # 1 = some uncaught (acceptable for nightly), 2+ = infra error
+          if [ $rc -ge 2 ]; then
+            echo "cargo-mutants exited $rc — infra failure" >&2
+            exit $rc
+          fi
+          echo "cargo-mutants exited $rc"
 
       - name: Upload report
         if: always()

@@ -14,6 +14,9 @@
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 
 #[derive(Debug)]
+// Fields are read only by the `#[cfg(unix)]` evaluate path; on
+// Windows the struct is constructed but never inspected.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub struct ShebangHasExecutableRule {
     id: String,
     level: Level,

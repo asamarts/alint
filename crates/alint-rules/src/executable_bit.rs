@@ -21,6 +21,10 @@ struct Options {
 }
 
 #[derive(Debug)]
+// Fields are read only by the `#[cfg(unix)]` evaluate path; on
+// Windows the struct is constructed but never inspected, so
+// rustc flags `message`/`scope`/`require_exec` as dead code.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub struct ExecutableBitRule {
     id: String,
     level: Level,
