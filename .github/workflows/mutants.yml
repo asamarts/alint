@@ -60,8 +60,17 @@ jobs:
         # cargo-mutants requires the parent of --output to exist
         # already. Continue past unkilled mutants (the artifact is
         # the signal we care about) but still surface infra
-        # failures (compile error, mkdir error, etc.) by checking
-        # the exit code shape.
+        # failures (compile error, baseline-test error, etc.).
+        #
+        # cargo-mutants exit codes (v27.x):
+        #   0 = all mutants caught (or none generated) — OK
+        #   2 = some mutants escaped the test suite — OK, this
+        #       IS the signal we want surfaced via the artifact
+        #   1 = command-line / argument error — fail
+        #   3 = baseline test or build failed — fail (real infra)
+        #   4 = timeout-only (no caught/missed split) — fail
+        #
+        # Treat 0 and 2 as success; anything else surfaces.
         run: |
           mkdir -p target/mutants
           set +e
@@ -71,13 +80,13 @@ jobs:
                        --timeout 300
           rc=$?
           set -e
-          # cargo-mutants exit codes: 0 = all mutants caught,
-          # 1 = some uncaught (acceptable for nightly), 2+ = infra error
-          if [ $rc -ge 2 ]; then
-            echo "cargo-mutants exited $rc — infra failure" >&2
-            exit $rc
-          fi
-          echo "cargo-mutants exited $rc"
+          case $rc in
+            0|2)
+              echo "cargo-mutants exited $rc — OK" ;;
+            *)
+              echo "cargo-mutants exited $rc — infra failure" >&2
+              exit $rc ;;
+          esac
 
       - name: Upload report
         if: always()

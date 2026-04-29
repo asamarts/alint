@@ -110,7 +110,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use crate::test_support::spec_yaml;
+    // ctx + tempdir_with_files are only consumed by the
+    // `#[cfg(unix)]` evaluate-path tests below; importing them
+    // unconditionally trips `unused_imports` on Windows.
+    #[cfg(unix)]
+    use crate::test_support::{ctx, tempdir_with_files};
 
     #[test]
     fn build_rejects_missing_paths_field() {

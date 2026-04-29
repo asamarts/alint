@@ -94,7 +94,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use crate::test_support::spec_yaml;
+    #[cfg(unix)]
+    use crate::test_support::{ctx, tempdir_with_files};
 
     #[test]
     fn build_rejects_missing_paths_field() {
