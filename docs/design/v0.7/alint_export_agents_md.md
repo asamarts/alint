@@ -70,12 +70,11 @@ maintaining the same rules in two places:
    directives the agent reads on every session, telling
    it what NOT to do.
 
-Per Augment Code's research cited in
-`PROPOSAL-AGENTS.md` §4: "67% of development teams are
-maintaining duplicate configurations" between agent-context
-files and their CI lint configs. The two drift, the agent
-violates rules the lint catches, the user reaffirms the
-rule in AGENTS.md, repeat.
+Per Augment Code's published research, "67% of development
+teams are maintaining duplicate configurations" between
+agent-context files and their CI lint configs. The two
+drift, the agent violates rules the lint catches, the user
+reaffirms the rule in AGENTS.md, repeat.
 
 `alint export-agents-md` makes alint the single source
 of truth: the active rule set generates a section of

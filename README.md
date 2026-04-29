@@ -6,11 +6,11 @@
 
 **alint** is a language-agnostic linter for repository structure. You declare the shape your repo should have — required files, filename conventions, content patterns, values inside `package.json` / `Cargo.toml` / GitHub workflows, cross-file relationships — in a single `.alint.yml`, and alint enforces it. It walks the tree honoring `.gitignore`, runs rules in parallel, reports violations in human / JSON / SARIF / GitHub-annotation form, and can auto-fix what it flags. One static Rust binary, any language, any repo.
 
-v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see [docs/rules.md](docs/rules.md) for the full catalogue. alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, and structured-query primitives.
+v0.7 ships **54 rule kinds** across eleven families and 12 auto-fix ops — see [docs/rules.md](docs/rules.md) for the full catalogue. alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, structured-query, and agent-aware primitives.
 
 ## Core capabilities
 
-- **~55 rule kinds** across eleven families (full reference: [docs/rules.md](docs/rules.md)):
+- **54 rule kinds** across eleven families (full reference: [docs/rules.md](docs/rules.md)):
   - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
   - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_footer`, `file_shebang`, `file_starts_with`, `file_ends_with`, `file_hash`, `file_max_size`, `file_min_size`, `file_max_lines`, `file_min_lines`, `file_is_text`, `file_is_ascii`.
   - *Structured query* — `json_path_equals`, `json_path_matches`, `yaml_path_equals`, `yaml_path_matches`, `toml_path_equals`, `toml_path_matches`. JSONPath (RFC 9535) queries over JSON / YAML / TOML.
@@ -25,10 +25,10 @@ v0.4 ships **~55 rule kinds** across eleven families and 12 auto-fix ops — see
 - **Auto-fix** — 12 file ops covering content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append). Preview with `alint fix --dry-run`. Content-editing ops honour a configurable `fix_size_limit` (default 1 MiB) that skips oversize files rather than rewriting them.
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Composition** — `extends:` pulls in other configs by local path, HTTPS URL (with SRI pinning), or `alint://bundled/<name>@<rev>`. Children override inherited rules field-by-field. Monorepos can opt into `nested_configs: true` to auto-discover `.alint.yml` files in subdirectories and scope their rules to each subtree.
-- **Seventeen bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `ci/github-actions`, `monorepo`, `monorepo/cargo-workspace`, `monorepo/pnpm-workspace`, `monorepo/yarn-workspace`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `compliance/reuse`, `compliance/apache-2`. Built into the binary — no network round-trip.
-- **Seven output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality).
-- **JSON Schema** at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete.
-- **Official GitHub Action** — `asamarts/alint@v0.5.12`.
+- **Nineteen bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `ci/github-actions`, `monorepo`, `monorepo/cargo-workspace`, `monorepo/pnpm-workspace`, `monorepo/yarn-workspace`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `compliance/reuse`, `compliance/apache-2`, `agent-hygiene`, `agent-context`. Built into the binary — no network round-trip.
+- **Eight output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
+- **JSON Schemas** — config at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete; report shapes at [`schemas/v1/check-report.json`](schemas/v1/check-report.json) and [`schemas/v1/fix-report.json`](schemas/v1/fix-report.json) for downstream tooling.
+- **Official GitHub Action** — `asamarts/alint@v0.7.0`.
 
 ## Non-goals
 
@@ -70,7 +70,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.5.12 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.7.0 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -79,7 +79,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.5`) and the raw git tag (`:v0.5.12`).
+Also published: `:<major>.<minor>` (e.g. `:0.7`) and the raw git tag (`:v0.7.0`).
 
 ### From crates.io
 
@@ -626,15 +626,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.5.12
+- uses: asamarts/alint@v0.7.0
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.5.12
+- uses: asamarts/alint@v0.7.0
   with:
-    version: v0.5.12        # alint release tag (default: latest)
+    version: v0.7.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github | markdown | junit | gitlab (default: github)
     config: |              # extra config path(s), one per line
@@ -646,7 +646,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.5.12
+- uses: asamarts/alint@v0.7.0
   id: alint
   with:
     format: sarif
@@ -664,7 +664,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.5.12
+    rev: v0.7.0
     hooks:
       - id: alint
 ```

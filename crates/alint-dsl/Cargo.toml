@@ -9,6 +9,10 @@ repository.workspace = true
 homepage = "https://github.com/asamarts/alint"
 readme = "../../README.md"
 authors.workspace = true
+# Internal crate — implementation detail of the alint binary.
+# Historical versions ship to crates.io; new versions are gated
+# off here. Defense-in-depth past `release.yml`'s allowlist.
+publish = false
 
 [dependencies]
 alint-core.workspace = true

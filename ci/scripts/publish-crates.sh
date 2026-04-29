@@ -33,13 +33,18 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=true
 fi
 
-# Dependency-ordered list. alint-core is foundational; dsl/rules/output
-# each depend only on core; alint (the CLI binary) depends on all four.
+# Dependency-ordered list. alint-core is the published library
+# (engine + types — public API); alint is the binary. The
+# remaining workspace crates (alint-dsl, alint-rules,
+# alint-output) carry `publish = false` and stay out of crates.io
+# going forward — their descriptions have always read "Internal:
+# Not a stable public API"; making the manifest match.
+#
+# Historical versions of those three crates remain on crates.io
+# (ship since v0.5.x) — see the `cargo yank` housekeeping under
+# `docs/design/v0.8.0-release-notes.md` if applicable.
 CRATES=(
   alint-core
-  alint-dsl
-  alint-rules
-  alint-output
   alint
 )
 

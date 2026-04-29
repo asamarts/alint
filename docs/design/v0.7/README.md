@@ -7,13 +7,12 @@ starts.
 
 ## What v0.7 ships
 
-Three new rule kinds and two new subcommands. All of them
-were sketched in `PROPOSAL-AGENTS.md` (local-only, see
-`.gitignore`) as "Tier 2" / "Tier 3" follow-ups to v0.6's
-bundled-ruleset cut. Where v0.6 was config-only — every
-feature composed from existing primitives — v0.7 actually
-extends the engine with new rule kinds and new CLI surface,
-so each one needs deliberate design before code.
+Three new rule kinds and two new subcommands. All five were
+identified during the v0.6 field test as "Tier 2" / "Tier 3"
+follow-ups to v0.6's bundled-ruleset cut. Where v0.6 was
+config-only — every feature composed from existing primitives —
+v0.7 actually extends the engine with new rule kinds and new
+CLI surface, so each one needs deliberate design before code.
 
 | File | Feature |
 |---|---|
@@ -35,7 +34,7 @@ ecosystem detection) need git operations. Two options:
 
 - **Add `gix` as a workspace dep.** Pure-Rust git, no
   external `git` binary required, used by `gitoxide`-family
-  tools. Already on the deps roadmap per PROPOSAL.md §5.3.
+  tools.
 - **Shell out to `git`.** No new dep; uses whatever git the
   user has. Currently how `alint-core::git` /
   `git_no_denied_paths` etc. work.
@@ -119,7 +118,7 @@ Roughly easiest-first:
 Each design doc has the same shape:
 
 1. **Problem** — what user pain this addresses, sourced
-   from the v0.6 field test or PROPOSAL-AGENTS.md.
+   from the v0.6 field test.
 2. **Schema** — the YAML the user writes.
 3. **Semantics** — what the engine does on each match.
 4. **False-positive surface** — what could go wrong and

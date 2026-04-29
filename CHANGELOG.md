@@ -6,6 +6,140 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+The v0.8 cut — five sub-phases (v0.8.1 → v0.8.5) building
+the comprehensive test/bench/rot-prevention foundation that
+v0.9's engine optimization needs to land safely. No new
+user-facing rule kinds, formatters, or subcommands; entirely
+internal. CHANGELOG keeps it under [Unreleased] until the
+v0.8.0 tag is cut. Schema-compatible: every v0.7 config
+runs unchanged.
+
+### Added — test infrastructure
+
+- **Cross-platform CI** — `.github/workflows/cross-platform.yml`
+  runs `cargo test --workspace --locked` on macOS-arm64 and
+  Windows-x86_64 GitHub-hosted runners on every PR/push.
+  Caught two real production bugs the Linux lane missed
+  (glob mixed-separator + bench-compare key separator,
+  both fixed before merge).
+- **Coverage workflow** — `.github/workflows/coverage.yml`
+  runs `cargo llvm-cov` over the workspace (xtask excluded
+  as dev tooling). Enforces 85% line-coverage floor;
+  workspace currently at 90.57%. LCOV + HTML uploaded as
+  artifacts; opt-in Codecov upload via `CODECOV_TOKEN`.
+- **Mutants nightly** — `.github/workflows/mutants.yml`
+  rotates one workspace crate per night through cargo-mutants.
+  Surfaces unkilled mutants as test-coverage gaps via
+  uploaded artifacts.
+- **Comprehensive bench suite** —
+  `single_file_rules.rs`, `cross_file_rules.rs`,
+  `structured_query.rs`, `output_formats.rs`,
+  `fix_throughput.rs`, `blame_cache.rs`, `dsl_extends.rs`
+  under `crates/alint-bench/benches/`. Plus hyperfine
+  scenarios S4 (agent-hygiene) + S5 (fix-pass) and a walker
+  parallelism baseline captured for v0.9.
+
+### Added — rot prevention
+
+- **`xtask bench-compare`** — diffs two `target/criterion/`
+  trees and gates on regressions past `--threshold`
+  (default 10%). PR-time perf-regression gate.
+- **JSON report schemas** —
+  `schemas/v1/check-report.json` and
+  `schemas/v1/fix-report.json` lock the public contract
+  for `alint check --format json` and
+  `alint fix --format json`. Cross-formatter and
+  fix-report tests validate output against the schemas.
+- **Fixture-completeness test** in alint-dsl asserts the
+  canonical `all_kinds.yaml` fixture exercises every
+  registered rule kind (now 70, up from 18).
+- **Scenario-coverage audit** in alint-e2e asserts every
+  registered rule kind has at least one e2e scenario.
+- **Default-option snapshot** in alint-dsl captures every
+  rule's resolved Debug output into a checked-in snapshot.
+  Catches silent shifts to `#[serde(default = ...)]`
+  values (e.g. `commented_out_code::min_lines`).
+- **CLI flag inventory snapshot** captures the full
+  per-subcommand flag list separately from `--help` text
+  to catch flag-name drift independently of help-text edits.
+- **Cross-formatter snapshot test** —
+  `crates/alint-output/tests/cross_formatter.rs`. Same
+  fixed Report rendered through all 8 output formatters
+  with 13 invariant tests (rule_id presence, JSON parses,
+  schema_version key, SARIF driver completeness, etc.).
+- **Pty integration test** —
+  `crates/alint/tests/pty_color.rs` (Unix-only) covers
+  the `--color=auto` resolution branch trycmd's pipe-only
+  spawn can't reach.
+- **`.gitattributes`** pins LF for byte-stable test
+  artifacts (snapshots, trycmd `.stdout`/`.stderr`/`.toml`,
+  YAML fixtures) so Windows checkouts don't introduce
+  CRLF drift.
+
+### Added — coverage breadth
+
+- **~155 new rule-kind unit tests** across 34 previously
+  under-covered rule kinds (build / options / evaluate
+  fires / evaluate silent / edge cases — the standard
+  quintet).
+- **Fail-variant e2e scenarios** for the 3 pass-only
+  unix-metadata rules (`no_symlinks`, `executable_bit`,
+  `executable_has_shebang`).
+- **E2E scenarios** for the 4 zero-e2e rules
+  (`json_schema_passes`, `git_no_denied_paths`,
+  `git_commit_message`, `command`).
+- **Integration tests** under `crates/alint-rules/tests/`
+  for the shell-out rules: `git_no_denied_paths`,
+  `git_commit_message`, `command` (mirrors v0.7.3's
+  `git_blame_age` integration-test pattern).
+- **alint-core internal tests** — `engine.rs`, `walker.rs`,
+  `registry.rs`, `report.rs`, `error.rs`, `level.rs`,
+  `scope.rs`, `config.rs`, `rule.rs` all gained unit
+  tests (had 0 pre-v0.8.2).
+- **alint-dsl edges** — extends-chain cycle detection,
+  diamond inheritance, `extends:` filter validation,
+  nested-config path-prefix rewriting, `.alint.d/` merge
+  order determinism, HTTPS timeout / size-cap
+  enforcement, SRI algorithm-mismatch errors,
+  template-instantiation edge cases.
+
+### Added — CLI surface
+
+- **trycmd 33 → 56 cases** — stderr snapshots for every
+  error path, per-subcommand `--help` snapshots,
+  `--color × NO_COLOR × CLICOLOR_FORCE` matrix,
+  `--progress × TTY/non-TTY` matrix.
+
+### Fixed — production bugs surfaced by the new lanes
+
+- **DSL nested-config glob mixed separators** — on
+  Windows, `discover_nested` joined `rel_dir.to_string_lossy()`
+  (native separators) with the user's pattern (`/`), producing
+  globs like `packages\foo/README.md` that globset couldn't
+  match. Nested-config rules silently no-op'd on Windows. Now
+  the prefix is normalised to `/` before joining.
+- **xtask bench-compare key separators** — comparison keys
+  carried native separators, breaking cross-OS tree
+  comparison (`target/criterion-main` from a Linux runner
+  vs. `target/criterion` from a Windows checkout). Now
+  normalised to `/`.
+- **CLICOLOR_FORCE on `--color=auto`** — the `auto`
+  resolution path didn't honor `CLICOLOR_FORCE` before
+  passing the choice to anstream. Fixed via a
+  `ColorChoice::resolve()` pre-pass.
+
+### Internal — release safety
+
+- `alint-dsl`, `alint-rules`, `alint-output` now carry
+  `publish = false`. Their descriptions have always read
+  "Internal: Not a stable public API"; the manifest now
+  matches. Historical v0.5.x → v0.7.0 versions remain on
+  crates.io for compatibility; new versions are gated off.
+- `ci/scripts/publish-crates.sh` reduced to publishing
+  only `alint-core` (public library) and `alint`
+  (binary). The other three are internal implementation
+  detail.
+
 ## [0.7.0] — 2026-04-28
 
 Closes the v0.7 cut. Three new rule kinds and two new

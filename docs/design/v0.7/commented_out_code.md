@@ -28,8 +28,7 @@ Existing alint primitives don't catch this:
 - `agent-no-affirmation-prose` and the model-TODO regex
   catch specific phrasings, not the general pattern.
 
-The v0.6 field test (`PROPOSAL-AGENTS.md` §2 item 8 / §3
-"comment cruft") flagged this as a class alint should
+The v0.6 field test flagged this as a class alint should
 address but couldn't with existing rule kinds.
 
 ## Schema
