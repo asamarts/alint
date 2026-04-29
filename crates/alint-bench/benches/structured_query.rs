@@ -43,9 +43,7 @@ fn make_yaml_tree(n_files: usize) -> tempfile::TempDir {
         .tempdir()
         .expect("tempdir");
     for i in 0..n_files {
-        let path = tmp
-            .path()
-            .join(format!(".github/workflows/ci-{i}.yml"));
+        let path = tmp.path().join(format!(".github/workflows/ci-{i}.yml"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let body = format!(
             "name: ci-{i}\n\
@@ -68,9 +66,8 @@ fn make_toml_tree(n_files: usize) -> tempfile::TempDir {
     for i in 0..n_files {
         let path = tmp.path().join(format!("crate/c{i}/Cargo.toml"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let body = format!(
-            "[package]\nname = \"c{i}\"\nedition = \"2024\"\nrust-version = \"1.85\"\n",
-        );
+        let body =
+            format!("[package]\nname = \"c{i}\"\nedition = \"2024\"\nrust-version = \"1.85\"\n",);
         std::fs::File::create(&path)
             .unwrap()
             .write_all(body.as_bytes())

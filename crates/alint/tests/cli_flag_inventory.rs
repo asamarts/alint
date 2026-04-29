@@ -144,9 +144,7 @@ fn cli_flag_inventory_matches_snapshot() {
         let max = exp_lines.len().max(act_lines.len());
         let mut first = max;
         for i in 0..max {
-            if exp_lines.get(i).copied().unwrap_or("")
-                != act_lines.get(i).copied().unwrap_or("")
-            {
+            if exp_lines.get(i).copied().unwrap_or("") != act_lines.get(i).copied().unwrap_or("") {
                 first = i;
                 break;
             }

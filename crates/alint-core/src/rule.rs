@@ -351,8 +351,7 @@ mod tests {
 
     #[test]
     fn context_is_git_tracked_consults_set_when_present() {
-        let mut tracked: std::collections::HashSet<PathBuf> =
-            std::collections::HashSet::new();
+        let mut tracked: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         tracked.insert(PathBuf::from("src/main.rs"));
         let idx = empty_index();
         let ctx = Context {

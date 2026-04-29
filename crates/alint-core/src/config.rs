@@ -534,8 +534,7 @@ mod tests {
 
     #[test]
     fn config_explicit_null_disables_fix_size_limit() {
-        let cfg: Config =
-            serde_yaml_ng::from_str("version: 1\nfix_size_limit: null\n").unwrap();
+        let cfg: Config = serde_yaml_ng::from_str("version: 1\nfix_size_limit: null\n").unwrap();
         assert_eq!(cfg.fix_size_limit, None);
     }
 
@@ -575,8 +574,7 @@ mod tests {
         let single: PathsSpec = serde_yaml_ng::from_str("\"src/**\"").unwrap();
         assert!(matches!(single, PathsSpec::Single(s) if s == "src/**"));
 
-        let many: PathsSpec =
-            serde_yaml_ng::from_str("[\"src/**\", \"!src/vendor/**\"]").unwrap();
+        let many: PathsSpec = serde_yaml_ng::from_str("[\"src/**\", \"!src/vendor/**\"]").unwrap();
         assert!(matches!(many, PathsSpec::Many(v) if v.len() == 2));
 
         let inc_exc: PathsSpec =
