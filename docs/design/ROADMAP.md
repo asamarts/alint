@@ -4,37 +4,30 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.7.0** (2026-04-28). Closes the v0.7
-cut. Three new rule kinds (`markdown_paths_resolve`,
-`commented_out_code`, `git_blame_age`) and two new
-subcommands (`alint suggest`, `alint export-agents-md`)
-targeting agent-driven development workflows specifically.
-Where v0.6 was config-only — bundled rulesets composed
-from existing primitives — v0.7 extends the engine itself
-with new rule kinds and new CLI surface. Schema-compatible:
-every v0.6 config runs unchanged; the new rule kinds parse
-new YAML shapes that older configs simply don't use, and
-`version: 1` continues to cover them. See
-[CHANGELOG.md](../../CHANGELOG.md) for the full feature list.
+**Latest release: v0.8.0** (2026-04-29). Closes the v0.8
+cut — five sub-phases (v0.8.1 → v0.8.5) shipping the
+comprehensive test/bench/rot-prevention foundation that
+v0.9's engine optimization needs to land safely. No new
+user-facing rule kinds, formatters, or subcommands; entirely
+internal. Workspace coverage at 90.57% (xtask excluded);
+Cross-Platform lane on macOS-arm64 + Windows-x86_64; Mutants
+nightly rotating one crate per night;
+`xtask bench-compare` gating PR-time perf regressions
+against a v0.7.0 baseline. Schema-compatible: every v0.7
+config runs unchanged. See
+[CHANGELOG.md](../../CHANGELOG.md) for the full breakdown.
 
-**Next: v0.8 — Comprehensive test + bench foundation.**
-Revival of the cut that was forward-pointed on 2026-04-27
-(v0.5.11 day) and then dropped the same afternoon when the
-v0.6 agent-era re-prioritisation took its slot. After a
-four-agent coverage analysis on 2026-04-28 surfaced 49 rule
-kinds with no isolated benches, 34 rule kinds with no unit
-tests, infrastructure modules in alint-core with 0 unit
-tests, and a fixture covering only 18 of 66 registered
-rule names, the cut expanded from "regression-guard test
-layer" into a comprehensive test + bench foundation. Five
-point releases (v0.8.1 → v0.8.5): rule-kind coverage
-uplift, infrastructure-crate coverage, CLI surface
-coverage, benchmark uplift, regression-guard +
-rot-prevention infra (with `cargo llvm-cov` gated at 80%
-en route to 85% target, `cargo mutants` nightly,
-cross-platform CI matrix). Engine optimization (per-file-
-rule dispatch flip + parallel walker + memory-footprint
-audit) shifts to v0.9; LSP to v0.10; WASM plugins to v0.11.
+**Next: v0.9 — Engine optimization.** Per-file-rule
+dispatch flip (collapse redundant `std::fs::read` calls
+when multiple content rules match the same file), parallel
+walker via `WalkBuilder::build_parallel` with deterministic
+post-sort, and a memory-footprint pass (Cow audit on
+`Violation` / `RuleResult` / `Report`, `dhat` profile
+against the v0.8.4 bench scenarios). v0.8.5's
+`bench-compare` gate against the
+`docs/benchmarks/v0.8/baseline-v0.7.0/` snapshot catches
+any user-visible regression for free. LSP shifts to v0.10;
+WASM plugins to v0.11.
 
 ## Positioning
 
