@@ -26,14 +26,21 @@ fn snapshot_path() -> PathBuf {
 }
 
 /// Collapse verbose nested-struct blocks (`Scope { ... }`,
-/// `GlobSet { ... }`, regex-engine internals) into a one-line
-/// placeholder so the snapshot tracks user-meaningful option
-/// values, not unrelated crate-internal Debug churn.
+/// `GlobSet { ... }`, `GlobMatcher { ... }`, regex-engine
+/// internals) into a one-line placeholder so the snapshot
+/// tracks user-meaningful option values, not unrelated
+/// crate-internal Debug churn.
 ///
 /// Walks the multi-line Debug output and, whenever a line ends
-/// in `Scope {` or `GlobSet {` (after stripping the field-name
-/// prefix), elides everything up to the matching `}` at the
-/// same indent level.
+/// in one of the noisy struct names (after stripping the
+/// field-name prefix), elides everything up to the matching
+/// `}` at the same indent level.
+///
+/// `GlobMatcher` is included because globset's compiled
+/// matchers carry a `GlobOptions` block whose `backslash_escape`
+/// default differs by platform (`true` on Unix, `false` on
+/// Windows) — drift that has nothing to do with the rule's
+/// user-set options.
 fn elide_verbose_blocks(input: &str) -> String {
     let lines: Vec<&str> = input.lines().collect();
     let mut out = String::new();
@@ -41,7 +48,9 @@ fn elide_verbose_blocks(input: &str) -> String {
     while i < lines.len() {
         let line = lines[i];
         let trimmed = line.trim_end();
-        let is_noisy = trimmed.ends_with("Scope {") || trimmed.ends_with("GlobSet {");
+        let is_noisy = trimmed.ends_with("Scope {")
+            || trimmed.ends_with("GlobSet {")
+            || trimmed.ends_with("GlobMatcher {");
         if is_noisy {
             let indent = line.len() - line.trim_start().len();
             let prefix = &line[..line.rfind('{').unwrap()];
