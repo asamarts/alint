@@ -1,6 +1,6 @@
 Generate (or maintain a section of) `AGENTS.md` from the active rule set, so the agent's pre-prompt directives stay in sync with the lint config. Outputs to stdout by default; use `--output PATH` to write a file or `--inline --output PATH` to splice between `<!-- alint:start -->` / `<!-- alint:end -->` markers
 
-Usage: alint export-agents-md [OPTIONS]
+Usage: alint[EXE] export-agents-md [OPTIONS]
 
 Options:
   -c, --config <CONFIG>       Path to a config file (repeatable; later overrides earlier)

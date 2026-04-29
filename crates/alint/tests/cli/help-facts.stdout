@@ -1,6 +1,6 @@
 Evaluate every `facts:` entry in the effective config and print the resolved value. Debugging aid for `when:` clauses
 
-Usage: alint facts [OPTIONS] [PATH]
+Usage: alint[EXE] facts [OPTIONS] [PATH]
 
 Arguments:
   [PATH]  Root of the repository to evaluate facts against [default: .]

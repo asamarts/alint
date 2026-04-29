@@ -1,6 +1,6 @@
 List all rules loaded from the effective config
 
-Usage: alint list [OPTIONS]
+Usage: alint[EXE] list [OPTIONS]
 
 Options:
   -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)

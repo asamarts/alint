@@ -1,6 +1,6 @@
 Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
 
-Usage: alint suggest [OPTIONS] [PATH]
+Usage: alint[EXE] suggest [OPTIONS] [PATH]
 
 Arguments:
   [PATH]  Root of the repository to scan. Defaults to the current directory [default: .]

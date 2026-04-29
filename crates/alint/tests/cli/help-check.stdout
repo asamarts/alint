@@ -1,6 +1,6 @@
 Run linters against the current (or given) directory. Default command
 
-Usage: alint check [OPTIONS] [PATH]
+Usage: alint[EXE] check [OPTIONS] [PATH]
 
 Arguments:
   [PATH]  Root of the repository to lint. Defaults to the current directory [default: .]

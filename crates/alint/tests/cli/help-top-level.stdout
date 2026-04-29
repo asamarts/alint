@@ -1,6 +1,6 @@
 Language-agnostic linter for repository structure, existence, naming, and content rules
 
-Usage: alint [OPTIONS] [COMMAND]
+Usage: alint[EXE] [OPTIONS] [COMMAND]
 
 Commands:
   check             Run linters against the current (or given) directory. Default command

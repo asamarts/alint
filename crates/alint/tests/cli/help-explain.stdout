@@ -1,6 +1,6 @@
 Show a rule's definition
 
-Usage: alint explain [OPTIONS] <RULE_ID>
+Usage: alint[EXE] explain [OPTIONS] <RULE_ID>
 
 Arguments:
   <RULE_ID>  Rule id to describe

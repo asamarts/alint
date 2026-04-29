@@ -1,6 +1,6 @@
 Apply automatic fixes for violations whose rules declare one
 
-Usage: alint fix [OPTIONS] [PATH]
+Usage: alint[EXE] fix [OPTIONS] [PATH]
 
 Arguments:
   [PATH]  Root of the repository to operate on [default: .]

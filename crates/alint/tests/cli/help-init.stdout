@@ -1,6 +1,6 @@
 Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
 
-Usage: alint init [OPTIONS] [PATH]
+Usage: alint[EXE] init [OPTIONS] [PATH]
 
 Arguments:
   [PATH]  Root of the repository to write the config into. Defaults to the current directory [default: .]
