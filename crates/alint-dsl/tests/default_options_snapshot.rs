@@ -115,13 +115,56 @@ fn default_options_snapshot_matches() {
         .replace("\r\n", "\n");
 
     if expected != actual {
-        let preview: String = actual.lines().take(40).collect::<Vec<_>>().join("\n");
+        let diff = first_diverging_window(&expected, &actual, 6);
         panic!(
             "Default-option snapshot drift detected.\n\
              Expected file: {}\n\
              Run with UPDATE_SNAPSHOTS=1 to refresh after an intentional change.\n\n\
-             First 40 lines of actual output:\n{preview}",
+             First diverging window (line {}):\n{diff}",
             path.display(),
+            diff_line_number(&expected, &actual),
         );
     }
+}
+
+/// Find the first line where `expected` and `actual` differ
+/// and emit `context` lines on each side as a unified-style
+/// snippet. Surfaces the platform-specific delta directly in
+/// the panic output so CI logs are diagnostic without
+/// downloading artifacts.
+fn first_diverging_window(expected: &str, actual: &str, context: usize) -> String {
+    let exp_lines: Vec<&str> = expected.lines().collect();
+    let act_lines: Vec<&str> = actual.lines().collect();
+    let max_len = exp_lines.len().max(act_lines.len());
+    let mut first_diff = max_len;
+    for i in 0..max_len {
+        let e = exp_lines.get(i).copied().unwrap_or("");
+        let a = act_lines.get(i).copied().unwrap_or("");
+        if e != a {
+            first_diff = i;
+            break;
+        }
+    }
+    let start = first_diff.saturating_sub(context);
+    let end = (first_diff + context + 1).min(max_len);
+    let mut out = String::new();
+    for i in start..end {
+        let e = exp_lines.get(i).copied().unwrap_or("<EOF>");
+        let a = act_lines.get(i).copied().unwrap_or("<EOF>");
+        if e == a {
+            writeln!(out, "  {i:>5} | {e}").unwrap();
+        } else {
+            writeln!(out, "- {i:>5} | {e}").unwrap();
+            writeln!(out, "+ {i:>5} | {a}").unwrap();
+        }
+    }
+    out
+}
+
+fn diff_line_number(expected: &str, actual: &str) -> usize {
+    expected
+        .lines()
+        .zip(actual.lines())
+        .position(|(e, a)| e != a)
+        .unwrap_or(0)
 }
