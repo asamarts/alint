@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/fix-report.json",
+  "title": "alint fix report (v1)",
+  "description": "Output schema emitted by `alint fix --format json`. Locks the public contract for downstream tooling.",
+  "type": "object",
+  "required": ["schema_version", "summary", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Report schema version. Always 1 for this schema."
+    },
+    "summary": {
+      "type": "object",
+      "required": ["applied", "skipped", "unfixable"],
+      "additionalProperties": false,
+      "properties": {
+        "applied": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "unfixable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule_result" }
+    }
+  },
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "off"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["applied", "skipped", "unfixable"]
+    },
+    "rule_result": {
+      "type": "object",
+      "required": ["id", "level", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "level": { "$ref": "#/$defs/level" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/item" }
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["message", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "message": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "status": { "$ref": "#/$defs/status" },
+        "detail": {
+          "type": "string",
+          "description": "Free-form human-readable explanation paired with `status`."
+        }
+      }
+    }
+  }
+}

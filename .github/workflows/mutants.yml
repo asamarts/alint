@@ -1,0 +1,73 @@
+name: Mutants (nightly)
+
+# Nightly cargo-mutants run rotating through one workspace crate
+# per night. Surfaces unkilled mutants as actionable
+# test-coverage gaps without paying the workspace-wide ~hours
+# runtime each day.
+#
+# Manual rotation: trigger via workflow_dispatch with a `crate`
+# input to target a specific crate ad-hoc.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "Crate to mutate (omit for daily rotation)"
+        required: false
+        default: ""
+
+concurrency:
+  group: mutants
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  mutants:
+    name: cargo-mutants (rotated)
+    runs-on: [self-hosted, linux, alint]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick crate (manual override or daily rotation)
+        id: pick
+        env:
+          MANUAL: ${{ github.event.inputs.crate }}
+        run: |
+          set -euo pipefail
+          CRATES=(alint-core alint-dsl alint-rules alint-output alint alint-bench alint-testkit alint-e2e)
+          if [ -n "${MANUAL:-}" ]; then
+            TARGET="$MANUAL"
+          else
+            DOY=$(date +%j)
+            IDX=$(( (10#$DOY - 1) % ${#CRATES[@]} ))
+            TARGET="${CRATES[$IDX]}"
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "==> Mutating $TARGET"
+
+      - name: Install cargo-mutants
+        run: |
+          if ! command -v cargo-mutants >/dev/null 2>&1; then
+            cargo install cargo-mutants --locked
+          fi
+
+      - name: Run cargo-mutants
+        run: |
+          cargo mutants --package "${{ steps.pick.outputs.target }}" \
+                       --no-shuffle \
+                       --output target/mutants \
+                       --timeout 300 \
+                       || true   # never fail the nightly; the artifact is the signal
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ steps.pick.outputs.target }}-${{ github.run_id }}
+          path: target/mutants/
+          retention-days: 30

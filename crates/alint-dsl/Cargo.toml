@@ -21,6 +21,7 @@ tracing.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+alint-rules.workspace = true
 jsonschema.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

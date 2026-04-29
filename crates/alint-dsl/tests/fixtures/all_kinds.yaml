@@ -165,3 +165,303 @@ rules:
       - kind: file_exists
         paths: "{path}/package.json"
     level: error
+
+  # ─── Content-family coverage (one entry per kind) ──────────────
+  - id: content-matches-spdx
+    kind: file_content_matches
+    paths: "src/**/*.rs"
+    pattern: "SPDX-License-Identifier"
+    level: warning
+  - id: content-matches-alias
+    kind: content_matches
+    paths: "**/*.toml"
+    pattern: "version\\s*="
+    level: info
+  - id: content-forbidden-todo
+    kind: file_content_forbidden
+    paths: "src/**/*.rs"
+    pattern: '\bTODO\b'
+    level: warning
+  - id: content-forbidden-alias
+    kind: content_forbidden
+    paths: "src/**/*.rs"
+    pattern: 'unimplemented!'
+    level: warning
+  - id: rust-spdx-header
+    kind: file_header
+    paths: "src/**/*.rs"
+    pattern: "^// SPDX-License-Identifier:"
+    level: warning
+  - id: header-alias
+    kind: header
+    paths: "src/**/*.toml"
+    pattern: "^# "
+    level: info
+  - id: rust-final-line
+    kind: file_footer
+    paths: "src/**/*.rs"
+    pattern: "}$"
+    level: info
+  - id: footer-alias
+    kind: footer
+    paths: "**/*.txt"
+    pattern: "$"
+    level: info
+  - id: scripts-have-shebang
+    kind: file_shebang
+    paths: "scripts/**"
+    shebang: "^#!/(usr/)?bin/(env )?(ba)?sh"
+    level: warning
+  - id: shebang-alias
+    kind: shebang
+    paths: "scripts/**/*.py"
+    shebang: "^#!/(usr/)?bin/(env )?python3?"
+    level: warning
+  - id: rust-starts-with-spdx
+    kind: file_starts_with
+    paths: "src/**/*.rs"
+    prefix: "// SPDX-License-Identifier"
+    level: warning
+  - id: text-files-end-with-newline
+    kind: file_ends_with
+    paths: "src/**/*.rs"
+    suffix: "\n"
+    level: warning
+  - id: max-content-size
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 10485760
+    level: warning
+  - id: max-size-alias
+    kind: max_size
+    paths: "**/*.png"
+    max_bytes: 5242880
+    level: warning
+  - id: readme-min-size
+    kind: file_min_size
+    paths: "README.md"
+    min_bytes: 200
+    level: warning
+  - id: min-size-alias
+    kind: min_size
+    paths: "LICENSE"
+    min_bytes: 100
+    level: warning
+  - id: readme-min-lines
+    kind: file_min_lines
+    paths: "README.md"
+    min_lines: 5
+    level: info
+  - id: min-lines-alias
+    kind: min_lines
+    paths: "CHANGELOG.md"
+    min_lines: 3
+    level: info
+  - id: changelog-max-lines
+    kind: file_max_lines
+    paths: "CHANGELOG.md"
+    max_lines: 10000
+    level: info
+  - id: max-lines-alias
+    kind: max_lines
+    paths: "**/*.md"
+    max_lines: 5000
+    level: info
+  - id: rust-fixture-hash
+    kind: file_hash
+    paths: "vendor/frozen.bin"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    level: error
+  - id: rust-must-be-text
+    kind: file_is_text
+    paths: "src/**/*.rs"
+    level: warning
+  - id: is-text-alias
+    kind: is_text
+    paths: "**/*.md"
+    level: warning
+  - id: rust-must-be-ascii
+    kind: file_is_ascii
+    paths: "src/**/*.rs"
+    level: info
+
+  # ─── Structured-query family ───────────────────────────────────
+  - id: package-name-matches
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.name"
+    equals: "demo"
+    level: error
+  - id: package-version-matches
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.version"
+    matches: "^\\d+\\.\\d+\\.\\d+$"
+    level: warning
+  - id: workflow-uses-checkout
+    kind: yaml_path_equals
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.build.steps[0].uses"
+    equals: "actions/checkout@v4"
+    level: warning
+    if_present: true
+  - id: workflow-permissions-shape
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.permissions['contents']"
+    matches: "^read$"
+    level: warning
+    if_present: true
+  - id: cargo-edition-2024
+    kind: toml_path_equals
+    paths: "Cargo.toml"
+    path: "$.package.edition"
+    equals: "2024"
+    level: error
+  - id: rust-version-floor
+    kind: toml_path_matches
+    paths: "Cargo.toml"
+    path: "$.package['rust-version']"
+    matches: "^1\\.\\d+$"
+    level: warning
+    if_present: true
+  - id: package-conforms-to-schema
+    kind: json_schema_passes
+    paths: "package.json"
+    schema_path: "schemas/package.schema.json"
+    level: error
+
+  # ─── Markdown / commented-code / blame-age ─────────────────────
+  - id: agents-md-paths-resolve
+    kind: markdown_paths_resolve
+    paths: "AGENTS.md"
+    prefixes: ["src/", "crates/", "docs/"]
+    level: warning
+  - id: no-commented-code
+    kind: commented_out_code
+    paths: "src/**/*.rs"
+    min_lines: 3
+    threshold: 0.5
+    level: warning
+  - id: stale-todos
+    kind: git_blame_age
+    paths: "src/**/*.rs"
+    pattern: '\b(TODO|FIXME)\b'
+    max_age_days: 180
+    level: warning
+
+  # ─── Git-aware family ──────────────────────────────────────────
+  - id: no-tracked-secrets
+    kind: git_no_denied_paths
+    denied: ["*.env", "*.pem", "id_rsa"]
+    level: error
+  - id: conventional-commit
+    kind: git_commit_message
+    pattern: "^(feat|fix|chore): "
+    level: warning
+
+  # ─── Plugin tier 1 ─────────────────────────────────────────────
+  - id: shellcheck-shell-scripts
+    kind: command
+    paths: "scripts/**/*.sh"
+    command: ["shellcheck"]
+    level: warning
+
+  # ─── Text hygiene ──────────────────────────────────────────────
+  - id: no-trailing-ws
+    kind: no_trailing_whitespace
+    paths: "src/**/*.rs"
+    level: warning
+  - id: rust-final-newline
+    kind: final_newline
+    paths: "src/**/*.rs"
+    level: warning
+  - id: line-endings-lf
+    kind: line_endings
+    paths: "src/**/*.rs"
+    target: lf
+    level: warning
+  - id: line-max-width
+    kind: line_max_width
+    paths: "src/**/*.rs"
+    max_width: 100
+    level: warning
+  - id: indent-style
+    kind: indent_style
+    paths: "src/**/*.rs"
+    style: spaces
+    width: 4
+    level: warning
+  - id: max-blank-lines
+    kind: max_consecutive_blank_lines
+    paths: "src/**/*.rs"
+    max: 2
+    level: warning
+
+  # ─── Security / Unicode sanity ─────────────────────────────────
+  - id: no-merge-conflict-markers
+    kind: no_merge_conflict_markers
+    paths: "src/**/*.rs"
+    level: error
+  - id: no-bidi-controls
+    kind: no_bidi_controls
+    paths: "src/**/*.rs"
+    level: error
+  - id: no-zero-width
+    kind: no_zero_width_chars
+    paths: "src/**/*.rs"
+    level: error
+
+  # ─── Encoding ──────────────────────────────────────────────────
+  - id: no-bom
+    kind: no_bom
+    paths: "src/**/*.rs"
+    level: warning
+
+  # ─── Structure / layout ────────────────────────────────────────
+  - id: max-dir-depth
+    kind: max_directory_depth
+    paths: "**"
+    max_depth: 12
+    level: warning
+  - id: max-files-per-dir
+    kind: max_files_per_directory
+    paths: "**"
+    max_files: 500
+    level: warning
+  - id: no-empty-files
+    kind: no_empty_files
+    paths: "src/**/*.rs"
+    level: warning
+
+  # ─── Portable metadata ─────────────────────────────────────────
+  - id: no-case-conflicts
+    kind: no_case_conflicts
+    paths: "**"
+    level: warning
+  - id: no-illegal-windows-names
+    kind: no_illegal_windows_names
+    paths: "**"
+    level: warning
+
+  # ─── Unix metadata + git ───────────────────────────────────────
+  - id: no-symlinks
+    kind: no_symlinks
+    paths: "**"
+    level: warning
+  - id: scripts-executable
+    kind: executable_bit
+    paths: "scripts/**"
+    require: true
+    level: warning
+  - id: exec-needs-shebang
+    kind: executable_has_shebang
+    paths: "**"
+    level: warning
+  - id: shebang-needs-exec
+    kind: shebang_has_executable
+    paths: "**"
+    level: warning
+  - id: no-submodules
+    kind: no_submodules
+    level: warning

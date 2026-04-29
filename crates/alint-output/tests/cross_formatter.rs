@@ -270,3 +270,47 @@ fn from_str_accepts_every_canonical_format_name() {
         assert_eq!(parsed, *format, "name `{name}` round-tripped wrong");
     }
 }
+
+const CHECK_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/check-report.json");
+
+#[test]
+fn json_format_validates_against_published_schema() {
+    let json_text = render(Format::Json);
+    let instance: serde_json::Value =
+        serde_json::from_str(&json_text).expect("json formatter emits valid JSON");
+    let schema_value: serde_json::Value =
+        serde_json::from_str(CHECK_REPORT_SCHEMA).expect("schema is valid JSON");
+    let validator =
+        jsonschema::validator_for(&schema_value).expect("schema compiles as Draft 2020-12");
+    let errs: Vec<String> = validator
+        .iter_errors(&instance)
+        .map(|e| format!("{} at {}", e, e.instance_path))
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "JSON output failed schema validation:\n{}\n\noutput:\n{json_text}",
+        errs.join("\n"),
+    );
+}
+
+#[test]
+fn empty_report_json_validates_against_published_schema() {
+    let report = Report {
+        results: Vec::new(),
+    };
+    let mut buf = Vec::new();
+    Format::Json.write(&report, &mut buf).unwrap();
+    let json_text = String::from_utf8(buf).unwrap();
+    let instance: serde_json::Value = serde_json::from_str(&json_text).unwrap();
+    let schema_value: serde_json::Value = serde_json::from_str(CHECK_REPORT_SCHEMA).unwrap();
+    let validator = jsonschema::validator_for(&schema_value).unwrap();
+    let errs: Vec<String> = validator
+        .iter_errors(&instance)
+        .map(|e| format!("{} at {}", e, e.instance_path))
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "empty-report JSON failed schema validation:\n{}",
+        errs.join("\n"),
+    );
+}

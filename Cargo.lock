@@ -102,6 +102,7 @@ name = "alint-dsl"
 version = "0.7.0"
 dependencies = [
  "alint-core",
+ "alint-rules",
  "directories",
  "jsonschema",
  "serde",
@@ -135,6 +136,7 @@ dependencies = [
  "alint-core",
  "anstream 0.6.21",
  "anstyle",
+ "jsonschema",
  "serde",
  "serde_json",
  "sha2",

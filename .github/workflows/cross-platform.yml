@@ -1,0 +1,56 @@
+name: Cross-Platform
+
+# Smoke-tests the workspace on macOS and Windows GitHub-hosted
+# runners so platform-specific regressions surface independently
+# of the primary Linux self-hosted CI lane.
+#
+# This intentionally runs only `cargo test --workspace --locked`
+# without the heavier dogfood/bench/audit lanes — the goal is to
+# catch path-handling, line-ending, and pty-related drift, not to
+# duplicate the main pipeline.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-
+
+      - name: cargo test
+        run: cargo test --workspace --locked

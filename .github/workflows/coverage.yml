@@ -1,0 +1,65 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+  ALINT_COVERAGE_FLOOR: "85.0"
+
+jobs:
+  coverage:
+    name: cargo-llvm-cov
+    runs-on: [self-hosted, linux, alint]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: ci/scripts/coverage.sh
+
+      - name: Upload LCOV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: target/coverage/coverage.lcov
+          retention-days: 30
+
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: target/coverage/html/
+          retention-days: 30
+
+      # Codecov upload runs only when CODECOV_TOKEN is configured
+      # in repo secrets — opt-in so this workflow is meaningful
+      # even before the user wires the token. Map the secret into
+      # an env first; `secrets.X` itself isn't usable in `if:`.
+      - name: Check Codecov token presence
+        id: codecov_token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload to Codecov
+        if: steps.codecov_token.outputs.present == 'true'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/coverage/coverage.lcov
+          fail_ci_if_error: false

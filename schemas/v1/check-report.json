@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/check-report.json",
+  "title": "alint check report (v1)",
+  "description": "Output schema emitted by `alint check --format json`. Locks the public contract for downstream tooling.",
+  "type": "object",
+  "required": ["schema_version", "summary", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Report schema version. Always 1 for this schema."
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "failing_rules",
+        "passing_rules",
+        "total_violations",
+        "has_errors",
+        "has_warnings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "failing_rules": { "type": "integer", "minimum": 0 },
+        "passing_rules": { "type": "integer", "minimum": 0 },
+        "total_violations": { "type": "integer", "minimum": 0 },
+        "has_errors": { "type": "boolean" },
+        "has_warnings": { "type": "boolean" }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule_result" }
+    }
+  },
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "off"]
+    },
+    "rule_result": {
+      "type": "object",
+      "required": ["id", "level", "passed", "fixable", "violations"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Rule id, matches the `id:` field of a rule in the config."
+        },
+        "level": { "$ref": "#/$defs/level" },
+        "passed": {
+          "type": "boolean",
+          "description": "True when the rule produced zero violations."
+        },
+        "policy_url": {
+          "type": "string",
+          "description": "Optional documentation URL provided by the rule.",
+          "format": "uri"
+        },
+        "fixable": {
+          "type": "boolean",
+          "description": "True when the rule declares an autofix; downstream tools use this to decide whether to suggest `alint fix`."
+        },
+        "violations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/violation" }
+        }
+      }
+    },
+    "violation": {
+      "type": "object",
+      "required": ["message"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Repo-relative path; absent for tree-wide violations."
+        },
+        "message": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -3,6 +3,8 @@
 //! Runs the published JSON Schema through a compliant validator to keep the
 //! schema in lockstep with the actual DSL the engine accepts.
 
+use std::fmt::Write as _;
+
 use alint_dsl::CONFIG_SCHEMA_V1;
 
 fn compile_schema() -> jsonschema::Validator {
@@ -59,6 +61,73 @@ fn accepts_every_rule_kind() {
     let yaml = include_str!("fixtures/all_kinds.yaml");
     let instance = yaml_to_json(yaml);
     assert_valid(&validator, &instance, "all_kinds.yaml fixture");
+}
+
+/// Rot-prevention guard. Asserts the `all_kinds.yaml` fixture
+/// covers every rule kind registered in `alint-rules`. Without
+/// this gate, a newly-added rule kind ships with schema
+/// validation only if the author manually remembers to update
+/// the fixture — the v0.8 coverage audit found 18 of 66 names
+/// covered, with no test catching new gaps.
+///
+/// Failure prints the missing kinds so the fix is to add a
+/// minimal entry per kind to `tests/fixtures/all_kinds.yaml`.
+#[test]
+fn fixture_covers_every_registered_rule_kind() {
+    let yaml = include_str!("fixtures/all_kinds.yaml");
+    let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("fixture parses");
+    let fixture_kinds: std::collections::HashSet<String> = parsed
+        .as_mapping()
+        .and_then(|m| m.get(serde_yaml_ng::Value::String("rules".into())))
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|rule| {
+                    rule.as_mapping()
+                        .and_then(|m| m.get(serde_yaml_ng::Value::String("kind".into())))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let registry = alint_rules::builtin_registry();
+    let registered: std::collections::HashSet<String> =
+        registry.known_kinds().map(str::to_string).collect();
+
+    let missing: Vec<&String> = registered.difference(&fixture_kinds).collect();
+    if !missing.is_empty() {
+        let mut sorted: Vec<&&String> = missing.iter().collect();
+        sorted.sort();
+        let mut bullets = String::new();
+        for k in &sorted {
+            let _ = writeln!(bullets, "  - {k}");
+        }
+        panic!(
+            "fixture `all_kinds.yaml` is missing {} of {} registered rule kinds. \
+             Add a minimal entry per kind so schema validation has full coverage:\n{}",
+            missing.len(),
+            registered.len(),
+            bullets,
+        );
+    }
+
+    let stale: Vec<&String> = fixture_kinds.difference(&registered).collect();
+    if !stale.is_empty() {
+        let mut sorted: Vec<&&String> = stale.iter().collect();
+        sorted.sort();
+        let mut bullets = String::new();
+        for k in &sorted {
+            let _ = writeln!(bullets, "  - {k}");
+        }
+        panic!(
+            "fixture `all_kinds.yaml` references {} kind(s) that are NOT registered. \
+             Either remove the stale entries or register the kinds:\n{}",
+            stale.len(),
+            bullets,
+        );
+    }
 }
 
 #[test]

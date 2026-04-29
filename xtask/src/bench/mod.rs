@@ -30,6 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+pub mod compare;
 pub mod docker;
 mod fingerprint;
 pub mod tools;

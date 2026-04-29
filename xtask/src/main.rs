@@ -112,6 +112,27 @@ enum Commands {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Compare two `target/criterion` trees and gate on
+    /// regressions. `--before` and `--after` should each be a
+    /// criterion-format directory (a tree of
+    /// `<group>/<id>/new/estimates.json` files). Exits non-zero
+    /// when any paired bench's mean time has grown by more than
+    /// `--threshold` percent — wire into PR CI to gate
+    /// performance regressions.
+    BenchCompare {
+        /// Baseline criterion directory (typically saved off the
+        /// main branch as `target/criterion-main`).
+        #[arg(long)]
+        before: PathBuf,
+        /// Candidate criterion directory (typically the freshly
+        /// produced `target/criterion`).
+        #[arg(long)]
+        after: PathBuf,
+        /// Regression gate: fail when any pair grows past this
+        /// percent. Defaults to 10.0.
+        #[arg(long, default_value_t = 10.0)]
+        threshold: f64,
+    },
     /// Emit `docs-bundle/` — the handoff bundle consumed by
     /// `asamarts/alint.org` at site-build time.
     DocsExport {
@@ -154,6 +175,11 @@ fn main() -> Result<()> {
             seed,
             out,
         } => gen_fixture(files, depth, seed, out),
+        Commands::BenchCompare {
+            before,
+            after,
+            threshold,
+        } => bench::compare::run(&before, &after, threshold),
         Commands::DocsExport { out, check } => docs_export(out, check),
     }
 }
