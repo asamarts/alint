@@ -1,0 +1,20 @@
+# Force LF line endings on checkout for files where the in-repo
+# bytes are themselves the test fixture or the snapshot under
+# assertion. Git's `core.autocrlf=true` (Windows default) would
+# otherwise convert these to CRLF, producing spurious diffs in
+# tests that read the file back and compare against an
+# in-memory `\n`-only string.
+
+# Snapshot files are byte-stable across platforms by design.
+crates/alint-dsl/tests/snapshots/*.txt text eol=lf
+
+# YAML test fixtures (testkit + e2e scenarios) feed YAML parsers
+# that mostly tolerate CRLF, but stay safe and explicit.
+crates/alint-e2e/scenarios/**/*.yml text eol=lf
+crates/alint-dsl/tests/fixtures/*.yaml text eol=lf
+
+# trycmd snapshots — stdout/stderr literals compared byte-for-byte.
+crates/alint/tests/cli/*.stdout text eol=lf
+crates/alint/tests/cli/*.stderr text eol=lf
+crates/alint/tests/cli/*.in text eol=lf
+crates/alint/tests/cli/*.toml text eol=lf

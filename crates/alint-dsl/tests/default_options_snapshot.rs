@@ -106,7 +106,13 @@ fn default_options_snapshot_matches() {
         return;
     }
 
-    let expected = std::fs::read_to_string(&path).unwrap_or_default();
+    // Git's `core.autocrlf` may convert the checked-in LF
+    // snapshot to CRLF on Windows checkout; the in-memory
+    // `actual` always uses `\n`. Normalise so the comparison
+    // measures content drift, not line-ending drift.
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
 
     if expected != actual {
         let preview: String = actual.lines().take(40).collect::<Vec<_>>().join("\n");
