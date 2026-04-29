@@ -39,9 +39,33 @@ name = "walker"
 harness = false
 required-features = ["fs-benches"]
 
+[[bench]]
+name = "single_file_rules"
+harness = false
+required-features = ["fs-benches"]
+
+[[bench]]
+name = "cross_file_rules"
+harness = false
+
+[[bench]]
+name = "output_formats"
+harness = false
+
+[[bench]]
+name = "fix_throughput"
+harness = false
+required-features = ["fs-benches"]
+
+[[bench]]
+name = "dsl_extends"
+harness = false
+required-features = ["fs-benches"]
+
 [dependencies]
 alint-core.workspace = true
 alint-dsl.workspace = true
+alint-output.workspace = true
 alint-rules.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
