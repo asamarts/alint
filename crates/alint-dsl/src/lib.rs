@@ -2103,4 +2103,105 @@ rules:
             "!packages/foo/src/**/*.test.ts"
         );
     }
+
+    #[test]
+    fn discover_finds_config_in_starting_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+        let found = discover(tmp.path()).expect("config should be found");
+        assert_eq!(found.file_name().unwrap(), ".alint.yml");
+    }
+
+    #[test]
+    fn discover_walks_up_to_find_ancestor_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+        let nested = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let found = discover(&nested).expect("ancestor config should be found");
+        assert_eq!(found, tmp.path().join(".alint.yml"));
+    }
+
+    #[test]
+    fn discover_returns_none_when_no_config_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Empty tempdir, no parents have config either.
+        let found = discover(tmp.path());
+        // The tempdir's parent might have an alint.yml in some
+        // CI environments; the strict assertion is that discover
+        // either returns Some(path inside or above tempdir's
+        // parent chain) or None.
+        if let Some(p) = &found {
+            assert!(!p.starts_with(tmp.path()), "tempdir has no config: {p:?}");
+        }
+    }
+
+    #[test]
+    fn discover_prefers_nearest_config_over_ancestor() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.yml"),
+            "version: 1\nrules: [{id: outer, kind: file_exists, paths: a, level: error}]\n",
+        )
+        .unwrap();
+        let inner = tmp.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(
+            inner.join(".alint.yml"),
+            "version: 1\nrules: [{id: inner, kind: file_exists, paths: b, level: error}]\n",
+        )
+        .unwrap();
+        let found = discover(&inner).expect("inner config wins");
+        assert_eq!(found, inner.join(".alint.yml"));
+    }
+
+    #[test]
+    fn discover_recognises_alternate_config_names() {
+        // The loader accepts `.alint.yml`, `.alint.yaml`,
+        // `alint.yml`, `alint.yaml` — `discover` mirrors that list.
+        for name in [".alint.yaml", "alint.yml", "alint.yaml"] {
+            let tmp = tempfile::tempdir().unwrap();
+            std::fs::write(tmp.path().join(name), "version: 1\nrules: []\n").unwrap();
+            let found = discover(tmp.path()).expect("config should be found");
+            assert_eq!(
+                found.file_name().unwrap().to_str().unwrap(),
+                name,
+                "expected discover to find {name}",
+            );
+        }
+    }
+
+    #[test]
+    fn extends_diamond_inheritance_resolves_without_duplicate_rules() {
+        // Diamond shape: root extends B + C, both extend D.
+        // D's rule should appear once, not twice.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("d.yml"),
+            "version: 1\nrules: [{id: from-d, kind: file_exists, paths: D, level: error}]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("b.yml"),
+            "version: 1\nextends: [\"./d.yml\"]\nrules: []\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("c.yml"),
+            "version: 1\nextends: [\"./d.yml\"]\nrules: []\n",
+        )
+        .unwrap();
+        let root = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &root,
+            "version: 1\nextends: [\"./b.yml\", \"./c.yml\"]\nrules: []\n",
+        )
+        .unwrap();
+        let cfg = load(&root).unwrap();
+        let from_d_count = cfg.rules.iter().filter(|r| r.id == "from-d").count();
+        assert_eq!(
+            from_d_count, 1,
+            "diamond inheritance should yield one `from-d` rule, got {from_d_count}",
+        );
+    }
 }

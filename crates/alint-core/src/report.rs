@@ -106,3 +106,144 @@ fn has_unresolved(items: &[FixItem]) -> bool {
         .iter()
         .any(|i| matches!(i.status, FixStatus::Skipped(_) | FixStatus::Unfixable))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rr(rule_id: &str, level: Level, n_violations: usize) -> RuleResult {
+        RuleResult {
+            rule_id: rule_id.into(),
+            level,
+            policy_url: None,
+            violations: (0..n_violations)
+                .map(|i| Violation::new(format!("v{i}")))
+                .collect(),
+            is_fixable: false,
+        }
+    }
+
+    fn frr(rule_id: &str, level: Level, statuses: Vec<FixStatus>) -> FixRuleResult {
+        FixRuleResult {
+            rule_id: rule_id.into(),
+            level,
+            items: statuses
+                .into_iter()
+                .map(|status| FixItem {
+                    violation: Violation::new("v"),
+                    status,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn empty_report_has_no_errors_or_warnings() {
+        let r = Report { results: vec![] };
+        assert!(!r.has_errors());
+        assert!(!r.has_warnings());
+        assert_eq!(r.total_violations(), 0);
+        assert_eq!(r.failing_rules(), 0);
+        assert_eq!(r.passing_rules(), 0);
+    }
+
+    #[test]
+    fn passing_rules_count_passing_results() {
+        // A passing RuleResult has zero violations.
+        let r = Report {
+            results: vec![rr("a", Level::Error, 0), rr("b", Level::Warning, 0)],
+        };
+        assert_eq!(r.passing_rules(), 2);
+        assert_eq!(r.failing_rules(), 0);
+        assert!(!r.has_errors());
+    }
+
+    #[test]
+    fn has_errors_true_when_error_level_has_violations() {
+        let r = Report {
+            results: vec![rr("a", Level::Error, 1), rr("b", Level::Warning, 5)],
+        };
+        assert!(r.has_errors());
+        assert!(r.has_warnings());
+        assert_eq!(r.total_violations(), 6);
+        assert_eq!(r.failing_rules(), 2);
+    }
+
+    #[test]
+    fn has_errors_false_when_only_warnings_have_violations() {
+        let r = Report {
+            results: vec![rr("a", Level::Error, 0), rr("b", Level::Warning, 3)],
+        };
+        assert!(!r.has_errors());
+        assert!(r.has_warnings());
+    }
+
+    #[test]
+    fn fix_report_applied_skipped_unfixable_counts_summed_across_rules() {
+        let r = FixReport {
+            results: vec![
+                frr(
+                    "a",
+                    Level::Error,
+                    vec![
+                        FixStatus::Applied("ok".into()),
+                        FixStatus::Applied("ok".into()),
+                        FixStatus::Skipped("nope".into()),
+                    ],
+                ),
+                frr(
+                    "b",
+                    Level::Warning,
+                    vec![FixStatus::Unfixable, FixStatus::Applied("ok".into())],
+                ),
+            ],
+        };
+        assert_eq!(r.applied(), 3);
+        assert_eq!(r.skipped(), 1);
+        assert_eq!(r.unfixable(), 1);
+    }
+
+    #[test]
+    fn has_unfixable_errors_true_when_error_rule_has_unresolved() {
+        let r = FixReport {
+            results: vec![frr("a", Level::Error, vec![FixStatus::Unfixable])],
+        };
+        assert!(r.has_unfixable_errors());
+        assert!(!r.has_unfixable_warnings());
+    }
+
+    #[test]
+    fn has_unfixable_errors_false_when_all_applied() {
+        let r = FixReport {
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::Applied("done".into())],
+            )],
+        };
+        assert!(!r.has_unfixable_errors());
+    }
+
+    #[test]
+    fn has_unfixable_errors_false_when_skip_only_at_warning_level() {
+        // Skips at warning level matter for `has_unfixable_warnings`,
+        // not `has_unfixable_errors` — severity gates the check.
+        let r = FixReport {
+            results: vec![frr(
+                "a",
+                Level::Warning,
+                vec![FixStatus::Skipped("nope".into())],
+            )],
+        };
+        assert!(!r.has_unfixable_errors());
+        assert!(r.has_unfixable_warnings());
+    }
+
+    #[test]
+    fn rule_result_passed_method_is_correct() {
+        let passing = rr("a", Level::Error, 0);
+        let failing = rr("b", Level::Error, 1);
+        assert!(passing.passed());
+        assert!(!failing.passed());
+    }
+}
