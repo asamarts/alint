@@ -322,7 +322,7 @@ alint's existing niche especially valuable; v0.6 ships
 ecosystem-specific bundled rulesets to capitalise on that
 without changing the underlying tool.
 
-- ⏳ **`alint://bundled/agent-hygiene@v1`** — backup-suffix
+- ✅ **`alint://bundled/agent-hygiene@v1`** — backup-suffix
   bans (`*.bak`, `*.orig`, `*~`, `*.swp`), versioned-duplicate
   filename guards (`*_v2.ts`, `*_old.py`), scratch-doc bans at
   root (`PLAN.md`, `NOTES.md`, `ANALYSIS.md`, …), `.env`-file
@@ -331,14 +331,14 @@ without changing the underlying tool.
   `debugger`, `breakpoint()`), and model-attributed TODO bans
   (`TODO(claude:)`, `TODO(cursor:)`, …). All composable from
   `file_absent` / `filename_regex` / `file_content_forbidden`.
-- ⏳ **`alint://bundled/agent-context@v1`** — hygiene rules
+- ✅ **`alint://bundled/agent-context@v1`** — hygiene rules
   for `AGENTS.md` / `CLAUDE.md` / `.cursorrules`: existence
   recommended, stub guard via `file_min_lines`, bloat guard
   via `file_max_lines` (per Augment Code research, context
   files >300 lines correlate with worse agent performance),
   stale-path heuristic via regex. Subsumes ctxlint's niche
   with no new rule kinds.
-- ⏳ **`--format=agent` JSON output** — sibling of
+- ✅ **`--format=agent` JSON output** — sibling of
   `--format=json` shaped for LLM consumption. Each violation
   carries an `agent_instruction` field templated from the
   rule's `message` + `fix` block: a remediation phrasing
@@ -398,32 +398,32 @@ open questions before code started, then was flipped to
   between AGENTS.md and CI lint" gap by making alint the
   single source of truth.
 
-## v0.8 — Comprehensive test + bench foundation
+## v0.8 — Comprehensive test + bench foundation (shipped)
 
-Five point releases (v0.8.1 → v0.8.5) building the
-test/bench/rot-prevention foundation engine optimization
-(now v0.9) needs to land safely. Scope agreed 2026-04-28
-after a four-agent coverage audit surfaced the gaps below;
-each point release is a self-contained, tag-eligible cut.
+Five sub-phases (v0.8.1 → v0.8.5) building the
+test/bench/rot-prevention foundation that engine
+optimization (now v0.9) needs to land safely. Scope agreed
+2026-04-28 after a four-agent coverage audit; phases
+merged to `main` 2026-04-28 / 2026-04-29 with full CI
+(Linux self-hosted + Coverage 90.57% + Cross-Platform
+macOS/Windows + Mutants nightly) green throughout.
 
 ### v0.8.1 — Rule-kind coverage uplift
 
 Goal: every rule kind has ≥5 unit tests + ≥2 e2e (pass +
-fail). Today 34 of 54 rule kinds have 0 unit tests; 4 have
-0 e2e (`json_schema_passes`, `git_no_denied_paths`,
-`git_commit_message`, `command`); 3 have only pass-variant
+fail). Pre-v0.8.1: 34 of 54 rule kinds had 0 unit tests; 4
+had 0 e2e (`json_schema_passes`, `git_no_denied_paths`,
+`git_commit_message`, `command`); 3 had only pass-variant
 e2e (`no_symlinks`, `executable_bit`,
-`executable_has_shebang`). Worst-covered families:
-existence (4 rules, 0 units), naming (2, 0), unix metadata
-(5, 0), content (9 of 14 missing units).
+`executable_has_shebang`).
 
-- ⏳ ~120 new unit tests across the 34 under-covered rule
+- ✅ ~155 new unit tests across the 34 under-covered rule
   kinds (build / options / evaluate fires / evaluate
   silent / edge cases — the standard quintet).
-- ⏳ Fail-variant e2e for the 3 pass-only unix-metadata
+- ✅ Fail-variant e2e for the 3 pass-only unix-metadata
   rules.
-- ⏳ E2E for the 4 zero-e2e rules.
-- ⏳ Integration tests (under `crates/alint-rules/tests/`)
+- ✅ E2E for the 4 zero-e2e rules.
+- ✅ Integration tests (under `crates/alint-rules/tests/`)
   for the shell-out rules — `git_no_denied_paths`,
   `git_commit_message`, `command` (mirrors the v0.7.3
   `git_blame_age` integration-test pattern).
@@ -432,99 +432,116 @@ existence (4 rules, 0 units), naming (2, 0), unix metadata
 
 alint-core's `engine.rs`, `walker.rs`, `registry.rs`,
 `report.rs`, `error.rs`, `level.rs`, `scope.rs`,
-`config.rs`, `rule.rs` all have 0 unit tests today. The
-most important crate has the worst coverage of its own
+`config.rs`, `rule.rs` all had 0 unit tests pre-v0.8.2.
+The most important crate had the worst coverage of its own
 internals.
 
-- ⏳ Unit tests for `walker::walk`, `Registry::build`,
+- ✅ Unit tests for `walker::walk`, `Registry::build`,
   `Report` aggregation, `Scope::matches` edge cases,
   `Engine::run` (changed-mode path-scope intersection,
   fact-eval failure paths), `BlameCache` thread-safety
-  under contention.
-- ⏳ alint-dsl edges: extends-chain cycle detection,
+  under contention. `config.rs` and `rule.rs` covered
+  during v0.8 housekeeping (2026-04-29).
+- ✅ alint-dsl edges: extends-chain cycle detection,
   diamond inheritance, `extends:` filter validation
   (`only:` / `except:`), nested-config path-prefix
   rewriting, `.alint.d/` merge order determinism, HTTPS
   timeout / size-cap enforcement, SRI algorithm-mismatch
   errors, template-instantiation edge cases.
-- ⏳ **Cross-formatter snapshot test** as the keystone:
-  same fixed Report rendered through all 8 output
-  formatters with golden-file comparison. Each formatter
-  drifts independently today; this test is the
-  single-source-of-truth gate.
+- ✅ **Cross-formatter snapshot test** —
+  `crates/alint-output/tests/cross_formatter.rs`. Same
+  fixed Report rendered through all 8 output formatters
+  with 13 invariant tests. Catches silent formatter
+  divergence; SARIF + agent + JSON-schema validation
+  bundled in.
 
 ### v0.8.3 — CLI surface coverage
 
-trycmd 33 → ~70 cases. Today 27 of 30 are happy-path only
-(only 2 have stderr snapshots).
+trycmd 33 → 56 cases (pre-v0.8.3 had 27 happy-path; only 2
+stderr snapshots).
 
-- ⏳ Stderr snapshots for every error path: `--changed`
+- ✅ Stderr snapshots for every error path: `--changed`
   on non-git, `--base invalid-ref`, malformed YAML,
   unknown rule kind, `--fail-on-warning` exit-code
   verification, `export-agents-md --inline` malformed
   markers.
-- ⏳ Per-subcommand `--help` snapshot tests — flag drift
-  caught immediately.
-- ⏳ `--color auto` × `NO_COLOR` × `CLICOLOR_FORCE`
-  matrix.
-- ⏳ `--progress=auto|always|never` × TTY/non-TTY matrix.
+- ✅ Per-subcommand `--help` snapshot tests for all 9
+  subcommands.
+- ✅ `--color auto` × `NO_COLOR` × `CLICOLOR_FORCE`
+  matrix (5 cases). Surfaced + fixed a real bug:
+  CLICOLOR_FORCE wasn't honored under `--color=auto`.
+- ✅ `--progress=auto|always|never` × TTY/non-TTY matrix
+  via trycmd env vars + `portable-pty` integration test
+  for the actual TTY branch.
 
 ### v0.8.4 — Benchmark uplift
 
-Today 6 of ~50 rule kinds have isolated criterion benches.
-0 output formatters benched. 0 fix-throughput benches.
+Pre-v0.8.4: 6 of ~50 rule kinds had isolated criterion
+benches. 0 output formatters benched. 0 fix-throughput
+benches.
 
-- ⏳ `single_file_rules.rs` — every per-file rule kind,
+- ✅ `single_file_rules.rs` — every per-file rule kind,
   parameterised over file size and tree size.
-- ⏳ `cross_file_rules.rs` — `pair`, `for_each_dir`,
+- ✅ `cross_file_rules.rs` — `pair`, `for_each_dir`,
   `every_matching_has`, `unique_by`, `dir_contains`,
   `dir_only_contains` at varying tree shapes.
-- ⏳ `structured_query.rs` — JSON / YAML / TOML parse +
+- ✅ `structured_query.rs` — JSON / YAML / TOML parse +
   path-query throughput; `json_schema_passes` validation.
-- ⏳ `output_formats.rs` — 1k / 10k / 100k violation
+- ✅ `output_formats.rs` — 1k / 10k / 100k violation
   Reports rendered through all 8 formatters.
-- ⏳ `fix_throughput.rs` — every fix-op type on synthetic
+- ✅ `fix_throughput.rs` — every fix-op type on synthetic
   violation lists.
-- ⏳ `blame_cache.rs` — cold/warm/miss-rate
+- ✅ `blame_cache.rs` — cold/warm/miss-rate
   characterisation.
-- ⏳ `dsl_extends.rs` — extends-chain depth + drop-in
+- ✅ `dsl_extends.rs` — extends-chain depth + drop-in
   merge cost.
-- ⏳ Two new hyperfine scenarios: S4 `agent-hygiene`, S5
-  `fix-pass`. Walker parallelism baseline so v0.9's
-  `build_parallel` switch has a "before" number.
+- ✅ Two new hyperfine scenarios: S4 `agent-hygiene`, S5
+  `fix-pass`. Walker parallelism baseline captured for
+  v0.9's `build_parallel` switch.
 
 ### v0.8.5 — Regression-guard + rot-prevention
 
 Closes the v0.8 cut. Makes test/bench rot mechanically
 impossible to ship.
 
-- ⏳ **`xtask bench-compare`** — diffs two `results.json`
-  files; fails when any scenario regresses past
-  `--threshold` (default ±10%). PR-time on the small-tree
-  subset; nightly on the full matrix.
-- ⏳ **Baseline against v0.7.0** captured + committed so
-  v0.8 lands honest now.
-- ⏳ **Fixture-completeness test** — `accepts_every_rule_kind`
-  extended to assert the fixture covers every registered
-  kind (currently 18 of 66).
-- ⏳ **Scenario-coverage audit test** — every registered
-  rule kind must have ≥1 scenario.
-- ⏳ **Default-option snapshot test** — `insta::assert_snapshot`
-  over each rule's default options. Catches silent default
-  changes.
-- ⏳ **CLI flag inventory snapshot** per subcommand.
-- ⏳ **JSON report schema** at `schemas/v1/report.json` +
-  trycmd JSON validation against it. Stable shape for
-  downstream tooling.
-- ⏳ **`cargo llvm-cov` instrumentation** + Codecov.
-  Target 85% workspace-wide line coverage; gate at 80%
-  initially so PRs don't fail on noise.
-- ⏳ **`cargo mutants` nightly** rotating one crate at a
-  time (workspace-wide is hours per run).
-- ⏳ **Cross-platform CI** — extend test job to
-  linux-x86_64 + macos-arm64 + windows-x86_64
-  (GitHub-hosted runners initially; self-hosted is
-  operational overhead we'll defer).
+- ✅ **`xtask bench-compare`** — diffs two
+  `target/criterion/` trees; fails when any scenario
+  regresses past `--threshold` (default ±10%). PR-time
+  gate-ready.
+- ✅ **Baseline against v0.7.0** captured at
+  `docs/benchmarks/v0.8/baseline-v0.7.0/` so v0.9 engine
+  work has a documented floor.
+- ✅ **Fixture-completeness test** —
+  `alint-dsl/tests/schema.rs::fixture_covers_every_registered_rule_kind`
+  asserts every registered kind appears in
+  `all_kinds.yaml` (now 70 kinds, up from 18).
+- ✅ **Scenario-coverage audit test** —
+  `crates/alint-e2e/tests/coverage_audit.rs`.
+- ✅ **Default-option snapshot test** —
+  `crates/alint-dsl/tests/default_options_snapshot.rs`
+  with elide rules for crate-internal Debug churn.
+- ✅ **CLI flag inventory snapshot** per subcommand —
+  `crates/alint/tests/cli_flag_inventory.rs` (separate
+  from --help text snapshots).
+- ✅ **JSON report schemas** at
+  `schemas/v1/{check-report,fix-report}.json` + cross-
+  formatter validation tests.
+- ✅ **`cargo llvm-cov` instrumentation** —
+  `.github/workflows/coverage.yml` enforces 85% line
+  coverage floor (90.57% achieved). `xtask` excluded
+  (dev tooling, structurally low coverage). Codecov
+  upload opt-in via `CODECOV_TOKEN`.
+- ✅ **`cargo mutants` nightly** —
+  `.github/workflows/mutants.yml` rotates one crate per
+  night.
+- ✅ **Cross-platform CI** —
+  `.github/workflows/cross-platform.yml` runs
+  `cargo test --workspace --locked` on macOS-arm64 +
+  Windows-x86_64. Caught two real production bugs not
+  surfaced by the Linux lane: a glob mixed-separator bug
+  in the DSL nested-config prefix handling and a
+  bench-compare key separator bug, both fixed before
+  merge.
 
 ### Out of scope (deferred to v0.9 engine cut)
 
