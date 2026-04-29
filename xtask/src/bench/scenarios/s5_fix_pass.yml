@@ -1,0 +1,45 @@
+# Scenario S5 — Fix-pass throughput.
+#
+# Composed of the four most common content-editing fix ops:
+# trailing whitespace, final newline, line endings, BOM strip.
+# Designed to maximise the "every rule has something to fix"
+# overlap — typical real-world fix-pass workload, where one
+# `alint fix` run touches every text file at least once.
+#
+# Used by `xtask bench-scale --scenarios S5` to measure the
+# read-modify-write throughput of the fix engine. Pairs with
+# the criterion `fix_throughput.rs` micro-benches; this one
+# measures end-to-end CLI cost including walk + scope + fix
+# coordinator.
+
+version: 1
+
+rules:
+  - id: trim-tail
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: trailing-nl
+    kind: final_newline
+    paths: "**/*.rs"
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  - id: lf-only
+    kind: line_endings
+    paths: "**/*.rs"
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  - id: no-bom
+    kind: no_bom
+    paths: "**/*.rs"
+    level: warning
+    fix:
+      file_strip_bom: {}

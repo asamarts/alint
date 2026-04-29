@@ -57,7 +57,10 @@ enum Commands {
         /// Include the 1M-file size (multi-GB working set, slow).
         #[arg(long)]
         include_1m: bool,
-        /// Comma-separated scenarios (S1,S2,S3).
+        /// Comma-separated scenarios. Default `S1,S2,S3` is the
+        /// publication trio (filename / existence+content /
+        /// workspace bundle). `S4` (agent-era hygiene) and `S5`
+        /// (fix-pass) are opt-in for characterization runs.
         #[arg(long, default_value = "S1,S2,S3", value_delimiter = ',')]
         scenarios: Vec<String>,
         /// Comma-separated modes (full,changed).

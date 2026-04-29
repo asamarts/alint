@@ -181,7 +181,9 @@ impl Tool {
             Self::GrepPipeline => match scenario {
                 Scenario::S1 => grep_pipeline_s1(&root),
                 Scenario::S2 => grep_pipeline_s2(&root),
-                Scenario::S3 => unreachable!("supports() filters S3 out for GrepPipeline"),
+                Scenario::S3 | Scenario::S4 | Scenario::S5 => {
+                    unreachable!("supports() filters S3+ out for GrepPipeline")
+                }
             },
             // `repolinter lint <root>` reads `repolinter.json`
             // at the tree root by default. We pass the tree

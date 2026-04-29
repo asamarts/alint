@@ -1,0 +1,59 @@
+# Scenario S4 — Agent-era hygiene.
+#
+# Mirrors the v0.6 `agent-hygiene` bundled ruleset's scope:
+# backup-suffix bans, scratch-doc bans at root, debug-residue
+# in source, AI-affirmation regex in prose, model-attributed
+# TODO bans. Composed from existing primitives so the bench
+# measures real-world rule-mix performance — five rule kinds
+# co-evaluated over the same tree.
+#
+# Adds to S1/S2/S3 by exercising the content-content-name
+# overlap that agent-era repos actually pay: every source file
+# is matched by at least three rules.
+
+version: 1
+
+rules:
+  # Backup-suffix bans (filename-based, no read).
+  - id: no-backup-suffixes
+    kind: file_absent
+    paths:
+      - "**/*.bak"
+      - "**/*.orig"
+      - "**/*~"
+      - "**/*.swp"
+    level: error
+
+  # Scratch-doc bans at root (filename-based, no read).
+  - id: no-root-scratch-docs
+    kind: file_absent
+    paths:
+      - "PLAN.md"
+      - "NOTES.md"
+      - "ANALYSIS.md"
+      - "TODO.md"
+    root_only: true
+    level: warning
+
+  # Debug-residue scan in source (content read).
+  - id: no-debug-residue
+    kind: file_content_forbidden
+    paths:
+      include: "src/**"
+      exclude: "src/**/*_test.*"
+    pattern: '\b(console\.log|debugger|breakpoint\(\))\b'
+    level: warning
+
+  # AI-affirmation prose in markdown (content read).
+  - id: no-ai-affirmation
+    kind: file_content_forbidden
+    paths: "**/*.md"
+    pattern: "(?i)you'?re absolutely right"
+    level: info
+
+  # Model-attributed TODO bans (content read).
+  - id: no-model-todos
+    kind: file_content_forbidden
+    paths: "src/**"
+    pattern: '\bTODO\((claude|cursor|copilot|gpt-?4)[^)]*\)'
+    level: warning

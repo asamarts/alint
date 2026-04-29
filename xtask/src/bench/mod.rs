@@ -43,6 +43,8 @@ pub use tools::Tool;
 const SCENARIO_S1: &str = include_str!("scenarios/s1_filename.yml");
 const SCENARIO_S2: &str = include_str!("scenarios/s2_existence_content.yml");
 const SCENARIO_S3: &str = include_str!("scenarios/s3_workspace.yml");
+const SCENARIO_S4: &str = include_str!("scenarios/s4_agent_hygiene.yml");
+const SCENARIO_S5: &str = include_str!("scenarios/s5_fix_pass.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
@@ -132,6 +134,8 @@ pub enum Scenario {
     S1,
     S2,
     S3,
+    S4,
+    S5,
 }
 
 impl Scenario {
@@ -140,7 +144,9 @@ impl Scenario {
             "S1" => Ok(Self::S1),
             "S2" => Ok(Self::S2),
             "S3" => Ok(Self::S3),
-            other => bail!("unknown scenario {other:?}; expected S1, S2, or S3"),
+            "S4" => Ok(Self::S4),
+            "S5" => Ok(Self::S5),
+            other => bail!("unknown scenario {other:?}; expected one of S1..S5"),
         }
     }
 
@@ -149,6 +155,8 @@ impl Scenario {
             Self::S1 => "S1",
             Self::S2 => "S2",
             Self::S3 => "S3",
+            Self::S4 => "S4",
+            Self::S5 => "S5",
         }
     }
 
@@ -157,6 +165,8 @@ impl Scenario {
             Self::S1 => "Filename hygiene (8 rules)",
             Self::S2 => "Existence + content (8 rules)",
             Self::S3 => "Workspace bundle (oss-baseline + rust + monorepo + cargo-workspace)",
+            Self::S4 => "Agent-era hygiene (5 rules: backup/scratch/debug/affirmation/model-TODO)",
+            Self::S5 => "Fix-pass throughput (4 content-editing fix ops)",
         }
     }
 
@@ -165,6 +175,8 @@ impl Scenario {
             Self::S1 => SCENARIO_S1,
             Self::S2 => SCENARIO_S2,
             Self::S3 => SCENARIO_S3,
+            Self::S4 => SCENARIO_S4,
+            Self::S5 => SCENARIO_S5,
         }
     }
 }

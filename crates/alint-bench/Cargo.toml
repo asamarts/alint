@@ -62,6 +62,16 @@ name = "dsl_extends"
 harness = false
 required-features = ["fs-benches"]
 
+[[bench]]
+name = "structured_query"
+harness = false
+required-features = ["fs-benches"]
+
+[[bench]]
+name = "blame_cache"
+harness = false
+required-features = ["fs-benches"]
+
 [dependencies]
 alint-core.workspace = true
 alint-dsl.workspace = true

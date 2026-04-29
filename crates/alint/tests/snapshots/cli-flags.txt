@@ -1,0 +1,125 @@
+# CLI flag inventory — see cli_flag_inventory.rs
+# Run with UPDATE_SNAPSHOTS=1 to refresh after intentional flag changes.
+
+=== <top-level> ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -V, --version
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== check ===
+  --ascii
+  --base <REF>
+  --changed
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== list ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== explain ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== fix ===
+  --ascii
+  --base <REF>
+  --changed
+  --color <WHEN>
+  --compact
+  --dry-run
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== facts ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== init ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --monorepo
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== suggest ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --confidence <LEVEL>
+  --explain
+  --fail-on-warning
+  --include-bundled
+  --no-gitignore
+  --progress <WHEN>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== export-agents-md ===
+  --ascii
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --include-info
+  --inline
+  --no-gitignore
+  --output <PATH>
+  --progress <WHEN>
+  --section-title <TEXT>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+

@@ -999,6 +999,88 @@ Hygiene checks for Node.js / npm / pnpm / yarn / bun projects. Every rule is gat
 | `node-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
 | `node-sources-no-bidi` | `no_bidi_controls` | error | — |
 
+### `alint://bundled/python@v1`
+
+Hygiene checks for Python projects. Gated with `when: facts.is_python` (any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` present), so silent no-op when none of those exist.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `python-pyproject-or-setup` | `file_exists` | warning | — |
+| `python-no-tracked-pycache` | `dir_absent` | error | — |
+| `python-no-tracked-venv` | `dir_absent` | error | — |
+| `python-no-tracked-egg-info` | `dir_absent` | warning | — |
+| `python-snake-case-modules` | `filename_case` | info | `file_rename` |
+| `python-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `python-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+| `python-sources-no-bidi` | `no_bidi_controls` | error | — |
+
+### `alint://bundled/go@v1`
+
+Hygiene checks for Go modules. Gated with `when: facts.is_go` (any of `go.mod`, `go.sum`).
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `go-go-mod-exists` | `file_exists` | error | — |
+| `go-no-tracked-vendor` | `dir_absent` | warning | — |
+| `go-no-tracked-bin` | `dir_absent` | info | — |
+| `go-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `go-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+| `go-sources-no-bidi` | `no_bidi_controls` | error | — |
+
+### `alint://bundled/java@v1`
+
+Hygiene checks for Java / Kotlin projects (Gradle or Maven). Gated with `when: facts.is_java` (any of `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`).
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `java-build-tool-exists` | `file_exists` | error | — |
+| `java-no-tracked-build-output` | `dir_absent` | error | — |
+| `java-no-tracked-idea` | `dir_absent` | info | — |
+| `java-pascal-case-classes` | `filename_case` | info | — |
+| `java-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `java-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
+| `java-sources-no-bidi` | `no_bidi_controls` | error | — |
+
+### `alint://bundled/ci/github-actions@v1`
+
+Hygiene checks for `.github/workflows/*.yml`. Gated with `when: facts.has_github_actions` (`.github/workflows/` present), so the ruleset is a safe no-op outside repos using Actions.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `gha-workflows-have-permissions` | `yaml_path_matches` | warning | — |
+| `gha-workflows-pin-actions` | `file_content_forbidden` | warning | — |
+| `gha-workflows-final-newline` | `final_newline` | info | `file_append_final_newline` |
+| `gha-workflows-lf-line-endings` | `line_endings` (lf) | info | `file_normalize_line_endings` |
+
+### `alint://bundled/agent-hygiene@v1`
+
+Catches the canonical agent-driven-development cruft surface — backup-suffix files, scratch docs, debug residue, AI-affirmation prose, model-attributed TODO markers. Composable from existing primitives (`file_absent`, `filename_regex`, `file_content_forbidden`); no new rule kinds. Fires on every repo regardless of language; not gated.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `agent-no-backup-files` | `file_absent` (`*.bak`, `*.orig`, `*~`, `*.swp`) | error | — |
+| `agent-no-versioned-duplicates` | `filename_regex` (`*_v2.ts`, `*_old.py`, …) | warning | — |
+| `agent-no-scratch-docs-at-root` | `file_absent` (`PLAN.md`, `NOTES.md`, `ANALYSIS.md`, …) | warning | — |
+| `agent-no-tracked-env-files` | `git_no_denied_paths` (`*.env`, `.env*`) | error | — |
+| `agent-no-debug-residue` | `file_content_forbidden` (`console.log`, `debugger`, `breakpoint()`) | warning | — |
+| `agent-no-affirmation-prose` | `file_content_forbidden` (`"You're absolutely right"`, …) | info | — |
+| `agent-no-model-attributed-todos` | `file_content_forbidden` (`TODO(claude:)`, `TODO(cursor:)`, …) | warning | — |
+
+The most-cited gripes about agent-generated code surface as a single one-line `extends:` adoption — pair with the per-language ruleset that fits the project.
+
+### `alint://bundled/agent-context@v1`
+
+Hygiene rules for agent-context files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`). Existence recommended, stub guard via `file_min_lines`, bloat guard via `file_max_lines` (per Augment Code research, context files >300 lines correlate with worse agent performance), stale-path heuristic via regex. Subsumes `ctxlint`'s niche with no new rule kinds — composes `file_exists` / `file_min_lines` / `file_max_lines` / `file_content_forbidden`.
+
+| Rule id | Kind | Default level | Fix |
+|---|---|---|---|
+| `agent-context-recommend-agents-md` | `file_exists` | info | — |
+| `agent-context-not-a-stub` | `file_min_lines` | warning | — |
+| `agent-context-not-bloated` | `file_max_lines` (300) | warning | — |
+| `agent-context-no-stale-paths` | `file_content_forbidden` (regex heuristic) | info | — |
+
+For precise stale-path detection, layer `markdown_paths_resolve` (a v0.7.1 rule kind) on top of this ruleset — the regex above flags candidates; the rule kind verifies them against the file index.
+
 ### `alint://bundled/monorepo@v1`
 
 Language-agnostic monorepo-shape checks. Fires for every directory under `packages/*`, `crates/*`, `apps/*`, or `services/*`. Pair with `rust@v1` / `node@v1` for ecosystem-specific checks on the packages themselves.
