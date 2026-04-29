@@ -102,3 +102,113 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         require_exec: opts.require,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             require: true\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_missing_require() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_fix_block() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             require: true\n\
+             level: error\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_fires_when_exec_required_but_missing() {
+        use std::os::unix::fs::PermissionsExt;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             require: true\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("scripts/a.sh", b"#!/bin/sh\n")]);
+        // Default mode is 0644 — no +x bit.
+        let mut perms = std::fs::metadata(tmp.path().join("scripts/a.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(tmp.path().join("scripts/a.sh"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_passes_when_exec_required_and_set() {
+        use std::os::unix::fs::PermissionsExt;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             require: true\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("scripts/a.sh", b"#!/bin/sh\n")]);
+        let mut perms = std::fs::metadata(tmp.path().join("scripts/a.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(tmp.path().join("scripts/a.sh"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "0755 should pass require=true: {v:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_fires_when_exec_forbidden_but_set() {
+        use std::os::unix::fs::PermissionsExt;
+        // require: false → no .md should be executable
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"**/*.md\"\n\
+             require: false\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("README.md", b"# title\n")]);
+        let mut perms = std::fs::metadata(tmp.path().join("README.md"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(tmp.path().join("README.md"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "0755 markdown should fire require=false");
+    }
+}

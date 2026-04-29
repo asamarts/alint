@@ -350,3 +350,252 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         if_present: opts.if_present,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    // ─── build-path errors ────────────────────────────────────
+
+    #[test]
+    fn build_rejects_missing_paths() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             path: \"$.name\"\n\
+             equals: \"x\"\n\
+             level: error\n",
+        );
+        assert!(json_path_equals_build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_invalid_jsonpath() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$..[invalid\"\n\
+             equals: \"x\"\n\
+             level: error\n",
+        );
+        assert!(json_path_equals_build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex_in_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"package.json\"\n\
+             path: \"$.version\"\n\
+             pattern: \"[unterminated\"\n\
+             level: error\n",
+        );
+        assert!(json_path_matches_build(&spec).is_err());
+    }
+
+    // ─── json_path_equals ─────────────────────────────────────
+
+    #[test]
+    fn json_path_equals_passes_when_value_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$.name\"\n\
+             equals: \"demo\"\n\
+             level: error\n",
+        );
+        let rule = json_path_equals_build(&spec).unwrap();
+        let (tmp, idx) =
+            tempdir_with_files(&[("package.json", br#"{"name":"demo","version":"1.0.0"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "matching value should pass: {v:?}");
+    }
+
+    #[test]
+    fn json_path_equals_fires_on_mismatch() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$.name\"\n\
+             equals: \"demo\"\n\
+             level: error\n",
+        );
+        let rule = json_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", br#"{"name":"other"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn json_path_equals_fires_on_missing_path() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$.name\"\n\
+             equals: \"demo\"\n\
+             level: error\n",
+        );
+        let rule = json_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", br#"{"version":"1.0"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "missing path should fire");
+    }
+
+    #[test]
+    fn json_path_if_present_silent_on_missing() {
+        // `if_present: true` → missing path is silent.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$.name\"\n\
+             equals: \"demo\"\n\
+             if_present: true\n\
+             level: error\n",
+        );
+        let rule = json_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", br#"{"version":"1.0"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "if_present should silence: {v:?}");
+    }
+
+    // ─── json_path_matches ────────────────────────────────────
+
+    #[test]
+    fn json_path_matches_passes_on_pattern_hit() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"package.json\"\n\
+             path: \"$.version\"\n\
+             matches: \"^\\\\d+\\\\.\\\\d+\\\\.\\\\d+$\"\n\
+             level: error\n",
+        );
+        let rule = json_path_matches_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", br#"{"version":"1.2.3"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "matching version should pass: {v:?}");
+    }
+
+    #[test]
+    fn json_path_matches_fires_on_pattern_miss() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"package.json\"\n\
+             path: \"$.version\"\n\
+             matches: \"^\\\\d+\\\\.\\\\d+\\\\.\\\\d+$\"\n\
+             level: error\n",
+        );
+        let rule = json_path_matches_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", br#"{"version":"v1.x"}"#)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    // ─── yaml_path_* ─────────────────────────────────────────
+
+    #[test]
+    fn yaml_path_equals_passes_when_value_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_equals\n\
+             paths: \".github/workflows/*.yml\"\n\
+             path: \"$.name\"\n\
+             equals: \"CI\"\n\
+             level: error\n",
+        );
+        let rule = yaml_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            ".github/workflows/ci.yml",
+            b"name: CI\non: push\njobs: {}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "matching name should pass: {v:?}");
+    }
+
+    #[test]
+    fn yaml_path_matches_uses_bracket_notation_for_dashed_keys() {
+        // Per the memory note: dashed YAML keys need bracket
+        // notation (`$.foo['dashed-key']`) because the JSONPath
+        // dot-form can't parse them.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_matches\n\
+             paths: \"action.yml\"\n\
+             path: \"$.runs['using']\"\n\
+             matches: \"^node\\\\d+$\"\n\
+             level: error\n",
+        );
+        let rule = yaml_path_matches_build(&spec).unwrap();
+        let (tmp, idx) =
+            tempdir_with_files(&[("action.yml", b"runs:\n  using: node20\n  main: index.js\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "bracket notation should match: {v:?}");
+    }
+
+    // ─── toml_path_* ─────────────────────────────────────────
+
+    #[test]
+    fn toml_path_equals_passes_when_value_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: toml_path_equals\n\
+             paths: \"Cargo.toml\"\n\
+             path: \"$.package.edition\"\n\
+             equals: \"2024\"\n\
+             level: error\n",
+        );
+        let rule = toml_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "Cargo.toml",
+            b"[package]\nname = \"x\"\nedition = \"2024\"\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "matching edition should pass: {v:?}");
+    }
+
+    #[test]
+    fn toml_path_matches_fires_on_floating_version() {
+        // Common policy: deps must be tilde-pinned, not bare.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: toml_path_matches\n\
+             paths: \"Cargo.toml\"\n\
+             path: \"$.dependencies.serde\"\n\
+             matches: \"^[~=]\"\n\
+             level: error\n",
+        );
+        let rule = toml_path_matches_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "Cargo.toml",
+            b"[package]\nname = \"x\"\n[dependencies]\nserde = \"1\"\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "floating `serde = \"1\"` should fire");
+    }
+
+    // ─── parse error path ─────────────────────────────────────
+
+    #[test]
+    fn evaluate_fires_on_malformed_input() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_equals\n\
+             paths: \"package.json\"\n\
+             path: \"$.name\"\n\
+             equals: \"x\"\n\
+             level: error\n",
+        );
+        let rule = json_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("package.json", b"{not valid json")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "malformed JSON should fire one violation");
+    }
+}

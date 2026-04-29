@@ -1,0 +1,26 @@
+name: command plugin is silent when the wrapped CLI exits 0
+tags: [check, command, plugin, passing]
+
+# Uses `/bin/true` so the test stays portable on any Unix-like
+# system without depending on a specific tool being installed.
+# The Windows runner has no `/bin/true`, but the trycmd CLI tests
+# already cover that platform — these e2e scenarios are unix-only
+# in practice, mirroring the testkit's tree-spec materialisation.
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: trivial-pass
+        kind: command
+        paths: "src/**/*.rs"
+        command: ["/bin/true"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

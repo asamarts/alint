@@ -1,0 +1,27 @@
+name: command plugin fires once per file when the wrapped CLI exits non-zero
+tags: [check, command, plugin, failing]
+
+# Uses `/bin/false` for a deterministic non-zero exit on any
+# Unix-like system. Each matched file gets its own violation
+# carrying the subprocess's stdout+stderr (empty here).
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {}\n"
+      b.rs: "fn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: trivial-fail
+        kind: command
+        paths: "src/**/*.rs"
+        command: ["/bin/false"]
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: trivial-fail, level: error, path: src/a.rs}
+      - {rule: trivial-fail, level: error, path: src/b.rs}

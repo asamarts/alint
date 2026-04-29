@@ -1,0 +1,27 @@
+name: git_no_denied_paths is silent when no tracked path matches the denylist
+tags: [check, git_no_denied_paths, git, passing]
+
+given:
+  tree:
+    README.md: "# demo\n"
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-secrets
+        kind: git_no_denied_paths
+        denied:
+          - "*.env"
+          - "*.pem"
+          - "secrets/**"
+        level: error
+  git:
+    init: true
+    add: [README.md, src/main.rs]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

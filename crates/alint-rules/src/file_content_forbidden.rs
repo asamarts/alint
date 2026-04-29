@@ -91,3 +91,82 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         pattern,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             pattern: \"X\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"**/*\"\n\
+             pattern: \"[bad\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_fires_on_forbidden_match_with_line_number() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"\\\\bTODO\\\\b\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "src/main.rs",
+            b"fn main() {\n    let x = 1;\n    // TODO\n}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].line, Some(3), "violation should point at line 3");
+    }
+
+    #[test]
+    fn evaluate_passes_when_pattern_absent() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"\\\\bTODO\\\\b\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) =
+            tempdir_with_files(&[("src/main.rs", b"fn main() {\n    let x = 1;\n}\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "clean file should pass: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_silent_on_non_utf8() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"**/*\"\n\
+             pattern: \"X\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("img.bin", &[0xff, 0xfe])]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+}

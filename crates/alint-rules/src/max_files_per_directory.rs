@@ -104,3 +104,93 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
 // `Path::to_path_buf` is required by the grouping above.
 use std::path::Path;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             max_files: 100\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_zero_max() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**\"\n\
+             max_files: 0\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_fix_block() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**\"\n\
+             max_files: 100\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_under_limit() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**\"\n\
+             max_files: 5\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["a/1.rs", "a/2.rs", "a/3.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_on_over_limit_directory() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**\"\n\
+             max_files: 2\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["a/1.rs", "a/2.rs", "a/3.rs", "b/1.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only `a/` exceeds: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_groups_by_immediate_parent() {
+        // Files in `a/` and files in `a/b/` count toward
+        // separate directory totals.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**\"\n\
+             max_files: 2\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["a/1.rs", "a/2.rs", "a/b/1.rs", "a/b/2.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "neither dir exceeds: {v:?}");
+    }
+}

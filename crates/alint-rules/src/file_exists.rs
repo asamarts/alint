@@ -181,3 +181,154 @@ fn patterns_of(spec: &PathsSpec) -> Vec<String> {
         PathsSpec::IncludeExclude { include, .. } => include.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_accepts_root_only_option() {
+        // `root_only: true` is the supported option; building
+        // it should succeed and produce a configured rule.
+        // (Unknown options are tolerated by file_exists' build
+        // path via `.unwrap_or(default)`; the JSON Schema and
+        // DSL loader catch typos at config-load time before
+        // we get here, which is the right layer for that
+        // check.)
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"LICENSE\"\n\
+             level: error\n\
+             root_only: true\n",
+        );
+        assert!(build(&spec).is_ok());
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix_op() {
+        // file_exists supports `file_create` only; `file_remove`
+        // (or any other op) must surface a clear config error so
+        // a typo doesn't silently disable the fix path.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"LICENSE\"\n\
+             level: error\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_remove"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_file_create_needs_explicit_path_for_glob_only_paths() {
+        // When every entry in `paths:` is a glob, the fixer
+        // can't pick a literal target; the user must supply
+        // `fix.file_create.path` explicitly.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"docs/**/*.md\"\n\
+             level: error\n\
+             fix:\n  \
+               file_create:\n    \
+                 content: \"# title\\n\"\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("path"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn evaluate_passes_when_matching_file_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"README.md\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["README.md", "Cargo.toml"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected violations: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_when_no_matching_file_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"LICENSE\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["README.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "expected one violation; got: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_root_only_excludes_nested_matches() {
+        // `root_only: true` only counts entries whose path has
+        // no parent component — `LICENSE` qualifies,
+        // `pkg/LICENSE` does not.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_exists\n\
+             paths: \"LICENSE\"\n\
+             level: error\n\
+             root_only: true\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx_only_nested = index(&["pkg/LICENSE"]);
+        let v = rule
+            .evaluate(&ctx(Path::new("/fake"), &idx_only_nested))
+            .unwrap();
+        assert_eq!(v.len(), 1, "nested match shouldn't satisfy root_only");
+    }
+
+    #[test]
+    fn first_literal_path_picks_first_non_glob() {
+        let patterns = vec!["docs/**/*.md".into(), "LICENSE".into(), "README.md".into()];
+        assert_eq!(
+            first_literal_path(&patterns).as_deref(),
+            Some(Path::new("LICENSE")),
+        );
+    }
+
+    #[test]
+    fn first_literal_path_returns_none_when_all_glob() {
+        let patterns = vec!["docs/**/*.md".into(), "src/[a-z]*.rs".into()];
+        assert!(first_literal_path(&patterns).is_none());
+    }
+
+    #[test]
+    fn patterns_of_handles_every_paths_spec_shape() {
+        assert_eq!(patterns_of(&PathsSpec::Single("a".into())), vec!["a"]);
+        assert_eq!(
+            patterns_of(&PathsSpec::Many(vec!["a".into(), "b".into()])),
+            vec!["a", "b"],
+        );
+        assert_eq!(
+            patterns_of(&PathsSpec::IncludeExclude {
+                include: vec!["a".into()],
+                exclude: vec!["b".into()],
+            }),
+            vec!["a"],
+        );
+    }
+}

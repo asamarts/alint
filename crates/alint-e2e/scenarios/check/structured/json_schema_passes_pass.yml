@@ -1,0 +1,34 @@
+name: json_schema_passes is silent on a schema-conforming JSON document
+tags: [check, json_schema_passes, structured, passing]
+
+given:
+  tree:
+    schemas:
+      package.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+          }
+        }
+    package.json: |
+      {
+        "name": "demo",
+        "version": "1.2.3"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: package-conforms
+        kind: json_schema_passes
+        paths: "package.json"
+        schema_path: "schemas/package.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

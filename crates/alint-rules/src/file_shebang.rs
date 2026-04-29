@@ -105,3 +105,79 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         pattern,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             shebang: \"^#!/bin/sh\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             paths: \"**/*.sh\"\n\
+             shebang: \"[unterminated\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_shebang_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             paths: \"**/*.sh\"\n\
+             shebang: \"^#!/(usr/)?bin/(env )?(ba)?sh\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.sh", b"#!/usr/bin/env bash\necho hi\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "shebang should match: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_when_shebang_missing() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             paths: \"**/*.sh\"\n\
+             shebang: \"^#!\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.sh", b"echo hi\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_only_inspects_first_line() {
+        // A shebang on line 5 must NOT satisfy the rule —
+        // shebangs are line-1-only.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             paths: \"**/*.sh\"\n\
+             shebang: \"^#!/bin/sh\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.sh", b"echo first\n#!/bin/sh\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "shebang on line 2 shouldn't satisfy");
+    }
+}

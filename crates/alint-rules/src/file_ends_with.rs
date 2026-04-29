@@ -94,3 +94,78 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         suffix: opts.suffix.into_bytes(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_ends_with\n\
+             suffix: \"\\n\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_empty_suffix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_ends_with\n\
+             paths: \"**/*\"\n\
+             suffix: \"\"\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("empty"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_rejects_fix_block() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_ends_with\n\
+             paths: \"**/*\"\n\
+             suffix: \"\\n\"\n\
+             level: error\n\
+             fix:\n  \
+               file_append:\n    \
+                 content: \"x\"\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_suffix_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_ends_with\n\
+             paths: \"**/*.txt\"\n\
+             suffix: \"END\\n\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", b"hello\nEND\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_when_suffix_missing() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_ends_with\n\
+             paths: \"**/*.txt\"\n\
+             suffix: \"END\\n\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", b"hello\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+}

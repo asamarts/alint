@@ -1,0 +1,35 @@
+name: json_schema_passes flags a JSON document that violates the schema
+tags: [check, json_schema_passes, structured, failing]
+
+given:
+  tree:
+    schemas:
+      package.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+          }
+        }
+    package.json: |
+      {
+        "name": "demo",
+        "version": "v1.x"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: package-conforms
+        kind: json_schema_passes
+        paths: "package.json"
+        schema_path: "schemas/package.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: package-conforms, level: error, path: package.json}

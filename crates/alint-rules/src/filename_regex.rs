@@ -89,3 +89,100 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         stem: opts.stem,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             pattern: \"^test_.*$\"\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"tests/**/*.rs\"\n\
+             pattern: \"[unterminated\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_on_matching_basename() {
+        // The pattern is anchored automatically — note no `^…$`.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"tests/**/*.rs\"\n\
+             pattern: \"test_[a-z0-9_]+\\\\.rs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["tests/test_basic.rs", "tests/test_widget.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_on_non_matching_basename() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"tests/**/*.rs\"\n\
+             pattern: \"test_[a-z0-9_]+\\\\.rs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["tests/no_test_prefix.rs", "tests/test_ok.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only the no-prefix file should fire");
+    }
+
+    #[test]
+    fn stem_mode_matches_against_extensionless_name() {
+        // With `stem: true`, the regex sees `test_widget`,
+        // not `test_widget.rs`. The pattern reflects that.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"tests/**/*.rs\"\n\
+             pattern: \"test_[a-z0-9_]+\"\n\
+             stem: true\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["tests/test_widget.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "stem-mode should match: {v:?}");
+    }
+
+    #[test]
+    fn pattern_is_anchored() {
+        // A pattern of `widget` should NOT match `xwidgety.rs` —
+        // build wraps it in `^…$` automatically.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"widget\\\\.rs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["src/xwidgety.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "non-anchored partial match shouldn't pass");
+    }
+}

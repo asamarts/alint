@@ -82,3 +82,85 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_accepts_file_remove_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.fixer().is_some());
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_create:\n    \
+                 content: \"x\"\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_on_regular_files() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", b"hi")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_fires_on_symlink() {
+        use std::os::unix::fs::symlink;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, mut idx) = tempdir_with_files(&[("real.txt", b"target")]);
+        // Add a symlink pointing to real.txt; index it manually
+        // (tempdir_with_files doesn't create symlinks).
+        symlink(tmp.path().join("real.txt"), tmp.path().join("link.txt")).unwrap();
+        idx.entries.push(alint_core::FileEntry {
+            path: std::path::PathBuf::from("link.txt"),
+            is_dir: false,
+            size: 0,
+        });
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "symlink should fire: {v:?}");
+    }
+}

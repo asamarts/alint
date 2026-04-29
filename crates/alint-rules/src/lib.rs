@@ -62,6 +62,8 @@ pub mod no_zero_width_chars;
 pub mod pair;
 pub mod shebang_has_executable;
 pub mod structured_path;
+#[cfg(test)]
+mod test_support;
 pub mod unique_by;
 
 /// Register every built-in rule kind into the given registry.

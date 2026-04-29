@@ -93,3 +93,76 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_fix_block() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_paths_unique_after_lowercase() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = index(&["README.md", "src/main.rs", "Cargo.toml"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_one_violation_per_collision_member() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        // README.md and readme.md collide → both emitted.
+        let i = index(&["README.md", "readme.md", "Cargo.toml"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 2, "two collision members should fire");
+    }
+
+    #[test]
+    fn evaluate_fires_on_three_way_collision() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = index(&["README.md", "readme.md", "ReadMe.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 3, "three collision members should fire");
+    }
+}

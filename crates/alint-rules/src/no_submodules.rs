@@ -94,3 +94,84 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             paths: \"**\"\n\
+             level: warning\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_accepts_minimal_config() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_ok());
+    }
+
+    #[test]
+    fn build_accepts_file_remove_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.fixer().is_some());
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             level: warning\n\
+             fix:\n  \
+               file_create:\n    \
+                 content: \"x\"\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_without_gitmodules() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["README.md", ".gitignore"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_when_gitmodules_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&[".gitmodules", "README.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+}

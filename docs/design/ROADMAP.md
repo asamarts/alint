@@ -17,20 +17,24 @@ new YAML shapes that older configs simply don't use, and
 `version: 1` continues to cover them. See
 [CHANGELOG.md](../../CHANGELOG.md) for the full feature list.
 
-**Next: v0.8 — Performance & test-floor.** Revival of the
-cut that was forward-pointed on 2026-04-27 (v0.5.11 day) and
-then dropped the same afternoon when the v0.6 agent-era
-re-prioritisation took its slot. With the v0.6 / v0.7 cuts
-shipped, the original perf agenda is back on the front
-burner: a regression-guard test layer that gates CI on
-benchmark drift, a per-file-rule dispatch flip in the
-engine (current shape re-walks the index per rule), a
-parallel walker via `ignore::WalkBuilder::build_parallel`,
-and a memory-footprint audit. Self-justified on its own
-merits, and a natural unblocker for v0.9's LSP — which
-also wants per-file dispatch (file change → re-evaluate
-that file's rules). LSP shifts to v0.9; WASM plugins to
-v0.10.
+**Next: v0.8 — Comprehensive test + bench foundation.**
+Revival of the cut that was forward-pointed on 2026-04-27
+(v0.5.11 day) and then dropped the same afternoon when the
+v0.6 agent-era re-prioritisation took its slot. After a
+four-agent coverage analysis on 2026-04-28 surfaced 49 rule
+kinds with no isolated benches, 34 rule kinds with no unit
+tests, infrastructure modules in alint-core with 0 unit
+tests, and a fixture covering only 18 of 66 registered
+rule names, the cut expanded from "regression-guard test
+layer" into a comprehensive test + bench foundation. Five
+point releases (v0.8.1 → v0.8.5): rule-kind coverage
+uplift, infrastructure-crate coverage, CLI surface
+coverage, benchmark uplift, regression-guard +
+rot-prevention infra (with `cargo llvm-cov` gated at 80%
+en route to 85% target, `cargo mutants` nightly,
+cross-platform CI matrix). Engine optimization (per-file-
+rule dispatch flip + parallel walker + memory-footprint
+audit) shifts to v0.9; LSP to v0.10; WASM plugins to v0.11.
 
 ## Positioning
 
@@ -392,135 +396,183 @@ open questions before code started, then was flipped to
   between AGENTS.md and CI lint" gap by making alint the
   single source of truth.
 
-## v0.8 — Performance & test-floor
+## v0.8 — Comprehensive test + bench foundation
 
-Revival of the cut that was forward-pointed on the v0.5.11
-release (2026-04-27 morning) and then dropped the same
-afternoon when v0.6 was re-prioritised for the agent-era
-bundled rulesets. With v0.6 / v0.7 shipped, the original
-agenda is back on the front burner. Four sub-themes,
-ranked by leverage ÷ risk.
+Five point releases (v0.8.1 → v0.8.5) building the
+test/bench/rot-prevention foundation engine optimization
+(now v0.9) needs to land safely. Scope agreed 2026-04-28
+after a four-agent coverage audit surfaced the gaps below;
+each point release is a self-contained, tag-eligible cut.
 
-### Regression-guard test layer
+### v0.8.1 — Rule-kind coverage uplift
 
-A CI gate that fails the build when a benchmarked workload
-regresses past a threshold. The infrastructure already
-exists (criterion micros under `crates/alint-bench/`,
-hyperfine macros via `xtask bench-release`, scale matrix
-under `docs/benchmarks/v0.5/scale/`); what's missing is
-commit-by-commit baseline tracking and the gate itself.
+Goal: every rule kind has ≥5 unit tests + ≥2 e2e (pass +
+fail). Today 34 of 54 rule kinds have 0 unit tests; 4 have
+0 e2e (`json_schema_passes`, `git_no_denied_paths`,
+`git_commit_message`, `command`); 3 have only pass-variant
+e2e (`no_symlinks`, `executable_bit`,
+`executable_has_shebang`). Worst-covered families:
+existence (4 rules, 0 units), naming (2, 0), unix metadata
+(5, 0), content (9 of 14 missing units).
 
-- ⏳ **`xtask bench-regression`** — replays a fixed set
-  of bench scenarios against the current commit, compares
-  to the baseline stored in-tree (or computed from
-  `main`), fails when any scenario regresses past
-  `--threshold` (proposed default ±10%).
-- ⏳ **CI wiring**: gate `bench-regression` on every PR
-  via `ci.yml`; nightly job on `main` refreshes the
-  baseline. Probably stages a small set of representative
-  scenarios at PR-time and the full matrix nightly to
-  keep PR runtime sane.
-- ⏳ **Methodology + reproduction doc** so external
-  contributors can validate or contest a flagged
-  regression. Hardware fingerprinting + warmup-iteration
-  conventions documented alongside the gate.
-- ⏳ **Backfill the baseline against v0.7.0** — anchors
-  "honest now"; everything we improve in v0.8 lands as a
-  win against that mark.
+- ⏳ ~120 new unit tests across the 34 under-covered rule
+  kinds (build / options / evaluate fires / evaluate
+  silent / edge cases — the standard quintet).
+- ⏳ Fail-variant e2e for the 3 pass-only unix-metadata
+  rules.
+- ⏳ E2E for the 4 zero-e2e rules.
+- ⏳ Integration tests (under `crates/alint-rules/tests/`)
+  for the shell-out rules — `git_no_denied_paths`,
+  `git_commit_message`, `command` (mirrors the v0.7.3
+  `git_blame_age` integration-test pattern).
 
-### Per-file-rule dispatch flip
+### v0.8.2 — Infrastructure-crate coverage
 
-Today the engine's outer loop is rules; each rule walks
-`ctx.index.files()` and filters by scope. For per-file
-rules (the `file_*` family — most of the catalogue), that
-re-walks the index N times. Flipping to file-major
-dispatch — walk files once, fan rules out per file —
-improves cache locality (file content read once, all
-matching rules apply) and trims redundant globset work.
+alint-core's `engine.rs`, `walker.rs`, `registry.rs`,
+`report.rs`, `error.rs`, `level.rs`, `scope.rs`,
+`config.rs`, `rule.rs` all have 0 unit tests today. The
+most important crate has the worst coverage of its own
+internals.
 
-- ⏳ **Engine restructure** — dual-loop where per-file
-  rules run under a file-major outer loop and cross-file
-  rules (`pair`, `for_each_dir`, `every_matching_has`,
-  `unique_by`, `dir_contains`, `dir_only_contains`) keep
-  the rule-major path. Distinguishable via the existing
-  `Rule::requires_full_index()` method.
-- ⏳ **File-content read coalescing** — multiple content
-  rules over the same file each call `std::fs::read`
-  today. Under file-major dispatch the read happens once
-  per file and is shared across all matching rules.
-- ⏳ **Bench acceptance gate** — numbers must show on the
-  `bench-scale` matrix (regression-guard from the previous
-  sub-theme catches a regression here for free).
+- ⏳ Unit tests for `walker::walk`, `Registry::build`,
+  `Report` aggregation, `Scope::matches` edge cases,
+  `Engine::run` (changed-mode path-scope intersection,
+  fact-eval failure paths), `BlameCache` thread-safety
+  under contention.
+- ⏳ alint-dsl edges: extends-chain cycle detection,
+  diamond inheritance, `extends:` filter validation
+  (`only:` / `except:`), nested-config path-prefix
+  rewriting, `.alint.d/` merge order determinism, HTTPS
+  timeout / size-cap enforcement, SRI algorithm-mismatch
+  errors, template-instantiation edge cases.
+- ⏳ **Cross-formatter snapshot test** as the keystone:
+  same fixed Report rendered through all 8 output
+  formatters with golden-file comparison. Each formatter
+  drifts independently today; this test is the
+  single-source-of-truth gate.
 
-### Parallel walker
+### v0.8.3 — CLI surface coverage
 
-`alint-core::walker::walk` is single-threaded. The
-`ignore` crate's `WalkBuilder::build_parallel` exists
-specifically for trees where syscall bandwidth saturates
-ahead of CPU. Switching to it should help on huge trees
-(Linux kernel, polyglot monorepos with deep node_modules /
-target / venv directories).
+trycmd 33 → ~70 cases. Today 27 of 30 are happy-path only
+(only 2 have stderr snapshots).
 
-- ⏳ Replace `WalkBuilder::build()` with
-  `build_parallel()`; collect into the same
-  `Vec<FileEntry>` shape via a `Mutex<Vec<_>>` or
-  channel.
-- ⏳ Sort the collected vec by relative path before
-  returning so rule evaluation order stays deterministic
-  across runs — output-format snapshot tests depend on
-  this.
-- ⏳ Document the threading-knob behaviour: rayon-style
-  `--jobs N` flag or env var so CI runners with bounded
-  CPU don't over-subscribe.
+- ⏳ Stderr snapshots for every error path: `--changed`
+  on non-git, `--base invalid-ref`, malformed YAML,
+  unknown rule kind, `--fail-on-warning` exit-code
+  verification, `export-agents-md --inline` malformed
+  markers.
+- ⏳ Per-subcommand `--help` snapshot tests — flag drift
+  caught immediately.
+- ⏳ `--color auto` × `NO_COLOR` × `CLICOLOR_FORCE`
+  matrix.
+- ⏳ `--progress=auto|always|never` × TTY/non-TTY matrix.
 
-### Memory-footprint pass
+### v0.8.4 — Benchmark uplift
 
-Smaller leverage than the dispatch flip but cheap under
-the same release.
+Today 6 of ~50 rule kinds have isolated criterion benches.
+0 output formatters benched. 0 fix-throughput benches.
 
-- ⏳ Audit `Violation` / `RuleResult` / `Report` — many
-  fields are owned `String` where `Cow<'_, str>` or
-  `&'static str` would do (rule-kind names, severity
-  labels, message-template-passthrough cases).
-- ⏳ Lazy file-content loading for line-oriented rules
-  (`no_trailing_whitespace`, `final_newline`,
-  `line_max_width`, `max_consecutive_blank_lines`,
-  `indent_style`, …) — `BufReader::lines()` instead of
-  `std::fs::read`.
-- ⏳ Profile via `dhat` or `valgrind massif` against the
-  bench scenarios; publish the report alongside the
-  release.
+- ⏳ `single_file_rules.rs` — every per-file rule kind,
+  parameterised over file size and tree size.
+- ⏳ `cross_file_rules.rs` — `pair`, `for_each_dir`,
+  `every_matching_has`, `unique_by`, `dir_contains`,
+  `dir_only_contains` at varying tree shapes.
+- ⏳ `structured_query.rs` — JSON / YAML / TOML parse +
+  path-query throughput; `json_schema_passes` validation.
+- ⏳ `output_formats.rs` — 1k / 10k / 100k violation
+  Reports rendered through all 8 formatters.
+- ⏳ `fix_throughput.rs` — every fix-op type on synthetic
+  violation lists.
+- ⏳ `blame_cache.rs` — cold/warm/miss-rate
+  characterisation.
+- ⏳ `dsl_extends.rs` — extends-chain depth + drop-in
+  merge cost.
+- ⏳ Two new hyperfine scenarios: S4 `agent-hygiene`, S5
+  `fix-pass`. Walker parallelism baseline so v0.9's
+  `build_parallel` switch has a "before" number.
 
-### Out of scope
+### v0.8.5 — Regression-guard + rot-prevention
 
-- **Switching from `regex` to `regex-lite`** — tempting
-  for binary size but the catalogue uses features
-  (`(?x)`, named captures, lookahead in some rule kinds)
-  that `lite` doesn't support.
-- **Pre-compiling rule chains via macros** — the
-  declarative DSL is the user-facing surface; turning
-  rules into static dispatch would lock in the rule
-  catalogue.
-- **Custom allocators (`mimalloc` / `jemalloc`)** —
-  downstream concern. Users can opt in via `RUSTFLAGS`
-  if they want; alint stays vanilla.
+Closes the v0.8 cut. Makes test/bench rot mechanically
+impossible to ship.
 
-## v0.9 — LSP
+- ⏳ **`xtask bench-compare`** — diffs two `results.json`
+  files; fails when any scenario regresses past
+  `--threshold` (default ±10%). PR-time on the small-tree
+  subset; nightly on the full matrix.
+- ⏳ **Baseline against v0.7.0** captured + committed so
+  v0.8 lands honest now.
+- ⏳ **Fixture-completeness test** — `accepts_every_rule_kind`
+  extended to assert the fixture covers every registered
+  kind (currently 18 of 66).
+- ⏳ **Scenario-coverage audit test** — every registered
+  rule kind must have ≥1 scenario.
+- ⏳ **Default-option snapshot test** — `insta::assert_snapshot`
+  over each rule's default options. Catches silent default
+  changes.
+- ⏳ **CLI flag inventory snapshot** per subcommand.
+- ⏳ **JSON report schema** at `schemas/v1/report.json` +
+  trycmd JSON validation against it. Stable shape for
+  downstream tooling.
+- ⏳ **`cargo llvm-cov` instrumentation** + Codecov.
+  Target 85% workspace-wide line coverage; gate at 80%
+  initially so PRs don't fail on noise.
+- ⏳ **`cargo mutants` nightly** rotating one crate at a
+  time (workspace-wide is hours per run).
+- ⏳ **Cross-platform CI** — extend test job to
+  linux-x86_64 + macos-arm64 + windows-x86_64
+  (GitHub-hosted runners initially; self-hosted is
+  operational overhead we'll defer).
 
-(Was v0.6 in the pre-2026-04-27 roadmap; pushed back three
-slots after the agent-era re-prioritisation and the v0.8
-perf revival.)
+### Out of scope (deferred to v0.9 engine cut)
+
+- Per-file-rule dispatch flip (engine restructure).
+- Parallel walker (`WalkBuilder::build_parallel`).
+- Memory-footprint pass (Cow / lazy file content / dhat
+  profile).
+
+All three were originally v0.8 sub-themes; they shift to
+v0.9 because the v0.8 test/bench foundation is the gate
+that lets engine work land without regressing user-visible
+behaviour.
+
+## v0.9 — Engine optimization
+
+(Was v0.8 sub-themes 2–4 in the pre-2026-04-28 plan;
+displaced by the v0.8 test/bench foundation.)
+
+- Per-file-rule dispatch flip — per-file rules run under a
+  file-major outer loop, cross-file rules
+  (`requires_full_index() == true`) keep the rule-major
+  path. Coalesces redundant `std::fs::read` calls when
+  multiple content rules match the same file.
+- Parallel walker via `WalkBuilder::build_parallel`;
+  deterministic post-sort by relative path so snapshot
+  tests stay stable.
+- Memory-footprint pass: `String` → `Cow` audit on
+  `Violation` / `RuleResult` / `Report`,
+  `BufReader::lines()` for line-oriented rules,
+  `dhat` / `massif` profile against the v0.8 bench
+  scenarios.
+- v0.8.5's `bench-compare` gate catches any regression
+  from the engine restructure for free.
+
+## v0.10 — LSP
+
+(Was v0.6 in the pre-2026-04-27 roadmap; pushed back four
+slots after the agent-era re-prioritisation, the v0.8 test
+foundation, and the v0.9 engine cut.)
 
 - LSP server (`alint lsp`): inline diagnostics, hover with
   rule documentation, code actions for "add to ignore" and
   "apply fix."
 - VS Code extension (bundles the LSP).
-- Per-file dispatch shape from v0.8 directly powers the
+- Per-file dispatch shape from v0.9 directly powers the
   per-file-edit re-evaluation hot path.
 
-## v0.10 — WASM plugins
+## v0.11 — WASM plugins
 
-(Was v0.7 in the pre-2026-04-27 roadmap; pushed back three
+(Was v0.7 in the pre-2026-04-27 roadmap; pushed back four
 slots.)
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT

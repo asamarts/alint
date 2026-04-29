@@ -79,3 +79,94 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         min_bytes: opts.min_bytes,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml};
+    use alint_core::{FileEntry, FileIndex};
+    use std::path::{Path, PathBuf};
+
+    fn idx_with_size(path: &str, size: u64) -> FileIndex {
+        FileIndex {
+            entries: vec![FileEntry {
+                path: PathBuf::from(path),
+                is_dir: false,
+                size,
+            }],
+        }
+    }
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_min_size\n\
+             min_bytes: 100\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_size_above_minimum() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_min_size\n\
+             paths: \"README.md\"\n\
+             min_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("README.md", 1024);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_when_size_below_minimum() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_min_size\n\
+             paths: \"README.md\"\n\
+             min_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("README.md", 10);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_size_at_exact_minimum_passes() {
+        // Boundary: `entry.size < min_bytes` is strict, so a
+        // file at exactly min_bytes passes.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_min_size\n\
+             paths: \"a.bin\"\n\
+             min_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("a.bin", 100);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "size == min should pass: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_zero_byte_file_fires_when_minimum_positive() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_min_size\n\
+             paths: \"empty.txt\"\n\
+             min_bytes: 1\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("empty.txt", 0);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+}

@@ -119,3 +119,102 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             pattern: \".*\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"**/*\"\n\
+             pattern: \"[unterminated\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_pattern_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"LICENSE\"\n\
+             pattern: \"Apache License\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) =
+            tempdir_with_files(&[("LICENSE", b"Apache License Version 2.0, January 2004\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "pattern should match: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_when_pattern_missing() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"LICENSE\"\n\
+             pattern: \"Apache License\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("LICENSE", b"MIT License\n\nCopyright ...\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_skips_files_outside_scope() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"LICENSE\"\n\
+             pattern: \"Apache\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("README.md", b"no apache here")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "out-of-scope shouldn't fire: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_with_clear_message_on_non_utf8() {
+        // file_content_matches needs to read text to apply the
+        // regex; non-UTF-8 input surfaces an explicit violation
+        // rather than silently skipping (so a binary commit
+        // doesn't accidentally hide a missing-pattern policy).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"img.bin\"\n\
+             pattern: \"never matches\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("img.bin", &[0xff, 0xfe, 0xfd])]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "non-UTF-8 should report one violation");
+        assert!(
+            v[0].message.contains("UTF-8"),
+            "message should mention UTF-8: {}",
+            v[0].message
+        );
+    }
+}

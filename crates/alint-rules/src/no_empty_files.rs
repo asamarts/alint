@@ -78,3 +78,90 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml};
+    use alint_core::{FileEntry, FileIndex};
+    use std::path::{Path, PathBuf};
+
+    fn idx(entries: &[(&str, u64)]) -> FileIndex {
+        FileIndex {
+            entries: entries
+                .iter()
+                .map(|(p, sz)| FileEntry {
+                    path: PathBuf::from(p),
+                    is_dir: false,
+                    size: *sz,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_accepts_file_remove_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             paths: \"**/*\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.fixer().is_some());
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             paths: \"**/*\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_create:\n    \
+                 content: \"x\"\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_fires_on_zero_byte_files() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = idx(&[("a.txt", 0), ("b.txt", 100), ("c.txt", 0)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 2, "two empty files should fire");
+    }
+
+    #[test]
+    fn evaluate_passes_on_non_empty_files() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = idx(&[("a.txt", 1), ("b.txt", 1024)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert!(v.is_empty());
+    }
+}

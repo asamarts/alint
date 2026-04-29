@@ -68,3 +68,90 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         max_bytes: opts.max_bytes,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml};
+    use alint_core::{FileEntry, FileIndex};
+    use std::path::{Path, PathBuf};
+
+    fn idx_with_size(path: &str, size: u64) -> FileIndex {
+        FileIndex {
+            entries: vec![FileEntry {
+                path: PathBuf::from(path),
+                is_dir: false,
+                size,
+            }],
+        }
+    }
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             max_bytes: 1000\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_missing_max_bytes() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_size_under_limit() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             paths: \"**/*\"\n\
+             max_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("a.bin", 50);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_fires_when_size_over_limit() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             paths: \"**/*\"\n\
+             max_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("big.bin", 1024);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_size_at_exact_limit_passes() {
+        // Boundary: `entry.size > max_bytes` is strict, so a
+        // file at exactly max_bytes is OK.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             paths: \"**/*\"\n\
+             max_bytes: 100\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = idx_with_size("a.bin", 100);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "size == max should pass: {v:?}");
+    }
+}

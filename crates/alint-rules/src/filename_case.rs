@@ -100,3 +100,113 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             case: snake_case\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_rejects_missing_case_option() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"src/**/*.rs\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err(), "missing `case:` should error");
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix_op() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"src/**/*.rs\"\n\
+             case: snake_case\n\
+             level: error\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_remove"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn evaluate_passes_on_canonical_snake_case() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"src/**/*.rs\"\n\
+             case: snake_case\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["src/main.rs", "src/lib.rs", "src/sub/mod.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_on_pascal_case_when_snake_required() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"src/**/*.rs\"\n\
+             case: snake_case\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["src/MainModule.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_skips_files_outside_scope() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"src/**/*.rs\"\n\
+             case: snake_case\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        // PascalCase, but outside scope.
+        let idx = index(&["docs/MainDoc.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "out-of-scope shouldn't fire: {v:?}");
+    }
+
+    #[test]
+    fn pascal_case_matches_canonical_components() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"components/**/*.tsx\"\n\
+             case: PascalCase\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&[
+            "components/Button.tsx",
+            "components/UserCard.tsx",
+            "components/bad_name.tsx",
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only `bad_name` should fire");
+    }
+}

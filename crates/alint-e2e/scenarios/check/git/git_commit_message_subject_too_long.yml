@@ -1,0 +1,25 @@
+name: git_commit_message fires when HEAD subject exceeds the configured cap
+tags: [check, git_commit_message, git, failing]
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: short-subjects
+        kind: git_commit_message
+        subject_max_length: 20
+        level: warning
+  git:
+    init: true
+    add: [README.md]
+    # The runner uses a fixed commit message: "scenario commit" (15 chars).
+    # 15 < 20 → no violation. We need a longer subject; see the
+    # _custom_message variant below.
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

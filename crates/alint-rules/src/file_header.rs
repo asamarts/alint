@@ -135,3 +135,102 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         fixer,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             pattern: \"^// SPDX\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_zero_lines() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"^// SPDX\"\n\
+             lines: 0\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("lines"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_rejects_invalid_regex() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"[unterminated\"\n\
+             level: error\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_when_header_matches() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"SPDX-License-Identifier: Apache-2.0\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "src/main.rs",
+            b"// SPDX-License-Identifier: Apache-2.0\n\nfn main() {}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "header should match: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_when_header_missing() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"SPDX-License-Identifier:\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("src/main.rs", b"fn main() {}\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_only_inspects_first_n_lines() {
+        // Pattern only on line 30, but `lines: 5` only looks at
+        // lines 1-5 → rule fires.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_header\n\
+             paths: \"src/**/*.rs\"\n\
+             pattern: \"NEEDLE\"\n\
+             lines: 5\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let mut content = String::new();
+        for _ in 0..30 {
+            content.push_str("filler\n");
+        }
+        content.push_str("NEEDLE\n");
+        let (tmp, idx) = tempdir_with_files(&[("src/main.rs", content.as_bytes())]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+}

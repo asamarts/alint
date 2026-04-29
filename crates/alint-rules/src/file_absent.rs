@@ -118,3 +118,119 @@ fn patterns_of(spec: &PathsSpec) -> Vec<String> {
         PathsSpec::IncludeExclude { include, .. } => include.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_rejects_incompatible_fix_op() {
+        // file_absent supports `file_remove` only; any other
+        // op surfaces a config error so a typo doesn't silently
+        // disable the fix path.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"*.bak\"\n\
+             level: error\n\
+             fix:\n  \
+               file_create:\n    \
+                 content: \"\"\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_create"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_accepts_file_remove_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"*.bak\"\n\
+             level: error\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        let rule = build(&spec).expect("valid file_remove fix");
+        assert!(rule.fixer().is_some(), "fixer should be present");
+    }
+
+    #[test]
+    fn evaluate_passes_when_no_match_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"*.bak\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["src/main.rs", "README.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_one_violation_per_match() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"**/*.bak\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["a.bak", "src/b.bak", "ok.txt"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 2, "expected one violation per .bak: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_silent_when_git_tracked_only_outside_repo() {
+        // git_tracked_only requires `ctx.git_tracked` to be
+        // populated; when it's None (no rule asked for it / no
+        // git repo), every path reads as "untracked" and the
+        // rule no-ops — the right default for "don't let X be
+        // committed" semantics.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"*.bak\"\n\
+             level: error\n\
+             git_tracked_only: true\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["a.bak"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(
+            v.is_empty(),
+            "git_tracked_only without ctx.git_tracked must no-op: {v:?}",
+        );
+    }
+
+    #[test]
+    fn rule_advertises_full_index_requirement() {
+        // Existence-axis rules opt out of changed-mode
+        // filtering — an unchanged-but-already-committed `.env`
+        // should still fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \".env\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.requires_full_index());
+    }
+}

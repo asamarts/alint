@@ -87,3 +87,95 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: shebang_has_executable\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_rejects_fix_block() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: shebang_has_executable\n\
+             paths: \"scripts/**\"\n\
+             level: warning\n\
+             fix:\n  \
+               file_remove: {}\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_fires_when_shebang_lacks_exec_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: shebang_has_executable\n\
+             paths: \"scripts/**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("scripts/a.sh", b"#!/bin/sh\necho hi\n")]);
+        let mut perms = std::fs::metadata(tmp.path().join("scripts/a.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(tmp.path().join("scripts/a.sh"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "shebang without +x must fire");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_passes_when_shebang_has_exec_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: shebang_has_executable\n\
+             paths: \"scripts/**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("scripts/a.sh", b"#!/bin/sh\necho hi\n")]);
+        let mut perms = std::fs::metadata(tmp.path().join("scripts/a.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(tmp.path().join("scripts/a.sh"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "shebang with +x should pass: {v:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_silent_on_non_shebang_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: shebang_has_executable\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", b"plain text")]);
+        let mut perms = std::fs::metadata(tmp.path().join("a.txt"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(tmp.path().join("a.txt"), perms).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "no shebang means rule no-ops: {v:?}");
+    }
+}

@@ -74,3 +74,81 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             level: warning\n",
+        );
+        assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn evaluate_passes_on_utf8_text() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             paths: \"**/*.rs\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.rs", b"// hello\nfn main() {}\n")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "utf-8 text should pass: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_on_binary_content() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        // Bytes with NUL + binary tail; content_inspector
+        // should classify as Binary.
+        let mut binary = vec![0u8; 16];
+        binary.extend_from_slice(&[0xff, 0xfe, 0xfd, 0xfc]);
+        let (tmp, idx) = tempdir_with_files(&[("img.bin", &binary)]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "binary should fire: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_silent_on_zero_byte_file() {
+        // Empty files are treated as text by convention —
+        // no read needed, no violation.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("empty", b"")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn evaluate_skips_out_of_scope_files() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             paths: \"src/**/*.rs\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("img.bin", &[0u8; 64])]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "out-of-scope shouldn't fire: {v:?}");
+    }
+}

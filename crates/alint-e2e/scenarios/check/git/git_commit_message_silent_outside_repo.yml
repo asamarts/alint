@@ -1,0 +1,22 @@
+name: git_commit_message stays silent when there is no git repo
+tags: [check, git_commit_message, git, passing]
+
+# No `given.git:` block — the tempdir is not a git repo. The rule
+# silently no-ops outside a git repo, matching the rest of the
+# git-aware family.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: conventional-commit
+        kind: git_commit_message
+        pattern: '^(feat|fix|chore): '
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

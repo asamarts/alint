@@ -93,3 +93,96 @@ fn patterns_of(spec: &PathsSpec) -> Vec<String> {
         PathsSpec::IncludeExclude { include, .. } => include.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index_with_dirs, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn evaluate_passes_when_no_matching_dir_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             paths: \"target\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("src", true), ("docs", true)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_one_violation_per_forbidden_dir() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             paths: \"**/target\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("target", true), ("crates/foo/target", true), ("src", true)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 2, "expected one violation per target dir: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_ignores_files_with_matching_name() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             paths: \"target\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        // A file named "target" should NOT fire `dir_absent`.
+        let idx = index_with_dirs(&[("target", false)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "file named 'target' shouldn't fire");
+    }
+
+    #[test]
+    fn git_tracked_only_silent_outside_repo() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             paths: \"target\"\n\
+             level: error\n\
+             git_tracked_only: true\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("target", true)]);
+        // ctx.git_tracked is None, so dir_has_tracked_files
+        // always returns false → rule no-ops.
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(
+            v.is_empty(),
+            "git_tracked_only without tracked-set must no-op: {v:?}",
+        );
+    }
+
+    #[test]
+    fn rule_advertises_full_index_requirement() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_absent\n\
+             paths: \"target\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.requires_full_index());
+    }
+}

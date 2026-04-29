@@ -95,3 +95,90 @@ fn patterns_of(spec: &PathsSpec) -> Vec<String> {
         PathsSpec::IncludeExclude { include, .. } => include.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{ctx, index_with_dirs, spec_yaml};
+    use std::path::Path;
+
+    #[test]
+    fn build_rejects_missing_paths_field() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn evaluate_passes_when_matching_dir_present() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             paths: \"docs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("docs", true), ("docs/README.md", false)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_fires_when_directory_missing() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             paths: \"docs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("README.md", false), ("src", true)]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "missing dir should fire one violation");
+    }
+
+    #[test]
+    fn evaluate_skips_files_when_dir_glob_only_matches_dirs() {
+        // A file named `docs` must not satisfy a `dir_exists`
+        // rule — only entries with `is_dir: true` count.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             paths: \"docs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index_with_dirs(&[("docs", false)]); // a file named "docs"
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn rule_advertises_full_index_requirement() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             paths: \"docs\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.requires_full_index());
+    }
+
+    #[test]
+    fn git_tracked_only_propagates_to_wants_git_tracked() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: dir_exists\n\
+             paths: \"src\"\n\
+             level: error\n\
+             git_tracked_only: true\n",
+        );
+        let rule = build(&spec).unwrap();
+        assert!(rule.wants_git_tracked());
+    }
+}
