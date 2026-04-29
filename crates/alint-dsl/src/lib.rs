@@ -962,7 +962,11 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
         )));
     }
 
-    let dir_prefix = rel_dir.to_string_lossy().into_owned();
+    // Glob patterns are platform-agnostic (always `/`); on
+    // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd
+    // end up with mixed-separator globs like `packages\foo/foo.txt`
+    // that don't compile against globset cleanly.
+    let dir_prefix = rel_dir.to_string_lossy().replace('\\', "/");
     let mut out = Vec::with_capacity(config.rules.len());
     for mut rule in config.rules {
         scope_rule(&mut rule, &dir_prefix, &source)?;
