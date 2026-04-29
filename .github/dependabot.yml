@@ -1,0 +1,47 @@
+version: 2
+
+# Weekly cadence is generous enough not to drown the queue but
+# tight enough that an action stuck on a deprecated version
+# surfaces within a release cycle.
+#
+# `cargo` updates honour the workspace `Cargo.lock` — Dependabot
+# bumps lockfile entries; we review/merge.
+#
+# `github-actions` covers every `uses:` in `.github/workflows/`.
+# This is the lane that actually rots: docker/setup-buildx
+# minor-pinned to @v3 means bug fixes get picked up; @v4 majors
+# arrive as PRs we evaluate.
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      actions-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: "chore(actions)"
+      include: scope

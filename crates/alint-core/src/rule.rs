@@ -291,3 +291,185 @@ pub fn read_for_fix(
     })?;
     Ok(ReadForFix::Bytes(bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_index() -> FileIndex {
+        FileIndex::default()
+    }
+
+    #[test]
+    fn violation_builder_sets_fields_via_chain() {
+        let v = Violation::new("trailing whitespace")
+            .with_path("src/main.rs")
+            .with_location(12, 4);
+        assert_eq!(v.message, "trailing whitespace");
+        assert_eq!(v.path.as_deref(), Some(Path::new("src/main.rs")));
+        assert_eq!(v.line, Some(12));
+        assert_eq!(v.column, Some(4));
+    }
+
+    #[test]
+    fn violation_new_starts_with_no_path_or_location() {
+        let v = Violation::new("global note");
+        assert!(v.path.is_none());
+        assert!(v.line.is_none());
+        assert!(v.column.is_none());
+    }
+
+    #[test]
+    fn rule_result_passed_iff_violations_empty() {
+        let mut r = RuleResult {
+            rule_id: "x".into(),
+            level: Level::Error,
+            policy_url: None,
+            violations: Vec::new(),
+            is_fixable: false,
+        };
+        assert!(r.passed());
+        r.violations.push(Violation::new("oops"));
+        assert!(!r.passed());
+    }
+
+    #[test]
+    fn context_is_git_tracked_returns_false_outside_repo() {
+        let idx = empty_index();
+        let ctx = Context {
+            root: Path::new("/tmp"),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None, // outside-a-repo / no rule opted in
+            git_blame: None,
+        };
+        assert!(!ctx.is_git_tracked(Path::new("anything.rs")));
+        assert!(!ctx.dir_has_tracked_files(Path::new("src")));
+    }
+
+    #[test]
+    fn context_is_git_tracked_consults_set_when_present() {
+        let mut tracked: std::collections::HashSet<PathBuf> =
+            std::collections::HashSet::new();
+        tracked.insert(PathBuf::from("src/main.rs"));
+        let idx = empty_index();
+        let ctx = Context {
+            root: Path::new("/tmp"),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: Some(&tracked),
+            git_blame: None,
+        };
+        assert!(ctx.is_git_tracked(Path::new("src/main.rs")));
+        assert!(!ctx.is_git_tracked(Path::new("README.md")));
+    }
+
+    /// Stand-in `Rule` impl that returns the trait defaults.
+    /// Lets us assert the documented defaults without dragging
+    /// in a real registered rule.
+    #[derive(Debug)]
+    struct DefaultRule;
+
+    impl Rule for DefaultRule {
+        fn id(&self) -> &'static str {
+            "default"
+        }
+        fn level(&self) -> Level {
+            Level::Warning
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> Result<Vec<Violation>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn rule_trait_defaults_are_safe_no_ops() {
+        let r = DefaultRule;
+        assert_eq!(r.policy_url(), None);
+        assert!(!r.wants_git_tracked());
+        assert!(!r.wants_git_blame());
+        assert!(!r.requires_full_index());
+        assert!(r.path_scope().is_none());
+        assert!(r.fixer().is_none());
+    }
+
+    #[test]
+    fn check_fix_size_returns_none_when_limit_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("a.txt");
+        std::fs::write(&f, b"hello").unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+        };
+        let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
+        assert!(outcome.is_none());
+    }
+
+    #[test]
+    fn check_fix_size_skips_over_limit_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("big.txt");
+        std::fs::write(&f, vec![b'x'; 1024]).unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: Some(64),
+        };
+        let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
+        match outcome {
+            Some(FixOutcome::Skipped(reason)) => {
+                assert!(reason.contains("exceeds fix_size_limit"));
+                assert!(reason.contains("big.txt"));
+            }
+            other => panic!("expected Skipped, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_for_fix_returns_bytes_when_in_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("a.txt");
+        std::fs::write(&f, b"hello").unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: Some(1 << 20),
+        };
+        match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
+            ReadForFix::Skipped(_) => panic!("expected Bytes, got Skipped"),
+        }
+    }
+
+    #[test]
+    fn read_for_fix_returns_skipped_when_over_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("big.txt");
+        std::fs::write(&f, vec![b'x'; 1024]).unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: Some(64),
+        };
+        match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
+            ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
+            ReadForFix::Skipped(FixOutcome::Applied(_)) => {
+                panic!("expected Skipped, got Skipped(Applied)")
+            }
+            ReadForFix::Bytes(_) => panic!("expected Skipped, got Bytes"),
+        }
+    }
+
+    #[test]
+    fn fix_outcome_variants_are_constructible() {
+        // Sanity: documented variant shapes haven't drifted.
+        let _applied = FixOutcome::Applied("created LICENSE".into());
+        let _skipped = FixOutcome::Skipped("already exists".into());
+    }
+}

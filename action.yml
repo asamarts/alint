@@ -52,9 +52,16 @@ runs:
       env:
         ALINT_VERSION: ${{ inputs.version }}
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
+        # Pin install.sh to whichever ref the consumer pinned the
+        # action to (e.g. `asamarts/alint@v0.7.0`). Without this,
+        # `main`'s install.sh would be fetched on every run — a
+        # change to that script affects every action consumer
+        # regardless of the version they pinned.
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
-        curl -fsSL "https://raw.githubusercontent.com/asamarts/alint/main/install.sh" | bash
+        ref="${ACTION_REF:-main}"
+        curl -fsSL "https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh" | bash
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
     - name: Run alint

@@ -5,6 +5,13 @@ name: Action self-test
 # chain that external consumers follow, which our in-process
 # tests don't cover. Runs on ubuntu-latest (not self-hosted) so
 # this job represents a typical external user's environment.
+#
+# `uses: asamarts/alint@${{ github.sha }}` pins each invocation
+# to the exact commit being tested rather than a floating `main`
+# ref — so a PR's action.yml change is exercised by *its own*
+# action.yml, not whatever happens to be on main when the job
+# runs. Closes a long-standing supply-chain gap where the
+# self-test couldn't actually fail safely on a bad action.yml.
 
 on:
   push:
@@ -25,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: alint check (annotations)
-        uses: asamarts/alint@main
+        uses: asamarts/alint@${{ github.sha }}
         # Default format is `github` — inline annotations on
         # the PR if run against a PR commit. Exit 0 if the repo
         # is clean against its own `.alint.yml`.
@@ -37,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: alint check (sarif)
         id: alint
-        uses: asamarts/alint@main
+        uses: asamarts/alint@${{ github.sha }}
         with:
           format: sarif
         continue-on-error: true
@@ -54,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: alint check (json)
-        uses: asamarts/alint@main
+        uses: asamarts/alint@${{ github.sha }}
         with:
           format: json
 
@@ -64,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: alint check with explicit version input
-        uses: asamarts/alint@main
+        uses: asamarts/alint@${{ github.sha }}
         with:
           # Exercises install.sh's version-pinning path against
           # a specific release tag. Must name a release whose

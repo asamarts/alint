@@ -506,3 +506,208 @@ impl NestedRuleSpec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::template::PathTokens;
+    use std::path::Path;
+
+    #[test]
+    fn config_default_respects_gitignore_and_caps_fix_size() {
+        // Round-trip the documented defaults through serde to
+        // catch silent default drift.
+        let cfg: Config = serde_yaml_ng::from_str("version: 1\n").expect("minimal config");
+        assert_eq!(cfg.version, 1);
+        assert!(cfg.respect_gitignore);
+        assert_eq!(cfg.fix_size_limit, Some(1 << 20));
+        assert!(!cfg.nested_configs);
+        assert!(cfg.extends.is_empty());
+        assert!(cfg.rules.is_empty());
+    }
+
+    #[test]
+    fn config_rejects_unknown_top_level_field() {
+        let err = serde_yaml_ng::from_str::<Config>("version: 1\nignored_typo: true\n");
+        assert!(err.is_err(), "deny_unknown_fields should reject typos");
+    }
+
+    #[test]
+    fn config_explicit_null_disables_fix_size_limit() {
+        let cfg: Config =
+            serde_yaml_ng::from_str("version: 1\nfix_size_limit: null\n").unwrap();
+        assert_eq!(cfg.fix_size_limit, None);
+    }
+
+    #[test]
+    fn extends_entry_url_form_has_no_filters() {
+        let e = ExtendsEntry::Url("alint://bundled/oss-baseline@v1".into());
+        assert_eq!(e.url(), "alint://bundled/oss-baseline@v1");
+        assert!(e.only().is_none());
+        assert!(e.except().is_none());
+    }
+
+    #[test]
+    fn extends_entry_filtered_form_exposes_only_and_except() {
+        let e = ExtendsEntry::Filtered {
+            url: "alint://bundled/rust@v1".into(),
+            only: Some(vec!["rust-edition".into()]),
+            except: None,
+        };
+        assert_eq!(e.url(), "alint://bundled/rust@v1");
+        assert_eq!(e.only(), Some(&["rust-edition".to_string()][..]));
+        assert!(e.except().is_none());
+    }
+
+    #[test]
+    fn extends_entry_filtered_form_supports_except_only() {
+        let e = ExtendsEntry::Filtered {
+            url: "./team.yml".into(),
+            only: None,
+            except: Some(vec!["legacy-rule".into()]),
+        };
+        assert_eq!(e.except(), Some(&["legacy-rule".to_string()][..]));
+        assert!(e.only().is_none());
+    }
+
+    #[test]
+    fn paths_spec_accepts_three_shapes() {
+        let single: PathsSpec = serde_yaml_ng::from_str("\"src/**\"").unwrap();
+        assert!(matches!(single, PathsSpec::Single(s) if s == "src/**"));
+
+        let many: PathsSpec =
+            serde_yaml_ng::from_str("[\"src/**\", \"!src/vendor/**\"]").unwrap();
+        assert!(matches!(many, PathsSpec::Many(v) if v.len() == 2));
+
+        let inc_exc: PathsSpec =
+            serde_yaml_ng::from_str("include: src/**\nexclude: src/vendor/**\n").unwrap();
+        match inc_exc {
+            PathsSpec::IncludeExclude { include, exclude } => {
+                assert_eq!(include, vec!["src/**"]);
+                assert_eq!(exclude, vec!["src/vendor/**"]);
+            }
+            _ => panic!("expected include/exclude shape"),
+        }
+    }
+
+    #[test]
+    fn paths_spec_include_accepts_string_or_vec() {
+        let from_string: PathsSpec =
+            serde_yaml_ng::from_str("include: a\nexclude:\n  - b\n  - c\n").unwrap();
+        let PathsSpec::IncludeExclude { include, exclude } = from_string else {
+            panic!("expected include/exclude shape");
+        };
+        assert_eq!(include, vec!["a"]);
+        assert_eq!(exclude, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn rule_spec_deserialize_options_picks_up_kind_specific_fields() {
+        #[derive(Deserialize, Debug)]
+        struct PatternOnly {
+            pattern: String,
+        }
+        let spec: RuleSpec = serde_yaml_ng::from_str(
+            "id: r\nkind: file_content_matches\nlevel: error\npaths: src/**\npattern: TODO\n",
+        )
+        .unwrap();
+        let opts: PatternOnly = spec.deserialize_options().unwrap();
+        assert_eq!(opts.pattern, "TODO");
+    }
+
+    #[test]
+    fn fix_spec_op_name_covers_every_variant() {
+        // Round-trip every documented op name through YAML; any
+        // future fix variant added without a corresponding
+        // op_name arm will fall through serde and trip this test.
+        let cases = [
+            ("file_create:\n  content: x\n", "file_create"),
+            ("file_remove: {}", "file_remove"),
+            ("file_prepend:\n  content: x\n", "file_prepend"),
+            ("file_append:\n  content: x\n", "file_append"),
+            ("file_rename: {}", "file_rename"),
+            (
+                "file_trim_trailing_whitespace: {}",
+                "file_trim_trailing_whitespace",
+            ),
+            ("file_append_final_newline: {}", "file_append_final_newline"),
+            (
+                "file_normalize_line_endings: {}",
+                "file_normalize_line_endings",
+            ),
+            ("file_strip_bidi: {}", "file_strip_bidi"),
+            ("file_strip_zero_width: {}", "file_strip_zero_width"),
+            ("file_strip_bom: {}", "file_strip_bom"),
+            ("file_collapse_blank_lines: {}", "file_collapse_blank_lines"),
+        ];
+        for (yaml, expected) in cases {
+            let spec: FixSpec =
+                serde_yaml_ng::from_str(yaml).unwrap_or_else(|e| panic!("{yaml}: {e}"));
+            assert_eq!(spec.op_name(), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_content_source_inline_only() {
+        let s = Some("hello".to_string());
+        let resolved = resolve_content_source("r", "file_create", &s, &None).unwrap();
+        assert!(matches!(resolved, ContentSourceSpec::Inline(b) if b == "hello"));
+    }
+
+    #[test]
+    fn resolve_content_source_file_only() {
+        let p = Some(PathBuf::from("LICENSE"));
+        let resolved = resolve_content_source("r", "file_create", &None, &p).unwrap();
+        assert!(matches!(resolved, ContentSourceSpec::File(p) if p == Path::new("LICENSE")));
+    }
+
+    #[test]
+    fn resolve_content_source_rejects_both_set() {
+        let err = resolve_content_source(
+            "r",
+            "file_prepend",
+            &Some("x".into()),
+            &Some(PathBuf::from("y")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn resolve_content_source_rejects_neither_set() {
+        let err = resolve_content_source("r", "file_append", &None, &None).unwrap_err();
+        assert!(err.to_string().contains("required"));
+    }
+
+    #[test]
+    fn content_source_spec_from_string_variants() {
+        let from_owned: ContentSourceSpec = String::from("hi").into();
+        assert!(matches!(from_owned, ContentSourceSpec::Inline(s) if s == "hi"));
+        let from_str: ContentSourceSpec = "hi".into();
+        assert!(matches!(from_str, ContentSourceSpec::Inline(s) if s == "hi"));
+    }
+
+    #[test]
+    fn nested_rule_spec_instantiate_synthesizes_id_and_inherits_level() {
+        let nested: NestedRuleSpec = serde_yaml_ng::from_str(
+            "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: missing in {path}\n",
+        )
+        .unwrap();
+        let tokens = PathTokens::from_path(Path::new("packages/foo"));
+        let spec = nested.instantiate("every-pkg-has-readme", 0, Level::Error, &tokens);
+
+        assert_eq!(spec.id, "every-pkg-has-readme.require[0]");
+        assert_eq!(spec.kind, "file_exists");
+        assert_eq!(spec.level, Level::Error);
+        // Path template should have been rendered for both
+        // `paths:` and `message:` from the iterated tokens.
+        match spec.paths {
+            Some(PathsSpec::Single(p)) => assert_eq!(p, "packages/foo/README.md"),
+            other => panic!("unexpected paths shape: {other:?}"),
+        }
+        assert_eq!(spec.message.as_deref(), Some("missing in packages/foo"));
+        // Nested rules don't propagate git_tracked_only — the
+        // option is meaningful on top-level rules only.
+        assert!(!spec.git_tracked_only);
+    }
+}
