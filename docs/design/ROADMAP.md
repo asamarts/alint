@@ -4,37 +4,31 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.9.3** (2026-04-30). Third phase of
-the v0.9 engine-optimization cut — per-file dispatch flip
-plus per-rule scanning conversions deferred from v0.9.2.
-New `PerFileRule` trait next to `Rule`; rules opt in via
-`Rule::as_per_file(&self) -> Option<&dyn PerFileRule>`.
-The engine partitions per-file from cross-file rules; the
-per-file partition runs under a file-major loop that
-reads each matched file once and dispatches to every
-applicable rule against the same byte buffer. 8 rules
-migrated (line-oriented family + bounded prefix/suffix
-family); remaining ~22 content rules keep the rule-major
-path and will migrate incrementally in v0.9.4. No rule
-logic changes; all 8 output formatters produce byte-
-identical output to v0.9.2. See
+**Latest release: v0.9.4** (2026-04-30). Mechanical follow-
+up to v0.9.3: 16 of the remaining ~22 per-file content
+rules opt into the file-major dispatch path. After this
+cut, every per-file rule that reads file content benefits
+from v0.9.3's read coalescing whenever multiple content
+rules share a scope. `file_max_size` / `file_min_size`
+deliberately stay rule-major (metadata-only, no read to
+coalesce); `json_schema_passes` stays rule-major because
+its repository-level error path doesn't fit per-file
+dispatch. No rule logic changes; all 8 output formatters
+produce byte-identical output to v0.9.3. See
 [CHANGELOG.md](../../CHANGELOG.md) and
-`docs/benchmarks/v0.9/v0.9.3-dispatch-flip/README.md` for
+`docs/benchmarks/v0.9/v0.9.4-content-rules/README.md` for
 captured numbers.
 
-**Next: v0.9.4 — Migrate remaining content rules to
-`PerFileRule`.** Mechanical follow-up: ~22 per-file
-content rules opt into the v0.9.3 dispatch flip
-(file_content_matches, file_content_forbidden,
-file_header, file_footer, file_max/min_lines/size,
-file_hash, file_is_ascii / is_text / shebang,
-json/yaml/toml_path_*, json_schema_passes, no_bom,
-no_bidi/zero_width, markdown_paths_resolve,
-commented_out_code, no_merge_conflict_markers). The
-engine restructure shipped in v0.9.3; v0.9.4 just walks
-each rule body and adds a `PerFileRule` impl alongside
-the existing `Rule` impl. LSP shifts to v0.10; WASM
-plugins to v0.11.
+**v0.9 cut closed.** All three engine-optimization phases
+shipped (parallel walker, type-pass, dispatch flip), plus
+the v0.9.4 content-rule mechanical follow-up.
+
+**Next: v0.10 — LSP server.** Inline diagnostics, hover
+with rule documentation, code actions for "add to ignore"
+and "apply fix", VS Code extension. The per-file dispatch
+shape from v0.9.3 directly powers the per-file-edit
+re-evaluation hot path; v0.9.4 broadens its applicability
+across the rule catalogue. WASM plugins shift to v0.11.
 
 ## Positioning
 
@@ -588,9 +582,19 @@ design pass.)
   `line_max_width`) and 2 bounded-read rules
   (`file_starts_with`, `file_ends_with`) migrated;
   bounded-read helpers (`read_prefix_n` / `read_suffix_n`)
-  in `crates/alint-rules/src/io.rs`. Remaining ~22 per-file
-  content rules keep the rule-major path and migrate in
-  v0.9.4.
+  in `crates/alint-rules/src/io.rs`.
+- ✅ **Content-rule mechanical migration** (v0.9.4,
+  2026-04-30). 16 more per-file content rules opt into
+  the dispatch flip: `file_content_matches`,
+  `file_content_forbidden`, `file_header`, `file_footer`,
+  `file_shebang`, `file_max_lines`, `file_min_lines`,
+  `file_hash`, `file_is_ascii`, `file_is_text`, `no_bom`,
+  `no_bidi_controls`, `no_zero_width_chars`,
+  `no_merge_conflict_markers`, `markdown_paths_resolve`,
+  `structured_path` (json/yaml/toml_path_*).
+  `file_max_size` / `file_min_size` stay rule-major
+  (metadata-only); `json_schema_passes` stays rule-major
+  (repo-level error path doesn't fit per-file dispatch).
 - v0.8.5's `bench-compare` gate catches any regression
   from the engine restructure for free.
 

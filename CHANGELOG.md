@@ -6,6 +6,63 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-04-30
+
+Mechanical follow-up to v0.9.3: migrates 16 of the
+remaining ~22 per-file content rules to opt into the
+file-major dispatch path. After this cut, every per-file
+rule that reads file content benefits from the v0.9.3
+read coalescing whenever multiple content rules share a
+scope. No new rule kinds, formatters, or subcommands;
+every v0.9.3 config runs unchanged. Output bytes from
+all 8 formatters are byte-identical to v0.9.3.
+
+### Performance
+
+Each migrated rule grows a `PerFileRule` impl alongside
+its existing `Rule` impl; the existing `Rule::evaluate`
+body becomes a thin wrapper that walks the index, reads
+each file, and delegates to `evaluate_file` (used by
+`alint fix` and test harnesses that bypass the engine).
+
+**Migrated (16 rules):**
+
+Content-pattern (5): `file_content_matches`,
+`file_content_forbidden`, `file_header`, `file_footer`,
+`file_shebang`.
+
+File-property (5): `file_max_lines`, `file_min_lines`,
+`file_hash`, `file_is_ascii`, `file_is_text` (declares
+`max_bytes_needed: TEXT_INSPECT_LEN`).
+
+Unicode-safety (4): `no_bom` (declares
+`max_bytes_needed: 4`; rule-major path uses the bounded
+`read_prefix_n` helper), `no_bidi_controls`,
+`no_zero_width_chars`, `no_merge_conflict_markers`.
+
+Complex-content (2): `markdown_paths_resolve` (uses
+`ctx.index` in `evaluate_file` to look up backticked
+paths), `structured_path` (which backs `json_path_*`,
+`yaml_path_*`, `toml_path_*`).
+
+### Deliberately not migrated
+
+- `file_max_size` / `file_min_size` — metadata-only
+  checks, no `fs::read` to coalesce.
+- `json_schema_passes` — emits one repository-level
+  violation when the schema fails to compile; the per-
+  file dispatch path would multiply that 1 schema-error
+  into N file-errors.
+
+### Build / test
+
+- Workspace test suite green (1000+ tests across 7
+  crates).
+- Pre-v0.9.4 baseline frozen at
+  `docs/benchmarks/v0.9/baseline-v0.9.3/criterion/`.
+  v0.9.4 numbers at
+  `docs/benchmarks/v0.9/v0.9.4-content-rules/criterion/`.
+
 ## [0.9.3] — 2026-04-30
 
 Third phase of the v0.9 engine-optimization cut: the
@@ -2856,7 +2913,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/asamarts/alint/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/asamarts/alint/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/asamarts/alint/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/asamarts/alint/compare/v0.8.2...v0.9.1
