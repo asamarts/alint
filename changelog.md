@@ -8,49 +8,56 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.8.1] — 2026-04-29
+## [0.8.2] — 2026-04-29
 
-Hotfix for v0.8.0's incomplete crates.io publish. v0.8.0
-shipped to GitHub Releases, npm, Homebrew tap, Docker
-(ghcr.io), and `alint-core` on crates.io — but the `alint`
-binary's crates.io publish failed because the v0.8 audit had
-flagged `alint-dsl` / `alint-rules` / `alint-output` with
-`publish = false`, and `alint`'s manifest depends on all
-three at the workspace version. Cargo can't resolve a
-manifest dep to a crate that isn't on crates.io.
+Second hotfix on v0.8.0; supersedes v0.8.1. Same code as
+v0.8.0 / v0.8.1; manifest + script changes only.
 
-Reverts the `publish = false` change for the three
-implementation-detail crates and restores them to the
-`publish-crates.sh` dep-ordered list. The crates' descriptions
-still read "Internal: Not a stable public API" — the published
-status is a load-bearing accident of cargo's resolver, not an
-invitation to use them. The historical pre-0.8.x versions
-remain yanked on crates.io as a "do not start depending on
-these" signal; fresh 0.8.1 versions publish un-yanked
-alongside, in step with the binary.
+v0.8.1 reverted `publish = false` on the three internal
+crates (the v0.8.0 audit-residue bug) but the next publish
+attempt failed at `alint-dsl@0.8.1` with "no matching
+package named `alint-rules` found". Cargo publish validates
+**dev-dependencies** too, and `alint-dsl` carries
+`alint-rules` as a `[dev-dependencies]` entry (added by
+v0.8.5's fixture-completeness test). With the original
+publish order (`alint-core → alint-dsl → alint-rules →
+alint-output → alint`), `alint-dsl` packages before
+`alint-rules` is on crates.io.
 
-No behavioural changes since v0.8.0 — same bits as v0.8.0
-plus the manifest revert to make `cargo install alint` work.
-
-### Changed
-
-- **`alint-dsl` / `alint-rules` / `alint-output`** —
-  reverted `publish = false`. Their manifests now publish to
-  crates.io alongside `alint-core` and `alint` (and that has
-  to stay true while `alint` itself is published, because
-  cargo workspace deps need a resolvable version line). The
-  comment block on each manifest documents the constraint so
-  a future audit doesn't repeat the trap.
-- **`ci/scripts/publish-crates.sh`** — the `CRATES` list
-  goes back to all five entries in dependency order
-  (alint-core → alint-dsl → alint-rules → alint-output →
-  alint).
+v0.8.1 thus shipped to GitHub Releases, npm, Homebrew,
+Docker, and `alint-core@0.8.1` on crates.io — but
+`alint-dsl@0.8.1` and downstream (alint-rules, alint-output,
+alint) all failed.
 
 ### Fixed
 
-- `cargo install alint` against v0.8.1 resolves cleanly. v0.8.0
-  remains in a partially-published state (4 of 5 channels);
-  consumers should pin to v0.8.1 or `latest` for crates.io.
+- **`ci/scripts/publish-crates.sh`** — re-ordered the
+  `CRATES` list so `alint-rules` and `alint-output` publish
+  before `alint-dsl`: `alint-core → alint-rules →
+  alint-output → alint-dsl → alint`. The new order
+  satisfies every dep direction including dev-deps.
+- `cargo install alint` against v0.8.2 resolves cleanly.
+  v0.8.0 and v0.8.1 remain partially published on
+  crates.io; consumers should pin to v0.8.2 or `latest`.
+
+## [0.8.1] — 2026-04-29 (partially published — superseded by v0.8.2)
+
+Reverted `publish = false` on alint-dsl/rules/output to fix
+v0.8.0's crates.io publish failure. Pipeline progressed
+further (alint-core@0.8.1 published) but failed on
+alint-dsl@0.8.1 because of an unrelated dep-order issue —
+see v0.8.2 above for the resolution. Use v0.8.2 instead.
+
+### Changed (carried into v0.8.2)
+
+- **`alint-dsl` / `alint-rules` / `alint-output`** —
+  reverted `publish = false`. Their manifests now publish to
+  crates.io alongside `alint-core` and `alint`. The crates'
+  descriptions still read "Internal: Not a stable public
+  API" — the published status is a load-bearing accident of
+  cargo's resolver, not an invitation to use them. The
+  comment block on each manifest documents the constraint
+  so a future audit doesn't repeat the trap.
 
 ## [0.8.0] — 2026-04-29
 
@@ -2580,7 +2587,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/asamarts/alint/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/asamarts/alint/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/asamarts/alint/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/asamarts/alint/compare/v0.6.0...v0.7.0
