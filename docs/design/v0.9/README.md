@@ -16,7 +16,7 @@ or subcommands — every change is below the rule API.
 |---|---|
 | [`parallel_walker.md`](./parallel_walker.md) ✅ | Replace the sequential `WalkBuilder::build` with `WalkBuilder::build_parallel` + a deterministic post-sort. *(Shipped v0.9.1.)* |
 | [`memory_pass.md`](./memory_pass.md) ✅ (partial) | `Arc<Path>` / `Arc<str>` / `Cow<'static, str>` on the Violation / RuleResult hot path. *(Shipped v0.9.2; per-rule byte-slice scanning + bounded prefix/suffix reads moved to v0.9.3 — see the doc for context.)* |
-| [`dispatch_flip.md`](./dispatch_flip.md) ⏳ | Per-file rules run under a file-major outer loop via a new `PerFileRule` sub-trait; cross-file rules (`requires_full_index() == true`) keep the rule-major path. Bundled with the per-rule byte-slice + bounded-read conversions originally scoped to v0.9.2. |
+| [`dispatch_flip.md`](./dispatch_flip.md) ✅ (partial) | Per-file rules run under a file-major outer loop via a new `PerFileRule` sub-trait; cross-file rules (`requires_full_index() == true`) keep the rule-major path. *(Shipped v0.9.3 with engine restructure + 8-rule reference migration; remaining ~22 content rules migrate in v0.9.4.)* |
 
 ## Cross-cutting decisions
 

@@ -1,13 +1,50 @@
 # Per-file-rule dispatch flip + per-rule scanning conversions
 
-Status: Design draft. Scope grew on 2026-04-30 to absorb the
-per-rule byte-slice scanning + bounded prefix/suffix reads
-that were originally scoped to v0.9.2's memory pass — see
-[`memory_pass.md`](./memory_pass.md) for context. Bundling
-them with the dispatch flip avoids the duplicate-work shape
-where v0.9.2 converts a rule's body to consume `&[u8]`
-opened from a path, and v0.9.3 then changes the same body
-to consume `&[u8]` handed in by the engine.
+Status: **Engine restructure + 8-rule reference migration
+implemented** in `3de7f64` (v0.9.3, 2026-04-30). New
+`PerFileRule` trait + engine partition logic shipped; 6 line-
+oriented rules (`no_trailing_whitespace`, `final_newline`,
+`line_endings`, `max_consecutive_blank_lines`, `indent_style`,
+`line_max_width`) and 2 bounded-read rules
+(`file_starts_with`, `file_ends_with`) migrated.
+
+Resolved open questions (from the original design draft):
+
+1. **`PerFileRule::path_scope` returns `&Scope`** — every
+   migrated rule has a stable `Scope` field; the dynamic
+   `Cow<'_, Scope>` case isn't needed yet.
+2. **Engine reads `Vec<u8>`** for v0.9.3; `Arc<[u8]>` cache
+   across re-evaluation passes is a v0.10 LSP concern.
+3. **`max_bytes_needed()` ships now, ignored by engine in
+   v0.9.3** — captured on the trait so rules can declare it
+   and a future engine pass can honour the bound. Setting
+   `Some(N)` today doesn't change behaviour.
+4. **`fix` mode stays rule-major** — sequential filesystem
+   mutation rules out coalesced reads; the win is minor and
+   cross-mode semantic divergence isn't worth it.
+5. **`command` rule deliberately unmigrated** — its read
+   step is the binary invocation, not a file read; engine
+   coalescing doesn't apply.
+6. **`executable_has_shebang` / `shebang_has_executable`
+   stay rule-major** — they need
+   `metadata().permissions()` to short-circuit on non-`+x`
+   files BEFORE any read. The dispatch-flip path would have
+   the engine read every file in scope before the rule
+   could decide; that's a regression. Both gain bounded
+   2-byte reads in their rule-major path instead.
+
+The remaining ~22 per-file content rules
+(`file_content_matches`, `file_content_forbidden`,
+`file_header`, `file_footer`, `file_max_lines`,
+`file_min_lines`, `file_max_size`, `file_min_size`,
+`file_hash`, `file_is_ascii`, `file_is_text`, `file_shebang`,
+`json_path_*` / `yaml_path_*` / `toml_path_*`,
+`json_schema_passes`, `no_bom`, `no_bidi_controls`,
+`no_zero_width_chars`, `no_merge_conflict_markers`,
+`markdown_paths_resolve`, `commented_out_code`) keep the
+rule-major path. They migrate incrementally in v0.9.4 as a
+mechanical follow-up; v0.9.3's engine restructure + 8-rule
+reference implementation proves the shape works.
 
 ## Problem
 

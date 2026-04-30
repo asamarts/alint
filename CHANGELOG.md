@@ -6,6 +6,114 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-04-30
+
+Third phase of the v0.9 engine-optimization cut: the
+per-file dispatch flip plus the per-rule scanning
+conversions deferred from v0.9.2. No new user-visible rule
+kinds, formatters, or subcommands; every v0.9.2 config
+runs unchanged. Output bytes from all 8 formatters are
+byte-identical to v0.9.2.
+
+### Performance
+
+- **Per-file dispatch flip.** New `PerFileRule` trait next
+  to `Rule`; rules opt in via `Rule::as_per_file(&self) ->
+  Option<&dyn PerFileRule> { None }`. The engine partitions
+  entries: per-file rules run under a file-major loop that
+  reads each matched file once and dispatches to every
+  applicable rule against the same byte buffer. Cross-file
+  rules (`pair`, `for_each_dir`, `every_matching_has`,
+  `unique_by`, `dir_*`, `file_*` existence rules,
+  `git_no_denied_paths`, `git_commit_message`) keep the
+  rule-major `par_iter` path. Coalesces N reads of one file
+  across N rules sharing it.
+- **Line-oriented rules migrated to `PerFileRule` + byte-
+  slice scanning** (deferred from v0.9.2):
+  `no_trailing_whitespace` (skips the redundant UTF-8
+  validation pass via `bytes.split(|&b| b == b'\n')` +
+  `last()` byte check), `final_newline` (bounded `last()`
+  byte check; `max_bytes_needed: Some(1)`), `line_endings`
+  (existing byte-level walker preserved through
+  `evaluate_file`), `max_consecutive_blank_lines`,
+  `indent_style`, `line_max_width` (the latter three keep
+  per-line UTF-8 validation where character counts /
+  whitespace classifiers need `&str`).
+- **Bounded prefix/suffix reads on byte-pattern rules**
+  (deferred from v0.9.2): `file_starts_with` reads only the
+  first `prefix.len()` bytes; `file_ends_with` reads only
+  the last `suffix.len()` bytes via a new `read_suffix_n`
+  helper that seeks from EOF. Both opt into `PerFileRule`
+  and declare `max_bytes_needed`.
+  `executable_has_shebang` and `shebang_has_executable`
+  switch their rule-major paths to bounded 2-byte reads
+  (`#!`); they deliberately skip the dispatch-flip path
+  because they need `metadata().permissions()` to
+  short-circuit on non-`+x` files before any read happens.
+
+### Internal
+
+- New `crates/alint-rules/src/io.rs` helpers:
+  `read_prefix_n(path, n)` and `read_suffix_n(path, n)`.
+- `Rule::evaluate` for migrated rules becomes a thin
+  wrapper that walks the index, reads each file, and
+  delegates to `evaluate_file` — used by `alint fix`
+  (sequential filesystem mutation rules out coalesced
+  reads there) and by test harnesses that bypass the
+  engine.
+- `Engine::run` aggregates per-file violations back into
+  per-rule `RuleResult`s preserving each rule's metadata
+  (level / policy_url / is_fixable). Final assembly walks
+  `self.entries` in order so output remains deterministic.
+- `when:` evaluates once per per-file rule before the file
+  loop (not per file) — verdict is independent of the file
+  since `iter` is `None` at the engine level.
+
+### Tests
+
+- Four new engine tests exercising the dispatch flip:
+  `dispatch_flip_routes_per_file_rule_through_file_major_loop`,
+  `dispatch_flip_aggregates_multiple_per_file_rules`
+  (verifies aggregation buckets violations per rule across
+  N rules sharing one scope),
+  `dispatch_flip_passes_when_no_violations` (passing rules
+  omitted), `dispatch_flip_preserves_cross_file_rules_unchanged`.
+
+### Migration scope
+
+8 of ~30 per-file content rules migrated to `PerFileRule`
+in v0.9.3 (the line-oriented + bounded-read families
+deferred from v0.9.2). The remaining ~22 content rules
+(`file_content_matches`, `file_content_forbidden`,
+`file_header`, `file_footer`, `file_max_lines`,
+`file_min_lines`, `file_max_size`, `file_min_size`,
+`file_hash`, `file_is_ascii`, `file_is_text`,
+`file_shebang`, `json_path_*` / `yaml_path_*` /
+`toml_path_*`, `json_schema_passes`, `no_bom`,
+`no_bidi_controls`, `no_zero_width_chars`,
+`no_merge_conflict_markers`, `markdown_paths_resolve`,
+`commented_out_code`) keep the rule-major path. They'll
+migrate incrementally in v0.9.4 as a mechanical follow-up;
+v0.9.3 ships the engine restructure + 8-rule reference
+implementation that proves the shape works.
+
+### Out of scope (deferred)
+
+- Engine-side honouring of the `max_bytes_needed()` hint —
+  v0.9.3 reads whole files; a future pass could bound the
+  read when every applicable rule's hint sums to less than
+  the file size. Hint is captured on the trait so rules
+  can declare it now.
+
+### Build / test
+
+- Workspace test suite green (1000+ tests across 7
+  crates).
+- Pre-v0.9.3 baseline frozen at
+  `docs/benchmarks/v0.9/baseline-v0.9.2/criterion/`.
+  v0.9.3 numbers at
+  `docs/benchmarks/v0.9/v0.9.3-dispatch-flip/criterion/`.
+
 ## [0.9.2] — 2026-04-30
 
 Second phase of the v0.9 engine-optimization cut: the
@@ -2748,7 +2856,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/asamarts/alint/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/asamarts/alint/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/asamarts/alint/compare/v0.8.2...v0.9.1
 [0.8.2]: https://github.com/asamarts/alint/compare/v0.8.1...v0.8.2
