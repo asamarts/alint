@@ -1,6 +1,55 @@
 # Memory-footprint pass
 
-Status: Design draft.
+Status: **Type pass implemented** in `7bd7bf5` (v0.9.2,
+2026-04-30). Per-rule byte-slice scanning + bounded
+prefix/suffix reads were originally scoped to the same
+release but have moved to v0.9.3 alongside the dispatch
+flip — see [`dispatch_flip.md`](./dispatch_flip.md) for
+the rule conversions in their new home.
+
+Resolved open questions (from the original design draft):
+
+1. **`Arc<Path>` vs `Arc<PathBuf>` vs `Rc<Path>`** —
+   `Arc<Path>` shipped. The construction-time `Arc::from`
+   amortises over N violations referencing one file; engine
+   parallelism rules out `Rc`.
+2. **`ctx.root` Arc-ification** — left as `&Path`. Borrowed
+   for the lifetime of `engine.run`; consumers hold `&Path`
+   already.
+3. **`memchr` for `\n` discovery** — deferred. Postponed to
+   v0.9.3 alongside the line-scanning conversions; v0.9.2
+   doesn't touch the byte-walk path.
+4. **Cow on `policy_url`** — converted to `Arc<str>` in the
+   same pass as `rule_id`. `RuleResult::policy_url` is now
+   `Option<Arc<str>>` and shares one allocation across all
+   violations of one rule.
+
+## What v0.9.2 actually shipped (the type pass)
+
+The Arc/Cow type changes on `FileEntry::path`,
+`Violation::path`, `Violation::message`, and
+`RuleResult::rule_id` / `policy_url`. Mechanical migration
+of all ~70 rule call sites + 8 formatter structs.
+Behavioural invariants verified: byte-identical output via
+the cross-formatter snapshot test, full workspace test
+suite green. Bench numbers: see
+`docs/benchmarks/v0.9/v0.9.2-memory-pass/README.md`.
+
+## What moved to v0.9.3
+
+Per-rule byte-slice scanning conversions (the 6 line-oriented
+rules) and bounded prefix/suffix reads (the 4 first-/last-
+bytes-only rules) were originally scoped here. They moved
+to v0.9.3 because v0.9.3's per-file dispatch flip hands each
+rule a pre-loaded `&[u8]` slice from the engine's single
+`fs::read` — doing the byte-slice conversions now in v0.9.2
+and re-touching the same evaluate bodies in v0.9.3 was
+strictly duplicate work. The 4 bounded-read rules are slightly
+different (the engine wouldn't read for them either way) but
+were bundled with v0.9.3 to keep the per-rule conversion
+diff in one commit. See
+[`dispatch_flip.md`](./dispatch_flip.md) for the v0.9.3
+home.
 
 ## Problem
 

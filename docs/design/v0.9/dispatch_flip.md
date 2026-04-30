@@ -1,6 +1,13 @@
-# Per-file-rule dispatch flip
+# Per-file-rule dispatch flip + per-rule scanning conversions
 
-Status: Design draft.
+Status: Design draft. Scope grew on 2026-04-30 to absorb the
+per-rule byte-slice scanning + bounded prefix/suffix reads
+that were originally scoped to v0.9.2's memory pass — see
+[`memory_pass.md`](./memory_pass.md) for context. Bundling
+them with the dispatch flip avoids the duplicate-work shape
+where v0.9.2 converts a rule's body to consume `&[u8]`
+opened from a path, and v0.9.3 then changes the same body
+to consume `&[u8]` handed in by the engine.
 
 ## Problem
 
@@ -256,6 +263,33 @@ Three engine-level mechanics change:
   index, reads each file, and calls `evaluate_file` — only
   invoked from rule-major fallback paths (the `fix` flow,
   some test harnesses).
+
+**Per-rule scanning conversions absorbed from v0.9.2.** As
+each rule migrates to `PerFileRule::evaluate_file(bytes:
+&[u8])`, its body switches from
+`std::fs::read + std::str::from_utf8 + text.split('\n')` to
+direct byte-slice scanning over the engine-supplied slice
+(`bytes.split(|&b| b == b'\n')`). UTF-8 validation is
+skipped where the rule's predicate operates on bytes
+(`b' '` / `b'\t'` / `b'\r'`); kept (per-line) where the
+rule needs character counts (`line_max_width`). The per-
+rule unit tests are byte-equivalent to v0.9.2 — the rules
+that already had unit tests on byte input keep them; rules
+that worked on `&str` get a quick conversion-test pass to
+confirm violation output is unchanged.
+
+**Bounded prefix/suffix reads** (4 rules:
+`executable_has_shebang`, `shebang_has_executable`,
+`file_starts_with`, `file_ends_with`). These rules consult
+only the first or last few bytes of a file. They get a new
+`crates/alint-rules/src/io.rs` with
+`read_prefix(path, n)` / `read_suffix(path, n)` helpers
+*and* a `PerFileRule::max_bytes_needed() -> Option<usize>`
+hint that lets the engine optionally honour the bound (the
+v0.9.3 engine reads whole files; the hint is reserved for a
+future engine-side optimisation pass). Even ignoring the
+hint, switching the read path itself shaves the read size
+on these rules independently of the dispatch flip.
 
 **Migrating rules — the candidate list:**
 

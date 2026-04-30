@@ -53,7 +53,7 @@ runs:
         ALINT_VERSION: ${{ inputs.version }}
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
         # Pin install.sh to whichever ref the consumer pinned the
-        # action to (e.g. `asamarts/alint@v0.9.1`). Without this,
+        # action to (e.g. `asamarts/alint@v0.9.2`). Without this,
         # `main`'s install.sh would be fetched on every run — a
         # change to that script affects every action consumer
         # regardless of the version they pinned.
