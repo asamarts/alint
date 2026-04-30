@@ -11,8 +11,12 @@
 //! silently duplicate the prefix on files that start with a
 //! similar but non-matching string.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
+
+use crate::io::read_prefix_n;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,23 +52,53 @@ impl Rule for FileStartsWithRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            // Bounded read: only the first `prefix.len()` bytes
+            // matter. When this rule runs solo (e.g. via `alint
+            // fix --only ...` or test harnesses) we read just
+            // those bytes, not the whole file. The dispatch-flip
+            // path (`evaluate_file`) gets the full slice from
+            // the engine and bounds-checks via `starts_with`.
             let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = std::fs::read(&full) else {
+            let Ok(bytes) = read_prefix_n(&full, self.prefix.len()) else {
                 continue;
             };
-            if !bytes.starts_with(&self.prefix) {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "file does not start with the required prefix".to_string());
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(1, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileStartsWithRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        if bytes.starts_with(&self.prefix) {
+            return Ok(Vec::new());
+        }
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| "file does not start with the required prefix".to_string());
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(1, 1),
+        ])
+    }
+
+    fn max_bytes_needed(&self) -> Option<usize> {
+        Some(self.prefix.len())
     }
 }
 

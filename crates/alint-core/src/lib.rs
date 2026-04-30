@@ -31,7 +31,7 @@ pub use level::Level;
 pub use registry::{RuleBuilder, RuleRegistry};
 pub use report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
 pub use rule::{
-    Context, FixContext, FixOutcome, Fixer, ReadForFix, Rule, RuleResult, Violation,
+    Context, FixContext, FixOutcome, Fixer, PerFileRule, ReadForFix, Rule, RuleResult, Violation,
     check_fix_size, read_for_fix,
 };
 pub use scope::Scope;

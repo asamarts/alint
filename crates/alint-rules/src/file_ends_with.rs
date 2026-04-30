@@ -11,8 +11,12 @@
 //! content. Auto-appending implicitly could silently duplicate a
 //! near-matching tail.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
+
+use crate::io::read_suffix_n;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,19 +52,48 @@ impl Rule for FileEndsWithRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            // Bounded read: only the trailing `suffix.len()`
+            // bytes matter. Solo runs (`alint fix --only`,
+            // tests) read just those bytes from the end.
             let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = std::fs::read(&full) else {
+            let Ok(tail) = read_suffix_n(&full, self.suffix.len()) else {
                 continue;
             };
-            if !bytes.ends_with(&self.suffix) {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "file does not end with the required suffix".to_string());
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &tail)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileEndsWithRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        if bytes.ends_with(&self.suffix) {
+            return Ok(Vec::new());
+        }
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| "file does not end with the required suffix".to_string());
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
+    }
+
+    fn max_bytes_needed(&self) -> Option<usize> {
+        Some(self.suffix.len())
     }
 }
 

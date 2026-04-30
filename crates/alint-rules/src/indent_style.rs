@@ -17,7 +17,9 @@
 //! not repair. Users typically pair it with their editor's own
 //! "reindent on save" feature.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -67,28 +69,52 @@ impl Rule for IndentStyleRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some((line_no, reason)) = first_bad_line(text, self.style, self.width) {
-                let msg = self.message.clone().unwrap_or_else(|| match reason {
-                    BadReason::WrongChar => format!(
-                        "line {line_no} indented with the wrong character (expected {})",
-                        self.style_name()
-                    ),
-                    BadReason::WidthMismatch => format!(
-                        "line {line_no} has leading spaces that are not a multiple of {}",
-                        self.width.unwrap_or(0),
-                    ),
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for IndentStyleRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        // The leading-indent scan inspects ASCII whitespace
+        // characters and uses `char_indices` to slice the prefix
+        // — we keep the UTF-8 validation pass for parity with
+        // the rule-major path. Non-UTF-8 files silently skip.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some((line_no, reason)) = first_bad_line(text, self.style, self.width) else {
+            return Ok(Vec::new());
+        };
+        let msg = self.message.clone().unwrap_or_else(|| match reason {
+            BadReason::WrongChar => format!(
+                "line {line_no} indented with the wrong character (expected {})",
+                self.style_name()
+            ),
+            BadReason::WidthMismatch => format!(
+                "line {line_no} has leading spaces that are not a multiple of {}",
+                self.width.unwrap_or(0),
+            ),
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, 1),
+        ])
     }
 }
 

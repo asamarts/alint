@@ -9,7 +9,9 @@
 //! Check-only: truncation isn't a safe auto-fix. Users either
 //! refactor the line or widen the limit.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -49,24 +51,47 @@ impl Rule for LineMaxWidthRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some((line_no, width)) = first_overlong_line(text, self.max_width) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "line {line_no} is {width} chars wide; max is {}",
-                        self.max_width
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, self.max_width + 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for LineMaxWidthRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        // `chars().count()` requires a UTF-8-validated `&str` —
+        // line widths count Unicode scalars, not bytes. Non-UTF-8
+        // files silently skip, matching the rule-major path.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some((line_no, width)) = first_overlong_line(text, self.max_width) else {
+            return Ok(Vec::new());
+        };
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "line {line_no} is {width} chars wide; max is {}",
+                self.max_width
+            )
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, self.max_width + 1),
+        ])
     }
 }
 

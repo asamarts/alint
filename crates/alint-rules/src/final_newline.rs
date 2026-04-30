@@ -10,7 +10,11 @@
 //! Empty files (zero bytes) are treated as fine — there's no
 //! missing trailing newline on a file with no content.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 
 use crate::fixers::FileAppendFinalNewlineFixer;
 
@@ -45,22 +49,52 @@ impl Rule for FinalNewlineRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            if bytes.is_empty() {
-                continue;
-            }
-            if bytes.last().copied() != Some(b'\n') {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "file does not end with a newline".to_string());
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FinalNewlineRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        // Empty files (zero bytes) are fine — no missing trailing
+        // newline on a file with no content.
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        if bytes.last().copied() == Some(b'\n') {
+            return Ok(Vec::new());
+        }
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| "file does not end with a newline".to_string());
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
+    }
+
+    fn max_bytes_needed(&self) -> Option<usize> {
+        // Only the last byte matters; engine reads whole file
+        // today but a future bounded-read pass could honour this.
+        Some(1)
     }
 }
 

@@ -10,7 +10,11 @@
 //! each over-long run down to exactly `max` blank lines. The
 //! fixer preserves the file's line endings (LF vs CRLF).
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use serde::Deserialize;
 
 use crate::fixers::{FileCollapseBlankLinesFixer, line_is_blank};
@@ -55,26 +59,51 @@ impl Rule for MaxConsecutiveBlankLinesRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some(line_no) = first_over_limit(text, self.max) {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("more than {} consecutive blank line(s)", self.max));
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for MaxConsecutiveBlankLinesRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        // The blank-line check uses `line_is_blank` (str-based,
+        // matches the fixer's logic — they share the helper) so
+        // we keep the UTF-8 validation pass here. Non-UTF-8
+        // files are silently skipped, matching the rule-major
+        // path's behaviour.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some(line_no) = first_over_limit(text, self.max) else {
+            return Ok(Vec::new());
+        };
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("more than {} consecutive blank line(s)", self.max));
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, 1),
+        ])
     }
 }
 

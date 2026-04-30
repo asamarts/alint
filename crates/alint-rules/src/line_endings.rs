@@ -2,7 +2,11 @@
 //! the configured line ending (`lf` or `crlf`). Mixed endings
 //! in a single file fail.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use serde::Deserialize;
 
 use crate::fixers::{FileNormalizeLineEndingsFixer, LineEndingTarget};
@@ -61,25 +65,45 @@ impl Rule for LineEndingsRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            if let Some(line_no) = first_mismatched_line(&bytes, self.target) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "line {line_no} does not use {} line endings",
-                        self.target.name()
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for LineEndingsRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Some(line_no) = first_mismatched_line(bytes, self.target) else {
+            return Ok(Vec::new());
+        };
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "line {line_no} does not use {} line endings",
+                self.target.name()
+            )
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, 1),
+        ])
     }
 }
 

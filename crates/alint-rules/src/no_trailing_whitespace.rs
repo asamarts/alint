@@ -1,12 +1,22 @@
 //! `no_trailing_whitespace` — every line in each file in scope
 //! must not end with a space or tab.
 //!
-//! The rule reads each file's UTF-8 content, walks line-by-line,
-//! and reports one violation per file (with the 1-based line
-//! number of the first offender in `violation.line`). Non-UTF-8
-//! files are skipped silently.
+//! The rule walks line-by-line and reports one violation per
+//! file (with the 1-based line number of the first offender in
+//! `violation.line`). Read failures are skipped silently.
+//!
+//! Trailing whitespace is a byte-pattern check (`b' '` /
+//! `b'\t'`), so the per-file dispatch path scans the engine-
+//! supplied `&[u8]` directly without a UTF-8 validation pass.
+//! The rule-major fallback (`Rule::evaluate`, used by
+//! `alint fix` and tests that bypass the engine) reads each
+//! file itself and delegates to `evaluate_file`.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 
 use crate::fixers::FileTrimTrailingWhitespaceFixer;
 
@@ -41,20 +51,7 @@ impl Rule for NoTrailingWhitespaceRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some((line_no, _)) = first_offending_line(text) {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("trailing whitespace on line {line_no}"));
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
@@ -62,20 +59,48 @@ impl Rule for NoTrailingWhitespaceRule {
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
 }
 
-/// Returns (1-based line number, line-without-terminator) for
-/// the first line ending in a space or tab. `None` if clean.
-fn first_offending_line(text: &str) -> Option<(usize, &str)> {
-    for (idx, line) in text.split('\n').enumerate() {
-        // `split` yields a trailing empty element if text ends
-        // with `\n`; that's not a real line, so skip empties at
-        // the final position only when the overall file ended in
-        // `\n`. Checking `.ends_with(' ' | '\t')` on "" is false
-        // anyway, so no special-case is needed.
-        let trimmed = line.strip_suffix('\r').unwrap_or(line);
-        if trimmed.ends_with(' ') || trimmed.ends_with('\t') {
-            return Some((idx + 1, trimmed));
+impl PerFileRule for NoTrailingWhitespaceRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Some(line_no) = first_offending_line(bytes) else {
+            return Ok(Vec::new());
+        };
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("trailing whitespace on line {line_no}"));
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, 1),
+        ])
+    }
+}
+
+/// Returns the 1-based line number of the first line ending in
+/// a space or tab, or `None` if the file is clean. Operates on
+/// bytes directly; trailing whitespace is a byte-pattern check
+/// that doesn't need UTF-8 validation, so we skip the
+/// `from_utf8` walk.
+fn first_offending_line(bytes: &[u8]) -> Option<usize> {
+    for (idx, line) in bytes.split(|&b| b == b'\n').enumerate() {
+        let trimmed = line.strip_suffix(b"\r").unwrap_or(line);
+        if matches!(trimmed.last(), Some(b' ' | b'\t')) {
+            return Some(idx + 1);
         }
     }
     None
@@ -115,32 +140,26 @@ mod tests {
 
     #[test]
     fn detects_trailing_space() {
-        assert_eq!(
-            first_offending_line("clean\nbad  \nclean\n"),
-            Some((2, "bad  "))
-        );
+        assert_eq!(first_offending_line(b"clean\nbad  \nclean\n"), Some(2));
     }
 
     #[test]
     fn detects_trailing_tab() {
-        assert_eq!(
-            first_offending_line("clean\nbad\t\nclean\n"),
-            Some((2, "bad\t"))
-        );
+        assert_eq!(first_offending_line(b"clean\nbad\t\nclean\n"), Some(2));
     }
 
     #[test]
     fn crlf_with_trailing_whitespace_flagged() {
-        assert_eq!(first_offending_line("bad \r\n"), Some((1, "bad ")));
+        assert_eq!(first_offending_line(b"bad \r\n"), Some(1));
     }
 
     #[test]
     fn clean_file_has_no_match() {
-        assert_eq!(first_offending_line("one\ntwo\nthree\n"), None);
+        assert_eq!(first_offending_line(b"one\ntwo\nthree\n"), None);
     }
 
     #[test]
     fn single_line_no_trailing_newline_clean() {
-        assert_eq!(first_offending_line("hello"), None);
+        assert_eq!(first_offending_line(b"hello"), None);
     }
 }

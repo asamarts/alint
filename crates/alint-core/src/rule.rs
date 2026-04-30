@@ -213,6 +213,67 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn fixer(&self) -> Option<&dyn Fixer> {
         None
     }
+
+    /// Opt into the file-major dispatch path. Per-file rules that
+    /// can evaluate one file at a time given a pre-loaded byte
+    /// slice override this to return `Some(self)`; cross-file
+    /// rules and any rule with `requires_full_index() == true`
+    /// leave it as `None` and keep evaluating under the rule-
+    /// major loop.
+    ///
+    /// When the engine has multiple per-file rules sharing one
+    /// scope, the file-major loop reads each matched file once
+    /// and dispatches to every applicable per-file rule against
+    /// the same byte buffer — coalescing N reads of one file
+    /// into 1.
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        None
+    }
+}
+
+/// File-major dispatch entry-point for a per-file rule.
+///
+/// Rules that can evaluate one file at a time given a pre-loaded
+/// byte slice implement this trait alongside [`Rule`] and opt
+/// into the file-major path via [`Rule::as_per_file`]. The
+/// engine reads each file once per evaluation pass and calls
+/// `evaluate_file` on every per-file rule whose
+/// [`path_scope`](PerFileRule::path_scope) matches that file —
+/// avoiding the per-rule `std::fs::read` the rule-major loop
+/// would otherwise duplicate.
+///
+/// Implementations MUST NOT call `std::fs::read` themselves; the
+/// `bytes` argument is the engine's already-read content. The
+/// rule's existing [`Rule::evaluate`] implementation (which does
+/// read the file) stays in place as the rule-major fallback —
+/// it's still the path used by `alint fix` (sequential
+/// filesystem mutation rules out coalesced reads there) and by
+/// fallback test harnesses.
+pub trait PerFileRule: Send + Sync + std::fmt::Debug {
+    /// The rule's scope. The engine checks
+    /// `path_scope().matches(path)` before calling
+    /// `evaluate_file`; a rule that returns
+    /// [`Scope::match_all`](crate::scope::Scope::match_all) is
+    /// in scope for every file.
+    fn path_scope(&self) -> &crate::scope::Scope;
+
+    /// Evaluate one file given the engine's already-read byte
+    /// content. The `path` is the relative path from the lint
+    /// root; the rule should `with_path(path.into())` (or clone
+    /// the matched [`FileEntry::path`](crate::walker::FileEntry::path)
+    /// if it has one in hand) on emitted violations.
+    fn evaluate_file(&self, ctx: &Context<'_>, path: &Path, bytes: &[u8])
+    -> Result<Vec<Violation>>;
+
+    /// Optional lower bound on the bytes the rule needs to
+    /// evaluate. Default `None` means "I need the whole file."
+    /// Used as a hint; the engine in v0.9.3 reads the whole
+    /// file regardless and hands it to every applicable rule —
+    /// the hint is reserved for a future engine-side bounded-
+    /// read optimisation.
+    fn max_bytes_needed(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Runtime context for applying a fix.

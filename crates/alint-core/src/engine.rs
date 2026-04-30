@@ -155,18 +155,211 @@ impl Engine {
             vars: &self.vars,
             iter: None,
         };
-        let results: Vec<RuleResult> = self
+
+        // Cross-file partition: rules that don't opt into the
+        // file-major dispatch path (cross-file rules + per-file
+        // rules that haven't migrated yet). Same parallelism
+        // shape as v0.9.2 — rule-major par_iter.
+        let cross_results: Vec<(usize, RuleResult)> = self
             .entries
             .par_iter()
-            .filter_map(|entry| {
+            .enumerate()
+            .filter_map(|(idx, entry)| {
+                if entry.rule.as_per_file().is_some() {
+                    return None;
+                }
                 if self.skip_for_changed(entry.rule.as_ref()) {
                     return None;
                 }
                 let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
-                run_entry(entry, ctx, &when_env, &fact_values)
+                run_entry(entry, ctx, &when_env, &fact_values).map(|rr| (idx, rr))
             })
             .collect();
+
+        // Per-file partition: file-major loop reads each file
+        // once and dispatches to every per-file rule whose scope
+        // matches. Coalesces N reads of one file across N rules
+        // sharing it.
+        let per_file_results = self.run_per_file(root, &full_ctx, filtered_ctx.as_ref(), &when_env);
+
+        // Final assembly preserves `self.entries` order so the
+        // output Vec is deterministic + tests that index by
+        // position keep working. Each entry slot fills from
+        // either the cross-file or per-file partition; rules
+        // filtered out (by `--changed` scope, `when: false`, or
+        // passing with no violations) leave their slot empty.
+        let mut cross_by_idx: HashMap<usize, RuleResult> = cross_results.into_iter().collect();
+        let mut per_file_by_idx: HashMap<usize, RuleResult> =
+            per_file_results.into_iter().collect();
+        let mut results = Vec::with_capacity(self.entries.len());
+        for idx in 0..self.entries.len() {
+            if let Some(rr) = cross_by_idx.remove(&idx) {
+                results.push(rr);
+            } else if let Some(rr) = per_file_by_idx.remove(&idx) {
+                results.push(rr);
+            }
+        }
         Ok(Report { results })
+    }
+
+    /// Per-file dispatch loop. Walks `index.files()` in parallel
+    /// and, for each file, calls every applicable per-file rule's
+    /// `evaluate_file` against a single `std::fs::read`. Returns
+    /// `(entry-index, RuleResult)` tuples for every per-file
+    /// rule that emitted at least one violation; passing rules
+    /// (zero violations) are omitted, matching the rule-major
+    /// path's semantics.
+    #[allow(clippy::too_many_lines)]
+    fn run_per_file<'a>(
+        &'a self,
+        root: &'a Path,
+        full_ctx: &'a Context<'a>,
+        filtered_ctx: Option<&'a Context<'a>>,
+        when_env: &'a WhenEnv<'a>,
+    ) -> Vec<(usize, RuleResult)> {
+        // Pre-filter live per-file entries: opt-in via
+        // `as_per_file`, not skipped by `--changed`, and `when`
+        // resolved. `when` evaluates against constant facts +
+        // vars (no `iter` namespace at the engine level), so its
+        // verdict is independent of the file being scanned —
+        // resolve it once per rule before entering the file
+        // loop. `when` errors short-circuit to a per-rule result
+        // with the error message; behaviour matches the
+        // rule-major path's `run_entry` for parity.
+        let mut live: Vec<(usize, &RuleEntry)> = Vec::new();
+        let mut when_errors: Vec<(usize, RuleResult)> = Vec::new();
+        for (idx, entry) in self.entries.iter().enumerate() {
+            if entry.rule.as_per_file().is_none() {
+                continue;
+            }
+            if self.skip_for_changed(entry.rule.as_ref()) {
+                continue;
+            }
+            if let Some(expr) = &entry.when {
+                match expr.evaluate(when_env) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        when_errors.push((
+                            idx,
+                            RuleResult {
+                                rule_id: Arc::from(entry.rule.id()),
+                                level: entry.rule.level(),
+                                policy_url: entry.rule.policy_url().map(Arc::from),
+                                violations: vec![Violation::new(format!(
+                                    "when evaluation error: {e}"
+                                ))],
+                                is_fixable: entry.rule.fixer().is_some(),
+                            },
+                        ));
+                        continue;
+                    }
+                }
+            }
+            live.push((idx, entry));
+        }
+        if live.is_empty() {
+            return when_errors;
+        }
+
+        let per_file_ctx = filtered_ctx.unwrap_or(full_ctx);
+
+        // Each file-major iteration produces a Vec of
+        // `(entry-index, Violation)` tuples. The flatten
+        // gathers them all; aggregation below buckets them by
+        // entry-index back into per-rule `RuleResult`s.
+        let by_file: Vec<(usize, Violation)> = per_file_ctx
+            .index
+            .files()
+            .par_bridge()
+            .flat_map_iter(|file_entry| {
+                // 1. Decide which per-file rules apply to this
+                // file. Per-file rules expose their scope via
+                // `PerFileRule::path_scope`; we filter on it
+                // before any I/O so files no rule cares about
+                // never get read.
+                let applicable: Vec<&RuleEntry> = live
+                    .iter()
+                    .filter(|(_, entry)| {
+                        entry
+                            .rule
+                            .as_per_file()
+                            .expect("live entries are per-file rules by construction")
+                            .path_scope()
+                            .matches(&file_entry.path)
+                    })
+                    .map(|(_, entry)| *entry)
+                    .collect();
+                if applicable.is_empty() {
+                    return Vec::new();
+                }
+                // 2. Read once. Read failures (file deleted
+                // mid-walk, permission flake) skip the file
+                // silently — same shape as today's per-rule
+                // `let Ok(bytes) = std::fs::read(...) else
+                // continue;`.
+                let abs = root.join(&file_entry.path);
+                let Ok(bytes) = std::fs::read(&abs) else {
+                    return Vec::new();
+                };
+                // 3. Dispatch. Every applicable rule sees the
+                // same byte slice; the file is read exactly once
+                // even though N rules may produce violations
+                // against it.
+                let mut out: Vec<(usize, Violation)> = Vec::new();
+                for entry in applicable {
+                    let live_idx = live
+                        .iter()
+                        .position(|(_, e)| std::ptr::eq(*e, entry))
+                        .expect("applicable entry must be in live list");
+                    let entry_idx = live[live_idx].0;
+                    let pf = entry
+                        .rule
+                        .as_per_file()
+                        .expect("live entries are per-file rules by construction");
+                    let result = pf.evaluate_file(per_file_ctx, &file_entry.path, &bytes);
+                    match result {
+                        Ok(vs) => {
+                            for v in vs {
+                                out.push((entry_idx, v));
+                            }
+                        }
+                        Err(e) => {
+                            out.push((entry_idx, Violation::new(format!("rule error: {e}"))));
+                        }
+                    }
+                }
+                out
+            })
+            .collect();
+
+        // Bucket violations by entry-index, then rebuild
+        // `RuleResult` per live entry preserving each rule's
+        // metadata (level / policy_url / is_fixable).
+        let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
+        for (idx, v) in by_file {
+            bucket.entry(idx).or_default().push(v);
+        }
+        let mut results = when_errors;
+        for (idx, entry) in live {
+            let Some(violations) = bucket.remove(&idx) else {
+                // Rule was applicable to zero files (or every
+                // file was empty / unreadable) — passing rule;
+                // omit, matching today's behaviour.
+                continue;
+            };
+            results.push((
+                idx,
+                RuleResult {
+                    rule_id: Arc::from(entry.rule.id()),
+                    level: entry.rule.level(),
+                    policy_url: entry.rule.policy_url().map(Arc::from),
+                    violations,
+                    is_fixable: entry.rule.fixer().is_some(),
+                },
+            ));
+        }
+        results
     }
 
     /// Evaluate every rule and apply fixers for their violations.
@@ -603,5 +796,178 @@ mod tests {
         let engine = Engine::new(vec![stub("t", "**/*.rs")], RuleRegistry::new());
         let report = engine.run(Path::new("/fake"), &idx(&["a.rs"])).unwrap();
         assert_eq!(report.results.len(), 1);
+    }
+
+    /// Per-file rule that emits one violation per file based on
+    /// the byte content prefix. Used to verify the file-major
+    /// dispatch path actually hands the bytes to the rule and
+    /// aggregates the violations correctly.
+    #[derive(Debug)]
+    struct PerFileStub {
+        id: String,
+        scope: Scope,
+        prefix: Vec<u8>,
+    }
+
+    impl Rule for PerFileStub {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            // Rule-major fallback: not exercised when
+            // `as_per_file` is set + the engine routes to the
+            // file-major loop.
+            Ok(Vec::new())
+        }
+        fn as_per_file(&self) -> Option<&dyn crate::PerFileRule> {
+            Some(self)
+        }
+    }
+
+    impl crate::PerFileRule for PerFileStub {
+        fn path_scope(&self) -> &Scope {
+            &self.scope
+        }
+        fn evaluate_file(
+            &self,
+            _ctx: &Context<'_>,
+            path: &std::path::Path,
+            bytes: &[u8],
+        ) -> crate::error::Result<Vec<Violation>> {
+            if !bytes.starts_with(&self.prefix) {
+                return Ok(vec![
+                    Violation::new("missing prefix")
+                        .with_path(std::sync::Arc::<std::path::Path>::from(path)),
+                ]);
+            }
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn dispatch_flip_routes_per_file_rule_through_file_major_loop() {
+        // Real filesystem so the engine's `std::fs::read` works.
+        // The PerFileStub fires when a file does NOT start with
+        // `MAGIC` — exercises the slice-handing-in path end-to-end.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("good.txt"), b"MAGIC + payload").unwrap();
+        std::fs::write(tmp.path().join("bad.txt"), b"no magic here").unwrap();
+
+        let rule = Box::new(PerFileStub {
+            id: "needs-magic".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"MAGIC".to_vec(),
+        });
+        let engine = Engine::new(vec![rule], RuleRegistry::new());
+
+        let opts = crate::WalkOptions::default();
+        let index = crate::walk(tmp.path(), &opts).unwrap();
+        let report = engine.run(tmp.path(), &index).unwrap();
+
+        assert_eq!(report.results.len(), 1, "results: {:?}", report.results);
+        let r = &report.results[0];
+        assert_eq!(&*r.rule_id, "needs-magic");
+        assert_eq!(r.violations.len(), 1, "violations: {:?}", r.violations);
+        assert_eq!(
+            r.violations[0].path.as_deref(),
+            Some(std::path::Path::new("bad.txt")),
+        );
+    }
+
+    #[test]
+    fn dispatch_flip_aggregates_multiple_per_file_rules() {
+        // Two per-file rules sharing one scope: the file-major
+        // loop reads each file once and dispatches both rules
+        // against the same byte buffer. Verifies the aggregation
+        // step buckets violations per rule correctly (not
+        // per-file).
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"ZZZ stuff").unwrap();
+        std::fs::write(tmp.path().join("b.txt"), b"BBB stuff").unwrap();
+
+        let rule_a = Box::new(PerFileStub {
+            id: "needs-AAA".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"AAA".to_vec(),
+        });
+        let rule_b = Box::new(PerFileStub {
+            id: "needs-BBB".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"BBB".to_vec(),
+        });
+        let engine = Engine::new(vec![rule_a, rule_b], RuleRegistry::new());
+
+        let opts = crate::WalkOptions::default();
+        let index = crate::walk(tmp.path(), &opts).unwrap();
+        let report = engine.run(tmp.path(), &index).unwrap();
+
+        // `needs-AAA` fires on both files (neither starts with
+        // "AAA"). `needs-BBB` fires only on `a.txt`.
+        let by_id: HashMap<&str, &RuleResult> =
+            report.results.iter().map(|r| (&*r.rule_id, r)).collect();
+        assert_eq!(
+            by_id.len(),
+            2,
+            "expected both rules in the report: {:?}",
+            report.results
+        );
+        assert_eq!(by_id["needs-AAA"].violations.len(), 2);
+        assert_eq!(by_id["needs-BBB"].violations.len(), 1);
+        assert_eq!(
+            by_id["needs-BBB"].violations[0].path.as_deref(),
+            Some(std::path::Path::new("a.txt")),
+        );
+    }
+
+    #[test]
+    fn dispatch_flip_passes_when_no_violations() {
+        // A per-file rule that finds no violations in any file
+        // should be omitted from the report entirely (matching
+        // the rule-major path's "passing rules omitted"
+        // semantics).
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"MAGIC ok").unwrap();
+
+        let rule = Box::new(PerFileStub {
+            id: "needs-magic".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"MAGIC".to_vec(),
+        });
+        let engine = Engine::new(vec![rule], RuleRegistry::new());
+
+        let opts = crate::WalkOptions::default();
+        let index = crate::walk(tmp.path(), &opts).unwrap();
+        let report = engine.run(tmp.path(), &index).unwrap();
+
+        assert!(report.results.is_empty(), "results: {:?}", report.results);
+    }
+
+    #[test]
+    fn dispatch_flip_preserves_cross_file_rules_unchanged() {
+        // A rule that opts out of `as_per_file` (the default
+        // `None`) keeps the rule-major path. Mixing with a
+        // per-file rule should produce both results.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"hi").unwrap();
+
+        let cross_rule = stub("cross", "**/*.txt");
+        let per_file_rule = Box::new(PerFileStub {
+            id: "needs-magic".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"MAGIC".to_vec(),
+        });
+        let engine = Engine::new(vec![cross_rule, per_file_rule], RuleRegistry::new());
+
+        let opts = crate::WalkOptions::default();
+        let index = crate::walk(tmp.path(), &opts).unwrap();
+        let report = engine.run(tmp.path(), &index).unwrap();
+
+        assert_eq!(report.results.len(), 2, "results: {:?}", report.results);
+        // Order follows entry-registration order.
+        assert_eq!(&*report.results[0].rule_id, "cross");
+        assert_eq!(&*report.results[1].rule_id, "needs-magic");
     }
 }

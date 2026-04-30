@@ -13,6 +13,9 @@
 
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 
+#[cfg(unix)]
+use crate::io::read_prefix_n;
+
 #[derive(Debug)]
 // Fields are read only by the `#[cfg(unix)]` evaluate path; on
 // Windows the struct is constructed but never inspected.
@@ -52,7 +55,11 @@ impl Rule for ExecutableHasShebangRule {
             if meta.permissions().mode() & 0o111 == 0 {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(&full) else {
+            // Only the first 2 bytes (`#!`) matter — bounded
+            // read instead of the whole file. Non-`+x` files
+            // already short-circuited above; this read only
+            // happens on actual executables.
+            let Ok(bytes) = read_prefix_n(&full, 2) else {
                 continue;
             };
             if !bytes.starts_with(b"#!") {
