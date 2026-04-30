@@ -6,6 +6,87 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-04-30
+
+First phase of the v0.9 engine-optimization cut. Parallel
+walker. No user-visible rule kinds, formatters, or
+subcommands change; every v0.8 config runs unchanged.
+
+### Performance
+
+- **Walker is now parallel.** `crates/alint-core/src/walker.rs`
+  switches from `WalkBuilder::build()` (single-threaded
+  iterator) to `WalkBuilder::build_parallel()` driving a
+  per-thread `ParallelVisitor` that accumulates `FileEntry`s
+  in a thread-local `Vec` and merges via `Drop`. A
+  deterministic post-sort by relative path
+  (`entries.sort_unstable_by(|a, b| a.path.cmp(&b.path))`)
+  restores the byte-identical output that snapshot tests +
+  formatters depend on. Walker output is the same as v0.8.2
+  for any input tree; only the intermediate execution is
+  parallel.
+
+  Numbers vs the captured pre-v0.9 baseline at
+  `docs/benchmarks/v0.9/baseline-pre/criterion`:
+
+  | bench | before | after | delta |
+  |---|---:|---:|---:|
+  | `walker/10000` | 52.25 ms | 18.67 ms | **-64.26%** |
+  | `walker/1000` | 8.85 ms | 5.25 ms | **-40.62%** |
+  | `walker/100` | 1.62 ms | 2.62 ms | +61.18% |
+
+  The walker/100 regression is the small-N thread-spawn-
+  overhead trade the design doc anticipated — 1ms of
+  overhead at the 100-file size, dwarfed by the 33.6ms saved
+  at 10k files. v0.7.0 gate stays green; max delta -4.77% on
+  `rule_engine/1000`.
+
+### Added — design + benchmark snapshots
+
+- **`docs/design/v0.9/`** — design pass for the v0.9 cut.
+  README + per-sub-theme drafts for the parallel walker
+  (this release), memory-footprint pass (v0.9.2), and
+  per-file-rule dispatch flip (v0.9.3). Same shape as
+  `docs/design/v0.7/` (Problem → Surface → Semantics →
+  False-positive surface → Implementation → Tests → Open
+  questions).
+- **`docs/benchmarks/v0.9/baseline-pre/`** — frozen
+  criterion snapshot captured on `bec0cf4` (the v0.9 starting
+  point) so subsequent v0.9 phases have a same-day, same-
+  hardware "before" reference to measure deltas against.
+- **`docs/benchmarks/v0.9/v0.9.1-parallel-walker/`** —
+  post-merge bench snapshot for this release, with a README
+  documenting the deltas vs both the v0.7.0 floor (the gate)
+  and the pre-v0.9 baseline (the per-phase delta).
+
+### Tests
+
+- Three new walker unit tests:
+  `walk_output_is_deterministic_across_runs` (two runs over
+  the same tree produce equal `FileIndex`s — guard against a
+  forgotten post-sort), `walk_output_is_alphabetically_sorted`
+  (catches a sort that silently breaks), and
+  `walk_handles_thousand_files` (concurrency stress: exactly
+  1k entries, sorted, no duplicates / drops).
+
+### Internal
+
+- `walk()` body factored into `build_walk_builder` and
+  `result_to_entry` private helpers so the visitor closure
+  stays small. No public API change — `walk(root, opts) ->
+  Result<FileIndex>` is unchanged.
+
+### Out of scope (v0.9.2 / v0.9.3 sub-themes)
+
+- Memory-footprint pass (Cow audit on `Violation` /
+  `RuleResult` / `Report`; line-slice scanning on the line-
+  oriented rules; dhat workflow). Designed in
+  `docs/design/v0.9/memory_pass.md`; ships as v0.9.2.
+- Per-file-rule dispatch flip (new `PerFileRule` sub-trait;
+  file-major engine loop; coalesce reads when N rules share
+  one file). Designed in `docs/design/v0.9/dispatch_flip.md`;
+  ships as v0.9.3.
+
 ## [0.8.2] — 2026-04-29
 
 Second hotfix on v0.8.0; supersedes v0.8.1. Same code as
@@ -2585,7 +2666,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/asamarts/alint/compare/v0.8.2...v0.9.1
 [0.8.2]: https://github.com/asamarts/alint/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/asamarts/alint/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/asamarts/alint/compare/v0.7.0...v0.8.0
