@@ -12,7 +12,7 @@
 //! I/O. Sizes: 1k / 10k file trees with realistic
 //! `src/<module>/file.rs + src/<module>/file.h` pairing.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use alint_core::{Engine, FileEntry, FileIndex, Rule};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -21,7 +21,7 @@ fn build_paired_index(n_modules: usize) -> FileIndex {
     let mut entries = Vec::with_capacity(n_modules * 2);
     for i in 0..n_modules {
         entries.push(FileEntry {
-            path: PathBuf::from(format!("src/m{i}/widget.c")),
+            path: std::path::PathBuf::from(format!("src/m{i}/widget.c")).into(),
             is_dir: false,
             size: 1024,
         });
@@ -29,7 +29,7 @@ fn build_paired_index(n_modules: usize) -> FileIndex {
         // the `pair` rule's "missing partner" branch on the other half.
         if i % 2 == 0 {
             entries.push(FileEntry {
-                path: PathBuf::from(format!("src/m{i}/widget.h")),
+                path: std::path::PathBuf::from(format!("src/m{i}/widget.h")).into(),
                 is_dir: false,
                 size: 256,
             });
@@ -41,18 +41,18 @@ fn build_paired_index(n_modules: usize) -> FileIndex {
 fn build_workspace_index(n_packages: usize) -> FileIndex {
     let mut entries = Vec::with_capacity(n_packages * 4 + 1);
     entries.push(FileEntry {
-        path: PathBuf::from("packages"),
+        path: std::path::PathBuf::from("packages").into(),
         is_dir: true,
         size: 0,
     });
     for i in 0..n_packages {
         entries.push(FileEntry {
-            path: PathBuf::from(format!("packages/p{i}")),
+            path: std::path::PathBuf::from(format!("packages/p{i}")).into(),
             is_dir: true,
             size: 0,
         });
         entries.push(FileEntry {
-            path: PathBuf::from(format!("packages/p{i}/package.json")),
+            path: std::path::PathBuf::from(format!("packages/p{i}/package.json")).into(),
             is_dir: false,
             size: 200,
         });
@@ -60,7 +60,7 @@ fn build_workspace_index(n_packages: usize) -> FileIndex {
         // every_matching_has's miss branch on the other half.
         if i % 2 == 0 {
             entries.push(FileEntry {
-                path: PathBuf::from(format!("packages/p{i}/README.md")),
+                path: std::path::PathBuf::from(format!("packages/p{i}/README.md")).into(),
                 is_dir: false,
                 size: 512,
             });
@@ -75,7 +75,7 @@ fn build_unique_by_index(n_files: usize) -> FileIndex {
     for i in 0..n_files {
         let stem = if i % 2 == 0 { i / 2 } else { (i / 2) + 10000 };
         entries.push(FileEntry {
-            path: PathBuf::from(format!("src/dir_{}/widget_{stem}.rs", i % 32)),
+            path: std::path::PathBuf::from(format!("src/dir_{}/widget_{stem}.rs", i % 32)).into(),
             is_dir: false,
             size: 256,
         });

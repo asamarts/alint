@@ -19,7 +19,6 @@
 //! because the collision is a single fact.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use alint_core::template::{PathTokens, render_message, render_path};
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
@@ -68,8 +67,11 @@ impl Rule for UniqueByRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        // BTreeMap gives a stable (sorted) iteration order → deterministic output.
-        let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+        // BTreeMap gives a stable (sorted) iteration order →
+        // deterministic output. Storing `Arc<Path>` re-uses the
+        // walker's per-file allocation rather than copying bytes
+        // through a `PathBuf`.
+        let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
         for entry in ctx.index.files() {
             if !self.select_scope.matches(&entry.path) {
                 continue;
@@ -98,7 +100,7 @@ impl Rule for UniqueByRule {
 }
 
 impl UniqueByRule {
-    fn format_message(&self, key: &str, paths: &[PathBuf]) -> String {
+    fn format_message(&self, key: &str, paths: &[std::sync::Arc<std::path::Path>]) -> String {
         let paths_joined = paths
             .iter()
             .map(|p| p.display().to_string())
@@ -156,7 +158,7 @@ mod tests {
             entries: files
                 .iter()
                 .map(|p| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 1,
                 })

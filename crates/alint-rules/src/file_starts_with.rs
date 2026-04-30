@@ -59,7 +59,7 @@ impl Rule for FileStartsWithRule {
                     .unwrap_or_else(|| "file does not start with the required prefix".to_string());
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(1, 1),
                 );
             }

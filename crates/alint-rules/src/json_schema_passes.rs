@@ -125,7 +125,7 @@ impl Rule for JsonSchemaPassesRule {
                         "could not detect format from extension; pass `format:` \
                          (`json` / `yaml` / `toml`) on the rule",
                     )
-                    .with_path(&entry.path),
+                    .with_path(entry.path.clone()),
                 );
                 continue;
             };
@@ -135,7 +135,7 @@ impl Rule for JsonSchemaPassesRule {
                 Err(err) => {
                     violations.push(
                         Violation::new(format!("not a valid {} document: {err}", format.label()))
-                            .with_path(&entry.path),
+                            .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -144,7 +144,7 @@ impl Rule for JsonSchemaPassesRule {
             for error in validator.iter_errors(&parsed) {
                 let detail = format!("schema violation at `{}`: {error}", error.instance_path);
                 let msg = self.message.clone().unwrap_or(detail);
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

@@ -60,7 +60,7 @@ impl Rule for FilenameCaseRule {
                         self.case.display_name()
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

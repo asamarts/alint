@@ -65,7 +65,7 @@ impl Rule for MaxConsecutiveBlankLinesRule {
                     .unwrap_or_else(|| format!("more than {} consecutive blank line(s)", self.max));
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(line_no, 1),
                 );
             }

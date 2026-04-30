@@ -33,7 +33,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
     let backup_hits: Vec<&Path> = scan
         .index
         .files()
-        .map(|e| e.path.as_path())
+        .map(|e| e.path.as_ref())
         .filter(|p| has_backup_suffix(p))
         .filter(|p| !is_fixture_or_test_path(p))
         .collect();
@@ -52,7 +52,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
     let scratch_hits: Vec<&Path> = scan
         .index
         .files()
-        .map(|e| e.path.as_path())
+        .map(|e| e.path.as_ref())
         .filter(|p| is_scratch_doc_at_root(p))
         .collect();
     if !scratch_hits.is_empty() {
@@ -166,7 +166,7 @@ fn scan_console_log(scan: &Scan, phase: &crate::progress::Phase) -> Vec<std::pat
             continue;
         };
         if pattern.is_match(text) {
-            hits.push(path.clone());
+            hits.push(path.to_path_buf());
         }
     }
     hits
@@ -225,7 +225,6 @@ fn preview_paths_paths(paths: &[std::path::PathBuf], max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn detects_backup_suffix_variants() {
@@ -282,7 +281,7 @@ mod tests {
     fn backup_file_alone_proposes_agent_hygiene() {
         let index = alint_core::FileIndex {
             entries: vec![alint_core::FileEntry {
-                path: PathBuf::from("README.md.bak"),
+                path: Path::new("README.md.bak").into(),
                 is_dir: false,
                 size: 0,
             }],

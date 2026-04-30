@@ -42,7 +42,8 @@ impl Rule for FileContentForbiddenRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}"))
+                            .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -60,7 +61,7 @@ impl Rule for FileContentForbiddenRule {
                     .unwrap_or_else(|| format!("forbidden pattern /{}/ found", self.pattern_src));
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(line, 1),
                 );
             }

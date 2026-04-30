@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 
@@ -226,7 +227,7 @@ impl Engine {
                     Ok(false) => continue,
                     Err(e) => {
                         results.push(FixRuleResult {
-                            rule_id: entry.rule.id().to_string(),
+                            rule_id: Arc::from(entry.rule.id()),
                             level: entry.rule.level(),
                             items: vec![FixItem {
                                 violation: Violation::new(format!("when evaluation error: {e}")),
@@ -263,7 +264,7 @@ impl Engine {
                 })
                 .collect();
             results.push(FixRuleResult {
-                rule_id: entry.rule.id().to_string(),
+                rule_id: Arc::from(entry.rule.id()),
                 level: entry.rule.level(),
                 items,
             });
@@ -324,7 +325,7 @@ impl Engine {
         let entries = full
             .entries
             .iter()
-            .filter(|e| set.contains(&e.path))
+            .filter(|e| set.contains(&*e.path))
             .cloned()
             .collect();
         Some(FileIndex { entries })
@@ -374,9 +375,9 @@ fn run_entry(
             Ok(false) => return None,
             Err(e) => {
                 return Some(RuleResult {
-                    rule_id: entry.rule.id().to_string(),
+                    rule_id: Arc::from(entry.rule.id()),
                     level: entry.rule.level(),
-                    policy_url: entry.rule.policy_url().map(str::to_string),
+                    policy_url: entry.rule.policy_url().map(Arc::from),
                     violations: vec![Violation::new(format!("when evaluation error: {e}"))],
                     is_fixable: entry.rule.fixer().is_some(),
                 });
@@ -392,9 +393,9 @@ fn run_one(rule: &dyn Rule, ctx: &Context<'_>) -> RuleResult {
         Err(e) => vec![Violation::new(format!("rule error: {e}"))],
     };
     RuleResult {
-        rule_id: rule.id().to_string(),
+        rule_id: Arc::from(rule.id()),
         level: rule.level(),
-        policy_url: rule.policy_url().map(str::to_string),
+        policy_url: rule.policy_url().map(Arc::from),
         violations,
         is_fixable: rule.fixer().is_some(),
     }
@@ -438,7 +439,7 @@ mod tests {
             let mut out = Vec::new();
             for entry in ctx.index.files() {
                 if self.scope.matches(&entry.path) {
-                    out.push(Violation::new("hit").with_path(&entry.path));
+                    out.push(Violation::new("hit").with_path(entry.path.clone()));
                 }
             }
             Ok(out)
@@ -470,7 +471,7 @@ mod tests {
             entries: paths
                 .iter()
                 .map(|p| FileEntry {
-                    path: std::path::PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 0,
                 })

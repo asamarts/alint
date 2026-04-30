@@ -53,7 +53,7 @@ impl Rule for NoSubmodulesRule {
             let msg = self.message.clone().unwrap_or_else(|| {
                 "`.gitmodules` present — git submodules are forbidden".to_string()
             });
-            violations.push(Violation::new(msg).with_path(&entry.path));
+            violations.push(Violation::new(msg).with_path(entry.path.clone()));
         }
         Ok(violations)
     }

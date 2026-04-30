@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 use crate::error::Result;
 use crate::facts::FactValues;
@@ -8,16 +10,28 @@ use crate::registry::RuleRegistry;
 use crate::walker::FileIndex;
 
 /// A single linting violation produced by a rule.
+///
+/// `path` holds an [`Arc<Path>`]; rules clone the [`Arc`] from
+/// [`FileEntry::path`](crate::walker::FileEntry::path) (a cheap
+/// atomic refcount bump) rather than copying the path bytes. At
+/// 100k violations this saves 100k path-byte allocations.
+///
+/// `message` is a [`Cow<'static, str>`]; per-match templated
+/// messages live as `Cow::Owned(String)` (no change in cost),
+/// while fixed messages can live as `Cow::Borrowed("…")` if a
+/// rule chooses to construct them that way. Public API on the
+/// struct is unchanged at the byte level — `Display` and serde
+/// `Serialize` impls go through the inner `&str` / `&Path`.
 #[derive(Debug, Clone)]
 pub struct Violation {
-    pub path: Option<PathBuf>,
-    pub message: String,
+    pub path: Option<Arc<Path>>,
+    pub message: Cow<'static, str>,
     pub line: Option<usize>,
     pub column: Option<usize>,
 }
 
 impl Violation {
-    pub fn new(message: impl Into<String>) -> Self {
+    pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             path: None,
             message: message.into(),
@@ -26,8 +40,16 @@ impl Violation {
         }
     }
 
+    /// Attach a path to the violation. Accepts anything convertible
+    /// into `Arc<Path>` — the canonical caller is
+    /// `.with_path(entry.path.clone())` where `entry.path` is the
+    /// `Arc<Path>` already owned by the [`FileIndex`]; this clones
+    /// the [`Arc`] (atomic refcount bump) rather than the bytes.
+    /// `PathBuf`, `&Path`, and `Box<Path>` are also accepted via
+    /// std's `From` impls; for an ad-hoc `&str` use
+    /// `Path::new("a.rs")` to convert first.
     #[must_use]
-    pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
+    pub fn with_path(mut self, path: impl Into<Arc<Path>>) -> Self {
         self.path = Some(path.into());
         self
     }
@@ -41,11 +63,17 @@ impl Violation {
 }
 
 /// The collected outcome of evaluating a single rule.
+///
+/// `rule_id` holds an [`Arc<str>`]: the engine builds it once
+/// per rule run and shares it across every violation that rule
+/// produces, saving N-1 allocations per rule. `policy_url`
+/// follows the same shape via [`Arc<str>`] — set once per rule,
+/// shared across violations.
 #[derive(Debug, Clone)]
 pub struct RuleResult {
-    pub rule_id: String,
+    pub rule_id: Arc<str>,
     pub level: Level,
-    pub policy_url: Option<String>,
+    pub policy_url: Option<Arc<str>>,
     pub violations: Vec<Violation>,
     /// Whether the rule declares a [`Fixer`] — surfaced here so
     /// the human formatter can tag violations as `fixable`
@@ -303,7 +331,7 @@ mod tests {
     #[test]
     fn violation_builder_sets_fields_via_chain() {
         let v = Violation::new("trailing whitespace")
-            .with_path("src/main.rs")
+            .with_path(Path::new("src/main.rs"))
             .with_location(12, 4);
         assert_eq!(v.message, "trailing whitespace");
         assert_eq!(v.path.as_deref(), Some(Path::new("src/main.rs")));
@@ -351,8 +379,9 @@ mod tests {
 
     #[test]
     fn context_is_git_tracked_consults_set_when_present() {
-        let mut tracked: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        tracked.insert(PathBuf::from("src/main.rs"));
+        let mut tracked: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+        tracked.insert(std::path::PathBuf::from("src/main.rs"));
         let idx = empty_index();
         let ctx = Context {
             root: Path::new("/tmp"),

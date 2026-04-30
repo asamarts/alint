@@ -56,7 +56,8 @@ impl Rule for FileHeaderRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}"))
+                            .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -64,7 +65,7 @@ impl Rule for FileHeaderRule {
             let Ok(text) = std::str::from_utf8(&bytes) else {
                 violations.push(
                     Violation::new("file is not valid UTF-8; cannot match header")
-                        .with_path(&entry.path),
+                        .with_path(entry.path.clone()),
                 );
                 continue;
             };
@@ -78,7 +79,7 @@ impl Rule for FileHeaderRule {
                 });
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(1, 1),
                 );
             }

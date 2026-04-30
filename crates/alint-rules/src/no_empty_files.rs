@@ -40,7 +40,7 @@ impl Rule for NoEmptyFilesRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| "file is empty".to_string());
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)
@@ -84,14 +84,14 @@ mod tests {
     use super::*;
     use crate::test_support::{ctx, spec_yaml};
     use alint_core::{FileEntry, FileIndex};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn idx(entries: &[(&str, u64)]) -> FileIndex {
         FileIndex {
             entries: entries
                 .iter()
                 .map(|(p, sz)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: *sz,
                 })

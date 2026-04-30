@@ -89,7 +89,7 @@ impl Rule for DirOnlyContainsRule {
                     continue;
                 }
                 let msg = self.format_message(&dir.path, &file.path, basename);
-                violations.push(Violation::new(msg).with_path(&file.path));
+                violations.push(Violation::new(msg).with_path(file.path.clone()));
             }
         }
         Ok(violations)
@@ -161,14 +161,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
-    use std::path::PathBuf;
 
     fn index(entries: &[(&str, bool)]) -> FileIndex {
         FileIndex {
             entries: entries
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })

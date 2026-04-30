@@ -115,7 +115,7 @@ impl Rule for GitBlameAgeRule {
                 });
                 violations.push(
                     Violation::new(rendered)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(line.line_number, 1),
                 );
             }
@@ -164,7 +164,7 @@ mod tests {
     use super::*;
     use alint_core::git::BlameCache;
     use alint_core::{FileEntry, FileIndex, PathsSpec};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn rule(pattern: &str, max_age_days: u64, message: Option<&str>) -> GitBlameAgeRule {
         GitBlameAgeRule {
@@ -183,7 +183,7 @@ mod tests {
             entries: paths
                 .iter()
                 .map(|p| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 0,
                 })

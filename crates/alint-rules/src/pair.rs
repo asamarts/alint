@@ -76,7 +76,7 @@ impl Rule for PairRule {
                         self.partner_template,
                         entry.path.display(),
                     ))
-                    .with_path(&entry.path),
+                    .with_path(entry.path.clone()),
                 );
                 continue;
             }
@@ -89,7 +89,7 @@ impl Rule for PairRule {
                         self.partner_template,
                         entry.path.display(),
                     ))
-                    .with_path(&entry.path),
+                    .with_path(entry.path.clone()),
                 );
                 continue;
             }
@@ -97,7 +97,7 @@ impl Rule for PairRule {
                 continue;
             }
             let message = self.format_message(&entry.path, &partner_path);
-            violations.push(Violation::new(message).with_path(&entry.path));
+            violations.push(Violation::new(message).with_path(entry.path.clone()));
         }
         Ok(violations)
     }
@@ -151,14 +151,14 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn idx(paths: &[&str]) -> FileIndex {
         FileIndex {
             entries: paths
                 .iter()
                 .map(|p| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 1,
                 })

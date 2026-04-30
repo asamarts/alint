@@ -76,8 +76,8 @@ fn build_issue(result: &RuleResult, violation: &Violation) -> Issue {
         .map_or_else(|| ".".to_string(), |p| p.display().to_string());
 
     Issue {
-        description: violation.message.clone(),
-        check_name: result.rule_id.clone(),
+        description: violation.message.to_string(),
+        check_name: result.rule_id.to_string(),
         fingerprint: fingerprint(&result.rule_id, &path, &violation.message),
         severity: severity(result.level),
         location: Location {
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use alint_core::{Report, RuleResult, Violation};
     use serde_json::Value;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn render(report: &Report) -> String {
         let mut buf = Vec::new();
@@ -174,7 +174,7 @@ mod tests {
                 "no-todo",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from("src/lib.rs")),
+                    path: Some(Path::new("src/lib.rs").into()),
                     message: "TODO marker found".into(),
                     line: Some(12),
                     column: Some(4),
@@ -258,7 +258,7 @@ mod tests {
                 "r",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from("a.rs")),
+                    path: Some(Path::new("a.rs").into()),
                     message: "x".into(),
                     line: Some(0),
                     column: None,
@@ -276,7 +276,7 @@ mod tests {
                 "r",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from("a.rs")),
+                    path: Some(Path::new("a.rs").into()),
                     message: "msg".into(),
                     line: Some(7),
                     column: None,
@@ -303,7 +303,7 @@ mod tests {
                 "r",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from("a.rs")),
+                    path: Some(Path::new("a.rs").into()),
                     message: "same-msg".into(),
                     line: Some(line),
                     column: None,
@@ -321,7 +321,7 @@ mod tests {
             results: vec![rule(
                 "r",
                 Level::Error,
-                vec![Violation::new(msg).with_path(PathBuf::from("a.rs"))],
+                vec![Violation::new(msg.to_string()).with_path(PathBuf::from("a.rs"))],
             )],
         };
         let fp_a = parse(&render(&mk("alpha")))[0]["fingerprint"].clone();
@@ -352,7 +352,7 @@ mod tests {
                 "r/special",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from(r#"a"b\c.rs"#)),
+                    path: Some(std::path::Path::new(r#"a"b\c.rs"#).into()),
                     message: r#"contains "quotes" and \backslashes\ and newline\nliteral"#.into(),
                     line: Some(1),
                     column: None,

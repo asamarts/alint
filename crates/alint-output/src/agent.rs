@@ -24,7 +24,7 @@
 //! version.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 use alint_core::{Level, Report, RuleResult, Violation};
 use serde::Serialize;
@@ -58,14 +58,14 @@ struct AgentViolation<'a> {
     rule_id: &'a str,
     severity: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<PathBuf>,
+    file: Option<&'a Path>,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
     /// The rule's violation message verbatim, suitable for human
     /// review. Mirror of the `message` field in `--format=json`.
-    human_message: String,
+    human_message: &'a str,
     /// Templated remediation phrasing optimised for an LLM to act
     /// on. Composed from severity, message, location, fix
     /// availability, and policy URL — see `build_agent_instruction`.
@@ -96,12 +96,12 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 fixable_violations += 1;
             }
             violations.push(AgentViolation {
-                rule_id: &r.rule_id,
+                rule_id: r.rule_id.as_ref(),
                 severity: severity_str(r.level),
-                file: v.path.clone(),
+                file: v.path.as_deref(),
                 line: v.line,
                 column: v.column,
-                human_message: v.message.clone(),
+                human_message: v.message.as_ref(),
                 agent_instruction: build_agent_instruction(r, v),
                 fix_available: r.is_fixable,
                 policy_url: r.policy_url.as_deref(),
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn path_bound_violation_renders_location_in_agent_instruction() {
         let result = RuleResult {
-            rule_id: "agent-no-console-log".to_string(),
+            rule_id: "agent-no-console-log".into(),
             level: Level::Warning,
             policy_url: None,
             violations: vec![
@@ -263,9 +263,9 @@ mod tests {
     #[test]
     fn fixable_violation_suggests_alint_fix_in_instruction() {
         let result = RuleResult {
-            rule_id: "readme-exists".to_string(),
+            rule_id: "readme-exists".into(),
             level: Level::Error,
-            policy_url: Some("https://example.com/policy".to_string()),
+            policy_url: Some("https://example.com/policy".into()),
             violations: vec![Violation::new("A README is required at the root.")],
             is_fixable: true,
         };
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn cross_file_violation_uses_repository_level_phrasing() {
         let result = RuleResult {
-            rule_id: "lockfiles-only-one".to_string(),
+            rule_id: "lockfiles-only-one".into(),
             level: Level::Error,
             policy_url: None,
             violations: vec![Violation::new("Multiple lockfiles found.")],
@@ -313,28 +313,28 @@ mod tests {
     fn severity_counts_aggregate_correctly() {
         let results = vec![
             RuleResult {
-                rule_id: "rule-a".to_string(),
+                rule_id: "rule-a".into(),
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation::new("a")],
                 is_fixable: false,
             },
             RuleResult {
-                rule_id: "rule-b".to_string(),
+                rule_id: "rule-b".into(),
                 level: Level::Warning,
                 policy_url: None,
                 violations: vec![Violation::new("b1"), Violation::new("b2")],
                 is_fixable: false,
             },
             RuleResult {
-                rule_id: "rule-c".to_string(),
+                rule_id: "rule-c".into(),
                 level: Level::Info,
                 policy_url: None,
                 violations: vec![Violation::new("c")],
                 is_fixable: false,
             },
             RuleResult {
-                rule_id: "rule-d".to_string(),
+                rule_id: "rule-d".into(),
                 level: Level::Warning,
                 policy_url: None,
                 violations: vec![],

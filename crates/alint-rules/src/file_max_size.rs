@@ -42,7 +42,7 @@ impl Rule for FileMaxSizeRule {
                         self.max_bytes, entry.size
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)
@@ -74,12 +74,12 @@ mod tests {
     use super::*;
     use crate::test_support::{ctx, spec_yaml};
     use alint_core::{FileEntry, FileIndex};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn idx_with_size(path: &str, size: u64) -> FileIndex {
         FileIndex {
             entries: vec![FileEntry {
-                path: PathBuf::from(path),
+                path: std::path::Path::new(path).into(),
                 is_dir: false,
                 size,
             }],

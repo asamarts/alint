@@ -63,7 +63,7 @@ impl Rule for MaxFilesPerDirectoryRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!("{pretty} has {count} files; max is {}", self.max_files)
                 });
-                violations.push(Violation::new(msg).with_path(&dir));
+                violations.push(Violation::new(msg).with_path(dir.clone()));
             }
         }
         Ok(violations)

@@ -100,14 +100,22 @@ rules:
     let r = report
         .results
         .iter()
-        .find(|r| r.rule_id == "always-fail")
+        .find(|r| &*r.rule_id == "always-fail")
         .expect("rule absent from report");
     assert_eq!(r.violations.len(), 2, "violations: {:?}", r.violations);
-    let paths: HashSet<_> = r.violations.iter().filter_map(|v| v.path.clone()).collect();
+    let paths: HashSet<_> = r
+        .violations
+        .iter()
+        .filter_map(|v| v.path.as_deref().map(Path::to_path_buf))
+        .collect();
     assert!(paths.contains(&PathBuf::from("a.txt")));
     assert!(paths.contains(&PathBuf::from("b.txt")));
     for v in &r.violations {
-        assert!(v.message.contains("nope"), "message: {}", v.message);
+        assert!(
+            v.message.contains("nope"),
+            "message: {}",
+            v.message.as_ref()
+        );
     }
 }
 

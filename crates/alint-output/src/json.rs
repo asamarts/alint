@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 use alint_core::{FixReport, FixStatus, Level, Report};
 use serde::Serialize;
@@ -31,14 +31,14 @@ struct JsonResult<'a> {
     /// tools that want to decide whether suggesting `alint fix`
     /// makes sense for this rule.
     fixable: bool,
-    violations: Vec<JsonViolation>,
+    violations: Vec<JsonViolation<'a>>,
 }
 
 #[derive(Serialize)]
-struct JsonViolation {
+struct JsonViolation<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<PathBuf>,
-    message: String,
+    path: Option<&'a Path>,
+    message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,7 +57,7 @@ pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
         .results
         .iter()
         .map(|r| JsonResult {
-            id: &r.rule_id,
+            id: r.rule_id.as_ref(),
             level: r.level,
             passed: r.passed(),
             policy_url: r.policy_url.as_deref(),
@@ -66,8 +66,8 @@ pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 .violations
                 .iter()
                 .map(|v| JsonViolation {
-                    path: v.path.clone(),
-                    message: v.message.clone(),
+                    path: v.path.as_deref(),
+                    message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
                 })
@@ -102,21 +102,21 @@ struct FixSummary {
 struct JsonFixRuleResult<'a> {
     id: &'a str,
     level: Level,
-    items: Vec<JsonFixItem>,
+    items: Vec<JsonFixItem<'a>>,
 }
 
 #[derive(Serialize)]
-struct JsonFixItem {
+struct JsonFixItem<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<PathBuf>,
-    message: String,
+    path: Option<&'a Path>,
+    message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    detail: Option<&'a str>,
 }
 
 pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
@@ -124,20 +124,20 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
         .results
         .iter()
         .map(|r| JsonFixRuleResult {
-            id: &r.rule_id,
+            id: r.rule_id.as_ref(),
             level: r.level,
             items: r
                 .items
                 .iter()
                 .map(|it| {
                     let (status, detail) = match &it.status {
-                        FixStatus::Applied(s) => ("applied", Some(s.clone())),
-                        FixStatus::Skipped(s) => ("skipped", Some(s.clone())),
+                        FixStatus::Applied(s) => ("applied", Some(s.as_str())),
+                        FixStatus::Skipped(s) => ("skipped", Some(s.as_str())),
                         FixStatus::Unfixable => ("unfixable", None),
                     };
                     JsonFixItem {
-                        path: it.violation.path.clone(),
-                        message: it.violation.message.clone(),
+                        path: it.violation.path.as_deref(),
+                        message: it.violation.message.as_ref(),
                         line: it.violation.line,
                         column: it.violation.column,
                         status,

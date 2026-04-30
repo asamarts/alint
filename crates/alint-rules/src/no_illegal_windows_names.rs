@@ -51,7 +51,7 @@ impl Rule for NoIllegalWindowsNamesRule {
                         .message
                         .clone()
                         .unwrap_or_else(|| format!("{reason}: {name:?}"));
-                    violations.push(Violation::new(msg).with_path(&entry.path));
+                    violations.push(Violation::new(msg).with_path(entry.path.clone()));
                     break;
                 }
             }

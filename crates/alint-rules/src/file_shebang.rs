@@ -74,7 +74,7 @@ impl Rule for FileShebangRule {
                 });
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(1, 1),
                 );
             }

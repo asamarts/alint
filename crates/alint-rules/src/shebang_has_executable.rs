@@ -60,7 +60,7 @@ impl Rule for ShebangHasExecutableRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| "shebang script is not marked executable".to_string());
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

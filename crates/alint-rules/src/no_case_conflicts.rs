@@ -7,7 +7,6 @@
 //! Check-only — renaming which one to keep is a human decision.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 
@@ -32,8 +31,10 @@ impl Rule for NoCaseConflictsRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        // Group paths by their lowercased form.
-        let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+        // Group paths by their lowercased form. Storing
+        // `Arc<Path>` here lets us hand the same allocation to
+        // every violation later without re-cloning bytes.
+        let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
                 continue;
@@ -65,7 +66,7 @@ impl Rule for NoCaseConflictsRule {
                             .join(", ")
                     )
                 });
-                violations.push(Violation::new(msg).with_path(p));
+                violations.push(Violation::new(msg).with_path(p.clone()));
             }
         }
         Ok(violations)

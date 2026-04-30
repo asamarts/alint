@@ -254,7 +254,7 @@ impl Rule for CommentedOutCodeRule {
                     });
                     violations.push(
                         Violation::new(msg)
-                            .with_path(&entry.path)
+                            .with_path(entry.path.clone())
                             .with_location(block.start_line, 1),
                     );
                 }

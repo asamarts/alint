@@ -57,7 +57,7 @@ impl Rule for FileEndsWithRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| "file does not end with the required suffix".to_string());
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

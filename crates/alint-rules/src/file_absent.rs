@@ -72,7 +72,7 @@ impl Rule for FileAbsentRule {
                     entry.path.display()
                 )
             });
-            violations.push(Violation::new(msg).with_path(&entry.path));
+            violations.push(Violation::new(msg).with_path(entry.path.clone()));
         }
         Ok(violations)
     }

@@ -8,10 +8,16 @@ use ignore::{
 use crate::error::{Error, Result};
 
 /// A single filesystem entry discovered by the walker.
+///
+/// `path` is held as [`Arc<Path>`] so per-violation copies are
+/// atomic refcount bumps rather than path-byte allocations.
+/// Every [`Violation`](crate::rule::Violation) referencing this
+/// file shares the same allocation; at 100k violations that's
+/// 100k saved `PathBuf` clones.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     /// Path relative to the repository root.
-    pub path: PathBuf,
+    pub path: Arc<Path>,
     pub is_dir: bool,
     pub size: u64,
 }
@@ -40,7 +46,7 @@ impl FileIndex {
     /// at the scales we target today; revisit with a `HashSet` / `HashMap`
     /// index if cross-file-rule benches start to show it.
     pub fn find_file(&self, rel: &Path) -> Option<&FileEntry> {
-        self.files().find(|e| e.path == rel)
+        self.files().find(|e| &*e.path == rel)
     }
 }
 
@@ -161,7 +167,7 @@ fn result_to_entry(
         source: std::io::Error::other(e.to_string()),
     })?;
     Ok(Some(FileEntry {
-        path: rel.to_path_buf(),
+        path: Arc::from(rel),
         is_dir: metadata.is_dir(),
         size: if metadata.is_file() {
             metadata.len()
@@ -276,12 +282,12 @@ mod tests {
         let idx = FileIndex {
             entries: vec![
                 FileEntry {
-                    path: "a".into(),
+                    path: Path::new("a").into(),
                     is_dir: true,
                     size: 0,
                 },
                 FileEntry {
-                    path: "a/x.rs".into(),
+                    path: Path::new("a/x.rs").into(),
                     is_dir: false,
                     size: 5,
                 },
@@ -289,7 +295,7 @@ mod tests {
         };
         let files: Vec<_> = idx.files().collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].path, Path::new("a/x.rs"));
+        assert_eq!(&*files[0].path, Path::new("a/x.rs"));
     }
 
     #[test]
@@ -297,12 +303,12 @@ mod tests {
         let idx = FileIndex {
             entries: vec![
                 FileEntry {
-                    path: "a".into(),
+                    path: Path::new("a").into(),
                     is_dir: true,
                     size: 0,
                 },
                 FileEntry {
-                    path: "a/x.rs".into(),
+                    path: Path::new("a/x.rs").into(),
                     is_dir: false,
                     size: 5,
                 },
@@ -310,7 +316,7 @@ mod tests {
         };
         let dirs: Vec<_> = idx.dirs().collect();
         assert_eq!(dirs.len(), 1);
-        assert_eq!(dirs[0].path, Path::new("a"));
+        assert_eq!(&*dirs[0].path, Path::new("a"));
     }
 
     #[test]
@@ -318,17 +324,17 @@ mod tests {
         let idx = FileIndex {
             entries: vec![
                 FileEntry {
-                    path: "a".into(),
+                    path: Path::new("a").into(),
                     is_dir: true,
                     size: 999, // dirs report 0 in `walk`, but defensively excluded here
                 },
                 FileEntry {
-                    path: "a/x.rs".into(),
+                    path: Path::new("a/x.rs").into(),
                     is_dir: false,
                     size: 100,
                 },
                 FileEntry {
-                    path: "a/y.rs".into(),
+                    path: Path::new("a/y.rs").into(),
                     is_dir: false,
                     size: 50,
                 },
@@ -344,12 +350,12 @@ mod tests {
         let idx = FileIndex {
             entries: vec![
                 FileEntry {
-                    path: "a/x.rs".into(),
+                    path: Path::new("a/x.rs").into(),
                     is_dir: false,
                     size: 0,
                 },
                 FileEntry {
-                    path: "b".into(),
+                    path: Path::new("b").into(),
                     is_dir: true,
                     size: 0,
                 },
@@ -487,7 +493,7 @@ mod tests {
         let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
         let entry = idx
             .files()
-            .find(|e| e.path == Path::new("a.txt"))
+            .find(|e| &*e.path == Path::new("a.txt"))
             .expect("a.txt entry");
         assert_eq!(entry.size, 1024);
         assert!(!entry.is_dir);

@@ -28,20 +28,23 @@ fn build_report(n_violations: usize) -> Report {
     .iter()
     .enumerate()
     {
-        let rule_id = format!("synthetic-rule-{i}");
+        let rule_id: std::sync::Arc<str> = format!("synthetic-rule-{i}").into();
         let violations = (0..per_rule)
             .map(|j| {
                 Violation::new(format!(
                     "synthetic violation {j} for rule {i} at this offset",
                 ))
-                .with_path(format!("src/path/segment_{}/file_{j}.rs", j % 32))
+                .with_path(std::path::PathBuf::from(format!(
+                    "src/path/segment_{}/file_{j}.rs",
+                    j % 32
+                )))
                 .with_location(j + 1, (j % 80) + 1)
             })
             .collect();
         results.push(RuleResult {
             rule_id,
             level: *level,
-            policy_url: Some(format!("https://example.com/rules/{i}")),
+            policy_url: Some(format!("https://example.com/rules/{i}").into()),
             violations,
             is_fixable: i % 2 == 0,
         });

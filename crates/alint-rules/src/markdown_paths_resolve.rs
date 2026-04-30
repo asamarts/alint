@@ -86,7 +86,7 @@ impl Rule for MarkdownPathsResolveRule {
                     });
                     violations.push(
                         Violation::new(msg)
-                            .with_path(&entry.path)
+                            .with_path(entry.path.clone())
                             .with_location(cand.line, cand.column),
                     );
                 }
@@ -310,7 +310,7 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
         return ctx.index.entries.iter().any(|e| matcher.is_match(&e.path));
     }
     let p = Path::new(lookup);
-    ctx.index.entries.iter().any(|e| e.path == p)
+    ctx.index.entries.iter().any(|e| &*e.path == p)
 }
 
 #[cfg(test)]

@@ -52,7 +52,7 @@ impl Rule for MaxDirectoryDepthRule {
                         self.max_depth
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

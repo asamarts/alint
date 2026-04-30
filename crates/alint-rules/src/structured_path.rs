@@ -177,7 +177,7 @@ impl Rule for StructuredPathRule {
                             "not a valid {} document: {err}",
                             self.format.label()
                         ))
-                        .with_path(&entry.path),
+                        .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -191,13 +191,13 @@ impl Rule for StructuredPathRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| format!("JSONPath `{}` produced no match", self.path_src));
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
                 continue;
             }
             for m in matches.iter() {
                 if let Some(v) = check_match(m, &self.op) {
                     let base = self.message.clone().unwrap_or(v);
-                    violations.push(Violation::new(base).with_path(&entry.path));
+                    violations.push(Violation::new(base).with_path(entry.path.clone()));
                 }
             }
         }

@@ -69,7 +69,7 @@ impl Rule for ExecutableBitRule {
                         format!("mode is 0o{mode:o}; +x bit must not be set")
                     }
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

@@ -993,7 +993,7 @@ mod tests {
         std::fs::write(&target, "noise").unwrap();
         let outcome = FileRemoveFixer
             .apply(
-                &Violation::new("forbidden").with_path("debug.log"),
+                &Violation::new("forbidden").with_path(std::path::Path::new("debug.log")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1020,7 +1020,7 @@ mod tests {
         std::fs::write(&target, "bytes").unwrap();
         let outcome = FileRemoveFixer
             .apply(
-                &Violation::new("forbidden").with_path("victim.bak"),
+                &Violation::new("forbidden").with_path(std::path::Path::new("victim.bak")),
                 &make_ctx(&tmp, true),
             )
             .unwrap();
@@ -1038,7 +1038,7 @@ mod tests {
         let fixer = FilePrependFixer::new("// Copyright 2026\n".into());
         fixer
             .apply(
-                &Violation::new("missing header").with_path("a.rs"),
+                &Violation::new("missing header").with_path(std::path::Path::new("a.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1058,7 +1058,7 @@ mod tests {
         let fixer = FilePrependFixer::new("HEAD\n".into());
         fixer
             .apply(
-                &Violation::new("m").with_path("x.txt"),
+                &Violation::new("m").with_path(std::path::Path::new("x.txt")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1073,7 +1073,7 @@ mod tests {
         std::fs::write(tmp.path().join("a.rs"), "original\n").unwrap();
         FilePrependFixer::new("HEAD\n".into())
             .apply(
-                &Violation::new("m").with_path("a.rs"),
+                &Violation::new("m").with_path(std::path::Path::new("a.rs")),
                 &make_ctx(&tmp, true),
             )
             .unwrap();
@@ -1099,7 +1099,7 @@ mod tests {
         let fixer = FileAppendFixer::new("\n## Section\n".into());
         fixer
             .apply(
-                &Violation::new("missing section").with_path("notes.md"),
+                &Violation::new("missing section").with_path(std::path::Path::new("notes.md")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1115,7 +1115,7 @@ mod tests {
         std::fs::write(tmp.path().join("x.txt"), "orig\n").unwrap();
         FileAppendFixer::new("extra\n".into())
             .apply(
-                &Violation::new("m").with_path("x.txt"),
+                &Violation::new("m").with_path(std::path::Path::new("x.txt")),
                 &make_ctx(&tmp, true),
             )
             .unwrap();
@@ -1140,7 +1140,7 @@ mod tests {
         std::fs::write(tmp.path().join("FooBar.rs"), "fn main() {}\n").unwrap();
         FileRenameFixer::new(CaseConvention::Snake)
             .apply(
-                &Violation::new("case").with_path("FooBar.rs"),
+                &Violation::new("case").with_path(std::path::Path::new("FooBar.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1155,7 +1155,7 @@ mod tests {
         std::fs::write(tmp.path().join("src/MyModule.rs"), "").unwrap();
         FileRenameFixer::new(CaseConvention::Snake)
             .apply(
-                &Violation::new("case").with_path("src/MyModule.rs"),
+                &Violation::new("case").with_path(std::path::Path::new("src/MyModule.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1168,7 +1168,7 @@ mod tests {
         std::fs::write(tmp.path().join("foo_bar.rs"), "").unwrap();
         let outcome = FileRenameFixer::new(CaseConvention::Snake)
             .apply(
-                &Violation::new("case").with_path("foo_bar.rs"),
+                &Violation::new("case").with_path(std::path::Path::new("foo_bar.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1185,7 +1185,7 @@ mod tests {
         std::fs::write(tmp.path().join("foo_bar.rs"), "B").unwrap();
         let outcome = FileRenameFixer::new(CaseConvention::Snake)
             .apply(
-                &Violation::new("case").with_path("FooBar.rs"),
+                &Violation::new("case").with_path(std::path::Path::new("FooBar.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1210,7 +1210,7 @@ mod tests {
         std::fs::write(tmp.path().join("FooBar.rs"), "").unwrap();
         FileRenameFixer::new(CaseConvention::Snake)
             .apply(
-                &Violation::new("case").with_path("FooBar.rs"),
+                &Violation::new("case").with_path(std::path::Path::new("FooBar.rs")),
                 &make_ctx(&tmp, true),
             )
             .unwrap();
@@ -1232,7 +1232,7 @@ mod tests {
         std::fs::write(tmp.path().join("x.rs"), "let _ = 1;   \n").unwrap();
         let outcome = FileTrimTrailingWhitespaceFixer
             .apply(
-                &Violation::new("ws").with_path("x.rs"),
+                &Violation::new("ws").with_path(std::path::Path::new("x.rs")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1254,7 +1254,10 @@ mod tests {
             fix_size_limit: Some(100),
         };
         let outcome = FileTrimTrailingWhitespaceFixer
-            .apply(&Violation::new("ws").with_path("big.txt"), &ctx)
+            .apply(
+                &Violation::new("ws").with_path(std::path::Path::new("big.txt")),
+                &ctx,
+            )
             .unwrap();
         match outcome {
             FixOutcome::Skipped(reason) => {
@@ -1275,7 +1278,7 @@ mod tests {
         std::fs::write(tmp.path().join("x.txt"), "hello").unwrap();
         FileAppendFinalNewlineFixer
             .apply(
-                &Violation::new("eof").with_path("x.txt"),
+                &Violation::new("eof").with_path(std::path::Path::new("x.txt")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
@@ -1305,7 +1308,7 @@ mod tests {
         std::fs::write(tmp.path().join("a.md"), "one\r\ntwo\r\n").unwrap();
         FileNormalizeLineEndingsFixer::new(LineEndingTarget::Lf)
             .apply(
-                &Violation::new("le").with_path("a.md"),
+                &Violation::new("le").with_path(std::path::Path::new("a.md")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();

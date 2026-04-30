@@ -1053,14 +1053,14 @@ mod tests {
     // ─── iter namespace ──────────────────────────────────────────
 
     use crate::walker::{FileEntry, FileIndex};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn idx(paths: &[(&str, bool)]) -> FileIndex {
         FileIndex {
             entries: paths
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })

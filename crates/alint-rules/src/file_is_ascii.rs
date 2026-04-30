@@ -46,7 +46,7 @@ impl Rule for FileIsAsciiRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!("non-ASCII byte 0x{:02X} at offset {pos}", bytes[pos])
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

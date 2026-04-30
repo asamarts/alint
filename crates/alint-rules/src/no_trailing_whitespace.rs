@@ -51,7 +51,7 @@ impl Rule for NoTrailingWhitespaceRule {
                     .unwrap_or_else(|| format!("trailing whitespace on line {line_no}"));
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(line_no, 1),
                 );
             }

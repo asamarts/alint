@@ -171,7 +171,7 @@ message: \"`{{ctx.match}}` marker is ancient — resolve or remove\"
         .results
         .iter()
         .flat_map(|r| r.violations.iter())
-        .map(|v| v.message.as_str())
+        .map(|v| v.message.as_ref())
         .collect();
     assert_eq!(messages.len(), 2, "two markers should fire: {messages:?}");
     let combined = messages.join("\n");

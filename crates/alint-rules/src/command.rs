@@ -117,7 +117,7 @@ impl Rule for CommandRule {
                 self.timeout,
             ) {
                 let final_msg = self.message.clone().unwrap_or(msg);
-                violations.push(Violation::new(final_msg).with_path(&entry.path));
+                violations.push(Violation::new(final_msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)
@@ -303,14 +303,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
-    use std::path::PathBuf;
 
     fn idx(paths: &[&str]) -> FileIndex {
         FileIndex {
             entries: paths
                 .iter()
                 .map(|p| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 1,
                 })

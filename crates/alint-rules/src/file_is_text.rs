@@ -43,7 +43,8 @@ impl Rule for FileIsTextRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}"))
+                            .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -52,7 +53,7 @@ impl Rule for FileIsTextRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     "file is detected as binary; text is required here".to_string()
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

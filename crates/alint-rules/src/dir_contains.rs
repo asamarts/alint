@@ -93,7 +93,7 @@ impl Rule for DirContainsRule {
                 if !found {
                     let glob = &self.require_globs[i];
                     let msg = self.format_message(&dir.path, glob);
-                    violations.push(Violation::new(msg).with_path(&dir.path));
+                    violations.push(Violation::new(msg).with_path(dir.path.clone()));
                 }
             }
         }
@@ -151,14 +151,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
-    use std::path::PathBuf;
 
     fn index(entries: &[(&str, bool)]) -> FileIndex {
         FileIndex {
             entries: entries
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })

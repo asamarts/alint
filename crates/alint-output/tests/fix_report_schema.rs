@@ -23,13 +23,13 @@ fn canonical_fix_report() -> FixReport {
                 items: vec![
                     FixItem {
                         violation: Violation::new("trailing whitespace on line 12")
-                            .with_path("README.md")
+                            .with_path(std::path::Path::new("README.md"))
                             .with_location(12, 1),
                         status: FixStatus::Applied("rewrote 1 line".into()),
                     },
                     FixItem {
                         violation: Violation::new("trailing whitespace on line 3")
-                            .with_path("CONTRIBUTING.md")
+                            .with_path(std::path::Path::new("CONTRIBUTING.md"))
                             .with_location(3, 1),
                         status: FixStatus::Skipped("file no longer exists".into()),
                     },
@@ -40,7 +40,7 @@ fn canonical_fix_report() -> FixReport {
                 level: Level::Error,
                 items: vec![FixItem {
                     violation: Violation::new("`debugger;` left in committed source")
-                        .with_path("src/main.ts")
+                        .with_path(std::path::Path::new("src/main.ts"))
                         .with_location(42, 1),
                     status: FixStatus::Unfixable,
                 }],

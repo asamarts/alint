@@ -38,10 +38,10 @@ fn canonical_report() -> Report {
                 policy_url: Some("https://example.com/policy".into()),
                 violations: vec![
                     Violation::new("`debugger;` left in committed source")
-                        .with_path("src/main.ts")
+                        .with_path(std::path::Path::new("src/main.ts"))
                         .with_location(42, 1),
                     Violation::new("`breakpoint()` left in committed source")
-                        .with_path("src/util.ts")
+                        .with_path(std::path::Path::new("src/util.ts"))
                         .with_location(7, 4),
                 ],
                 is_fixable: false,
@@ -52,10 +52,10 @@ fn canonical_report() -> Report {
                 policy_url: None,
                 violations: vec![
                     Violation::new("trailing whitespace on line 12")
-                        .with_path("README.md")
+                        .with_path(std::path::Path::new("README.md"))
                         .with_location(12, 1),
                     Violation::new("trailing whitespace on line 3")
-                        .with_path("CONTRIBUTING.md")
+                        .with_path(std::path::Path::new("CONTRIBUTING.md"))
                         .with_location(3, 1),
                 ],
                 is_fixable: true,
@@ -106,7 +106,7 @@ fn every_format_produces_non_empty_output() {
 #[test]
 fn every_format_includes_every_rule_id() {
     let report = canonical_report();
-    let rule_ids: Vec<&str> = report.results.iter().map(|r| r.rule_id.as_str()).collect();
+    let rule_ids: Vec<&str> = report.results.iter().map(|r| r.rule_id.as_ref()).collect();
     for (format, name) in FORMATS {
         let out = render(*format);
         for rule_id in &rule_ids {

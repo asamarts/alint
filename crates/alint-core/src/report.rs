@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::level::Level;
 use crate::rule::{RuleResult, Violation};
 
@@ -42,7 +44,7 @@ pub struct FixReport {
 
 #[derive(Debug, Clone)]
 pub struct FixRuleResult {
-    pub rule_id: String,
+    pub rule_id: Arc<str>,
     pub level: Level,
     pub items: Vec<FixItem>,
 }

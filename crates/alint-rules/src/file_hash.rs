@@ -62,7 +62,7 @@ impl Rule for FileHashRule {
                         encode_hex(&actual),
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

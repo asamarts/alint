@@ -35,7 +35,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
     let candidates: Vec<PathBuf> = scan
         .text_files()
         .filter(|e| is_source_file(&e.path))
-        .map(|e| e.path.clone())
+        .map(|e| e.path.to_path_buf())
         .collect();
     if candidates.is_empty() {
         return Vec::new();

@@ -62,7 +62,7 @@ fn escape_body(s: &str) -> String {
 mod tests {
     use super::*;
     use alint_core::{Report, RuleResult, Violation};
-    use std::path::PathBuf;
+    use std::path::Path;
 
     fn render(report: &Report) -> String {
         let mut buf = Vec::new();
@@ -125,7 +125,7 @@ mod tests {
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation {
-                    path: Some(PathBuf::from("src/lib.rs")),
+                    path: Some(Path::new("src/lib.rs").into()),
                     message: "bad".into(),
                     line: Some(12),
                     column: Some(4),

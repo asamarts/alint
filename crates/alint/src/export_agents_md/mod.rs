@@ -328,7 +328,7 @@ mod tests {
             spec("a-info", Level::Info, Some("ai")),
         ]);
         let dirs = collect_directives(&cfg, true);
-        let order: Vec<&str> = dirs.iter().map(|d| d.rule_id.as_str()).collect();
+        let order: Vec<&str> = dirs.iter().map(|d| d.rule_id.as_ref()).collect();
         assert_eq!(order, vec!["a-err", "b-warn", "z-warn", "a-info"]);
     }
 

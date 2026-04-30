@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn resolve_content_source_file_only() {
-        let p = Some(PathBuf::from("LICENSE"));
+        let p = Some(Path::new("LICENSE").into());
         let resolved = resolve_content_source("r", "file_create", &None, &p).unwrap();
         assert!(matches!(resolved, ContentSourceSpec::File(p) if p == Path::new("LICENSE")));
     }
@@ -665,7 +665,7 @@ mod tests {
             "r",
             "file_prepend",
             &Some("x".into()),
-            &Some(PathBuf::from("y")),
+            &Some(Path::new("y").into()),
         )
         .unwrap_err();
         assert!(err.to_string().contains("mutually exclusive"));

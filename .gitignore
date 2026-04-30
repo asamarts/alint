@@ -1,4 +1,6 @@
 /target
+target-baseline*/
+**/target-baseline*/
 /Cargo.lock.bak
 **/*.rs.bk
 

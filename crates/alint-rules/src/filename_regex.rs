@@ -58,7 +58,7 @@ impl Rule for FilenameRegexRule {
                         name, self.pattern_src
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

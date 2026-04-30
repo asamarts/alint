@@ -85,7 +85,7 @@ impl Rule for GitNoDeniedPathsRule {
                 pattern_list.join("`, `"),
             );
             let msg = self.message.clone().unwrap_or(detail);
-            violations.push(Violation::new(msg).with_path(path));
+            violations.push(Violation::new(msg).with_path(path.clone()));
         }
 
         Ok(violations)

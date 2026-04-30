@@ -105,7 +105,7 @@ impl Rule for NoBomRule {
                     .unwrap_or_else(|| format!("file begins with a {} BOM", kind.name()));
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(1, 1),
                 );
             }

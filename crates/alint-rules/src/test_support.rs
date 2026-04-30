@@ -11,7 +11,7 @@
 //! release builds. Per-rule tests bring them in via
 //! `use crate::test_support::*;`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use alint_core::{Context, FileEntry, FileIndex, RuleSpec};
 
@@ -32,7 +32,7 @@ pub fn index(paths: &[&str]) -> FileIndex {
         entries: paths
             .iter()
             .map(|p| FileEntry {
-                path: PathBuf::from(p),
+                path: std::path::Path::new(p).into(),
                 is_dir: false,
                 size: 0,
             })
@@ -48,7 +48,7 @@ pub fn index_with_dirs(entries: &[(&str, bool)]) -> FileIndex {
         entries: entries
             .iter()
             .map(|(p, is_dir)| FileEntry {
-                path: PathBuf::from(p),
+                path: std::path::Path::new(p).into(),
                 is_dir: *is_dir,
                 size: 0,
             })
@@ -93,7 +93,7 @@ pub fn tempdir_with_files(files: &[(&str, &[u8])]) -> (tempfile::TempDir, FileIn
         }
         std::fs::write(&abs, content).expect("write fixture file");
         entries.push(FileEntry {
-            path: PathBuf::from(rel),
+            path: std::path::Path::new(rel).into(),
             is_dir: false,
             size: content.len() as u64,
         });

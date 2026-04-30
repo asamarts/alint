@@ -2,7 +2,7 @@
 //! No filesystem I/O — isolates engine overhead (glob matching, rayon fanout,
 //! result aggregation) from walk costs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use alint_core::{Engine, FileEntry, FileIndex, Rule};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -58,12 +58,12 @@ fn build_rules() -> Vec<Box<dyn Rule>> {
 fn build_index(n: usize) -> FileIndex {
     let mut entries = Vec::with_capacity(n + 1);
     entries.push(FileEntry {
-        path: PathBuf::from("README.md"),
+        path: std::path::PathBuf::from("README.md").into(),
         is_dir: false,
         size: 2048,
     });
     entries.push(FileEntry {
-        path: PathBuf::from("docs"),
+        path: std::path::PathBuf::from("docs").into(),
         is_dir: true,
         size: 0,
     });
@@ -76,7 +76,7 @@ fn build_index(n: usize) -> FileIndex {
             _ => (format!("misc/data_{i}.yaml"), false, 256),
         };
         entries.push(FileEntry {
-            path: PathBuf::from(path),
+            path: std::path::PathBuf::from(path).into(),
             is_dir,
             size,
         });

@@ -316,14 +316,13 @@ fn read_git_branch(root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::walker::FileEntry;
-    use std::path::PathBuf;
 
     fn idx(paths: &[&str]) -> FileIndex {
         FileIndex {
             entries: paths
                 .iter()
                 .map(|p| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 1,
                 })

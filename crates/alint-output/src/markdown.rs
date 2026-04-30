@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 use alint_core::{FixReport, FixStatus, Level, Report, RuleResult, Violation};
 
@@ -208,25 +208,25 @@ fn level_counts(report: &Report) -> (usize, usize, usize) {
 }
 
 fn file_bucket_count(report: &Report) -> usize {
-    let mut paths: std::collections::BTreeSet<Option<PathBuf>> = std::collections::BTreeSet::new();
+    let mut paths: std::collections::BTreeSet<Option<&Path>> = std::collections::BTreeSet::new();
     for r in &report.results {
         if r.passed() {
             continue;
         }
         for v in &r.violations {
-            paths.insert(v.path.clone());
+            paths.insert(v.path.as_deref());
         }
     }
     paths.len()
 }
 
 type BucketedViolations<'a> = (
-    BTreeMap<PathBuf, Vec<(&'a RuleResult, &'a Violation)>>,
+    BTreeMap<&'a Path, Vec<(&'a RuleResult, &'a Violation)>>,
     Vec<(&'a RuleResult, &'a Violation)>,
 );
 
 fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
-    let mut by_file: BTreeMap<PathBuf, Vec<(&RuleResult, &Violation)>> = BTreeMap::new();
+    let mut by_file: BTreeMap<&Path, Vec<(&RuleResult, &Violation)>> = BTreeMap::new();
     let mut cross_file: Vec<(&RuleResult, &Violation)> = Vec::new();
     for result in &report.results {
         if result.passed() {
@@ -235,7 +235,7 @@ fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
         for violation in &result.violations {
             match &violation.path {
                 Some(p) => by_file
-                    .entry(p.clone())
+                    .entry(p.as_ref())
                     .or_default()
                     .push((result, violation)),
                 None => cross_file.push((result, violation)),
@@ -253,7 +253,7 @@ fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
 
 fn sort_key<'a>(p: &'a (&'a RuleResult, &'a Violation)) -> (&'a str, usize, usize) {
     (
-        p.0.rule_id.as_str(),
+        p.0.rule_id.as_ref(),
         p.1.line.unwrap_or(0),
         p.1.column.unwrap_or(0),
     )
@@ -308,7 +308,7 @@ fn md_url(s: &str) -> String {
 mod tests {
     use super::*;
     use alint_core::{FixItem, FixReport, FixRuleResult, FixStatus, Report, RuleResult, Violation};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn render(report: &Report) -> String {
         let mut buf = Vec::new();
@@ -357,7 +357,7 @@ mod tests {
                 "no-todo",
                 Level::Error,
                 vec![Violation {
-                    path: Some(PathBuf::from("src/lib.rs")),
+                    path: Some(Path::new("src/lib.rs").into()),
                     message: "TODO marker found".into(),
                     line: Some(12),
                     column: Some(4),
@@ -378,7 +378,7 @@ mod tests {
                     "r-z",
                     Level::Warning,
                     vec![Violation {
-                        path: Some(PathBuf::from("zeta.rs")),
+                        path: Some(Path::new("zeta.rs").into()),
                         message: "z".into(),
                         line: None,
                         column: None,
@@ -388,7 +388,7 @@ mod tests {
                     "r-a",
                     Level::Error,
                     vec![Violation {
-                        path: Some(PathBuf::from("alpha.rs")),
+                        path: Some(Path::new("alpha.rs").into()),
                         message: "a".into(),
                         line: None,
                         column: None,
@@ -513,7 +513,7 @@ mod tests {
                 "r1",
                 Level::Warning,
                 vec![Violation {
-                    path: Some(PathBuf::from("a.rs")),
+                    path: Some(Path::new("a.rs").into()),
                     message: "x".into(),
                     line: Some(7),
                     column: None,
@@ -528,13 +528,13 @@ mod tests {
     #[test]
     fn output_is_deterministic_across_input_order() {
         let v1 = Violation {
-            path: Some(PathBuf::from("a.rs")),
+            path: Some(Path::new("a.rs").into()),
             message: "a".into(),
             line: Some(1),
             column: Some(1),
         };
         let v2 = Violation {
-            path: Some(PathBuf::from("a.rs")),
+            path: Some(Path::new("a.rs").into()),
             message: "b".into(),
             line: Some(2),
             column: Some(1),
@@ -565,7 +565,7 @@ mod tests {
                 items: vec![
                     FixItem {
                         violation: Violation {
-                            path: Some(PathBuf::from("a.rs")),
+                            path: Some(Path::new("a.rs").into()),
                             message: "trailing whitespace".into(),
                             line: Some(1),
                             column: None,
@@ -574,7 +574,7 @@ mod tests {
                     },
                     FixItem {
                         violation: Violation {
-                            path: Some(PathBuf::from("b.rs")),
+                            path: Some(Path::new("b.rs").into()),
                             message: "trailing whitespace".into(),
                             line: None,
                             column: None,

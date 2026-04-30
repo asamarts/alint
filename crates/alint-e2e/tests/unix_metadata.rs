@@ -85,7 +85,7 @@ fn violation_count(report: &Report, rule_id: &str) -> usize {
     report
         .results
         .iter()
-        .filter(|r| r.rule_id == rule_id)
+        .filter(|r| &*r.rule_id == rule_id)
         .map(|r| r.violations.len())
         .sum()
 }

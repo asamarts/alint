@@ -187,7 +187,7 @@ pub(crate) fn evaluate_for_each(
                     Err(e) => {
                         violations.push(
                             Violation::new(format!("{parent_id}: when_iter error: {e}"))
-                                .with_path(&entry.path),
+                                .with_path(entry.path.clone()),
                         );
                         continue;
                     }
@@ -223,7 +223,7 @@ pub(crate) fn evaluate_for_each(
                                 Violation::new(format!(
                                     "{parent_id}: nested rule #{i} when error: {e}"
                                 ))
-                                .with_path(&entry.path),
+                                .with_path(entry.path.clone()),
                             );
                             continue;
                         }
@@ -238,7 +238,7 @@ pub(crate) fn evaluate_for_each(
                             "{parent_id}: failed to build nested rule #{i} for {}: {e}",
                             entry.path.display()
                         ))
-                        .with_path(&entry.path),
+                        .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -259,14 +259,14 @@ pub(crate) fn evaluate_for_each(
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex, RuleRegistry};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn index(entries: &[(&str, bool)]) -> FileIndex {
         FileIndex {
             entries: entries
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })

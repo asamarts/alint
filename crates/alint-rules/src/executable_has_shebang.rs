@@ -60,7 +60,7 @@ impl Rule for ExecutableHasShebangRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| "executable file has no shebang (#!)".to_string());
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

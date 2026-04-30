@@ -47,7 +47,7 @@ impl Rule for NoSymlinksRule {
                     .message
                     .clone()
                     .unwrap_or_else(|| "path is a symbolic link".to_string());
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)
@@ -156,7 +156,7 @@ mod tests {
         // (tempdir_with_files doesn't create symlinks).
         symlink(tmp.path().join("real.txt"), tmp.path().join("link.txt")).unwrap();
         idx.entries.push(alint_core::FileEntry {
-            path: std::path::PathBuf::from("link.txt"),
+            path: std::path::Path::new("link.txt").into(),
             is_dir: false,
             size: 0,
         });

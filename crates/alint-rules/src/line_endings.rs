@@ -70,7 +70,7 @@ impl Rule for LineEndingsRule {
                 });
                 violations.push(
                     Violation::new(msg)
-                        .with_path(&entry.path)
+                        .with_path(entry.path.clone())
                         .with_location(line_no, 1),
                 );
             }

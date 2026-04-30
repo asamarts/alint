@@ -49,7 +49,8 @@ impl Rule for FileContentMatchesRule {
                 Ok(b) => b,
                 Err(e) => {
                     violations.push(
-                        Violation::new(format!("could not read file: {e}")).with_path(&entry.path),
+                        Violation::new(format!("could not read file: {e}"))
+                            .with_path(entry.path.clone()),
                     );
                     continue;
                 }
@@ -57,7 +58,7 @@ impl Rule for FileContentMatchesRule {
             let Ok(text) = std::str::from_utf8(&bytes) else {
                 violations.push(
                     Violation::new("file is not valid UTF-8; cannot match regex")
-                        .with_path(&entry.path),
+                        .with_path(entry.path.clone()),
                 );
                 continue;
             };
@@ -68,7 +69,7 @@ impl Rule for FileContentMatchesRule {
                         self.pattern_src
                     )
                 });
-                violations.push(Violation::new(msg).with_path(&entry.path));
+                violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }
         }
         Ok(violations)

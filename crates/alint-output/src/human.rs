@@ -15,7 +15,8 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
+use std::sync::Arc;
 
 use alint_core::{FixReport, FixStatus, Level, Report, RuleResult, Violation};
 
@@ -46,9 +47,12 @@ pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> st
         return Ok(());
     }
 
-    // Bucket violations by path. `Option<PathBuf>` sorts `None`
+    // Bucket violations by path. `Option<Arc<Path>>` sorts `None`
     // before `Some`, which we want — repository-level gaps lead.
-    let mut by_bucket: BTreeMap<Option<PathBuf>, Vec<(&RuleResult, &Violation)>> = BTreeMap::new();
+    // Cloning the Arc is an atomic refcount bump, not a path-byte
+    // copy.
+    let mut by_bucket: BTreeMap<Option<Arc<Path>>, Vec<(&RuleResult, &Violation)>> =
+        BTreeMap::new();
     for result in &report.results {
         if result.passed() {
             continue;

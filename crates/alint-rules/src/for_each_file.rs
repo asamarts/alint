@@ -95,14 +95,14 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex, RuleRegistry};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn index(entries: &[(&str, bool)]) -> FileIndex {
         FileIndex {
             entries: entries
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
-                    path: PathBuf::from(p),
+                    path: std::path::Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })

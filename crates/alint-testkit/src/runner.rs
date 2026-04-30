@@ -287,7 +287,7 @@ fn assert_violations(
             // assert `src/main.rs` regardless of host OS.
             // Windows' Path::display() emits `src\main.rs`.
             actual.push((
-                r.rule_id.clone(),
+                r.rule_id.to_string(),
                 r.level,
                 v.path
                     .as_ref()
@@ -341,7 +341,7 @@ fn assert_fix_status(
         .results
         .iter()
         .filter(|r| r.items.iter().any(|it| pred(&it.status)))
-        .map(|r| r.rule_id.clone())
+        .map(|r| r.rule_id.to_string())
         .collect();
     let mut expected = wanted_rules.to_vec();
     expected.sort();

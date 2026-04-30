@@ -26,11 +26,11 @@ fn build_sarif(report: &Report) -> Sarif {
 
     for rr in &report.results {
         rules.push(SarifRule {
-            id: rr.rule_id.clone(),
+            id: rr.rule_id.to_string(),
             short_description: SarifText {
                 text: format!("alint rule `{}`", rr.rule_id),
             },
-            help_uri: rr.policy_url.clone(),
+            help_uri: rr.policy_url.as_deref().map(str::to_string),
         });
 
         for v in &rr.violations {
@@ -55,10 +55,10 @@ fn build_sarif(report: &Report) -> Sarif {
                 Vec::new()
             };
             results.push(SarifResult {
-                rule_id: rr.rule_id.clone(),
+                rule_id: rr.rule_id.to_string(),
                 level: level_to_sarif(rr.level),
                 message: SarifText {
-                    text: v.message.clone(),
+                    text: v.message.to_string(),
                 },
                 locations,
             });
@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use alint_core::{Report, RuleResult, Violation};
     use serde_json::Value;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     fn render(report: &Report) -> Value {
         let mut buf = Vec::new();
@@ -274,7 +274,7 @@ mod tests {
                 level: Level::Error,
                 policy_url: None,
                 violations: vec![Violation {
-                    path: Some(PathBuf::from("src/lib.rs")),
+                    path: Some(Path::new("src/lib.rs").into()),
                     message: "m".into(),
                     line: Some(7),
                     column: Some(3),
