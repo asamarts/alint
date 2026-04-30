@@ -8,6 +8,88 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-04-30
+
+Second phase of the v0.9 engine-optimization cut: the
+type-level memory pass. No new user-visible rule kinds,
+formatters, or subcommands; every v0.9.1 config runs
+unchanged. Output bytes from all 8 formatters are
+byte-identical to v0.9.1.
+
+### Performance
+
+- **`Arc<Path>` on `FileEntry::path` and
+  `Violation::path`.** The walker builds one `Arc::from`
+  per file; every `Violation` referencing that file now
+  shares the same allocation via `Arc::clone` (atomic
+  refcount bump) instead of copying the path bytes. At
+  100k violations that's ~100k saved path allocations.
+  Canonical caller pattern is now
+  `.with_path(entry.path.clone())`.
+- **`Arc<str>` on `RuleResult::rule_id` and
+  `policy_url`.** Set once per rule by the engine, shared
+  across N violations of that rule (one alloc per rule
+  instead of per violation).
+- **`Cow<'static, str>` on `Violation::message`.** Per-
+  match templated messages (`format!("line {n}:…")`) live
+  as `Cow::Owned(String)` (no change in cost); fixed
+  messages can live as `Cow::Borrowed("…")` for a future
+  audit pass. Public API preserves `&v.message: &str`
+  via `Cow::as_ref`.
+
+### Internal
+
+- `Violation::with_path(impl Into<Arc<Path>>)` accepts
+  `PathBuf`, `&Path`, `Box<Path>`, and `Arc<Path>`. Tests
+  using a string literal migrate to
+  `with_path(Path::new("…"))`.
+- `Violation::new(impl Into<Cow<'static, str>>)` accepts
+  `&'static str`, `String`, and `Cow<'static, str>`.
+  Borrowed `&str` from non-static lifetimes pass via
+  `.to_string()`.
+- ~70 rule call sites and 8 output formatter structs
+  migrated. Output formatters that previously held
+  `Option<PathBuf>` / `String` internally now borrow
+  `Option<&'a Path>` / `&'a str` from the source where
+  possible (json, agent, markdown), or convert at the
+  serialise boundary via `.to_string()` / `.as_deref()`
+  where the format requires owned.
+- `human` formatter: `BTreeMap` keyed on
+  `Option<Arc<Path>>` instead of `Option<PathBuf>` — sort
+  order unchanged (Arc<Path> sorts via Path's Ord impl).
+- `markdown` formatter: bucket map switches to
+  `BTreeMap<&'a Path, …>` — eliminates the per-violation
+  path clone the bucketing did before.
+- `unique_by` and `no_case_conflicts` group on
+  `Arc<Path>` internally instead of `PathBuf`.
+
+### Scope deferred to v0.9.3
+
+The original v0.9.2 design scope included per-rule
+byte-slice scanning conversions (the 6 line-oriented rules:
+`no_trailing_whitespace`, `final_newline`, `line_endings`,
+`max_consecutive_blank_lines`, `indent_style`,
+`line_max_width`) and bounded prefix/suffix reads (the 4
+first-/last-bytes-only rules: `file_starts_with`,
+`file_ends_with`, `executable_has_shebang`,
+`shebang_has_executable`). Both moved to v0.9.3 because
+the per-file dispatch flip hands each rule a pre-loaded
+`&[u8]` slice — bundling the conversions there avoids
+touching the same rule bodies twice. See
+`docs/design/v0.9/memory_pass.md` and
+`docs/design/v0.9/dispatch_flip.md` for the rationale.
+
+### Build / test
+
+- Workspace test suite green (1000+ tests across 7
+  crates).
+- `target-baseline*/` added to `.gitignore` for the
+  baseline-bench scratch dirs the v0.9.x flow uses.
+- Pre-v0.9.2 baseline frozen at
+  `docs/benchmarks/v0.9/baseline-v0.9.1/criterion/` for
+  same-day per-phase delta comparisons. v0.9.2 numbers
+  at `docs/benchmarks/v0.9/v0.9.2-memory-pass/criterion/`.
+
 ## [0.9.1] — 2026-04-30
 
 First phase of the v0.9 engine-optimization cut. Parallel
@@ -2668,7 +2750,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/asamarts/alint/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/asamarts/alint/compare/v0.8.2...v0.9.1
 [0.8.2]: https://github.com/asamarts/alint/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/asamarts/alint/compare/v0.8.0...v0.8.1

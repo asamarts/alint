@@ -6,35 +6,33 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.9.1** (2026-04-30). First phase of
-the v0.9 engine-optimization cut — parallel walker via
-`WalkBuilder::build_parallel` plus a deterministic post-
-sort by relative path. `walker/10000` is **64% faster**
-(52.25 ms → 18.67 ms) and `walker/1000` is **41% faster**
-(8.85 ms → 5.25 ms) on the published bench scenarios.
-`walker/100` regresses by 1ms (61% relative; thread-spawn
-overhead at small N) — accepted trade per the design doc;
-the v0.7.0 `bench-compare` gate stays green at -4.77% max
-delta on `rule_engine/1000`. No new user-visible rule
-kinds, formatters, or subcommands; every v0.8 config runs
-unchanged. See [CHANGELOG.md](../../CHANGELOG.md) for the
-full breakdown and `docs/benchmarks/v0.9/v0.9.1-parallel-
-walker/README.md` for the captured numbers.
+**Latest release: v0.9.2** (2026-04-30). Second phase of
+the v0.9 engine-optimization cut — the type-level memory
+pass: `Arc<Path>` on `FileEntry::path` and
+`Violation::path`, `Arc<str>` on `RuleResult::rule_id` and
+`policy_url`, `Cow<'static, str>` on `Violation::message`.
+Per-violation path / rule-id clones become atomic refcount
+bumps instead of byte allocations; at 100k violations
+that's 100k saved allocs. No rule logic changes; all 8
+output formatters produce byte-identical output to v0.9.1.
+The per-rule byte-slice scanning + bounded prefix/suffix
+read conversions originally scoped here moved to v0.9.3
+because the dispatch flip hands rules a pre-loaded `&[u8]`
+slice — bundling them avoids duplicate work on the same
+rule bodies. See [CHANGELOG.md](../../CHANGELOG.md) and
+`docs/benchmarks/v0.9/v0.9.2-memory-pass/README.md`.
 
-**Next: v0.9.2 — Memory-footprint pass.** Cow audit on
-`Violation` / `RuleResult` / `Report` (most yield from
-`Arc<Path>` on `FileEntry::path` so violation builders
-amortise the clone), byte-slice scanning on the line-
-oriented rules to skip the redundant UTF-8 validation pass,
-bounded prefix/suffix reads on rules that today read the
-whole file but only consult the first or last few bytes
-(`executable_has_shebang`, `file_starts_with`, etc.).
-`dhat` profile against `single_file_rules.rs` and
-`cross_file_rules.rs` at the published 10k / 100k tree
-sizes drives the per-rule conversion list. Designed in
-`docs/design/v0.9/memory_pass.md`. v0.9.3 (per-file-rule
-dispatch flip) ships after; LSP shifts to v0.10; WASM
-plugins to v0.11.
+**Next: v0.9.3 — Per-file-rule dispatch flip.** Per-file
+rules run under a file-major outer loop via a new
+`PerFileRule` sub-trait; cross-file rules
+(`requires_full_index() == true`) keep the rule-major
+path. Coalesces redundant `std::fs::read` calls when
+multiple content rules match the same file. Bundled
+with the per-rule byte-slice scanning + bounded
+prefix/suffix reads (formerly v0.9.2 scope) so each rule
+body is touched once. Designed in
+`docs/design/v0.9/dispatch_flip.md`. LSP shifts to v0.10;
+WASM plugins to v0.11.
 
 ## Positioning
 
@@ -570,19 +568,27 @@ design pass.)
   on. Walker bench: -64% at 10k files, -41% at 1k files,
   +61% at 100 files (1ms thread-spawn overhead — accepted
   trade per design doc).
-- ⏳ **Memory-footprint pass** (v0.9.2) — `String` → `Cow` /
-  `Arc<str>` audit on `Violation` / `RuleResult` / `Report`,
-  byte-slice scanning on line-oriented rules to skip
-  redundant UTF-8 validation passes, bounded prefix/suffix
-  reads where rules today read the whole file. `dhat`
-  profile against the v0.8.4 bench scenarios drives the
-  per-rule conversion list.
-- ⏳ **Per-file-rule dispatch flip** (v0.9.3) — per-file
-  rules run under a file-major outer loop via a new
-  `PerFileRule` sub-trait; cross-file rules
-  (`requires_full_index() == true`) keep the rule-major
-  path. Coalesces redundant `std::fs::read` calls when
-  multiple content rules match the same file.
+- ✅ **Memory-footprint pass** — type-level only (v0.9.2,
+  2026-04-30). `Arc<Path>` on `FileEntry::path` /
+  `Violation::path`, `Arc<str>` on `RuleResult::rule_id` /
+  `policy_url`, `Cow<'static, str>` on `Violation::message`.
+  Per-violation path / id clones become atomic refcount
+  bumps. Byte-slice scanning + bounded prefix/suffix reads
+  bundled into v0.9.3 alongside the dispatch flip (rule
+  bodies get touched once instead of twice).
+- ⏳ **Per-file-rule dispatch flip + per-rule scanning
+  conversions** (v0.9.3) — per-file rules run under a
+  file-major outer loop via a new `PerFileRule` sub-trait;
+  cross-file rules (`requires_full_index() == true`) keep
+  the rule-major path. Coalesces redundant `std::fs::read`
+  calls when multiple content rules match the same file. As
+  each rule's body migrates to consume `&[u8]`, it switches
+  from `from_utf8 + split('\n')` to `bytes.split` (skips the
+  redundant UTF-8 validation pass on byte-pattern checks);
+  the four first/last-bytes-only rules (`file_starts_with`,
+  `file_ends_with`, `executable_has_shebang`,
+  `shebang_has_executable`) get bounded reads via a new
+  `crates/alint-rules/src/io.rs`.
 - v0.8.5's `bench-compare` gate catches any regression
   from the engine restructure for free.
 
