@@ -9,10 +9,11 @@ repository.workspace = true
 homepage = "https://github.com/asamarts/alint"
 readme = "../../README.md"
 authors.workspace = true
-# Internal crate — implementation detail of the alint binary.
-# Historical versions ship to crates.io; new versions are gated
-# off here. Defense-in-depth past `release.yml`'s allowlist.
-publish = false
+# Implementation-detail crate of the alint binary, but cargo
+# requires every workspace dep of a published crate to have a
+# resolvable `version =` on crates.io. So this crate publishes
+# even though its description warns "Internal: Not a stable
+# public API." See alint-dsl/Cargo.toml for the v0.8 history.
 
 [dependencies]
 alint-core.workspace = true

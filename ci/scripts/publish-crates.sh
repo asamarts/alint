@@ -33,18 +33,25 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=true
 fi
 
-# Dependency-ordered list. alint-core is the published library
-# (engine + types — public API); alint is the binary. The
-# remaining workspace crates (alint-dsl, alint-rules,
-# alint-output) carry `publish = false` and stay out of crates.io
-# going forward — their descriptions have always read "Internal:
-# Not a stable public API"; making the manifest match.
+# Dependency-ordered list. alint-core is the public library
+# (engine + types); alint-dsl/rules/output are
+# implementation-detail crates whose descriptions warn "Internal:
+# Not a stable public API" — they only publish because cargo
+# requires every workspace dep of a published crate (alint, the
+# binary) to have a resolvable `version =` on crates.io. The
+# v0.8 audit attempted `publish = false` on the three internal
+# crates (87462c3 + 794b954) but `cargo publish -p alint` failed
+# at v0.8.0 because the workspace-pinned dep on alint-dsl@0.8.0
+# wasn't resolvable from crates.io. Reverted in v0.8.1.
 #
-# Historical versions of those three crates remain on crates.io
-# (ship since v0.5.x) — see the `cargo yank` housekeeping under
-# `docs/design/v0.8.0-release-notes.md` if applicable.
+# Historical versions of alint-dsl/rules/output remain *yanked*
+# on crates.io (the audit-driven cleanup discouraged depending
+# on them externally); fresh versions ship un-yanked alongside.
 CRATES=(
   alint-core
+  alint-dsl
+  alint-rules
+  alint-output
   alint
 )
 
