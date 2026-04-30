@@ -1,6 +1,10 @@
 //! `file_header` — first N lines of each file in scope must match a pattern.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -62,29 +66,48 @@ impl Rule for FileHeaderRule {
                     continue;
                 }
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                violations.push(
-                    Violation::new("file is not valid UTF-8; cannot match header")
-                        .with_path(entry.path.clone()),
-                );
-                continue;
-            };
-            let header: String = text.split_inclusive('\n').take(self.lines).collect();
-            if !self.pattern.is_match(&header) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "first {} line(s) do not match required header /{}/",
-                        self.lines, self.pattern_src
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(1, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileHeaderRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(vec![
+                Violation::new("file is not valid UTF-8; cannot match header")
+                    .with_path(std::sync::Arc::<Path>::from(path)),
+            ]);
+        };
+        let header: String = text.split_inclusive('\n').take(self.lines).collect();
+        if self.pattern.is_match(&header) {
+            return Ok(Vec::new());
+        }
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "first {} line(s) do not match required header /{}/",
+                self.lines, self.pattern_src
+            )
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(1, 1),
+        ])
     }
 }
 

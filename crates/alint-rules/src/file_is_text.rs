@@ -4,9 +4,11 @@
 //! (magic-byte + heuristic analysis). UTF-8, UTF-16 (with BOM), and plain
 //! 7-bit ASCII are treated as text.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
 
-use crate::io::{Classification, classify_bytes, read_prefix};
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+
+use crate::io::{Classification, TEXT_INSPECT_LEN, classify_bytes, read_prefix};
 
 #[derive(Debug)]
 pub struct FileIsTextRule {
@@ -38,6 +40,11 @@ impl Rule for FileIsTextRule {
                 // Empty files are text by convention.
                 continue;
             }
+            // Bounded read: only the first TEXT_INSPECT_LEN
+            // bytes feed `content_inspector`. Solo runs read
+            // just that prefix; the dispatch-flip path receives
+            // the whole file from the engine and inspects only
+            // the prefix.
             let full = ctx.root.join(&entry.path);
             let bytes = match read_prefix(&full) {
                 Ok(b) => b,
@@ -49,14 +56,48 @@ impl Rule for FileIsTextRule {
                     continue;
                 }
             };
-            if classify_bytes(&bytes) == Classification::Binary {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    "file is detected as binary; text is required here".to_string()
-                });
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileIsTextRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Inspect only the first TEXT_INSPECT_LEN bytes; the
+        // engine handed us the full file but the classifier
+        // only needs the prefix.
+        let sample = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
+        if classify_bytes(sample) != Classification::Binary {
+            return Ok(Vec::new());
+        }
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| "file is detected as binary; text is required here".to_string());
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
+    }
+
+    fn max_bytes_needed(&self) -> Option<usize> {
+        Some(TEXT_INSPECT_LEN)
     }
 }
 

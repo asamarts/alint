@@ -10,7 +10,9 @@
 //! would silently lose meaning. Users either rewrite manually
 //! or loosen the rule to `file_is_text`.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 
 #[derive(Debug)]
 pub struct FileIsAsciiRule {
@@ -42,14 +44,37 @@ impl Rule for FileIsAsciiRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            if let Some(pos) = first_non_ascii(&bytes) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!("non-ASCII byte 0x{:02X} at offset {pos}", bytes[pos])
-                });
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileIsAsciiRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Some(pos) = first_non_ascii(bytes) else {
+            return Ok(Vec::new());
+        };
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("non-ASCII byte 0x{:02X} at offset {pos}", bytes[pos]));
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
     }
 }
 

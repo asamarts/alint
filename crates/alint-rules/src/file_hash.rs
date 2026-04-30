@@ -8,7 +8,9 @@
 //! Check-only. Fix would require knowing what the "right"
 //! content is, which is the generator's job, not alint's.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -51,21 +53,43 @@ impl Rule for FileHashRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            let actual: [u8; 32] = hasher.finalize().into();
-            if actual != self.expected {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "sha256 mismatch: expected {}, got {}",
-                        encode_hex(&self.expected),
-                        encode_hex(&actual),
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileHashRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let actual: [u8; 32] = hasher.finalize().into();
+        if actual == self.expected {
+            return Ok(Vec::new());
+        }
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "sha256 mismatch: expected {}, got {}",
+                encode_hex(&self.expected),
+                encode_hex(&actual),
+            )
+        });
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
     }
 }
 

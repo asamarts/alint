@@ -15,7 +15,9 @@
 //! Most useful configs supply a tighter regex like
 //! `^#!/usr/bin/env bash$` or `^#!/bin/bash -euo pipefail$`.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -61,25 +63,45 @@ impl Rule for FileShebangRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let first_line = match std::str::from_utf8(&bytes) {
-                Ok(text) => text.split('\n').next().unwrap_or(""),
-                Err(_) => "",
-            };
-            if !self.pattern.is_match(first_line) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "first line {first_line:?} does not match required shebang /{}/",
-                        self.pattern_src
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(1, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileShebangRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let first_line = match std::str::from_utf8(bytes) {
+            Ok(text) => text.split('\n').next().unwrap_or(""),
+            Err(_) => "",
+        };
+        if self.pattern.is_match(first_line) {
+            return Ok(Vec::new());
+        }
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "first line {first_line:?} does not match required shebang /{}/",
+                self.pattern_src
+            )
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(1, 1),
+        ])
     }
 }
 

@@ -10,7 +10,9 @@
 //! Check-only: resolving a conflict requires human judgment, so
 //! no auto-fix exists.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 
 #[derive(Debug)]
 pub struct NoMergeConflictMarkersRule {
@@ -42,21 +44,41 @@ impl Rule for NoMergeConflictMarkersRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some((line_no, marker)) = first_marker(text) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!("unresolved merge conflict marker on line {line_no}: {marker:?}")
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for NoMergeConflictMarkersRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some((line_no, marker)) = first_marker(text) else {
+            return Ok(Vec::new());
+        };
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!("unresolved merge conflict marker on line {line_no}: {marker:?}")
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, 1),
+        ])
     }
 }
 

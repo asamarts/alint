@@ -9,9 +9,14 @@
 //!
 //! Fixable via `file_strip_bom` — removes the leading BOM bytes.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 
 use crate::fixers::FileStripBomFixer;
+use crate::io::read_prefix_n;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BomKind {
@@ -94,27 +99,53 @@ impl Rule for NoBomRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            // Bounded read: BOMs are 2-4 bytes. Solo runs read
+            // just the prefix instead of the whole file.
             let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = std::fs::read(&full) else {
+            let Ok(bytes) = read_prefix_n(&full, 4) else {
                 continue;
             };
-            if let Some(kind) = detect_bom(&bytes) {
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("file begins with a {} BOM", kind.name()));
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(1, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for NoBomRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Some(kind) = detect_bom(bytes) else {
+            return Ok(Vec::new());
+        };
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("file begins with a {} BOM", kind.name()));
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(1, 1),
+        ])
+    }
+
+    fn max_bytes_needed(&self) -> Option<usize> {
+        Some(4)
     }
 }
 

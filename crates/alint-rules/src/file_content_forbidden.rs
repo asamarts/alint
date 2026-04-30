@@ -1,6 +1,8 @@
 //! `file_content_forbidden` — files in scope must NOT match a regex.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -48,25 +50,45 @@ impl Rule for FileContentForbiddenRule {
                     continue;
                 }
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                // Non-UTF-8 files are silently skipped; they can't contain a
-                // text regex match. Use `file_is_text` to flag binaries.
-                continue;
-            };
-            if let Some(m) = self.pattern.find(text) {
-                let line = text[..m.start()].matches('\n').count() + 1;
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("forbidden pattern /{}/ found", self.pattern_src));
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line, 1),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileContentForbiddenRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        // Non-UTF-8 files are silently skipped; they can't contain a
+        // text regex match. Use `file_is_text` to flag binaries.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some(m) = self.pattern.find(text) else {
+            return Ok(Vec::new());
+        };
+        let line = text[..m.start()].matches('\n').count() + 1;
+        let msg = self
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("forbidden pattern /{}/ found", self.pattern_src));
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line, 1),
+        ])
     }
 }
 

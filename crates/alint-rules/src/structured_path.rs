@@ -39,9 +39,9 @@
 //! problem, not the structured rule's concern — but better to
 //! surface it than silently skip.
 
-use std::io::Read;
+use std::path::Path;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
@@ -164,41 +164,65 @@ impl Rule for StructuredPathRule {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
-            let Ok(text) = read_to_string(&full) else {
+            let Ok(bytes) = std::fs::read(&full) else {
                 // permission / race — silent skip, like other
                 // content rules
                 continue;
             };
-            let root_value = match self.format.parse(&text) {
-                Ok(v) => v,
-                Err(err) => {
-                    violations.push(
-                        Violation::new(format!(
-                            "not a valid {} document: {err}",
-                            self.format.label()
-                        ))
-                        .with_path(entry.path.clone()),
-                    );
-                    continue;
-                }
-            };
-            let matches = self.path_expr.query(&root_value);
-            if matches.is_empty() {
-                if self.if_present {
-                    continue;
-                }
-                let msg = self
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("JSONPath `{}` produced no match", self.path_src));
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-                continue;
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
+        }
+        Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for StructuredPathRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let root_value = match self.format.parse(text) {
+            Ok(v) => v,
+            Err(err) => {
+                return Ok(vec![
+                    Violation::new(format!(
+                        "not a valid {} document: {err}",
+                        self.format.label()
+                    ))
+                    .with_path(std::sync::Arc::<Path>::from(path)),
+                ]);
             }
-            for m in matches.iter() {
-                if let Some(v) = check_match(m, &self.op) {
-                    let base = self.message.clone().unwrap_or(v);
-                    violations.push(Violation::new(base).with_path(entry.path.clone()));
-                }
+        };
+        let matches = self.path_expr.query(&root_value);
+        if matches.is_empty() {
+            if self.if_present {
+                return Ok(Vec::new());
+            }
+            let msg = self
+                .message
+                .clone()
+                .unwrap_or_else(|| format!("JSONPath `{}` produced no match", self.path_src));
+            return Ok(vec![
+                Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+            ]);
+        }
+        let mut violations = Vec::new();
+        for m in matches.iter() {
+            if let Some(v) = check_match(m, &self.op) {
+                let base = self.message.clone().unwrap_or(v);
+                violations.push(Violation::new(base).with_path(std::sync::Arc::<Path>::from(path)));
             }
         }
         Ok(violations)
@@ -261,12 +285,6 @@ fn kind_name(v: &Value) -> &'static str {
     }
 }
 
-fn read_to_string(path: &std::path::Path) -> std::io::Result<String> {
-    let mut f = std::fs::File::open(path)?;
-    let mut s = String::new();
-    f.read_to_string(&mut s)?;
-    Ok(s)
-}
 
 // ---------------------------------------------------------------
 // Builders

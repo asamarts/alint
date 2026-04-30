@@ -52,7 +52,7 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -222,42 +222,63 @@ impl Rule for CommentedOutCodeRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
-            let lang = self.language.resolve(&entry.path);
-            if lang == Language::Auto {
-                continue; // unknown extension — skip silently
-            }
             let full = ctx.root.join(&entry.path);
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
+        }
+        Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for CommentedOutCodeRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let lang = self.language.resolve(path);
+        if lang == Language::Auto {
+            return Ok(Vec::new()); // unknown extension — skip silently
+        }
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let mut violations = Vec::new();
+        for block in find_comment_blocks(text, lang) {
+            if block.lines.len() < self.min_lines {
                 continue;
-            };
-            for block in find_comment_blocks(text, lang) {
-                if block.lines.len() < self.min_lines {
-                    continue;
-                }
-                if block.start_line <= self.skip_leading_lines {
-                    continue;
-                }
-                if block.is_doc_comment {
-                    continue;
-                }
-                let density = score_density(&block.content);
-                if density >= self.threshold {
-                    let msg = self.message.clone().unwrap_or_else(|| {
-                        format!(
-                            "block of {} commented-out lines (density {:.2}); remove or convert to runtime-checked branch",
-                            block.lines.len(),
-                            density,
-                        )
-                    });
-                    violations.push(
-                        Violation::new(msg)
-                            .with_path(entry.path.clone())
-                            .with_location(block.start_line, 1),
-                    );
-                }
+            }
+            if block.start_line <= self.skip_leading_lines {
+                continue;
+            }
+            if block.is_doc_comment {
+                continue;
+            }
+            let density = score_density(&block.content);
+            if density >= self.threshold {
+                let msg = self.message.clone().unwrap_or_else(|| {
+                    format!(
+                        "block of {} commented-out lines (density {:.2}); remove or convert to runtime-checked branch",
+                        block.lines.len(),
+                        density,
+                    )
+                });
+                violations.push(
+                    Violation::new(msg)
+                        .with_path(std::sync::Arc::<Path>::from(path))
+                        .with_location(block.start_line, 1),
+                );
             }
         }
         Ok(violations)

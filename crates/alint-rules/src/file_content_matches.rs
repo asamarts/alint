@@ -1,6 +1,10 @@
 //! `file_content_matches` — every file in scope must match a regex.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -55,24 +59,45 @@ impl Rule for FileContentMatchesRule {
                     continue;
                 }
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                violations.push(
-                    Violation::new("file is not valid UTF-8; cannot match regex")
-                        .with_path(entry.path.clone()),
-                );
-                continue;
-            };
-            if !self.pattern.is_match(text) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "content does not match required pattern /{}/",
-                        self.pattern_src
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileContentMatchesRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(vec![
+                Violation::new("file is not valid UTF-8; cannot match regex")
+                    .with_path(std::sync::Arc::<Path>::from(path)),
+            ]);
+        };
+        if self.pattern.is_match(text) {
+            return Ok(Vec::new());
+        }
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "content does not match required pattern /{}/",
+                self.pattern_src
+            )
+        });
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
     }
 }
 

@@ -17,7 +17,11 @@
 //! Non-UTF-8 files are skipped (can't have these codepoints
 //! anyway without being invalid UTF-8).
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 
 use crate::fixers::FileStripBidiFixer;
 
@@ -58,28 +62,48 @@ impl Rule for NoBidiControlsRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue;
-            };
-            if let Some((line_no, col, codepoint)) = first_bidi(text) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "Unicode bidi control U+{codepoint:04X} at line {line_no} col {col} \
-                         (Trojan-Source defense)"
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_location(line_no, col),
-                );
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for NoBidiControlsRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new());
+        };
+        let Some((line_no, col, codepoint)) = first_bidi(text) else {
+            return Ok(Vec::new());
+        };
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "Unicode bidi control U+{codepoint:04X} at line {line_no} col {col} \
+                 (Trojan-Source defense)"
+            )
+        });
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(line_no, col),
+        ])
     }
 }
 

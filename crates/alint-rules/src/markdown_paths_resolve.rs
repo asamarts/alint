@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -69,28 +69,50 @@ impl Rule for MarkdownPathsResolveRule {
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else {
-                continue; // non-UTF-8 markdown is degenerate; skip
-            };
-            for cand in scan_markdown_paths(text, &self.prefixes) {
-                if self.ignore_template_vars && has_template_vars(&cand.token) {
-                    continue;
-                }
-                let lookup = strip_path_decoration(&cand.token);
-                if !path_resolves(ctx, lookup) {
-                    let msg = self.message.clone().unwrap_or_else(|| {
-                        format!(
-                            "backticked path `{}` doesn't resolve to a file or directory",
-                            cand.token
-                        )
-                    });
-                    violations.push(
-                        Violation::new(msg)
-                            .with_path(entry.path.clone())
-                            .with_location(cand.line, cand.column),
-                    );
-                }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
+        }
+        Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for MarkdownPathsResolveRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(Vec::new()); // non-UTF-8 markdown is degenerate; skip
+        };
+        let mut violations = Vec::new();
+        for cand in scan_markdown_paths(text, &self.prefixes) {
+            if self.ignore_template_vars && has_template_vars(&cand.token) {
+                continue;
             }
+            let lookup = strip_path_decoration(&cand.token);
+            if path_resolves(ctx, lookup) {
+                continue;
+            }
+            let msg = self.message.clone().unwrap_or_else(|| {
+                format!(
+                    "backticked path `{}` doesn't resolve to a file or directory",
+                    cand.token
+                )
+            });
+            violations.push(
+                Violation::new(msg)
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    .with_location(cand.line, cand.column),
+            );
         }
         Ok(violations)
     }

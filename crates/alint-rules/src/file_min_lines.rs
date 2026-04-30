@@ -15,7 +15,9 @@
 //! usual `wc -l` semantics closely enough for policy use;
 //! pedantic counting differences aren't worth the surprise.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use std::path::Path;
+
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -58,18 +60,40 @@ impl Rule for FileMinLinesRule {
                 // whole check run.
                 continue;
             };
-            let lines = count_lines(&bytes);
-            if lines < self.min_lines {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "file has {} line(s); at least {} required",
-                        lines, self.min_lines,
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
-            }
+            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
         Ok(violations)
+    }
+
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> {
+        Some(self)
+    }
+}
+
+impl PerFileRule for FileMinLinesRule {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    fn evaluate_file(
+        &self,
+        _ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let lines = count_lines(bytes);
+        if lines >= self.min_lines {
+            return Ok(Vec::new());
+        }
+        let msg = self.message.clone().unwrap_or_else(|| {
+            format!(
+                "file has {} line(s); at least {} required",
+                lines, self.min_lines,
+            )
+        });
+        Ok(vec![
+            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+        ])
     }
 }
 
