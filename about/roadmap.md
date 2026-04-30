@@ -6,34 +6,35 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.8.2** (2026-04-29). Hotfix on v0.8.0
-restoring `cargo install alint` after the v0.8 audit's
-`publish = false` change made `alint`'s crates.io publish
-unresolvable — see CHANGELOG. Same code as v0.8.0; manifest
-revert only. v0.8.0 closes the v0.8
-cut — five sub-phases (v0.8.1 → v0.8.5) shipping the
-comprehensive test/bench/rot-prevention foundation that
-v0.9's engine optimization needs to land safely. No new
-user-facing rule kinds, formatters, or subcommands; entirely
-internal. Workspace coverage at 90.57% (xtask excluded);
-Cross-Platform lane on macOS-arm64 + Windows-x86_64; Mutants
-nightly rotating one crate per night;
-`xtask bench-compare` gating PR-time perf regressions
-against a v0.7.0 baseline. Schema-compatible: every v0.7
-config runs unchanged. See
-[CHANGELOG.md](../../CHANGELOG.md) for the full breakdown.
+**Latest release: v0.9.1** (2026-04-30). First phase of
+the v0.9 engine-optimization cut — parallel walker via
+`WalkBuilder::build_parallel` plus a deterministic post-
+sort by relative path. `walker/10000` is **64% faster**
+(52.25 ms → 18.67 ms) and `walker/1000` is **41% faster**
+(8.85 ms → 5.25 ms) on the published bench scenarios.
+`walker/100` regresses by 1ms (61% relative; thread-spawn
+overhead at small N) — accepted trade per the design doc;
+the v0.7.0 `bench-compare` gate stays green at -4.77% max
+delta on `rule_engine/1000`. No new user-visible rule
+kinds, formatters, or subcommands; every v0.8 config runs
+unchanged. See [CHANGELOG.md](../../CHANGELOG.md) for the
+full breakdown and `docs/benchmarks/v0.9/v0.9.1-parallel-
+walker/README.md` for the captured numbers.
 
-**Next: v0.9 — Engine optimization.** Per-file-rule
-dispatch flip (collapse redundant `std::fs::read` calls
-when multiple content rules match the same file), parallel
-walker via `WalkBuilder::build_parallel` with deterministic
-post-sort, and a memory-footprint pass (Cow audit on
-`Violation` / `RuleResult` / `Report`, `dhat` profile
-against the v0.8.4 bench scenarios). v0.8.5's
-`bench-compare` gate against the
-`docs/benchmarks/v0.8/baseline-v0.7.0/` snapshot catches
-any user-visible regression for free. LSP shifts to v0.10;
-WASM plugins to v0.11.
+**Next: v0.9.2 — Memory-footprint pass.** Cow audit on
+`Violation` / `RuleResult` / `Report` (most yield from
+`Arc<Path>` on `FileEntry::path` so violation builders
+amortise the clone), byte-slice scanning on the line-
+oriented rules to skip the redundant UTF-8 validation pass,
+bounded prefix/suffix reads on rules that today read the
+whole file but only consult the first or last few bytes
+(`executable_has_shebang`, `file_starts_with`, etc.).
+`dhat` profile against `single_file_rules.rs` and
+`cross_file_rules.rs` at the published 10k / 100k tree
+sizes drives the per-rule conversion list. Designed in
+`docs/design/v0.9/memory_pass.md`. v0.9.3 (per-file-rule
+dispatch flip) ships after; LSP shifts to v0.10; WASM
+plugins to v0.11.
 
 ## Positioning
 
@@ -555,21 +556,33 @@ behaviour.
 ## v0.9 — Engine optimization
 
 (Was v0.8 sub-themes 2–4 in the pre-2026-04-28 plan;
-displaced by the v0.8 test/bench foundation.)
+displaced by the v0.8 test/bench foundation. Per-feature
+design drafts live under
+[`docs/design/v0.9/`](./v0.9/) — same shape as the v0.7
+design pass.)
 
-- Per-file-rule dispatch flip — per-file rules run under a
-  file-major outer loop, cross-file rules
+- ✅ **Parallel walker** (v0.9.1, 2026-04-30) — replaces
+  `WalkBuilder::build()` with `build_parallel()` driving a
+  per-thread `ParallelVisitor` that accumulates `FileEntry`s
+  in a thread-local `Vec` and merges via `Drop`. A
+  deterministic `sort_unstable_by` post-sort restores the
+  byte-identical output snapshot tests + formatters depend
+  on. Walker bench: -64% at 10k files, -41% at 1k files,
+  +61% at 100 files (1ms thread-spawn overhead — accepted
+  trade per design doc).
+- ⏳ **Memory-footprint pass** (v0.9.2) — `String` → `Cow` /
+  `Arc<str>` audit on `Violation` / `RuleResult` / `Report`,
+  byte-slice scanning on line-oriented rules to skip
+  redundant UTF-8 validation passes, bounded prefix/suffix
+  reads where rules today read the whole file. `dhat`
+  profile against the v0.8.4 bench scenarios drives the
+  per-rule conversion list.
+- ⏳ **Per-file-rule dispatch flip** (v0.9.3) — per-file
+  rules run under a file-major outer loop via a new
+  `PerFileRule` sub-trait; cross-file rules
   (`requires_full_index() == true`) keep the rule-major
   path. Coalesces redundant `std::fs::read` calls when
   multiple content rules match the same file.
-- Parallel walker via `WalkBuilder::build_parallel`;
-  deterministic post-sort by relative path so snapshot
-  tests stay stable.
-- Memory-footprint pass: `String` → `Cow` audit on
-  `Violation` / `RuleResult` / `Report`,
-  `BufReader::lines()` for line-oriented rules,
-  `dhat` / `massif` profile against the v0.8 bench
-  scenarios.
 - v0.8.5's `bench-compare` gate catches any regression
   from the engine restructure for free.
 
