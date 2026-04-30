@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use ignore::{WalkBuilder, overrides::OverrideBuilder};
+use ignore::{
+    ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState, overrides::OverrideBuilder,
+};
 
 use crate::error::{Error, Result};
 
@@ -57,6 +60,49 @@ impl Default for WalkOptions {
 }
 
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
+    let builder = build_walk_builder(root, opts)?;
+
+    // Per-thread accumulators land in `out_entries`; the first
+    // error wins and stops the walk via `WalkState::Quit` (the
+    // worker that sees it sets the slot, others poll it on each
+    // visit and bail). Single-writer semantics keep the lock
+    // cost low — it's held once per worker on push, not per
+    // entry.
+    let out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>> = Arc::new(Mutex::new(Vec::new()));
+    let error_slot: Arc<Mutex<Option<Error>>> = Arc::new(Mutex::new(None));
+    let root_owned: Arc<PathBuf> = Arc::new(root.to_path_buf());
+
+    let mut visitor_builder = WalkVisitorBuilder {
+        root: Arc::clone(&root_owned),
+        error_slot: Arc::clone(&error_slot),
+        out_entries: Arc::clone(&out_entries),
+    };
+    builder.build_parallel().visit(&mut visitor_builder);
+
+    if let Some(err) = error_slot.lock().expect("walker error slot lock").take() {
+        return Err(err);
+    }
+
+    // Flatten the per-thread `Vec`s into one `Vec`. We deliberately
+    // do NOT preserve insertion order across threads — the
+    // sort_unstable_by below restores a deterministic ordering by
+    // relative path, which is the contract callers (snapshot tests,
+    // formatters) actually depend on.
+    let mut entries: Vec<FileEntry> = out_entries
+        .lock()
+        .expect("walker out-entries lock")
+        .drain(..)
+        .flatten()
+        .collect();
+    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok(FileIndex { entries })
+}
+
+/// Build the `ignore::WalkBuilder` we run today. Pure factor-out
+/// of the original `walk()` body's setup half so both the
+/// sequential test path and the parallel runtime path stay in
+/// sync.
+fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<WalkBuilder> {
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(opts.respect_gitignore)
@@ -89,32 +135,111 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
         .build()
         .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))?;
     builder.overrides(overrides);
+    Ok(builder)
+}
 
-    let mut entries = Vec::new();
-    for result in builder.build() {
-        let entry = result?;
-        let abs = entry.path();
-        let Ok(rel) = abs.strip_prefix(root) else {
-            continue;
-        };
-        if rel.as_os_str().is_empty() {
-            continue;
-        }
-        let metadata = entry.metadata().map_err(|e| Error::Io {
-            path: abs.to_path_buf(),
-            source: std::io::Error::other(e.to_string()),
-        })?;
-        entries.push(FileEntry {
-            path: rel.to_path_buf(),
-            is_dir: metadata.is_dir(),
-            size: if metadata.is_file() {
-                metadata.len()
-            } else {
-                0
-            },
-        });
+/// Convert one `ignore::DirEntry` (or its error) into a
+/// `FileEntry`. Returns `Ok(None)` for entries we deliberately
+/// skip (the walk root itself, or anything outside the root).
+/// The error path produces the same `Error::Io` / `Error::Walk`
+/// variants the sequential walker did, so callers see no
+/// behavioural change.
+fn result_to_entry(
+    root: &Path,
+    result: std::result::Result<ignore::DirEntry, ignore::Error>,
+) -> Result<Option<FileEntry>> {
+    let entry = result?;
+    let abs = entry.path();
+    let Ok(rel) = abs.strip_prefix(root) else {
+        return Ok(None);
+    };
+    if rel.as_os_str().is_empty() {
+        return Ok(None);
     }
-    Ok(FileIndex { entries })
+    let metadata = entry.metadata().map_err(|e| Error::Io {
+        path: abs.to_path_buf(),
+        source: std::io::Error::other(e.to_string()),
+    })?;
+    Ok(Some(FileEntry {
+        path: rel.to_path_buf(),
+        is_dir: metadata.is_dir(),
+        size: if metadata.is_file() {
+            metadata.len()
+        } else {
+            0
+        },
+    }))
+}
+
+/// Per-thread visitor: accumulates `FileEntry`s in a thread-
+/// local `Vec`. On `Drop` (one per worker thread, when the
+/// walk finishes), it appends the local `Vec` to the shared
+/// out-entries slot. The lock is held once per worker, not
+/// per entry — keeping it off the hot path.
+struct WalkVisitor {
+    root: Arc<PathBuf>,
+    entries: Vec<FileEntry>,
+    error_slot: Arc<Mutex<Option<Error>>>,
+    out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>>,
+}
+
+impl ParallelVisitor for WalkVisitor {
+    fn visit(&mut self, result: std::result::Result<ignore::DirEntry, ignore::Error>) -> WalkState {
+        // Cheap exit when another worker has already failed:
+        // poll the shared slot once per visit. The lock is
+        // uncontended in the common (no-error) case.
+        if self
+            .error_slot
+            .lock()
+            .expect("walker error slot lock")
+            .is_some()
+        {
+            return WalkState::Quit;
+        }
+        match result_to_entry(&self.root, result) {
+            Ok(Some(entry)) => {
+                self.entries.push(entry);
+                WalkState::Continue
+            }
+            Ok(None) => WalkState::Continue,
+            Err(err) => {
+                let mut slot = self.error_slot.lock().expect("walker error slot lock");
+                if slot.is_none() {
+                    *slot = Some(err);
+                }
+                WalkState::Quit
+            }
+        }
+    }
+}
+
+impl Drop for WalkVisitor {
+    fn drop(&mut self) {
+        let local = std::mem::take(&mut self.entries);
+        if local.is_empty() {
+            return;
+        }
+        if let Ok(mut out) = self.out_entries.lock() {
+            out.push(local);
+        }
+    }
+}
+
+struct WalkVisitorBuilder {
+    root: Arc<PathBuf>,
+    error_slot: Arc<Mutex<Option<Error>>>,
+    out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>>,
+}
+
+impl<'s> ParallelVisitorBuilder<'s> for WalkVisitorBuilder {
+    fn build(&mut self) -> Box<dyn ParallelVisitor + 's> {
+        Box::new(WalkVisitor {
+            root: Arc::clone(&self.root),
+            entries: Vec::new(),
+            error_slot: Arc::clone(&self.error_slot),
+            out_entries: Arc::clone(&self.out_entries),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -373,5 +498,76 @@ mod tests {
         let opts = WalkOptions::default();
         assert!(opts.respect_gitignore);
         assert!(opts.extra_ignores.is_empty());
+    }
+
+    #[test]
+    fn walk_output_is_deterministic_across_runs() {
+        // Parallel walker scheduling order is non-deterministic;
+        // the deterministic post-sort by relative path is what
+        // makes snapshot tests + formatters stable. Two runs over
+        // the same tree must produce byte-identical FileIndex
+        // outputs — guards against a forgotten sort.
+        let tmp = td();
+        for i in 0..50 {
+            touch(
+                tmp.path(),
+                &format!("dir_{}/file_{i}.rs", i % 5),
+                b"// hello\n",
+            );
+        }
+        let opts = WalkOptions::default();
+        let a = walk(tmp.path(), &opts).unwrap();
+        let b = walk(tmp.path(), &opts).unwrap();
+        assert_eq!(paths(&a), paths(&b));
+    }
+
+    #[test]
+    fn walk_output_is_alphabetically_sorted() {
+        // The post-sort uses path-natural ordering. We don't
+        // depend on the exact ordering — just that the output IS
+        // sorted, in some total order over PathBuf, so callers
+        // can rely on consecutive runs returning the same shape.
+        let tmp = td();
+        touch(tmp.path(), "z.txt", b"z");
+        touch(tmp.path(), "a.txt", b"a");
+        touch(tmp.path(), "m.txt", b"m");
+        touch(tmp.path(), "sub/b.txt", b"b");
+        touch(tmp.path(), "sub/a.txt", b"a");
+
+        let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
+        let actual: Vec<_> = idx.entries.iter().map(|e| e.path.clone()).collect();
+        let mut expected = actual.clone();
+        expected.sort_unstable();
+        assert_eq!(actual, expected, "walker output must be path-sorted");
+    }
+
+    #[test]
+    fn walk_handles_thousand_files() {
+        // Concurrency stress: enough files to land entries on
+        // most worker threads on multi-core hosts. Asserts (a)
+        // the count is exactly N and (b) the post-sort produces
+        // a stable, total ordering matching what we'd compute
+        // by sorting a manual list of expected paths.
+        let tmp = td();
+        let n = 1_000usize;
+        for i in 0..n {
+            touch(tmp.path(), &format!("d{}/f{i:04}.txt", i % 16), b"x");
+        }
+        let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
+
+        let file_paths: Vec<_> = idx.files().map(|e| e.path.clone()).collect();
+        assert_eq!(
+            file_paths.len(),
+            n,
+            "expected {n} files, got {}",
+            file_paths.len(),
+        );
+
+        let mut expected = file_paths.clone();
+        expected.sort_unstable();
+        assert_eq!(
+            file_paths, expected,
+            "concurrent walker output must remain path-sorted",
+        );
     }
 }
