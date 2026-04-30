@@ -4,7 +4,7 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.8.1** (2026-04-29). Hotfix on v0.8.0
+**Latest release: v0.8.2** (2026-04-29). Hotfix on v0.8.0
 restoring `cargo install alint` after the v0.8 audit's
 `publish = false` change made `alint`'s crates.io publish
 unresolvable — see CHANGELOG. Same code as v0.8.0; manifest
@@ -395,7 +395,7 @@ open questions before code started, then was flipped to
 
 ## v0.8 — Comprehensive test + bench foundation (shipped)
 
-Five sub-phases (v0.8.1 → v0.8.5) building the
+Five sub-phases (v0.8.2 → v0.8.5) building the
 test/bench/rot-prevention foundation that engine
 optimization (now v0.9) needs to land safely. Scope agreed
 2026-04-28 after a four-agent coverage audit; phases
@@ -403,10 +403,10 @@ merged to `main` 2026-04-28 / 2026-04-29 with full CI
 (Linux self-hosted + Coverage 90.57% + Cross-Platform
 macOS/Windows + Mutants nightly) green throughout.
 
-### v0.8.1 — Rule-kind coverage uplift
+### v0.8.2 — Rule-kind coverage uplift
 
 Goal: every rule kind has ≥5 unit tests + ≥2 e2e (pass +
-fail). Pre-v0.8.1: 34 of 54 rule kinds had 0 unit tests; 4
+fail). Pre-v0.8.2: 34 of 54 rule kinds had 0 unit tests; 4
 had 0 e2e (`json_schema_passes`, `git_no_denied_paths`,
 `git_commit_message`, `command`); 3 had only pass-variant
 e2e (`no_symlinks`, `executable_bit`,

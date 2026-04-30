@@ -47,11 +47,17 @@ fi
 # Historical versions of alint-dsl/rules/output remain *yanked*
 # on crates.io (the audit-driven cleanup discouraged depending
 # on them externally); fresh versions ship un-yanked alongside.
+# Order has to satisfy *every* dep direction, including
+# `[dev-dependencies]` (cargo publish validates those too).
+# alint-dsl carries `alint-rules` as a dev-dep (added by the
+# v0.8.5 fixture-completeness test), so alint-rules must
+# publish first. alint-output is independent of dsl/rules; it
+# can publish anywhere after core but before alint.
 CRATES=(
   alint-core
-  alint-dsl
   alint-rules
   alint-output
+  alint-dsl
   alint
 )
 
