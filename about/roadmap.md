@@ -6,7 +6,11 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.8.0** (2026-04-29). Closes the v0.8
+**Latest release: v0.8.1** (2026-04-29). Hotfix on v0.8.0
+restoring `cargo install alint` after the v0.8 audit's
+`publish = false` change made `alint`'s crates.io publish
+unresolvable — see CHANGELOG. Same code as v0.8.0; manifest
+revert only. v0.8.0 closes the v0.8
 cut — five sub-phases (v0.8.1 → v0.8.5) shipping the
 comprehensive test/bench/rot-prevention foundation that
 v0.9's engine optimization needs to land safely. No new

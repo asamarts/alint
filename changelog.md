@@ -8,7 +8,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-04-29
+
+Hotfix for v0.8.0's incomplete crates.io publish. v0.8.0
+shipped to GitHub Releases, npm, Homebrew tap, Docker
+(ghcr.io), and `alint-core` on crates.io — but the `alint`
+binary's crates.io publish failed because the v0.8 audit had
+flagged `alint-dsl` / `alint-rules` / `alint-output` with
+`publish = false`, and `alint`'s manifest depends on all
+three at the workspace version. Cargo can't resolve a
+manifest dep to a crate that isn't on crates.io.
+
+Reverts the `publish = false` change for the three
+implementation-detail crates and restores them to the
+`publish-crates.sh` dep-ordered list. The crates' descriptions
+still read "Internal: Not a stable public API" — the published
+status is a load-bearing accident of cargo's resolver, not an
+invitation to use them. The historical pre-0.8.x versions
+remain yanked on crates.io as a "do not start depending on
+these" signal; fresh 0.8.1 versions publish un-yanked
+alongside, in step with the binary.
+
+No behavioural changes since v0.8.0 — same bits as v0.8.0
+plus the manifest revert to make `cargo install alint` work.
+
+### Changed
+
+- **`alint-dsl` / `alint-rules` / `alint-output`** —
+  reverted `publish = false`. Their manifests now publish to
+  crates.io alongside `alint-core` and `alint` (and that has
+  to stay true while `alint` itself is published, because
+  cargo workspace deps need a resolvable version line). The
+  comment block on each manifest documents the constraint so
+  a future audit doesn't repeat the trap.
+- **`ci/scripts/publish-crates.sh`** — the `CRATES` list
+  goes back to all five entries in dependency order
+  (alint-core → alint-dsl → alint-rules → alint-output →
+  alint).
+
+### Fixed
+
+- `cargo install alint` against v0.8.1 resolves cleanly. v0.8.0
+  remains in a partially-published state (4 of 5 channels);
+  consumers should pin to v0.8.1 or `latest` for crates.io.
+
 ## [0.8.0] — 2026-04-29
+
+> **Note**: this tag shipped to GitHub Releases, npm, Homebrew,
+> and Docker, plus `alint-core` on crates.io — but the `alint`
+> binary's crates.io publish failed (see v0.8.1 above for the
+> root cause + fix). For `cargo install alint` use v0.8.1+; all
+> other distribution channels for v0.8.0 are usable.
 
 The v0.8 cut — five sub-phases (v0.8.1 → v0.8.5) building
 the comprehensive test/bench/rot-prevention foundation that
@@ -2530,7 +2580,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/asamarts/alint/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/asamarts/alint/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/asamarts/alint/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/asamarts/alint/compare/v0.5.12...v0.6.0
