@@ -14,12 +14,14 @@
 //! filename hygiene (S1), existence + content (S2), and the
 //! full workspace bundle (S3).
 //!
-//! Output: a per-platform directory under
-//! `docs/benchmarks/v0.5/scale/<os>-<arch>/` containing a
-//! `results.json` (machine-readable) plus per-size `results.md`
-//! files and an `index.md` summary. Cross-machine comparisons
-//! always require like-for-like (same fingerprint) — see
-//! `docs/benchmarks/METHODOLOGY.md`.
+//! Output: a per-platform, per-version directory under
+//! `docs/benchmarks/macro/results/<os>-<arch>/<workspace-version>/`
+//! containing a `results.json` (machine-readable) plus per-size
+//! `results.md` files and an `index.md` summary. Cross-machine
+//! comparisons always require like-for-like (same fingerprint) —
+//! see `docs/benchmarks/METHODOLOGY.md`. Cross-version comparisons
+//! walk per-version dirs; see `docs/benchmarks/HISTORY.md` for
+//! the headline cross-release table.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -180,8 +182,12 @@ impl Scenario {
             Self::S4 => "Agent-era hygiene (5 rules: backup/scratch/debug/affirmation/model-TODO)",
             Self::S5 => "Fix-pass throughput (4 content-editing fix ops)",
             Self::S6 => "Per-file content fan-out (13 content rules over `**/*.rs`)",
-            Self::S7 => "Cross-file relational (pair / unique_by / for_each_dir / for_each_file / dir_only_contains / every_matching_has)",
-            Self::S8 => "Git-tracked overlay (S3 + git_no_denied_paths + git_tracked_only over a real git repo)",
+            Self::S7 => {
+                "Cross-file relational (pair / unique_by / for_each_dir / for_each_file / dir_only_contains / every_matching_has)"
+            }
+            Self::S8 => {
+                "Git-tracked overlay (S3 + git_no_denied_paths + git_tracked_only over a real git repo)"
+            }
         }
     }
 
@@ -620,18 +626,58 @@ fn write_outputs(report: &Report, args: &ScaleArgs) -> Result<()> {
     Ok(())
 }
 
-/// `docs/benchmarks/v0.5/scale/<os>-<arch>/` — the canonical
-/// committable location. Maintainers pass `--out` to override
-/// (e.g. for ad-hoc local runs they don't intend to commit).
+/// `docs/benchmarks/macro/results/<os>-<arch>/<workspace-version>/`
+/// — the canonical committable location.
+///
+/// The workspace version is read from the alint binary's
+/// reported version (which the harness has already established
+/// via `build_release_binary` before this is called) so the
+/// default tracks the workspace version as it bumps.
+/// Maintainers pass `--out` to override for ad-hoc / investigation
+/// runs they don't want polluting the published per-version dir.
+///
+/// Pre-2026-05 this was hard-coded to
+/// `docs/benchmarks/v0.5/scale/<arch>/`, which silently
+/// overwrote the v0.5 baseline numbers on every run. Per
+/// `docs/benchmarks/README.md`'s layout, results are now
+/// per-version under `macro/results/`.
 fn default_out_dir(fp: &fingerprint::Fingerprint) -> Result<PathBuf> {
     let workspace = workspace_root()?;
     let platform = format!("{}-{}", fp.os, fp.arch);
+    let version = workspace_version(&workspace)?;
     Ok(workspace
         .join("docs")
         .join("benchmarks")
-        .join("v0.5")
-        .join("scale")
-        .join(platform))
+        .join("macro")
+        .join("results")
+        .join(platform)
+        .join(format!("v{version}")))
+}
+
+/// Read `workspace.package.version` from the workspace root
+/// `Cargo.toml`. Tiny inline parse — enough for the default
+/// out-dir below; reaching for `cargo_metadata` here would be
+/// overkill for a one-line value.
+fn workspace_version(workspace: &Path) -> Result<String> {
+    let manifest = std::fs::read_to_string(workspace.join("Cargo.toml"))
+        .context("read workspace Cargo.toml")?;
+    for line in manifest.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("version") {
+            // matches `version = "..."` (workspace.package.version
+            // inherited; the workspace root's first `version =` is
+            // the canonical workspace version — see the v0.5+
+            // workspace inheritance pattern).
+            if let Some(eq) = rest.find('=')
+                && let Some(start) = rest[eq..].find('"')
+                && let Some(end) = rest[eq + start + 1..].find('"')
+            {
+                let value = &rest[eq + start + 1..eq + start + 1 + end];
+                return Ok(value.to_string());
+            }
+        }
+    }
+    bail!("could not find workspace version in {}/Cargo.toml", workspace.display())
 }
 
 fn render_index(report: &Report) -> String {

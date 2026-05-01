@@ -86,7 +86,7 @@ enum Commands {
         #[arg(long, default_value_t = 10.0)]
         diff_pct: f64,
         /// Output directory. Defaults to
-        /// `docs/benchmarks/v0.5/scale/<os>-<arch>/`.
+        /// `docs/benchmarks/macro/results/<os>-<arch>/v<workspace-version>/`.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Smoke mode: collapses the matrix to a single 1k/S1/full row in seconds.
@@ -154,6 +154,26 @@ enum Commands {
         #[arg(long, default_value_t = 10.0)]
         threshold: f64,
     },
+    /// Snapshot `target/criterion/` into the per-version
+    /// committable location under
+    /// `docs/benchmarks/micro/results/<os>-<arch>/<workspace-version>/criterion/`.
+    /// Run after a publication-grade `cargo bench -p alint-bench`
+    /// to materialise a snapshot ready for `git add`.
+    PublishBenches {
+        /// Source criterion directory. Defaults to `target/criterion`.
+        #[arg(long, default_value = "target/criterion")]
+        from: PathBuf,
+        /// Override the per-version output dir. Defaults to
+        /// `docs/benchmarks/micro/results/<os>-<arch>/v<workspace-version>/criterion/`.
+        #[arg(long)]
+        to: Option<PathBuf>,
+        /// Skip the html / svg / raw-sample artefacts that
+        /// criterion writes. Default: false (full snapshot).
+        /// Use --trim for committable snapshots that would
+        /// otherwise add tens of MB of HTML reports.
+        #[arg(long)]
+        trim: bool,
+    },
     /// Emit `docs-bundle/` — the handoff bundle consumed by
     /// `asamarts/alint.org` at site-build time.
     DocsExport {
@@ -197,6 +217,7 @@ fn main() -> Result<()> {
             out,
         } => gen_fixture(files, depth, seed, out),
         Commands::GenMonorepo { size, seed, out } => gen_monorepo(&size, seed, out),
+        Commands::PublishBenches { from, to, trim } => publish_benches(&from, to.as_deref(), trim),
         Commands::BenchCompare {
             before,
             after,
@@ -330,6 +351,130 @@ fn gen_monorepo(size: &str, seed: u64, out: PathBuf) -> Result<()> {
         out.display(),
     );
     Ok(())
+}
+
+/// Snapshot `target/criterion/` into the per-version published
+/// directory. Default destination
+/// `docs/benchmarks/micro/results/<os>-<arch>/v<workspace-version>/criterion/`
+/// matches the layout `docs/benchmarks/micro/README.md` documents.
+///
+/// Pass `--trim` to skip the html / svg / raw-sample artefacts;
+/// useful for committable snapshots that would otherwise add tens
+/// of MB of HTML reports per release.
+fn publish_benches(from: &Path, to: Option<&Path>, trim: bool) -> Result<()> {
+    if !from.exists() {
+        bail!(
+            "source criterion dir {} does not exist; run `cargo bench -p alint-bench --features fs-benches` first",
+            from.display()
+        );
+    }
+    let workspace = workspace_root_from_xtask()?;
+    let dest_owned: PathBuf;
+    let dest = match to {
+        Some(p) => p,
+        None => {
+            let arch = std::env::consts::ARCH;
+            let os = std::env::consts::OS;
+            let version = workspace_version_from_manifest(&workspace)?;
+            dest_owned = workspace
+                .join("docs")
+                .join("benchmarks")
+                .join("micro")
+                .join("results")
+                .join(format!("{os}-{arch}"))
+                .join(format!("v{version}"))
+                .join("criterion");
+            &dest_owned
+        }
+    };
+    if dest.exists() {
+        bail!(
+            "{} already exists; remove it first or pick a different --to path",
+            dest.display()
+        );
+    }
+    fs::create_dir_all(dest)?;
+    copy_criterion_tree(from, dest, trim)?;
+    let trimmed_note = if trim { " (trimmed)" } else { "" };
+    println!(
+        "published {} → {}{trimmed_note}",
+        from.display(),
+        dest.display(),
+    );
+    Ok(())
+}
+
+/// Find the workspace root by walking up from the xtask binary's
+/// CARGO_MANIFEST_DIR. xtask itself lives at `<workspace>/xtask`,
+/// so the parent of CARGO_MANIFEST_DIR IS the workspace root.
+fn workspace_root_from_xtask() -> Result<PathBuf> {
+    let xtask_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    xtask_manifest
+        .parent()
+        .map(Path::to_path_buf)
+        .context("no parent dir for xtask CARGO_MANIFEST_DIR")
+}
+
+/// Tiny inline parse of the workspace `Cargo.toml`'s
+/// `version = "..."` line. Same shape as
+/// `bench::workspace_version` — duplicated here to keep `xtask`
+/// from depending on `bench::` private internals.
+fn workspace_version_from_manifest(workspace: &Path) -> Result<String> {
+    let manifest = std::fs::read_to_string(workspace.join("Cargo.toml"))
+        .context("read workspace Cargo.toml")?;
+    for line in manifest.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("version") {
+            if let Some(eq) = rest.find('=')
+                && let Some(start) = rest[eq..].find('"')
+                && let Some(end) = rest[eq + start + 1..].find('"')
+            {
+                let value = &rest[eq + start + 1..eq + start + 1 + end];
+                return Ok(value.to_string());
+            }
+        }
+    }
+    bail!(
+        "could not find workspace version in {}/Cargo.toml",
+        workspace.display(),
+    )
+}
+
+/// Copy a criterion-format tree, optionally skipping the
+/// non-essential artefacts. The `--trim` mode keeps everything
+/// `xtask bench-compare` reads (`new/estimates.json`,
+/// `new/sample.json`, `new/benchmark.json`, the matching `base/`
+/// trio) and drops everything `criterion-html-report` produces
+/// (`report/`, `*.svg` files, `change/` subdirs).
+fn copy_criterion_tree(from: &Path, to: &Path, trim: bool) -> Result<()> {
+    for entry in walkdir_plain(from)? {
+        let rel = entry.strip_prefix(from).unwrap();
+        if trim && should_trim_path(rel) {
+            continue;
+        }
+        let dest = to.join(rel);
+        if entry.is_dir() {
+            fs::create_dir_all(&dest)?;
+        } else if entry.is_file() {
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&entry, &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// True for paths under a criterion tree that we drop in `--trim`
+/// mode. Conservative: only things `bench-compare` provably
+/// doesn't read get trimmed.
+fn should_trim_path(rel: &Path) -> bool {
+    let s = rel.to_string_lossy();
+    s.contains("/report/")
+        || s.starts_with("report/")
+        || s.ends_with(".svg")
+        || s.ends_with(".html")
+        || s.contains("/change/")
 }
 
 fn copy_tree(from: &Path, to: &Path) -> Result<()> {
