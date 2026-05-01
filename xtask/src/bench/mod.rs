@@ -677,7 +677,10 @@ fn workspace_version(workspace: &Path) -> Result<String> {
             }
         }
     }
-    bail!("could not find workspace version in {}/Cargo.toml", workspace.display())
+    bail!(
+        "could not find workspace version in {}/Cargo.toml",
+        workspace.display()
+    )
 }
 
 fn render_index(report: &Report) -> String {

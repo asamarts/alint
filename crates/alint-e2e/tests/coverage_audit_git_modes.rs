@@ -24,11 +24,7 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
-const GIT_REQUIRED_KINDS: &[&str] = &[
-    "git_blame_age",
-    "git_commit_message",
-    "git_no_denied_paths",
-];
+const GIT_REQUIRED_KINDS: &[&str] = &["git_blame_age", "git_commit_message", "git_no_denied_paths"];
 
 /// Pull every rule kind referenced in this scenario's
 /// `given.config:` rules block.
@@ -105,8 +101,10 @@ fn git_required_rules_have_in_repo_and_outside_repo_scenarios() {
     let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
 
     // (kind → (has_in_repo, has_outside_git))
-    let mut coverage: std::collections::HashMap<&'static str, (bool, bool)> =
-        GIT_REQUIRED_KINDS.iter().map(|k| (*k, (false, false))).collect();
+    let mut coverage: std::collections::HashMap<&'static str, (bool, bool)> = GIT_REQUIRED_KINDS
+        .iter()
+        .map(|k| (*k, (false, false)))
+        .collect();
 
     for path in walkdir(&scenarios_dir) {
         let Ok(text) = std::fs::read_to_string(&path) else {

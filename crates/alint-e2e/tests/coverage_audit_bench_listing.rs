@@ -89,7 +89,11 @@ fn list_rule_kinds_not_covered_by_bench_scale() {
         .ancestors()
         .nth(2)
         .expect("workspace root from alint-e2e CARGO_MANIFEST_DIR");
-    let bench_scenarios_dir = workspace_root.join("xtask").join("src").join("bench").join("scenarios");
+    let bench_scenarios_dir = workspace_root
+        .join("xtask")
+        .join("src")
+        .join("bench")
+        .join("scenarios");
     let bundled_dir = workspace_root
         .join("crates")
         .join("alint-dsl")

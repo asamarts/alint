@@ -6,6 +6,209 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-05-01
+
+Reopens v0.9 with cross-file dispatch fast paths, the
+test/coverage floor that prevents the same class of regression
+from slipping by again, and a benchmark-docs reorganisation
+that makes the perf story discoverable from a single entry
+point. Six sub-phases, all in this release:
+
+| Sub-phase | What it ships |
+|---|---|
+| .5 | Cross-file dispatch fast paths (lazy path-index on `FileIndex` + literal-path fast paths in `file_exists` / `structured_path` / `iter.has_file`) |
+| .6 | Coverage audits (pass/fail symmetry, bundled-ruleset coverage, git-mode symmetry) |
+| .7 | 16 new coverage scenarios filling the audit punch list |
+| .8 | Bench-scale S6 / S7 / S8 + `generate_git_monorepo` helper |
+| .9 | Rule-authoring workflow doc; alint already self-lints via `action-selftest.yml` |
+| Reorg | Benchmark documentation reorganisation: `docs/benchmarks/{micro,macro,investigations,archive}/` layout, per-version results, top-level `README.md` / `HISTORY.md` / `RUNNING.md`, new `xtask publish-benches` subcommand |
+
+No new rule kinds, formatters, or schema changes; output bytes
+byte-identical to v0.9.4 across all 8 formatters.
+
+Full design:
+[`docs/design/v0.9/coverage-and-dogfood.md`](docs/design/v0.9/coverage-and-dogfood.md).
+Workflow: [`docs/development/RULE-AUTHORING.md`](docs/development/RULE-AUTHORING.md).
+Bench layout: [`docs/benchmarks/README.md`](docs/benchmarks/README.md).
+
+### Performance (.5)
+
+`xtask gen-monorepo --size 1m`, S3 = `oss-baseline + rust +
+monorepo + cargo-workspace`, hyperfine `--warmup 1 --runs 3`:
+
+| Cell | v0.9.4 | v0.9.5 | Speedup |
+|---|---:|---:|---:|
+| `1m S3 full` | 731.856 s | 11.194 s ± 0.154 | **65.4×** |
+| `1m S3 changed` | 724.362 s | 6.728 s ± 0.059 | **107.7×** |
+| `100k S3 engine total` | 10.7 s | 186 ms | **57×** |
+| `10k S3 engine total` | 226 ms | 23 ms | **9.8×** |
+
+Also ~50–80× faster than the published v0.5.6 baseline (the
+fastest 1M S3 numbers ever shipped). Full numbers under
+[`docs/benchmarks/macro/results/linux-x86_64/v0.9.5/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.5/).
+
+### Engine (.5)
+
+- `alint-core::walker::FileIndex` gains a lazy
+  `OnceLock<HashSet<Arc<Path>>>` keyed on every file (non-
+  dir) entry. Built on first call to `contains_file` or
+  `file_path_set`; concurrent first-call safe via OnceLock.
+- New `FileIndex::contains_file(&Path) -> bool` — the
+  canonical O(1) "does this exact relative path exist?"
+  query. `find_file(&Path)` keeps its signature but does
+  the O(1) check first; the linear `&FileEntry` scan only
+  runs on a hit. New `FileIndex::from_entries(Vec<FileEntry>)`
+  constructor for tests/benches.
+- `Engine::run` adds `tracing::info!` per-phase + per-cross-
+  file-rule wall-time emission with stable structured fields
+  (`phase`, `elapsed_us`, optional `rules` / `files`).
+  Drive with `ALINT_LOG=alint_core=info`. Production runs
+  pay nothing — events fire only when info is enabled for
+  this target.
+- Per-file dispatch loop in `Engine::run_per_file` switches
+  from `index.files().par_bridge()` to
+  `index.entries.par_iter().filter(|e| !e.is_dir)` — the
+  native Rayon `ParallelIterator` over the underlying `Vec`
+  uses work-stealing slabs instead of par_bridge's Mutex-
+  guarded channel. The applicable-rule inner loop carries
+  `entry_idx` directly instead of re-resolving via O(L)
+  `position` lookup per applicable rule per file.
+
+### Rules (.5)
+
+- `file_exists` — when every `paths:` entry is a literal
+  relative path AND the rule is not `git_tracked_only`,
+  the build path pre-extracts the literals into
+  `Vec<PathBuf>`; evaluate uses `contains_file` per
+  literal. Glob/exclude/git-tracked patterns keep the
+  existing O(N) scope-match scan.
+- `structured_path` (the shared impl behind
+  `*_path_{equals,matches}` for json/yaml/toml) — same
+  literal-paths fast path. Joins `ctx.root + literal`
+  directly for the `std::fs::read` rather than calling
+  `find_file`.
+- `iter_has_file` (the `iter.has_file("…")` `when_iter:`
+  builtin) — when the pattern is a literal filename,
+  computes `iter.path.join(pattern)` and consults
+  `contains_file`. Glob patterns (`**/*.bzl`) keep the
+  scope-match scan.
+- `pair::evaluate` swaps `find_file(&p).is_some()` for the
+  cheaper `contains_file(&p)`.
+
+### Coverage audits (.6)
+
+Three new tests under `crates/alint-e2e/tests/`:
+
+- **`coverage_audit_pass_fail.rs`** — every canonical rule
+  kind has at least one scenario where it fires AND at
+  least one where it stays silent. Ships with a small
+  `NATIVE_FIRES_ALLOWLIST` for kinds whose firing case
+  can't be expressed in YAML today (`executable_bit`,
+  `executable_has_shebang`, `no_symlinks`, `git_blame_age`,
+  `git_commit_message`); each entry points at the native
+  Rust integration test that DOES cover the firing path.
+- **`coverage_audit_bundled_rulesets.rs`** — every
+  `crates/alint-dsl/rulesets/v1/**/*.yml` is referenced by
+  at least one well-formed scenario AND at least one
+  ill-formed scenario.
+- **`coverage_audit_git_modes.rs`** — the three pure-git
+  rule kinds (`git_blame_age`, `git_commit_message`,
+  `git_no_denied_paths`) need both an in-repo and an
+  outside-git scenario.
+- **`coverage_audit_bench_listing.rs`** (soft, always
+  passes) — emits an `eprintln!` listing of rule kinds
+  absent from any bench scenario.
+
+### Coverage scenarios (.7)
+
+16 new scenarios filling the v0.9.6 audit punch list:
+
+- `structured/{json,toml,yaml}_path_{equals,matches}_silent_when_satisfied.yml` (6)
+- `bundled/{agent_context,agent_hygiene,ci_github_actions,docs_adr,hygiene_lockfiles,hygiene_no_tracked_artifacts,tooling_editorconfig}_well_formed_passes.yml` (7)
+- `bundled/{agent_context_stub,agent_hygiene_scratch_doc}_flagged.yml` (2)
+- `git/git_no_denied_paths_silent_outside_git.yml` (1)
+
+E2e scenario count: 205 → 221. All four `coverage_audit_*`
+tests green by default.
+
+### Bench-scale extension (.8)
+
+Three new perf-shape scenarios; S1–S5 unchanged:
+
+- **S6 — Per-file content fan-out**: 13 content rules over
+  `**/*.rs`.
+- **S7 — Cross-file relational**: `pair`, `unique_by`,
+  `for_each_dir`, `for_each_file`, `dir_only_contains`,
+  `every_matching_has`.
+- **S8 — Git-tracked overlay**: S3 reshape with `.git/` +
+  `git_no_denied_paths` + `git_tracked_only`.
+
+New `alint_bench::tree::generate_git_monorepo` helper for
+S8 — runs `git init && git add -A && git commit` on a
+materialised monorepo tree. `xtask` enum extends to
+`Scenario::S1..S8`; default `--scenarios` stays `S1,S2,S3`.
+
+### Workflow doc + dogfood scope (.9)
+
+- New `docs/development/RULE-AUTHORING.md` — the four-step
+  process every new rule / bundled ruleset / alias goes
+  through; documents the two-layer enforcement (alint
+  check . + Rust audits), family conventions, scenario
+  shape, the native-test allowlist for testkit gaps, and
+  the concrete audit failures contributors will hit.
+- The aspirational declarative-coverage rules in
+  `.alint.yml` (e.g. "every rule-source file has ≥1 e2e
+  scenario") need a rule kind alint doesn't yet have:
+  aggregate "does any file in this scope contain pattern
+  X?" semantics. Today's `file_content_matches` is
+  per-file; the right primitive is deferred to v0.10+.
+- alint still self-lints in CI today via the existing
+  `.alint.yml` and `action-selftest.yml`; v0.9.9 just
+  formalises the workflow contributors should follow.
+
+### Benchmark documentation reorganisation
+
+The `docs/benchmarks/` tree was shaped accidentally over four
+release cycles and had four different per-version layouts.
+This release lands a clean micro / macro / investigations /
+archive split:
+
+- **Top-level** — `README.md` (entry point with current
+  numbers), `HISTORY.md` (per-release perf changelog),
+  `RUNNING.md` (how-to-run), `METHODOLOGY.md` (focused
+  rewrite of the why-behind-the-split).
+- **`micro/`** — criterion micro-benches with a per-bench
+  catalogue and per-version `results/<arch>/<version>/`
+  snapshots.
+- **`macro/`** — hyperfine bench-scale with the S1–S8
+  catalogue, tool matrix, and per-version
+  `results/<arch>/<version>/` snapshots.
+- **`investigations/`** — ad-hoc deep-dives (was
+  `docs/perf/`); the v0.9.5 cliff investigation lives at
+  `2026-05-cross-file-rules/`.
+- **`archive/`** — superseded snapshots (v0.1 single-file
+  era, v0.9 development-cycle baselines + per-phase
+  outputs). Read-only by contract.
+
+`xtask bench-scale --out` default fixes the long-standing
+footgun where every run silently overwrote
+`docs/benchmarks/v0.5/scale/<arch>/`; new default is
+`docs/benchmarks/macro/results/<arch>/v<workspace-version>/`,
+read from the workspace `Cargo.toml` so it tracks the
+version as it bumps. New `xtask publish-benches` snapshots
+`target/criterion/` into the per-version published
+location with an optional `--trim` flag dropping criterion's
+HTML reports.
+
+### Tooling
+
+- New `xtask gen-monorepo --size {1k|10k|100k|1m} --out PATH`
+  materializes a persistent monorepo tree at a fixed path.
+  Used by the perf-investigation flow to skip 5+ minutes of
+  tree-gen between profile runs. Size labels match
+  `bench-scale`'s internal monorepo shape, so trees are
+  byte-identical to the published bench corpus.
+
 ## [0.9.4] — 2026-04-30
 
 Mechanical follow-up to v0.9.3: migrates 16 of the
