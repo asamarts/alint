@@ -1,7 +1,7 @@
 //! `file_exists` — require that at least one file matching any of the given
 //! globs exists in the repository.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation,
@@ -25,6 +25,17 @@ pub struct FileExistsRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    /// `Some(paths)` when every entry in `patterns` is a literal
+    /// path (no glob metacharacters, no `!` excludes) and the
+    /// rule does not opt into `git_tracked_only`. The fast path
+    /// uses these to do O(1) `FileIndex::contains_file` lookups
+    /// instead of iterating every entry through
+    /// `Scope::matches`. At 1M files in a 5,000-package
+    /// monorepo, `for_each_dir` rules spawn one nested
+    /// `file_exists` per directory; without this short-circuit
+    /// each one is an O(N) scan and the fan-out becomes
+    /// O(D × N). With it, they collapse to O(D) lookups.
+    literal_paths: Option<Vec<PathBuf>>,
     root_only: bool,
     /// When `true`, only consider walked entries that are also
     /// in git's index. Outside a git repo this becomes a silent
@@ -32,6 +43,28 @@ pub struct FileExistsRule {
     /// "missing" violation as if no file existed.
     git_tracked_only: bool,
     fixer: Option<FileCreateFixer>,
+}
+
+/// True when `pattern` is a plain literal path string — no glob
+/// metacharacters, no `!` exclude prefix. Such patterns can be
+/// answered by an O(1) hash-set lookup against
+/// [`alint_core::FileIndex::contains_file`] instead of a O(N)
+/// scope-match scan.
+fn is_literal_path(pattern: &str) -> bool {
+    !pattern.starts_with('!')
+        && !pattern
+            .chars()
+            .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+}
+
+/// True iff `paths` is a flat list (single string or `Many`)
+/// with no excludes — `IncludeExclude` form is excluded since
+/// the fast path can't honour excludes by hash lookup alone.
+fn paths_spec_has_no_excludes(spec: &PathsSpec) -> bool {
+    match spec {
+        PathsSpec::Single(_) | PathsSpec::Many(_) => true,
+        PathsSpec::IncludeExclude { exclude, .. } => exclude.is_empty(),
+    }
 }
 
 impl FileExistsRule {
@@ -69,18 +102,36 @@ impl Rule for FileExistsRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let found = ctx.index.files().any(|entry| {
-            if self.root_only && entry.path.components().count() != 1 {
-                return false;
-            }
-            if !self.scope.matches(&entry.path) {
-                return false;
-            }
-            if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
-                return false;
-            }
-            true
-        });
+        let found = if let Some(literals) = self.literal_paths.as_ref() {
+            // Fast path: each pattern is a literal relative
+            // path. Hash-lookup against the index's lazily-
+            // built path set is O(1) per pattern; for
+            // `for_each_dir`-spawned rules at 1M scale this is
+            // the difference between O(D × N) and O(D).
+            literals.iter().any(|p| {
+                if self.root_only && literal_is_nested(p) {
+                    return false;
+                }
+                ctx.index.contains_file(p)
+            })
+        } else {
+            // Slow path: glob patterns and/or `git_tracked_only`
+            // require iterating every entry. Same shape as the
+            // pre-v0.10 implementation — preserved verbatim so
+            // glob-using rules keep their existing semantics.
+            ctx.index.files().any(|entry| {
+                if self.root_only && entry.path.components().count() != 1 {
+                    return false;
+                }
+                if !self.scope.matches(&entry.path) {
+                    return false;
+                }
+                if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
+                    return false;
+                }
+                true
+            })
+        };
         if found {
             Ok(Vec::new())
         } else {
@@ -121,6 +172,20 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .unwrap_or(Options { root_only: false });
+    // The fast path needs every pattern to be a plain relative
+    // path (no glob metacharacters, no `!` exclude) AND the
+    // rule must not opt into `git_tracked_only` (which requires
+    // a per-entry callback). When all preconditions hold,
+    // `literal_paths` carries the parsed `PathBuf`s ready for
+    // `FileIndex::contains_file` lookup at evaluate time.
+    let literal_paths = if !spec.git_tracked_only
+        && paths_spec_has_no_excludes(paths)
+        && patterns.iter().all(|p| is_literal_path(p))
+    {
+        Some(patterns.iter().map(PathBuf::from).collect())
+    } else {
+        None
+    };
     let fixer = match &spec.fix {
         Some(FixSpec::FileCreate { file_create: cfg }) => {
             let target = cfg
@@ -157,10 +222,19 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope,
         patterns,
+        literal_paths,
         root_only: opts.root_only,
         git_tracked_only: spec.git_tracked_only,
         fixer,
     }))
+}
+
+/// True when a literal `paths:` pattern names something nested
+/// (more than one path component). Mirrors the slow-path
+/// `entry.path.components().count() != 1` check used to honour
+/// `root_only` against entries during a scope-match scan.
+fn literal_is_nested(p: &Path) -> bool {
+    p.components().count() != 1
 }
 
 /// Best-effort: return the first entry in `patterns` that has no glob

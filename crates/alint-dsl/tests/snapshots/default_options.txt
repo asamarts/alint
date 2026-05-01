@@ -253,6 +253,11 @@ FileExistsRule {
     patterns: [
         ".editorconfig",
     ],
+    literal_paths: Some(
+        [
+            ".editorconfig",
+        ],
+    ),
     root_only: true,
     git_tracked_only: false,
     fixer: Some(
@@ -280,6 +285,11 @@ FileExistsRule {
     patterns: [
         "README.md",
     ],
+    literal_paths: Some(
+        [
+            "README.md",
+        ],
+    ),
     root_only: true,
     git_tracked_only: false,
     fixer: None,
@@ -692,6 +702,11 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "package.json",
+        ],
+    ),
     format: Json,
     path_expr: JsonPath(
         Query {
@@ -720,6 +735,11 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "package.json",
+        ],
+    ),
     format: Json,
     path_expr: JsonPath(
         Query {
@@ -1002,6 +1022,11 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "Cargo.toml",
+        ],
+    ),
     format: Toml,
     path_expr: JsonPath(
         Query {
@@ -1036,6 +1061,11 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "Cargo.toml",
+        ],
+    ),
     format: Toml,
     path_expr: JsonPath(
         Query {
@@ -1090,6 +1120,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: None,
     format: Yaml,
     path_expr: JsonPath(
         Query {
@@ -1150,6 +1181,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    literal_paths: None,
     format: Yaml,
     path_expr: JsonPath(
         Query {

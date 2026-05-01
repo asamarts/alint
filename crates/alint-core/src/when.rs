@@ -809,12 +809,28 @@ fn eval_iter_call(method: &str, args: &[WhenExpr], env: &WhenEnv<'_>) -> Result<
 /// any `.bzl` under the iterated dir at any depth. Returns
 /// `false` when the iteration context is absent or the iterated
 /// entry isn't a directory (files don't "contain" anything).
+///
+/// When `pattern` is a literal filename (no glob metacharacters)
+/// the fast path consults the index's hash-set directly — O(1)
+/// per call. The slow path falls back to a scope match against
+/// every file in the index. At 1M files in a 5,000-package
+/// monorepo, `for_each_dir` rules with
+/// `when_iter: 'iter.has_file("Cargo.toml")'` would otherwise
+/// be O(D × N); the fast path collapses them to O(D).
 fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, WhenError> {
     let Some(iter) = iter else {
         return Ok(false);
     };
     if !iter.is_dir {
         return Ok(false);
+    }
+    if !pattern
+        .chars()
+        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+        && !pattern.starts_with('!')
+    {
+        let candidate = iter.path.join(pattern);
+        return Ok(iter.index.contains_file(&candidate));
     }
     let combined = format!("{}/{}", iter.path.to_string_lossy(), pattern);
     let scope = Scope::from_patterns(std::slice::from_ref(&combined))

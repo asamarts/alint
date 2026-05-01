@@ -39,13 +39,46 @@
 //! problem, not the structured rule's concern — but better to
 //! surface it than silently skip.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Level, PathsSpec, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json_path::JsonPath;
+
+/// True when `pattern` is a plain relative-path literal — no
+/// glob metacharacters, no `!` exclude prefix. Mirrors
+/// `file_exists::is_literal_path`; kept local to dodge a
+/// crate-wide pub-helper module just for two rules.
+fn is_literal_path(pattern: &str) -> bool {
+    !pattern.starts_with('!')
+        && !pattern
+            .chars()
+            .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+}
+
+/// Collect every literal pattern from `spec` IFF every entry is
+/// a literal AND the spec carries no excludes. Returns `None`
+/// when any pattern is a glob or there are excludes — the slow
+/// path is still correct in those cases.
+fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
+    let patterns: Vec<&str> = match spec {
+        PathsSpec::Single(s) => vec![s.as_str()],
+        PathsSpec::Many(v) => v.iter().map(String::as_str).collect(),
+        PathsSpec::IncludeExclude { include, exclude } if exclude.is_empty() => {
+            include.iter().map(String::as_str).collect()
+        }
+        PathsSpec::IncludeExclude { .. } => return None,
+    };
+    if patterns.iter().all(|p| is_literal_path(p)) {
+        Some(patterns.iter().map(PathBuf::from).collect())
+    } else {
+        None
+    }
+}
 
 /// Which YAML-flavoured parser to use on the target file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +165,18 @@ pub struct StructuredPathRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    /// `Some(paths)` when every `paths:` entry is a plain
+    /// literal (no glob metacharacters, no `!` excludes). The
+    /// fast path uses these to short-circuit through the
+    /// index's hash-set and skip the O(N) `scope.matches`
+    /// scan — same shape as `file_exists`'s fast path. Driven
+    /// by the bundled `monorepo/cargo-workspace@v1`'s
+    /// `cargo-workspace-member-declares-name` rule, which
+    /// `for_each_dir` instantiates with `paths:
+    /// "{path}/Cargo.toml"` (purely literal after token
+    /// substitution) for every `crates/*` directory; without
+    /// the fast path this is the dominant 1M-scale bottleneck.
+    literal_paths: Option<Vec<PathBuf>>,
     format: Format,
     path_expr: JsonPath,
     path_src: String,
@@ -159,17 +204,40 @@ impl Rule for StructuredPathRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
+        if let Some(literals) = self.literal_paths.as_ref() {
+            // Fast path: each `paths:` entry is a literal
+            // relative path; we don't need to touch the entry
+            // list at all. `contains_file` is the cheap
+            // membership check; the absolute path comes from
+            // joining `root` with the literal directly.
+            // (`find_file` would re-scan the entries list to
+            // hand back a `&FileEntry`, which we don't need
+            // here — only the bytes — and which would
+            // re-introduce the O(N) work this fast path
+            // exists to avoid.)
+            for literal in literals {
+                if !ctx.index.contains_file(literal) {
+                    continue;
+                }
+                let full = ctx.root.join(literal);
+                let Ok(bytes) = std::fs::read(&full) else {
+                    continue;
+                };
+                violations.extend(self.evaluate_file(ctx, literal, &bytes)?);
             }
-            let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = std::fs::read(&full) else {
-                // permission / race — silent skip, like other
-                // content rules
-                continue;
-            };
-            violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
+        } else {
+            for entry in ctx.index.files() {
+                if !self.scope.matches(&entry.path) {
+                    continue;
+                }
+                let full = ctx.root.join(&entry.path);
+                let Ok(bytes) = std::fs::read(&full) else {
+                    // permission / race — silent skip, like other
+                    // content rules
+                    continue;
+                };
+                violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
+            }
         }
         Ok(violations)
     }
@@ -334,6 +402,7 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        literal_paths: extract_literal_paths(paths),
         format,
         path_expr,
         path_src: opts.path,
@@ -361,6 +430,7 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        literal_paths: extract_literal_paths(paths),
         format,
         path_expr,
         path_src: opts.path,
