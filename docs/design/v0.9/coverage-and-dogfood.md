@@ -345,8 +345,8 @@ rule-authoring workflow we've been converging toward
 - v0.9 phases .1-.4: `docs/design/v0.9/{parallel_walker,
   memory_pass, dispatch_flip}.md`
 - v0.9.5 commits: `git log 9050745..HEAD`
-- v0.9.5 bench data: `docs/benchmarks/v0.9/scale-after-pathindex/`
+- v0.9.5 bench data: `docs/benchmarks/macro/results/linux-x86_64/v0.9.5/`
 - v0.9.5 investigation traces:
-  `docs/perf/cross-file-rules/`
+  `docs/benchmarks/investigations/2026-05-cross-file-rules/`
 - Existing coverage audit:
   `crates/alint-e2e/tests/coverage_audit.rs`

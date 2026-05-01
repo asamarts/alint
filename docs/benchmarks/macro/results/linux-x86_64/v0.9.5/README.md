@@ -15,7 +15,7 @@ out either of the two commits above and running
 ```sh
 xtask bench-scale --include-1m --sizes 1m --scenarios S3 \
     --modes full,changed --warmup 1 --runs 3 \
-    --out docs/benchmarks/v0.9/scale-after-pathindex
+    --out docs/benchmarks/macro/results/linux-x86_64/v0.9.5
 ```
 
 (the harness will rebuild `alint` first, so HEAD's binary is what
@@ -24,8 +24,8 @@ gets timed regardless of the snapshot label).
 ## Headline vs published v0.9.4 baseline
 
 ```sh
-cat docs/benchmarks/v0.9/scale/linux-x86_64/index.md
-cat docs/benchmarks/v0.9/scale-after-pathindex/1m/results.md
+cat docs/benchmarks/macro/results/linux-x86_64/v0.9.4/index.md
+cat docs/benchmarks/macro/results/linux-x86_64/v0.9.5/1m/results.md
 ```
 
 | Cell | v0.9.4 baseline | After fix | Speedup |
@@ -36,7 +36,7 @@ cat docs/benchmarks/v0.9/scale-after-pathindex/1m/results.md
 ## Headline vs v0.5.6 (pre-regression baseline, same 1M S3 corpus)
 
 ```sh
-cat docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md
+cat docs/benchmarks/macro/results/linux-x86_64/v0.5.6/1m/results.md
 ```
 
 | Cell | v0.5.6 | After fix | Speedup |
@@ -47,4 +47,4 @@ cat docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md
 So this fix doesn't just close the v0.9.x regression — it makes
 1M-scale S3 runs ~50–80× faster than they have ever been published
 in a release. The investigation that produced the fix is documented
-under [`docs/perf/cross-file-rules/`](../../../perf/cross-file-rules/).
+under [`docs/benchmarks/investigations/2026-05-cross-file-rules/`](../../../investigations/2026-05-cross-file-rules/).

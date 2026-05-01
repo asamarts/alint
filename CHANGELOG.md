@@ -59,9 +59,9 @@ paths), `structured_path` (which backs `json_path_*`,
 - Workspace test suite green (1000+ tests across 7
   crates).
 - Pre-v0.9.4 baseline frozen at
-  `docs/benchmarks/v0.9/baseline-v0.9.3/criterion/`.
+  `docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.3/criterion/`.
   v0.9.4 numbers at
-  `docs/benchmarks/v0.9/v0.9.4-content-rules/criterion/`.
+  `docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion/`.
 
 ## [0.9.3] — 2026-04-30
 
@@ -167,9 +167,9 @@ implementation that proves the shape works.
 - Workspace test suite green (1000+ tests across 7
   crates).
 - Pre-v0.9.3 baseline frozen at
-  `docs/benchmarks/v0.9/baseline-v0.9.2/criterion/`.
+  `docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.2/criterion/`.
   v0.9.3 numbers at
-  `docs/benchmarks/v0.9/v0.9.3-dispatch-flip/criterion/`.
+  `docs/benchmarks/archive/v0.9-development-phases/v0.9.3-dispatch-flip/criterion/`.
 
 ## [0.9.2] — 2026-04-30
 
@@ -249,9 +249,9 @@ touching the same rule bodies twice. See
 - `target-baseline*/` added to `.gitignore` for the
   baseline-bench scratch dirs the v0.9.x flow uses.
 - Pre-v0.9.2 baseline frozen at
-  `docs/benchmarks/v0.9/baseline-v0.9.1/criterion/` for
+  `docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.1/criterion/` for
   same-day per-phase delta comparisons. v0.9.2 numbers
-  at `docs/benchmarks/v0.9/v0.9.2-memory-pass/criterion/`.
+  at `docs/benchmarks/archive/v0.9-development-phases/v0.9.2-memory-pass/criterion/`.
 
 ## [0.9.1] — 2026-04-30
 
@@ -274,7 +274,7 @@ subcommands change; every v0.8 config runs unchanged.
   parallel.
 
   Numbers vs the captured pre-v0.9 baseline at
-  `docs/benchmarks/v0.9/baseline-pre/criterion`:
+  `docs/benchmarks/archive/v0.9-development-baselines/baseline-pre/criterion`:
 
   | bench | before | after | delta |
   |---|---:|---:|---:|
@@ -297,11 +297,11 @@ subcommands change; every v0.8 config runs unchanged.
   `docs/design/v0.7/` (Problem → Surface → Semantics →
   False-positive surface → Implementation → Tests → Open
   questions).
-- **`docs/benchmarks/v0.9/baseline-pre/`** — frozen
+- **`docs/benchmarks/archive/v0.9-development-baselines/baseline-pre/`** — frozen
   criterion snapshot captured on `bec0cf4` (the v0.9 starting
   point) so subsequent v0.9 phases have a same-day, same-
   hardware "before" reference to measure deltas against.
-- **`docs/benchmarks/v0.9/v0.9.1-parallel-walker/`** —
+- **`docs/benchmarks/archive/v0.9-development-phases/v0.9.1-parallel-walker/`** —
   post-merge bench snapshot for this release, with a README
   documenting the deltas vs both the v0.7.0 floor (the gate)
   and the pre-v0.9 baseline (the per-phase delta).
@@ -1248,7 +1248,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   `ALINT_BENCH_IMAGE=...`.
 
 - **First competitive numbers** under
-  `docs/benchmarks/v0.5/scale/linux-x86_64/`. Same
+  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/`. Same
   fingerprint as v0.5.6's alint-only publication; rows
   for ls-lint / repolinter / grep added at the
   scenarios + sizes each tool supports. Headline
@@ -1264,7 +1264,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   matrix; the new `Tool` column makes pivoting trivial.
 
 - **Published 1M-file numbers** under
-  `docs/benchmarks/v0.5/scale/linux-x86_64/1m/results.md`.
+  `docs/benchmarks/macro/results/linux-x86_64/v0.5.6/1m/results.md`.
   Six rows (`1m × {S1,S2,S3} × {full,changed}`) on the
   same hardware as v0.5.6's 1k/10k/100k publication.
   Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
@@ -1330,7 +1330,7 @@ runs unchanged.
 
   Per-row hyperfine measurement (3 warmup + 10 measured
   runs by default); JSON + Markdown output under
-  `docs/benchmarks/v0.5/scale/<os>-<arch>/`. Hardware
+  `docs/benchmarks/macro/results/<os>-<arch>/<version>/`. Hardware
   fingerprint (CPU model + cores, RAM, FS type, kernel,
   rustc, alint version + git SHA, hyperfine version)
   embedded in every report so cross-machine comparisons
@@ -1349,10 +1349,10 @@ runs unchanged.
   files to "touch" in `--changed`-mode benches.
 
 - **First published numbers**:
-  `docs/benchmarks/v0.5/scale/linux-x86_64/` with 18 rows
+  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/` with 18 rows
   (3 sizes × 3 scenarios × 2 modes) on AMD Ryzen 9 3900X /
   62 GB / ext4 / Linux 6.1. Companion
-  `docs/benchmarks/v0.5/scale/{README.md,methodology.md}`
+  `docs/benchmarks/{README.md,RUNNING.md,macro/README.md} (post-reorg layout)`
   documents the harness + scenario definitions + how to
   reproduce.
 

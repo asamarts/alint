@@ -16,7 +16,7 @@ its repository-level error path doesn't fit per-file
 dispatch. No rule logic changes; all 8 output formatters
 produce byte-identical output to v0.9.3. See
 [CHANGELOG.md](../../CHANGELOG.md) and
-`docs/benchmarks/v0.9/v0.9.4-content-rules/README.md` for
+`docs/benchmarks/micro/results/linux-x86_64/v0.9.4/README.md` for
 captured numbers.
 
 **v0.9 cut reopened (2026-05-01).** A scaling-profile
@@ -84,7 +84,7 @@ The smallest scope that is usefully adoptable.
 - ✅ Output formats: `human`, `json`.
 - ✅ CLI subcommands: `check`, `list`, `explain`.
 - ✅ JSON Schema published for editor autocomplete (`schemas/v1/config.json`).
-- ✅ Benchmarks published with the release — criterion micro-benches under `crates/alint-bench/` and hyperfine macro-benches via `xtask bench-release`. Methodology at [`docs/benchmarks/METHODOLOGY.md`](../benchmarks/METHODOLOGY.md); per-platform results under `docs/benchmarks/v0.1/`.
+- ✅ Benchmarks published with the release — criterion micro-benches under `crates/alint-bench/` and hyperfine macro-benches via `xtask bench-release`. Methodology at [`docs/benchmarks/METHODOLOGY.md`](../benchmarks/METHODOLOGY.md); per-platform results under `docs/benchmarks/archive/v0.1/`.
 - ✅ Static binaries on GitHub Releases, install script, `cargo install alint` — release workflow at `.github/workflows/release.yml`, installer at [`install.sh`](../../install.sh).
 - ✅ Pre-publish hygiene: binary package renamed `alint-cli` → `alint`; internal crates flagged `publish = false` (only `alint` + `alint-core` publish); crates.io metadata populated on the public crates; `LICENSE-APACHE` + `LICENSE-MIT` + root `README.md` added.
 - ✅ Dogfood `.alint.yml` exercising the tool against its own repo.
@@ -277,7 +277,7 @@ Ranked by leverage.
   (2026-04-26) as `xtask bench-scale`. Publishes
   hyperfine timings across (size × scenario × mode)
   matrix with hardware fingerprint; numbers under
-  [`docs/benchmarks/v0.5/scale/linux-x86_64/`](../benchmarks/v0.5/scale/linux-x86_64/).
+  [`docs/benchmarks/macro/results/linux-x86_64/v0.5.7/`](../benchmarks/v0.5/scale/linux-x86_64/).
   1M-file size opt-in via `--include-1m`.
 - ✅ **Competitive comparisons** — shipped in v0.5.7
   (2026-04-26). Same harness now drives ls-lint,
@@ -524,7 +524,7 @@ impossible to ship.
   regresses past `--threshold` (default ±10%). PR-time
   gate-ready.
 - ✅ **Baseline against v0.7.0** captured at
-  `docs/benchmarks/v0.8/baseline-v0.7.0/` so v0.9 engine
+  `docs/benchmarks/micro/results/linux-x86_64/v0.7.0/` so v0.9 engine
   work has a documented floor.
 - ✅ **Fixture-completeness test** —
   `alint-dsl/tests/schema.rs::fixture_covers_every_registered_rule_kind`

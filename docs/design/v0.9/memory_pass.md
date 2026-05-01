@@ -33,7 +33,7 @@ of all ~70 rule call sites + 8 formatter structs.
 Behavioural invariants verified: byte-identical output via
 the cross-formatter snapshot test, full workspace test
 suite green. Bench numbers: see
-`docs/benchmarks/v0.9/v0.9.2-memory-pass/README.md`.
+`docs/benchmarks/archive/v0.9-development-phases/v0.9.2-memory-pass/README.md`.
 
 ## What moved to v0.9.3
 

@@ -59,7 +59,7 @@ count = quadratic in (D × N).
 
 The 1M `baseline` trace isn't here because the v0.9.4 1M run took
 12 minutes per shot and we already had the macro number from
-`docs/benchmarks/v0.9/scale/linux-x86_64/1m/results.md`. Generate
+`docs/benchmarks/macro/results/linux-x86_64/v0.9.4/1m/results.md`. Generate
 it locally if needed by checking out `9050745` and running the
 `gen-monorepo` + tracing recipe above.
 

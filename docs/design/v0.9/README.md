@@ -63,7 +63,7 @@ Every v0.9.x tag runs:
 
 ```sh
 xtask bench-compare \
-  --before docs/benchmarks/v0.8/baseline-v0.7.0/criterion \
+  --before docs/benchmarks/micro/results/linux-x86_64/v0.7.0/criterion \
   --after target/criterion \
   --threshold 10
 ```
@@ -76,7 +76,7 @@ The four v0.7.0-baselined micro-benches are `glob_compile`,
 (`single_file_rules`, `cross_file_rules`, `output_formats`,
 `fix_throughput`, `dsl_extends`, `structured_query`,
 `blame_cache`, `walker`) didn't exist at v0.7.0 — per
-`docs/benchmarks/v0.8/baseline-v0.7.0/README.md`, "their own
+`docs/benchmarks/micro/results/linux-x86_64/v0.7.0/README.md`, "their own
 first-run numbers serve as their baseline." For these, v0.9.x
 compares against the previous v0.9.x phase rather than against
 v0.7.0.
@@ -154,9 +154,9 @@ v0.9. `version: 1` covers the entire v0.9 cut.
 3. **`dispatch_flip.md`** — engine restructure. Lands as v0.9.3.
 
 Each phase carries its own `xtask bench-compare` run and a
-short `docs/benchmarks/v0.9/<phase>/` snapshot so v0.10's LSP
-work (which directly builds on the per-file dispatch hot path)
-has a documented floor.
+short `docs/benchmarks/archive/v0.9-development-phases/<phase>/`
+snapshot so v0.10's LSP work (which directly builds on the
+per-file dispatch hot path) has a documented floor.
 
 ## Out of scope for v0.9
 

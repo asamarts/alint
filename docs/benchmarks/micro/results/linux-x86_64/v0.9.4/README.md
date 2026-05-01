@@ -16,8 +16,8 @@ benefits from the read-coalescing path.
 
 ```sh
 xtask bench-compare \
-  --before docs/benchmarks/v0.8/baseline-v0.7.0/criterion \
-  --after  docs/benchmarks/v0.9/v0.9.4-content-rules/criterion \
+  --before docs/benchmarks/micro/results/linux-x86_64/v0.7.0/criterion \
+  --after  docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion \
   --threshold 10
 ```
 
@@ -46,8 +46,8 @@ content-rule migration.
 
 ```sh
 xtask bench-compare \
-  --before docs/benchmarks/v0.9/baseline-v0.9.3/criterion \
-  --after  docs/benchmarks/v0.9/v0.9.4-content-rules/criterion \
+  --before docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.3/criterion \
+  --after  docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion \
   --threshold 10
 ```
 
@@ -107,7 +107,7 @@ cargo bench -p alint-bench --features fs-benches \
   --bench walker --bench rule_engine \
   --bench glob_compile --bench glob_match --bench regex_content \
   --bench single_file_rules --bench cross_file_rules --bench output_formats
-cp -r target/criterion docs/benchmarks/v0.9/v0.9.4-content-rules/criterion
+cp -r target/criterion docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion
 ```
 
 Stale benches not exercised by v0.9.4

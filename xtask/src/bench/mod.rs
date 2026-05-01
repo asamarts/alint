@@ -637,7 +637,7 @@ fn write_outputs(report: &Report, args: &ScaleArgs) -> Result<()> {
 /// runs they don't want polluting the published per-version dir.
 ///
 /// Pre-2026-05 this was hard-coded to
-/// `docs/benchmarks/v0.5/scale/<arch>/`, which silently
+/// `docs/benchmarks/v0.5/scale/<arch>/ (the pre-reorg path)`, which silently
 /// overwrote the v0.5 baseline numbers on every run. Per
 /// `docs/benchmarks/README.md`'s layout, results are now
 /// per-version under `macro/results/`.

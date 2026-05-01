@@ -23,7 +23,7 @@ parallel walker, memory-footprint pass) gates regression on
 
 ```sh
 xtask bench-compare \
-  --before docs/benchmarks/v0.8/baseline-v0.7.0/criterion \
+  --before docs/benchmarks/micro/results/linux-x86_64/v0.7.0/criterion \
   --after target/criterion \
   --threshold 10
 ```
@@ -43,7 +43,7 @@ CRITERION_HOME=$PWD/criterion-results \
   cargo bench -p alint-bench \
     --bench rule_engine --bench glob_match \
     --bench glob_compile --bench regex_content
-cp -r criterion-results <repo>/docs/benchmarks/v0.8/baseline-v0.7.0/criterion
+cp -r criterion-results <repo>/docs/benchmarks/micro/results/linux-x86_64/v0.7.0/criterion
 git worktree remove /tmp/alint-v0.7.0
 ```
 

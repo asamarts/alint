@@ -1,168 +1,138 @@
 # Benchmark methodology
 
-> Short version: two layers. **criterion** for pure-CPU micro-benchmarks
-> (stable, cross-platform). **hyperfine** driven by `xtask bench-release`
-> (v0.1, single-config) and `xtask bench-scale` (v0.5+, scenario × size ×
-> mode matrix) for end-to-end CLI wall-time (cross-platform, reproducible,
-> honest about variance). Results are committed per version, per platform.
+> Short version: two layers. **criterion** for pure-CPU
+> micro-benchmarks (stable, cross-platform). **hyperfine**
+> driven by `xtask bench-scale` for end-to-end CLI wall-time
+> (cross-platform, reproducible, honest about variance).
+> Results are committed per version, per platform, under
+> [`micro/results/`](micro/) and [`macro/results/`](macro/).
 >
-> Latest: v0.5 scale-ceiling — see [`v0.5/scale/`](v0.5/scale/) for the
-> reproduction recipe, scenario definitions, and per-platform numbers.
+> This document explains the *why* behind that split. For
+> *how to run them*, see [`RUNNING.md`](RUNNING.md). For
+> *what each one measures*, see [`micro/README.md`](micro/README.md)
+> and [`macro/README.md`](macro/README.md). For *current
+> published numbers*, see [`README.md`](README.md) and
+> [`HISTORY.md`](HISTORY.md).
 
 ## What we measure and why
 
 alint's hot path combines two very different cost models:
 
-1. **Syscall-bound**: the `ignore`-crate walk of the repository tree. Cost
-   depends heavily on libc/kernel/filesystem + page-cache state.
-2. **Pure-CPU**: glob compilation, `GlobSet` matching, regex matching against
-   in-memory file contents, engine fan-out and result aggregation.
+1. **Syscall-bound**: the `ignore`-crate walk of the
+   repository tree. Cost depends heavily on libc/kernel/
+   filesystem + page-cache state.
+2. **Pure-CPU**: glob compilation, `GlobSet` matching, regex
+   matching against in-memory file contents, engine fan-out
+   and result aggregation.
 
-They need different tools. **criterion** is a bad fit for the syscall-heavy
-path (wall-time variance + it's not what we want to regression-gate on);
-Valgrind-based tools (iai-callgrind, CodSpeed Instruments) are a bad fit
-because syscall instruction counts drift with glibc/kernel versions. So we
-split:
+They need different tools. **criterion** is a bad fit for
+the syscall-heavy path (wall-time variance + it's not what
+we want to regression-gate on); Valgrind-based tools
+(iai-callgrind, CodSpeed Instruments) are a bad fit because
+syscall instruction counts drift with glibc/kernel versions.
+So we split:
 
-- **criterion micro-benches** isolate the pure-CPU kernels where
-  instruction-ish patterns are stable.
-- **hyperfine macro-benches** measure the actual CLI as users will invoke
-  it, across controlled synthetic trees, and publish per-platform numbers.
-
-Explicitly not in v0.1: CodSpeed, Bencher, iai-callgrind/gungraun,
-CI-gated wall-time regression detection. Revisit in v0.2 if criterion
-baselines aren't sufficient.
-
-## Layer 1 — criterion micro-benches
-
-Location: `crates/alint-bench/benches/`.
-
-| Bench | What it isolates |
-|---|---|
-| `glob_compile` | Cost of building a `Scope` from 10 / 100 / 1000 glob patterns. |
-| `glob_match` | Per-path match throughput against a 5-pattern `Scope` across 1k / 10k / 100k paths. |
-| `regex_content` | Byte throughput of a content regex against 1 KiB / 64 KiB / 1 MiB buffers. |
-| `rule_engine` | Full engine run over an in-memory `FileIndex` of 1k / 10k / 100k entries — no I/O. |
-| `walker` *(feature-gated `--features fs-benches`)* | Full FS walk of a seeded synthetic tree. Noisier than the others; opt-in. |
-
-### Running locally
-
-```bash
-# all micro-benches
-cargo bench -p alint-bench
-
-# one target
-cargo bench -p alint-bench --bench glob_match
-
-# including the filesystem walker
-cargo bench -p alint-bench --features fs-benches --bench walker
-
-# save a baseline (e.g. on main), then compare from a branch:
-git switch main     && cargo bench -p alint-bench -- --save-baseline main
-git switch my-work  && cargo bench -p alint-bench -- --baseline main
-```
-
-Criterion emits HTML reports under `target/criterion/` and prints CI-style
-deltas to the terminal. Noise is platform-dependent; on a reasonably quiet
-machine expect 1-3% stddev on pure-CPU benches, higher on the walker.
-
-## Layer 2 — `xtask bench-release` (hyperfine)
-
-Location: `xtask/src/main.rs`. Rule config: `xtask/src/bench_config.yml`.
-
-The driver:
-
-1. `cargo build --release -p alint`.
-2. For each tree size (default 1k / 10k / 100k; `--quick` collapses to a
-   single 500-file smoke), generates a deterministic synthetic tree under
-   `$TMPDIR` via `alint-bench::tree::generate_tree`. The seed is fixed
-   (`0xA11E47` by default, overridable with `--seed`) so every machine
-   materializes a byte-identical tree.
-3. Copies a ~15-rule representative config (`bench_config.yml`) into the
-   tree root.
-4. Shells out to `hyperfine` with `--warmup 5 --min-runs 10` and
-   `--export-markdown`.
-5. Captures a platform fingerprint (OS, arch, rustc version, git SHA,
-   timestamp) and emits a markdown report to stdout or `--out <path>`.
-
-### Running locally
-
-```bash
-# full report (several minutes)
-cargo run -p xtask --release -- bench-release \
-    --out docs/benchmarks/v0.1/linux-x86_64.md
-
-# quick smoke (~10 seconds)
-cargo run -p xtask --release -- bench-release --quick
-```
-
-`hyperfine` must be installed and on `PATH`:
-
-```bash
-cargo install hyperfine
-# or: apt install hyperfine / brew install hyperfine / choco install hyperfine
-```
-
-### What gets committed
-
-Per release cut, the maintainer runs `bench-release` on each supported
-platform and commits the markdown to
-`docs/benchmarks/<next-version>/<os>-<arch>.md`. Example:
-
-```
-docs/benchmarks/v0.1/linux-x86_64.md
-docs/benchmarks/v0.1/macos-arm64.md
-docs/benchmarks/v0.1/windows-x86_64.md
-```
-
-This follows ripgrep's precedent: cross-machine variance is documented by
-running on multiple machines and committing results per machine, not
-hidden behind a single dashboard number.
-
-## Why not CodSpeed / iai-callgrind for v0.1
-
-- **iai-callgrind / gungraun** is Valgrind-based and Linux-only in
-  practice (Apple Silicon is unsupported by upstream Valgrind; Windows is
-  unsupported). An alint-specific problem: syscall-heavy code under
-  Valgrind reports instruction counts that drift whenever the CI runner's
-  glibc or kernel updates — which is exactly the part of alint we most
-  want stable numbers for.
-- **CodSpeed** uses the same Valgrind substrate for its "Instruments"
-  mode, inheriting the same issues. CodSpeed's Walltime Macro Runners
-  would give stable wall-time numbers but require a GitHub organization
-  account and add complexity for marginal v0.1 value.
-
-Both remain reasonable to add in v0.2 once we have a concrete need for
-sub-percent CI-gated regression detection on the pure-CPU components
-specifically. The criterion source we ship today is drop-in compatible
-with `codspeed-criterion-compat` via a shim — adopting CodSpeed later
-won't require touching the bench code.
+- **criterion micro-benches** isolate the pure-CPU kernels
+  where instruction-ish patterns are stable. 12 bench files
+  under `crates/alint-bench/benches/`; the catalogue with
+  per-bench rationale lives in [`micro/README.md`](micro/README.md).
+- **hyperfine macro-benches** measure the actual CLI as
+  users will invoke it, across controlled synthetic trees,
+  and publish per-platform numbers. 8 scenarios (S1-S8)
+  under `xtask/src/bench/scenarios/`; catalogue in
+  [`macro/README.md`](macro/README.md).
 
 ## Reproducibility caveats (be honest)
 
-- Absolute numbers are not comparable across machines. Always compare
-  like-for-like: same platform file, same tree size, same rule count.
-- GitHub-hosted `ubuntu-latest` has 5-30% wall-time variance — fine for
-  smoke-testing the harness, too noisy for PR-level regression gating.
-- Filesystem type matters (tmpfs > ext4 > NTFS > APFS by order of
-  magnitude on walk-heavy workloads). Platform fingerprint includes OS +
-  arch but not FS type; note it in commit messages when it matters.
-- `cargo build --release` is not bit-reproducible across rustc versions
-  even with the same source. That's why the fingerprint records the
-  rustc version.
+- **Absolute numbers are not comparable across machines.**
+  Always compare like-for-like: same platform fingerprint
+  (OS / arch / rustc / CPU / RAM / FS), same tree size,
+  same scenario. The platform fingerprint is captured in
+  every published `index.md`'s header.
+- **GitHub-hosted `ubuntu-latest` has 5-30 % wall-time
+  variance** — fine for smoke-testing the harness, too
+  noisy for PR-level regression gating. Publication-grade
+  numbers come from a self-hosted runner with a known
+  fingerprint (per `docs/benchmarks/README.md`'s TL;DR).
+- **Filesystem type matters** (tmpfs > ext4 > NTFS > APFS
+  by order of magnitude on walk-heavy workloads). Platform
+  fingerprint includes OS + arch but not FS type explicitly;
+  note it in commit messages or `index.md` headers when it
+  matters.
+- **`cargo build --release` is not bit-reproducible across
+  rustc versions** even with the same source. That's why
+  the fingerprint records the rustc version.
 
-## Adding a new bench target
+## Why not CodSpeed / iai-callgrind / Bencher
 
-1. Add a `.rs` file under `crates/alint-bench/benches/`.
-2. Register it in `crates/alint-bench/Cargo.toml` as a `[[bench]]` entry.
-3. Use `criterion_group!` + `criterion_main!`.
-4. Prefer `BenchmarkGroup` + `Throughput` to get per-element / per-byte
-   numbers.
-5. Add a row to the table above.
+- **iai-callgrind / gungraun** is Valgrind-based and
+  Linux-only in practice (Apple Silicon is unsupported by
+  upstream Valgrind; Windows is unsupported). An
+  alint-specific problem: syscall-heavy code under Valgrind
+  reports instruction counts that drift whenever the CI
+  runner's glibc or kernel updates — exactly the part of
+  alint we most want stable numbers for.
+- **CodSpeed** uses the same Valgrind substrate for its
+  "Instruments" mode, inheriting the same issues. CodSpeed's
+  Walltime Macro Runners would give stable wall-time numbers
+  but require a GitHub organization account and add
+  complexity for marginal value at our publication cadence.
+- **Bencher** is a thin SaaS wrapper around criterion +
+  hyperfine outputs; we already produce those, and the
+  wrapper's value (visualisation, alerting) doesn't yet
+  justify the new external dependency.
+
+The criterion source we ship is drop-in compatible with
+`codspeed-criterion-compat` via a shim — adopting CodSpeed
+later won't require touching the bench code.
+
+## Regression gates
+
+Two gates run in CI:
+
+1. **Per-PR**: `xtask bench-compare --before <floor> --after
+   target/criterion --threshold 10` against the v0.7.0
+   floor under
+   [`micro/results/linux-x86_64/v0.7.0/criterion/`](micro/results/linux-x86_64/v0.7.0/). Catches any micro-bench whose mean
+   has grown more than 10 % vs the v0.7.0 publication.
+2. **Per-release** (manual, before tag): `xtask bench-scale`
+   at the publication-grade matrix; eyeball the headline
+   cells in [`HISTORY.md`](HISTORY.md). Anything > 20 %
+   drift gets an investigation under
+   [`investigations/`](investigations/).
+
+Per-phase gating during a release cut (e.g. v0.9.x's four
+phases) compared each phase against the prior phase's
+snapshot under
+[`archive/v0.9-development-baselines/`](archive/v0.9-development-baselines/) — see the v0.9 design doc for that
+convention.
+
+## Adding a new bench
+
+See [`micro/README.md`](micro/README.md) and
+[`macro/README.md`](macro/README.md) for the per-layer
+recipes. Both layers ship with a "soft" coverage warning
+test (`coverage_audit_bench_listing.rs` for macro;
+`coverage_audit.rs` already covers e2e correctness for
+micro-benched rule kinds via the e2e scenarios) that
+surfaces uncovered rule kinds — useful as a triage list
+when picking what shape to add next.
 
 ## Adding a new target platform
 
-1. Install `hyperfine` on the target machine.
-2. `cargo run -p xtask --release -- bench-release --out docs/benchmarks/<version>/<os>-<arch>.md`.
-3. Sanity-check the numbers; commit the file. Do not auto-commit via CI —
-   GitHub runner variance means human eyes should read before recording.
+1. Install `hyperfine` on the target machine and ensure
+   `cargo bench` works.
+2. Run the publication-grade matrix:
+
+   ```sh
+   cargo bench -p alint-bench --features fs-benches
+   xtask publish-benches --trim
+   xtask bench-scale --include-1m --scenarios S1,S2,S3 --warmup 3 --runs 10
+   ```
+
+3. The defaults write to
+   `docs/benchmarks/{micro,macro}/results/<os>-<arch>/v<workspace-version>/`;
+   verify the new dirs are present, sanity-check the
+   numbers, commit the file. Do not auto-commit via CI —
+   per-machine variance means human eyes should read before
+   recording.
