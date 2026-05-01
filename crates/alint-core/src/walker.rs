@@ -332,17 +332,17 @@ mod tests {
     #[test]
     fn fileindex_files_filters_directories_out() {
         let idx = FileIndex::from_entries(vec![
-                FileEntry {
-                    path: Path::new("a").into(),
-                    is_dir: true,
-                    size: 0,
-                },
-                FileEntry {
-                    path: Path::new("a/x.rs").into(),
-                    is_dir: false,
-                    size: 5,
-                },
-            ]);
+            FileEntry {
+                path: Path::new("a").into(),
+                is_dir: true,
+                size: 0,
+            },
+            FileEntry {
+                path: Path::new("a/x.rs").into(),
+                is_dir: false,
+                size: 5,
+            },
+        ]);
         let files: Vec<_> = idx.files().collect();
         assert_eq!(files.len(), 1);
         assert_eq!(&*files[0].path, Path::new("a/x.rs"));
@@ -351,17 +351,17 @@ mod tests {
     #[test]
     fn fileindex_dirs_filters_files_out() {
         let idx = FileIndex::from_entries(vec![
-                FileEntry {
-                    path: Path::new("a").into(),
-                    is_dir: true,
-                    size: 0,
-                },
-                FileEntry {
-                    path: Path::new("a/x.rs").into(),
-                    is_dir: false,
-                    size: 5,
-                },
-            ]);
+            FileEntry {
+                path: Path::new("a").into(),
+                is_dir: true,
+                size: 0,
+            },
+            FileEntry {
+                path: Path::new("a/x.rs").into(),
+                is_dir: false,
+                size: 5,
+            },
+        ]);
         let dirs: Vec<_> = idx.dirs().collect();
         assert_eq!(dirs.len(), 1);
         assert_eq!(&*dirs[0].path, Path::new("a"));
@@ -370,22 +370,22 @@ mod tests {
     #[test]
     fn fileindex_total_size_sums_files_only() {
         let idx = FileIndex::from_entries(vec![
-                FileEntry {
-                    path: Path::new("a").into(),
-                    is_dir: true,
-                    size: 999, // dirs report 0 in `walk`, but defensively excluded here
-                },
-                FileEntry {
-                    path: Path::new("a/x.rs").into(),
-                    is_dir: false,
-                    size: 100,
-                },
-                FileEntry {
-                    path: Path::new("a/y.rs").into(),
-                    is_dir: false,
-                    size: 50,
-                },
-            ]);
+            FileEntry {
+                path: Path::new("a").into(),
+                is_dir: true,
+                size: 999, // dirs report 0 in `walk`, but defensively excluded here
+            },
+            FileEntry {
+                path: Path::new("a/x.rs").into(),
+                is_dir: false,
+                size: 100,
+            },
+            FileEntry {
+                path: Path::new("a/y.rs").into(),
+                is_dir: false,
+                size: 50,
+            },
+        ]);
         // total_size sums via `files()` so the directory's
         // bogus size is ignored.
         assert_eq!(idx.total_size(), 150);
@@ -394,17 +394,17 @@ mod tests {
     #[test]
     fn fileindex_find_file_returns_match_or_none() {
         let idx = FileIndex::from_entries(vec![
-                FileEntry {
-                    path: Path::new("a/x.rs").into(),
-                    is_dir: false,
-                    size: 0,
-                },
-                FileEntry {
-                    path: Path::new("b").into(),
-                    is_dir: true,
-                    size: 0,
-                },
-            ]);
+            FileEntry {
+                path: Path::new("a/x.rs").into(),
+                is_dir: false,
+                size: 0,
+            },
+            FileEntry {
+                path: Path::new("b").into(),
+                is_dir: true,
+                size: 0,
+            },
+        ]);
         assert!(idx.find_file(Path::new("a/x.rs")).is_some());
         assert!(idx.find_file(Path::new("missing.rs")).is_none());
         // find_file filters dirs — querying a known directory

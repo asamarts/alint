@@ -87,14 +87,16 @@ mod tests {
     use std::path::Path;
 
     fn idx(entries: &[(&str, u64)]) -> FileIndex {
-        FileIndex::from_entries(entries
+        FileIndex::from_entries(
+            entries
                 .iter()
                 .map(|(p, sz)| FileEntry {
                     path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: *sz,
                 })
-                .collect())
+                .collect(),
+        )
     }
 
     #[test]

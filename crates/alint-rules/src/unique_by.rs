@@ -154,14 +154,16 @@ mod tests {
     use std::path::Path;
 
     fn index(files: &[&str]) -> FileIndex {
-        FileIndex::from_entries(files
+        FileIndex::from_entries(
+            files
                 .iter()
                 .map(|p| FileEntry {
                     path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 1,
                 })
-                .collect())
+                .collect(),
+        )
     }
 
     fn rule(select: &str, key: &str) -> UniqueByRule {

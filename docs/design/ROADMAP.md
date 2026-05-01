@@ -19,16 +19,39 @@ produce byte-identical output to v0.9.3. See
 `docs/benchmarks/v0.9/v0.9.4-content-rules/README.md` for
 captured numbers.
 
-**v0.9 cut closed.** All three engine-optimization phases
-shipped (parallel walker, type-pass, dispatch flip), plus
-the v0.9.4 content-rule mechanical follow-up.
+**v0.9 cut reopened (2026-05-01).** A scaling-profile
+investigation surfaced a +28-37% 1M S3 regression vs
+v0.5.6 — `for_each_dir` cross-file dispatch was running
+nested rules in O(D × N) shape (5 B glob-match operations
+at 1M with 5,000 packages). The fix landed on `main` as
+v0.9.5 (lazy path-index on `FileIndex` + literal-path fast
+paths in `file_exists`, `structured_path`,
+`iter.has_file`); 1M S3 wall: 731.9 s → 11.19 s (65×) full,
+6.73 s (108×) changed. Sub-phases v0.9.6–.9 codify the
+test/coverage floor that lets future engine work land
+without that class of regression slipping by:
+
+- **v0.9.6** — coverage audits (pass/fail symmetry, bundled-
+  ruleset coverage, git-mode symmetry)
+- **v0.9.7** — coverage scenarios filling gaps the audits
+  surface
+- **v0.9.8** — bench-scale extension (S6 per-file content
+  fan-out, S7 cross-file relational, S8 git-tracked overlay)
+- **v0.9.9** — alint self-dogfooding via `.alint.yml` at
+  repo root, gated in CI
+
+Full design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
 
 **Next: v0.10 — LSP server.** Inline diagnostics, hover
 with rule documentation, code actions for "add to ignore"
 and "apply fix", VS Code extension. The per-file dispatch
 shape from v0.9.3 directly powers the per-file-edit
 re-evaluation hot path; v0.9.4 broadens its applicability
-across the rule catalogue. WASM plugins shift to v0.11.
+across the rule catalogue; v0.9.5's `FileIndex::contains_file`
+is itself useful for v0.10 (a single-file edit only needs
+to re-test rules whose `path_scope` matches that path —
+existing contains-checks become O(1)). WASM plugins shift
+to v0.11.
 
 ## Positioning
 
@@ -597,6 +620,52 @@ design pass.)
   (repo-level error path doesn't fit per-file dispatch).
 - v0.8.5's `bench-compare` gate catches any regression
   from the engine restructure for free.
+
+### Reopened sub-phases (2026-05-01)
+
+A scaling-profile investigation surfaced that the v0.9.4 1M
+S3 hyperfine number had drifted +28-37% vs v0.5.6 — every
+`for_each_dir` rule with a `crates/*` select instantiated a
+fresh nested rule per matched directory and each ran a
+linear scan of `ctx.index.files()`, giving O(D × N) shape
+that hit ~5 B glob-match ops at 1M with 5,000 packages.
+
+- ⏳ **Cross-file dispatch fast paths** (v0.9.5, code merged
+  on `main`). Lazy `OnceLock<HashSet<Arc<Path>>>` path-index
+  on `FileIndex` (`contains_file(&Path) -> bool` is the
+  canonical O(1) "does this path exist?" query); literal-
+  path fast paths in `file_exists::evaluate`,
+  `structured_path::evaluate`, and the `iter.has_file`
+  `when_iter:` builtin; `pair` switches `find_file().is_some()`
+  to `contains_file`. Engine adds `tracing::info!` per-phase
+  + per-cross-file-rule wall-time emission via
+  `ALINT_LOG=alint_core=info`. **Numbers (1M S3 hyperfine,
+  --warmup 1 --runs 3):** full 731.9 s → 11.19 s ± 0.15
+  (65×); changed 724.4 s → 6.73 s ± 0.06 (108×). Also ~80×
+  faster than the v0.5.6 baseline.
+- ⏸ **Coverage audits** (v0.9.6). Three new tests under
+  `crates/alint-e2e/tests/`: pass/fail symmetry per kind;
+  bundled-ruleset coverage; git-mode symmetry. Plus a soft-
+  warning bench-coverage listing.
+- ⏸ **Coverage scenarios** (v0.9.7). Author the missing
+  ~30-50 YAMLs under `crates/alint-e2e/scenarios/check/
+  <family>/` to drain the v0.9.6 punch list. Standardised
+  naming (`<kind>_pass.yml`, `<kind>_fires.yml`,
+  `<kind>_no_op_outside_git.yml`, `<kind>_in_repo.yml`).
+- ⏸ **Bench-scale extension** (v0.9.8). S1-S5 unchanged;
+  three new perf-shape scenarios — S6 (per-file content
+  fan-out), S7 (cross-file relational), S8 (git-tracked
+  overlay). New `alint_bench::tree::generate_git_monorepo`
+  helper.
+- ⏸ **alint self-dogfooding** (v0.9.9). `.alint.yml` at
+  the repo root with rules requiring every rule-source
+  file to have a referencing e2e scenario, every bundled
+  ruleset to have pass + flagging scenarios. CI gate:
+  `alint check .` runs alongside `cargo test`. Two-layer
+  enforcement — alint check (file presence) + Rust audits
+  (semantic).
+
+Full design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
 
 ## v0.10 — LSP
 

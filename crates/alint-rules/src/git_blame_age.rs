@@ -179,14 +179,16 @@ mod tests {
     }
 
     fn index(paths: &[&str]) -> FileIndex {
-        FileIndex::from_entries(paths
+        FileIndex::from_entries(
+            paths
                 .iter()
                 .map(|p| FileEntry {
                     path: std::path::Path::new(p).into(),
                     is_dir: false,
                     size: 0,
                 })
-                .collect())
+                .collect(),
+        )
     }
 
     #[test]
