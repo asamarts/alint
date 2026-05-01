@@ -1,0 +1,28 @@
+[2m2026-05-01T05:01:10.122616Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"evaluate_facts" [3melapsed_us[0m[2m=[0m203 [3mfacts[0m[2m=[0m2
+[2m2026-05-01T05:01:10.122670Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"git_setup" [3melapsed_us[0m[2m=[0m2
+[2m2026-05-01T05:01:10.122676Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"build_filtered_index" [3melapsed_us[0m[2m=[0m0 [3mfiles[0m[2m=[0m102003
+[2m2026-05-01T05:01:20.736780Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_partition" [3melapsed_us[0m[2m=[0m10614094 [3mrules[0m[2m=[0m21
+[2m2026-05-01T05:01:20.736816Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"cargo-workspace-member-declares-name" [3melapsed_us[0m[2m=[0m10612840
+[2m2026-05-01T05:01:20.736821Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"cargo-workspace-member-has-readme" [3melapsed_us[0m[2m=[0m6974319
+[2m2026-05-01T05:01:20.736825Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"monorepo-packages-have-readme" [3melapsed_us[0m[2m=[0m3591652
+[2m2026-05-01T05:01:20.736829Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"monorepo-crates-have-cargo-toml" [3melapsed_us[0m[2m=[0m3533244
+[2m2026-05-01T05:01:20.736833Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"rust-sources-snake-case" [3melapsed_us[0m[2m=[0m18656
+[2m2026-05-01T05:01:20.736838Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-codeowners-non-empty" [3melapsed_us[0m[2m=[0m11310
+[2m2026-05-01T05:01:20.736842Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-license-non-empty" [3melapsed_us[0m[2m=[0m10634
+[2m2026-05-01T05:01:20.736846Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-codeowners-exists" [3melapsed_us[0m[2m=[0m10578
+[2m2026-05-01T05:01:20.736850Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-security-policy-exists" [3melapsed_us[0m[2m=[0m9938
+[2m2026-05-01T05:01:20.736854Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"monorepo-unique-package-names" [3melapsed_us[0m[2m=[0m9534
+[2m2026-05-01T05:01:20.736858Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-security-policy-non-empty" [3melapsed_us[0m[2m=[0m9018
+[2m2026-05-01T05:01:20.736862Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-code-of-conduct-exists" [3melapsed_us[0m[2m=[0m8986
+[2m2026-05-01T05:01:20.736865Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-dependency-update-tool" [3melapsed_us[0m[2m=[0m8762
+[2m2026-05-01T05:01:20.736869Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-readme-exists" [3melapsed_us[0m[2m=[0m7892
+[2m2026-05-01T05:01:20.736873Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-license-exists" [3melapsed_us[0m[2m=[0m7848
+[2m2026-05-01T05:01:20.736877Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"rust-toolchain-pinned" [3melapsed_us[0m[2m=[0m5631
+[2m2026-05-01T05:01:20.736881Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"rust-cargo-lock-exists" [3melapsed_us[0m[2m=[0m4950
+[2m2026-05-01T05:01:20.736885Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"oss-gitignore-exists" [3melapsed_us[0m[2m=[0m4582
+[2m2026-05-01T05:01:20.736889Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"rust-no-tracked-target" [3melapsed_us[0m[2m=[0m434
+[2m2026-05-01T05:01:20.736905Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"monorepo-packages-have-package-json" [3melapsed_us[0m[2m=[0m335
+[2m2026-05-01T05:01:20.736909Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"cross_file_rule" [3mrule[0m[2m=[0m"rust-cargo-toml-exists" [3melapsed_us[0m[2m=[0m2
+[2m2026-05-01T05:01:20.847247Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"per_file_partition" [3melapsed_us[0m[2m=[0m110330 [3mrules[0m[2m=[0m11
+[2m2026-05-01T05:01:20.847292Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"assembly" [3melapsed_us[0m[2m=[0m5 [3mresults[0m[2m=[0m23
+[2m2026-05-01T05:01:20.847297Z[0m [32m INFO[0m engine.phase [3mphase[0m[2m=[0m"engine_run_total" [3melapsed_us[0m[2m=[0m10724891
