@@ -28,8 +28,8 @@ pub fn spec_yaml(yaml: &str) -> RuleSpec {
 /// 0`. Tests that need directories or non-zero sizes should
 /// use [`index_with_dirs`] or build the index directly.
 pub fn index(paths: &[&str]) -> FileIndex {
-    FileIndex {
-        entries: paths
+    FileIndex::from_entries(
+        paths
             .iter()
             .map(|p| FileEntry {
                 path: std::path::Path::new(p).into(),
@@ -37,15 +37,15 @@ pub fn index(paths: &[&str]) -> FileIndex {
                 size: 0,
             })
             .collect(),
-    }
+    )
 }
 
 /// Build an in-memory `FileIndex` where each entry carries an
 /// `is_dir` flag. Used by rules that distinguish files from
 /// directories (`dir_exists`, `dir_absent`, …).
 pub fn index_with_dirs(entries: &[(&str, bool)]) -> FileIndex {
-    FileIndex {
-        entries: entries
+    FileIndex::from_entries(
+        entries
             .iter()
             .map(|(p, is_dir)| FileEntry {
                 path: std::path::Path::new(p).into(),
@@ -53,7 +53,7 @@ pub fn index_with_dirs(entries: &[(&str, bool)]) -> FileIndex {
                 size: 0,
             })
             .collect(),
-    }
+    )
 }
 
 /// Construct a `Context` with the minimal set of fields a unit
@@ -98,5 +98,5 @@ pub fn tempdir_with_files(files: &[(&str, &[u8])]) -> (tempfile::TempDir, FileIn
             size: content.len() as u64,
         });
     }
-    (tmp, FileIndex { entries })
+    (tmp, FileIndex::from_entries(entries))
 }

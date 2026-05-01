@@ -1056,8 +1056,8 @@ mod tests {
     use std::path::Path;
 
     fn idx(paths: &[(&str, bool)]) -> FileIndex {
-        FileIndex {
-            entries: paths
+        FileIndex::from_entries(
+            paths
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
                     path: Path::new(p).into(),
@@ -1065,7 +1065,7 @@ mod tests {
                     size: 1,
                 })
                 .collect(),
-        }
+        )
     }
 
     fn check_iter(src: &str, iter_path: &Path, is_dir: bool, index: &FileIndex) -> bool {
@@ -1221,7 +1221,7 @@ mod tests {
     #[test]
     fn evaluate_rejects_has_file_with_non_string_arg() {
         let (facts, vars) = env();
-        let index = FileIndex { entries: vec![] };
+        let index = FileIndex::default();
         let expr = parse("iter.has_file(42)").unwrap();
         let err = expr
             .evaluate(&WhenEnv {

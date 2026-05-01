@@ -115,6 +115,24 @@ enum Commands {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Materialize a Cargo-workspace-shaped monorepo tree at a
+    /// fixed path. Used by the perf-investigation flow to keep
+    /// a 1k/10k/100k/1m tree across profile runs (skip 5 min of
+    /// tree-gen per iteration). Same shape as `bench-scale`'s
+    /// internal tree (matches its size labels).
+    GenMonorepo {
+        /// Size label: 1k / 10k / 100k / 1m. Picks
+        /// `(packages, files_per_package)` to hit the size.
+        #[arg(long)]
+        size: String,
+        /// Tree-generator seed (matches bench-scale default so
+        /// trees are byte-identical to the published bench corpus).
+        #[arg(long, default_value_t = 0xA11E47)]
+        seed: u64,
+        /// Where to place the tree.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Compare two `target/criterion` trees and gate on
     /// regressions. `--before` and `--after` should each be a
     /// criterion-format directory (a tree of
@@ -178,6 +196,7 @@ fn main() -> Result<()> {
             seed,
             out,
         } => gen_fixture(files, depth, seed, out),
+        Commands::GenMonorepo { size, seed, out } => gen_monorepo(&size, seed, out),
         Commands::BenchCompare {
             before,
             after,
@@ -286,6 +305,30 @@ fn gen_fixture(files: usize, depth: usize, seed: u64, out: Option<PathBuf>) -> R
         None => tree.into_persistent()?,
     };
     println!("generated {files} files under {}", final_path.display());
+    Ok(())
+}
+
+fn gen_monorepo(size: &str, seed: u64, out: PathBuf) -> Result<()> {
+    let (packages, files_per_package, total) = match size {
+        "1k" => (50, 18, 1_000),
+        "10k" => (200, 48, 10_000),
+        "100k" => (1000, 98, 100_000),
+        "1m" => (5000, 198, 1_000_000),
+        other => bail!("unknown size {other:?}; expected one of 1k / 10k / 100k / 1m"),
+    };
+    if out.exists() {
+        bail!(
+            "{} already exists; remove it first or pick a fresh path",
+            out.display()
+        );
+    }
+    let tree = alint_bench::tree::generate_monorepo(packages, files_per_package, seed)?;
+    fs::create_dir_all(&out)?;
+    copy_tree(tree.root(), &out)?;
+    println!(
+        "generated {total} files (packages={packages}, files_per_package={files_per_package}) under {}",
+        out.display(),
+    );
     Ok(())
 }
 

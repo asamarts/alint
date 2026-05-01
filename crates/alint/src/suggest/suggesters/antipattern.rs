@@ -279,13 +279,11 @@ mod tests {
 
     #[test]
     fn backup_file_alone_proposes_agent_hygiene() {
-        let index = alint_core::FileIndex {
-            entries: vec![alint_core::FileEntry {
-                path: Path::new("README.md.bak").into(),
-                is_dir: false,
-                size: 0,
-            }],
-        };
+        let index = alint_core::FileIndex::from_entries(vec![alint_core::FileEntry {
+            path: Path::new("README.md.bak").into(),
+            is_dir: false,
+            size: 0,
+        }]);
         let scan = Scan::for_test(crate::init::Detection::default(), index, Vec::new());
         let proposals = propose(&scan, &Progress::null());
         assert_eq!(proposals.len(), 1);

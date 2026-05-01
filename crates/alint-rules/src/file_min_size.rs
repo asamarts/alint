@@ -88,13 +88,11 @@ mod tests {
     use std::path::Path;
 
     fn idx_with_size(path: &str, size: u64) -> FileIndex {
-        FileIndex {
-            entries: vec![FileEntry {
-                path: std::path::Path::new(path).into(),
-                is_dir: false,
-                size,
-            }],
-        }
+        FileIndex::from_entries(vec![FileEntry {
+            path: std::path::Path::new(path).into(),
+            is_dir: false,
+            size,
+        }])
     }
 
     #[test]

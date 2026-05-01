@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use rayon::prelude::*;
 
@@ -11,6 +13,24 @@ use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
 use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
+
+/// Cheap helper: emit a `tracing::info!` event with elapsed
+/// nanoseconds since `start` plus arbitrary key/value pairs.
+/// Used by the engine's phase + per-rule timing breakdown so a
+/// scaling profile (`RUST_LOG=alint_core::engine=info` at
+/// 10k/100k/1M) can show which phase (or rule) is growing
+/// super-linearly. Off by default — only fires when info is
+/// enabled for this target, so production runs pay nothing.
+macro_rules! phase {
+    ($start:expr, $phase:expr $(, $k:ident = $v:expr)* $(,)?) => {
+        tracing::info!(
+            phase = $phase,
+            elapsed_us = $start.elapsed().as_micros() as u64,
+            $($k = $v,)*
+            "engine.phase",
+        );
+    };
+}
 
 /// A rule bundled with an optional `when` expression. Rules with a `when`
 /// that evaluates to false at runtime are skipped (no `RuleResult` is
@@ -119,6 +139,7 @@ impl Engine {
     }
 
     pub fn run(&self, root: &Path, index: &FileIndex) -> Result<Report> {
+        let t_total = Instant::now();
         // Empty changed-set fast path: nothing to lint, return
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.
@@ -128,10 +149,23 @@ impl Engine {
             });
         }
 
+        let t_facts = Instant::now();
         let fact_values = evaluate_facts(&self.facts, root, index)?;
+        phase!(t_facts, "evaluate_facts", facts = self.facts.len() as u64);
+
+        let t_git = Instant::now();
         let git_tracked = self.collect_git_tracked_if_needed(root);
         let git_blame = self.build_blame_cache_if_needed(root);
+        phase!(t_git, "git_setup");
+
+        let t_filter = Instant::now();
         let filtered_index = self.build_filtered_index(index);
+        phase!(
+            t_filter,
+            "build_filtered_index",
+            files = index.entries.len() as u64,
+        );
+
         let full_ctx = Context {
             root,
             index,
@@ -156,10 +190,23 @@ impl Engine {
             iter: None,
         };
 
+        // Per-rule wall-time accumulator for the cross-file
+        // partition. One AtomicU64 per entry, indexed by
+        // entry position in `self.entries`. Workers add their
+        // rule's elapsed nanoseconds atomically; we dump the
+        // breakdown after the partition completes. Per-rule
+        // timing in a parallel partition is necessarily
+        // wall-time (a single rule can't span threads), so
+        // the totals here = sum of per-thread elapsed across
+        // workers, which still localises which rule dominates.
+        let cross_rule_ns: Vec<AtomicU64> =
+            (0..self.entries.len()).map(|_| AtomicU64::new(0)).collect();
+
         // Cross-file partition: rules that don't opt into the
         // file-major dispatch path (cross-file rules + per-file
         // rules that haven't migrated yet). Same parallelism
         // shape as v0.9.2 — rule-major par_iter.
+        let t_cross = Instant::now();
         let cross_results: Vec<(usize, RuleResult)> = self
             .entries
             .par_iter()
@@ -172,15 +219,66 @@ impl Engine {
                     return None;
                 }
                 let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
-                run_entry(entry, ctx, &when_env, &fact_values).map(|rr| (idx, rr))
+                let t_rule = Instant::now();
+                let result = run_entry(entry, ctx, &when_env, &fact_values);
+                let elapsed_ns = t_rule.elapsed().as_nanos() as u64;
+                cross_rule_ns[idx].fetch_add(elapsed_ns, Ordering::Relaxed);
+                result.map(|rr| (idx, rr))
             })
             .collect();
+        phase!(
+            t_cross,
+            "cross_file_partition",
+            rules = self
+                .entries
+                .iter()
+                .filter(|e| e.rule.as_per_file().is_none())
+                .count() as u64,
+        );
+        // Per-rule cross-file dump: skip zero-elapsed slots
+        // (rules that ran on the per-file path or were
+        // skipped by `--changed`). Sorted descending by
+        // elapsed so the worst offenders are at the top of
+        // the log.
+        if tracing::level_enabled!(tracing::Level::INFO) {
+            let mut rows: Vec<(&str, u64)> = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, entry)| {
+                    let ns = cross_rule_ns[idx].load(Ordering::Relaxed);
+                    if ns == 0 {
+                        return None;
+                    }
+                    Some((entry.rule.id(), ns))
+                })
+                .collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            for (rule_id, ns) in rows {
+                tracing::info!(
+                    phase = "cross_file_rule",
+                    rule = rule_id,
+                    elapsed_us = ns / 1000,
+                    "engine.phase",
+                );
+            }
+        }
 
         // Per-file partition: file-major loop reads each file
         // once and dispatches to every per-file rule whose scope
         // matches. Coalesces N reads of one file across N rules
         // sharing it.
+        let t_per_file = Instant::now();
         let per_file_results = self.run_per_file(root, &full_ctx, filtered_ctx.as_ref(), &when_env);
+        phase!(
+            t_per_file,
+            "per_file_partition",
+            rules = self
+                .entries
+                .iter()
+                .filter(|e| e.rule.as_per_file().is_some())
+                .count() as u64,
+        );
 
         // Final assembly preserves `self.entries` order so the
         // output Vec is deterministic + tests that index by
@@ -188,6 +286,7 @@ impl Engine {
         // either the cross-file or per-file partition; rules
         // filtered out (by `--changed` scope, `when: false`, or
         // passing with no violations) leave their slot empty.
+        let t_assembly = Instant::now();
         let mut cross_by_idx: HashMap<usize, RuleResult> = cross_results.into_iter().collect();
         let mut per_file_by_idx: HashMap<usize, RuleResult> =
             per_file_results.into_iter().collect();
@@ -199,6 +298,8 @@ impl Engine {
                 results.push(rr);
             }
         }
+        phase!(t_assembly, "assembly", results = results.len() as u64);
+        phase!(t_total, "engine_run_total");
         Ok(Report { results })
     }
 
@@ -268,17 +369,32 @@ impl Engine {
         // `(entry-index, Violation)` tuples. The flatten
         // gathers them all; aggregation below buckets them by
         // entry-index back into per-rule `RuleResult`s.
+        //
+        // We iterate `index.entries` (a Vec) via `par_iter()`
+        // and filter out directories *inside* the parallel
+        // pipeline rather than calling `index.files().par_bridge()`.
+        // `par_bridge` wraps a sequential iterator using a
+        // Mutex-guarded channel; at 1M entries that lock turns
+        // into a contention bottleneck across 24 worker
+        // threads. The native `par_iter` on the underlying Vec
+        // uses Rayon's work-stealing slabs instead — same
+        // observable iteration, no shared lock on the hot
+        // path.
         let by_file: Vec<(usize, Violation)> = per_file_ctx
             .index
-            .files()
-            .par_bridge()
+            .entries
+            .par_iter()
+            .filter(|e| !e.is_dir)
             .flat_map_iter(|file_entry| {
                 // 1. Decide which per-file rules apply to this
                 // file. Per-file rules expose their scope via
                 // `PerFileRule::path_scope`; we filter on it
                 // before any I/O so files no rule cares about
-                // never get read.
-                let applicable: Vec<&RuleEntry> = live
+                // never get read. Carrying `entry_idx` through
+                // here avoids an O(L) `position` lookup per
+                // applicable rule per file inside the inner
+                // dispatch loop below.
+                let applicable: Vec<(usize, &RuleEntry)> = live
                     .iter()
                     .filter(|(_, entry)| {
                         entry
@@ -288,7 +404,7 @@ impl Engine {
                             .path_scope()
                             .matches(&file_entry.path)
                     })
-                    .map(|(_, entry)| *entry)
+                    .map(|(idx, entry)| (*idx, *entry))
                     .collect();
                 if applicable.is_empty() {
                     return Vec::new();
@@ -307,12 +423,7 @@ impl Engine {
                 // even though N rules may produce violations
                 // against it.
                 let mut out: Vec<(usize, Violation)> = Vec::new();
-                for entry in applicable {
-                    let live_idx = live
-                        .iter()
-                        .position(|(_, e)| std::ptr::eq(*e, entry))
-                        .expect("applicable entry must be in live list");
-                    let entry_idx = live[live_idx].0;
+                for (entry_idx, entry) in applicable {
                     let pf = entry
                         .rule
                         .as_per_file()
@@ -521,7 +632,7 @@ impl Engine {
             .filter(|e| set.contains(&*e.path))
             .cloned()
             .collect();
-        Some(FileIndex { entries })
+        Some(FileIndex::from_entries(entries))
     }
 
     /// True when `--changed` mode is active AND the rule's
@@ -660,8 +771,8 @@ mod tests {
     }
 
     fn idx(paths: &[&str]) -> FileIndex {
-        FileIndex {
-            entries: paths
+        FileIndex::from_entries(
+            paths
                 .iter()
                 .map(|p| FileEntry {
                     path: std::path::Path::new(p).into(),
@@ -669,7 +780,7 @@ mod tests {
                     size: 0,
                 })
                 .collect(),
-        }
+        )
     }
 
     #[test]

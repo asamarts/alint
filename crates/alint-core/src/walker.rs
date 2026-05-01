@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ignore::{
     ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState, overrides::OverrideBuilder,
@@ -24,12 +25,34 @@ pub struct FileEntry {
 
 /// The indexed result of one filesystem walk. All rules share this index —
 /// the walk happens once per `alint check` invocation.
+///
+/// `path_set` is a lazy `HashSet<Arc<Path>>` over file entries.
+/// Built once on first call to [`FileIndex::contains_file`] /
+/// [`FileIndex::file_path_set`] and re-used across all subsequent
+/// lookups. Cross-file rules that ask "does this exact path
+/// exist?" (most importantly `file_exists` instantiated by
+/// `for_each_dir`) hit the set instead of doing an O(N) linear
+/// scan over every entry. At 1M files in a 5,000-package
+/// monorepo, this turns the fan-out shape from O(D × N) =
+/// 5 × 10⁹ ops to O(D) = 5,000 lookups.
 #[derive(Debug, Default)]
 pub struct FileIndex {
     pub entries: Vec<FileEntry>,
+    path_set: OnceLock<HashSet<Arc<Path>>>,
 }
 
 impl FileIndex {
+    /// Construct a [`FileIndex`] from raw entries. Equivalent to
+    /// `FileIndex { entries, ..Default::default() }` but spelled
+    /// out so test/bench fixtures don't have to know about the
+    /// internal lazy `path_set` field.
+    pub fn from_entries(entries: Vec<FileEntry>) -> Self {
+        Self {
+            entries,
+            path_set: OnceLock::new(),
+        }
+    }
+
     pub fn files(&self) -> impl Iterator<Item = &FileEntry> {
         self.entries.iter().filter(|e| !e.is_dir)
     }
@@ -42,10 +65,39 @@ impl FileIndex {
         self.files().map(|f| f.size).sum()
     }
 
-    /// Find a file entry by its exact relative path. Linear scan — acceptable
-    /// at the scales we target today; revisit with a `HashSet` / `HashMap`
-    /// index if cross-file-rule benches start to show it.
+    /// Get (lazily building on first call) the hash-indexed set
+    /// of all *file* (non-dir) paths in this index. Subsequent
+    /// calls return the cached set. Concurrent first calls are
+    /// safe (`OnceLock` ensures a single initialiser wins).
+    pub fn file_path_set(&self) -> &HashSet<Arc<Path>> {
+        self.path_set.get_or_init(|| {
+            self.entries
+                .iter()
+                .filter(|e| !e.is_dir)
+                .map(|e| Arc::clone(&e.path))
+                .collect()
+        })
+    }
+
+    /// O(1) "does this exact relative path exist as a file?"
+    /// query. Triggers the lazy build of the path set on first
+    /// call. Use this instead of iterating `files()` whenever a
+    /// rule needs to check a fully-qualified path — at scale,
+    /// the hash lookup is several orders of magnitude faster.
+    pub fn contains_file(&self, rel: &Path) -> bool {
+        self.file_path_set().contains(rel)
+    }
+
+    /// Find a file entry by its exact relative path. Uses the
+    /// lazy path set for the existence check, then re-scans
+    /// entries linearly to return the matching `&FileEntry`
+    /// (entries are pinned, but the set stores `Arc<Path>` keys
+    /// not direct entry references). Most callers want the
+    /// boolean answer — prefer [`FileIndex::contains_file`].
     pub fn find_file(&self, rel: &Path) -> Option<&FileEntry> {
+        if !self.contains_file(rel) {
+            return None;
+        }
         self.files().find(|e| &*e.path == rel)
     }
 }
@@ -101,7 +153,7 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
         .flatten()
         .collect();
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    Ok(FileIndex { entries })
+    Ok(FileIndex::from_entries(entries))
 }
 
 /// Build the `ignore::WalkBuilder` we run today. Pure factor-out
@@ -279,8 +331,7 @@ mod tests {
 
     #[test]
     fn fileindex_files_filters_directories_out() {
-        let idx = FileIndex {
-            entries: vec![
+        let idx = FileIndex::from_entries(vec![
                 FileEntry {
                     path: Path::new("a").into(),
                     is_dir: true,
@@ -291,8 +342,7 @@ mod tests {
                     is_dir: false,
                     size: 5,
                 },
-            ],
-        };
+            ]);
         let files: Vec<_> = idx.files().collect();
         assert_eq!(files.len(), 1);
         assert_eq!(&*files[0].path, Path::new("a/x.rs"));
@@ -300,8 +350,7 @@ mod tests {
 
     #[test]
     fn fileindex_dirs_filters_files_out() {
-        let idx = FileIndex {
-            entries: vec![
+        let idx = FileIndex::from_entries(vec![
                 FileEntry {
                     path: Path::new("a").into(),
                     is_dir: true,
@@ -312,8 +361,7 @@ mod tests {
                     is_dir: false,
                     size: 5,
                 },
-            ],
-        };
+            ]);
         let dirs: Vec<_> = idx.dirs().collect();
         assert_eq!(dirs.len(), 1);
         assert_eq!(&*dirs[0].path, Path::new("a"));
@@ -321,8 +369,7 @@ mod tests {
 
     #[test]
     fn fileindex_total_size_sums_files_only() {
-        let idx = FileIndex {
-            entries: vec![
+        let idx = FileIndex::from_entries(vec![
                 FileEntry {
                     path: Path::new("a").into(),
                     is_dir: true,
@@ -338,8 +385,7 @@ mod tests {
                     is_dir: false,
                     size: 50,
                 },
-            ],
-        };
+            ]);
         // total_size sums via `files()` so the directory's
         // bogus size is ignored.
         assert_eq!(idx.total_size(), 150);
@@ -347,8 +393,7 @@ mod tests {
 
     #[test]
     fn fileindex_find_file_returns_match_or_none() {
-        let idx = FileIndex {
-            entries: vec![
+        let idx = FileIndex::from_entries(vec![
                 FileEntry {
                     path: Path::new("a/x.rs").into(),
                     is_dir: false,
@@ -359,8 +404,7 @@ mod tests {
                     is_dir: true,
                     size: 0,
                 },
-            ],
-        };
+            ]);
         assert!(idx.find_file(Path::new("a/x.rs")).is_some());
         assert!(idx.find_file(Path::new("missing.rs")).is_none());
         // find_file filters dirs — querying a known directory

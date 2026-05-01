@@ -318,8 +318,8 @@ mod tests {
     use crate::walker::FileEntry;
 
     fn idx(paths: &[&str]) -> FileIndex {
-        FileIndex {
-            entries: paths
+        FileIndex::from_entries(
+            paths
                 .iter()
                 .map(|p| FileEntry {
                     path: std::path::Path::new(p).into(),
@@ -327,7 +327,7 @@ mod tests {
                     size: 1,
                 })
                 .collect(),
-        }
+        )
     }
 
     fn parse(yaml: &str) -> Vec<FactSpec> {

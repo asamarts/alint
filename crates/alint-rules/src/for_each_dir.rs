@@ -262,16 +262,14 @@ mod tests {
     use std::path::Path;
 
     fn index(entries: &[(&str, bool)]) -> FileIndex {
-        FileIndex {
-            entries: entries
+        FileIndex::from_entries(entries
                 .iter()
                 .map(|(p, is_dir)| FileEntry {
                     path: std::path::Path::new(p).into(),
                     is_dir: *is_dir,
                     size: 1,
                 })
-                .collect(),
-        }
+                .collect())
     }
 
     fn registry() -> RuleRegistry {
