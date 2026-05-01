@@ -50,6 +50,62 @@ supports; unsupported combinations are filtered out automatically.
 `--tools all` expands to every available tool; tools not on PATH are
 auto-skipped with a stderr note rather than aborting.
 
+## Reproducible competitive runs (`--docker`)
+
+Comparing alint vs ls-lint vs grep vs Repolinter on a developer's
+laptop is dishonest: each laptop has a different `ls-lint` version,
+a different `grep` flavour, a different Node runtime under
+Repolinter, even (depending on rust-toolchain.toml) a different
+`alint`. Numbers from such a run aren't comparable to any other
+machine's run.
+
+The `--docker` flag fixes this. `xtask bench-scale --docker --tools
+all …` runs the entire matrix inside `ghcr.io/asamarts/alint-bench:<tag>`,
+a published image that pins:
+
+- `alint` — built from the same workspace at image-build time.
+- `ls-lint` — pinned `v2.2.3`.
+- `ripgrep` (the `grep` tool variant) — pinned `15.1.0`.
+- `repolinter` — pinned `0.11.2`.
+- `hyperfine` — pinned `1.20.0`.
+- `rustc` — pinned via `rust-toolchain.toml` at image-build time.
+
+A given image tag (e.g. `0.9.5`) is therefore the canonical
+*"competitive bench environment for v0.9.5."* Bumping any tool's
+version requires re-publishing the image and re-running the
+competitive numbers — the image tag IS the methodology version.
+
+### Where the image lives
+
+| Asset | Path |
+|---|---|
+| Build context (just the Dockerfile) | [`bench/Dockerfile`](../../../bench/Dockerfile) at the repo root |
+| `.dockerignore` (aggressively scopes the build context to the Dockerfile only) | [`bench/.dockerignore`](../../../bench/.dockerignore) |
+| Build/publish workflow | [`.github/workflows/bench-docker.yml`](../../../.github/workflows/bench-docker.yml) |
+| Published image | `ghcr.io/asamarts/alint-bench:<tag>` |
+
+### Workflow
+
+The image is built + pushed by `bench-docker.yml` on tag pushes
+and on manual workflow-dispatch. Image tags follow the alint
+release tags 1:1 (`v0.9.5` → `ghcr.io/asamarts/alint-bench:0.9.5`),
+plus a rolling `latest`. The `xtask --docker` flag's bind-mount
+shape is documented in the Dockerfile header.
+
+`xtask bench-scale --docker` is the canonical entry point;
+direct `docker run …` invocation works too because the image's
+entrypoint forwards all args to `xtask bench-scale`.
+
+### When you DON'T need it
+
+The Docker image only matters for `--tools all` runs. alint-only
+runs (`xtask bench-scale --tools alint`, the default) read the
+freshly-built workspace `alint` binary directly — no Docker
+involvement, and no portability concern because alint's own
+version is captured in the fingerprint header. The Docker image
+exists specifically because `ls-lint` / `grep` / `repolinter`
+have NO native version-pinning hook in our harness.
+
 ## Tree shape
 
 The synthetic monorepo generator at `crates/alint-bench/src/tree.rs`
