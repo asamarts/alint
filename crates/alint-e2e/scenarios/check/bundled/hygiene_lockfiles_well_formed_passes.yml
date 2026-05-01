@@ -1,0 +1,30 @@
+name: alint://bundled/hygiene/lockfiles — silent on a clean tree without nested lockfiles
+tags: [check, extends, bundled, hygiene, lockfiles, passing]
+
+# A monorepo-shaped tree where each package has source files
+# but no nested lockfiles. The bundled rules forbid yarn.lock /
+# pnpm-lock.yaml / package-lock.json / Cargo.lock / etc. inside
+# packages because they're meant to live at the workspace root.
+
+given:
+  tree:
+    "package.json": '{"name": "demo", "private": true}'
+    "yarn.lock": "# fixture lockfile\n"
+    packages:
+      a:
+        "package.json": '{"name": "@demo/a"}'
+        src:
+          "index.ts": "export const a = 1;\n"
+      b:
+        "package.json": '{"name": "@demo/b"}'
+        src:
+          "index.ts": "export const b = 2;\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/hygiene/lockfiles@v1
+
+when: [check]
+
+expect:
+  - violations: []

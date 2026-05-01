@@ -1,0 +1,27 @@
+name: alint://bundled/tooling/editorconfig — silent on a tree with .editorconfig and a .gitattributes that normalises line endings
+tags: [check, extends, bundled, tooling, editorconfig, passing]
+
+given:
+  tree:
+    ".editorconfig": |
+      root = true
+      [*]
+      end_of_line = lf
+      indent_style = space
+      indent_size = 2
+      insert_final_newline = true
+      trim_trailing_whitespace = true
+    ".gitattributes": |
+      * text=auto eol=lf
+    README.md: "# demo\n"
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/tooling/editorconfig@v1
+
+when: [check]
+
+expect:
+  - violations: []

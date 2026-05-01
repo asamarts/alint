@@ -1,0 +1,21 @@
+name: alint://bundled/agent-hygiene — flags a PLAN.md scratch doc at the repo root
+tags: [check, extends, bundled, agent-hygiene, failing]
+
+given:
+  tree:
+    README.md: "# demo\n"
+    PLAN.md: |
+      # Plan
+      Step 1.
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/agent-hygiene@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: agent-no-scratch-docs-at-root, level: warning, path: PLAN.md}

@@ -121,6 +121,40 @@ fn walkdir(root: &Path) -> Vec<std::path::PathBuf> {
     out
 }
 
+/// Rule kinds whose firing case can't be expressed in the
+/// scenario YAML format because the testkit doesn't yet
+/// materialise the required filesystem primitive. Each entry
+/// must point at a native Rust integration test that DOES
+/// cover the firing case.
+///
+/// These should shrink to zero as the testkit grows
+/// `mode: 0o755`, `symlink_to: <path>`, custom commit
+/// messages, and `GIT_AUTHOR_DATE` overrides — at which point
+/// the YAML coverage becomes feasible and the entry is
+/// removed.
+const NATIVE_FIRES_ALLOWLIST: &[(&str, &str)] = &[
+    (
+        "executable_bit",
+        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't write +x bits)",
+    ),
+    (
+        "executable_has_shebang",
+        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't write +x bits)",
+    ),
+    (
+        "no_symlinks",
+        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't materialise symlinks)",
+    ),
+    (
+        "git_blame_age",
+        "crates/alint-rules/tests/git_blame_age.rs (testkit runner doesn't backdate commits via GIT_AUTHOR_DATE)",
+    ),
+    (
+        "git_commit_message",
+        "crates/alint-rules/tests/shell_out_rules.rs (testkit runner uses a fixed commit message)",
+    ),
+];
+
 /// Same alias map as `coverage_audit.rs`. Normalise before
 /// recording status so a single scenario using either form
 /// satisfies the audit.
@@ -145,9 +179,6 @@ fn canonical(kind: &str) -> &str {
 }
 
 #[test]
-#[ignore = "v0.9.6 audit; gaps fill in v0.9.7. Run with `cargo test -- --ignored` \
-            to see the punch list. Will be enabled (default) once v0.9.7 lands the \
-            ~11 scenarios this surfaces."]
 fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
     let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
     let mut status: HashMap<String, Status> = HashMap::new();
@@ -201,13 +232,18 @@ fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
         .map(str::to_string)
         .collect();
 
+    let native_allowlist: HashSet<&str> = NATIVE_FIRES_ALLOWLIST
+        .iter()
+        .map(|(kind, _)| *kind)
+        .collect();
+
     let mut missing_fires: Vec<&String> = Vec::new();
     let mut missing_silent: Vec<&String> = Vec::new();
     for kind in &canonical_kinds {
         let s = status.get(kind);
         let fires = s.is_some_and(|s| !s.fires_in.is_empty());
         let silent = s.is_some_and(|s| !s.silent_in.is_empty());
-        if !fires {
+        if !fires && !native_allowlist.contains(kind.as_str()) {
             missing_fires.push(kind);
         }
         if !silent {

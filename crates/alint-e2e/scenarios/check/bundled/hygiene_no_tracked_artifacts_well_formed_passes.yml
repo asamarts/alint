@@ -1,0 +1,23 @@
+name: alint://bundled/hygiene/no-tracked-artifacts — silent on a clean tree
+tags: [check, extends, bundled, hygiene, no-tracked-artifacts, passing]
+
+# A repo with no node_modules / __pycache__ / target / dist /
+# .DS_Store / .bak / etc. artefacts tracked. The full bundled
+# ruleset must produce zero violations.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    src:
+      main.rs: "fn main() {}\n"
+    docs:
+      "intro.md": "# intro\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+when: [check]
+
+expect:
+  - violations: []

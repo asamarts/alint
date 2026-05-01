@@ -1,0 +1,24 @@
+name: json_path_equals stays silent when every value matches the expected literal
+tags: [check, json_path_equals, structured, passing]
+
+given:
+  tree:
+    packages:
+      a:
+        "package.json": '{"name": "@demo/a", "license": "MIT"}'
+      b:
+        "package.json": '{"name": "@demo/b", "license": "MIT"}'
+  config: |
+    version: 1
+    rules:
+      - id: require-mit-license
+        kind: json_path_equals
+        paths: "packages/*/package.json"
+        path: "$.license"
+        equals: "MIT"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

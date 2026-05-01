@@ -1,0 +1,30 @@
+name: toml_path_equals stays silent when every value matches the expected literal
+tags: [check, toml_path_equals, structured, passing]
+
+given:
+  tree:
+    crates:
+      a:
+        "Cargo.toml": |
+          [package]
+          name = "a"
+          edition = "2024"
+      b:
+        "Cargo.toml": |
+          [package]
+          name = "b"
+          edition = "2024"
+  config: |
+    version: 1
+    rules:
+      - id: rust-edition-2024
+        kind: toml_path_equals
+        paths: "crates/*/Cargo.toml"
+        path: "$.package.edition"
+        equals: "2024"
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

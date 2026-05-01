@@ -1,0 +1,30 @@
+name: git_no_denied_paths stays silent outside a git repo
+tags: [check, git_no_denied_paths, git, passing]
+
+# No `given.git:` block — the tempdir is not a git repo. The
+# engine's tracked-set probe (`git ls-files`) returns None;
+# the rule's `ctx.git_tracked` is None and evaluate() short-
+# circuits without ever scanning. A `.env` file that WOULD be
+# flagged inside a real repo gets a free pass here, which is
+# the right behaviour: the rule is "no denied paths in git",
+# not "no denied paths on disk".
+
+given:
+  tree:
+    README.md: "# demo\n"
+    secrets:
+      ".env": "DATABASE_URL=postgres://x\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-secrets
+        kind: git_no_denied_paths
+        denied:
+          - "*.env"
+          - "secrets/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

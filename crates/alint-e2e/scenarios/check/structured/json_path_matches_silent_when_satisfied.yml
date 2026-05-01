@@ -1,0 +1,24 @@
+name: json_path_matches stays silent when every match satisfies the regex
+tags: [check, json_path_matches, structured, passing]
+
+given:
+  tree:
+    packages:
+      a:
+        "package.json": '{"name": "@demo/a", "version": "1.2.3"}'
+      b:
+        "package.json": '{"name": "@demo/b", "version": "0.10.0"}'
+  config: |
+    version: 1
+    rules:
+      - id: semver-versions
+        kind: json_path_matches
+        paths: "packages/*/package.json"
+        path: "$.version"
+        matches: '^\d+\.\d+\.\d+$'
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

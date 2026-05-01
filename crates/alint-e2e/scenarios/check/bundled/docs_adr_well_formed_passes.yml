@@ -1,0 +1,41 @@
+name: alint://bundled/docs/adr — silent on a well-shaped ADR
+tags: [check, extends, bundled, docs, adr, passing]
+
+# Filename matches NNNN-kebab-case-title.md and the document
+# carries the canonical Status / Context / Decision sections.
+
+given:
+  tree:
+    docs:
+      adr:
+        "0001-record-architecture-decisions.md": |
+          # 0001 - Record architecture decisions
+
+          ## Status
+
+          Accepted.
+
+          ## Context
+
+          We need a lightweight way to record significant
+          architectural decisions made on this project.
+
+          ## Decision
+
+          We will use Architecture Decision Records (ADRs)
+          stored under `docs/adr/`, one file per decision,
+          with the filename pattern `NNNN-kebab-case.md`.
+
+          ## Consequences
+
+          New decisions get an ADR; old ones can be updated
+          via supersession links.
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/docs/adr@v1
+
+when: [check]
+
+expect:
+  - violations: []

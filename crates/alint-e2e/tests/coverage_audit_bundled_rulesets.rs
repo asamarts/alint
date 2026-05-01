@@ -114,9 +114,6 @@ fn walk_yaml_paths(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-#[ignore = "v0.9.6 audit; gaps fill in v0.9.7. Run with `cargo test -- --ignored` \
-            to see the punch list. Will be enabled (default) once v0.9.7 lands the \
-            ~9 bundled-scenario gaps this surfaces."]
 fn every_bundled_ruleset_has_well_formed_and_ill_formed_scenarios() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let rulesets_dir = manifest

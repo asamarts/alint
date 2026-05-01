@@ -1,0 +1,41 @@
+name: yaml_path_equals stays silent when every value matches the expected literal
+tags: [check, yaml_path_equals, structured, passing]
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        "release.yml": |
+          name: Release
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            release:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: workflow-default-permissions
+        kind: yaml_path_equals
+        paths: ".github/workflows/*.yml"
+        path: "$.permissions.contents"
+        equals: "read"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,23 @@
+name: alint://bundled/agent-context — flags a stub AGENTS.md that's too short
+tags: [check, extends, bundled, agent-context, failing]
+
+# AGENTS.md exists (so `facts.has_agent_context` is true and the
+# gated rules fire) but contains only 2 lines of content — well
+# under the `min_lines: 10` floor that `agent-context-non-stub`
+# enforces.
+
+given:
+  tree:
+    AGENTS.md: |
+      # demo
+      TODO
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/agent-context@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: agent-context-non-stub, level: warning, path: AGENTS.md}

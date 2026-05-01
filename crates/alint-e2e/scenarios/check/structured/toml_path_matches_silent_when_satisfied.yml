@@ -1,0 +1,30 @@
+name: toml_path_matches stays silent when every match satisfies the regex
+tags: [check, toml_path_matches, structured, passing]
+
+given:
+  tree:
+    crates:
+      a:
+        "Cargo.toml": |
+          [package]
+          name = "a"
+          version = "1.2.3"
+      b:
+        "Cargo.toml": |
+          [package]
+          name = "b"
+          version = "0.4.5"
+  config: |
+    version: 1
+    rules:
+      - id: pinned-version
+        kind: toml_path_matches
+        paths: "crates/*/Cargo.toml"
+        path: "$.package.version"
+        matches: '^\d+\.\d+\.\d+$'
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []

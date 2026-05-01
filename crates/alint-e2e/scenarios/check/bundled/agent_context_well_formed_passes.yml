@@ -1,0 +1,34 @@
+name: alint://bundled/agent-context — silent on a well-formed AGENTS.md
+tags: [check, extends, bundled, agent-context, passing]
+
+given:
+  tree:
+    AGENTS.md: |
+      # Project agent context
+
+      Build: cargo build --release
+      Test: cargo test --workspace
+      Lint: cargo clippy --all-targets
+
+      ## Layout
+
+      The repository follows a workspace layout. Sources are
+      organised by crate, with one entry-point per binary.
+
+      ## Conventions
+
+      Prefer named constants over magic numbers.
+      Wrap user-facing errors with miette diagnostics.
+      Keep functions short and modules cohesive.
+    src:
+      bin:
+        main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/agent-context@v1
+
+when: [check]
+
+expect:
+  - violations: []

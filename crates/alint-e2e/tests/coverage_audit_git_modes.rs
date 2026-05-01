@@ -101,9 +101,6 @@ fn walkdir(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 #[test]
-#[ignore = "v0.9.6 audit; gaps fill in v0.9.7. Run with `cargo test -- --ignored` \
-            to see the punch list. Will be enabled (default) once v0.9.7 lands the \
-            outside-git no_denied_paths scenario this surfaces."]
 fn git_required_rules_have_in_repo_and_outside_repo_scenarios() {
     let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
 

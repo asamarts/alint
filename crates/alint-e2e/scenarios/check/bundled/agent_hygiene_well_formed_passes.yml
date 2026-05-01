@@ -1,0 +1,22 @@
+name: alint://bundled/agent-hygiene — silent on a clean repo with no agent-shaped artefacts
+tags: [check, extends, bundled, agent-hygiene, passing]
+
+given:
+  tree:
+    README.md: "# demo\n"
+    src:
+      main.rs: |
+        fn main() {
+            println!("hi");
+        }
+      lib.rs: "pub mod widget;\n"
+      widget.rs: "pub fn run() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/agent-hygiene@v1
+
+when: [check]
+
+expect:
+  - violations: []

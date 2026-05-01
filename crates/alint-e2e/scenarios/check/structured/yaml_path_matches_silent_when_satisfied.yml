@@ -1,0 +1,31 @@
+name: yaml_path_matches stays silent when every match satisfies the regex
+tags: [check, yaml_path_matches, structured, passing]
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b
+                - uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: pin-actions-to-sha
+        kind: yaml_path_matches
+        paths: ".github/workflows/*.yml"
+        path: "$.jobs.*.steps[*].uses"
+        matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+        level: warning
+
+when: [check]
+
+expect:
+  - violations: []
