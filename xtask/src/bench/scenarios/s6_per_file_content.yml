@@ -1,0 +1,88 @@
+# Scenario S6 — Per-file content fan-out.
+#
+# 13 content rules over the same `**/*.rs` scope, exercising
+# the file-major dispatch path's read-coalescing benefit at
+# its widest. Every `.rs` file is hit by every rule on a
+# single read; this is the shape v0.9.3 was designed to make
+# fast, and the perf signal here is "how flat does the
+# per-rule cost stay as the rule mix grows."
+#
+# Adds to S1-S5 by stressing the dispatch loop's per-file
+# inner work — no cross-file fan-out, just dense per-file
+# coverage. Catches regressions in the file-major dispatch
+# loop that S3 (cross-file dominated) wouldn't surface.
+
+version: 1
+
+rules:
+  - id: rs-final-newline
+    kind: final_newline
+    paths: "**/*.rs"
+    level: warning
+
+  - id: rs-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    level: info
+
+  - id: rs-no-bidi-controls
+    kind: no_bidi_controls
+    paths: "**/*.rs"
+    level: error
+
+  - id: rs-no-zero-width-chars
+    kind: no_zero_width_chars
+    paths: "**/*.rs"
+    level: error
+
+  - id: rs-no-bom
+    kind: no_bom
+    paths: "**/*.rs"
+    level: warning
+
+  - id: rs-line-endings
+    kind: line_endings
+    paths: "**/*.rs"
+    target: lf
+    level: warning
+
+  - id: rs-indent-style
+    kind: indent_style
+    paths: "**/*.rs"
+    style: spaces
+    width: 4
+    level: info
+
+  - id: rs-line-max-width
+    kind: line_max_width
+    paths: "**/*.rs"
+    max_width: 120
+    level: info
+
+  - id: rs-max-consecutive-blank-lines
+    kind: max_consecutive_blank_lines
+    paths: "**/*.rs"
+    max: 2
+    level: info
+
+  - id: rs-file-max-lines
+    kind: file_max_lines
+    paths: "**/*.rs"
+    max_lines: 10000
+    level: warning
+
+  - id: rs-file-min-lines
+    kind: file_min_lines
+    paths: "**/*.rs"
+    min_lines: 1
+    level: info
+
+  - id: rs-is-text
+    kind: file_is_text
+    paths: "**/*.rs"
+    level: warning
+
+  - id: rs-is-ascii
+    kind: file_is_ascii
+    paths: "**/*.rs"
+    level: info

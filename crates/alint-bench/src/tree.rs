@@ -17,6 +17,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -141,6 +142,58 @@ pub fn generate_monorepo(packages: usize, files_per_package: usize, seed: u64) -
         dir,
         files: file_list,
     })
+}
+
+/// Like `generate_monorepo` but the resulting tree is a real
+/// git repo: every file is `git add`'d and committed at
+/// generation time. Produced for bench-scale's git-aware
+/// scenarios (S8 — git-tracked overlay), where the engine's
+/// `Engine::collect_git_tracked_if_needed` and `BlameCache`
+/// paths only fire inside a real repo.
+///
+/// Failures from `git init` / `git add` / `git commit` map to
+/// `io::Error` so callers can keep one error type. The
+/// `user.name`/`user.email` config is set inline (matching the
+/// alint-testkit runner's pattern) so the commit doesn't depend
+/// on the host's global git config.
+pub fn generate_git_monorepo(
+    packages: usize,
+    files_per_package: usize,
+    seed: u64,
+) -> io::Result<Tree> {
+    let tree = generate_monorepo(packages, files_per_package, seed)?;
+    let root = tree.root();
+    run_git(root, &["init", "-q", "-b", "main"])?;
+    // Add everything in one shot; at 1M files the per-path
+    // `git add file` loop would be a multi-minute serial
+    // bottleneck whereas `git add -A` indexes the tree once.
+    run_git(root, &["add", "-A"])?;
+    run_git(
+        root,
+        &[
+            "-c",
+            "user.name=alint bench",
+            "-c",
+            "user.email=bench@alint.test",
+            "commit",
+            "-q",
+            "-m",
+            "bench-scale: initial commit",
+        ],
+    )?;
+    Ok(tree)
+}
+
+fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
+    let out = Command::new("git").arg("-C").arg(cwd).args(args).output()?;
+    if !out.status.success() {
+        return Err(io::Error::other(format!(
+            "git {args:?} failed (status {}); stderr:\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr),
+        )));
+    }
+    Ok(())
 }
 
 /// Pick a deterministic subset of a tree's files to "touch" — used

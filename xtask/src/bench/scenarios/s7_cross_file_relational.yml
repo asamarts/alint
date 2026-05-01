@@ -1,0 +1,86 @@
+# Scenario S7 — Cross-file relational.
+#
+# Six cross-file rule kinds the v0.9.5 path-index fast paths
+# don't directly cover: `pair`, `unique_by`, `for_each_dir`,
+# `for_each_file`, `dir_only_contains`, `every_matching_has`.
+# Each runs its own scan or fan-out over the full index, and
+# regressions in those shapes only show up in a bench that
+# exercises them at scale.
+#
+# Adds to S3 — which stresses the `for_each_dir × file_exists`
+# pattern the path-index closed — by spreading the cost across
+# the remaining cross-file kinds. If a future change accidentally
+# reintroduces O(D × N) on, say, `every_matching_has`, S7 catches
+# it before users do.
+
+version: 1
+
+rules:
+  # Every `.rs` file in a package's `src/` should have a
+  # sibling `mod_<NNNN>.rs` peer (synthetic, but exercises
+  # `pair`'s primary/partner template + index lookup at scale).
+  # The synthetic monorepo names files `lib.rs` / `mod_NNNN.rs`,
+  # so this is silent in practice — the perf signal is in the
+  # index walk, not the violation count.
+  - id: rs-needs-pair
+    kind: pair
+    primary: "crates/*/src/lib.rs"
+    partner: "{dir}/mod_0001.rs"
+    level: info
+
+  # Every package directory name must be unique across the
+  # workspace. Same shape as `monorepo-unique-package-names`
+  # in S3, but isolated to focus the cost on `unique_by`'s
+  # group-and-collide aggregation.
+  - id: pkg-names-unique
+    kind: unique_by
+    select: "crates/*"
+    key: "{basename}"
+    level: warning
+
+  # For every `crates/*` directory, run a cheap nested check.
+  # In S3 these were file_exists-style; here we use a content-
+  # match to stress a different fan-out shape.
+  - id: every-pkg-cargo-toml-declares-name
+    kind: for_each_dir
+    select: "crates/*"
+    require:
+      - kind: toml_path_matches
+        paths: "{path}/Cargo.toml"
+        path: "$.package.name"
+        matches: '^[a-z][a-z0-9-]*$'
+    level: warning
+
+  # For every `crates/*/src/lib.rs`, require it have at least
+  # 1 line. Exercises `for_each_file`'s per-file iteration.
+  - id: every-lib-has-content
+    kind: for_each_file
+    select: "crates/*/src/lib.rs"
+    require:
+      - kind: file_min_lines
+        paths: "{path}"
+        min_lines: 1
+    level: info
+
+  # Every `crates/*` directory should contain at least one
+  # `.rs` source file. `every_matching_has` walks the index
+  # once per `select` match then verifies the predicate; cost
+  # grows with the primary's match count.
+  - id: every-pkg-has-source
+    kind: every_matching_has
+    select: "crates/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/src/lib.rs"
+    level: warning
+
+  # `crates/*/src/` should contain only `.rs` files — no
+  # `.bak`, `.swp`, or stray docs. `dir_only_contains` checks
+  # every entry under the matched dir against the allow-glob
+  # against basenames (not full paths).
+  - id: src-only-rs
+    kind: dir_only_contains
+    select: "crates/*/src"
+    allow:
+      - "*.rs"
+    level: info

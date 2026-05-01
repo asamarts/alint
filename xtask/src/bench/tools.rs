@@ -181,7 +181,12 @@ impl Tool {
             Self::GrepPipeline => match scenario {
                 Scenario::S1 => grep_pipeline_s1(&root),
                 Scenario::S2 => grep_pipeline_s2(&root),
-                Scenario::S3 | Scenario::S4 | Scenario::S5 => {
+                Scenario::S3
+                | Scenario::S4
+                | Scenario::S5
+                | Scenario::S6
+                | Scenario::S7
+                | Scenario::S8 => {
                     unreachable!("supports() filters S3+ out for GrepPipeline")
                 }
             },

@@ -45,6 +45,9 @@ const SCENARIO_S2: &str = include_str!("scenarios/s2_existence_content.yml");
 const SCENARIO_S3: &str = include_str!("scenarios/s3_workspace.yml");
 const SCENARIO_S4: &str = include_str!("scenarios/s4_agent_hygiene.yml");
 const SCENARIO_S5: &str = include_str!("scenarios/s5_fix_pass.yml");
+const SCENARIO_S6: &str = include_str!("scenarios/s6_per_file_content.yml");
+const SCENARIO_S7: &str = include_str!("scenarios/s7_cross_file_relational.yml");
+const SCENARIO_S8: &str = include_str!("scenarios/s8_git_overlay.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
@@ -136,6 +139,9 @@ pub enum Scenario {
     S3,
     S4,
     S5,
+    S6,
+    S7,
+    S8,
 }
 
 impl Scenario {
@@ -146,7 +152,10 @@ impl Scenario {
             "S3" => Ok(Self::S3),
             "S4" => Ok(Self::S4),
             "S5" => Ok(Self::S5),
-            other => bail!("unknown scenario {other:?}; expected one of S1..S5"),
+            "S6" => Ok(Self::S6),
+            "S7" => Ok(Self::S7),
+            "S8" => Ok(Self::S8),
+            other => bail!("unknown scenario {other:?}; expected one of S1..S8"),
         }
     }
 
@@ -157,6 +166,9 @@ impl Scenario {
             Self::S3 => "S3",
             Self::S4 => "S4",
             Self::S5 => "S5",
+            Self::S6 => "S6",
+            Self::S7 => "S7",
+            Self::S8 => "S8",
         }
     }
 
@@ -167,6 +179,9 @@ impl Scenario {
             Self::S3 => "Workspace bundle (oss-baseline + rust + monorepo + cargo-workspace)",
             Self::S4 => "Agent-era hygiene (5 rules: backup/scratch/debug/affirmation/model-TODO)",
             Self::S5 => "Fix-pass throughput (4 content-editing fix ops)",
+            Self::S6 => "Per-file content fan-out (13 content rules over `**/*.rs`)",
+            Self::S7 => "Cross-file relational (pair / unique_by / for_each_dir / for_each_file / dir_only_contains / every_matching_has)",
+            Self::S8 => "Git-tracked overlay (S3 + git_no_denied_paths + git_tracked_only over a real git repo)",
         }
     }
 
@@ -177,7 +192,20 @@ impl Scenario {
             Self::S3 => SCENARIO_S3,
             Self::S4 => SCENARIO_S4,
             Self::S5 => SCENARIO_S5,
+            Self::S6 => SCENARIO_S6,
+            Self::S7 => SCENARIO_S7,
+            Self::S8 => SCENARIO_S8,
         }
+    }
+
+    /// True for scenarios whose tree must be a real git repo
+    /// (`.git/` initialised, every file `git add`'d + commit
+    /// at generation time). Drives `bench-scale`'s tree-gen
+    /// path: `Engine::collect_git_tracked_if_needed` +
+    /// `BlameCache` only fire inside a real repo, so the
+    /// dispatch shape they produce is invisible without one.
+    pub fn requires_git_repo(self) -> bool {
+        matches!(self, Self::S8)
     }
 }
 
@@ -281,14 +309,28 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
 
     let mut rows: Vec<Row> = Vec::new();
     for &size in &args.sizes {
+        // Some scenarios (S8) need a real git repo; in that
+        // case the tree generator runs `git init && git add -A
+        // && git commit` as part of materialisation. Decide
+        // up-front whether ANY scenario in this run wants a
+        // git repo — if so, build the git-aware tree once and
+        // reuse it across scenarios. If not, the cheaper
+        // non-git generator suffices.
+        let needs_git_repo = args.scenarios.iter().any(|s| s.requires_git_repo());
+        let (pkgs, fpp) = size.monorepo_shape();
         eprintln!(
-            "[xtask] generating monorepo tree of {} files (seed={:#x})...",
+            "[xtask] generating {}monorepo tree of {} files (seed={:#x})...",
+            if needs_git_repo { "git-aware " } else { "" },
             size.file_count(),
             args.seed,
         );
-        let (pkgs, fpp) = size.monorepo_shape();
-        let tree = alint_bench::tree::generate_monorepo(pkgs, fpp, args.seed)
-            .with_context(|| format!("generating {} tree", size.label()))?;
+        let tree = if needs_git_repo {
+            alint_bench::tree::generate_git_monorepo(pkgs, fpp, args.seed)
+                .with_context(|| format!("generating {} git-tree", size.label()))?
+        } else {
+            alint_bench::tree::generate_monorepo(pkgs, fpp, args.seed)
+                .with_context(|| format!("generating {} tree", size.label()))?
+        };
         let tree_root = tree.root().to_path_buf();
 
         // Initialise git so `--changed` mode has something to

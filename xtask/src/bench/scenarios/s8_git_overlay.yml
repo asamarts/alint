@@ -1,0 +1,50 @@
+# Scenario S8 — Git-tracked overlay.
+#
+# Reshape of S3 (`oss-baseline + rust + monorepo +
+# cargo-workspace`) over a tree that's a real git repo: the
+# generator runs `git init && git add -A && git commit` after
+# materialising the monorepo, so every file is git-tracked and
+# the engine's `Engine::collect_git_tracked_if_needed` +
+# `BlameCache` paths fire at scale.
+#
+# Layered on top: `git_no_denied_paths` enforcing a small
+# denylist (no `*.env`, no `secrets/**`), and `file_exists`
+# rules with `git_tracked_only: true` to exercise the tracked-
+# set scope filter. v0.7.x had a `git ls-files` path that
+# scaled badly at 100k+ trees; without S8 there's no published
+# bench guarding it.
+#
+# Adds to S3 by being its only git-aware sibling. S6 / S7 stay
+# non-git so we have an A/B for measuring the cost of the
+# tracked-set probe.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+
+rules:
+  # Tracked-secrets denylist. At scale the cost is dominated
+  # by `git ls-files` plus a per-entry tracked-set lookup; the
+  # rule itself is a glob check.
+  - id: no-tracked-secrets
+    kind: git_no_denied_paths
+    denied:
+      - "*.env"
+      - "*.pem"
+      - "secrets/**"
+    level: error
+
+  # Workspace-level Cargo.toml must be tracked, not just on
+  # disk. `git_tracked_only: true` is the option that drove
+  # the v0.7-era `git ls-files` regression, so explicitly
+  # exercise it here.
+  - id: cargo-toml-must-be-tracked
+    kind: file_exists
+    paths: Cargo.toml
+    root_only: true
+    git_tracked_only: true
+    level: error
