@@ -172,7 +172,30 @@ the v0.9.5 baseline (frozen at the path-index fix landing).
 (`S6`, `S7`, `S8`). Default `--scenarios` stays `S1,S2,S3`
 (the publication trio); S4–S8 are opt-in.
 
-## v0.9.9 — alint self-dogfooding
+## v0.9.9 — alint self-dogfooding *(infra in place; coverage rule kinds deferred)*
+
+> Status update — 2026-05-01 implementation pass discovered
+> that the declarative-coverage idea below requires a rule
+> kind alint doesn't yet have: aggregate "does any file in
+> this scope contain pattern X?" semantics. Today's
+> `file_content_matches` is per-file (a non-matching file =
+> one violation per file). The right primitive is
+> `any_file_content_matches` or facts-style "fires once if
+> the predicate holds nowhere across the scope". That's a
+> v0.10+ rule-kind addition.
+>
+> What v0.9.9 actually ships:
+> - The two-layer enforcement framing (file-presence + Rust
+>   audits) is documented in
+>   `docs/development/RULE-AUTHORING.md` (new) so future
+>   contributors land scenarios alongside their rules.
+> - The existing `.alint.yml` already lints alint on every
+>   push via `.github/workflows/action-selftest.yml`. Layer 1
+>   ("alint runs on alint") is real — just not for the
+>   coverage rules below, which need a future rule kind.
+> - Rust audits from v0.9.6 + scenarios from v0.9.7 are the
+>   actual enforcement. The dogfood `.alint.yml` rules below
+>   are aspirational.
 
 The most novel piece. alint can express most of its own
 authoring invariants through the rule catalogue itself — and
