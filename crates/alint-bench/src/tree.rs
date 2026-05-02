@@ -184,6 +184,150 @@ pub fn generate_git_monorepo(
     Ok(tree)
 }
 
+/// Generate a nested polyglot monorepo for the v0.9.6 S9 scenario.
+///
+/// Splits `packages` three ways across `crates/` (Rust), `packages/`
+/// (Node), and `apps/` (Python) — closest-ancestor manifest scoping
+/// is exactly what the v0.9.6 `scope_filter:` primitive was
+/// designed to handle. Each ecosystem subtree contributes:
+///
+/// - `crates/rust-pkg-NNN/{Cargo.toml, README.md, src/*.rs}`
+/// - `packages/node-pkg-NNN/{package.json, README.md, src/*.js}`
+/// - `apps/py-pkg-NNN/{pyproject.toml, README.md, src/*.py}`
+///
+/// File-count target: same as [`generate_monorepo`] — the total
+/// across all three ecosystems matches `packages × (2 +
+/// files_per_package) + 1` so an S9 run at K100 produces ≈ 100k
+/// files like S1–S7 (not 300k as a naïve "3 × 100k" reading
+/// would suggest). This keeps cross-scenario bench comparisons
+/// apples-to-apples on tree-walk work; what S9 actually
+/// stresses is the per-rule scope_filter ancestor walk under
+/// three competing rulesets.
+///
+/// No root manifest is written (unlike `generate_monorepo`'s
+/// workspace-shaped tree) — the `has_*` ecosystem facts in
+/// `rust@v1` / `node@v1` / `python@v1` are broadened to catch
+/// nested manifests, so the tree exercises the
+/// "monorepo with no root manifest" shape that v0.9.6 was
+/// motivated by.
+pub fn generate_nested_polyglot_monorepo(
+    packages: usize,
+    files_per_package: usize,
+    seed: u64,
+) -> io::Result<Tree> {
+    let dir = TempDir::new()?;
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut file_list = Vec::with_capacity(packages * (2 + files_per_package));
+
+    // Three ecosystems, packages distributed as evenly as possible.
+    // The remainder (when packages % 3 != 0) goes to crates/ first,
+    // packages/ second, apps/ third — deterministic across runs.
+    let rust_pkgs = packages.div_ceil(3);
+    let node_pkgs = (packages + 1) / 3;
+    let py_pkgs = packages / 3;
+    debug_assert_eq!(rust_pkgs + node_pkgs + py_pkgs, packages);
+
+    // --- crates/rust-pkg-NNN/{Cargo.toml, README.md, src/*.rs}
+    for pkg_idx in 0..rust_pkgs {
+        let pkg_name = format!("rust-pkg-{pkg_idx:06}");
+        let pkg_rel = PathBuf::from("crates").join(&pkg_name);
+        let pkg_abs = dir.path().join(&pkg_rel);
+        std::fs::create_dir_all(pkg_abs.join("src"))?;
+
+        let manifest =
+            format!("[package]\nname = \"{pkg_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
+        std::fs::write(pkg_abs.join("Cargo.toml"), manifest)?;
+        file_list.push(pkg_rel.join("Cargo.toml"));
+
+        std::fs::write(
+            pkg_abs.join("README.md"),
+            format!("# {pkg_name}\n\nSynthetic crate for S9 bench.\n"),
+        )?;
+        file_list.push(pkg_rel.join("README.md"));
+
+        for file_idx in 0..files_per_package {
+            let stem = if file_idx == 0 {
+                "lib".to_string()
+            } else {
+                format!("mod_{file_idx:04}")
+            };
+            let rel = pkg_rel.join("src").join(format!("{stem}.rs"));
+            let size = rng.random_range(256usize..2048);
+            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            file_list.push(rel);
+        }
+    }
+
+    // --- packages/node-pkg-NNN/{package.json, README.md, src/*.js}
+    for pkg_idx in 0..node_pkgs {
+        let pkg_name = format!("node-pkg-{pkg_idx:06}");
+        let pkg_rel = PathBuf::from("packages").join(&pkg_name);
+        let pkg_abs = dir.path().join(&pkg_rel);
+        std::fs::create_dir_all(pkg_abs.join("src"))?;
+
+        let manifest = format!(
+            "{{\n  \"name\": \"{pkg_name}\",\n  \"version\": \"0.1.0\",\n  \"private\": true\n}}\n"
+        );
+        std::fs::write(pkg_abs.join("package.json"), manifest)?;
+        file_list.push(pkg_rel.join("package.json"));
+
+        std::fs::write(
+            pkg_abs.join("README.md"),
+            format!("# {pkg_name}\n\nSynthetic package for S9 bench.\n"),
+        )?;
+        file_list.push(pkg_rel.join("README.md"));
+
+        for file_idx in 0..files_per_package {
+            let stem = if file_idx == 0 {
+                "index".to_string()
+            } else {
+                format!("mod_{file_idx:04}")
+            };
+            let rel = pkg_rel.join("src").join(format!("{stem}.js"));
+            let size = rng.random_range(256usize..2048);
+            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            file_list.push(rel);
+        }
+    }
+
+    // --- apps/py-pkg-NNN/{pyproject.toml, README.md, src/*.py}
+    for pkg_idx in 0..py_pkgs {
+        let pkg_name = format!("py-pkg-{pkg_idx:06}");
+        let pkg_rel = PathBuf::from("apps").join(&pkg_name);
+        let pkg_abs = dir.path().join(&pkg_rel);
+        std::fs::create_dir_all(pkg_abs.join("src"))?;
+
+        let manifest = format!(
+            "[project]\nname = \"{pkg_name}\"\nversion = \"0.1.0\"\nrequires-python = \">=3.10\"\n"
+        );
+        std::fs::write(pkg_abs.join("pyproject.toml"), manifest)?;
+        file_list.push(pkg_rel.join("pyproject.toml"));
+
+        std::fs::write(
+            pkg_abs.join("README.md"),
+            format!("# {pkg_name}\n\nSynthetic app for S9 bench.\n"),
+        )?;
+        file_list.push(pkg_rel.join("README.md"));
+
+        for file_idx in 0..files_per_package {
+            let stem = if file_idx == 0 {
+                "main".to_string()
+            } else {
+                format!("mod_{file_idx:04}")
+            };
+            let rel = pkg_rel.join("src").join(format!("{stem}.py"));
+            let size = rng.random_range(256usize..2048);
+            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            file_list.push(rel);
+        }
+    }
+
+    Ok(Tree {
+        dir,
+        files: file_list,
+    })
+}
+
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
     let out = Command::new("git").arg("-C").arg(cwd).args(args).output()?;
     if !out.status.success() {

@@ -50,6 +50,7 @@ const SCENARIO_S5: &str = include_str!("scenarios/s5_fix_pass.yml");
 const SCENARIO_S6: &str = include_str!("scenarios/s6_per_file_content.yml");
 const SCENARIO_S7: &str = include_str!("scenarios/s7_cross_file_relational.yml");
 const SCENARIO_S8: &str = include_str!("scenarios/s8_git_overlay.yml");
+const SCENARIO_S9: &str = include_str!("scenarios/s9_nested_polyglot.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
@@ -144,6 +145,7 @@ pub enum Scenario {
     S6,
     S7,
     S8,
+    S9,
 }
 
 impl Scenario {
@@ -157,7 +159,8 @@ impl Scenario {
             "S6" => Ok(Self::S6),
             "S7" => Ok(Self::S7),
             "S8" => Ok(Self::S8),
-            other => bail!("unknown scenario {other:?}; expected one of S1..S8"),
+            "S9" => Ok(Self::S9),
+            other => bail!("unknown scenario {other:?}; expected one of S1..S9"),
         }
     }
 
@@ -171,6 +174,7 @@ impl Scenario {
             Self::S6 => "S6",
             Self::S7 => "S7",
             Self::S8 => "S8",
+            Self::S9 => "S9",
         }
     }
 
@@ -188,6 +192,9 @@ impl Scenario {
             Self::S8 => {
                 "Git-tracked overlay (S3 + git_no_denied_paths + git_tracked_only over a real git repo)"
             }
+            Self::S9 => {
+                "Nested polyglot monorepo (rust + node + python rulesets over crates/ + packages/ + apps/)"
+            }
         }
     }
 
@@ -201,7 +208,20 @@ impl Scenario {
             Self::S6 => SCENARIO_S6,
             Self::S7 => SCENARIO_S7,
             Self::S8 => SCENARIO_S8,
+            Self::S9 => SCENARIO_S9,
         }
+    }
+
+    /// True for scenarios whose tree must be the v0.9.6
+    /// nested-polyglot shape (rust + node + python packages
+    /// distributed across `crates/` + `packages/` + `apps/`).
+    /// Drives `bench-scale`'s tree-gen path: the v0.9.6
+    /// `scope_filter:` primitive only fires meaningfully when
+    /// per-rule rules from different ecosystems compete for the
+    /// same files, which the standard Cargo-workspace tree
+    /// doesn't exercise.
+    pub fn requires_polyglot_tree(self) -> bool {
+        matches!(self, Self::S9)
     }
 
     /// True for scenarios whose tree must be a real git repo
@@ -323,48 +343,93 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         // reuse it across scenarios. If not, the cheaper
         // non-git generator suffices.
         let needs_git_repo = args.scenarios.iter().any(|s| s.requires_git_repo());
+        let needs_polyglot_tree = args.scenarios.iter().any(|s| s.requires_polyglot_tree());
         let (pkgs, fpp) = size.monorepo_shape();
-        eprintln!(
-            "[xtask] generating {}monorepo tree of {} files (seed={:#x})...",
-            if needs_git_repo { "git-aware " } else { "" },
-            size.file_count(),
-            args.seed,
-        );
-        let tree = if needs_git_repo {
-            alint_bench::tree::generate_git_monorepo(pkgs, fpp, args.seed)
-                .with_context(|| format!("generating {} git-tree", size.label()))?
+
+        // Build the regular monorepo tree if any non-polyglot
+        // scenario is in this run. S9 (polyglot) gets its own
+        // tree below. Most runs use only one of the two; mixing
+        // S9 with non-S9 scenarios in the same invocation builds
+        // both trees up-front and dispatches per-scenario.
+        let needs_regular_tree = args.scenarios.iter().any(|s| !s.requires_polyglot_tree());
+        let regular_tree = if needs_regular_tree {
+            eprintln!(
+                "[xtask] generating {}monorepo tree of {} files (seed={:#x})...",
+                if needs_git_repo { "git-aware " } else { "" },
+                size.file_count(),
+                args.seed,
+            );
+            Some(if needs_git_repo {
+                alint_bench::tree::generate_git_monorepo(pkgs, fpp, args.seed)
+                    .with_context(|| format!("generating {} git-tree", size.label()))?
+            } else {
+                alint_bench::tree::generate_monorepo(pkgs, fpp, args.seed)
+                    .with_context(|| format!("generating {} tree", size.label()))?
+            })
         } else {
-            alint_bench::tree::generate_monorepo(pkgs, fpp, args.seed)
-                .with_context(|| format!("generating {} tree", size.label()))?
+            None
         };
-        let tree_root = tree.root().to_path_buf();
+        let polyglot_tree = if needs_polyglot_tree {
+            eprintln!(
+                "[xtask] generating polyglot monorepo tree of {} files (seed={:#x})...",
+                size.file_count(),
+                args.seed ^ 0xB011_F11E,
+            );
+            Some(
+                alint_bench::tree::generate_nested_polyglot_monorepo(
+                    pkgs,
+                    fpp,
+                    args.seed ^ 0xB011_F11E,
+                )
+                .with_context(|| format!("generating {} polyglot tree", size.label()))?,
+            )
+        } else {
+            None
+        };
 
         // Initialise git so `--changed` mode has something to
         // diff against. Done once per tree — hyperfine then
         // measures the same disk state across runs. Skipped
         // when no tool requested `Mode::Changed` to save time.
+        // Both trees get the treatment if both exist.
         let needs_git = args.modes.contains(&Mode::Changed)
             && args
                 .tools
                 .iter()
                 .any(|t| args.scenarios.iter().any(|s| t.supports(*s, Mode::Changed)));
         if needs_git {
-            init_git_for_changed_mode(&tree_root)?;
-            let to_touch = alint_bench::tree::select_subset(
-                &tree.files,
-                args.diff_pct / 100.0,
-                args.seed ^ 0xD1FF,
-            );
-            eprintln!(
-                "[xtask] touching {} of {} files for --changed diff ({}%)",
-                to_touch.len(),
-                tree.files.len(),
-                args.diff_pct,
-            );
-            touch_subset(&tree_root, &to_touch)?;
+            for tree in [regular_tree.as_ref(), polyglot_tree.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                let tree_root = tree.root();
+                init_git_for_changed_mode(tree_root)?;
+                let to_touch = alint_bench::tree::select_subset(
+                    &tree.files,
+                    args.diff_pct / 100.0,
+                    args.seed ^ 0xD1FF,
+                );
+                eprintln!(
+                    "[xtask] touching {} of {} files for --changed diff ({}%)",
+                    to_touch.len(),
+                    tree.files.len(),
+                    args.diff_pct,
+                );
+                touch_subset(tree_root, &to_touch)?;
+            }
         }
 
         for &scenario in &args.scenarios {
+            let tree_for_scenario = if scenario.requires_polyglot_tree() {
+                polyglot_tree
+                    .as_ref()
+                    .expect("polyglot tree built when any S9-like scenario in run")
+            } else {
+                regular_tree
+                    .as_ref()
+                    .expect("regular tree built when any non-S9 scenario in run")
+            };
+            let tree_root = tree_for_scenario.root().to_path_buf();
             for &tool in &args.tools {
                 // Tool decides whether to write a config; ls-lint's
                 // `.ls-lint.yml` and alint's `.alint.yml` coexist

@@ -1,0 +1,27 @@
+# Scenario S9 — Nested polyglot monorepo.
+#
+# Three bundled ecosystem rulesets stacked on a tree where Rust,
+# Node, and Python packages live side-by-side under separate
+# top-level directories (`crates/`, `packages/`, `apps/`). The
+# v0.9.6 `scope_filter:` primitive is what makes this shape
+# tractable — without it, a `**/*.py` rule from python@v1 would
+# fire on every `.py` file in the tree (including any stray
+# Python helpers checked into a Rust or Node package), and a
+# `**/*.rs` rule from rust@v1 would fire across the Node + Python
+# subtrees too. With `scope_filter: { has_ancestor: <manifest> }`,
+# each ruleset's per-file rules narrow to the files inside their
+# own ecosystem's package directories.
+#
+# This scenario is the dispatch shape v0.9.6 was designed for: it
+# captures whether the per-rule scope_filter walk (Path::parent()
+# upward × N rules per file) is dominated by the v0.9.5 path-index
+# `contains_file` lookups (O(1) amortised) rather than degenerating
+# into per-file path-component scans.
+
+version: 1
+nested_configs: false
+
+extends:
+  - alint://bundled/rust@v1
+  - alint://bundled/node@v1
+  - alint://bundled/python@v1

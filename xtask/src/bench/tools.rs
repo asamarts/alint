@@ -186,7 +186,8 @@ impl Tool {
                 | Scenario::S5
                 | Scenario::S6
                 | Scenario::S7
-                | Scenario::S8 => {
+                | Scenario::S8
+                | Scenario::S9 => {
                     unreachable!("supports() filters S3+ out for GrepPipeline")
                 }
             },
