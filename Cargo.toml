@@ -64,6 +64,15 @@ portable-pty = "0.9"
 serde_json_path = "0.7"
 toml = "0.9"
 
+# v0.10 — LSP server. See `docs/design/v0.10/lsp_server.md` for the
+# crate-choice rationale (`tower-lsp` over `lsp-server`). Pulled into
+# `[workspace.dependencies]` ahead of the `crates/alint-lsp/` crate
+# itself so contributors picking up v0.10 work don't need a Cargo.toml
+# touch as a precondition. No workspace member depends on this yet,
+# so the dep is dormant until alint-lsp lands; `cargo build` won't
+# pull it.
+tower-lsp = "0.20"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
