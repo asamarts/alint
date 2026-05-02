@@ -198,9 +198,8 @@ fn every_bundled_ruleset_has_well_formed_and_ill_formed_scenarios() {
         }
         let _ = writeln!(
             report,
-            "  (add a scenario with given.config.extends: [{}] and \
+            "  (add a scenario with given.config.extends: [<uri>] and \
              a tree shape that satisfies the bundled rules)",
-            "<uri>",
         );
     }
     if !missing_ill_formed.is_empty() {
