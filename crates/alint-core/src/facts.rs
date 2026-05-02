@@ -6,8 +6,8 @@
 //!
 //! ```yaml
 //! facts:
-//!   - id: is_rust
-//!     any_file_exists: ["Cargo.toml"]
+//!   - id: has_rust
+//!     any_file_exists: ["Cargo.toml", "**/Cargo.toml"]
 //!   - id: is_monorepo
 //!     all_files_exist: ["packages", "pnpm-workspace.yaml"]
 //!   - id: n_java_files

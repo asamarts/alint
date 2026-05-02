@@ -9,11 +9,11 @@ given:
   config: |
     version: 1
     facts:
-      - id: is_rust
+      - id: has_rust
         any_file_exists: [Cargo.toml]
     rules:
       - id: rust-has-toolchain
-        when: facts.is_rust
+        when: facts.has_rust
         kind: file_exists
         paths: [rust-toolchain.toml, rust-toolchain]
         level: error

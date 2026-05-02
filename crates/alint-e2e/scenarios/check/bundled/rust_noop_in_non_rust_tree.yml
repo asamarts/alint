@@ -1,7 +1,7 @@
-name: alint://bundled/rust stays quiet in a non-Rust tree (is_rust fact gates it)
+name: alint://bundled/rust stays quiet in a non-Rust tree (has_rust fact gates it)
 tags: [check, extends, bundled, rust, passing]
 
-# Every rule in `rust@v1` is gated with `when: facts.is_rust`, which
+# Every rule in `rust@v1` is gated with `when: facts.has_rust`, which
 # is false when Cargo.toml is absent. Extending the ruleset from a
 # polyglot repo's root config is therefore safe — nothing fires
 # unless Rust is actually present.
