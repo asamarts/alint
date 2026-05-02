@@ -130,6 +130,62 @@ move into native YAML coverage.
 3. Run `cargo test -p alint-e2e --test coverage_audit_bundled_rulesets`.
 ```
 
+### `scope_filter:` for ecosystem rulesets (v0.9.6+)
+
+Bundled rulesets that target one ecosystem (`rust@v1`,
+`node@v1`, etc.) should pair their tree-level `when:
+facts.has_<ecosystem>` gate with a per-rule
+`scope_filter: { has_ancestor: <manifest> }` on per-file
+content rules so the rule fires only on files inside that
+ecosystem's package subtree. The two gates compose:
+`when:` is a cheap tree-level short-circuit (no facts → no
+rule iteration); `scope_filter:` narrows per-file scope when
+the rule does run, useful in polyglot monorepos where one
+language's package sits next to another's.
+
+```yaml
+# In a ruleset YAML:
+facts:
+  - id: has_rust
+    any_file_exists: [Cargo.toml, "**/Cargo.toml"]    # broadened: catch nested manifests
+
+rules:
+  - id: rust-sources-no-bidi
+    when: facts.has_rust                              # tree gate
+    kind: no_bidi_controls
+    paths: "**/*.rs"                                  # path glob
+    scope_filter:                                     # ancestor walk
+      has_ancestor: Cargo.toml                        # canonical per-package manifest
+    level: error
+```
+
+Constraints:
+
+- **Per-file rules only.** `scope_filter:` is supported on
+  `PerFileRule`-trait rules (engine consults it in the file-
+  major dispatch loop). Cross-file rules (`pair`,
+  `for_each_dir`, `file_exists`, etc.) reject `scope_filter:`
+  at build time with a pointer to the `for_each_dir +
+  when_iter:` pattern. Rule-major rules like `filename_case`
+  silently ignore `scope_filter:` today — gate them via the
+  rule's `paths:` glob or skip the filter.
+- **Literal filenames, not globs.** Each `has_ancestor:` entry
+  is a filename like `Cargo.toml` or `package.json`; no `**/`
+  prefix, no path separators. The walk handles "anywhere up
+  the tree" by traversing `Path::parent()` upward.
+- **File's own dir counts as ancestor.** A `pyproject.toml`
+  matched by `paths: pyproject.toml` and gated by
+  `scope_filter: { has_ancestor: pyproject.toml }` always
+  passes its own ancestor walk — don't add the filter when the
+  rule's `paths:` is already a literal manifest filename.
+- **`has_ancestor` accepts a single string or a list.**
+  `has_ancestor: pom.xml` and `has_ancestor: [pom.xml,
+  build.gradle, build.gradle.kts]` are both valid; first-match-
+  wins on the upward walk.
+
+Design + semantics:
+[`docs/design/v0.9/scope-filter.md`](../design/v0.9/scope-filter.md).
+
 The audit treats nested rulesets like
 `monorepo/cargo-workspace.yml` as a single unit — its scenarios
 live alongside `monorepo`'s under `bundled-monorepo/`. The

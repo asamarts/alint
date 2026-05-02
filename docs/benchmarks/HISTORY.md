@@ -7,7 +7,8 @@ hardware contract and why cross-machine comparisons need like-for-like.
 
 | Tag | Date | 1M S3 full | 1M S3 changed | 100k S3 full | 10k S3 full | Headline change |
 |---|---|---:|---:|---:|---:|---|
-| **v0.9.5** | 2026-05-01 | **11.194 s ± 0.154** | **6.728 s ± 0.059** | 11.20 s | 316 ms | Cross-file dispatch fast paths (path-index on FileIndex) — 65× / 108× over v0.9.4. |
+| **v0.9.6** | 2026-05-02 | — | — | 11.20 s | 316 ms | `scope_filter:` primitive + bundled-ruleset migration; new S9 = 688 ms at 100k. |
+| v0.9.5 | 2026-05-01 | 11.194 s ± 0.154 | 6.728 s ± 0.059 | 11.20 s | 316 ms | Cross-file dispatch fast paths (path-index on FileIndex) — 65× / 108× over v0.9.4. |
 | v0.9.4 | 2026-04-30 | 731.856 s ± 5.349 | 724.362 s ± 2.132 | 11.20 s | 316 ms | Content-rule mechanical migration (16 rules to PerFileRule). |
 | v0.9.3 | 2026-04-30 | — | — | 11.39 s | 355 ms | Per-file dispatch flip + 8-rule reference migration. |
 | v0.9.2 | 2026-04-30 | — | — | 11.39 s | 355 ms | Memory-footprint pass (Arc<Path> / Cow types). |

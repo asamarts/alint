@@ -33,6 +33,7 @@ clone produces byte-identical configs.
 | **S6** | 13 content rules over `**/*.rs` | Per-file dispatch path width — every `.rs` file hit by every rule on a single read | Stresses the read-coalescing path; v0.9.3 dispatch flip's design target | Per-file inner-loop regressions S3 doesn't surface |
 | **S7** | 6 cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_file`, `dir_only_contains`, `every_matching_has`) | Various fan-out shapes over the synthetic monorepo | Catches the next O(D × N) cliff after the v0.9.5 path-index fix | Cross-file dispatch shapes the path-index doesn't cover |
 | **S8** | S3 reshape + `git_no_denied_paths` + `git_tracked_only` over a real git repo | Same as S3 but with `Engine::collect_git_tracked_if_needed` + `BlameCache` active | v0.7-era `git ls-files` regression had no scale gate; this fixes that | Git-aware dispatch regressions at scale |
+| **S9** | Three competing ecosystem rulesets: `extends: rust + node + python` (≈26 rules) over a polyglot tree (Rust under `crates/`, Node under `packages/`, Python under `apps/`) | Per-rule `scope_filter: { has_ancestor: <manifest> }` ancestor walks against the v0.9.5 path-index, three rulesets competing for each file | The dispatch shape the v0.9.6 `scope_filter:` primitive was designed for — without it, every `**/*.py` rule from python@v1 fires on every `.py` file in the tree | Scope_filter walk regressions; ecosystem-fact mis-broadening |
 
 ## Tool matrix
 

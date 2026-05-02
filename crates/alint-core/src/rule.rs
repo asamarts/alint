@@ -210,7 +210,7 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     ///
     /// Cross-file rules MUST return `None`; the build-time
     /// validation in
-    /// [`crate::scope_filter::reject_on_cross_file_rule`]
+    /// [`crate::reject_scope_filter_on_cross_file`]
     /// enforces this from the rule-builder side. Returning
     /// `Some` from a cross-file rule is a programming error
     /// — the engine consults this method only on the
