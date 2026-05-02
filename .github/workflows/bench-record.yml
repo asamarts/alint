@@ -1,0 +1,220 @@
+name: bench-record
+
+# Tag-triggered "publish-grade" bench run for the canonical baseline
+# machine (self-hosted, AMD Ryzen 9 3900X — matches the fingerprint
+# every published row in docs/benchmarks/HISTORY.md was captured on).
+#
+# Two layers per run:
+# - macro: `xtask bench-scale --include-1m --warmup 3 --runs 10` over
+#   the full S1-S9 × {1k,10k,100k,1m} × {full,changed} matrix.
+# - micro: `cargo bench -p alint-bench --features fs-benches` against
+#   the criterion harness, then `xtask publish-benches` to land the
+#   trim'd criterion snapshot under
+#   `docs/benchmarks/micro/results/<arch>/v<tag>/criterion/`.
+#
+# Output: a PR adding both directories plus a HISTORY.md update for
+# every (scenario, mode, size) cell measured. The PR sits in review
+# until a maintainer eyeballs the CV (anything > 10 % gets a re-run
+# on a quieter system) and merges. No auto-merge — bench numbers
+# enter the published corpus only after human review.
+#
+# Triggers:
+# - tag push (v*): the canonical case. Bench runs on the released
+#   binary built from the tagged commit.
+# - workflow_dispatch with an explicit ref input: lets a maintainer
+#   run an off-cycle bench (e.g. characterising main between releases
+#   for an investigation; supplied label lands the dirs as
+#   v<label>/ rather than overwriting a real release dir).
+#
+# Wall time: ~3.5 hours on the canonical baseline. Long-running, so
+# this workflow is INTENTIONALLY off the release.yml dependency
+# graph — release artefacts (binaries, npm, Docker, Homebrew) ship
+# fast, bench data lands async via the PR this workflow opens.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to bench (default: current main)."
+        required: false
+        default: "main"
+      label:
+        description: "Output dir label (default: derived from ref). Use a v-prefixed label for tag-shaped outputs."
+        required: false
+        default: ""
+
+permissions:
+  contents: write       # commit the bench dirs + HISTORY.md update
+  pull-requests: write  # open the review PR
+
+# Hard serialisation: only one bench run at a time per ref. A second
+# tag push while a bench is in flight queues rather than racing for
+# the runner.
+concurrency:
+  group: bench-record-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: bench (linux-x86_64)
+    # The canonical baseline runner — must match the fingerprint of
+    # every previously published row. ubuntu-latest on github-hosted
+    # would run a different CPU, kernel, and FS, voiding cross-version
+    # comparability.
+    runs-on: [self-hosted, linux, alint]
+    timeout-minutes: 360   # 6h cap; ~3.5h expected at publish-grade flags
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-record
+
+      - name: install hyperfine
+        run: |
+          set -euo pipefail
+          if ! command -v hyperfine >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/hyperfine.deb \
+              https://github.com/sharkdp/hyperfine/releases/download/v1.20.0/hyperfine_1.20.0_amd64.deb
+            sudo dpkg -i /tmp/hyperfine.deb
+          fi
+          hyperfine --version
+
+      - name: derive output label
+        id: label
+        run: |
+          set -euo pipefail
+          input_label='${{ github.event.inputs.label }}'
+          if [[ -n "$input_label" ]]; then
+            echo "label=$input_label" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Tag push: docs/benchmarks/.../v0.9.7/ shape.
+            echo "label=${GITHUB_REF##refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            # Off-cycle dispatch with no explicit label: v0.9.7-rc-<sha>.
+            workspace_ver=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+            short_sha=$(git rev-parse --short HEAD)
+            echo "label=v${workspace_ver}-rc-${short_sha}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build release binaries
+        run: cargo build --release -p alint -p xtask
+
+      # ── Macro: full publish-grade matrix ─────────────────────────
+      # 9 scenarios × 4 sizes × 2 modes = 72 cells. The 1M cells
+      # dominate — ~10 min each, so ~3h for the 18 1M cells alone.
+      - name: macro bench-scale
+        env:
+          OUT_LABEL: ${{ steps.label.outputs.label }}
+        run: |
+          set -euo pipefail
+          out_dir="docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}"
+          mkdir -p "$out_dir"
+          ./target/release/xtask bench-scale \
+            --include-1m \
+            --sizes 1k,10k,100k,1m \
+            --scenarios S1,S2,S3,S4,S5,S6,S7,S8,S9 \
+            --modes full,changed \
+            --tools alint \
+            --warmup 3 --runs 10 \
+            --json-only \
+            --out "$out_dir"
+          ls -la "$out_dir"
+
+      # ── Micro: criterion ─────────────────────────────────────────
+      - name: micro cargo bench
+        run: |
+          set -euo pipefail
+          cargo bench -p alint-bench --features fs-benches
+
+      - name: publish micro snapshot
+        env:
+          OUT_LABEL: ${{ steps.label.outputs.label }}
+        run: |
+          set -euo pipefail
+          out_dir="docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion"
+          ./target/release/xtask publish-benches --to "$out_dir" --trim
+          ls -la "$out_dir" | head -20
+
+      # ── HISTORY.md update is intentionally manual ────────────────
+      # Auto-rewriting markdown tables is fragile (positional cells,
+      # version ordering, scenario sections). The PR body links to
+      # the new results.json so the maintainer pastes the new row
+      # into HISTORY.md as part of the merge. The new row fields
+      # come from the per-cell JSON via:
+      #
+      #   jq -r '.rows[] | "\(.scenario) \(.size_label) \(.mode): mean=\(.mean_ms)ms ± \(.stddev_ms)"' \
+      #     docs/benchmarks/macro/results/linux-x86_64/<tag>/results.json
+      #
+      # … which the PR body shells out for and inlines verbatim, so
+      # the maintainer copy-pastes pre-formatted values.
+
+      - name: open PR with bench results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUT_LABEL: ${{ steps.label.outputs.label }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          branch="bench-record/${OUT_LABEL}"
+
+          git config user.name  "alint bench bot"
+          git config user.email "aliaksandr.samartsau@gmail.com"
+
+          git checkout -b "$branch"
+          git add docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/
+          git add docs/benchmarks/micro/results/linux-x86_64/"${OUT_LABEL}"/
+          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S9 at 1k/10k/100k/1m × full/changed)"
+          git push origin "$branch" --force
+
+          # Render a per-cell summary the maintainer pastes into HISTORY.md.
+          json=docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/results.json
+          summary=$(jq -r '.rows[] | "- \(.scenario) \(.size_label) \(.mode): \(.mean_ms | tostring | .[0:6]) ms ± \(.stddev_ms | tostring | .[0:5])"' "$json")
+
+          gh pr create \
+            --title "docs(bench): ${OUT_LABEL} bench-scale results" \
+            --body "$(cat <<EOF
+          Auto-opened by \`bench-record.yml\` for source SHA \`${SOURCE_SHA}\`.
+
+          ## What landed
+
+          - \`docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/\` — full
+            publish-grade hyperfine matrix (S1-S9 × {1k, 10k, 100k, 1m} × {full,
+            changed}) at \`--warmup 3 --runs 10\`.
+          - \`docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion/\`
+            — trimmed criterion snapshot from \`cargo bench -p alint-bench\`.
+
+          ## Maintainer review checklist
+
+          - [ ] Skim \`results.json\` for any cell with \`stddev_ms / mean_ms > 0.10\`
+            (CV > 10 %) — re-run those on a quieter system before merging.
+          - [ ] Update \`docs/benchmarks/HISTORY.md\` with the per-cell rows
+            below (one row per scenario × mode table; cross-version trajectory
+            table at the top gets a new headline row).
+          - [ ] Verify the workspace version in the bench fingerprint matches
+            the tag/label.
+
+          ## Per-cell numbers
+
+          \`\`\`
+          ${summary}
+          \`\`\`
+
+          ## Notes
+
+          - Hardware fingerprint and \`hyperfine\`/\`alint\` versions are captured
+            inside \`results.json\` for cross-version diffing. Cross-machine
+            comparisons require a like-for-like fingerprint — see
+            [\`METHODOLOGY.md\`](../docs/benchmarks/METHODOLOGY.md).
+          - Triggered by: \`${GITHUB_REF}\`.
+          EOF
+          )" \
+            --head "$branch" \
+            --base main \
+            --label bench-record

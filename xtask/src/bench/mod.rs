@@ -604,9 +604,24 @@ fn run_one(
 /// per-repo prevents that — alint's walker also excludes
 /// `.git/` so the race is doubly impossible, but the
 /// belt-and-suspenders is cheap.
+///
+/// **Idempotent re-entry.** When the matrix includes S8 (the
+/// only `requires_git_repo` scenario), the tree was already
+/// generated as a git repo with an initial commit by
+/// `generate_git_monorepo`. In that case `git init` is a no-op
+/// (re-init is silently OK), but `git commit` would fail with
+/// "nothing to commit" because every file is already in HEAD.
+/// We probe `git rev-parse --verify HEAD`: if it succeeds (HEAD
+/// exists), we skip the add+commit pair entirely — the existing
+/// initial commit IS the bench base. The follow-up file-touch
+/// step then produces the working-tree diff `--changed` mode
+/// measures.
 fn init_git_for_changed_mode(root: &Path) -> Result<()> {
     git(root, &["init", "-q", "-b", "main"])?;
     git(root, &["config", "gc.auto", "0"])?;
+    if has_initial_commit(root) {
+        return Ok(());
+    }
     git(root, &["add", "-A"])?;
     git(
         root,
@@ -622,6 +637,19 @@ fn init_git_for_changed_mode(root: &Path) -> Result<()> {
         ],
     )?;
     Ok(())
+}
+
+/// True iff the repo at `root` already has at least one commit
+/// reachable from HEAD. Used by [`init_git_for_changed_mode`]
+/// to skip the add+commit pair when an S8 git-aware tree
+/// already supplied the bench base.
+fn has_initial_commit(root: &Path) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<()> {
