@@ -33,13 +33,17 @@ alint check --format human    # default; colorized; grouped by file
 alint check --format json     # stable, versioned JSON schema
 alint check --format sarif    # SARIF 2.1.0 (for GitHub Code Scanning)
 alint check --format github   # GitHub Actions workflow commands
+alint check --format markdown # PR-comment-friendly tables
+alint check --format junit    # CI test-report shape
+alint check --format gitlab   # GitLab Code Quality
+alint check --format agent    # LLM-shaped JSON with per-violation `agent_instruction`
 ```
 
 Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` internal error. Warnings do not fail by default — use `--fail-on-warning` to flip that.
 
 ## Where to next
 
-- [Bundled Rulesets](/docs/bundled-rulesets/) — eleven one-line baselines covering Rust, Python, Go, Node, monorepos, GitHub Actions hardening, and more.
+- [Bundled Rulesets](/docs/bundled-rulesets/) — nineteen one-line baselines covering Rust, Python, Go, Node, Java, monorepos, GitHub Actions hardening, agent hygiene, license compliance, and more.
 - [Cookbook](/docs/cookbook/) — copy-pasteable patterns for real-world repo-maintenance tasks.
 - [Configuration](/docs/configuration/) — full `.alint.yml` field reference.
 - [Concepts](/docs/concepts/) — the rule model, scopes, when-expressions, composition.

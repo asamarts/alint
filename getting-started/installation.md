@@ -33,7 +33,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.4.7 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.9.6 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -42,7 +42,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.4`) and the raw git tag (`:v0.4.7`).
+Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.9.6`).
 
 ## crates.io
 

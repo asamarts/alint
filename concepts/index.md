@@ -71,7 +71,7 @@ Preview with `alint fix --dry-run`; apply with `alint fix`. Content-editing ops 
 
 ## Output formats
 
-Four formats: `human` (default; colorized; grouped by file), `json` (stable schema), `sarif` (SARIF 2.1.0 for GitHub Code Scanning), `github` (`::error::` / `::warning::` workflow commands for inline PR annotations).
+Eight formats: `human` (default; colorized; grouped by file), `json` (stable schema), `sarif` (SARIF 2.1.0 for GitHub Code Scanning), `github` (`::error::` / `::warning::` workflow commands for inline PR annotations), `markdown` (PR-comment tables), `junit` (CI test-report shape), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with per-violation `agent_instruction`).
 
 ```bash
 alint check --format json --compact

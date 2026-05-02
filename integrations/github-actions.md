@@ -10,7 +10,7 @@ The official Action wraps the `install.sh` flow plus alint invocation into one s
 ## Inline PR annotations (default)
 
 ```yaml
-- uses: asamarts/alint@v0.4.7
+- uses: asamarts/alint@v0.9.6
 ```
 
 This runs `alint check --format github` against `.` and emits findings as `::error::` / `::warning::` workflow commands, which GitHub renders inline on the PR.
@@ -18,9 +18,9 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 ## Inputs (all optional)
 
 ```yaml
-- uses: asamarts/alint@v0.4.7
+- uses: asamarts/alint@v0.9.6
   with:
-    version: v0.4.7        # alint release tag (default: latest)
+    version: v0.9.6        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
@@ -34,7 +34,7 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 Use `format: sarif` and pipe to the standard upload action:
 
 ```yaml
-- uses: asamarts/alint@v0.4.7
+- uses: asamarts/alint@v0.9.6
   id: alint
   with:
     format: sarif
@@ -52,7 +52,7 @@ Use `format: sarif` and pipe to the standard upload action:
 For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/docs/bundled-rulesets/) bundled ruleset), pin the action to a commit SHA:
 
 ```yaml
-- uses: asamarts/alint@<40-char-sha>  # v0.4.7
+- uses: asamarts/alint@<40-char-sha>  # v0.9.6
 ```
 
 Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags).
