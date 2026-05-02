@@ -6,7 +6,7 @@
       "value": false
     },
     {
-      "id": "is_python",
+      "id": "has_python",
       "kind": "any_file_exists",
       "value": false
     }

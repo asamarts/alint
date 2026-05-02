@@ -1,8 +1,8 @@
-name: alint://bundled/python - every rule is silent when facts.is_python is false
+name: alint://bundled/python - every rule is silent when facts.has_python is false
 tags: [check, extends, bundled, python]
 
 # With no Python marker (no pyproject.toml, setup.py, setup.cfg,
-# requirements.txt), `facts.is_python` evaluates false and every
+# requirements.txt), `facts.has_python` evaluates false and every
 # rule's `when:` gate suppresses it. The ruleset is safe to
 # layer into a polyglot repo's root config.
 
