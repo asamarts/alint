@@ -67,7 +67,7 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     timeout-minutes: 360   # 6h cap; ~3.5h expected at publish-grade flags
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0

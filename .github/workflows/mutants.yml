@@ -31,7 +31,7 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Pick crate (manual override or daily rotation)
         id: pick

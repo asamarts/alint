@@ -36,7 +36,7 @@ jobs:
     name: default (github annotations)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: alint check (annotations)
         uses: ./
         # Default format is `github` — inline annotations on
@@ -47,7 +47,7 @@ jobs:
     name: sarif output
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: alint check (sarif)
         id: alint
         uses: ./
@@ -65,7 +65,7 @@ jobs:
     name: json output
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: alint check (json)
         uses: ./
         with:
@@ -75,7 +75,7 @@ jobs:
     name: pinned version input
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: alint check with explicit version input
         uses: ./
         with:
