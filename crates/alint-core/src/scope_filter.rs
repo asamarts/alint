@@ -117,7 +117,9 @@ impl ScopeFilter {
             validate_manifest_name(rule_id, &name)?;
             paths.push(PathBuf::from(name));
         }
-        Ok(Self { has_ancestor: paths })
+        Ok(Self {
+            has_ancestor: paths,
+        })
     }
 
     /// Direct construction without validation. Tests only.
@@ -315,7 +317,11 @@ mod tests {
     fn closest_ancestor_among_multiple() {
         // Both root and crates/api have Cargo.toml. Either match.
         let f = filter(vec!["Cargo.toml"]);
-        let i = idx(&["Cargo.toml", "crates/api/Cargo.toml", "crates/api/src/main.rs"]);
+        let i = idx(&[
+            "Cargo.toml",
+            "crates/api/Cargo.toml",
+            "crates/api/src/main.rs",
+        ]);
         assert!(f.matches(Path::new("crates/api/src/main.rs"), &i));
     }
 
@@ -325,7 +331,9 @@ mod tests {
     fn from_spec_rejects_empty_list() {
         let err = ScopeFilter::from_spec(
             "r",
-            ScopeFilterSpec { has_ancestor: vec![] },
+            ScopeFilterSpec {
+                has_ancestor: vec![],
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("non-empty"), "msg: {err}");
@@ -352,10 +360,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(
-            err.to_string().contains("path separators"),
-            "msg: {err}"
-        );
+        assert!(err.to_string().contains("path separators"), "msg: {err}");
     }
 
     #[test]
@@ -368,10 +373,7 @@ mod tests {
                 },
             )
             .unwrap_err();
-            assert!(
-                err.to_string().contains("glob"),
-                "msg for {bad:?}: {err}"
-            );
+            assert!(err.to_string().contains("glob"), "msg for {bad:?}: {err}");
         }
     }
 
