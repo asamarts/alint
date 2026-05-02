@@ -1,9 +1,9 @@
 # v0.7 — Design pass
 
-Status: Working drafts, written 2026-04-28 after the v0.6 cut
-shipped. Each file in this directory is a per-feature design
-that should be reviewed and revised before implementation
-starts.
+Status: All five v0.7 features shipped (v0.7.0 – v0.7.5). The
+per-feature docs in this directory are kept as the design
+record — each one's `Status:` header points to the commit /
+crate where it landed.
 
 ## What v0.7 ships
 

@@ -6,14 +6,14 @@
 
 **alint** is a language-agnostic linter for repository structure. You declare the shape your repo should have — required files, filename conventions, content patterns, values inside `package.json` / `Cargo.toml` / GitHub workflows, cross-file relationships — in a single `.alint.yml`, and alint enforces it. It walks the tree honoring `.gitignore`, runs rules in parallel, reports violations in human / JSON / SARIF / GitHub-annotation form, and can auto-fix what it flags. One static Rust binary, any language, any repo.
 
-v0.7 ships **54 rule kinds** across eleven families and 12 auto-fix ops — see [docs/rules.md](docs/rules.md) for the full catalogue. alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, structured-query, and agent-aware primitives.
+v0.9.6 ships **60 rule kinds** across thirteen families and 12 auto-fix ops — see [docs/rules.md](docs/rules.md) for the full catalogue. alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, structured-query, and agent-aware primitives.
 
 ## Core capabilities
 
-- **54 rule kinds** across eleven families (full reference: [docs/rules.md](docs/rules.md)):
+- **60 rule kinds** across thirteen families (full reference: [docs/rules.md](docs/rules.md)):
   - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
   - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_footer`, `file_shebang`, `file_starts_with`, `file_ends_with`, `file_hash`, `file_max_size`, `file_min_size`, `file_max_lines`, `file_min_lines`, `file_is_text`, `file_is_ascii`.
-  - *Structured query* — `json_path_equals`, `json_path_matches`, `yaml_path_equals`, `yaml_path_matches`, `toml_path_equals`, `toml_path_matches`. JSONPath (RFC 9535) queries over JSON / YAML / TOML.
+  - *Structured query* — `json_path_equals`, `json_path_matches`, `yaml_path_equals`, `yaml_path_matches`, `toml_path_equals`, `toml_path_matches`, `json_schema_passes`. JSONPath (RFC 9535) queries over JSON / YAML / TOML.
   - *Naming* — `filename_case`, `filename_regex`.
   - *Text hygiene* — `no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines`.
   - *Security / Unicode* — `no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars`.
@@ -21,7 +21,9 @@ v0.7 ships **54 rule kinds** across eleven families and 12 auto-fix ops — see 
   - *Structure* — `max_directory_depth`, `max_files_per_directory`, `no_empty_files`.
   - *Portable metadata* — `no_case_conflicts`, `no_illegal_windows_names`.
   - *Unix metadata + git* — `no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`, `no_submodules`.
+  - *Git hygiene* — `commented_out_code`, `markdown_paths_resolve`, `git_no_denied_paths`, `git_commit_message`, `git_blame_age`.
   - *Cross-file* — `pair`, `for_each_dir`, `for_each_file`, `dir_contains`, `dir_only_contains`, `unique_by`, `every_matching_has`.
+  - *Plugin (tier 1)* — `command` (shell out to an external CLI per matched file; trust-gated to the user's top-level config).
 - **Auto-fix** — 12 file ops covering content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append). Preview with `alint fix --dry-run`. Content-editing ops honour a configurable `fix_size_limit` (default 1 MiB) that skips oversize files rather than rewriting them.
 - **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
 - **Composition** — `extends:` pulls in other configs by local path, HTTPS URL (with SRI pinning), or `alint://bundled/<name>@<rev>`. Children override inherited rules field-by-field. Monorepos can opt into `nested_configs: true` to auto-discover `.alint.yml` files in subdirectories and scope their rules to each subtree.
@@ -586,7 +588,7 @@ rules:
 
 ## Bundled rulesets
 
-Seventeen rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
+Nineteen rulesets ship in the binary — zero network round-trip, pinned to the version of alint you're running:
 
 **Ecosystem + project-shape baselines**
 

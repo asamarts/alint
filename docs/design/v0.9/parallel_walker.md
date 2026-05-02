@@ -1,6 +1,6 @@
 # Parallel walker
 
-Status: Design draft.
+Status: Implemented in v0.9.1 (`crates/alint-core/src/walker.rs`).
 
 ## Problem
 

@@ -13,8 +13,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── Preflight gate ──────────────────────────────────────────────
+  # Self-contained verification that the tagged commit passes the
+  # same fmt + clippy + test + doctest + `cargo doc -D warnings`
+  # gates that ci.yml enforces. Required because release.yml fires
+  # on tag-push in parallel with ci.yml (both watch tags: ["v*"])
+  # — without this dependency, a failing CI run does not stop a
+  # release. See also feedback note in CLAUDE memory:
+  # `cargo doc` warnings bypass cargo check / test / clippy, so
+  # the rustdoc gate must run as part of every release preflight.
+  # All publishing jobs (build matrix, release, docker, npm,
+  # homebrew, publish-crates) `needs:` this job; if it fails, no
+  # artefacts are published.
+  preflight:
+    name: preflight (fmt + clippy + test + doc)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-preflight
+      - name: fmt
+        run: ci/scripts/fmt.sh
+      - name: clippy
+        run: ci/scripts/clippy.sh
+      - name: test
+        run: ci/scripts/test.sh
+      - name: docs (cargo doc with -D warnings)
+        run: ci/scripts/docs.sh
+
   build:
     name: build (${{ matrix.target }})
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:

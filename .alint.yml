@@ -11,13 +11,13 @@ ignore:
   - "crates/alint/tests/cli/**"
 
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: [Cargo.toml]
 
 rules:
   # --- when-gated -----------------------------------------------------------
   - id: rust-has-toolchain
-    when: facts.is_rust
+    when: facts.has_rust
     kind: file_exists
     paths: [rust-toolchain.toml, rust-toolchain]
     root_only: true

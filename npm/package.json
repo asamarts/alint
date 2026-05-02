@@ -1,6 +1,6 @@
 {
   "name": "@asamarts/alint",
-  "version": "0.5.10",
+  "version": "0.9.6",
   "description": "Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. This package downloads and wraps the platform-matched native alint binary.",
   "keywords": ["lint", "linter", "repository", "filename", "policy", "compliance"],
   "homepage": "https://github.com/asamarts/alint",

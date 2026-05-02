@@ -23,7 +23,8 @@ inputs:
   format:
     description: |
       Output format: `human`, `json`, `sarif`, `github` (inline PR annotations),
-      `github-actions` (alias for `github`). Defaults to `github`.
+      `github-actions` (alias for `github`), `markdown`, `junit`, `gitlab`,
+      `agent`. Defaults to `github`.
     required: false
     default: github
   fail-on-warning:

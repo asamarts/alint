@@ -371,30 +371,33 @@ alint/
 ├── crates/
 │   ├── alint/              binary entrypoint; `cargo install alint`
 │   ├── alint-core/         engine, walker, rule trait, config AST, errors
-│   ├── alint-dsl/          YAML config loader + schema validation
+│   ├── alint-dsl/          YAML config loader + schema validation + bundled rulesets
 │   ├── alint-rules/        built-in rule implementations
-│   ├── alint-output/       formatters (human, json, ...)
-│   └── alint-bench/        criterion micro-benches + seeded tree generator
-├── xtask/                  cargo-xtask helpers (bench-release driver)
+│   ├── alint-output/       formatters (human, json, sarif, github, markdown, junit, gitlab, agent)
+│   ├── alint-bench/        criterion micro-benches + seeded tree generator
+│   ├── alint-testkit/      shared test harness (treespec materializer, scenario runner, proptest strategies)
+│   └── alint-e2e/          end-to-end scenarios + coverage audits + cross-cutting invariant tests
+├── xtask/                  cargo-xtask helpers (bench-release driver, docs-export, publish-benches)
 ├── ci/                     self-hosted runner + per-job shell scripts
-├── schemas/v1/             JSON Schema for .alint.yml
+├── schemas/v1/             JSON Schema for .alint.yml + report shapes (mirrored under crates/alint-dsl/schemas/)
 ├── docs/
-│   ├── design/             architecture and roadmap
-│   └── benchmarks/         methodology and per-platform published numbers
+│   ├── design/             architecture, roadmap, per-cut design passes (v0.7, v0.9, ...)
+│   ├── development/        contributor docs (RULE-AUTHORING.md)
+│   └── benchmarks/         methodology + per-platform published numbers (micro/, macro/, investigations/, archive/)
 ├── install.sh              curl-pipeable platform-detecting installer
+├── action.yml              official GitHub Action (composite)
+├── npm/                    npm wrapper that downloads the platform-matched binary
+├── Dockerfile              distroless image; rebuilt per release
 ├── .alint.yml              dogfood config
 └── Cargo.toml              workspace manifest
 ```
 
 **Planned additions (see [ROADMAP.md](./ROADMAP.md)):**
 
-- `crates/alint-facts/` — language and license detectors
-- `crates/alint-plugin/` — command runner and WASM plugin host
-- `crates/alint-lsp/` — language-server implementation
-- `crates/alint-test/` — snapshot test harness for rule behaviors
-- `editors/` — VS Code, Zed, Helix extensions
-- `rulesets/` — bundled rulesets (embedded at build time; also published as raw YAML)
-- `xtask/` — benchmark harness and release tooling
+- `crates/alint-lsp/` — language-server implementation (v0.10)
+- `crates/alint-plugin/` — WASM plugin host (v0.11; the tier-1 `command` plugin already lives in `alint-rules` since v0.5.1)
+- `editors/` — VS Code, Zed, Helix extensions (paired with v0.10)
+- `crates/alint-facts/` — currently subsumed by `alint-core::facts`; promotion to its own crate is deferred until language and license detectors (PROPOSAL §4.6 `detect: linguist`, `detect: askalono`) actually land
 
 ### Publishing intent (crates.io)
 

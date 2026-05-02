@@ -1,6 +1,6 @@
 # `markdown_paths_resolve` rule kind
 
-Status: Design draft.
+Status: Implemented in v0.7.1 (`crates/alint-rules/src/markdown_paths_resolve.rs`).
 
 ## Problem
 

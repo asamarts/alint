@@ -1,20 +1,22 @@
 # v0.9 — Design pass
 
-Status: Working drafts, written 2026-04-30 after the v0.8 cut
-shipped (v0.8.2 is the latest tag; the v0.8.x test/bench
-foundation is what makes engine work safe to land here). Each
-file in this directory is a per-feature design that should be
-reviewed and revised before implementation starts.
+Status: v0.9 cut closed 2026-05-02 with v0.9.6. All four
+sub-themes shipped. The per-feature docs in this directory are
+kept as the design record — each one's `Status:` header points
+to the tag / commit / crate where it landed.
 
 **v0.9 was reopened on 2026-05-01** after the v0.9.4 cut closed.
 A scaling-profile investigation surfaced an O(D × N) hot spot
 in `for_each_dir` cross-file dispatch that produced a +28-37%
 1M S3 regression vs v0.5.6. The fix (lazy path-index on
 `FileIndex` + literal-path fast paths) drove a 65× / 108×
-speedup at 1M S3 and ships as v0.9.5. Sub-phases .6 through .9
-codify the test/coverage floor that lets future engine work
-land without that class of regression slipping by; see
-[`coverage-and-dogfood.md`](./coverage-and-dogfood.md).
+speedup at 1M S3 and shipped as v0.9.5. Sub-phases .5.5 –
+.5.reorg codify the test/coverage/dogfood floor that lets
+future engine work land without that class of regression
+slipping by; see [`coverage-and-dogfood.md`](./coverage-and-dogfood.md).
+v0.9.6 then closed the cut with the `scope_filter:` per-file
+gate plus the bundled-ecosystem-ruleset migration —
+[`scope-filter.md`](./scope-filter.md).
 
 ## What v0.9 ships
 
@@ -27,8 +29,9 @@ doesn't add user-visible rule kinds, formatters, or subcommands
 |---|---|
 | [`parallel_walker.md`](./parallel_walker.md) ✅ | Replace the sequential `WalkBuilder::build` with `WalkBuilder::build_parallel` + a deterministic post-sort. *(Shipped v0.9.1.)* |
 | [`memory_pass.md`](./memory_pass.md) ✅ (partial) | `Arc<Path>` / `Arc<str>` / `Cow<'static, str>` on the Violation / RuleResult hot path. *(Shipped v0.9.2; per-rule byte-slice scanning + bounded prefix/suffix reads moved to v0.9.3 — see the doc for context.)* |
-| [`dispatch_flip.md`](./dispatch_flip.md) ✅ (partial) | Per-file rules run under a file-major outer loop via a new `PerFileRule` sub-trait; cross-file rules (`requires_full_index() == true`) keep the rule-major path. *(Shipped v0.9.3 with engine restructure + 8-rule reference migration; remaining ~22 content rules migrate in v0.9.4.)* |
-| [`coverage-and-dogfood.md`](./coverage-and-dogfood.md) | v0.9.5 cross-file dispatch fast paths *(code merged)*, v0.9.6 coverage audits, v0.9.7 coverage scenarios, v0.9.8 bench-scale extension (S6/S7/S8), v0.9.9 alint self-dogfooding. |
+| [`dispatch_flip.md`](./dispatch_flip.md) ✅ | Per-file rules run under a file-major outer loop via a new `PerFileRule` sub-trait; cross-file rules (`requires_full_index() == true`) keep the rule-major path. *(Shipped v0.9.3 with engine restructure + 8-rule reference migration; remaining content rules migrated in v0.9.4.)* |
+| [`coverage-and-dogfood.md`](./coverage-and-dogfood.md) ✅ | v0.9.5.5 cross-file dispatch fast paths, v0.9.5.6 coverage audits, v0.9.5.7 coverage scenarios, v0.9.5.8 bench-scale S6/S7/S8, v0.9.5.9 RULE-AUTHORING.md, v0.9.5.reorg bench layout reorganisation. *(Shipped across v0.9.5.5 – v0.9.5.reorg.)* |
+| [`scope-filter.md`](./scope-filter.md) ✅ | `scope_filter: { has_ancestor: <manifest> }` per-file gate + bundled-ecosystem-ruleset migration (`is_*` → `has_*` rename + per-language `has_*` rulesets). *(Shipped v0.9.6.)* |
 
 ## Cross-cutting decisions
 

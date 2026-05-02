@@ -696,6 +696,7 @@ mod docs_paths {
     pub const RULES_DOC: &str = "docs/rules.md";
     pub const ARCHITECTURE_DOC: &str = "docs/design/ARCHITECTURE.md";
     pub const ROADMAP_DOC: &str = "docs/design/ROADMAP.md";
+    pub const RULE_AUTHORING_DOC: &str = "docs/development/RULE-AUTHORING.md";
     pub const CHANGELOG: &str = "CHANGELOG.md";
     pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
     pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
@@ -744,6 +745,11 @@ fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
         &workspace.join(docs_paths::ROADMAP_DOC),
         &target_dir.join("about/roadmap.md"),
         Some("Roadmap"),
+    )?;
+    copy_one(
+        &workspace.join(docs_paths::RULE_AUTHORING_DOC),
+        &target_dir.join("development/rule-authoring.md"),
+        Some("Rule authoring"),
     )?;
     // Rule reference: slice docs/rules.md by H2 (= family) →
     // H3 (= rule kind) into one page per kind, plus per-family

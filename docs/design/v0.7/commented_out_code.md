@@ -1,6 +1,6 @@
 # `commented_out_code` rule kind
 
-Status: Design draft.
+Status: Implemented in v0.7.2 (`crates/alint-rules/src/commented_out_code.rs`).
 
 ## Problem
 
