@@ -6,20 +6,12 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.9.4** (2026-04-30). Mechanical follow-
-up to v0.9.3: 16 of the remaining ~22 per-file content
-rules opt into the file-major dispatch path. After this
-cut, every per-file rule that reads file content benefits
-from v0.9.3's read coalescing whenever multiple content
-rules share a scope. `file_max_size` / `file_min_size`
-deliberately stay rule-major (metadata-only, no read to
-coalesce); `json_schema_passes` stays rule-major because
-its repository-level error path doesn't fit per-file
-dispatch. No rule logic changes; all 8 output formatters
-produce byte-identical output to v0.9.3. See
+**Latest release: v0.9.6** (2026-05-02). Closes the v0.9
+cut with the `scope_filter:` per-file gate (see the v0.9.6
+section below). See
 [CHANGELOG.md](../../CHANGELOG.md) and
-`docs/benchmarks/micro/results/linux-x86_64/v0.9.4/README.md` for
-captured numbers.
+[`docs/benchmarks/macro/results/linux-x86_64/v0.9.6/`](../benchmarks/macro/results/linux-x86_64/v0.9.6/)
+for captured numbers.
 
 **v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs
