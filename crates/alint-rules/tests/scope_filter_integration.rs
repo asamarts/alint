@@ -28,8 +28,8 @@ fn engine_from_yaml(yaml: &str) -> Engine {
 }
 
 /// Run the engine over `root` and return the set of relative
-/// violation paths (as strings, sorted). Empty when no rule
-/// fired anywhere in the tree.
+/// violation paths (as strings, sorted, forward-slash-normalised
+/// so the test asserts the same shape on Windows + Unix).
 fn run_and_collect_paths(engine: &Engine, root: &Path) -> Vec<String> {
     let opts = WalkOptions::default();
     let index = walk(root, &opts).unwrap();
@@ -38,7 +38,11 @@ fn run_and_collect_paths(engine: &Engine, root: &Path) -> Vec<String> {
         .results
         .iter()
         .flat_map(|r| r.violations.iter())
-        .filter_map(|v| v.path.as_deref().map(|p| p.display().to_string()))
+        .filter_map(|v| {
+            v.path
+                .as_deref()
+                .map(|p| p.display().to_string().replace('\\', "/"))
+        })
         .collect();
     paths.sort();
     paths
