@@ -6,22 +6,25 @@
 #     extends:
 #       - alint://bundled/node@v1
 #
-# Every rule is gated with `when: facts.is_node`, so it's safe to
-# extend from a polyglot repo — rules don't fire unless
-# `package.json` is present. Override `is_node` with your own
-# `facts:` block if you need a different heuristic (e.g. detect
-# `deno.json` or `bun.lock`).
+# Gated with `when: facts.has_node` (true if any `package.json`
+# exists anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: package.json }` on per-file
+# content rules so they only apply to files inside a Node package
+# — useful in polyglot monorepos where Node packages sit
+# alongside Rust / Python / Go subdirectories. Override
+# `has_node` with your own `facts:` block if you need a different
+# heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 version: 1
 
 facts:
-  - id: is_node
-    any_file_exists: [package.json]
+  - id: has_node
+    any_file_exists: [package.json, "**/package.json"]
 
 rules:
   # --- Manifest + lockfiles -----------------------------------------
   - id: node-package-json-exists
-    when: facts.is_node
+    when: facts.has_node
     kind: file_exists
     paths: package.json
     root_only: true
@@ -29,7 +32,7 @@ rules:
     message: "Node project: package.json at the root is required."
 
   - id: node-has-lockfile
-    when: facts.is_node
+    when: facts.has_node
     # Accept any of the four common lockfiles — npm, pnpm, yarn,
     # bun. At least one should be committed for reproducible installs.
     kind: file_exists
@@ -46,14 +49,14 @@ rules:
 
   # --- Build artefacts must not be tracked --------------------------
   - id: node-no-tracked-node-modules
-    when: facts.is_node
+    when: facts.has_node
     kind: dir_absent
     paths: "**/node_modules"
     level: error
     message: "`node_modules/` must not be committed; add it to .gitignore."
 
   - id: node-no-tracked-dist
-    when: facts.is_node
+    when: facts.has_node
     # Common build-output directory names. Users with legitimate
     # reasons to ship a built `dist/` (e.g. a typed-package
     # preview) can set this rule's `level: off`.
@@ -67,7 +70,7 @@ rules:
 
   # --- Node version pinning ----------------------------------------
   - id: node-engine-or-nvmrc
-    when: facts.is_node
+    when: facts.has_node
     kind: file_exists
     paths: [".nvmrc", ".node-version", ".tool-versions"]
     root_only: true
@@ -80,25 +83,31 @@ rules:
 
   # --- Source-file hygiene on JS / TS sources -----------------------
   - id: node-sources-final-newline
-    when: facts.is_node
+    when: facts.has_node
     kind: final_newline
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: info
     fix:
       file_append_final_newline: {}
 
   - id: node-sources-no-trailing-whitespace
-    when: facts.is_node
+    when: facts.has_node
     kind: no_trailing_whitespace
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: info
     fix:
       file_trim_trailing_whitespace: {}
 
   - id: node-sources-no-bidi
-    when: facts.is_node
+    when: facts.has_node
     kind: no_bidi_controls
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources."
     policy_url: "https://trojansource.codes/"

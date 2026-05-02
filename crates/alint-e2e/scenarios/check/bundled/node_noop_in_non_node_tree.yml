@@ -1,7 +1,7 @@
 name: alint://bundled/node stays quiet in a non-Node tree
 tags: [check, extends, bundled, node, passing]
 
-# Every node@v1 rule is gated `when: facts.is_node`, so this
+# Every node@v1 rule is gated `when: facts.has_node`, so this
 # ruleset is a safe no-op when package.json is absent.
 given:
   tree:
