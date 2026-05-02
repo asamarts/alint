@@ -7,8 +7,8 @@ hardware contract and why cross-machine comparisons need like-for-like.
 
 | Tag | Date | 1M S3 full | 1M S3 changed | 100k S3 full | 10k S3 full | Headline change |
 |---|---|---:|---:|---:|---:|---|
-| **v0.9.6** | 2026-05-02 | — | — | 11.20 s | 316 ms | `scope_filter:` primitive + bundled-ruleset migration; new S9 = 688 ms at 100k. |
-| v0.9.5 | 2026-05-01 | 11.194 s ± 0.154 | 6.728 s ± 0.059 | 11.20 s | 316 ms | Cross-file dispatch fast paths (path-index on FileIndex) — 65× / 108× over v0.9.4. |
+| **v0.9.6** | 2026-05-02 | — | — | **1.135 s ± 0.023** | **125 ms ± 11** | `scope_filter:` primitive + bundled-ruleset migration; new S9 = 738 ms at 100k. |
+| v0.9.5 | 2026-05-01 | 11.194 s ± 0.154 | 6.728 s ± 0.059 | 11.20 s¹ | 316 ms¹ | Cross-file dispatch fast paths (path-index on FileIndex) — 65× / 108× over v0.9.4. |
 | v0.9.4 | 2026-04-30 | 731.856 s ± 5.349 | 724.362 s ± 2.132 | 11.20 s | 316 ms | Content-rule mechanical migration (16 rules to PerFileRule). |
 | v0.9.3 | 2026-04-30 | — | — | 11.39 s | 355 ms | Per-file dispatch flip + 8-rule reference migration. |
 | v0.9.2 | 2026-04-30 | — | — | 11.39 s | 355 ms | Memory-footprint pass (Arc<Path> / Cow types). |
@@ -23,6 +23,8 @@ Data sources:
 - 1M cells: [`macro/results/linux-x86_64/<tag>/1m/results.md`](macro/results/linux-x86_64/)
 - 100k / 10k cells: same dir, `<size>/results.md`
 - v0.9.5 cells: [`macro/results/linux-x86_64/v0.9.5/`](macro/results/linux-x86_64/v0.9.5/) — captured `--warmup 1 --runs 3` (others used `--warmup 3 --runs 10`); the smaller-N runs are honest about per-iteration cost since the path-index fix dropped wall time below where 10 measurements add a meaningful signal-to-noise.
+- ¹ v0.9.5's 100k / 10k S3 cells are pre-v0.9.5-path-index-fix carry-overs from v0.9.4 (re-running them at v0.9.5 was deferred since the 1M cells captured the headline win). v0.9.6 is the first publish-grade re-capture at 100k / 10k after the path-index fix landed: 100k S3 = 1.135 s (was 11.20 s pre-fix, ≈ 10× win); 10k S3 = 125 ms (was 316 ms pre-fix, ≈ 2.5× win).
+- v0.9.6 cells: [`macro/results/linux-x86_64/v0.9.6/`](macro/results/linux-x86_64/v0.9.6/) — full S1–S9 matrix at 10k + 100k, `--warmup 2 --runs 5` (100k S6/S7/S8/S9 re-captured at `--warmup 3 --runs 7` after concurrent system load tripped CV thresholds on the first pass).
 
 ## How to add a row
 
