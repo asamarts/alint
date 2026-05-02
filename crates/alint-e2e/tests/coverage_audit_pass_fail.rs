@@ -178,6 +178,12 @@ fn canonical(kind: &str) -> &str {
         .map_or(kind, |(_, canon)| *canon)
 }
 
+// 101 lines — the test enumerates every registered rule kind,
+// classifies each as having a pass scenario / fail scenario /
+// both / neither, and emits a structured failure report when
+// gaps exist. Splitting would obscure the single linear
+// classification loop. Two lines over the threshold; allow.
+#[allow(clippy::too_many_lines)]
 #[test]
 fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
     let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");

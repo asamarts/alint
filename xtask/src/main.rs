@@ -216,7 +216,7 @@ fn main() -> Result<()> {
             seed,
             out,
         } => gen_fixture(files, depth, seed, out),
-        Commands::GenMonorepo { size, seed, out } => gen_monorepo(&size, seed, out),
+        Commands::GenMonorepo { size, seed, out } => gen_monorepo(&size, seed, &out),
         Commands::PublishBenches { from, to, trim } => publish_benches(&from, to.as_deref(), trim),
         Commands::BenchCompare {
             before,
@@ -329,7 +329,7 @@ fn gen_fixture(files: usize, depth: usize, seed: u64, out: Option<PathBuf>) -> R
     Ok(())
 }
 
-fn gen_monorepo(size: &str, seed: u64, out: PathBuf) -> Result<()> {
+fn gen_monorepo(size: &str, seed: u64, out: &Path) -> Result<()> {
     let (packages, files_per_package, total) = match size {
         "1k" => (50, 18, 1_000),
         "10k" => (200, 48, 10_000),
@@ -344,8 +344,8 @@ fn gen_monorepo(size: &str, seed: u64, out: PathBuf) -> Result<()> {
         );
     }
     let tree = alint_bench::tree::generate_monorepo(packages, files_per_package, seed)?;
-    fs::create_dir_all(&out)?;
-    copy_tree(tree.root(), &out)?;
+    fs::create_dir_all(out)?;
+    copy_tree(tree.root(), out)?;
     println!(
         "generated {total} files (packages={packages}, files_per_package={files_per_package}) under {}",
         out.display(),
@@ -370,22 +370,21 @@ fn publish_benches(from: &Path, to: Option<&Path>, trim: bool) -> Result<()> {
     }
     let workspace = workspace_root_from_xtask()?;
     let dest_owned: PathBuf;
-    let dest = match to {
-        Some(p) => p,
-        None => {
-            let arch = std::env::consts::ARCH;
-            let os = std::env::consts::OS;
-            let version = workspace_version_from_manifest(&workspace)?;
-            dest_owned = workspace
-                .join("docs")
-                .join("benchmarks")
-                .join("micro")
-                .join("results")
-                .join(format!("{os}-{arch}"))
-                .join(format!("v{version}"))
-                .join("criterion");
-            &dest_owned
-        }
+    let dest = if let Some(p) = to {
+        p
+    } else {
+        let arch = std::env::consts::ARCH;
+        let os = std::env::consts::OS;
+        let version = workspace_version_from_manifest(&workspace)?;
+        dest_owned = workspace
+            .join("docs")
+            .join("benchmarks")
+            .join("micro")
+            .join("results")
+            .join(format!("{os}-{arch}"))
+            .join(format!("v{version}"))
+            .join("criterion");
+        &dest_owned
     };
     if dest.exists() {
         bail!(
@@ -405,8 +404,8 @@ fn publish_benches(from: &Path, to: Option<&Path>, trim: bool) -> Result<()> {
 }
 
 /// Find the workspace root by walking up from the xtask binary's
-/// CARGO_MANIFEST_DIR. xtask itself lives at `<workspace>/xtask`,
-/// so the parent of CARGO_MANIFEST_DIR IS the workspace root.
+/// `CARGO_MANIFEST_DIR`. xtask itself lives at `<workspace>/xtask`,
+/// so the parent of `CARGO_MANIFEST_DIR` IS the workspace root.
 fn workspace_root_from_xtask() -> Result<PathBuf> {
     let xtask_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     xtask_manifest

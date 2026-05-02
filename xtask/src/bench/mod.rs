@@ -306,6 +306,16 @@ pub struct ReportArgs {
 /// Top-level entry called from `main.rs`. Builds the alint
 /// binary, materialises trees, drives hyperfine, and writes
 /// the report.
+///
+/// 137 lines spanning the (size, scenario, mode) matrix loop
+/// — splitting would mean threading a 9-arg context tuple
+/// through helpers that share lifetimes with the args /
+/// output dir / fingerprint. Reads better top-to-bottom as
+/// one phased pipeline: `--quick` collapse → out-dir setup
+/// → tools filter → per-(size, scenario) tree generation →
+/// per-cell hyperfine → per-version aggregation → report
+/// emission. Same call as the `Engine::run` allow elsewhere.
+#[allow(clippy::too_many_lines)]
 pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
     if args.quick {
         // `--quick` collapses the matrix to a smoke test.
