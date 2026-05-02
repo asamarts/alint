@@ -81,7 +81,7 @@ fn build_index(n: usize) -> FileIndex {
             size,
         });
     }
-    FileIndex { entries }
+    FileIndex::from_entries(entries)
 }
 
 fn bench_rule_engine(c: &mut Criterion) {

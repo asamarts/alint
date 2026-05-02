@@ -35,7 +35,7 @@ fn build_paired_index(n_modules: usize) -> FileIndex {
             });
         }
     }
-    FileIndex { entries }
+    FileIndex::from_entries(entries)
 }
 
 fn build_workspace_index(n_packages: usize) -> FileIndex {
@@ -66,7 +66,7 @@ fn build_workspace_index(n_packages: usize) -> FileIndex {
             });
         }
     }
-    FileIndex { entries }
+    FileIndex::from_entries(entries)
 }
 
 fn build_unique_by_index(n_files: usize) -> FileIndex {
@@ -80,7 +80,7 @@ fn build_unique_by_index(n_files: usize) -> FileIndex {
             size: 256,
         });
     }
-    FileIndex { entries }
+    FileIndex::from_entries(entries)
 }
 
 fn build_engine(yaml: &str) -> Engine {
