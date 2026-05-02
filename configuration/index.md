@@ -108,7 +108,7 @@ Properties of the repo evaluated once per run. Used in `when:` clauses to gate r
 
 ```yaml
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: [Cargo.toml]
   - id: n_rs_files
     count_files: "**/*.rs"
@@ -117,7 +117,7 @@ facts:
 
 rules:
   - id: rust-snake-case
-    when: facts.is_rust and facts.n_rs_files > 5
+    when: facts.has_rust and facts.n_rs_files > 5
     kind: filename_case
     paths: "src/**/*.rs"
     case: snake
@@ -157,9 +157,29 @@ Common per-rule fields:
 - **`level`** *(required)* — `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`** — glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
 - **`when`** — bounded expression gating the rule on facts / vars.
+- **`scope_filter`** — closest-ancestor manifest scoping for per-file rules (see below). Cross-file rules reject this field at build time.
 - **`fix`** — fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`** — override the rule's display message.
 - **`policy_url`** — link surfaced when the rule fires.
+
+#### `scope_filter` *(per-file rules, v0.9.6+)*
+
+Narrows a per-file rule to files that have a specified manifest somewhere in their ancestor directory chain. The engine walks `Path::parent()` upward from the file (the file's own directory counts as an ancestor) and consults the file index at each step; first-match-wins on the upward walk gates the rule per-file. Combine with the rule's existing `paths:` — both must match for the rule to fire.
+
+```yaml
+rules:
+  - id: rust-sources-no-bidi
+    when: facts.has_rust
+    kind: no_bidi_controls
+    paths: "**/*.rs"
+    scope_filter:
+      has_ancestor: Cargo.toml      # single string OR a list
+    level: error
+```
+
+`has_ancestor:` accepts a literal filename or a list of filenames; path separators and glob metacharacters are rejected at build time. The bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) use this to scope per-file content rules to their ecosystem's package subtrees in polyglot monorepos.
+
+Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field — gate them via the rule's `paths:` glob instead.
 
 ### `fix_size_limit`
 

@@ -11,9 +11,13 @@ extends:
   - alint://bundled/java@v1
 ```
 
-Every rule is gated with `when: facts.is_java`, so it's safe
-to extend from a polyglot repo — rules don't fire unless at
-least one Java build manifest is present at the root.
+Gated with `when: facts.has_java` (true if any Java build
+manifest exists anywhere in the tree) plus a per-rule
+`scope_filter: { has_ancestor: [pom.xml, build.gradle,
+build.gradle.kts] }` on per-file content rules so they only
+apply to files inside a Java module — useful in polyglot
+monorepos where Java modules sit alongside Rust / Node /
+Python subdirectories.
 
 Build outputs (`target/` for Maven, `build/` for Gradle) are
 checked with `git_tracked_only: true` so a developer's
@@ -27,7 +31,7 @@ about.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 - **policy**: <https://maven.apache.org/guides/introduction/introduction-to-the-pom.html>
 
 > Java project: `pom.xml` (Maven) or `build.gradle` / `build.gradle.kts` (Gradle) at the root is required.
@@ -36,7 +40,7 @@ about.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 - **policy**: <https://docs.gradle.org/current/userguide/gradle_wrapper.html>
 
 > A committed build wrapper (`mvnw` for Maven, `gradlew` for Gradle) lets contributors and CI build the project without pre-installing the right Maven / Gradle version.
@@ -45,7 +49,7 @@ about.
 
 - **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 > Maven's `target/` is a build directory and shouldn't be committed. Add `target/` to your `.gitignore`.
 
@@ -53,7 +57,7 @@ about.
 
 - **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 > Gradle's `build/` is a build directory and shouldn't be committed. Add `build/` to your `.gitignore`.
 
@@ -61,7 +65,7 @@ about.
 
 - **kind**: [`file_absent`](/docs/rules/existence/file_absent/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 > Compiled `.class` files don't belong in version control. Build them from the `.java` sources instead.
 
@@ -69,7 +73,7 @@ about.
 
 - **kind**: [`filename_case`](/docs/rules/naming/filename_case/)
 - **level**: `warning`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 > Java filenames should match the public class name (PascalCase).
 
@@ -77,19 +81,19 @@ about.
 
 - **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 ### `java-sources-no-trailing-whitespace`
 
 - **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 ### `java-sources-no-bidi`
 
 - **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 - **policy**: <https://trojansource.codes/>
 
 > Trojan Source (CVE-2021-42574): bidi override chars in Java sources are rejected.
@@ -98,7 +102,7 @@ about.
 
 - **kind**: [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/)
 - **level**: `error`
-- **when**: `facts.is_java`
+- **when**: `facts.has_java`
 
 > Zero-width characters in Java sources are rejected (review hazard).
 
@@ -115,9 +119,13 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/java.
 #     extends:
 #       - alint://bundled/java@v1
 #
-# Every rule is gated with `when: facts.is_java`, so it's safe
-# to extend from a polyglot repo — rules don't fire unless at
-# least one Java build manifest is present at the root.
+# Gated with `when: facts.has_java` (true if any Java build
+# manifest exists anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: [pom.xml, build.gradle,
+# build.gradle.kts] }` on per-file content rules so they only
+# apply to files inside a Java module — useful in polyglot
+# monorepos where Java modules sit alongside Rust / Node /
+# Python subdirectories.
 #
 # Build outputs (`target/` for Maven, `build/` for Gradle) are
 # checked with `git_tracked_only: true` so a developer's
@@ -128,18 +136,23 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/java.
 version: 1
 
 facts:
-  - id: is_java
+  - id: has_java
     any_file_exists:
       - pom.xml
+      - "**/pom.xml"
       - build.gradle
+      - "**/build.gradle"
       - build.gradle.kts
+      - "**/build.gradle.kts"
       - settings.gradle
+      - "**/settings.gradle"
       - settings.gradle.kts
+      - "**/settings.gradle.kts"
 
 rules:
   # --- Manifest -----------------------------------------------------
   - id: java-manifest-exists
-    when: facts.is_java
+    when: facts.has_java
     # Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either
     # is fine; mixed setups are unusual but valid.
     kind: file_exists
@@ -156,7 +169,7 @@ rules:
 
   # --- Wrapper scripts for reproducible builds ----------------------
   - id: java-build-wrapper-committed
-    when: facts.is_java
+    when: facts.has_java
     # `mvnw` (Maven Wrapper) or `gradlew` (Gradle Wrapper) make
     # CI builds and contributor onboarding deterministic. Either
     # script suffices.
@@ -178,7 +191,7 @@ rules:
   # `target/` (gitignored, no tracked content) is silently OK.
   # Same shape for Gradle's `build/`.
   - id: java-no-tracked-target
-    when: facts.is_java
+    when: facts.has_java
     kind: dir_absent
     paths: "**/target"
     git_tracked_only: true
@@ -188,7 +201,7 @@ rules:
       committed. Add `target/` to your `.gitignore`.
 
   - id: java-no-tracked-build
-    when: facts.is_java
+    when: facts.has_java
     kind: dir_absent
     paths: "**/build"
     git_tracked_only: true
@@ -198,7 +211,7 @@ rules:
       committed. Add `build/` to your `.gitignore`.
 
   - id: java-no-class-files
-    when: facts.is_java
+    when: facts.has_java
     kind: file_absent
     paths: "**/*.class"
     git_tracked_only: true
@@ -209,7 +222,7 @@ rules:
 
   # --- Source-file conventions --------------------------------------
   - id: java-sources-pascal-case
-    when: facts.is_java
+    when: facts.has_java
     # Java's class-file convention: every public top-level type
     # lives in a file named after it, in PascalCase. Some
     # repositories ship `package-info.java` / `module-info.java`
@@ -226,34 +239,42 @@ rules:
     message: "Java filenames should match the public class name (PascalCase)."
 
   - id: java-sources-final-newline
-    when: facts.is_java
+    when: facts.has_java
     kind: final_newline
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: info
     fix:
       file_append_final_newline: {}
 
   - id: java-sources-no-trailing-whitespace
-    when: facts.is_java
+    when: facts.has_java
     kind: no_trailing_whitespace
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: info
     fix:
       file_trim_trailing_whitespace: {}
 
   # --- Trojan Source defense on Java sources ------------------------
   - id: java-sources-no-bidi
-    when: facts.is_java
+    when: facts.has_java
     kind: no_bidi_controls
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars in Java sources are rejected."
     policy_url: "https://trojansource.codes/"
 
   - id: java-sources-no-zero-width
-    when: facts.is_java
+    when: facts.has_java
     kind: no_zero_width_chars
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: error
     message: "Zero-width characters in Java sources are rejected (review hazard)."
 ```

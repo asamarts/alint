@@ -8,6 +8,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-05-02
+
+Closes the v0.9 cut with the `scope_filter:` primitive — closest-
+ancestor manifest scoping for per-file rules, designed to make the
+bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`,
+`go@v1`, `java@v1`) correctly handle nested packages in polyglot
+monorepos.
+
+### Added
+
+- **`scope_filter: { has_ancestor: <list> }` rule-schema field**
+  (per-file rules only). The engine walks `Path::parent()` upward
+  from the file and consults the v0.9.5 path-index at each
+  directory; first-match-wins on the upward walk gates the rule
+  per-file. The file's own directory counts as an ancestor.
+  Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.)
+  reject `scope_filter:` at build time. Design:
+  [`docs/design/v0.9/scope-filter.md`](docs/design/v0.9/scope-filter.md).
+- **`alint_core::ScopeFilter` + `ScopeFilterSpec` runtime types,
+  `Rule::scope_filter()` trait method** (default `None`). Net
+  additive — rules that don't override the trait method see no
+  behaviour change. New `alint_core::reject_scope_filter_on_cross_file`
+  helper + 11 cross-file rule build-time guards.
+- **Bench-scale S9 — nested polyglot monorepo** scenario.
+  `extends: rust + node + python` over `crates/` + `packages/` +
+  `apps/` ecosystem subtrees; new
+  `alint_bench::tree::generate_nested_polyglot_monorepo` helper.
+  100k S9 = 688 ms ± 13 ms on the published baseline machine.
+- **Rule-authoring docs**: `scope_filter:` section in
+  [`RULE-AUTHORING.md`](docs/development/RULE-AUTHORING.md) with
+  the bundled-ruleset migration recipe.
+
+### Changed
+
+- **Bundled ecosystem rulesets renamed `is_*` → `has_*` for the
+  ecosystem facts.** Five rulesets:
+  `is_rust` → `has_rust`, `is_node` → `has_node`,
+  `is_python` → `has_python`, `is_go` → `has_go`,
+  `is_java` → `has_java`. The new name reads better with the
+  broadened heuristic (`has_<ecosystem>` is true if any
+  ecosystem manifest exists *anywhere* in the tree, not just at
+  the root). No backwards-compat alias period — repos that
+  override these facts in their own `facts:` blocks need to
+  update the identifier; tree-level gates that referenced the
+  fact name (`when: facts.is_rust` etc.) need the same update.
+- **Bundled ecosystem facts broadened with `**/<manifest>`
+  patterns** — `[Cargo.toml]` → `[Cargo.toml, "**/Cargo.toml"]`
+  and analogously for the other four. Polyglot monorepos with
+  no root manifest now correctly fire the ruleset.
+- **Per-file content rules in the five ecosystem rulesets get
+  `scope_filter:` added** (e.g.
+  `scope_filter: { has_ancestor: Cargo.toml }` on
+  `rust-sources-final-newline`). Filename-based rules
+  (`filename_case`, etc.) keep their existing `paths:` globs;
+  `scope_filter:` is supported on `PerFileRule`-trait rules
+  only.
+
+### Performance
+
+`scope_filter:` adds ≤ 150 ns per (file × rule) ancestor-walk
+step on the v0.9.5 path-index — sub-millisecond at K100 across
+five rules. Same-machine pre/post measurement on the engine
+commit (`7b080a0`) shows the null-default `Rule::scope_filter()`
+trait method is unmeasurable on rules that don't override it.
+See [`docs/benchmarks/investigations/2026-05-scope-filter-baseline-drift/`](docs/benchmarks/investigations/2026-05-scope-filter-baseline-drift/)
+for the dispositive A/B and the lesson on machine-state drift in
+cross-version bench comparisons.
+
 ## [0.9.5] — 2026-05-01
 
 Reopens v0.9 with cross-file dispatch fast paths, the

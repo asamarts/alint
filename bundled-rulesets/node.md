@@ -11,11 +11,14 @@ extends:
   - alint://bundled/node@v1
 ```
 
-Every rule is gated with `when: facts.is_node`, so it's safe to
-extend from a polyglot repo — rules don't fire unless
-`package.json` is present. Override `is_node` with your own
-`facts:` block if you need a different heuristic (e.g. detect
-`deno.json` or `bun.lock`).
+Gated with `when: facts.has_node` (true if any `package.json`
+exists anywhere in the tree) plus a per-rule
+`scope_filter: { has_ancestor: package.json }` on per-file
+content rules so they only apply to files inside a Node package
+— useful in polyglot monorepos where Node packages sit
+alongside Rust / Python / Go subdirectories. Override
+`has_node` with your own `facts:` block if you need a different
+heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 ## Rules
 
@@ -23,7 +26,7 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 > Node project: package.json at the root is required.
 
@@ -31,7 +34,7 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 - **policy**: <https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json>
 
 > A lockfile should be committed (package-lock.json / pnpm-lock.yaml / yarn.lock / bun.lock).
@@ -40,7 +43,7 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `error`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 > `node_modules/` must not be committed; add it to .gitignore.
 
@@ -48,7 +51,7 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `info`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 > Build output directories are usually generated and shouldn't be tracked. Override with `level: off` if this one is intentionally shipped.
 
@@ -56,7 +59,7 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `info`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 > Pin the Node.js version so local and CI installs match (`.nvmrc`, `.node-version`, or `.tool-versions`). An `engines.node` field in package.json is an alternative but is not detected by this rule.
 
@@ -64,19 +67,19 @@ extend from a polyglot repo — rules don't fire unless
 
 - **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 ### `node-sources-no-trailing-whitespace`
 
 - **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 
 ### `node-sources-no-bidi`
 
 - **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
-- **when**: `facts.is_node`
+- **when**: `facts.has_node`
 - **policy**: <https://trojansource.codes/>
 
 > Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources.
@@ -94,22 +97,25 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/node.
 #     extends:
 #       - alint://bundled/node@v1
 #
-# Every rule is gated with `when: facts.is_node`, so it's safe to
-# extend from a polyglot repo — rules don't fire unless
-# `package.json` is present. Override `is_node` with your own
-# `facts:` block if you need a different heuristic (e.g. detect
-# `deno.json` or `bun.lock`).
+# Gated with `when: facts.has_node` (true if any `package.json`
+# exists anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: package.json }` on per-file
+# content rules so they only apply to files inside a Node package
+# — useful in polyglot monorepos where Node packages sit
+# alongside Rust / Python / Go subdirectories. Override
+# `has_node` with your own `facts:` block if you need a different
+# heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 version: 1
 
 facts:
-  - id: is_node
-    any_file_exists: [package.json]
+  - id: has_node
+    any_file_exists: [package.json, "**/package.json"]
 
 rules:
   # --- Manifest + lockfiles -----------------------------------------
   - id: node-package-json-exists
-    when: facts.is_node
+    when: facts.has_node
     kind: file_exists
     paths: package.json
     root_only: true
@@ -117,7 +123,7 @@ rules:
     message: "Node project: package.json at the root is required."
 
   - id: node-has-lockfile
-    when: facts.is_node
+    when: facts.has_node
     # Accept any of the four common lockfiles — npm, pnpm, yarn,
     # bun. At least one should be committed for reproducible installs.
     kind: file_exists
@@ -134,14 +140,14 @@ rules:
 
   # --- Build artefacts must not be tracked --------------------------
   - id: node-no-tracked-node-modules
-    when: facts.is_node
+    when: facts.has_node
     kind: dir_absent
     paths: "**/node_modules"
     level: error
     message: "`node_modules/` must not be committed; add it to .gitignore."
 
   - id: node-no-tracked-dist
-    when: facts.is_node
+    when: facts.has_node
     # Common build-output directory names. Users with legitimate
     # reasons to ship a built `dist/` (e.g. a typed-package
     # preview) can set this rule's `level: off`.
@@ -155,7 +161,7 @@ rules:
 
   # --- Node version pinning ----------------------------------------
   - id: node-engine-or-nvmrc
-    when: facts.is_node
+    when: facts.has_node
     kind: file_exists
     paths: [".nvmrc", ".node-version", ".tool-versions"]
     root_only: true
@@ -168,25 +174,31 @@ rules:
 
   # --- Source-file hygiene on JS / TS sources -----------------------
   - id: node-sources-final-newline
-    when: facts.is_node
+    when: facts.has_node
     kind: final_newline
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: info
     fix:
       file_append_final_newline: {}
 
   - id: node-sources-no-trailing-whitespace
-    when: facts.is_node
+    when: facts.has_node
     kind: no_trailing_whitespace
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: info
     fix:
       file_trim_trailing_whitespace: {}
 
   - id: node-sources-no-bidi
-    when: facts.is_node
+    when: facts.has_node
     kind: no_bidi_controls
     paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    scope_filter:
+      has_ancestor: package.json
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources."
     policy_url: "https://trojansource.codes/"
