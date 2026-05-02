@@ -1,6 +1,6 @@
 version: 1
 facts:
-  - id: is_go
+  - id: has_go
     any_file_exists: [go.mod]
   - id: has_python
     any_file_exists: [pyproject.toml]

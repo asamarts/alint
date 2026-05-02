@@ -1,4 +1,4 @@
-name: alint://bundled/go - every rule is silent when facts.is_go is false
+name: alint://bundled/go - every rule is silent when facts.has_go is false
 tags: [check, extends, bundled, go]
 
 given:
