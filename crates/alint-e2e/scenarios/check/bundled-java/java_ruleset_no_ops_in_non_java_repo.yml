@@ -1,4 +1,4 @@
-name: alint://bundled/java - every rule is silent when facts.is_java is false
+name: alint://bundled/java - every rule is silent when facts.has_java is false
 tags: [check, extends, bundled, java]
 
 given:

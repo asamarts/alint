@@ -6,9 +6,13 @@
 #     extends:
 #       - alint://bundled/java@v1
 #
-# Every rule is gated with `when: facts.is_java`, so it's safe
-# to extend from a polyglot repo — rules don't fire unless at
-# least one Java build manifest is present at the root.
+# Gated with `when: facts.has_java` (true if any Java build
+# manifest exists anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: [pom.xml, build.gradle,
+# build.gradle.kts] }` on per-file content rules so they only
+# apply to files inside a Java module — useful in polyglot
+# monorepos where Java modules sit alongside Rust / Node /
+# Python subdirectories.
 #
 # Build outputs (`target/` for Maven, `build/` for Gradle) are
 # checked with `git_tracked_only: true` so a developer's
@@ -19,18 +23,23 @@
 version: 1
 
 facts:
-  - id: is_java
+  - id: has_java
     any_file_exists:
       - pom.xml
+      - "**/pom.xml"
       - build.gradle
+      - "**/build.gradle"
       - build.gradle.kts
+      - "**/build.gradle.kts"
       - settings.gradle
+      - "**/settings.gradle"
       - settings.gradle.kts
+      - "**/settings.gradle.kts"
 
 rules:
   # --- Manifest -----------------------------------------------------
   - id: java-manifest-exists
-    when: facts.is_java
+    when: facts.has_java
     # Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either
     # is fine; mixed setups are unusual but valid.
     kind: file_exists
@@ -47,7 +56,7 @@ rules:
 
   # --- Wrapper scripts for reproducible builds ----------------------
   - id: java-build-wrapper-committed
-    when: facts.is_java
+    when: facts.has_java
     # `mvnw` (Maven Wrapper) or `gradlew` (Gradle Wrapper) make
     # CI builds and contributor onboarding deterministic. Either
     # script suffices.
@@ -69,7 +78,7 @@ rules:
   # `target/` (gitignored, no tracked content) is silently OK.
   # Same shape for Gradle's `build/`.
   - id: java-no-tracked-target
-    when: facts.is_java
+    when: facts.has_java
     kind: dir_absent
     paths: "**/target"
     git_tracked_only: true
@@ -79,7 +88,7 @@ rules:
       committed. Add `target/` to your `.gitignore`.
 
   - id: java-no-tracked-build
-    when: facts.is_java
+    when: facts.has_java
     kind: dir_absent
     paths: "**/build"
     git_tracked_only: true
@@ -89,7 +98,7 @@ rules:
       committed. Add `build/` to your `.gitignore`.
 
   - id: java-no-class-files
-    when: facts.is_java
+    when: facts.has_java
     kind: file_absent
     paths: "**/*.class"
     git_tracked_only: true
@@ -100,7 +109,7 @@ rules:
 
   # --- Source-file conventions --------------------------------------
   - id: java-sources-pascal-case
-    when: facts.is_java
+    when: facts.has_java
     # Java's class-file convention: every public top-level type
     # lives in a file named after it, in PascalCase. Some
     # repositories ship `package-info.java` / `module-info.java`
@@ -117,33 +126,41 @@ rules:
     message: "Java filenames should match the public class name (PascalCase)."
 
   - id: java-sources-final-newline
-    when: facts.is_java
+    when: facts.has_java
     kind: final_newline
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: info
     fix:
       file_append_final_newline: {}
 
   - id: java-sources-no-trailing-whitespace
-    when: facts.is_java
+    when: facts.has_java
     kind: no_trailing_whitespace
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: info
     fix:
       file_trim_trailing_whitespace: {}
 
   # --- Trojan Source defense on Java sources ------------------------
   - id: java-sources-no-bidi
-    when: facts.is_java
+    when: facts.has_java
     kind: no_bidi_controls
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars in Java sources are rejected."
     policy_url: "https://trojansource.codes/"
 
   - id: java-sources-no-zero-width
-    when: facts.is_java
+    when: facts.has_java
     kind: no_zero_width_chars
     paths: "**/*.java"
+    scope_filter:
+      has_ancestor: [pom.xml, build.gradle, build.gradle.kts]
     level: error
     message: "Zero-width characters in Java sources are rejected (review hazard)."
