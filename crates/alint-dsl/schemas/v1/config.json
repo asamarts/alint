@@ -167,6 +167,7 @@
           "type": "string",
           "description": "Gate the rule on a fact-based expression (available from v0.2)."
         },
+        "scope_filter": { "$ref": "#/$defs/scope_filter" },
         "fix": { "$ref": "#/$defs/fix" }
       }
     },
@@ -552,6 +553,26 @@
       "type": "boolean",
       "default": false,
       "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; other rule kinds ignore the field. See https://alint.org/docs/concepts/walker-and-gitignore/ for the full semantics."
+    },
+
+    "scope_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Closest-ancestor manifest scoping (v0.9.6+). Per-file rules only — cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time. The engine walks `Path::parent()` upward from the file (the file's own directory counts as an ancestor) and consults the v0.9.5 path-index at each step; first-match-wins on the upward walk gates the rule per-file. Combine with the rule's existing `paths:` glob — both must match for the rule to fire. Useful in polyglot monorepos where a per-file content rule should narrow to files inside a specific ecosystem's package directory (e.g. only `.rs` files under an ancestor `Cargo.toml`).",
+      "required": ["has_ancestor"],
+      "properties": {
+        "has_ancestor": {
+          "description": "Manifest filename (or list of filenames) whose presence in any ancestor directory of the linted file admits the rule. Each entry is a literal filename like `Cargo.toml` or `package.json` — no path separators, no glob metacharacters; the ancestor walk handles \"anywhere up the tree\" by traversing `Path::parent()` upward.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          ]
+        }
+      }
     },
 
     "rule_file_content_matches": {

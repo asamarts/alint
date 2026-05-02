@@ -94,7 +94,7 @@ vars:
   copyright_year: "2026"
 
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: ["Cargo.toml"]
 
 rules:
@@ -118,7 +118,7 @@ rules:
     level: error
 
   - id: cargo-lock-checked-in
-    when: facts.is_rust
+    when: facts.has_rust
     kind: file_exists
     paths: "Cargo.lock"
     root_only: true
@@ -313,11 +313,31 @@ The `when` expression language is deliberately bounded:
 No user-defined functions, no recursion, no I/O. Examples:
 
 ```yaml
-when: facts.is_rust
+when: facts.has_rust
 when: facts.primary_language in ["Rust", "Go"]
-when: facts.is_rust and not facts.is_workspace_member
+when: facts.has_rust and not facts.is_workspace_member
 when: count_files("**/*.java") > 0
 ```
+
+### Closest-ancestor scoping (`scope_filter:`, v0.9.6+)
+
+A second per-file gate orthogonal to `when:` and `paths:`. Per-file rules can declare `scope_filter: { has_ancestor: <list> }` to narrow themselves to files that have a specified manifest somewhere in their ancestor directory chain. The engine walks `Path::parent()` upward (the file's own directory counts as an ancestor) and consults the v0.9.5 path-index at each step; first-match-wins gates the rule per-file.
+
+```yaml
+- id: rust-sources-no-bidi
+  when: facts.has_rust              # tree-level gate
+  kind: no_bidi_controls
+  paths: "**/*.rs"                  # path glob
+  scope_filter:                     # ancestor walk
+    has_ancestor: Cargo.toml
+  level: error
+```
+
+The composition order is: 1. Tree-level `when:` (skip rule entirely if false), 2. Per-file `paths:` glob, 3. Per-file `scope_filter:` ancestor walk, 4. Per-file `git_tracked_only:` consult, 5. Rule-specific evaluate body.
+
+Cross-file rules (`pair`, `for_each_dir`, `file_exists`, …) reject `scope_filter:` at build time and direct authors to `for_each_dir + when_iter:`. Rule-major rules like `filename_case` silently ignore the field — gate via the rule's `paths:` glob instead.
+
+Used by the five bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) so their per-file content rules narrow to files inside their ecosystem's package subtree in polyglot monorepos. Full design: [`v0.9/scope-filter.md`](./v0.9/scope-filter.md).
 
 ### Composition
 

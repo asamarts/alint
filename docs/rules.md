@@ -969,77 +969,81 @@ rules:
 
 ### `alint://bundled/rust@v1`
 
-Hygiene checks for Rust projects. Every rule is gated with `when: facts.is_rust` (declared inside the ruleset as `any_file_exists: [Cargo.toml]`), so extending the ruleset from a polyglot repo's root config is safe — rules don't fire unless Rust is actually present.
+Hygiene checks for Rust projects. Tree-level gate: `when: facts.has_rust` (true if any `Cargo.toml` exists *anywhere* in the tree — declared inside the ruleset as `any_file_exists: [Cargo.toml, "**/Cargo.toml"]`). Per-file content rules layer a `scope_filter: { has_ancestor: Cargo.toml }` on top so they only fire on `.rs` files inside an ancestor-`Cargo.toml` directory subtree — useful in polyglot monorepos where Rust packages sit alongside Node / Python / Go subdirectories.
 
-| Rule id | Kind | Default level | Fix |
-|---|---|---|---|
-| `rust-cargo-toml-exists` | `file_exists` | error | — |
-| `rust-cargo-lock-exists` | `file_exists` | warning | — |
-| `rust-toolchain-pinned` | `file_exists` | info | — |
-| `rust-no-tracked-target` | `dir_absent` | error | — |
-| `rust-sources-snake-case` | `filename_case` | error | `file_rename` |
-| `rust-sources-final-newline` | `final_newline` | warning | `file_append_final_newline` |
-| `rust-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
-| `rust-sources-no-bidi` | `no_bidi_controls` | error | — |
-| `rust-sources-no-zero-width` | `no_zero_width_chars` | error | — |
-| `rust-no-merge-markers-in-manifests` | `no_merge_conflict_markers` | error | — |
+| Rule id | Kind | Default level | scope_filter | Fix |
+|---|---|---|---|---|
+| `rust-cargo-toml-exists` | `file_exists` | error | — | — |
+| `rust-cargo-lock-exists` | `file_exists` | warning | — | — |
+| `rust-toolchain-pinned` | `file_exists` | info | — | — |
+| `rust-no-tracked-target` | `dir_absent` | error | — | — |
+| `rust-sources-snake-case` | `filename_case` | error | — | `file_rename` |
+| `rust-sources-final-newline` | `final_newline` | warning | `Cargo.toml` | `file_append_final_newline` |
+| `rust-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `Cargo.toml` | `file_trim_trailing_whitespace` |
+| `rust-sources-no-bidi` | `no_bidi_controls` | error | `Cargo.toml` | — |
+| `rust-sources-no-zero-width` | `no_zero_width_chars` | error | `Cargo.toml` | — |
+| `rust-no-merge-markers-in-manifests` | `no_merge_conflict_markers` | error | `Cargo.toml` | — |
 
 ### `alint://bundled/node@v1`
 
-Hygiene checks for Node.js / npm / pnpm / yarn / bun projects. Every rule is gated with `when: facts.is_node` (via `any_file_exists: [package.json]`), so the ruleset is a safe no-op when `package.json` is absent.
+Hygiene checks for Node.js / npm / pnpm / yarn / bun projects. Tree-level gate: `when: facts.has_node` (`any_file_exists: [package.json, "**/package.json"]`). Per-file content rules layer `scope_filter: { has_ancestor: package.json }` so they only fire on JS/TS files inside an ancestor-`package.json` directory subtree.
 
-| Rule id | Kind | Default level | Fix |
-|---|---|---|---|
-| `node-package-json-exists` | `file_exists` | error | — |
-| `node-has-lockfile` | `file_exists` | warning | — |
-| `node-no-tracked-node-modules` | `dir_absent` | error | — |
-| `node-no-tracked-dist` | `dir_absent` | info | — |
-| `node-engine-or-nvmrc` | `file_exists` | info | — |
-| `node-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
-| `node-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
-| `node-sources-no-bidi` | `no_bidi_controls` | error | — |
+| Rule id | Kind | Default level | scope_filter | Fix |
+|---|---|---|---|---|
+| `node-package-json-exists` | `file_exists` | error | — | — |
+| `node-has-lockfile` | `file_exists` | warning | — | — |
+| `node-no-tracked-node-modules` | `dir_absent` | error | — | — |
+| `node-no-tracked-dist` | `dir_absent` | info | — | — |
+| `node-engine-or-nvmrc` | `file_exists` | info | — | — |
+| `node-sources-final-newline` | `final_newline` | info | `package.json` | `file_append_final_newline` |
+| `node-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `package.json` | `file_trim_trailing_whitespace` |
+| `node-sources-no-bidi` | `no_bidi_controls` | error | `package.json` | — |
 
 ### `alint://bundled/python@v1`
 
-Hygiene checks for Python projects. Gated with `when: facts.is_python` (any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` present), so silent no-op when none of those exist.
+Hygiene checks for Python projects. Tree-level gate: `when: facts.has_python` — any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` (each broadened with a `**/<manifest>` companion) present anywhere in the tree. Per-file content rules layer `scope_filter: { has_ancestor: [pyproject.toml, setup.py, requirements.txt] }` (note: `setup.cfg` stays in the broad fact list but not in scope_filter — `scope_filter` narrows to canonical package markers).
 
-| Rule id | Kind | Default level | Fix |
-|---|---|---|---|
-| `python-pyproject-or-setup` | `file_exists` | warning | — |
-| `python-no-tracked-pycache` | `dir_absent` | error | — |
-| `python-no-tracked-venv` | `dir_absent` | error | — |
-| `python-no-tracked-egg-info` | `dir_absent` | warning | — |
-| `python-snake-case-modules` | `filename_case` | info | `file_rename` |
-| `python-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
-| `python-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
-| `python-sources-no-bidi` | `no_bidi_controls` | error | — |
+| Rule id | Kind | Default level | scope_filter | Fix |
+|---|---|---|---|---|
+| `python-manifest-exists` | `file_exists` | error | — | — |
+| `python-has-lockfile` | `file_exists` | warning | — | — |
+| `python-pyproject-declares-name` | `toml_path_matches` | warning | — | — |
+| `python-pyproject-declares-requires-python` | `toml_path_matches` | info | — | — |
+| `python-module-snake-case` | `filename_case` | info | — | — |
+| `python-sources-final-newline` | `final_newline` | info | `[pyproject.toml, setup.py, requirements.txt]` | `file_append_final_newline` |
+| `python-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `[pyproject.toml, setup.py, requirements.txt]` | `file_trim_trailing_whitespace` |
+| `python-sources-no-bidi` | `no_bidi_controls` | error | `[pyproject.toml, setup.py, requirements.txt]` | — |
 
 ### `alint://bundled/go@v1`
 
-Hygiene checks for Go modules. Gated with `when: facts.is_go` (any of `go.mod`, `go.sum`).
+Hygiene checks for Go modules. Tree-level gate: `when: facts.has_go` (`any_file_exists: [go.mod, "**/go.mod"]`). Per-file content rules layer `scope_filter: { has_ancestor: go.mod }` so they only fire on `.go` files inside an ancestor-`go.mod` module subtree.
 
-| Rule id | Kind | Default level | Fix |
-|---|---|---|---|
-| `go-go-mod-exists` | `file_exists` | error | — |
-| `go-no-tracked-vendor` | `dir_absent` | warning | — |
-| `go-no-tracked-bin` | `dir_absent` | info | — |
-| `go-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
-| `go-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
-| `go-sources-no-bidi` | `no_bidi_controls` | error | — |
+| Rule id | Kind | Default level | scope_filter | Fix |
+|---|---|---|---|---|
+| `go-mod-exists` | `file_exists` | error | — | — |
+| `go-sum-exists` | `file_exists` | warning | — | — |
+| `go-mod-declares-module-path` | `file_content_matches` | error | — | — |
+| `go-mod-declares-go-version` | `file_content_matches` | warning | — | — |
+| `go-sources-no-bidi` | `no_bidi_controls` | error | `go.mod` | — |
+| `go-sources-no-zero-width` | `no_zero_width_chars` | error | `go.mod` | — |
+| `go-sources-final-newline` | `final_newline` | info | `go.mod` | `file_append_final_newline` |
 
 ### `alint://bundled/java@v1`
 
-Hygiene checks for Java / Kotlin projects (Gradle or Maven). Gated with `when: facts.is_java` (any of `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`).
+Hygiene checks for Java / Kotlin projects (Gradle or Maven). Tree-level gate: `when: facts.has_java` — any Java build manifest variant (`pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, each broadened with a `**/<manifest>` companion). Per-file content rules layer `scope_filter: { has_ancestor: [pom.xml, build.gradle, build.gradle.kts] }` — note that `settings.gradle*` are in the broad fact list but excluded from scope_filter (workspace-level files, not per-module manifests).
 
-| Rule id | Kind | Default level | Fix |
-|---|---|---|---|
-| `java-build-tool-exists` | `file_exists` | error | — |
-| `java-no-tracked-build-output` | `dir_absent` | error | — |
-| `java-no-tracked-idea` | `dir_absent` | info | — |
-| `java-pascal-case-classes` | `filename_case` | info | — |
-| `java-sources-final-newline` | `final_newline` | info | `file_append_final_newline` |
-| `java-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
-| `java-sources-no-bidi` | `no_bidi_controls` | error | — |
+| Rule id | Kind | Default level | scope_filter | Fix |
+|---|---|---|---|---|
+| `java-manifest-exists` | `file_exists` | error | — | — |
+| `java-build-wrapper-committed` | `file_exists` | info | — | — |
+| `java-no-tracked-target` | `dir_absent` | error | — | — |
+| `java-no-tracked-build` | `dir_absent` | error | — | — |
+| `java-no-class-files` | `file_absent` | error | — | — |
+| `java-sources-pascal-case` | `filename_case` | warning | — | — |
+| `java-sources-final-newline` | `final_newline` | info | `[pom.xml, build.gradle, build.gradle.kts]` | `file_append_final_newline` |
+| `java-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `[pom.xml, build.gradle, build.gradle.kts]` | `file_trim_trailing_whitespace` |
+| `java-sources-no-bidi` | `no_bidi_controls` | error | `[pom.xml, build.gradle, build.gradle.kts]` | — |
+| `java-sources-no-zero-width` | `no_zero_width_chars` | error | `[pom.xml, build.gradle, build.gradle.kts]` | — |
 
 ### `alint://bundled/ci/github-actions@v1`
 

@@ -203,7 +203,7 @@ extends:
   - alint://bundled/hygiene/lockfiles@v1                 # Cargo.lock only at root
 ```
 
-The Rust and Node rulesets are gated by facts (`when: facts.is_rust` / `facts.is_node`) and silently no-op in projects where they don't apply, so layering them is cheap.
+The Rust and Node rulesets are gated by facts (`when: facts.has_rust` / `facts.has_node`) and silently no-op in projects where they don't apply, so layering them is cheap. In **polyglot monorepos** (Rust under `crates/`, Node under `packages/`, Python under `apps/`, …), the bundled ecosystem rulesets additionally use `scope_filter: { has_ancestor: <manifest> }` (v0.9.6+) on their per-file content rules to narrow each rule to files inside its own ecosystem's package subtree — a `**/*.py` rule from `python@v1` won't fire on stray `.py` helpers committed under a Rust crate, and vice versa.
 
 ### 3. Override a bundled rule without restating its body
 
@@ -405,21 +405,21 @@ Facts are evaluated once per run and referenced in `when:`. Here: only enforce s
 version: 1
 
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: [Cargo.toml]
-  - id: is_typescript
+  - id: has_typescript
     any_file_exists: ["tsconfig.json", "packages/*/tsconfig.json"]
 
 rules:
   - id: rust-snake-case
-    when: facts.is_rust
+    when: facts.has_rust
     kind: filename_case
     paths: "src/**/*.rs"
     case: snake
     level: error
 
   - id: ts-kebab-case
-    when: facts.is_typescript and not (facts.is_rust)
+    when: facts.has_typescript and not (facts.has_rust)
     kind: filename_case
     paths: "src/**/*.ts"
     case: kebab
@@ -573,7 +573,7 @@ rules:
   - id: rust-pkg-license-set
     kind: for_each_dir
     select: "crates/*"
-    when_iter: 'facts.is_rust and iter.has_file("Cargo.toml")'
+    when_iter: 'facts.has_rust and iter.has_file("Cargo.toml")'
     require:
       - kind: toml_path_matches
         paths: "{path}/Cargo.toml"
@@ -591,11 +591,11 @@ Seventeen rulesets ship in the binary — zero network round-trip, pinned to the
 **Ecosystem + project-shape baselines**
 
 - **`oss-baseline@v1`** — README / LICENSE / SECURITY.md / CODE_OF_CONDUCT.md / .gitignore existence; minimum sensible file sizes; merge-marker + bidi-control bans; trailing-whitespace and final-newline hygiene (auto-fixable).
-- **`rust@v1`** — Cargo.toml / Cargo.lock / rust-toolchain.toml existence; no committed `target/`; snake_case source filenames; Trojan-Source defenses. Gated with `when: facts.is_rust`.
-- **`node@v1`** — package.json + lockfile; no committed `node_modules/`, `dist/`, `.next/`, etc.; Node-version pin via `.nvmrc` or `engines`; JS/TS source hygiene. Gated with `when: facts.is_node`.
-- **`python@v1`** — manifest (pyproject.toml / setup.py / setup.cfg) exists; lockfile (uv / poetry / Pipenv / PDM); pyproject.toml declares `project.name` + `project.requires-python` via structured-query; PEP 8 snake_case module filenames; Trojan-Source defenses. Gated with `when: facts.is_python`.
-- **`go@v1`** — go.mod + go.sum at root; go.mod declares `module <path>` + `go <version>`; Trojan-Source defenses on `*.go`. Gated with `when: facts.is_go`.
-- **`java@v1`** — Maven (`pom.xml`) or Gradle (`build.gradle` / `build.gradle.kts`) manifest; build wrapper (`mvnw` / `gradlew`); no committed `target/` / `build/` (using `git_tracked_only` so locally-built dirs stay silent); no committed `*.class`; PascalCase Java filenames; Trojan-Source defenses. Gated with `when: facts.is_java`.
+- **`rust@v1`** — Cargo.toml / Cargo.lock / rust-toolchain.toml existence; no committed `target/`; snake_case source filenames; Trojan-Source defenses. Gated with `when: facts.has_rust`.
+- **`node@v1`** — package.json + lockfile; no committed `node_modules/`, `dist/`, `.next/`, etc.; Node-version pin via `.nvmrc` or `engines`; JS/TS source hygiene. Gated with `when: facts.has_node`.
+- **`python@v1`** — manifest (pyproject.toml / setup.py / setup.cfg) exists; lockfile (uv / poetry / Pipenv / PDM); pyproject.toml declares `project.name` + `project.requires-python` via structured-query; PEP 8 snake_case module filenames; Trojan-Source defenses. Gated with `when: facts.has_python`.
+- **`go@v1`** — go.mod + go.sum at root; go.mod declares `module <path>` + `go <version>`; Trojan-Source defenses on `*.go`. Gated with `when: facts.has_go`.
+- **`java@v1`** — Maven (`pom.xml`) or Gradle (`build.gradle` / `build.gradle.kts`) manifest; build wrapper (`mvnw` / `gradlew`); no committed `target/` / `build/` (using `git_tracked_only` so locally-built dirs stay silent); no committed `*.class`; PascalCase Java filenames; Trojan-Source defenses. Gated with `when: facts.has_java`.
 - **`monorepo@v1`** — every `packages/*`, `crates/*`, `apps/*`, `services/*` directory has a README + ecosystem manifest; unique basenames.
 
 **Workspace-aware overlays** (use `when_iter:` to scope per-member checks to actual package directories — non-package dirs under `crates/` / `packages/` don't fire false positives)

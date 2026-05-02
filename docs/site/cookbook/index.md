@@ -233,26 +233,59 @@ Facts are evaluated once per run and referenced in `when:`. Here: only enforce s
 version: 1
 
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: [Cargo.toml]
-  - id: is_typescript
+  - id: has_typescript
     any_file_exists: ["tsconfig.json", "packages/*/tsconfig.json"]
 
 rules:
   - id: rust-snake-case
-    when: facts.is_rust
+    when: facts.has_rust
     kind: filename_case
     paths: "src/**/*.rs"
     case: snake
     level: error
 
   - id: ts-kebab-case
-    when: facts.is_typescript and not (facts.is_rust)
+    when: facts.has_typescript and not (facts.has_rust)
     kind: filename_case
     paths: "src/**/*.ts"
     case: kebab
     level: warning
 ```
+
+## 11.5. Polyglot monorepo: per-ecosystem rules with closest-ancestor scoping
+
+In a monorepo where Rust packages sit under `crates/`, Node packages under `packages/`, and Python packages under `apps/`, you want each ecosystem's hygiene rules to fire **only on the files inside that ecosystem's package directories** — not on stray `.py` helpers checked into a Rust crate or vice versa. The `scope_filter:` primitive (v0.9.6+) handles this declaratively: extend every ecosystem's bundled ruleset and they auto-scope by ancestor manifest.
+
+```yaml
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1   # tree-wide: README, LICENSE, hygiene
+  - alint://bundled/rust@v1           # auto-scopes to ancestor-Cargo.toml
+  - alint://bundled/node@v1           # auto-scopes to ancestor-package.json
+  - alint://bundled/python@v1         # auto-scopes to ancestor-pyproject.toml/setup.py/requirements.txt
+```
+
+Each bundled ecosystem ruleset since v0.9.6 ships with a `scope_filter:` on its per-file content rules — `rust@v1`'s `rust-sources-no-bidi` only fires on `.rs` files inside an ancestor-`Cargo.toml` directory, `node@v1`'s `node-sources-no-trailing-whitespace` only on JS/TS files inside an ancestor-`package.json`, etc. Tree-wide rules (the existence checks, `oss-baseline@v1`'s LICENSE/README rules) keep their global scope.
+
+To layer a custom rule with the same scoping pattern, declare `scope_filter:` directly on the rule:
+
+```yaml
+rules:
+  # Custom: forbid `unwrap()` only inside Rust packages — won't fire on
+  # a stray `.rs` file checked into a Node package's docs/.
+  - id: rust-no-unwrap-in-libs
+    kind: file_content_forbidden
+    paths: "**/src/**/*.rs"
+    scope_filter:
+      has_ancestor: Cargo.toml
+    pattern: '\.unwrap\(\)'
+    level: warning
+```
+
+`scope_filter:` is supported on per-file rules only — cross-file rules (`pair`, `for_each_dir`, `file_exists`, …) reject it at build time and direct you to the `for_each_dir + when_iter:` pattern instead.
 
 ## 12. Cross-file relationships
 
