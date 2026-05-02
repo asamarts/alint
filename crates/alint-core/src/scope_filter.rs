@@ -344,7 +344,7 @@ mod tests {
         let err = ScopeFilter::from_spec(
             "r",
             ScopeFilterSpec {
-                has_ancestor: vec!["".into()],
+                has_ancestor: vec![String::new()],
             },
         )
         .unwrap_err();

@@ -23,9 +23,17 @@ use crate::when::{WhenEnv, WhenExpr};
 /// enabled for this target, so production runs pay nothing.
 macro_rules! phase {
     ($start:expr, $phase:expr $(, $k:ident = $v:expr)* $(,)?) => {
+        // u128 → u64 saturating cast: `elapsed_us` overflows u64 only
+        // after ~584,000 years of wall time. The lossy cast is
+        // intentional (we never need the high bits) — picking
+        // `try_into().unwrap_or(u64::MAX)` instead of an `as` cast
+        // also pegs the rare overflow at u64::MAX rather than
+        // silently wrapping, which keeps log readers honest.
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_us: u64 = $start.elapsed().as_micros() as u64;
         tracing::info!(
             phase = $phase,
-            elapsed_us = $start.elapsed().as_micros() as u64,
+            elapsed_us = elapsed_us,
             $($k = $v,)*
             "engine.phase",
         );
@@ -138,6 +146,13 @@ impl Engine {
         self.entries.len()
     }
 
+    // ~125 lines but each block has its own purpose (changed-set
+    // short-circuit, fact eval, git probe, filtered-index build,
+    // cross-file partition, per-file partition, assembly). Splitting
+    // would mean threading the same ~6-arg context tuple through
+    // four helpers that share lifetimes — net worse for the reader.
+    // The function reads top-to-bottom as one phased pipeline.
+    #[allow(clippy::too_many_lines)]
     pub fn run(&self, root: &Path, index: &FileIndex) -> Result<Report> {
         let t_total = Instant::now();
         // Empty changed-set fast path: nothing to lint, return
@@ -221,6 +236,12 @@ impl Engine {
                 let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
                 let t_rule = Instant::now();
                 let result = run_entry(entry, ctx, &when_env, &fact_values);
+                // u128 → u64 saturating: same rationale as the
+                // `phase!` macro — elapsed_ns overflows u64 only
+                // after ~584 years per rule, and we want lossy
+                // truncation rather than a runtime panic on the
+                // hot path.
+                #[allow(clippy::cast_possible_truncation)]
                 let elapsed_ns = t_rule.elapsed().as_nanos() as u64;
                 cross_rule_ns[idx].fetch_add(elapsed_ns, Ordering::Relaxed);
                 result.map(|rr| (idx, rr))
@@ -253,7 +274,7 @@ impl Engine {
                     Some((entry.rule.id(), ns))
                 })
                 .collect();
-            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            rows.sort_by_key(|(_, ns)| std::cmp::Reverse(*ns));
             for (rule_id, ns) in rows {
                 tracing::info!(
                     phase = "cross_file_rule",
