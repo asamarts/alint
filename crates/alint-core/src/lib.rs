@@ -13,6 +13,7 @@ mod registry;
 mod report;
 mod rule;
 mod scope;
+mod scope_filter;
 pub mod template;
 mod walker;
 pub mod when;
@@ -35,5 +36,6 @@ pub use rule::{
     check_fix_size, read_for_fix,
 };
 pub use scope::Scope;
+pub use scope_filter::{ScopeFilter, ScopeFilterSpec, reject_scope_filter_on_cross_file};
 pub use walker::{FileEntry, FileIndex, WalkOptions, walk};
 pub use when::{WhenEnv, WhenError, WhenExpr};

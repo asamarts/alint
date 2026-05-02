@@ -397,12 +397,29 @@ impl Engine {
                 let applicable: Vec<(usize, &RuleEntry)> = live
                     .iter()
                     .filter(|(_, entry)| {
-                        entry
+                        // 1a. Path-scope glob — cheap, dropping
+                        // files no rule cares about before any
+                        // further work.
+                        if !entry
                             .rule
                             .as_per_file()
                             .expect("live entries are per-file rules by construction")
                             .path_scope()
                             .matches(&file_entry.path)
+                        {
+                            return false;
+                        }
+                        // 1b. scope_filter ancestor check (v0.9.6,
+                        // None for rules that don't opt in).
+                        // Walks `Path::parent()` upward and
+                        // consults the v0.9.5 path-index at each
+                        // step; O(depth × M) per (file, rule) pair.
+                        if let Some(filter) = entry.rule.scope_filter()
+                            && !filter.matches(&file_entry.path, per_file_ctx.index)
+                        {
+                            return false;
+                        }
+                        true
                     })
                     .map(|(idx, entry)| (*idx, *entry))
                     .collect();

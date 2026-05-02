@@ -123,6 +123,7 @@ fn is_direct_child(child: &Path, parent: &Path) -> bool {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    alint_core::reject_scope_filter_on_cross_file(spec, "dir_only_contains")?;
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;

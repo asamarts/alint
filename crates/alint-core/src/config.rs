@@ -206,6 +206,22 @@ pub struct RuleSpec {
     /// Default `false`. Has no effect outside a git repo.
     #[serde(default)]
     pub git_tracked_only: bool,
+    /// Per-file ancestor-manifest gate. When set, the rule
+    /// only fires on files that have at least one ancestor
+    /// directory (including the file's own directory)
+    /// containing a file matching the configured
+    /// `has_ancestor` name(s). Composes AND with `paths:`
+    /// and `git_tracked_only:`.
+    ///
+    /// Only meaningful for per-file rules; cross-file rule
+    /// builders MUST reject this field at build time
+    /// (see the design doc for the cross-file alternative
+    /// via `for_each_dir + when_iter:`).
+    ///
+    /// Default `None` (no scope filter; existing rules
+    /// preserve their pre-v0.9.6 behaviour).
+    #[serde(default)]
+    pub scope_filter: Option<crate::ScopeFilterSpec>,
     /// The entire YAML mapping, retained so each rule builder can deserialize
     /// its kind-specific fields without every option being represented here.
     #[serde(flatten)]
@@ -465,6 +481,12 @@ pub struct NestedRuleSpec {
     pub policy_url: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// Per-file scope filter — see [`RuleSpec::scope_filter`]
+    /// for semantics. Inherited unchanged when
+    /// [`NestedRuleSpec::instantiate`] synthesises a full
+    /// `RuleSpec` per-iteration.
+    #[serde(default)]
+    pub scope_filter: Option<crate::ScopeFilterSpec>,
     #[serde(flatten)]
     pub extra: serde_yaml_ng::Mapping,
 }
@@ -502,6 +524,7 @@ impl NestedRuleSpec {
             // now. If/when `for_each_dir`'s nested rules need it,
             // plumb it through here.
             git_tracked_only: false,
+            scope_filter: self.scope_filter.clone(),
             extra: crate::template::render_mapping(self.extra.clone(), tokens),
         }
     }

@@ -69,6 +69,7 @@ impl Rule for DirAbsentRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    alint_core::reject_scope_filter_on_cross_file(spec, "dir_absent")?;
     let Some(paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,

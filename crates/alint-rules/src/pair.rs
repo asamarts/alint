@@ -126,6 +126,7 @@ impl PairRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    alint_core::reject_scope_filter_on_cross_file(spec, "pair")?;
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
@@ -261,5 +262,38 @@ mod tests {
         let v = eval(&r, &["src/foo.c"]);
         assert_eq!(v.len(), 1);
         assert!(v[0].message.contains("empty path"));
+    }
+
+    #[test]
+    fn build_rejects_scope_filter_on_cross_file_rule() {
+        // pair is a cross-file rule (requires_full_index = true);
+        // scope_filter is per-file-rules-only. The build path
+        // must reject it with a clear message pointing at the
+        // for_each_dir + when_iter: alternative.
+        //
+        // YAML indentation: keep all leading text flush-left
+        // (no Rust string-continuation `\` at line ends, no
+        // leading source-indent whitespace). The indentation
+        // seen by the YAML parser is the literal indentation
+        // inside the string.
+        let yaml = r#"
+id: t
+kind: pair
+primary: "**/*.c"
+partner: "{dir}/{stem}.h"
+level: error
+scope_filter:
+  has_ancestor: Cargo.toml
+"#;
+        let spec = crate::test_support::spec_yaml(yaml);
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("scope_filter is supported on per-file rules only"),
+            "expected per-file-only message, got: {err}",
+        );
+        assert!(
+            err.contains("pair"),
+            "expected message to name the cross-file kind, got: {err}",
+        );
     }
 }

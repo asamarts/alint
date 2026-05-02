@@ -127,6 +127,7 @@ impl UniqueByRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    alint_core::reject_scope_filter_on_cross_file(spec, "unique_by")?;
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
