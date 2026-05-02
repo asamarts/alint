@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-05-02
+
+Patch release for the v0.9.6 `scope_filter:` runtime no-op (v0.9.6
+shipped the field, the type, and the engine gate but never wired the
+parsed filter onto the built rule). Same release also lands the
+follow-up audit cleanup (rule-count corrections, design-doc status
+flips, alint.org sidebar gaps, release.yml preflight gate) and the
+v0.10 LSP design pass with `tower-lsp` added to workspace deps as a
+dormant dependency.
+
 ### Fixed
 
 - **`scope_filter:` is now honoured at runtime by every per-file rule.**
@@ -24,6 +34,51 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   helper in `alint-core::config` keeps the per-rule build-site change to
   one line. Integration regression test:
   `crates/alint-rules/tests/scope_filter_integration.rs`.
+
+### Added
+
+- **5 e2e scenarios** under `crates/alint-e2e/scenarios/check/scope_filter/`
+  covering positive/negative cases, two-name lists, `extends:` inheritance,
+  combined per-file + tree-level gates, and a bundled `rust@v1` dogfood
+  against a polyglot tree.
+- **10 cross-file `reject_scope_filter_on_cross_file` unit tests**, one per
+  cross-file rule that calls the rejection helper (only `pair.rs` had one
+  before).
+- **`docs/design/v0.10/`** — three-doc design pass for the v0.10 LSP server
+  (`lsp_server.md`, `single_file_reevaluation.md`, `vscode_extension.md`)
+  mirroring the per-cut design-pass shape used for v0.7 and v0.9.
+- **`tower-lsp = "0.20"`** added to `[workspace.dependencies]` ahead of the
+  `crates/alint-lsp/` crate landing in v0.10. Dormant — no current member
+  depends on it, so `cargo build` doesn't pull it.
+- **`development/rule-authoring.md`** now reaches alint.org via
+  `xtask docs-export` (previously invisible to the sync script).
+
+### Changed
+
+- **`release.yml` preflight gate**: new top-level job runs fmt + clippy +
+  test + `cargo doc -D warnings` on the tagged commit; every publishing
+  job (build matrix, release, docker, npm, homebrew, publish-crates)
+  `needs:` it. Closes the gap where release.yml could fire while ci.yml
+  was failing on the same SHA.
+- **`README.md`** rule-count + family-count corrections (54 → 60 across
+  thirteen families; was missing `Git hygiene` and `Plugin (tier 1)`),
+  ruleset count reconciled (line 28 said 19, line 589 said 17 — both now
+  19), version anchor "v0.7 ships" → "v0.9.6 ships".
+- **`docs/design/v0.7/{commented_out_code,markdown_paths_resolve}.md`,
+  `v0.9/{parallel_walker,scope-filter}.md`** — status headers flipped
+  from "Design draft" to "Implemented in v0.7.x / v0.9.x" with crate
+  pointers.
+- **`docs/site/**` integration pages** — 12 instances of `v0.4.7` updated
+  to v0.9.6; `concepts/index.md` "Four formats" → "Eight formats";
+  `quickstart.md` ruleset count "eleven" → "nineteen".
+- **`action.yml`** format input description lists all 8 formats.
+- **`npm/package.json`** version 0.5.10 → 0.9.7 (was four releases stale
+  in the checked-in source; release.yml's publish step rewrites this from
+  the tag at publish time, but a stale value misled readers).
+- **`action-selftest.yml`** pinned-version test 0.3.1 → v0.9.6 (six minors
+  stale).
+- **`.alint.yml`** dogfood fact `is_rust` → `has_rust` to match the v0.9.6
+  bundled-fact rename.
 
 ## [0.9.6] — 2026-05-02
 
