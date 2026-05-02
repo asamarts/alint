@@ -201,7 +201,7 @@ pub fn generate_git_monorepo(
 /// files like S1–S7 (not 300k as a naïve "3 × 100k" reading
 /// would suggest). This keeps cross-scenario bench comparisons
 /// apples-to-apples on tree-walk work; what S9 actually
-/// stresses is the per-rule scope_filter ancestor walk under
+/// stresses is the per-rule `scope_filter` ancestor walk under
 /// three competing rulesets.
 ///
 /// No root manifest is written (unlike `generate_monorepo`'s
