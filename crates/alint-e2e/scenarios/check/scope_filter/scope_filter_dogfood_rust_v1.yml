@@ -1,0 +1,66 @@
+name: alint://bundled/rust@v1 per-file content rules respect scope_filter on a polyglot tree
+tags: [check, extends, bundled, rust, scope_filter, polyglot]
+
+# End-to-end smoke test of the v0.9.6 "bundled-ecosystem
+# migration": every per-file content rule in `rust@v1` carries
+# `scope_filter: { has_ancestor: Cargo.toml }`.
+#
+# The sentinel is `services/web/script.rs`: it matches the
+# rule's `paths:` glob (`**/*.rs`) and has the same content
+# sins as the in-scope file, but its ancestor chain reaches
+# only `services/web/`, `services/`, and the tree root —
+# none of which has a sibling `Cargo.toml`. scope_filter must
+# silence it. Pre-fix (v0.9.5) this file would have produced
+# two extra violations and the strict count match below would
+# fail.
+#
+# We deliberately do NOT put a `Cargo.toml` at the tree root
+# so the ancestor walk for `services/web/script.rs` yields
+# zero hits. As a result the workspace-shape rules
+# (`rust-cargo-toml-exists` + lockfile + toolchain) DO fire
+# at the root — those firings are part of the scenario's
+# expected-violations list and serve as the "the bundled
+# ruleset is actually loaded" canary.
+
+given:
+  tree:
+    crates:
+      api:
+        Cargo.toml: |
+          [package]
+          name = "api"
+          version = "0.1.0"
+        src:
+          # In scope: trips both `rust-sources-no-trailing-whitespace`
+          # (info) and `rust-sources-final-newline` (warning).
+          main.rs: "fn main() { } "
+    services:
+      web:
+        # Out of scope: matches `**/*.rs` but lives outside any
+        # Cargo.toml subtree. Same content sins as main.rs above —
+        # if scope_filter regressed, this file ALSO fires both
+        # rules and the strict-count check below trips.
+        script.rs: "fn helper() { } "
+        # TS file demonstrates the polyglot intent. None of
+        # `rust@v1`'s rules target `.ts`, so it never participates
+        # in the assertion.
+        index.ts: "export const x = 1;\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/rust@v1
+
+when: [check]
+
+expect:
+  # Five violations total: three workspace-shape rules at root
+  # (root_only file_exists rules) plus two per-file content
+  # rules on the in-scope `crates/api/src/main.rs`. If
+  # scope_filter regressed, two more would land on
+  # `services/web/script.rs` and the strict count would mismatch.
+  - violations:
+      - {rule: rust-cargo-toml-exists, level: error}
+      - {rule: rust-cargo-lock-exists, level: warning}
+      - {rule: rust-toolchain-pinned, level: info}
+      - {rule: rust-sources-no-trailing-whitespace, level: info, path: crates/api/src/main.rs}
+      - {rule: rust-sources-final-newline, level: warning, path: crates/api/src/main.rs}

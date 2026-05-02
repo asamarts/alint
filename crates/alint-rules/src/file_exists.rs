@@ -406,4 +406,30 @@ mod tests {
             vec!["a"],
         );
     }
+
+    #[test]
+    fn build_rejects_scope_filter_on_cross_file_rule() {
+        // file_exists is a cross-file rule (requires_full_index =
+        // true); scope_filter is per-file-rules-only. The build
+        // path must reject it with a clear message pointing at
+        // the for_each_dir + when_iter: alternative.
+        let yaml = r#"
+id: t
+kind: file_exists
+paths: "LICENSE"
+level: error
+scope_filter:
+  has_ancestor: Cargo.toml
+"#;
+        let spec = spec_yaml(yaml);
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("scope_filter is supported on per-file rules only"),
+            "expected per-file-only message, got: {err}",
+        );
+        assert!(
+            err.contains("file_exists"),
+            "expected message to name the cross-file kind, got: {err}",
+        );
+    }
 }

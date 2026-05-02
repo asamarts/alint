@@ -20,6 +20,7 @@ CommentedOutCodeRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     language: Auto,
     min_lines: 3,
     threshold: 0.5,
@@ -33,6 +34,7 @@ FileContentForbiddenRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "unimplemented!",
     pattern: Regex(
         "unimplemented!",
@@ -46,6 +48,7 @@ FileContentMatchesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "version\\s*=",
     pattern: Regex(
         "version\\s*=",
@@ -179,6 +182,7 @@ FileContentForbiddenRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "\\bTODO\\b",
     pattern: Regex(
         "\\bTODO\\b",
@@ -192,6 +196,7 @@ FileContentForbiddenRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "\\b(TODO|FIXME|XXX)\\b",
     pattern: Regex(
         "\\b(TODO|FIXME|XXX)\\b",
@@ -205,6 +210,7 @@ FileContentMatchesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "SPDX-License-Identifier",
     pattern: Regex(
         "SPDX-License-Identifier",
@@ -219,6 +225,7 @@ FileContentMatchesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "(?i)copyright",
     pattern: Regex(
         "(?i)copyright",
@@ -239,6 +246,7 @@ FileEndsWithRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     suffix: [
         10,
     ],
@@ -303,6 +311,7 @@ FileFooterRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "}$",
     pattern: Regex(
         "}$",
@@ -318,6 +327,7 @@ FileHashRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     expected: [
         0,
         0,
@@ -361,6 +371,7 @@ FileHeaderRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "(?s)Copyright",
     pattern: Regex(
         "(?s)Copyright",
@@ -382,6 +393,7 @@ FileHeaderRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "^// SPDX-License-Identifier:",
     pattern: Regex(
         "^// SPDX-License-Identifier:",
@@ -397,6 +409,7 @@ FileIsAsciiRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
 }
 
 === kind: file_is_text | id: all-text ===
@@ -406,6 +419,7 @@ FileIsTextRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
 }
 
 === kind: file_is_text | id: rust-must-be-text ===
@@ -415,6 +429,7 @@ FileIsTextRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
 }
 
 === kind: file_max_lines | id: changelog-max-lines ===
@@ -424,6 +439,7 @@ FileMaxLinesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     max_lines: 10000,
 }
 
@@ -454,6 +470,7 @@ FileMinLinesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     min_lines: 5,
 }
 
@@ -474,6 +491,7 @@ FileShebangRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "^#!/(usr/)?bin/(env )?(ba)?sh",
     pattern: Regex(
         "^#!/(usr/)?bin/(env )?(ba)?sh",
@@ -487,6 +505,7 @@ FileStartsWithRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     prefix: [
         47,
         47,
@@ -553,6 +572,7 @@ FinalNewlineRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     fixer: None,
 }
 
@@ -563,6 +583,7 @@ FileFooterRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "$",
     pattern: Regex(
         "$",
@@ -668,6 +689,7 @@ FileHeaderRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "^# ",
     pattern: Regex(
         "^# ",
@@ -683,6 +705,7 @@ IndentStyleRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     style: Spaces,
     width: Some(
         4,
@@ -696,6 +719,7 @@ FileIsTextRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
 }
 
 === kind: json_path_equals | id: package-name-matches ===
@@ -705,6 +729,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: Some(
         [
             "package.json",
@@ -738,6 +763,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: Some(
         [
             "package.json",
@@ -787,6 +813,7 @@ LineEndingsRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     target: Lf,
     fixer: None,
 }
@@ -798,6 +825,7 @@ LineMaxWidthRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     max_width: 100,
 }
 
@@ -808,6 +836,7 @@ MarkdownPathsResolveRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     prefixes: [
         "src/",
         "crates/",
@@ -823,6 +852,7 @@ MaxConsecutiveBlankLinesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     max: 2,
     fixer: None,
 }
@@ -854,6 +884,7 @@ FileMaxLinesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     max_lines: 5000,
 }
 
@@ -874,6 +905,7 @@ FileMinLinesRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     min_lines: 3,
 }
 
@@ -894,6 +926,7 @@ NoBidiControlsRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     fixer: None,
 }
 
@@ -904,6 +937,7 @@ NoBomRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     fixer: None,
 }
 
@@ -942,6 +976,7 @@ NoMergeConflictMarkersRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
 }
 
 === kind: no_submodules | id: no-submodules ===
@@ -971,6 +1006,7 @@ NoTrailingWhitespaceRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     fixer: None,
 }
 
@@ -981,6 +1017,7 @@ NoZeroWidthCharsRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     fixer: None,
 }
 
@@ -1003,6 +1040,7 @@ FileShebangRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     pattern_src: "^#!/(usr/)?bin/(env )?python3?",
     pattern: Regex(
         "^#!/(usr/)?bin/(env )?python3?",
@@ -1025,6 +1063,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: Some(
         [
             "Cargo.toml",
@@ -1064,6 +1103,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: Some(
         [
             "Cargo.toml",
@@ -1123,6 +1163,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: None,
     format: Yaml,
     path_expr: JsonPath(
@@ -1184,6 +1225,7 @@ StructuredPathRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    scope_filter: None,
     literal_paths: None,
     format: Yaml,
     path_expr: JsonPath(

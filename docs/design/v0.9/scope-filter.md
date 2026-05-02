@@ -1,7 +1,10 @@
 # scope_filter — closest-ancestor manifest scoping for per-file rules
 
-Status: Design draft, written 2026-05-01 after v0.9.5 shipped.
-Targets v0.9.6.
+Status: Implemented in v0.9.6 (`crates/alint-core/src/scope_filter.rs`,
+engine integration at `crates/alint-core/src/engine.rs`
+`run_per_file`). Per-file rule builders thread the filter onto
+the built rule via `RuleSpec::parse_scope_filter` (`config.rs`)
+so `Rule::scope_filter()` returns it back to the engine.
 
 This is the design for a new per-file-rule scope filter that
 makes ecosystem rule kinds (the bundled `rust@v1`, `node@v1`,

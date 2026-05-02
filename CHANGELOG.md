@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`scope_filter:` is now honoured at runtime by every per-file rule.**
+  v0.9.6 shipped the field on `RuleSpec`, the `ScopeFilter`/`ScopeFilterSpec`
+  runtime types, and the engine's per-file dispatch gate
+  (`crates/alint-core/src/engine.rs:run_per_file`), but no per-file rule
+  builder threaded the parsed filter onto the built rule — `Rule::scope_filter()`
+  always returned the trait default `None`, so the gate was a silent no-op
+  for every rule (including the bundled ecosystem rulesets that motivated
+  the primitive). Each of the 25 per-file rule types now stores a parsed
+  `Option<ScopeFilter>`, exposes it via `Rule::scope_filter()`, and gates
+  its rule-major fallback path on it as well (so `alint fix` respects the
+  filter the same way `alint check` does). New `RuleSpec::parse_scope_filter()`
+  helper in `alint-core::config` keeps the per-rule build-site change to
+  one line. Integration regression test:
+  `crates/alint-rules/tests/scope_filter_integration.rs`.
+
 ## [0.9.6] — 2026-05-02
 
 Closes the v0.9 cut with the `scope_filter:` primitive — closest-

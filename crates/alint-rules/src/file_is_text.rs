@@ -6,7 +6,9 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 
 use crate::io::{Classification, TEXT_INSPECT_LEN, classify_bytes, read_prefix};
 
@@ -17,6 +19,7 @@ pub struct FileIsTextRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for FileIsTextRule {
@@ -34,6 +37,11 @@ impl Rule for FileIsTextRule {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             if entry.size == 0 {
@@ -63,6 +71,10 @@ impl Rule for FileIsTextRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -114,6 +126,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
     }))
 }
 

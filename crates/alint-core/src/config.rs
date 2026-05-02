@@ -464,6 +464,29 @@ impl RuleSpec {
             self.extra.clone(),
         ))?)
     }
+
+    /// Parse and validate this spec's optional `scope_filter:`
+    /// field into a built [`ScopeFilter`](crate::ScopeFilter).
+    /// Returns `Ok(None)` when the spec has no `scope_filter`
+    /// set (the common case).
+    ///
+    /// Per-file rule builders call this and store the result
+    /// on the built rule; the rule's
+    /// [`Rule::scope_filter`](crate::Rule::scope_filter) method
+    /// returns it back to the engine, which gates per-file
+    /// dispatch on `ScopeFilter::matches` (`engine.rs`
+    /// `run_per_file`). Cross-file rules MUST NOT call this —
+    /// they call
+    /// [`reject_scope_filter_on_cross_file`](crate::reject_scope_filter_on_cross_file)
+    /// instead so a misconfigured `scope_filter:` on a cross-
+    /// file rule surfaces as a clear build-time error rather
+    /// than a silently-ignored field.
+    pub fn parse_scope_filter(&self) -> crate::error::Result<Option<crate::ScopeFilter>> {
+        match &self.scope_filter {
+            Some(spec) => Ok(Some(crate::ScopeFilter::from_spec(&self.id, spec.clone())?)),
+            None => Ok(None),
+        }
+    }
 }
 
 /// Rule specification for nested rules (e.g. the `require:` block of

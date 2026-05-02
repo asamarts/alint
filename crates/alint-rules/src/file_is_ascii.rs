@@ -12,7 +12,9 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 
 #[derive(Debug)]
 pub struct FileIsAsciiRule {
@@ -21,6 +23,7 @@ pub struct FileIsAsciiRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for FileIsAsciiRule {
@@ -40,6 +43,11 @@ impl Rule for FileIsAsciiRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let full = ctx.root.join(&entry.path);
             let Ok(bytes) = std::fs::read(&full) else {
                 continue;
@@ -51,6 +59,10 @@ impl Rule for FileIsAsciiRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -99,6 +111,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
     }))
 }
 

@@ -155,4 +155,34 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].path.as_deref(), Some(Path::new("packages/a")));
     }
+
+    #[test]
+    fn build_rejects_scope_filter_on_cross_file_rule() {
+        // every_matching_has is a cross-file rule
+        // (requires_full_index = true); scope_filter is
+        // per-file-rules-only. The build path must reject it with
+        // a clear message pointing at the for_each_dir +
+        // when_iter: alternative.
+        let yaml = r#"
+id: t
+kind: every_matching_has
+select: "packages/*"
+require:
+  - kind: file_exists
+    paths: "{path}/README.md"
+level: error
+scope_filter:
+  has_ancestor: Cargo.toml
+"#;
+        let spec = crate::test_support::spec_yaml(yaml);
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("scope_filter is supported on per-file rules only"),
+            "expected per-file-only message, got: {err}",
+        );
+        assert!(
+            err.contains("every_matching_has"),
+            "expected message to name the cross-file kind, got: {err}",
+        );
+    }
 }

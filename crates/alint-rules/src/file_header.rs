@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
+    Violation,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -28,6 +29,7 @@ pub struct FileHeaderRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     pattern_src: String,
     pattern: Regex,
     lines: usize,
@@ -55,6 +57,11 @@ impl Rule for FileHeaderRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let full = ctx.root.join(&entry.path);
             let bytes = match std::fs::read(&full) {
                 Ok(b) => b,
@@ -73,6 +80,10 @@ impl Rule for FileHeaderRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -153,6 +164,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         pattern_src: opts.pattern,
         pattern,
         lines: opts.lines,

@@ -1,0 +1,35 @@
+name: scope_filter has_ancestor accepts a list of marker names
+tags: [check, scope_filter, no_trailing_whitespace]
+
+# `has_ancestor:` takes either a single name or a list. The list
+# form is OR semantics — a file is in scope when ANY listed
+# marker name is found in its ancestor chain. This scenario
+# exercises a Python project shape (pyproject.toml OR setup.py)
+# alongside an out-of-scope `scripts/` dir.
+
+given:
+  tree:
+    app:
+      # Marker is `setup.py` (the second list entry).
+      setup.py: "# stub\n"
+      main.py: "x = 1 \n"
+    scripts:
+      # No pyproject.toml or setup.py anywhere in this subtree.
+      oneoff.py: "y = 2 \n"
+  config: |
+    version: 1
+    rules:
+      - id: nws
+        kind: no_trailing_whitespace
+        paths: "**/*.py"
+        scope_filter:
+          has_ancestor:
+            - pyproject.toml
+            - setup.py
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: nws, level: warning, path: app/main.py}

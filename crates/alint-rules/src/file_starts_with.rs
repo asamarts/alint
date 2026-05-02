@@ -13,7 +13,9 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 use serde::Deserialize;
 
 use crate::io::read_prefix_n;
@@ -32,6 +34,7 @@ pub struct FileStartsWithRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     prefix: Vec<u8>,
 }
 
@@ -52,6 +55,11 @@ impl Rule for FileStartsWithRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             // Bounded read: only the first `prefix.len()` bytes
             // matter. When this rule runs solo (e.g. via `alint
             // fix --only ...` or test harnesses) we read just
@@ -69,6 +77,10 @@ impl Rule for FileStartsWithRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -129,6 +141,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         prefix: opts.prefix.into_bytes(),
     }))
 }

@@ -1,0 +1,41 @@
+name: scope_filter has_ancestor (Cargo.toml) skips files outside any Rust subtree
+tags: [check, scope_filter, no_trailing_whitespace]
+
+# Per-file rule with `scope_filter: { has_ancestor: Cargo.toml }`.
+# Only files whose ancestor chain contains a sibling Cargo.toml
+# should be evaluated. The file under `services/web/` has no
+# such ancestor and must be skipped silently — this is the
+# "scope_filter dropped on the way through build()" regression
+# from v0.9.6 (asserted at the e2e layer).
+
+given:
+  tree:
+    crates:
+      api:
+        Cargo.toml: "[package]\nname = \"api\"\n"
+        src:
+          # In scope: has Cargo.toml ancestor at crates/api/.
+          main.rs: "fn main() { } \n"
+    services:
+      web:
+        scripts:
+          # Out of scope: no Cargo.toml ancestor.
+          migrate.rs: "// not really rust \n"
+  config: |
+    version: 1
+    rules:
+      - id: nws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        scope_filter:
+          has_ancestor: Cargo.toml
+        level: warning
+
+when: [check]
+
+expect:
+  # Only the in-scope file fires. If the gate is a no-op
+  # (the bug under test), `services/web/scripts/migrate.rs`
+  # also fires and this assertion fails.
+  - violations:
+      - {rule: nws, level: warning, path: crates/api/src/main.rs}

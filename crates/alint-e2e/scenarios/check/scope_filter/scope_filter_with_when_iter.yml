@@ -1,0 +1,47 @@
+name: scope_filter and tree-level when must both accept for the rule to fire
+tags: [check, scope_filter, when, facts]
+
+# Per-file `scope_filter:` (Cargo.toml ancestor required) AND
+# tree-level `when: facts.has_rust` (Cargo.toml exists somewhere).
+# Both gates must accept — if either rejects, the rule stays
+# quiet.
+#
+# Layout:
+#   crates/api/Cargo.toml      → makes facts.has_rust = true
+#   crates/api/src/main.rs     → in scope (Cargo.toml ancestor)
+#   services/web/scripts/x.rs  → out of scope (no ancestor)
+#
+# Expectation: only `crates/api/src/main.rs` fires. The when:
+# gate admits the rule globally; the per-file scope_filter then
+# narrows dispatch to the in-scope file.
+
+given:
+  tree:
+    crates:
+      api:
+        Cargo.toml: "[package]\nname = \"api\"\n"
+        src:
+          main.rs: "fn main() { } \n"
+    services:
+      web:
+        scripts:
+          x.rs: "// not rust \n"
+  config: |
+    version: 1
+    facts:
+      - id: has_rust
+        any_file_exists: [Cargo.toml, "**/Cargo.toml"]
+    rules:
+      - id: nws
+        when: facts.has_rust
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        scope_filter:
+          has_ancestor: Cargo.toml
+        level: warning
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: nws, level: warning, path: crates/api/src/main.rs}

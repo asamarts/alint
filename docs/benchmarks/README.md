@@ -5,16 +5,23 @@ How fast is alint, how do we measure it, and where do the numbers live.
 ## TL;DR — current published numbers
 
 `linux-x86_64` (AMD Ryzen 9 3900X 12-core / 62 GB / ext4 / rustc 1.95).
-Latest published release: **v0.9.5** (2026-05-01).
+Latest published release: **v0.9.6** (2026-05-02). Working baseline
+for the next release: **v0.9.6-postfix** (post-release `scope_filter:`
+runtime fix, see CHANGELOG `[Unreleased]`).
 
-| Workload | v0.5.6 baseline | v0.9.4 | v0.9.5 | Speedup vs v0.9.4 |
-|---|---:|---:|---:|---:|
-| 1M S3 full (hyperfine) | 569.078 s | 731.856 s | **11.194 s** | **65.4×** |
-| 1M S3 changed (hyperfine) | 528.103 s | 724.362 s | **6.728 s** | **107.7×** |
-| 100k S3 engine total (instrumented) | — | 10.7 s | **186 ms** | **57×** |
-| 10k S3 engine total (instrumented) | — | 226 ms | **23 ms** | **9.8×** |
+| Workload | v0.9.5 | v0.9.6 published | v0.9.6-postfix |
+|---|---:|---:|---:|
+| 100k S3 full (hyperfine) | — | 1135.27 ms | 1169.97 ms |
+| 100k S6 full (hyperfine) | — | 1221.27 ms | **1066.68 ms** (-12.7 %) |
+| 100k S9 full (hyperfine) | — | 738.58 ms | **691.83 ms** (-6.3 %) |
+| 1M S3 full (hyperfine) | 11.194 s | (not captured at 1M) | (not captured at 1M) |
+| 1M S3 changed (hyperfine) | 6.728 s | (not captured at 1M) | (not captured at 1M) |
 
-Source: [`macro/results/linux-x86_64/v0.9.5/`](macro/results/linux-x86_64/v0.9.5/).
+S9 (nested polyglot, new in v0.9.6) — see [`macro/results/linux-x86_64/v0.9.6/`](macro/results/linux-x86_64/v0.9.6/)
+and [`macro/results/linux-x86_64/v0.9.6-postfix/`](macro/results/linux-x86_64/v0.9.6-postfix/)
+for the post-fix re-capture (the released v0.9.6 binary's `scope_filter:` field was a runtime no-op; the postfix numbers reflect the gate actually firing).
+
+Source: [`macro/results/linux-x86_64/v0.9.6-postfix/`](macro/results/linux-x86_64/v0.9.6-postfix/) (working baseline) and [`macro/results/linux-x86_64/v0.9.5/`](macro/results/linux-x86_64/v0.9.5/) (prior 1M-scale baseline).
 
 ## Layout
 
@@ -29,7 +36,7 @@ docs/benchmarks/
 │   ├── README.md        — what each of the 12 micro-benches measures
 │   └── results/<arch>/<version>/criterion/   — published snapshots
 │
-├── macro/               — hyperfine bench-scale (S1-S8, full e2e wall-time)
+├── macro/               — hyperfine bench-scale (S1-S9, full e2e wall-time)
 │   ├── README.md        — what each scenario tests + tool matrix
 │   └── results/<arch>/<version>/             — published snapshots
 │

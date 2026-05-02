@@ -1,0 +1,41 @@
+name: scope_filter survives inheritance through extends
+tags: [check, scope_filter, extends, composition]
+
+# A base config defines a per-file rule with `scope_filter:`
+# set; a child config `extends:` it and adds nothing else.
+# The inherited filter must still gate dispatch — i.e. the
+# scope_filter field has to make it from the parent YAML
+# through the loader's merge step into the built rule.
+
+given:
+  tree:
+    base.yml: |
+      version: 1
+      rules:
+        - id: nws
+          kind: no_trailing_whitespace
+          paths: "**/*.rs"
+          scope_filter:
+            has_ancestor: Cargo.toml
+          level: warning
+
+    crates:
+      api:
+        Cargo.toml: "[package]\nname = \"api\"\n"
+        src:
+          main.rs: "fn main() { } \n"   # in scope
+    services:
+      web:
+        scripts:
+          migrate.rs: "// not rust \n"  # out of scope
+
+  config: |
+    version: 1
+    extends: [./base.yml]
+
+when: [check]
+
+expect:
+  # Inherited filter keeps the out-of-scope file silent.
+  - violations:
+      - {rule: nws, level: warning, path: crates/api/src/main.rs}

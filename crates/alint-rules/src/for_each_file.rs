@@ -180,4 +180,33 @@ mod tests {
         let v = r.evaluate(&ctx).unwrap();
         assert_eq!(v.len(), 2);
     }
+
+    #[test]
+    fn build_rejects_scope_filter_on_cross_file_rule() {
+        // for_each_file is a cross-file rule (requires_full_index
+        // = true); scope_filter is per-file-rules-only. The build
+        // path must reject it with a clear message pointing at
+        // the for_each_dir + when_iter: alternative.
+        let yaml = r#"
+id: t
+kind: for_each_file
+select: "**/*.c"
+require:
+  - kind: file_exists
+    paths: "{dir}/{stem}.h"
+level: error
+scope_filter:
+  has_ancestor: Cargo.toml
+"#;
+        let spec = crate::test_support::spec_yaml(yaml);
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("scope_filter is supported on per-file rules only"),
+            "expected per-file-only message, got: {err}",
+        );
+        assert!(
+            err.contains("for_each_file"),
+            "expected message to name the cross-file kind, got: {err}",
+        );
+    }
 }
