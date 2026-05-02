@@ -11,11 +11,14 @@ extends:
   - alint://bundled/python@v1
 ```
 
-Every rule is gated with `when: facts.is_python`, so it's safe
-to extend from a polyglot repo — rules don't fire unless at
-least one standard Python project marker is present. Override
-`is_python` with your own `facts:` block if you need a
-different heuristic.
+Gated with `when: facts.has_python` (true if any standard Python
+project marker exists anywhere in the tree) plus a per-rule
+`scope_filter: { has_ancestor: [pyproject.toml, setup.py,
+requirements.txt] }` on per-file content rules so they only
+apply to files inside a Python package — useful in polyglot
+monorepos where Python packages sit alongside Rust / Node / Go
+subdirectories. Override `has_python` with your own `facts:`
+block if you need a different heuristic.
 
 ## Rules
 
@@ -23,7 +26,7 @@ different heuristic.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 - **policy**: <https://packaging.python.org/en/latest/guides/writing-pyproject-toml/>
 
 > Python project: a `pyproject.toml` (preferred), `setup.py`, or `setup.cfg` at the repo root is required.
@@ -32,7 +35,7 @@ different heuristic.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 
 > A lockfile should be committed for reproducible installs (uv.lock / poetry.lock / Pipfile.lock / pdm.lock).
 
@@ -40,7 +43,7 @@ different heuristic.
 
 - **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
 - **level**: `warning`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 - **policy**: <https://peps.python.org/pep-0621/>
 
 > `pyproject.toml` has no `project.name` (PEP 621). Declare the distribution name so `pip install .` / `uv build` work.
@@ -49,7 +52,7 @@ different heuristic.
 
 - **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
 - **level**: `info`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 
 > `pyproject.toml` has no `project.requires-python`; declare a floor (e.g. `>=3.10`) so installs fail fast on unsupported interpreters.
 
@@ -57,7 +60,7 @@ different heuristic.
 
 - **kind**: [`filename_case`](/docs/rules/naming/filename_case/)
 - **level**: `info`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 - **policy**: <https://peps.python.org/pep-0008/#package-and-module-names>
 
 > Python module filenames should be snake_case (PEP 8).
@@ -66,19 +69,19 @@ different heuristic.
 
 - **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 
 ### `python-sources-no-trailing-whitespace`
 
 - **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 
 ### `python-sources-no-bidi`
 
 - **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
-- **when**: `facts.is_python`
+- **when**: `facts.has_python`
 - **policy**: <https://trojansource.codes/>
 
 > Trojan Source (CVE-2021-42574): bidi override chars in Python sources are rejected.
@@ -96,26 +99,33 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/pytho
 #     extends:
 #       - alint://bundled/python@v1
 #
-# Every rule is gated with `when: facts.is_python`, so it's safe
-# to extend from a polyglot repo — rules don't fire unless at
-# least one standard Python project marker is present. Override
-# `is_python` with your own `facts:` block if you need a
-# different heuristic.
+# Gated with `when: facts.has_python` (true if any standard Python
+# project marker exists anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: [pyproject.toml, setup.py,
+# requirements.txt] }` on per-file content rules so they only
+# apply to files inside a Python package — useful in polyglot
+# monorepos where Python packages sit alongside Rust / Node / Go
+# subdirectories. Override `has_python` with your own `facts:`
+# block if you need a different heuristic.
 
 version: 1
 
 facts:
-  - id: is_python
+  - id: has_python
     any_file_exists:
       - pyproject.toml
+      - "**/pyproject.toml"
       - setup.py
+      - "**/setup.py"
       - setup.cfg
+      - "**/setup.cfg"
       - requirements.txt
+      - "**/requirements.txt"
 
 rules:
   # --- Manifest + lockfile ------------------------------------------
   - id: python-manifest-exists
-    when: facts.is_python
+    when: facts.has_python
     # Modern Python wants `pyproject.toml` (PEP 518 / 621), but
     # `setup.py` + `setup.cfg` are still the reality in older code
     # bases. Any one of the three satisfies the rule.
@@ -129,7 +139,7 @@ rules:
     policy_url: "https://packaging.python.org/en/latest/guides/writing-pyproject-toml/"
 
   - id: python-has-lockfile
-    when: facts.is_python
+    when: facts.has_python
     # Accept any of the common lockfile names from uv / Poetry /
     # Pipenv / PDM. At least one should be committed for
     # reproducible installs. Skip this rule (`level: off`) if your
@@ -153,7 +163,7 @@ rules:
   # does exist but the enforced field is missing, the rule fires
   # (zero-match is a violation, which is what we want here).
   - id: python-pyproject-declares-name
-    when: facts.is_python
+    when: facts.has_python
     kind: toml_path_matches
     paths: pyproject.toml
     path: "$.project.name"
@@ -165,7 +175,7 @@ rules:
     policy_url: "https://peps.python.org/pep-0621/"
 
   - id: python-pyproject-declares-requires-python
-    when: facts.is_python
+    when: facts.has_python
     # Bracket notation is required on keys with dashes — JSONPath
     # dot-notation segments are restricted to [A-Za-z_][A-Za-z0-9_]*.
     kind: toml_path_matches
@@ -180,7 +190,7 @@ rules:
 
   # --- Source-file conventions --------------------------------------
   - id: python-module-snake-case
-    when: facts.is_python
+    when: facts.has_python
     # PEP 8: module filenames are lowercase with underscores.
     # Scoped to `src/**` and the top level only — tests commonly
     # use `test_*.py` (already snake) and conftest.py which are
@@ -193,26 +203,32 @@ rules:
     policy_url: "https://peps.python.org/pep-0008/#package-and-module-names"
 
   - id: python-sources-final-newline
-    when: facts.is_python
+    when: facts.has_python
     kind: final_newline
     paths: "**/*.py"
+    scope_filter:
+      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
     level: info
     fix:
       file_append_final_newline: {}
 
   - id: python-sources-no-trailing-whitespace
-    when: facts.is_python
+    when: facts.has_python
     kind: no_trailing_whitespace
     paths: "**/*.py"
+    scope_filter:
+      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
     level: info
     fix:
       file_trim_trailing_whitespace: {}
 
   # --- Trojan Source defense on Python sources ----------------------
   - id: python-sources-no-bidi
-    when: facts.is_python
+    when: facts.has_python
     kind: no_bidi_controls
     paths: "**/*.py"
+    scope_filter:
+      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars in Python sources are rejected."
     policy_url: "https://trojansource.codes/"

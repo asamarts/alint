@@ -21,7 +21,7 @@ produce byte-identical output to v0.9.3. See
 `docs/benchmarks/micro/results/linux-x86_64/v0.9.4/README.md` for
 captured numbers.
 
-**v0.9 cut reopened (2026-05-01).** A scaling-profile
+**v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs
 v0.5.6 — `for_each_dir` cross-file dispatch was running
 nested rules in O(D × N) shape (5 B glob-match operations
@@ -29,20 +29,35 @@ at 1M with 5,000 packages). The fix landed on `main` as
 v0.9.5 (lazy path-index on `FileIndex` + literal-path fast
 paths in `file_exists`, `structured_path`,
 `iter.has_file`); 1M S3 wall: 731.9 s → 11.19 s (65×) full,
-6.73 s (108×) changed. Sub-phases v0.9.6–.9 codify the
-test/coverage floor that lets future engine work land
-without that class of regression slipping by:
+6.73 s (108×) changed. v0.9.5 also folded in the
+test/coverage/dogfood floor that prevents the same class of
+regression from slipping by again:
 
-- **v0.9.6** — coverage audits (pass/fail symmetry, bundled-
+- **v0.9.5.5** — cross-file dispatch fast paths (the headline)
+- **v0.9.5.6** — coverage audits (pass/fail symmetry, bundled-
   ruleset coverage, git-mode symmetry)
-- **v0.9.7** — coverage scenarios filling gaps the audits
-  surface
-- **v0.9.8** — bench-scale extension (S6 per-file content
-  fan-out, S7 cross-file relational, S8 git-tracked overlay)
-- **v0.9.9** — alint self-dogfooding via `.alint.yml` at
-  repo root, gated in CI
+- **v0.9.5.7** — 16 coverage scenarios filling the audit punch list
+- **v0.9.5.8** — bench-scale S6 (per-file content fan-out) /
+  S7 (cross-file relational) / S8 (git-tracked overlay)
+- **v0.9.5.9** — `docs/development/RULE-AUTHORING.md` workflow doc
+- **v0.9.5.reorg** — `docs/benchmarks/{micro,macro,investigations,archive}/`
+  layout + per-version results + `xtask publish-benches`
 
-Full design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
+Full v0.9.5 design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
+
+**v0.9.6 (2026-05-02) — `scope_filter:` primitive.** Closest-
+ancestor manifest scoping for per-file rules, plus the
+bundled-ecosystem-ruleset migration that motivated it. The
+`is_*` ecosystem facts (`is_rust`, `is_node`, …) renamed to
+`has_*` and broadened from root-only `[Cargo.toml]` to
+`[Cargo.toml, "**/Cargo.toml"]` so polyglot monorepos with
+no root manifest correctly fire the ruleset; per-file content
+rules add `scope_filter: { has_ancestor: <manifest> }` so
+they only fire on files inside their ecosystem's package
+subtree. New bench-scale S9 scenario (nested polyglot:
+rust + node + python over `crates/` + `packages/` + `apps/`)
+captures the dispatch shape this primitive was designed for.
+Full design: [`docs/design/v0.9/scope-filter.md`](./v0.9/scope-filter.md).
 
 **Next: v0.10 — LSP server.** Inline diagnostics, hover
 with rule documentation, code actions for "add to ignore"
@@ -136,8 +151,8 @@ YAML.
 - ✅ `.pre-commit-hooks.yaml` — exposes `alint` (check) and `alint-fix` (manual-stage) hooks. `language: rust` means zero setup for pre-commit users.
 - ✅ Bundled rulesets infra: `alint://bundled/<name>@<rev>` URI scheme resolved offline via `include_str!`. Cycle-safe, leaf-only (bundled rulesets cannot themselves `extends:`). Inherits the same `custom:`-fact guard as HTTPS extends.
 - ✅ `alint://bundled/oss-baseline@v1` — 9 rules. Community docs + content hygiene most OSS repos want.
-- ✅ `alint://bundled/rust@v1` — 10 rules. Gated `when: facts.is_rust` so it's a safe no-op in polyglot trees.
-- ✅ `alint://bundled/node@v1` — 8 rules. Gated `when: facts.is_node`.
+- ✅ `alint://bundled/rust@v1` — 10 rules. Gated `when: facts.has_rust` so it's a safe no-op in polyglot trees.
+- ✅ `alint://bundled/node@v1` — 8 rules. Gated `when: facts.has_node`.
 - ✅ `alint://bundled/monorepo@v1` — 4 rules. Language-agnostic `for_each_dir` over `{packages,crates,apps,services}/*`.
 
 ### v0.4.x point releases (shipped)
@@ -632,8 +647,8 @@ fresh nested rule per matched directory and each ran a
 linear scan of `ctx.index.files()`, giving O(D × N) shape
 that hit ~5 B glob-match ops at 1M with 5,000 packages.
 
-- ⏳ **Cross-file dispatch fast paths** (v0.9.5, code merged
-  on `main`). Lazy `OnceLock<HashSet<Arc<Path>>>` path-index
+- ✅ **Cross-file dispatch fast paths** (v0.9.5, released
+  2026-05-01). Lazy `OnceLock<HashSet<Arc<Path>>>` path-index
   on `FileIndex` (`contains_file(&Path) -> bool` is the
   canonical O(1) "does this path exist?" query); literal-
   path fast paths in `file_exists::evaluate`,
@@ -645,29 +660,40 @@ that hit ~5 B glob-match ops at 1M with 5,000 packages.
   --warmup 1 --runs 3):** full 731.9 s → 11.19 s ± 0.15
   (65×); changed 724.4 s → 6.73 s ± 0.06 (108×). Also ~80×
   faster than the v0.5.6 baseline.
-- ⏸ **Coverage audits** (v0.9.6). Three new tests under
+- ✅ **Coverage audits** (v0.9.5.6). Three new tests under
   `crates/alint-e2e/tests/`: pass/fail symmetry per kind;
   bundled-ruleset coverage; git-mode symmetry. Plus a soft-
   warning bench-coverage listing.
-- ⏸ **Coverage scenarios** (v0.9.7). Author the missing
-  ~30-50 YAMLs under `crates/alint-e2e/scenarios/check/
-  <family>/` to drain the v0.9.6 punch list. Standardised
-  naming (`<kind>_pass.yml`, `<kind>_fires.yml`,
-  `<kind>_no_op_outside_git.yml`, `<kind>_in_repo.yml`).
-- ⏸ **Bench-scale extension** (v0.9.8). S1-S5 unchanged;
+- ✅ **Coverage scenarios** (v0.9.5.7). 16 new YAMLs under
+  `crates/alint-e2e/scenarios/check/<family>/` filling the
+  audit punch list. E2e count 205 → 221.
+- ✅ **Bench-scale extension** (v0.9.5.8). S1-S5 unchanged;
   three new perf-shape scenarios — S6 (per-file content
   fan-out), S7 (cross-file relational), S8 (git-tracked
   overlay). New `alint_bench::tree::generate_git_monorepo`
   helper.
-- ⏸ **alint self-dogfooding** (v0.9.9). `.alint.yml` at
-  the repo root with rules requiring every rule-source
-  file to have a referencing e2e scenario, every bundled
-  ruleset to have pass + flagging scenarios. CI gate:
-  `alint check .` runs alongside `cargo test`. Two-layer
-  enforcement — alint check (file presence) + Rust audits
-  (semantic).
+- ✅ **Rule-authoring workflow doc** (v0.9.5.9).
+  `docs/development/RULE-AUTHORING.md` codifies the
+  four-step workflow new rules / bundled rulesets / aliases
+  follow. Self-dogfooding via `action-selftest.yml` covers
+  the in-repo lint enforcement.
+- ✅ **`scope_filter:` primitive** (v0.9.6, released
+  2026-05-02). Closest-ancestor manifest scoping for per-
+  file rules — `Rule::scope_filter() -> Option<&ScopeFilter>`
+  trait method, engine integration in `Engine::run_per_file`'s
+  applicable-filter, walks `Path::parent()` upward and
+  consults the v0.9.5 path-index at each step. The five
+  bundled ecosystem rulesets (`rust@v1`, `node@v1`,
+  `python@v1`, `go@v1`, `java@v1`) renamed `is_*` → `has_*`,
+  broadened heuristics to catch nested manifests, and added
+  `scope_filter:` to per-file content rules so they only
+  fire on files inside their ecosystem's package subtree.
+  New bench-scale S9 scenario (nested polyglot:
+  rust + node + python over `crates/` + `packages/` +
+  `apps/`) at K100 = 688 ms ± 13 ms. Full design:
+  [`docs/design/v0.9/scope-filter.md`](./v0.9/scope-filter.md).
 
-Full design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
+Full v0.9.5 design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
 
 ## v0.10 — LSP
 

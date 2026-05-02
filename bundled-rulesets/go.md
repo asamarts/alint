@@ -10,10 +10,14 @@ extends:
   - alint://bundled/go@v1
 ```
 
-Every rule is gated with `when: facts.is_go`, so it's safe to
-extend from a polyglot repo — rules only apply when `go.mod` is
-present at the root. Override `is_go` with your own `facts:`
-block if your project uses a non-standard location.
+Gated with `when: facts.has_go` (true if any `go.mod` exists
+anywhere in the tree) plus a per-rule
+`scope_filter: { has_ancestor: go.mod }` on per-file content
+rules so they only apply to files inside a Go module — useful
+in polyglot monorepos where Go modules sit alongside
+Rust / Node / Python subdirectories. Override `has_go` with
+your own `facts:` block if your project uses a non-standard
+location.
 
 go.mod is a Go-specific format (not TOML/YAML/JSON), so shape
 checks use `file_content_matches` rather than the structured-
@@ -25,7 +29,7 @@ query family.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `error`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 - **policy**: <https://go.dev/ref/mod#go-mod-file>
 
 > Go module: go.mod at the repo root is required.
@@ -34,7 +38,7 @@ query family.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 - **policy**: <https://go.dev/ref/mod#go-sum-files>
 
 > go.sum pins the hashes of every transitive dependency; commit it for reproducible builds. Modules with zero dependencies legitimately omit it.
@@ -43,7 +47,7 @@ query family.
 
 - **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `error`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 
 > go.mod must declare a `module <path>` on its first directive.
 
@@ -51,7 +55,7 @@ query family.
 
 - **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
 - **level**: `warning`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 - **policy**: <https://go.dev/ref/mod#go-mod-file-go>
 
 > go.mod should declare a `go <version>` directive (e.g. `go 1.22`) so the toolchain version is explicit.
@@ -60,7 +64,7 @@ query family.
 
 - **kind**: [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/)
 - **level**: `error`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 - **policy**: <https://trojansource.codes/>
 
 > Trojan Source (CVE-2021-42574): bidi override chars in Go sources are rejected.
@@ -69,7 +73,7 @@ query family.
 
 - **kind**: [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/)
 - **level**: `error`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 
 > Zero-width characters in Go sources are rejected (review hazard).
 
@@ -77,7 +81,7 @@ query family.
 
 - **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
-- **when**: `facts.is_go`
+- **when**: `facts.has_go`
 
 ## Source
 
@@ -91,10 +95,14 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/go.ym
 #     extends:
 #       - alint://bundled/go@v1
 #
-# Every rule is gated with `when: facts.is_go`, so it's safe to
-# extend from a polyglot repo — rules only apply when `go.mod` is
-# present at the root. Override `is_go` with your own `facts:`
-# block if your project uses a non-standard location.
+# Gated with `when: facts.has_go` (true if any `go.mod` exists
+# anywhere in the tree) plus a per-rule
+# `scope_filter: { has_ancestor: go.mod }` on per-file content
+# rules so they only apply to files inside a Go module — useful
+# in polyglot monorepos where Go modules sit alongside
+# Rust / Node / Python subdirectories. Override `has_go` with
+# your own `facts:` block if your project uses a non-standard
+# location.
 #
 # go.mod is a Go-specific format (not TOML/YAML/JSON), so shape
 # checks use `file_content_matches` rather than the structured-
@@ -103,13 +111,13 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/go.ym
 version: 1
 
 facts:
-  - id: is_go
-    any_file_exists: [go.mod]
+  - id: has_go
+    any_file_exists: [go.mod, "**/go.mod"]
 
 rules:
   # --- Module manifest ---------------------------------------------
   - id: go-mod-exists
-    when: facts.is_go
+    when: facts.has_go
     kind: file_exists
     paths: go.mod
     root_only: true
@@ -118,7 +126,7 @@ rules:
     policy_url: "https://go.dev/ref/mod#go-mod-file"
 
   - id: go-sum-exists
-    when: facts.is_go
+    when: facts.has_go
     # go.sum pins every transitive dependency's hash — missing it
     # means non-reproducible builds. Modules with zero deps
     # legitimately omit go.sum; disable via `level: off` in that
@@ -135,7 +143,7 @@ rules:
 
   # --- go.mod shape ------------------------------------------------
   - id: go-mod-declares-module-path
-    when: facts.is_go
+    when: facts.has_go
     # Every go.mod starts with `module <path>`. Absent or empty
     # module path means `go build` will refuse the module.
     kind: file_content_matches
@@ -145,7 +153,7 @@ rules:
     message: "go.mod must declare a `module <path>` on its first directive."
 
   - id: go-mod-declares-go-version
-    when: facts.is_go
+    when: facts.has_go
     # Every go.mod should declare a `go <major>.<minor>` toolchain
     # floor. Missing it means the toolchain selects its default,
     # which changes across Go releases.
@@ -160,25 +168,31 @@ rules:
 
   # --- Trojan Source defense on Go sources -------------------------
   - id: go-sources-no-bidi
-    when: facts.is_go
+    when: facts.has_go
     kind: no_bidi_controls
     paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars in Go sources are rejected."
     policy_url: "https://trojansource.codes/"
 
   - id: go-sources-no-zero-width
-    when: facts.is_go
+    when: facts.has_go
     kind: no_zero_width_chars
     paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
     level: error
     message: "Zero-width characters in Go sources are rejected (review hazard)."
 
   # --- Source-file hygiene on Go sources ---------------------------
   - id: go-sources-final-newline
-    when: facts.is_go
+    when: facts.has_go
     kind: final_newline
     paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
     level: info
     fix:
       file_append_final_newline: {}

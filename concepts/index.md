@@ -37,7 +37,7 @@ Facts evaluate properties of the repo *once per run* and surface them as named v
 
 ```yaml
 facts:
-  - id: is_rust
+  - id: has_rust
     any_file_exists: [Cargo.toml]
 ```
 
@@ -45,7 +45,7 @@ Rules reference facts in `when:` to gate themselves conditionally:
 
 ```yaml
 - id: rust-snake-case
-  when: facts.is_rust
+  when: facts.has_rust
   kind: filename_case
   paths: "src/**/*.rs"
   case: snake
