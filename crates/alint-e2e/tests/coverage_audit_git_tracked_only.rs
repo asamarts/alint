@@ -56,8 +56,8 @@ fn git_tracked_only_field_is_fully_wired() {
 
         // Both wire-ups must be present.
         let has_wants_override = src.contains("fn wants_git_tracked");
-        let has_runtime_check = src.contains("is_git_tracked")
-            || src.contains("dir_has_tracked_files");
+        let has_runtime_check =
+            src.contains("is_git_tracked") || src.contains("dir_has_tracked_files");
 
         if !has_wants_override {
             violations.push(format!(
