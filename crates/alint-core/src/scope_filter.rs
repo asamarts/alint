@@ -199,6 +199,45 @@ pub fn reject_scope_filter_on_cross_file(
     Ok(())
 }
 
+/// Build-time guard for rules whose evaluation target is fixed
+/// (a hardcoded path or a tree-level invariant), making
+/// `scope_filter:` semantically meaningless. Sister helper to
+/// [`reject_scope_filter_on_cross_file`]; used by rules like
+/// `no_submodules` (hardcoded to `.gitmodules` at the repo
+/// root) where the user-supplied filter has nothing to scope.
+///
+/// `reason` is the user-facing why-can't-I-use-it: it gets
+/// inlined into the error message after `"...scope_filter is not
+/// supported on <rule_kind>; "`. Keep it as a single sentence
+/// fragment that completes that lead. Example: `"this rule is
+/// hardcoded to check `.gitmodules` at the repository root"`.
+///
+/// Usage in a rule builder:
+///
+/// ```ignore
+/// pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+///     reject_scope_filter_with_reason(
+///         spec,
+///         "no_submodules",
+///         "this rule is hardcoded to check `.gitmodules` at the repository root",
+///     )?;
+///     // …
+/// }
+/// ```
+pub fn reject_scope_filter_with_reason(
+    spec: &crate::config::RuleSpec,
+    rule_kind: &str,
+    reason: &str,
+) -> Result<()> {
+    if spec.scope_filter.is_some() {
+        return Err(Error::rule_config(
+            &spec.id,
+            format!("scope_filter is not supported on {rule_kind}; {reason}"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_manifest_name(rule_id: &str, name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(Error::rule_config(

@@ -51,6 +51,7 @@ const SCENARIO_S6: &str = include_str!("scenarios/s6_per_file_content.yml");
 const SCENARIO_S7: &str = include_str!("scenarios/s7_cross_file_relational.yml");
 const SCENARIO_S8: &str = include_str!("scenarios/s8_git_overlay.yml");
 const SCENARIO_S9: &str = include_str!("scenarios/s9_nested_polyglot.yml");
+const SCENARIO_S10: &str = include_str!("scenarios/s10_scope_filter_outside_per_file.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
@@ -146,6 +147,7 @@ pub enum Scenario {
     S7,
     S8,
     S9,
+    S10,
 }
 
 impl Scenario {
@@ -160,7 +162,8 @@ impl Scenario {
             "S7" => Ok(Self::S7),
             "S8" => Ok(Self::S8),
             "S9" => Ok(Self::S9),
-            other => bail!("unknown scenario {other:?}; expected one of S1..S9"),
+            "S10" => Ok(Self::S10),
+            other => bail!("unknown scenario {other:?}; expected one of S1..S10"),
         }
     }
 
@@ -175,6 +178,7 @@ impl Scenario {
             Self::S7 => "S7",
             Self::S8 => "S8",
             Self::S9 => "S9",
+            Self::S10 => "S10",
         }
     }
 
@@ -195,6 +199,9 @@ impl Scenario {
             Self::S9 => {
                 "Nested polyglot monorepo (rust + node + python rulesets over crates/ + packages/ + apps/)"
             }
+            Self::S10 => {
+                "scope_filter on rules outside the PerFileRule path (file_max_size / no_empty_files / no_symlinks / filename_case / filename_regex with has_ancestor narrowing)"
+            }
         }
     }
 
@@ -209,6 +216,7 @@ impl Scenario {
             Self::S7 => SCENARIO_S7,
             Self::S8 => SCENARIO_S8,
             Self::S9 => SCENARIO_S9,
+            Self::S10 => SCENARIO_S10,
         }
     }
 
@@ -221,7 +229,7 @@ impl Scenario {
     /// same files, which the standard Cargo-workspace tree
     /// doesn't exercise.
     pub fn requires_polyglot_tree(self) -> bool {
-        matches!(self, Self::S9)
+        matches!(self, Self::S9 | Self::S10)
     }
 
     /// True for scenarios whose tree must be a real git repo

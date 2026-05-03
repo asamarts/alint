@@ -10,7 +10,7 @@
 //! rule is a no-op (never produces violations). Document this in
 //! the config so platform-specific behaviour isn't a surprise.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +31,7 @@ pub struct ExecutableBitRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     require_exec: bool,
 }
 
@@ -52,6 +53,11 @@ impl Rule for ExecutableBitRule {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -81,6 +87,10 @@ impl Rule for ExecutableBitRule {
         // so configs stay portable across platforms.
         Ok(Vec::new())
     }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -103,6 +113,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         require_exec: opts.require,
     }))
 }
@@ -219,5 +230,41 @@ mod tests {
         std::fs::set_permissions(tmp.path().join("README.md"), perms).unwrap();
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "0755 markdown should fire require=false");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_filter_narrows() {
+        use std::os::unix::fs::PermissionsExt;
+        // Two .md files chmod'd 0755; only the one with
+        // `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"**/*.md\"\n\
+             require: false\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("pkg/marker.lock", b""),
+            ("pkg/README.md", b"# in"),
+            ("other/README.md", b"# out"),
+        ]);
+        for rel in ["pkg/README.md", "other/README.md"] {
+            let mut perms = std::fs::metadata(tmp.path().join(rel))
+                .unwrap()
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(tmp.path().join(rel), perms).unwrap();
+        }
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(
+            v[0].path.as_deref(),
+            Some(std::path::Path::new("pkg/README.md"))
+        );
     }
 }

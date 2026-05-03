@@ -7,7 +7,7 @@
 //! Check-only: moving files around to flatten the tree isn't a
 //! decision alint can make automatically.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +23,7 @@ pub struct MaxDirectoryDepthRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     max_depth: usize,
 }
 
@@ -43,6 +44,11 @@ impl Rule for MaxDirectoryDepthRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let depth = entry.path.components().count();
             if depth > self.max_depth {
                 let msg = self.message.clone().unwrap_or_else(|| {
@@ -56,6 +62,10 @@ impl Rule for MaxDirectoryDepthRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -87,13 +97,16 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         max_depth: opts.max_depth,
     }))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
+    use std::path::{Path, PathBuf};
 
     fn depth_of(s: &str) -> usize {
         PathBuf::from(s).components().count()
@@ -104,5 +117,32 @@ mod tests {
         assert_eq!(depth_of("README.md"), 1);
         assert_eq!(depth_of("src/lib.rs"), 2);
         assert_eq!(depth_of("a/b/c/d.rs"), 4);
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two too-deep files; only the one inside a directory
+        // with `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_directory_depth\n\
+             paths: \"**\"\n\
+             max_depth: 2\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&[
+            "pkg/marker.lock",
+            "pkg/sub/deep/file.rs",
+            "other/sub/deep/file.rs",
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(
+            v[0].path.as_deref(),
+            Some(Path::new("pkg/sub/deep/file.rs"))
+        );
     }
 }

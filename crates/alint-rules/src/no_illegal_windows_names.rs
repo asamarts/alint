@@ -14,7 +14,7 @@
 //!
 //! Check-only. The "correct" rename is a user decision.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 
 #[derive(Debug)]
 pub struct NoIllegalWindowsNamesRule {
@@ -23,6 +23,7 @@ pub struct NoIllegalWindowsNamesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for NoIllegalWindowsNamesRule {
@@ -42,6 +43,11 @@ impl Rule for NoIllegalWindowsNamesRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             for component in entry.path.components() {
                 let Some(name) = component.as_os_str().to_str() else {
                     continue;
@@ -57,6 +63,10 @@ impl Rule for NoIllegalWindowsNamesRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -140,6 +150,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
     }))
 }
 
@@ -190,5 +201,26 @@ mod tests {
         assert!(illegal_reason("README.md").is_none());
         assert!(illegal_reason("my-config.yaml").is_none());
         assert!(illegal_reason("src").is_none());
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        use crate::test_support::{ctx, index, spec_yaml};
+        use std::path::Path;
+        // Two illegal-named files; only the one inside a
+        // directory with `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_illegal_windows_names\n\
+             paths: \"**\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["pkg/marker.lock", "pkg/CON.txt", "other/CON.txt"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/CON.txt")));
     }
 }

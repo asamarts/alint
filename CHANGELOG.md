@@ -6,6 +6,97 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-05-03
+
+Patch release for two `scope_filter:` silent-no-op gaps surfaced
+by the post-v0.9.8 audit. v0.9.7 wired the filter through the
+25 per-file content rules; v0.9.9 closes the residual coverage on
+the 17 rules that bypass the engine's per-file dispatch path AND
+the `for_each_dir` literal-path bypass introduced in v0.9.8.
+
+### Fixed
+
+- **17 rules now honour `scope_filter:`.** The rules whose
+  `Rule::evaluate` iterates `ctx.index.files()` directly
+  (rather than opting into the engine's per-file dispatch) had
+  no `scope_filter` plumbing at all — the gate silently dropped
+  on the way through `build()`, identical shape to the v0.9.6 →
+  v0.9.7 bug for per-file content rules. Affects:
+  `file_max_size`, `file_min_size`, `no_empty_files`,
+  `executable_bit`, `executable_has_shebang`,
+  `shebang_has_executable`, `no_symlinks`, `filename_case`,
+  `filename_regex`, `no_illegal_windows_names`,
+  `max_files_per_directory`, `max_directory_depth`,
+  `json_schema_passes`, `command`, `git_blame_age`,
+  `no_case_conflicts`. Each rule now stores
+  `scope_filter: Option<ScopeFilter>`, exposes it via
+  `Rule::scope_filter()`, and short-circuits its
+  `ctx.index.files()` loop on out-of-scope files (preserving
+  the per-file iteration shape — only the work done per file
+  changes). Per-rule unit tests assert narrowing behaviour.
+- **`no_submodules` rejects `scope_filter:` at build time.** The
+  rule is hardcoded to inspect `.gitmodules` at the repo root —
+  it does not iterate the file index, so a `scope_filter` on it
+  is meaningless. Build-time rejection via the new
+  `reject_scope_filter_with_reason(spec, kind, reason)` helper
+  in `alint-core::scope_filter`.
+- **`for_each_dir` literal-path bypass now consults `scope_filter`.**
+  v0.9.8's fast path (dispatching a nested per-file rule via
+  `PerFileRule::evaluate_file` against a single literal,
+  bypassing the rule's own `evaluate`) executed regardless of
+  whether the literal's ancestor chain satisfied the nested
+  rule's `scope_filter:`. Divergent from the rule-major
+  fallback, which already honoured the filter (since v0.9.7).
+  The bypass guard at
+  `crates/alint-rules/src/for_each_dir.rs::evaluate_for_each`
+  now consults `nested_rule.scope_filter()` before taking the
+  fast path. E2e regression at
+  `crates/alint-e2e/scenarios/check/scope_filter/scope_filter_nested_under_for_each_dir.yml`.
+
+### Added
+
+- **`alint_core::reject_scope_filter_with_reason(spec, kind, reason)`**
+  — symmetric to `reject_scope_filter_on_cross_file`, but for
+  rules whose dispatch shape is hardcoded to a single path. The
+  `reason` field surfaces *why* the rule cannot honour the
+  filter (improves the error message authors get).
+- **Macro bench scenario S10** at
+  `xtask/src/bench/scenarios/s10_scope_filter_outside_per_file.yml`
+  — 5 rules from outside the PerFileRule dispatch path
+  (`file_max_size`, `no_empty_files`, `no_symlinks`,
+  `filename_case`, `filename_regex`) each with
+  `scope_filter: { has_ancestor: <manifest> }` over the polyglot
+  tree. Catches the same bug class S9 catches for per-file
+  rules, but on the rule set v0.9.8 silently dropped.
+- **17 unit tests** (`scope_filter_narrows`) — one per rule —
+  asserting in-scope / out-of-scope narrowing.
+- **1 e2e regression** for bug #2 covering the for_each_dir
+  literal-path bypass shape.
+
+### Changed
+
+- **`docs/design/v0.9/scope-filter.md`** gains a "Post-v0.9.6
+  follow-ups" section documenting the v0.9.7, v0.9.9, and
+  v0.9.10 trajectory — captures *why* this kept happening
+  (separate `Scope` + `Option<ScopeFilter>` fields without
+  compiler-enforced wiring) and the v0.9.10 structural fix
+  that prevents recurrence.
+
+### Performance
+
+- 1k/10k/100k S10 numbers within ±5 % of v0.9.8 baseline (the
+  per-file iteration shape is unchanged; only the per-file
+  cost of an in-scope vs out-of-scope check shifts). The
+  point of S10 is regression detection, not a speedup
+  headline. Full numbers in
+  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.9/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.9/).
+
+### Internal
+
+- All 393 alint-rules tests + 227 e2e scenarios pass.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  clean.
+
 ## [0.9.8] — 2026-05-02
 
 Cross-file dispatch fast paths, round 2. v0.9.5 closed the

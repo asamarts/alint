@@ -6,7 +6,9 @@
 //! `foo.spec.ts`, the stem is `foo.spec`, which will fail most case checks —
 //! use `filename_regex` for finer control in those situations.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 use serde::Deserialize;
 
 use crate::case::CaseConvention;
@@ -24,6 +26,7 @@ pub struct FilenameCaseRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     case: CaseConvention,
     fixer: Option<FileRenameFixer>,
 }
@@ -49,6 +52,11 @@ impl Rule for FilenameCaseRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let Some(stem) = entry.path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
@@ -64,6 +72,10 @@ impl Rule for FilenameCaseRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -96,6 +108,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         case: opts.case,
         fixer,
     }))
@@ -208,5 +221,26 @@ mod tests {
         ]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert_eq!(v.len(), 1, "only `bad_name` should fire");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two PascalCase files violating snake_case; only the
+        // one inside a directory with `marker.lock` as ancestor
+        // should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"**/*.rs\"\n\
+             case: snake_case\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["pkg/marker.lock", "pkg/BadName.rs", "other/AlsoBad.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/BadName.rs")));
     }
 }

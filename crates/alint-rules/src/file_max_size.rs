@@ -1,6 +1,6 @@
 //! `file_max_size` — files in scope must be at most `max_bytes` bytes.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,7 @@ pub struct FileMaxSizeRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     max_bytes: u64,
 }
 
@@ -35,6 +36,11 @@ impl Rule for FileMaxSizeRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             if entry.size > self.max_bytes {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
@@ -46,6 +52,10 @@ impl Rule for FileMaxSizeRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -65,6 +75,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         max_bytes: opts.max_bytes,
     }))
 }
@@ -151,5 +162,41 @@ mod tests {
         let idx = idx_with_size("a.bin", 100);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert!(v.is_empty(), "size == max should pass: {v:?}");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two oversize files; only the one inside a directory
+        // with `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_max_size\n\
+             paths: \"**/*.bin\"\n\
+             max_bytes: 100\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = FileIndex::from_entries(vec![
+            FileEntry {
+                path: std::path::Path::new("pkg/marker.lock").into(),
+                is_dir: false,
+                size: 1,
+            },
+            FileEntry {
+                path: std::path::Path::new("pkg/big.bin").into(),
+                is_dir: false,
+                size: 1024,
+            },
+            FileEntry {
+                path: std::path::Path::new("other/big.bin").into(),
+                is_dir: false,
+                size: 1024,
+            },
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/big.bin")));
     }
 }

@@ -4,7 +4,9 @@
 //! branch or generator output that lost its content. Fixable
 //! via `file_remove`, which deletes the empty file.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 
 use crate::fixers::FileRemoveFixer;
 
@@ -15,6 +17,7 @@ pub struct NoEmptyFilesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileRemoveFixer>,
 }
 
@@ -35,6 +38,11 @@ impl Rule for NoEmptyFilesRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             if entry.size == 0 {
                 let msg = self
                     .message
@@ -48,6 +56,10 @@ impl Rule for NoEmptyFilesRule {
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -75,6 +87,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         fixer,
     }))
 }
@@ -163,5 +176,28 @@ mod tests {
         let i = idx(&[("a.txt", 1), ("b.txt", 1024)]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two empty files; only the one inside a directory with
+        // `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_empty_files\n\
+             paths: \"**/*.txt\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = idx(&[
+            ("pkg/marker.lock", 1),
+            ("pkg/empty.txt", 0),
+            ("other/empty.txt", 0),
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/empty.txt")));
     }
 }

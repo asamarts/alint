@@ -36,6 +36,9 @@ pub use rule::{
     check_fix_size, read_for_fix,
 };
 pub use scope::Scope;
-pub use scope_filter::{ScopeFilter, ScopeFilterSpec, reject_scope_filter_on_cross_file};
+pub use scope_filter::{
+    ScopeFilter, ScopeFilterSpec, reject_scope_filter_on_cross_file,
+    reject_scope_filter_with_reason,
+};
 pub use walker::{FileEntry, FileIndex, WalkOptions, walk};
 pub use when::{WhenEnv, WhenError, WhenExpr};

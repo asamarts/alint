@@ -7,7 +7,9 @@
 //!
 //! Fixable via `file_remove`, which deletes the symlink.
 
-use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
+};
 
 use crate::fixers::FileRemoveFixer;
 
@@ -18,6 +20,7 @@ pub struct NoSymlinksRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileRemoveFixer>,
 }
 
@@ -38,6 +41,11 @@ impl Rule for NoSymlinksRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let full = ctx.root.join(&entry.path);
             let Ok(meta) = std::fs::symlink_metadata(&full) else {
                 continue;
@@ -55,6 +63,10 @@ impl Rule for NoSymlinksRule {
 
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -79,6 +91,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         fixer,
     }))
 }
@@ -162,5 +175,48 @@ mod tests {
         });
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "symlink should fire: {v:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_filter_narrows() {
+        use std::os::unix::fs::symlink;
+        // Two symlinks; only the one inside a directory with
+        // `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, mut idx) = tempdir_with_files(&[
+            ("pkg/marker.lock", b""),
+            ("pkg/real.txt", b"target"),
+            ("other/real.txt", b"target"),
+        ]);
+        std::fs::create_dir_all(tmp.path().join("pkg")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("other")).unwrap();
+        symlink(tmp.path().join("pkg/real.txt"), tmp.path().join("pkg/link")).unwrap();
+        symlink(
+            tmp.path().join("other/real.txt"),
+            tmp.path().join("other/link"),
+        )
+        .unwrap();
+        idx.entries.push(alint_core::FileEntry {
+            path: std::path::Path::new("pkg/link").into(),
+            is_dir: false,
+            size: 0,
+        });
+        idx.entries.push(alint_core::FileEntry {
+            path: std::path::Path::new("other/link").into(),
+            is_dir: false,
+            size: 0,
+        });
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope symlink should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(std::path::Path::new("pkg/link")));
     }
 }

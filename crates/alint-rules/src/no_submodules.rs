@@ -19,6 +19,7 @@
 
 use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation,
+    reject_scope_filter_with_reason,
 };
 
 use crate::fixers::FileRemoveFixer;
@@ -71,6 +72,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
              the repo root. Use `file_absent` for more general patterns.",
         ));
     }
+    reject_scope_filter_with_reason(
+        spec,
+        "no_submodules",
+        "this rule is hardcoded to inspect `.gitmodules` at the repo root and does not iterate \
+         the file index",
+    )?;
     let fixer = match &spec.fix {
         Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
         Some(other) => {
@@ -173,5 +180,24 @@ mod tests {
         let idx = index(&[".gitmodules", "README.md"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn build_rejects_scope_filter() {
+        // no_submodules is a fixed-target rule; scope_filter is
+        // semantically meaningless and silently ignoring it
+        // would surprise users. Build must reject it loudly.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_submodules\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("scope_filter is not supported on no_submodules"),
+            "unexpected error: {err}"
+        );
     }
 }

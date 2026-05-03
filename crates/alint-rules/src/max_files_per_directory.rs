@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +24,7 @@ pub struct MaxFilesPerDirectoryRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     max_files: usize,
 }
 
@@ -43,6 +44,11 @@ impl Rule for MaxFilesPerDirectoryRule {
         let mut counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             let parent = entry
@@ -67,6 +73,10 @@ impl Rule for MaxFilesPerDirectoryRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -98,6 +108,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         max_files: opts.max_files,
     }))
 }
@@ -192,5 +203,39 @@ mod tests {
         let idx = index(&["a/1.rs", "a/2.rs", "a/b/1.rs", "a/b/2.rs"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert!(v.is_empty(), "neither dir exceeds: {v:?}");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // `pkg/` and `other/` each hold 3 files; only `pkg/`
+        // has the `marker.lock` ancestor, so its files count
+        // toward the cap and `pkg/` fires; `other/` is silently
+        // excluded.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: max_files_per_directory\n\
+             paths: \"**/*.rs\"\n\
+             max_files: 2\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&[
+            "pkg/marker.lock",
+            "pkg/1.rs",
+            "pkg/2.rs",
+            "pkg/3.rs",
+            "other/1.rs",
+            "other/2.rs",
+            "other/3.rs",
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only `pkg/` should fire: {v:?}");
+        assert!(
+            v[0].path.as_deref().is_some_and(|p| p == Path::new("pkg")),
+            "unexpected path: {:?}",
+            v[0].path
+        );
     }
 }

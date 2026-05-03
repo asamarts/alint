@@ -687,3 +687,74 @@ Each commit is independently reviewable + revertable. The
 engine-only commit (#2) is the keystone — if Phase 5 Run 2
 shows perf regression on it alone, the bundled migration
 doesn't proceed and the engine commit is reworked.
+
+## Post-v0.9.6 follow-ups
+
+The v0.9.6 design landed the primitive but not full
+coverage. Three silent-no-op classes surfaced afterwards;
+each was fixed in a follow-up patch release.
+
+### v0.9.7 — per-file content rule sweep (25 rules)
+
+The per-file content rules — `no_trailing_whitespace`,
+`final_newline`, `line_endings`, `no_bom`,
+`file_content_forbidden`, `file_content_matches`,
+`file_max_lines`, `file_min_lines`, `line_max_width`,
+`indent_style`, `commented_out_code`,
+`max_consecutive_blank_lines`, `markdown_paths_resolve`,
+`no_bidi_controls`, `no_merge_conflict_markers`,
+`no_zero_width_chars`, `file_starts_with`, `file_ends_with`,
+`file_header`, `file_footer`, `file_hash`, `file_is_text`,
+`file_is_ascii`, `file_shebang`, `structured_path` — each
+shipped without parsing `spec.scope_filter`, so the gate
+silently dropped on the way through `build()`. v0.9.7 wired
+each rule through `parse_scope_filter()` with a uniform
+runtime check inside `evaluate()` and an
+`impl Rule::scope_filter()` override.
+
+### v0.9.9 — non-PerFileRule rule sweep (17 rules) + bypass guard
+
+Two related gaps closed in v0.9.9:
+
+**Bug #1 — 17 rules bypass the engine's per-file dispatch**
+and iterate `ctx.index.files()` directly. They never
+consulted `scope_filter`. The fix mirrors v0.9.7's pattern
+across `file_max_size`, `file_min_size`, `no_empty_files`,
+`executable_bit`, `executable_has_shebang`,
+`shebang_has_executable`, `no_symlinks`, `filename_case`,
+`filename_regex`, `no_illegal_windows_names`,
+`max_files_per_directory`, `max_directory_depth`,
+`json_schema_passes`, `command`, `git_blame_age`,
+`no_case_conflicts`. One rule (`no_submodules`) is
+hardcoded to inspect `.gitmodules` at the repo root and
+does not iterate the index — it rejects `scope_filter` at
+build time via the new
+`reject_scope_filter_with_reason(spec, kind, reason)`
+helper. Macro bench scenario S10 covers 5 of these rules
+with `scope_filter` narrowing across the polyglot tree.
+
+**Bug #2 — `for_each_dir` literal-path bypass.** The v0.9.8
+fast path that dispatches a nested per-file rule directly
+via `PerFileRule::evaluate_file` (instead of falling through
+to `Rule::evaluate`) skipped the `scope_filter` check. A
+nested rule whose spec carried `scope_filter:` would have
+the bypass execute regardless of the filter — divergent from
+the rule-major fallback. The guard at
+`crates/alint-rules/src/for_each_dir.rs::evaluate_for_each`
+now consults `nested_rule.scope_filter()` before taking the
+bypass. E2e regression at
+`crates/alint-e2e/scenarios/check/scope_filter/scope_filter_nested_under_for_each_dir.yml`.
+
+### Why this kept happening + the v0.9.10 plan
+
+The shape of all three bugs is identical: a rule (or dispatch
+site) holds a `Scope` and a separate `Option<ScopeFilter>`
+field, and forgets to consult the filter. The compiler can't
+catch the omission because nothing wires the two together.
+
+v0.9.10 is the structural fix: refactor `Scope` to own the
+optional `ScopeFilter`, change `Scope::matches(&Path)` to
+`Scope::matches(&Path, &FileIndex)`, and add a
+`Scope::from_spec(spec)` constructor. Every call site is
+forced to thread the index, and `scope_filter` is honoured
+automatically. Tracked under the v0.9.10 milestone.

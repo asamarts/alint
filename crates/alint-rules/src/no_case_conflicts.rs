@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 
 #[derive(Debug)]
 pub struct NoCaseConflictsRule {
@@ -17,6 +17,7 @@ pub struct NoCaseConflictsRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for NoCaseConflictsRule {
@@ -37,6 +38,11 @@ impl Rule for NoCaseConflictsRule {
         let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             let Some(as_str) = entry.path.to_str() else {
@@ -71,6 +77,10 @@ impl Rule for NoCaseConflictsRule {
         }
         Ok(violations)
     }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -92,6 +102,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
     }))
 }
 
@@ -165,5 +176,37 @@ mod tests {
         let i = index(&["README.md", "readme.md", "ReadMe.md"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
         assert_eq!(v.len(), 3, "three collision members should fire");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two collision pairs: one inside `pkg/` (scoped in via
+        // marker.lock) and one inside `other/` (filtered out).
+        // Only the in-scope pair should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = index(&[
+            "pkg/marker.lock",
+            "pkg/README.md",
+            "pkg/readme.md",
+            "other/README.md",
+            "other/readme.md",
+        ]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 2, "only the pkg/ pair should fire: {v:?}");
+        for vio in &v {
+            assert!(
+                vio.path.as_deref().is_some_and(|p| p.starts_with("pkg/")),
+                "unexpected path: {:?}",
+                vio.path
+            );
+        }
     }
 }

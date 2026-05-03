@@ -21,7 +21,7 @@
 use std::time::{Duration, SystemTime};
 
 use alint_core::template::render_message;
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -47,6 +47,7 @@ pub struct GitBlameAgeRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     pattern: Regex,
     max_age: Duration,
 }
@@ -68,6 +69,10 @@ impl Rule for GitBlameAgeRule {
         Some(&self.scope)
     }
 
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         let Some(blame_cache) = ctx.git_blame else {
@@ -79,6 +84,14 @@ impl Rule for GitBlameAgeRule {
         let now = SystemTime::now();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            // Apply scope_filter BEFORE the blame lookup so we
+            // don't pay the per-file blame cost on out-of-scope
+            // files. (Blame is the expensive bit here.)
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             let Some(blame) = blame_cache.get(&entry.path) else {
@@ -154,6 +167,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         pattern,
         max_age: Duration::from_secs(opts.max_age_days.saturating_mul(86_400)),
     }))
@@ -173,6 +187,7 @@ mod tests {
             policy_url: None,
             message: message.map(str::to_string),
             scope: Scope::from_paths_spec(&PathsSpec::Single("**/*.rs".into())).unwrap(),
+            scope_filter: None,
             pattern: Regex::new(pattern).unwrap(),
             max_age: Duration::from_secs(max_age_days * 86_400),
         }
@@ -293,5 +308,48 @@ level: warning
         let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
         let err = build(&spec).unwrap_err();
         assert!(err.to_string().contains("paths"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // YAML build wires up the scope_filter; runtime check
+        // gates files BEFORE the blame lookup. With a stub
+        // cache backed by a non-repo dir, every blame lookup
+        // returns None, so we can't observe per-file violation
+        // differences — but we CAN observe that:
+        // (a) `Rule::scope_filter()` reports the filter
+        //     (proves build wired it up), and
+        // (b) the rule's silent-no-op path still holds when
+        //     the filter is set.
+        let yaml = "\
+id: t
+kind: git_blame_age
+paths: \"**/*.rs\"
+pattern: 'TODO'
+max_age_days: 7
+scope_filter:
+  has_ancestor: marker.lock
+level: warning
+";
+        let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
+        let r = build(&spec).unwrap();
+        assert!(
+            r.scope_filter().is_some(),
+            "scope_filter should be wired through build()"
+        );
+        let idx = index(&["pkg/marker.lock", "pkg/a.rs", "other/b.rs"]);
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = BlameCache::new(tmp.path().to_path_buf());
+        let ctx = Context {
+            root: tmp.path(),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: Some(&cache),
+        };
+        let v = r.evaluate(&ctx).unwrap();
+        assert!(v.is_empty(), "no blame data → no violations: {v:?}");
     }
 }

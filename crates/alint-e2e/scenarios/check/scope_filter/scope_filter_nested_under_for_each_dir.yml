@@ -1,0 +1,53 @@
+name: scope_filter on nested per-file rule under for_each_dir literal-path bypass
+tags: [check, scope_filter, for_each_dir, nested, regression]
+
+# Bug #2 (v0.9.9): for_each_dir's literal-path bypass for nested
+# per-file rules dispatched via PerFileRule::evaluate_file without
+# consulting Rule::scope_filter — so a nested rule that carried
+# scope_filter would have it silently dropped on the bypass path,
+# even though the same rule's rule-major fallback honours it.
+#
+# Asserted shape: for_each_dir over `pkg/*` with a nested
+# no_trailing_whitespace whose `paths:` template resolves to a
+# single literal per iteration (`{path}/data.txt` → triggers the
+# bypass) and a `scope_filter: { has_ancestor: marker.lock }`
+# pin. Only `pkg/with-marker/` carries the marker — the nested
+# rule must skip `pkg/no-marker/data.txt` even though its
+# trailing whitespace would otherwise trigger.
+
+given:
+  tree:
+    pkg:
+      with-marker:
+        marker.lock: "v1\n"
+        # In scope. Trailing whitespace fires.
+        data.txt: "value \n"
+      no-marker:
+        # Out of scope (no marker.lock ancestor in the chain).
+        # Trailing whitespace would fire if scope_filter were
+        # silently dropped on the bypass — this is what the
+        # regression asserts against.
+        data.txt: "value \n"
+  config: |
+    version: 1
+    rules:
+      - id: nws-per-pkg
+        kind: for_each_dir
+        select: "pkg/*"
+        require:
+          - id: nws-data
+            kind: no_trailing_whitespace
+            paths: "{path}/data.txt"
+            scope_filter:
+              has_ancestor: marker.lock
+            level: warning
+        level: warning
+
+when: [check]
+
+expect:
+  # Only the in-scope file fires. If the bypass dropped the
+  # scope_filter (the v0.9.8 bug), `pkg/no-marker/data.txt`
+  # would also produce a violation and this assertion fails.
+  - violations:
+      - {rule: nws-per-pkg, level: warning, path: pkg/with-marker/data.txt}

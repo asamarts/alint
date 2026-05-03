@@ -11,7 +11,7 @@
 //! No fix op — the correct resolution (add shebang vs. remove +x)
 //! is a human judgment call.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 
 #[cfg(unix)]
 use crate::io::read_prefix_n;
@@ -26,6 +26,7 @@ pub struct ExecutableHasShebangRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for ExecutableHasShebangRule {
@@ -46,6 +47,11 @@ impl Rule for ExecutableHasShebangRule {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path) {
+                continue;
+            }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -77,6 +83,10 @@ impl Rule for ExecutableHasShebangRule {
     fn evaluate(&self, _ctx: &Context<'_>) -> Result<Vec<Violation>> {
         Ok(Vec::new())
     }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -95,6 +105,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
     }))
 }
 
@@ -189,5 +200,37 @@ mod tests {
         std::fs::set_permissions(tmp.path().join("README.md"), perms).unwrap();
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "non-exec doesn't need shebang: {v:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_filter_narrows() {
+        use std::os::unix::fs::PermissionsExt;
+        // Two +x scripts without shebang; only the one inside a
+        // dir with `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_has_shebang\n\
+             paths: \"**/*.sh\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("pkg/marker.lock", b""),
+            ("pkg/a.sh", b"echo hi\n"),
+            ("other/a.sh", b"echo hi\n"),
+        ]);
+        for rel in ["pkg/a.sh", "other/a.sh"] {
+            let mut perms = std::fs::metadata(tmp.path().join(rel))
+                .unwrap()
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(tmp.path().join(rel), perms).unwrap();
+        }
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(std::path::Path::new("pkg/a.sh")));
     }
 }

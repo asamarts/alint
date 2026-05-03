@@ -2,7 +2,7 @@
 //! regex. Anchored with `^...$` automatically; use the full basename
 //! (including extension) in your pattern.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -22,6 +22,7 @@ pub struct FilenameRegexRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     pattern_src: String,
     pattern: Regex,
     stem: bool,
@@ -44,6 +45,11 @@ impl Rule for FilenameRegexRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let name = if self.stem {
                 entry.path.file_stem().and_then(|s| s.to_str())
             } else {
@@ -62,6 +68,10 @@ impl Rule for FilenameRegexRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -84,6 +94,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         pattern_src: opts.pattern,
         pattern,
         stem: opts.stem,
@@ -184,5 +195,25 @@ mod tests {
         let idx = index(&["src/xwidgety.rs"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert_eq!(v.len(), 1, "non-anchored partial match shouldn't pass");
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        // Two non-matching basenames; only the one inside a
+        // directory with `marker.lock` as ancestor should fire.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"**/*.rs\"\n\
+             pattern: \"good_[a-z]+\\\\.rs\"\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["pkg/marker.lock", "pkg/bad.rs", "other/bad.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/bad.rs")));
     }
 }

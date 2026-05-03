@@ -34,7 +34,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
 use jsonschema::Validator;
 use serde::Deserialize;
 use serde_json::Value;
@@ -64,6 +64,7 @@ pub struct JsonSchemaPassesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
+    scope_filter: Option<ScopeFilter>,
     schema_path: PathBuf,
     /// Explicit format, if the user passed `format:`. When
     /// `None`, the format is detected per-file from the
@@ -109,6 +110,11 @@ impl Rule for JsonSchemaPassesRule {
             if !self.scope.matches(&entry.path) {
                 continue;
             }
+            if let Some(filter) = &self.scope_filter
+                && !filter.matches(&entry.path, ctx.index)
+            {
+                continue;
+            }
             let full = ctx.root.join(&entry.path);
             let Ok(text) = std::fs::read_to_string(&full) else {
                 // Permission / race — silent skip, like other
@@ -148,6 +154,10 @@ impl Rule for JsonSchemaPassesRule {
             }
         }
         Ok(violations)
+    }
+
+    fn scope_filter(&self) -> Option<&ScopeFilter> {
+        self.scope_filter.as_ref()
     }
 }
 
@@ -198,6 +208,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
+        scope_filter: spec.parse_scope_filter()?,
         schema_path: opts.schema_path,
         format_override,
         compiled: OnceLock::new(),
@@ -332,6 +343,36 @@ mod tests {
         assert_eq!(
             Format::detect_from_path(std::path::Path::new("Makefile")),
             None
+        );
+    }
+
+    #[test]
+    fn scope_filter_narrows() {
+        use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+        // Two JSON files that fail the schema; only the one
+        // inside a directory with `marker.lock` as ancestor
+        // should fire.
+        let (tmp, idx) = tempdir_with_files(&[
+            ("schema.json", br#"{"type":"object","required":["x"]}"#),
+            ("pkg/marker.lock", b""),
+            ("pkg/bad.json", b"{}"),
+            ("other/bad.json", b"{}"),
+        ]);
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_schema_passes\n\
+             paths: \"**/bad.json\"\n\
+             schema_path: schema.json\n\
+             scope_filter:\n  \
+               has_ancestor: marker.lock\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
+        assert_eq!(
+            v[0].path.as_deref(),
+            Some(std::path::Path::new("pkg/bad.json"))
         );
     }
 }

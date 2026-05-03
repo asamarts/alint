@@ -1,0 +1,81 @@
+# Scenario S10 — `scope_filter:` on rules outside the
+# PerFileRule dispatch path (v0.9.8 bug #1 coverage).
+#
+# Targets the 17 rules whose `evaluate()` iterates
+# `ctx.index.files()` directly + filters via `self.scope.matches()`
+# but doesn't override `Rule::scope_filter()`. At v0.9.8 these
+# silently drop user-set `scope_filter:` on the floor — engine's
+# per-file gate doesn't fire on them (they're not on the
+# PerFileRule dispatch path), and the rule itself never reads
+# the spec field. v0.9.9 wires `scope_filter:` through; this
+# scenario captures the dispatch shape so the next regression
+# is caught at bench-record time.
+#
+# Tree: the polyglot generator (`crates/` + `packages/` + `apps/`),
+# same as S9. Each rule below has a broad `paths:` glob that
+# pre-v0.9.9 fires on the entire matched set (e.g. `**` matches
+# 1M entries at the 1m size); `scope_filter:` narrows to the
+# rule's own ecosystem (~1/3 of the tree). Post-fix the per-file
+# work drops proportionally, with the `has_ancestor` ancestor
+# walk (~5 path-index lookups per file, all O(1) post v0.9.5)
+# adding tens of nanoseconds back per skipped file.
+#
+# Expected bench signal at 1m: ~1.5–2× speedup on the broad-glob
+# rules (file_max_size, no_empty_files, no_symlinks); flat on
+# the already-ext-narrow rules (filename_case on `**/*.rs` only
+# touches Rust files regardless). The signal is dominated by
+# rules whose pre-fix work was 3× the post-fix work; smaller
+# per-file rules surface in S6 instead.
+
+version: 1
+nested_configs: false
+
+rules:
+  # Broad `**` paths. Pre-v0.9.9: stats every file in the tree.
+  # Post-v0.9.9: stats only files inside `Cargo.toml` subtrees
+  # (~1/3 at 1m). The ratio of stat-cost to scope_filter-walk-
+  # cost is what shows up in the bench delta.
+  - id: rust-files-bounded
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 1048576
+    scope_filter:
+      has_ancestor: Cargo.toml
+    level: warning
+
+  - id: node-no-empty
+    kind: no_empty_files
+    paths: "**"
+    scope_filter:
+      has_ancestor: package.json
+    level: warning
+
+  - id: python-no-symlinks
+    kind: no_symlinks
+    paths: "**"
+    scope_filter:
+      has_ancestor: [pyproject.toml, setup.py]
+    level: warning
+
+  # Already-ext-narrow paths. `**/*.rs` only matches files in
+  # the rust subtree (the polyglot generator puts .rs only under
+  # `crates/`); `scope_filter:` here is a redundant narrowing.
+  # The bench cell for these rules should be flat pre/post —
+  # if it isn't, something has regressed in `scope_filter`'s
+  # ancestor-walk hot path.
+  - id: rust-snake-case
+    kind: filename_case
+    paths: "**/*.rs"
+    case: snake
+    scope_filter:
+      has_ancestor: Cargo.toml
+    level: warning
+
+  - id: python-snake-case
+    kind: filename_regex
+    paths: "**/*.py"
+    pattern: "^[a-z][a-z0-9_]*$"
+    stem: true
+    scope_filter:
+      has_ancestor: [pyproject.toml, setup.py]
+    level: warning
