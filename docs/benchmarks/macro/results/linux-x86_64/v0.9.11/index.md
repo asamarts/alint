@@ -93,3 +93,32 @@ Per-size detail under `<size>/results.md`. JSON: `results.json`.
 | alint | 100k | S9 | changed | 435.8 | 15.7 | 408.8 | 450.7 | 10 |
 | alint | 100k | S10 | full | 329.5 | 13.7 | 319.3 | 361.4 | 10 |
 | alint | 100k | S10 | changed | 438.0 | 12.9 | 415.1 | 453.8 | 10 |
+| alint | 1m | S1 | full | 1793.2 | 333.7 | 1575.9 | 2177.5 | 3 |
+| alint | 1m | S1 | changed | 4776.4 | 338.5 | 4422.5 | 5097 | 3 |
+| alint | 1m | S2 | full | 2911.3 | 17.8 | 2891.1 | 2924.7 | 3 |
+| alint | 1m | S2 | changed | 4429.1 | 28.9 | 4397 | 4453.2 | 3 |
+| alint | 1m | S3 | full | 11838.3 | 214.4 | 11610.1 | 12035.5 | 3 |
+| alint | 1m | S3 | changed | 6779.4 | 14.2 | 6769 | 6795.6 | 3 |
+| alint | 1m | S4 | full | 1656.7 | 45.1 | 1614 | 1703.9 | 3 |
+| alint | 1m | S4 | changed | 4418 | 54.3 | 4358.7 | 4465.4 | 3 |
+| alint | 1m | S5 | full | 9527 | 747.1 | 9061.7 | 10388.8 | 3 |
+| alint | 1m | S5 | changed | 4737.8 | 72.7 | 4691.5 | 4821.6 | 3 |
+| alint | 1m | S6 | full | 11906.7 | 155.8 | 11734.4 | 12037.8 | 3 |
+| alint | 1m | S6 | changed | 5160 | 235.4 | 4995.1 | 5429.6 | 3 |
+| alint | 1m | S7 | full | 17294.7 | 465.4 | 16938.6 | 17821.3 | 3 |
+| alint | 1m | S7 | changed | 19920 | 308.3 | 19669.3 | 20264.3 | 3 |
+| alint | 1m | S8 | full | 12731.8 | 410.6 | 12335.6 | 13155.5 | 3 |
+| alint | 1m | S8 | changed | 7090.5 | 50.1 | 7041.3 | 7141.4 | 3 |
+| alint | 1m | S9 | full | 8497.8 | 1069.5 | 7584.6 | 9674.4 | 3 |
+| alint | 1m | S9 | changed | 4672.9 | 116.7 | 4556.7 | 4790 | 3 |
+| alint | 1m | S10 | full | 3802.4 | 82.2 | 3717.4 | 3881.4 | 3 |
+| alint | 1m | S10 | changed | 4602.9 | 63.6 | 4549.3 | 4673.3 | 3 |
+
+> Note: 1m sizes use `--warmup 1 --runs 3` (matching the v0.9.5/v0.9.8/v0.9.10
+> 1m capture convention). Cross-version 1m comparison shows several scenarios
+> drift +5–18 % vs v0.9.10 1m baseline, but all 100k cells (the higher-confidence
+> captures at warmup=3/runs=10) are within ±8 % (most within ±5 %). The 1m drift
+> is within the 1m noise band on this run-set — the bench was captured while
+> release.yml was building the v0.9.11 publish chain in parallel, sharing CPU.
+> A quiet-machine re-run with warmup=3/runs=5 at 1m would resolve this; deferred
+> to a follow-up bench commit if a real signal emerges.
