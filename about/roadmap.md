@@ -684,8 +684,122 @@ that hit ~5 B glob-match ops at 1M with 5,000 packages.
   rust + node + python over `crates/` + `packages/` +
   `apps/`) at K100 = 688 ms ± 13 ms. Full design:
   [`docs/design/v0.9/scope-filter.md`](./v0.9/scope-filter.md).
+- ✅ **`scope_filter:` runtime no-op fix + audit cleanup +
+  v0.10 LSP design pass** (v0.9.7, released 2026-05-02).
+  v0.9.6 shipped the field, the runtime types, and the
+  engine gate but no per-file rule builder threaded the
+  parsed filter onto the built rule — `Rule::scope_filter()`
+  always returned the trait default `None`, so the gate was a
+  silent no-op. v0.9.7 wired each of 25 per-file content
+  rules through `parse_scope_filter()`. Same release added
+  10 cross-file `reject_scope_filter_on_cross_file` unit
+  tests, the release.yml preflight gate (fmt + clippy + test
+  + `cargo doc -D warnings`), and the v0.10 LSP design pass
+  (`docs/design/v0.10/{lsp_server,single_file_reevaluation,vscode_extension}.md`)
+  with `tower-lsp = "0.20"` added as a dormant workspace
+  dependency.
+- ✅ **Cross-file dispatch fast paths round 2**
+  (v0.9.8, released 2026-05-02). `FileIndex::children_of`,
+  `file_basenames_of`, `descendants_of` lazy `OnceLock`
+  indexes; `dir_only_contains` + `dir_contains` rewrite to
+  use `children_of` instead of full-index scan;
+  `evaluate_for_each` (shared by `for_each_dir`,
+  `for_each_file`, `every_matching_has`) gains a literal-
+  path bypass for nested per-file rules. **1M S7 full:
+  614 s → 15.3 s (40×); 1M S7 changed: 618 s → 17.9 s
+  (34×).** New `coverage_audit_cross_file_dispatch.rs` soft
+  audit. Full design:
+  [`docs/design/v0.9.8/cross-file-fast-paths-v2.md`](./v0.9.8/cross-file-fast-paths-v2.md).
+- ✅ **`scope_filter:` coverage sweep** (v0.9.9, released
+  2026-05-03). 17 rules whose `Rule::evaluate` iterates
+  `ctx.index.files()` directly (rather than opting into
+  the engine's per-file dispatch) had no `scope_filter`
+  plumbing at all — same shape as the v0.9.6 → v0.9.7 bug
+  for per-file content rules but on a different rule set.
+  16 rules now honour the filter (`file_max_size`,
+  `file_min_size`, `no_empty_files`, `executable_bit`,
+  `executable_has_shebang`, `shebang_has_executable`,
+  `no_symlinks`, `filename_case`, `filename_regex`,
+  `no_illegal_windows_names`, `max_files_per_directory`,
+  `max_directory_depth`, `json_schema_passes`, `command`,
+  `git_blame_age`, `no_case_conflicts`); `no_submodules`
+  rejects `scope_filter:` at build time via the new
+  `reject_scope_filter_with_reason` helper since it's
+  hardcoded to `.gitmodules` at the repo root. Same release
+  added a `for_each_dir` literal-path bypass guard (the
+  v0.9.8 fast path was skipping `nested_rule.scope_filter()`)
+  and a new S10 macro bench scenario (scope_filter outside
+  the per-file dispatch path).
+- ✅ **`Scope` owns `Option<ScopeFilter>` (structural fix)**
+  (v0.9.10, released 2026-05-03). The v0.9.6 / v0.9.7 / v0.9.9
+  silent-no-op bug class is closed structurally. `Scope`
+  bundles its `Option<ScopeFilter>` and `Scope::matches(&Path,
+  &FileIndex)` covers both predicates in one call; 41 rules
+  cleaned up to drop the standalone `scope_filter` field and
+  runtime check; `Rule::scope_filter()` trait method removed;
+  new `coverage_audit_scope_owns_filter.rs` audit fails CI
+  if the field re-appears. **Breaking** — `alint-core::Scope::matches`
+  signature changed; CLI users + bundled rulesets unaffected,
+  out-of-tree library consumers see a compile error at every
+  call site. Workspace-wide -319 LOC. Same release bundled
+  v0.9.11-prep cleanups: alint-bench clippy debt,
+  `git_tracked_only` audit test, HISTORY.md regenerated with
+  v0.9.7-v0.9.10 columns. Full design:
+  [`docs/design/v0.9/scope-owns-scope-filter.md`](./v0.9/scope-owns-scope-filter.md).
 
 Full v0.9.5 design: [`docs/design/v0.9/coverage-and-dogfood.md`](./v0.9/coverage-and-dogfood.md).
+
+## v0.9.11 — `git_tracked_only` structural fix + held v0.9 follow-ups
+
+The same recurrence-risk shape that produced the v0.9.6 /
+v0.9.7 / v0.9.9 silent-no-op `scope_filter:` bug class
+applies to `git_tracked_only` (declared on 4 existence
+rules; an audit test landed in v0.9.10 as a pragmatic
+backstop, but the structural fix was held). v0.9.11
+chooses the engine-side filtered-FileIndex approach
+(Option C in the design comparison) over Scope ownership
+(Option A) — there's no per-rule check to forget at all,
+and the `dir-mode vs file-mode` discriminator never
+pollutes `Scope`'s path-predicate model.
+
+- **Engine-side filtered FileIndex** for git-tracked rules.
+  `Engine::build_filtered_index` mirrors the existing
+  `--changed` filtered-index pattern: builds a
+  file-tracked subset (`set.contains(path)` filter) and a
+  dir-tracked subset (`dir_has_tracked_files` filter) once
+  per run when any rule opts in. Existence rules
+  (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`)
+  receive the pre-filtered index via `pick_ctx`; the
+  `if self.git_tracked_only && !ctx.is_git_tracked(...)`
+  runtime check disappears from each rule's `evaluate`.
+- **`Rule::wants_git_tracked()` engine consultation
+  consolidation.** Once the filtered index handles the
+  narrowing, `wants_git_tracked()` can derive from
+  inspecting rules' specs at engine-construction time
+  rather than per-rule trait override.
+- **No breaking API change** (in contrast to v0.9.10) —
+  the change is internal to engine + 4 rules.
+- **Acceptance**: S8 macro bench at 100k/full and 1m/full
+  within ±5 % of v0.9.10 (slight win expected from
+  amortising the HashSet lookup across multiple rules
+  opting in); `coverage_audit_git_tracked_only.rs` audit
+  retained as backstop.
+
+Held v0.9 follow-ups also captured in v0.9.11 (smaller
+items, may slip if engine refactor takes longer than
+expected):
+
+- **`bench-record.yml` workflow** end-to-end run. Defined
+  but never successfully executed — debug the path that
+  opens a PR with bench results so post-release backfill
+  is mechanical instead of manual.
+- **`coverage_audit_cross_file_dispatch.rs` cleanup.**
+  Soft warning currently flags rules that still scan
+  `entries.iter()` directly; convert to `children_of`
+  where the dispatch shape benefits.
+- **`when:` ownership** — explicitly NOT included.
+  Different semantics (eval-env, not a path predicate);
+  no shared silent-no-op shape.
 
 ## v0.10 — LSP
 
@@ -695,10 +809,20 @@ foundation, and the v0.9 engine cut.)
 
 - LSP server (`alint lsp`): inline diagnostics, hover with
   rule documentation, code actions for "add to ignore" and
-  "apply fix."
-- VS Code extension (bundles the LSP).
+  "apply fix." Design pass landed in v0.9.7
+  (`docs/design/v0.10/lsp_server.md`); `tower-lsp = "0.20"`
+  added as a dormant workspace dependency, no
+  `crates/alint-lsp/` crate yet.
+- VS Code extension (bundles the LSP). Design pass landed
+  in v0.9.7 (`docs/design/v0.10/vscode_extension.md`).
 - Per-file dispatch shape from v0.9 directly powers the
-  per-file-edit re-evaluation hot path.
+  per-file-edit re-evaluation hot path
+  (`docs/design/v0.10/single_file_reevaluation.md`).
+- **Generalise `ScopeFilter` shape beyond `has_ancestor`**
+  — held from v0.9.6 design as out of scope at the time;
+  candidates include `has_sibling`, `has_descendant`,
+  custom predicates. v0.9.10's `Scope::from_spec` makes
+  the additions purely additive (no API churn).
 
 ## v0.11 — WASM plugins
 
