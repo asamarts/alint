@@ -215,10 +215,7 @@ impl FileIndex {
     /// Files whose basename isn't valid UTF-8 are silently
     /// dropped from the iterator — same shape as the existing
     /// path-string consumers.
-    pub fn file_basenames_of<'a>(
-        &'a self,
-        dir: &Path,
-    ) -> impl Iterator<Item = &'a str> + 'a {
+    pub fn file_basenames_of<'a>(&'a self, dir: &Path) -> impl Iterator<Item = &'a str> + 'a {
         self.children_of(dir).iter().filter_map(move |&i| {
             let e = &self.entries[i];
             if e.is_dir {
@@ -241,10 +238,7 @@ impl FileIndex {
     /// adding a per-step cycle check would cost ~10 ns per yielded
     /// entry for a guarantee that's already established at
     /// walker time.
-    pub fn descendants_of<'a>(
-        &'a self,
-        dir: &'a Path,
-    ) -> impl Iterator<Item = &'a FileEntry> + 'a {
+    pub fn descendants_of<'a>(&'a self, dir: &'a Path) -> impl Iterator<Item = &'a FileEntry> + 'a {
         DescendantsIter {
             index: self,
             stack: vec![self.children_of(dir).iter().copied().rev().collect()],
@@ -887,7 +881,7 @@ mod tests {
             ("pkg", true),
             ("pkg/Cargo.toml", false),
             ("pkg/README.md", false),
-            ("pkg/src", true),  // subdir — NOT a file basename
+            ("pkg/src", true), // subdir — NOT a file basename
         ]);
         let basenames: Vec<&str> = idx.file_basenames_of(Path::new("pkg")).collect();
         assert_eq!(basenames.len(), 2);
@@ -991,10 +985,7 @@ mod tests {
         // path regardless of whether the parent itself is a known
         // entry — so a deep tree where intermediate dirs aren't
         // explicitly in entries still indexes correctly.
-        let idx = synthetic_index(&[
-            ("deep/nested/a.rs", false),
-            ("deep/nested/b.rs", false),
-        ]);
+        let idx = synthetic_index(&[("deep/nested/a.rs", false), ("deep/nested/b.rs", false)]);
         let children = idx.children_of(Path::new("deep/nested"));
         assert_eq!(children.len(), 2);
     }

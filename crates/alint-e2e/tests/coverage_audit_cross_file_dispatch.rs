@@ -38,10 +38,7 @@ use std::path::{Path, PathBuf};
 /// itself uses `children_of` indirectly via the v0.9.8
 /// `nested_spec_single_literal` bypass. Rules here are the
 /// ones whose own `evaluate` body contains the per-dir loop.
-const CROSS_FILE_RULES_WITH_CHILDREN_OF: &[&str] = &[
-    "dir_only_contains",
-    "dir_contains",
-];
+const CROSS_FILE_RULES_WITH_CHILDREN_OF: &[&str] = &["dir_only_contains", "dir_contains"];
 
 #[test]
 fn cross_file_rules_use_children_of() {
@@ -57,7 +54,10 @@ fn cross_file_rules_use_children_of() {
         let body = match fs::read_to_string(&src_path) {
             Ok(b) => b,
             Err(_) => {
-                summary.push_str(&format!("  - {kind}: source missing at {}\n", src_path.display()));
+                summary.push_str(&format!(
+                    "  - {kind}: source missing at {}\n",
+                    src_path.display()
+                ));
                 violators.push((*kind).to_string());
                 continue;
             }

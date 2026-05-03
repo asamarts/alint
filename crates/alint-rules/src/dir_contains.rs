@@ -95,7 +95,12 @@ impl Rule for DirContainsRule {
                 .index
                 .children_of(&dir.path)
                 .iter()
-                .filter_map(|&i| ctx.index.entries[i].path.file_name().and_then(|s| s.to_str()))
+                .filter_map(|&i| {
+                    ctx.index.entries[i]
+                        .path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                })
                 .collect();
             for (i, matcher) in self.require_matchers.iter().enumerate() {
                 let found = basenames.iter().any(|b| matcher.is_match(b));

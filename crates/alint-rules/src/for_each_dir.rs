@@ -266,13 +266,7 @@ pub(crate) fn evaluate_for_each(
                 && let Some(pf) = nested_rule.as_per_file()
                 && pf.path_scope().matches(&literal)
             {
-                let nested_violations = evaluate_one_per_file_rule(
-                    parent_id,
-                    i,
-                    &literal,
-                    pf,
-                    ctx,
-                );
+                let nested_violations = evaluate_one_per_file_rule(parent_id, i, &literal, pf, ctx);
                 for mut v in nested_violations {
                     if v.path.is_none() {
                         v.path = Some(entry.path.clone());
