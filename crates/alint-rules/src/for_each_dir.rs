@@ -244,6 +244,43 @@ pub(crate) fn evaluate_for_each(
                     continue;
                 }
             };
+            // v0.9.8: when the nested rule's `paths:` template
+            // resolved to a single literal path AND the rule is
+            // a per-file rule, bypass `rule.evaluate(ctx)` —
+            // which would iterate `ctx.index.files()` (1M
+            // entries) for a single-target lookup — and dispatch
+            // via `evaluate_file` against the in-index entry
+            // directly. Closes the v0.9.7 → v0.9.8 cliff for the
+            // canonical for_each_file × per-file-content-rule
+            // shape (S7's `every-lib-has-content` was 484s under
+            // v0.9.7's full-index scan; this drops it to a few
+            // milliseconds × N iterations).
+            //
+            // For non-per-file rules (e.g. `file_exists`,
+            // `toml_path_matches`), fall through to the rule's
+            // own evaluate — file_exists has its own literal-
+            // path fast path (contains_file lookup) since
+            // v0.9.5; toml_path_matches reads the file
+            // directly without scanning the full index.
+            if let Some(literal) = nested_spec_single_literal(&nested_spec)
+                && let Some(pf) = nested_rule.as_per_file()
+                && pf.path_scope().matches(&literal)
+            {
+                let nested_violations = evaluate_one_per_file_rule(
+                    parent_id,
+                    i,
+                    &literal,
+                    pf,
+                    ctx,
+                );
+                for mut v in nested_violations {
+                    if v.path.is_none() {
+                        v.path = Some(entry.path.clone());
+                    }
+                    violations.push(v);
+                }
+                continue;
+            }
             let nested_violations = nested_rule.evaluate(ctx)?;
             for mut v in nested_violations {
                 if v.path.is_none() {
@@ -254,6 +291,72 @@ pub(crate) fn evaluate_for_each(
         }
     }
     Ok(violations)
+}
+
+/// Extract a single literal relative path from a nested rule
+/// spec's `paths:` field, or `None` if the spec carries multiple
+/// patterns / a glob / an include-exclude shape. Used by
+/// [`evaluate_for_each`] to detect when a per-file nested rule
+/// can be dispatched via `evaluate_file` against a single
+/// in-index entry instead of going through the rule's own
+/// O(N) full-index scan.
+///
+/// Conservative: returns `None` for any pattern containing a
+/// glob metacharacter, even when the metacharacter is escaped —
+/// the bench cliff this exists to fix is the canonical
+/// `paths: "{path}/<basename>"` shape, which always resolves to
+/// a literal post-template-expansion. False positives here
+/// would silently bypass the rule's own glob handling.
+fn nested_spec_single_literal(spec: &alint_core::RuleSpec) -> Option<std::path::PathBuf> {
+    use alint_core::PathsSpec;
+    let paths = spec.paths.as_ref()?;
+    let single: &str = match paths {
+        PathsSpec::Single(s) => s,
+        PathsSpec::Many(v) if v.len() == 1 => &v[0],
+        _ => return None,
+    };
+    if single.is_empty() || single.starts_with('!') {
+        return None;
+    }
+    if single
+        .chars()
+        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+    {
+        return None;
+    }
+    Some(std::path::PathBuf::from(single))
+}
+
+/// Read the in-index file at `literal` once, dispatch to the
+/// per-file rule's `evaluate_file`, and return any violations
+/// (with `parent_id`-flavoured rule-error prefixing on failure
+/// to match the rule-major path's shape).
+fn evaluate_one_per_file_rule(
+    parent_id: &str,
+    nested_i: usize,
+    literal: &std::path::Path,
+    pf: &dyn alint_core::PerFileRule,
+    ctx: &Context<'_>,
+) -> Vec<Violation> {
+    if !ctx.index.contains_file(literal) {
+        // No in-index file at this path — same observable result
+        // as the rule's own `evaluate` would produce when its
+        // path_scope matches no files (i.e. zero violations).
+        return Vec::new();
+    }
+    let abs = ctx.root.join(literal);
+    let Ok(bytes) = std::fs::read(&abs) else {
+        // Mirror the rule-major behaviour: silent skip on read
+        // failure (permission flake, race with mid-walk delete).
+        return Vec::new();
+    };
+    match pf.evaluate_file(ctx, literal, &bytes) {
+        Ok(vs) => vs,
+        Err(e) => vec![Violation::new(format!(
+            "{parent_id}: nested rule #{nested_i} error on {}: {e}",
+            literal.display()
+        ))],
+    }
 }
 
 #[cfg(test)]
