@@ -165,7 +165,7 @@ def render(data: Dict[Cell, Stat]) -> str:
     ]
     # Date table — one row per known version present
     headlines = {
-        "v0.9.8": ("TBD", "Cross-file dispatch fast paths round 2 — `FileIndex::children_of` etc."),
+        "v0.9.8": ("2026-05-02", "Cross-file dispatch fast paths round 2 — `FileIndex::children_of` + `evaluate_for_each` literal-path bypass; 1M S7 40×."),
         "v0.9.7": ("2026-05-02", "`scope_filter:` runtime fix + audit cleanup + v0.10 LSP design pass."),
         "v0.9.6": ("2026-05-02", "`scope_filter:` primitive (latent runtime no-op fixed in v0.9.7) + S9 scenario."),
         "v0.9.5": ("2026-05-01", "Cross-file dispatch fast paths round 1 — `for_each_dir` path-index lookups."),
