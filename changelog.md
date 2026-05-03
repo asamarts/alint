@@ -8,6 +8,83 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-05-02
+
+Cross-file dispatch fast paths, round 2. v0.9.5 closed the
+`for_each_dir × file_exists` cliff via the lazy `path_set` index;
+v0.9.8 closes the residual O(D × N) shapes that v0.9.5 didn't
+cover, identified by the comprehensive v0.9.5/.6/.7 macro-bench
+backfill (1M S7 was stuck at ~614 s across all three releases).
+
+### Performance
+
+- **1M S7 full: 614 s → 15.3 s (40× speedup).**
+- **1M S7 changed: 618 s → 17.9 s (34× speedup).**
+- 1M S6 / S8 / S9 within ±5 % of v0.9.7 (no regression on the
+  per-file dispatch fast paths).
+- See [`docs/benchmarks/HISTORY.md`](docs/benchmarks/HISTORY.md)
+  per-scenario tables for the full v0.9.5 → v0.9.8 trajectory
+  and the bench captures under
+  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.8/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.8/).
+
+### Added
+
+- **`FileIndex::children_of(dir) -> &[usize]`** — direct
+  children of `dir`, by index into `entries`. Lazy `OnceLock`
+  build mirrors the v0.9.5 `path_set` shape; O(N) build, O(1)
+  per-dir lookup.
+- **`FileIndex::file_basenames_of(dir) -> impl Iterator<Item = &str>`**
+  — direct file children's basenames, borrowed from the
+  underlying `Arc<Path>`. Used by `dir_contains` and equivalent.
+- **`FileIndex::descendants_of(dir) -> impl Iterator<Item = &FileEntry>`**
+  — recursive, depth-first, lazy. Stack-of-iterators state;
+  does NOT materialise the full subtree.
+- **Debug-only tracing for index builds** — emits `phase=index_build
+  kind=<name> elapsed_us=N entries=M` events behind
+  `#[cfg(debug_assertions)]`. Release builds compile away both
+  the `Instant::now()` timer and the event emission entirely
+  (zero overhead for users running release binaries; the events
+  are for `xtask bench-scale` profile runs and contributor
+  debugging).
+- **`coverage_audit_cross_file_dispatch.rs`** — soft-fail audit
+  that scans cross-file rule sources for the O(D × N)
+  `entries.iter()` pattern v0.9.8 closed. Surfaces gaps for the
+  next refactor; doesn't block unrelated work.
+
+### Changed
+
+- **`dir_only_contains`** evaluates via `children_of` instead of
+  the per-dir `for file in ctx.index.files()` + `is_direct_child`
+  filter. At 1M files / 5K matched dirs, drops the inner loop
+  from 1M iterations to ~200 (the dir's actual children).
+- **`dir_contains`** evaluates via `children_of` + inline
+  basename extraction. Per-(dir, matcher) drops from O(N) to
+  O(children).
+- **`evaluate_for_each` in `for_each_dir.rs`** (shared by
+  `for_each_dir`, `for_each_file`, `every_matching_has`) gained
+  a literal-path bypass: when a nested rule's `paths:` template
+  resolves to a single literal AND the rule opts into
+  `as_per_file()`, dispatch via `evaluate_file` against the
+  in-index entry directly instead of running the rule's full
+  `evaluate(ctx)` (which would iterate `ctx.index.files()` per
+  call, multiplying the 1M scan by the iteration count). Closes
+  the residual cliff Phase E iter 1 surfaced (S7's
+  `every-lib-has-content` was 484 s post-Phase-C; this drops it
+  to milliseconds × N iterations).
+
+### Internal
+
+- New helpers `nested_spec_single_literal` and
+  `evaluate_one_per_file_rule` in `crates/alint-rules/src/for_each_dir.rs`.
+- `is_direct_child` free function deleted from
+  `dir_only_contains.rs` (no longer needed once `children_of`
+  is the dispatch shape).
+- Memory cost of the new `parent_to_children` index: ~500 KB
+  HashMap + ~8 MB usize indices at 1M files / 5K dirs.
+  Negligible vs the existing 1 GB `entries` vec.
+- All 376 alint-rules tests + 226 e2e scenarios + 183 alint-core
+  tests + 11 new walker tests pass.
+
 ## [0.9.7] — 2026-05-02
 
 Patch release for the v0.9.6 `scope_filter:` runtime no-op (v0.9.6
