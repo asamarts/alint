@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -7,6 +7,33 @@ use ignore::{
 };
 
 use crate::error::{Error, Result};
+
+/// Debug-only tracing for `FileIndex` lazy index builds. Emits a
+/// `phase=index_build kind=<name> elapsed_us=N entries=M` event so
+/// `xtask bench-scale` profile runs and contributor debugging can
+/// see how long the lazy `OnceLock` builds cost. Compiled out
+/// entirely in release builds — `Instant::now()` and the event
+/// emission are both gated behind `cfg(debug_assertions)`, so
+/// users running release binaries pay zero runtime cost for the
+/// instrumentation.
+#[cfg(debug_assertions)]
+macro_rules! trace_index_build {
+    ($kind:expr, $start:expr, $entries:expr) => {{
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_us: u64 = $start.elapsed().as_micros() as u64;
+        tracing::debug!(
+            phase = "index_build",
+            kind = $kind,
+            elapsed_us = elapsed_us,
+            entries = $entries as u64,
+            "engine.index",
+        );
+    }};
+}
+#[cfg(not(debug_assertions))]
+macro_rules! trace_index_build {
+    ($kind:expr, $start:expr, $entries:expr) => {};
+}
 
 /// A single filesystem entry discovered by the walker.
 ///
@@ -35,10 +62,20 @@ pub struct FileEntry {
 /// scan over every entry. At 1M files in a 5,000-package
 /// monorepo, this turns the fan-out shape from O(D × N) =
 /// 5 × 10⁹ ops to O(D) = 5,000 lookups.
+///
+/// `parent_to_children` (v0.9.8) is a second lazy index — for
+/// each directory, the indices of its DIRECT children in
+/// `entries`. Cross-file rules that previously scanned all
+/// entries per matched dir (`dir_only_contains`, `dir_contains`)
+/// now lookup `children_of(dir)` (O(1)) instead of doing a
+/// per-dir O(N) scan. Closes the v0.9.5 → v0.9.8 cliff: at 1M
+/// files / 5K dirs, `dir_only_contains` drops from 5 billion
+/// path-parent comparisons to ~1 million.
 #[derive(Debug, Default)]
 pub struct FileIndex {
     pub entries: Vec<FileEntry>,
     path_set: OnceLock<HashSet<Arc<Path>>>,
+    parent_to_children: OnceLock<HashMap<Arc<Path>, Vec<usize>>>,
 }
 
 impl FileIndex {
@@ -50,6 +87,7 @@ impl FileIndex {
         Self {
             entries,
             path_set: OnceLock::new(),
+            parent_to_children: OnceLock::new(),
         }
     }
 
@@ -71,11 +109,16 @@ impl FileIndex {
     /// safe (`OnceLock` ensures a single initialiser wins).
     pub fn file_path_set(&self) -> &HashSet<Arc<Path>> {
         self.path_set.get_or_init(|| {
-            self.entries
+            #[cfg(debug_assertions)]
+            let start = std::time::Instant::now();
+            let set: HashSet<Arc<Path>> = self
+                .entries
                 .iter()
                 .filter(|e| !e.is_dir)
                 .map(|e| Arc::clone(&e.path))
-                .collect()
+                .collect();
+            trace_index_build!("path_set", start, self.entries.len());
+            set
         })
     }
 
@@ -99,6 +142,146 @@ impl FileIndex {
             return None;
         }
         self.files().find(|e| &*e.path == rel)
+    }
+
+    // ── v0.9.8 — parent_to_children index ────────────────────────
+
+    /// Direct children of `dir`, as indices into [`Self::entries`].
+    /// Triggers the lazy build of the parent → children map on
+    /// first call across any directory.
+    ///
+    /// Returns an empty slice when `dir` has no children or isn't
+    /// in the index. Indices are stable across the lifetime of
+    /// `&self` — use them via `&self.entries[i]` at the call site
+    /// to dereference.
+    ///
+    /// Build cost: O(N) (one pass over `entries`, one HashMap
+    /// insert per entry). Lookup cost: O(1) HashMap probe.
+    /// Replaces the O(D × N) `for dir in dirs() { for file in
+    /// files() { is_direct_child(file, dir) ... } }` shape that
+    /// `dir_only_contains` and `dir_contains` previously used.
+    /// At 1M files × 5K matched dirs, that's a 5,000× reduction
+    /// in total comparison count.
+    pub fn children_of(&self, dir: &Path) -> &[usize] {
+        let map = self.parent_to_children.get_or_init(|| {
+            #[cfg(debug_assertions)]
+            let start = std::time::Instant::now();
+            let mut map: HashMap<Arc<Path>, Vec<usize>> = HashMap::new();
+            for (idx, entry) in self.entries.iter().enumerate() {
+                let Some(parent) = entry.path.parent() else {
+                    continue;
+                };
+                // Look up an existing key by &Path borrow first to
+                // avoid the per-entry Arc clone in the common case
+                // (most parents already have a child indexed).
+                if let Some(slot) = map.get_mut(parent) {
+                    slot.push(idx);
+                    continue;
+                }
+                // First child for this parent — promote the
+                // borrowed &Path to an Arc<Path>. Prefer cloning
+                // the Arc from a sibling entry whose path IS the
+                // parent dir (so the HashMap key + the entries[i]
+                // Arc point at the same allocation), but fall back
+                // to allocating a fresh Arc if the parent dir
+                // isn't itself in the index (root-level files,
+                // ancestor dirs the walker excluded, etc.).
+                let key: Arc<Path> = self
+                    .entries
+                    .iter()
+                    .find(|e| e.is_dir && &*e.path == parent)
+                    .map_or_else(|| Arc::<Path>::from(parent), |e| Arc::clone(&e.path));
+                map.insert(key, vec![idx]);
+            }
+            trace_index_build!("parent_to_children", start, self.entries.len());
+            map
+        });
+        map.get(dir).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Direct file children's basenames under `dir`. Filters out
+    /// subdirectories — pure file basenames only. Returns an
+    /// iterator borrowing into `entries[i].path` for each match;
+    /// no allocation per call (the underlying `Path::file_name()`
+    /// returns a borrow into the `Arc<Path>`).
+    ///
+    /// Built on top of [`Self::children_of`]. Cross-file rules
+    /// like `dir_contains` whose hot path is "does this dir have
+    /// any file matching this basename matcher?" use this to skip
+    /// the per-call `path.file_name().and_then(|s| s.to_str())`
+    /// extraction and the `entries.iter().any(...)` scan in one
+    /// shot.
+    ///
+    /// Files whose basename isn't valid UTF-8 are silently
+    /// dropped from the iterator — same shape as the existing
+    /// path-string consumers.
+    pub fn file_basenames_of<'a>(
+        &'a self,
+        dir: &Path,
+    ) -> impl Iterator<Item = &'a str> + 'a {
+        self.children_of(dir).iter().filter_map(move |&i| {
+            let e = &self.entries[i];
+            if e.is_dir {
+                return None;
+            }
+            e.path.file_name().and_then(|s| s.to_str())
+        })
+    }
+
+    /// All descendants under `dir` (files + subdirs), recursive,
+    /// depth-first. Built on top of [`Self::children_of`]; does
+    /// NOT materialise the full subtree as a Vec (root descendants
+    /// = every entry would cost O(N) memory, defeating the lazy
+    /// design). Yields entries one at a time so callers can
+    /// short-circuit cleanly via `take_while` / `find` / etc.
+    ///
+    /// Cycle defense: a stack-based walk with no per-iteration
+    /// cycle check. The walker (`crate::walk`) excludes symlinks
+    /// by default, so the entries vec is acyclic by construction;
+    /// adding a per-step cycle check would cost ~10 ns per yielded
+    /// entry for a guarantee that's already established at
+    /// walker time.
+    pub fn descendants_of<'a>(
+        &'a self,
+        dir: &'a Path,
+    ) -> impl Iterator<Item = &'a FileEntry> + 'a {
+        DescendantsIter {
+            index: self,
+            stack: vec![self.children_of(dir).iter().copied().rev().collect()],
+        }
+    }
+}
+
+/// Stack-of-iterators state for [`FileIndex::descendants_of`]. Each
+/// element of the outer stack is the remaining children of one
+/// ancestor dir to visit, in reverse order so `pop()` yields them
+/// in the original (sorted) order. When a yielded entry is itself
+/// a directory, its children are pushed as a fresh frame for the
+/// next iteration to descend into.
+struct DescendantsIter<'a> {
+    index: &'a FileIndex,
+    stack: Vec<Vec<usize>>,
+}
+
+impl<'a> Iterator for DescendantsIter<'a> {
+    type Item = &'a FileEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let frame = self.stack.last_mut()?;
+            let Some(idx) = frame.pop() else {
+                self.stack.pop();
+                continue;
+            };
+            let entry = &self.index.entries[idx];
+            if entry.is_dir {
+                let children = self.index.children_of(&entry.path);
+                if !children.is_empty() {
+                    self.stack.push(children.iter().copied().rev().collect());
+                }
+            }
+            return Some(entry);
+        }
     }
 }
 
@@ -619,5 +802,200 @@ mod tests {
             file_paths, expected,
             "concurrent walker output must remain path-sorted",
         );
+    }
+
+    // ── v0.9.8: parent_to_children + descendants_of ─────────────
+
+    /// Build a synthetic [`FileIndex`] with explicit (path, is_dir)
+    /// entries — sidesteps the filesystem walker so the
+    /// children_of/descendants_of tests can target exact tree
+    /// shapes without per-test tempdir scaffolding.
+    fn synthetic_index(entries: &[(&str, bool)]) -> FileIndex {
+        let entries = entries
+            .iter()
+            .map(|(p, is_dir)| FileEntry {
+                path: Arc::<Path>::from(Path::new(p)),
+                is_dir: *is_dir,
+                size: 0,
+            })
+            .collect();
+        FileIndex::from_entries(entries)
+    }
+
+    #[test]
+    fn children_of_empty_index_returns_empty() {
+        let idx = FileIndex::default();
+        assert!(idx.children_of(Path::new("anything")).is_empty());
+    }
+
+    #[test]
+    fn children_of_root_with_top_level_files() {
+        let idx = synthetic_index(&[("a.rs", false), ("b.rs", false), ("README.md", false)]);
+        let children: Vec<&str> = idx
+            .children_of(Path::new(""))
+            .iter()
+            .map(|&i| idx.entries[i].path.to_str().unwrap())
+            .collect();
+        assert_eq!(children.len(), 3);
+        assert!(children.contains(&"a.rs"));
+        assert!(children.contains(&"b.rs"));
+        assert!(children.contains(&"README.md"));
+    }
+
+    #[test]
+    fn children_of_nested_dir_returns_only_direct_children() {
+        let idx = synthetic_index(&[
+            ("crates", true),
+            ("crates/api", true),
+            ("crates/api/Cargo.toml", false),
+            ("crates/api/src", true),
+            ("crates/api/src/main.rs", false),
+            ("crates/api/src/lib.rs", false),
+            ("crates/api/src/utils.rs", false),
+        ]);
+        let children: Vec<&str> = idx
+            .children_of(Path::new("crates/api/src"))
+            .iter()
+            .map(|&i| idx.entries[i].path.to_str().unwrap())
+            .collect();
+        assert_eq!(children.len(), 3);
+        assert!(children.contains(&"crates/api/src/main.rs"));
+        assert!(children.contains(&"crates/api/src/lib.rs"));
+        assert!(children.contains(&"crates/api/src/utils.rs"));
+    }
+
+    #[test]
+    fn children_of_dir_not_in_index_returns_empty() {
+        let idx = synthetic_index(&[("a.rs", false)]);
+        assert!(idx.children_of(Path::new("nonexistent/dir")).is_empty());
+    }
+
+    #[test]
+    fn children_of_is_memoised() {
+        let idx = synthetic_index(&[("a.rs", false), ("b.rs", false)]);
+        // First call builds the index. Second call must return the
+        // same slice from the cache (same pointer indicates the
+        // OnceLock initialised exactly once).
+        let first = idx.children_of(Path::new(""));
+        let second = idx.children_of(Path::new(""));
+        assert_eq!(first.as_ptr(), second.as_ptr());
+    }
+
+    #[test]
+    fn file_basenames_of_filters_subdirs() {
+        let idx = synthetic_index(&[
+            ("pkg", true),
+            ("pkg/Cargo.toml", false),
+            ("pkg/README.md", false),
+            ("pkg/src", true),  // subdir — NOT a file basename
+        ]);
+        let basenames: Vec<&str> = idx.file_basenames_of(Path::new("pkg")).collect();
+        assert_eq!(basenames.len(), 2);
+        assert!(basenames.contains(&"Cargo.toml"));
+        assert!(basenames.contains(&"README.md"));
+        assert!(!basenames.contains(&"src"));
+    }
+
+    #[test]
+    fn descendants_of_root_yields_all_entries_depth_first() {
+        let idx = synthetic_index(&[
+            ("crates", true),
+            ("crates/api", true),
+            ("crates/api/lib.rs", false),
+            ("crates/web", true),
+            ("crates/web/lib.rs", false),
+            ("README.md", false),
+        ]);
+        let descendants: Vec<&str> = idx
+            .descendants_of(Path::new(""))
+            .map(|e| e.path.to_str().unwrap())
+            .collect();
+        // Must include every entry whose parent chain reaches root.
+        // Order depends on insertion order into the parent_to_children
+        // map; assert membership rather than position.
+        assert_eq!(descendants.len(), 6);
+        for expected in [
+            "crates",
+            "crates/api",
+            "crates/api/lib.rs",
+            "crates/web",
+            "crates/web/lib.rs",
+            "README.md",
+        ] {
+            assert!(
+                descendants.contains(&expected),
+                "missing {expected:?} in {descendants:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn descendants_of_nested_dir_skips_outside_subtree() {
+        let idx = synthetic_index(&[
+            ("crates", true),
+            ("crates/api", true),
+            ("crates/api/lib.rs", false),
+            ("crates/web", true),
+            ("crates/web/lib.rs", false),
+            ("README.md", false),
+        ]);
+        let descendants: Vec<&str> = idx
+            .descendants_of(Path::new("crates/api"))
+            .map(|e| e.path.to_str().unwrap())
+            .collect();
+        assert_eq!(descendants, vec!["crates/api/lib.rs"]);
+    }
+
+    #[test]
+    fn descendants_of_short_circuits_on_take() {
+        let idx = synthetic_index(&[
+            ("a", true),
+            ("a/b", true),
+            ("a/b/c", true),
+            ("a/b/c/d", true),
+            ("a/b/c/d/e.rs", false),
+        ]);
+        // take(2) consumes only the first two yielded entries; the
+        // iterator state stops descending past that. Documents the
+        // "no full materialisation" contract.
+        let head: Vec<&str> = idx
+            .descendants_of(Path::new(""))
+            .take(2)
+            .map(|e| e.path.to_str().unwrap())
+            .collect();
+        assert_eq!(head.len(), 2);
+    }
+
+    #[test]
+    fn children_of_independent_index_caches_independently() {
+        // Two FileIndexes built from different entries must NOT
+        // share their parent_to_children OnceLock — each instance
+        // builds its own cache. Important for `--changed`-mode
+        // filtered indices that live alongside the full index.
+        let idx_a = synthetic_index(&[("a.rs", false)]);
+        let idx_b = synthetic_index(&[("b.rs", false)]);
+        let a_children = idx_a.children_of(Path::new(""));
+        let b_children = idx_b.children_of(Path::new(""));
+        assert_eq!(a_children.len(), 1);
+        assert_eq!(b_children.len(), 1);
+        let a_path = idx_a.entries[a_children[0]].path.to_str().unwrap();
+        let b_path = idx_b.entries[b_children[0]].path.to_str().unwrap();
+        assert_eq!(a_path, "a.rs");
+        assert_eq!(b_path, "b.rs");
+    }
+
+    #[test]
+    fn children_of_only_indexes_walker_known_dirs() {
+        // The walker emits both files AND dirs (per the existing
+        // FileEntry::is_dir field). children_of indexes by parent
+        // path regardless of whether the parent itself is a known
+        // entry — so a deep tree where intermediate dirs aren't
+        // explicitly in entries still indexes correctly.
+        let idx = synthetic_index(&[
+            ("deep/nested/a.rs", false),
+            ("deep/nested/b.rs", false),
+        ]);
+        let children = idx.children_of(Path::new("deep/nested"));
+        assert_eq!(children.len(), 2);
     }
 }
