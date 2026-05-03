@@ -130,6 +130,15 @@ impl Scope {
     /// `has_ancestor: Cargo.toml`). Callers that don't have a
     /// `scope_filter` on this scope still pass it; the cost is
     /// a single `Option::is_none` branch.
+    ///
+    /// `#[inline]` is load-bearing — this method runs on every
+    /// (rule, file) pair in the per-file dispatch hot loop.
+    /// Without it, cross-crate calls from `alint-rules` rules'
+    /// `evaluate` bodies don't inline through `thin` LTO and the
+    /// `Option<ScopeFilter>` None-branch becomes a non-inlined
+    /// function call (~40 % slowdown on S6 10k vs v0.9.9
+    /// without the hint).
+    #[inline]
     pub fn matches(&self, path: &Path, index: &FileIndex) -> bool {
         if self.exclude.is_match(path) {
             return false;
