@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "fingerprint": {
+    "os": "linux",
+    "arch": "x86_64",
+    "kernel": "Linux 6.1.0-42-amd64",
+    "cpu_model": "AMD Ryzen 9 3900X 12-Core Processor",
+    "cpu_cores": 24,
+    "ram_gb": 62,
+    "fs_type": "ext4",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "alint_version": "0.9.6",
+    "alint_git_sha": "cc6465b",
+    "hyperfine_version": "1.20.0",
+    "tool_versions": {
+      "alint": "0.9.6"
+    },
+    "timestamp": "unix:1777758630"
+  },
+  "args": {
+    "seed": "0xa11e47",
+    "diff_pct": 10.0,
+    "warmup": 3,
+    "runs": 10,
+    "sizes": [
+      "1k",
+      "10k",
+      "100k",
+      "1m"
+    ],
+    "scenarios": [
+      "S8"
+    ],
+    "modes": [
+      "full"
+    ],
+    "tools": [
+      "alint"
+    ]
+  },
+  "rows": [
+    {
+      "tool": "alint",
+      "size_files": 1000,
+      "size_label": "1k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 21.232746500000005,
+      "stddev_ms": 0.648163477066027,
+      "median_ms": 21.0136929,
+      "min_ms": 20.471362399999997,
+      "max_ms": 22.146737400000003,
+      "samples": 10,
+      "command": "alint (1k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 10000,
+      "size_label": "10k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 115.94866648000001,
+      "stddev_ms": 3.4794476843981608,
+      "median_ms": 116.02128778,
+      "min_ms": 111.13510328,
+      "max_ms": 122.02592528,
+      "samples": 10,
+      "command": "alint (10k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 100000,
+      "size_label": "100k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 1123.53406654,
+      "stddev_ms": 46.54733732710531,
+      "median_ms": 1113.14128254,
+      "min_ms": 1071.9683365399999,
+      "max_ms": 1226.12031654,
+      "samples": 10,
+      "command": "alint (100k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 1000000,
+      "size_label": "1m",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 12230.328165946667,
+      "stddev_ms": 532.553388310003,
+      "median_ms": 12069.66989028,
+      "min_ms": 11796.600108280001,
+      "max_ms": 12824.71449928,
+      "samples": 3,
+      "command": "alint (1m/S8/full)"
+    }
+  ]
+}
