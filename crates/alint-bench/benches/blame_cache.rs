@@ -35,16 +35,15 @@ fn run_git(root: &Path, args: &[&str]) {
         .args(args)
         .output()
         .expect("git invocation");
-    if !out.status.success() {
-        panic!(
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
 }
 
 /// Build a tempdir-backed git repo with `n` files, one commit.
-/// Returns (TempDir, list of relative paths).
+/// Returns (`TempDir`, list of relative paths).
 fn build_repo(n_files: usize) -> Option<(tempfile::TempDir, Vec<PathBuf>)> {
     if !git_available() {
         return None;

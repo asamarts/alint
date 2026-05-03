@@ -1,10 +1,12 @@
 //! Structured-query rule throughput.
 //!
 //! Six rule kinds parse JSON / YAML / TOML on every match and
-//! evaluate a JSONPath query against the parsed value:
+//! evaluate a `JSONPath` query against the parsed value:
+//!
 //!   - `json_path_equals`   / `json_path_matches`
 //!   - `yaml_path_equals`   / `yaml_path_matches`
 //!   - `toml_path_equals`   / `toml_path_matches`
+//!
 //! Plus `json_schema_passes` which compiles a JSON Schema once at
 //! rule-build time and validates each matched file against it.
 //!
@@ -67,7 +69,7 @@ fn make_toml_tree(n_files: usize) -> tempfile::TempDir {
         let path = tmp.path().join(format!("crate/c{i}/Cargo.toml"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let body =
-            format!("[package]\nname = \"c{i}\"\nedition = \"2024\"\nrust-version = \"1.85\"\n",);
+            format!("[package]\nname = \"c{i}\"\nedition = \"2024\"\nrust-version = \"1.85\"\n");
         std::fs::File::create(&path)
             .unwrap()
             .write_all(body.as_bytes())
@@ -112,12 +114,12 @@ fn build_engine(yaml: &str) -> Engine {
     Engine::new(rules, alint_rules::builtin_registry())
 }
 
-fn bench_rule(c: &mut Criterion, group: &str, tree: &tempfile::TempDir, yaml: &str, n: u64) {
+fn bench_rule(c: &mut Criterion, group: &str, tree: &tempfile::TempDir, yaml: &str, n: usize) {
     let mut g = c.benchmark_group(group);
     let walk_opts = WalkOptions::default();
     let index = walk(tree.path(), &walk_opts).expect("walk");
     let engine = build_engine(yaml);
-    g.throughput(Throughput::Elements(n));
+    g.throughput(Throughput::Elements(n as u64));
     g.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
         b.iter(|| engine.run(tree.path(), idx).unwrap());
     });
@@ -125,8 +127,8 @@ fn bench_rule(c: &mut Criterion, group: &str, tree: &tempfile::TempDir, yaml: &s
 }
 
 fn json_path_equals(c: &mut Criterion) {
-    for &n in &[100u64, 1000] {
-        let tmp = make_json_tree(n as usize);
+    for &n in &[100usize, 1000] {
+        let tmp = make_json_tree(n);
         bench_rule(
             c,
             "structured_query/json_path_equals",
@@ -147,8 +149,8 @@ rules:
 }
 
 fn yaml_path_matches(c: &mut Criterion) {
-    for &n in &[100u64, 1000] {
-        let tmp = make_yaml_tree(n as usize);
+    for &n in &[100usize, 1000] {
+        let tmp = make_yaml_tree(n);
         bench_rule(
             c,
             "structured_query/yaml_path_matches",
@@ -169,8 +171,8 @@ rules:
 }
 
 fn toml_path_equals(c: &mut Criterion) {
-    for &n in &[100u64, 1000] {
-        let tmp = make_toml_tree(n as usize);
+    for &n in &[100usize, 1000] {
+        let tmp = make_toml_tree(n);
         bench_rule(
             c,
             "structured_query/toml_path_equals",
@@ -191,8 +193,8 @@ rules:
 }
 
 fn json_schema_passes(c: &mut Criterion) {
-    for &n in &[100u64, 1000] {
-        let tmp = make_schema_tree(n as usize);
+    for &n in &[100usize, 1000] {
+        let tmp = make_schema_tree(n);
         bench_rule(
             c,
             "structured_query/json_schema_passes",

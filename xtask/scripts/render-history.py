@@ -27,6 +27,8 @@ Stat = Tuple[float, float]           # (mean_ms, stddev_ms)
 
 # Ordered newest-first for the per-scenario tables.
 KNOWN_VERSIONS = [
+    "v0.9.10",
+    "v0.9.9",
     "v0.9.8",
     "v0.9.7",
     "v0.9.6",
@@ -77,6 +79,10 @@ SCENARIOS = [
         "S9", "Nested polyglot",
         "Three competing ecosystem rulesets: `extends: rust + node + python` (~26 rules) over a polyglot tree (Rust under `crates/`, Node under `packages/`, Python under `apps/`). Per-rule `scope_filter: { has_ancestor: <manifest> }` ancestor walks. The dispatch shape the v0.9.6 `scope_filter:` primitive was designed for — without it, every `**/*.py` rule from python@v1 fires on every `.py` file in the tree. **New in v0.9.6.**",
     ),
+    (
+        "S10", "scope_filter outside per-file dispatch",
+        "Five rules from outside the `PerFileRule` dispatch path (`file_max_size`, `no_empty_files`, `no_symlinks`, `filename_case`, `filename_regex`) each with `scope_filter: { has_ancestor: <manifest> }` over the polyglot tree. Per-rule `evaluate()` iterating `ctx.index.files()` with both path-glob AND scope_filter narrowing — the dispatch shape v0.9.9 wired through (v0.9.8 silently dropped `scope_filter:` on these 17 rule kinds). **New in v0.9.9.**",
+    ),
 ]
 
 # Manual cells from the published v0.5.6 markdown (no JSON exists).
@@ -110,6 +116,9 @@ def fmt(data: Dict[Cell, Stat], v: str, s: str, sz: str, m: str) -> str:
     if cell is None:
         # S9 didn't exist before v0.9.6.
         if s == "S9" and v in ("v0.9.5", "v0.9.4", "v0.5.7", "v0.5.6"):
+            return "n/a"
+        # S10 didn't exist before v0.9.9.
+        if s == "S10" and v in ("v0.9.8", "v0.9.7", "v0.9.6", "v0.9.5", "v0.9.4", "v0.5.7", "v0.5.6"):
             return "n/a"
         return "—"
     mean, sd = cell
@@ -165,13 +174,15 @@ def render(data: Dict[Cell, Stat]) -> str:
     ]
     # Date table — one row per known version present
     headlines = {
-        "v0.9.8": ("2026-05-02", "Cross-file dispatch fast paths round 2 — `FileIndex::children_of` + `evaluate_for_each` literal-path bypass; 1M S7 40×."),
-        "v0.9.7": ("2026-05-02", "`scope_filter:` runtime fix + audit cleanup + v0.10 LSP design pass."),
-        "v0.9.6": ("2026-05-02", "`scope_filter:` primitive (latent runtime no-op fixed in v0.9.7) + S9 scenario."),
-        "v0.9.5": ("2026-05-01", "Cross-file dispatch fast paths round 1 — `for_each_dir` path-index lookups."),
-        "v0.9.4": ("2026-04-30", "Content-rule mechanical migration (16 rules to PerFileRule)."),
-        "v0.5.7": ("2026-03",    "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
-        "v0.5.6": ("2026-03",    "Prep run that captured the only pre-v0.9 1M S3 numbers."),
+        "v0.9.10": ("2026-05-03", "`Scope` owns `Option<ScopeFilter>` (structural fix); `Scope::matches(&Path, &FileIndex)` covers both predicates; 41 rules cleaned up; new audit fails CI on field re-introduction."),
+        "v0.9.9":  ("2026-05-03", "`scope_filter:` coverage sweep — 17 rules outside the per-file dispatch path now honour the filter; `for_each_dir` literal-path bypass guarded; new S10 macro bench."),
+        "v0.9.8":  ("2026-05-02", "Cross-file dispatch fast paths round 2 — `FileIndex::children_of` + `evaluate_for_each` literal-path bypass; 1M S7 40×."),
+        "v0.9.7":  ("2026-05-02", "`scope_filter:` runtime fix + audit cleanup + v0.10 LSP design pass."),
+        "v0.9.6":  ("2026-05-02", "`scope_filter:` primitive (latent runtime no-op fixed in v0.9.7) + S9 scenario."),
+        "v0.9.5":  ("2026-05-01", "Cross-file dispatch fast paths round 1 — `for_each_dir` path-index lookups."),
+        "v0.9.4":  ("2026-04-30", "Content-rule mechanical migration (16 rules to PerFileRule)."),
+        "v0.5.7":  ("2026-03",    "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
+        "v0.5.6":  ("2026-03",    "Prep run that captured the only pre-v0.9 1M S3 numbers."),
     }
     for v in versions_present:
         date, headline = headlines.get(v, ("?", "—"))
