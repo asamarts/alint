@@ -78,8 +78,13 @@ impl Rule for DirOnlyContainsRule {
             if !self.select_scope.matches(&dir.path) {
                 continue;
             }
-            for file in ctx.index.files() {
-                if !is_direct_child(&file.path, &dir.path) {
+            // v0.9.8: O(D × children) instead of O(D × N). At 1M
+            // files / 5K matched dirs / ~200 files-per-dir, this
+            // is 1M ops total instead of the previous 5B
+            // entries.iter() comparisons per matched dir.
+            for &child_idx in ctx.index.children_of(&dir.path) {
+                let file = &ctx.index.entries[child_idx];
+                if file.is_dir {
                     continue;
                 }
                 let Some(basename) = file.path.file_name().and_then(|s| s.to_str()) else {
@@ -116,10 +121,6 @@ impl DirOnlyContainsRule {
             self.allow_globs.join(", "),
         )
     }
-}
-
-fn is_direct_child(child: &Path, parent: &Path) -> bool {
-    child.parent() == Some(parent)
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {

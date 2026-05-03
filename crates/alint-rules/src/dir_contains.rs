@@ -80,16 +80,25 @@ impl Rule for DirContainsRule {
             if !self.select_scope.matches(&dir.path) {
                 continue;
             }
+            // v0.9.8: collect direct child basenames once per dir
+            // (cheap; iterator borrows into the Arc<Path>), then
+            // run each matcher over that small slice rather than
+            // scanning all entries per (dir, matcher) pair.
+            // O(D × children) replaces the prior O(D × R × N).
+            //
+            // dir_contains accepts BOTH file and subdir basenames
+            // (a require of `src` matches a `src/` subdir as well
+            // as a `src` file), so we use `children_of` directly
+            // instead of `file_basenames_of` which would filter
+            // out subdirs.
+            let basenames: Vec<&str> = ctx
+                .index
+                .children_of(&dir.path)
+                .iter()
+                .filter_map(|&i| ctx.index.entries[i].path.file_name().and_then(|s| s.to_str()))
+                .collect();
             for (i, matcher) in self.require_matchers.iter().enumerate() {
-                let found = ctx.index.entries.iter().any(|e| {
-                    if e.path.parent() != Some(&dir.path) {
-                        return false;
-                    }
-                    e.path
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .is_some_and(|basename| matcher.is_match(basename))
-                });
+                let found = basenames.iter().any(|b| matcher.is_match(b));
                 if !found {
                     let glob = &self.require_globs[i];
                     let msg = self.format_message(&dir.path, glob);
