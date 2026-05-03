@@ -27,8 +27,12 @@ impl Rule for DirExistsRule {
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
     }
-    fn wants_git_tracked(&self) -> bool {
-        self.git_tracked_only
+    fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
+        if self.git_tracked_only {
+            alint_core::GitTrackedMode::DirAware
+        } else {
+            alint_core::GitTrackedMode::Off
+        }
     }
 
     fn requires_full_index(&self) -> bool {
@@ -42,11 +46,12 @@ impl Rule for DirExistsRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        // v0.9.11: when `git_tracked_only` is set the engine
+        // hands us a pre-filtered `ctx.index` (dir_aware mode);
+        // the per-entry `dir_has_tracked_files` check that lived
+        // here is now subsumed by the engine narrowing.
         let found = ctx.index.dirs().any(|entry| {
             if !self.scope.matches(&entry.path, ctx.index) {
-                return false;
-            }
-            if self.git_tracked_only && !ctx.dir_has_tracked_files(&entry.path) {
                 return false;
             }
             true
@@ -171,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn git_tracked_only_propagates_to_wants_git_tracked() {
+    fn git_tracked_only_advertises_dir_aware_mode() {
         let spec = spec_yaml(
             "id: t\n\
              kind: dir_exists\n\
@@ -180,7 +185,10 @@ mod tests {
              git_tracked_only: true\n",
         );
         let rule = build(&spec).unwrap();
-        assert!(rule.wants_git_tracked());
+        assert_eq!(
+            rule.git_tracked_mode(),
+            alint_core::GitTrackedMode::DirAware,
+        );
     }
 
     #[test]

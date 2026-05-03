@@ -142,6 +142,43 @@ impl Context<'_> {
     }
 }
 
+/// How a rule narrows its iteration to git-tracked entries.
+/// Returned by [`Rule::git_tracked_mode`]; the engine reads
+/// this at construction time to pick the right pre-filtered
+/// `FileIndex` (file-only or dir-aware) for each opted-in
+/// rule.
+///
+/// The mode is per-rule (a config might opt in some rules and
+/// not others). The engine builds at most two filtered indexes
+/// per run regardless of how many rules opt in, so the cost
+/// amortises across the whole rule set.
+///
+/// See `docs/design/v0.9/git-tracked-filtered-index.md` for
+/// the v0.9.11 structural fix this enum is the entry point of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitTrackedMode {
+    /// Rule does not consult the git-tracked set. Engine
+    /// routes the rule's evaluation against the unfiltered
+    /// `FileIndex`. The default; do not override unless the
+    /// rule opts into `git_tracked_only:`.
+    Off,
+    /// Rule iterates files (`ctx.index.files()`) and the
+    /// engine narrows that to entries where
+    /// `git_tracked.contains(path)` before the rule sees them.
+    /// File-mode existence rules (`file_exists`, `file_absent`)
+    /// pick this mode when the spec's `git_tracked_only: true`.
+    FileOnly,
+    /// Rule iterates dirs (`ctx.index.dirs()`) and the engine
+    /// narrows that to dirs where
+    /// `dir_has_tracked_files(path, &git_tracked)`. Dir-mode
+    /// existence rules (`dir_exists`, `dir_absent`) pick this
+    /// mode when the spec's `git_tracked_only: true`. The
+    /// filtered index also includes the tracked files
+    /// themselves so a `dir_*` rule's nested per-file checks
+    /// (e.g. `paths:` glob) still match.
+    DirAware,
+}
+
 /// Trait every built-in and plugin rule implements.
 pub trait Rule: Send + Sync + std::fmt::Debug {
     fn id(&self) -> &str;
@@ -149,15 +186,40 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn policy_url(&self) -> Option<&str> {
         None
     }
-    /// Whether this rule needs the git-tracked-paths set on
-    /// [`Context`]. Default `false`; rule kinds that support
-    /// `git_tracked_only` override to return `true` only when
-    /// the user actually opted in. The engine collects the set
-    /// (via `git ls-files`) once per run when ANY rule returns
-    /// `true`, so the cost is paid at most once even if many
-    /// rules opt in.
+    /// Whether (and how) this rule narrows its iteration to
+    /// git-tracked entries. Default [`GitTrackedMode::Off`].
+    /// Rule kinds that support `git_tracked_only:` override to
+    /// return [`GitTrackedMode::FileOnly`] (file-mode rules:
+    /// check `set.contains(path)`) or [`GitTrackedMode::DirAware`]
+    /// (dir-mode rules: check `dir_has_tracked_files(path, set)`)
+    /// when the user opts in.
+    ///
+    /// The engine collects the tracked-paths set (via
+    /// `git ls-files`) once per run when ANY rule returns a
+    /// non-`Off` mode, then builds a pre-filtered `FileIndex`
+    /// for each mode and routes opted-in rules to the right
+    /// `Context`. Rules iterate `ctx.index.files()` /
+    /// `ctx.index.dirs()` exactly as before — the index is
+    /// already narrowed, so no per-rule `if self.git_tracked_only
+    /// && !ctx.is_git_tracked(...)` runtime check is needed.
+    /// Closes the same recurrence-risk shape as v0.9.10's
+    /// `Scope`-owns-`scope_filter` fix:
+    /// `docs/design/v0.9/git-tracked-filtered-index.md`.
+    fn git_tracked_mode(&self) -> GitTrackedMode {
+        GitTrackedMode::Off
+    }
+
+    /// Deprecated alias for `git_tracked_mode() != GitTrackedMode::Off`.
+    /// Kept for one minor version so out-of-tree rule plugins
+    /// that override this method continue to opt in to the
+    /// engine's git-tracked-paths setup. Will be removed in
+    /// v0.9.12; override [`Rule::git_tracked_mode`] instead.
+    #[deprecated(
+        since = "0.9.11",
+        note = "override `git_tracked_mode` instead; this method is delegated and will be removed in v0.9.12"
+    )]
     fn wants_git_tracked(&self) -> bool {
-        false
+        self.git_tracked_mode() != GitTrackedMode::Off
     }
 
     /// Whether this rule needs `git blame` output on
@@ -479,7 +541,7 @@ mod tests {
     fn rule_trait_defaults_are_safe_no_ops() {
         let r = DefaultRule;
         assert_eq!(r.policy_url(), None);
-        assert!(!r.wants_git_tracked());
+        assert_eq!(r.git_tracked_mode(), GitTrackedMode::Off);
         assert!(!r.wants_git_blame());
         assert!(!r.requires_full_index());
         assert!(r.path_scope().is_none());

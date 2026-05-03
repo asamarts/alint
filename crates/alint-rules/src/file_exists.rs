@@ -84,8 +84,12 @@ impl Rule for FileExistsRule {
         self.policy_url.as_deref()
     }
 
-    fn wants_git_tracked(&self) -> bool {
-        self.git_tracked_only
+    fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
+        if self.git_tracked_only {
+            alint_core::GitTrackedMode::FileOnly
+        } else {
+            alint_core::GitTrackedMode::Off
+        }
     }
 
     fn requires_full_index(&self) -> bool {
@@ -115,18 +119,17 @@ impl Rule for FileExistsRule {
                 ctx.index.contains_file(p)
             })
         } else {
-            // Slow path: glob patterns and/or `git_tracked_only`
-            // require iterating every entry. Same shape as the
-            // pre-v0.10 implementation — preserved verbatim so
-            // glob-using rules keep their existing semantics.
+            // Slow path: glob patterns. v0.9.11: when
+            // `git_tracked_only` is set the engine hands us a
+            // pre-filtered `ctx.index` (file_only mode), so the
+            // per-entry `is_git_tracked` check that lived here
+            // pre-v0.9.11 is no longer needed — `ctx.index.files()`
+            // already iterates only tracked files.
             ctx.index.files().any(|entry| {
                 if self.root_only && entry.path.components().count() != 1 {
                     return false;
                 }
                 if !self.scope.matches(&entry.path, ctx.index) {
-                    return false;
-                }
-                if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
                     return false;
                 }
                 true
@@ -174,19 +177,20 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .unwrap_or(Options { root_only: false });
     // The fast path needs every pattern to be a plain relative
-    // path (no glob metacharacters, no `!` exclude) AND the
-    // rule must not opt into `git_tracked_only` (which requires
-    // a per-entry callback). When all preconditions hold,
+    // path (no glob metacharacters, no `!` exclude). v0.9.11:
+    // `git_tracked_only` no longer disqualifies the fast path
+    // — the engine routes the rule to a tracked-files-only
+    // pre-filtered index, so `FileIndex::contains_file` against
+    // that index naturally returns true iff the literal is BOTH
+    // present AND tracked. When all preconditions hold,
     // `literal_paths` carries the parsed `PathBuf`s ready for
     // `FileIndex::contains_file` lookup at evaluate time.
-    let literal_paths = if !spec.git_tracked_only
-        && paths_spec_has_no_excludes(paths)
-        && patterns.iter().all(|p| is_literal_path(p))
-    {
-        Some(patterns.iter().map(PathBuf::from).collect())
-    } else {
-        None
-    };
+    let literal_paths =
+        if paths_spec_has_no_excludes(paths) && patterns.iter().all(|p| is_literal_path(p)) {
+            Some(patterns.iter().map(PathBuf::from).collect())
+        } else {
+            None
+        };
     let fixer = match &spec.fix {
         Some(FixSpec::FileCreate { file_create: cfg }) => {
             let target = cfg

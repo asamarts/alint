@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "fingerprint": {
+    "os": "linux",
+    "arch": "x86_64",
+    "kernel": "Linux 6.1.0-42-amd64",
+    "cpu_model": "AMD Ryzen 9 3900X 12-Core Processor",
+    "cpu_cores": 24,
+    "ram_gb": 62,
+    "fs_type": "ext4",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "alint_version": "0.9.10",
+    "alint_git_sha": "8c39208",
+    "hyperfine_version": "1.20.0",
+    "tool_versions": {
+      "alint": "0.9.10"
+    },
+    "timestamp": "unix:1777848984"
+  },
+  "args": {
+    "seed": "0xa11e47",
+    "diff_pct": 10.0,
+    "warmup": 3,
+    "runs": 10,
+    "sizes": [
+      "1k",
+      "10k",
+      "100k"
+    ],
+    "scenarios": [
+      "S8"
+    ],
+    "modes": [
+      "full",
+      "changed"
+    ],
+    "tools": [
+      "alint"
+    ]
+  },
+  "rows": [
+    {
+      "tool": "alint",
+      "size_files": 1000,
+      "size_label": "1k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 21.863695579999998,
+      "stddev_ms": 1.250099319777029,
+      "median_ms": 21.61254918,
+      "min_ms": 20.34891168,
+      "max_ms": 24.94261568,
+      "samples": 10,
+      "command": "alint (1k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 1000,
+      "size_label": "1k",
+      "scenario": "S8",
+      "mode": "changed",
+      "mean_ms": 20.40496674,
+      "stddev_ms": 1.1784650689687695,
+      "median_ms": 19.870019539999998,
+      "min_ms": 19.30566804,
+      "max_ms": 23.06090304,
+      "samples": 10,
+      "command": "alint (1k/S8/changed)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 10000,
+      "size_label": "10k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 118.02878454,
+      "stddev_ms": 2.5129886835994406,
+      "median_ms": 118.26295984000001,
+      "min_ms": 114.61722634,
+      "max_ms": 121.73171434000001,
+      "samples": 10,
+      "command": "alint (10k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 10000,
+      "size_label": "10k",
+      "scenario": "S8",
+      "mode": "changed",
+      "mean_ms": 74.67488204000001,
+      "stddev_ms": 1.7812380687421667,
+      "median_ms": 74.92645394,
+      "min_ms": 72.32464294,
+      "max_ms": 78.17394794,
+      "samples": 10,
+      "command": "alint (10k/S8/changed)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 100000,
+      "size_label": "100k",
+      "scenario": "S8",
+      "mode": "full",
+      "mean_ms": 1064.02523086,
+      "stddev_ms": 31.560118273699388,
+      "median_ms": 1056.0457995600002,
+      "min_ms": 1029.78763606,
+      "max_ms": 1130.08864606,
+      "samples": 10,
+      "command": "alint (100k/S8/full)"
+    },
+    {
+      "tool": "alint",
+      "size_files": 100000,
+      "size_label": "100k",
+      "scenario": "S8",
+      "mode": "changed",
+      "mean_ms": 578.96249384,
+      "stddev_ms": 23.307342777732128,
+      "median_ms": 583.36254244,
+      "min_ms": 542.64737744,
+      "max_ms": 612.8054494400001,
+      "samples": 10,
+      "command": "alint (100k/S8/changed)"
+    }
+  ]
+}

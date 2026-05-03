@@ -34,8 +34,12 @@ impl Rule for FileAbsentRule {
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
     }
-    fn wants_git_tracked(&self) -> bool {
-        self.git_tracked_only
+    fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
+        if self.git_tracked_only {
+            alint_core::GitTrackedMode::FileOnly
+        } else {
+            alint_core::GitTrackedMode::Off
+        }
     }
 
     fn requires_full_index(&self) -> bool {
@@ -53,11 +57,12 @@ impl Rule for FileAbsentRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
+        // v0.9.11: when `git_tracked_only` is set the engine
+        // hands us a pre-filtered `ctx.index` (file_only mode);
+        // the per-entry `is_git_tracked` check that lived here
+        // is now subsumed by the engine-side narrowing.
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path, ctx.index) {
-                continue;
-            }
-            if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
                 continue;
             }
             let msg = self.message.clone().unwrap_or_else(|| {
@@ -198,12 +203,18 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_silent_when_git_tracked_only_outside_repo() {
-        // git_tracked_only requires `ctx.git_tracked` to be
-        // populated; when it's None (no rule asked for it / no
-        // git repo), every path reads as "untracked" and the
-        // rule no-ops — the right default for "don't let X be
-        // committed" semantics.
+    fn git_tracked_only_advertises_file_only_mode() {
+        // v0.9.11: the silent-no-op-outside-git-repo guarantee
+        // moved from a per-rule runtime check to an engine-side
+        // pre-filtered FileIndex. Calling `evaluate` directly
+        // bypasses the engine's filtering, so this unit test
+        // can no longer assert the no-op behaviour at the rule
+        // level — instead it asserts the rule advertises the
+        // correct `GitTrackedMode`, which is what tells the
+        // engine to substitute an empty index when the
+        // tracked-set is `None`. The end-to-end no-op behaviour
+        // is asserted by the e2e scenarios under
+        // `crates/alint-e2e/scenarios/check/git/`.
         let spec = spec_yaml(
             "id: t\n\
              kind: file_absent\n\
@@ -212,11 +223,10 @@ mod tests {
              git_tracked_only: true\n",
         );
         let rule = build(&spec).unwrap();
-        let idx = index(&["a.bak"]);
-        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
-        assert!(
-            v.is_empty(),
-            "git_tracked_only without ctx.git_tracked must no-op: {v:?}",
+        assert_eq!(
+            rule.git_tracked_mode(),
+            alint_core::GitTrackedMode::FileOnly,
+            "git_tracked_only on file_absent must advertise FileOnly mode",
         );
     }
 

@@ -1,23 +1,31 @@
 //! Hard audit: any rule that holds a `git_tracked_only: bool`
-//! field MUST wire it through both ends of the contract — the
-//! engine-side `wants_git_tracked()` override (so the engine
-//! actually populates `Context::git_tracked`) AND the runtime
-//! `ctx.is_git_tracked(...)` / `ctx.dir_has_tracked_files(...)`
-//! check (so the rule actually narrows its evaluation to
-//! tracked entries when the user opts in).
+//! field MUST advertise its narrowing mode via
+//! [`Rule::git_tracked_mode`] (returning `FileOnly` or `DirAware`
+//! when the user opts in via the YAML field). The engine reads
+//! this trait method to (a) collect the git-tracked path set and
+//! (b) build a pre-filtered `FileIndex` it hands to the rule —
+//! the per-rule runtime `is_git_tracked(...)` /
+//! `dir_has_tracked_files(...)` checks that lived on
+//! `evaluate()` pre-v0.9.11 are gone (subsumed by the engine
+//! narrowing).
 //!
-//! Rationale: this is the same recurrence-risk shape that
-//! produced the v0.9.6 / v0.9.7 / v0.9.9 silent-no-op
-//! `scope_filter:` bugs (see
-//! `docs/design/v0.9/scope-owns-scope-filter.md`). v0.9.10
-//! collapsed `scope_filter` into `Scope` so the compiler
-//! enforces correct usage; `git_tracked_only` carries different
-//! semantics (the data lives on `Context`, not on the rule)
-//! so the structural fix is harder to land. This audit closes
-//! the recurrence gap pragmatically — if a contributor adds a
-//! rule with `git_tracked_only:` and forgets either wire-up,
-//! CI catches it at PR time rather than in production as
-//! "the rule isn't filtering anything."
+//! Rationale: same recurrence-risk shape that produced the
+//! v0.9.6 / v0.9.7 / v0.9.9 silent-no-op `scope_filter:` bugs
+//! (see `docs/design/v0.9/scope-owns-scope-filter.md`). v0.9.10
+//! closed the `scope_filter` bug class structurally via
+//! `Scope` ownership; v0.9.11 closes the `git_tracked_only`
+//! bug class structurally via the engine-side filtered
+//! `FileIndex` (see
+//! `docs/design/v0.9/git-tracked-filtered-index.md`).
+//!
+//! This audit catches both directions:
+//! 1. A rule that ships `git_tracked_only: bool` but forgets
+//!    `git_tracked_mode()` → `Off` default → engine won't
+//!    pre-filter and the rule appears to ignore the user's opt-in.
+//! 2. A rule that re-introduces a per-evaluate
+//!    `is_git_tracked` / `dir_has_tracked_files` runtime check
+//!    → potentially conflicts with the engine pre-filter
+//!    (double-filtering or, worse, divergent semantics).
 //!
 //! See `git_tracked_only` design notes in
 //! `crates/alint-core/src/config.rs::RuleSpec`.
@@ -54,26 +62,36 @@ fn git_tracked_only_field_is_fully_wired() {
             continue;
         }
 
-        // Both wire-ups must be present.
-        let has_wants_override = src.contains("fn wants_git_tracked");
-        let has_runtime_check =
-            src.contains("is_git_tracked") || src.contains("dir_has_tracked_files");
-
-        if !has_wants_override {
+        // v0.9.11: must advertise `git_tracked_mode` so the
+        // engine knows to pre-filter the index handed to the
+        // rule. The default `Off` means "rule does not opt in"
+        // — but if the rule has the YAML field, the override
+        // is required.
+        let has_mode_override = src.contains("fn git_tracked_mode");
+        if !has_mode_override {
             violations.push(format!(
                 "{name}: declares `git_tracked_only: bool` but does not override \
-                 `Rule::wants_git_tracked()` — engine won't populate \
-                 `Context::git_tracked` and the rule's runtime check will \
-                 always silently no-op",
+                 `Rule::git_tracked_mode()` — engine defaults to `GitTrackedMode::Off` \
+                 and won't pre-filter the index, so the user's `git_tracked_only: true` \
+                 has no observable effect (the rule fires on every match regardless of \
+                 git-tracked state)",
             ));
         }
-        if !has_runtime_check {
+
+        // v0.9.11: per-rule runtime `is_git_tracked` /
+        // `dir_has_tracked_files` checks are gone. Re-
+        // introducing them risks double-filtering or
+        // divergent semantics from the engine pre-filter.
+        let has_runtime_check =
+            src.contains("is_git_tracked(") || src.contains("dir_has_tracked_files(");
+        if has_runtime_check {
             violations.push(format!(
-                "{name}: declares `git_tracked_only: bool` but does not call \
+                "{name}: declares `git_tracked_only: bool` AND calls \
                  `ctx.is_git_tracked(...)` or `ctx.dir_has_tracked_files(...)` \
-                 inside its `evaluate` — opting in via the YAML field has no \
-                 observable effect, the rule will fire on every match \
-                 regardless",
+                 inside `evaluate` — these are now subsumed by the engine's \
+                 per-rule pre-filtered FileIndex (v0.9.11 structural fix). \
+                 Drop the runtime check; the engine's filtered index handed via \
+                 `pick_ctx` covers the narrowing.",
             ));
         }
     }

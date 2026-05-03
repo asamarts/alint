@@ -6,6 +6,108 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.11] — 2026-05-03
+
+Structural fix for the `git_tracked_only:` silent-no-op
+recurrence-risk shape. v0.9.10 closed the analogous
+`scope_filter:` bug class via `Scope` ownership; v0.9.11
+closes the `git_tracked_only` shape via engine-side
+pre-filtered `FileIndex`es. Rules opted into
+`git_tracked_only:` no longer carry a runtime
+`if self.git_tracked_only && !ctx.is_git_tracked(...)`
+check — the engine hands them a `Context` whose `index`
+already iterates only the tracked subset.
+
+### Added — alint-core API
+
+- **`alint_core::GitTrackedMode { Off, FileOnly, DirAware }`**
+  enum. Returned by `Rule::git_tracked_mode()` so the
+  engine knows which pre-filtered `FileIndex` to hand the
+  rule. File-mode rules (`file_exists`, `file_absent`)
+  return `FileOnly`; dir-mode rules (`dir_exists`,
+  `dir_absent`) return `DirAware`.
+- **`Rule::git_tracked_mode(&self) -> GitTrackedMode`**
+  trait method (default `Off`). Replaces the boolean
+  consultation that `wants_git_tracked()` provided.
+
+### Deprecated
+
+- **`Rule::wants_git_tracked()`** — kept for one minor
+  version as a default that delegates to
+  `git_tracked_mode() != Off`. Out-of-tree rule plugins
+  that override this method continue to work; the engine
+  no longer consults it. **Removed in v0.9.12.** Override
+  `git_tracked_mode` instead.
+
+### Fixed
+
+- **`git_tracked_only` silent-no-op bug class closed
+  structurally.** A new rule that ships
+  `git_tracked_only: bool` on its spec but forgets to
+  override `git_tracked_mode()` defaults to `Off` —
+  same defensive default as today. But once it overrides
+  `git_tracked_mode()`, the engine's pre-filtered
+  `FileIndex` automatically narrows the rule's iteration
+  — no per-evaluate `is_git_tracked(...)` check to
+  forget. The audit
+  `coverage_audit_git_tracked_only.rs` was updated to
+  flag both the missing-mode-override AND the
+  re-introduction of any per-rule runtime check.
+- **`file_exists` literal-path fast path now applies even
+  with `git_tracked_only: true`.** Pre-v0.9.11, the rule
+  forced the slow path (entry iteration) when
+  `git_tracked_only` was set, because the per-entry
+  `is_git_tracked` check ran inside the slow loop. The
+  engine's pre-filtered index makes the literal-path
+  `contains_file` lookup correct without that check —
+  10-30 % S8 speedup at small/medium sizes (see Performance).
+
+### Internal
+
+- **Engine `build_git_tracked_indexes`**: builds at most two
+  pre-filtered `FileIndex`es per run (one per `GitTrackedMode`
+  in use). Build cost amortises across however many rules opt
+  into each mode.
+- **`pick_ctx`** extended to route opted-in rules to the
+  right pre-filtered `Context`. Existence rules already
+  declared `requires_full_index = true`, so the substitution
+  is safe — we're swapping the full-index `Context` for a
+  tracked-narrowed one.
+- **Outside-git-repo silent-no-op preserved** via the
+  empty-index fallback: when `git ls-files` returns nothing
+  (no repo / non-zero exit), the engine builds empty
+  pre-filtered indexes for opted-in modes so rules iterate
+  zero entries and fire zero violations.
+- 4 existence rules (`file_exists`, `file_absent`,
+  `dir_exists`, `dir_absent`) cleaned up: per-evaluate
+  `is_git_tracked(...)` / `dir_has_tracked_files(...)`
+  checks deleted; `git_tracked_mode()` overrides added.
+
+### Performance
+
+S8 (git overlay) at all sizes is faster:
+
+| Size/mode | v0.9.10 | v0.9.11 | Δ |
+|---|---:|---:|---:|
+| 1k/full | 24.2ms | 21.9ms | -10 % |
+| 1k/changed | 29.9ms | 20.4ms | -32 % |
+| 10k/full | 139.7ms | 118.0ms | -15 % |
+| 10k/changed | 87.3ms | 74.7ms | -14 % |
+| 100k/full | 1068.7ms | 1064.0ms | -0 % |
+| 100k/changed | 623.3ms | 579.0ms | -7 % |
+
+The 1k/changed -32 % is mostly the `file_exists`
+literal-path fast path applying for the first time with
+`git_tracked_only`. Larger sizes show a smaller win
+because the slow-path iteration cost is dominant.
+
+### Held for v0.9.12+
+
+- **`Rule::wants_git_tracked()` removal.** Deprecated this
+  cycle; remove next.
+- **`when:` ownership** remains explicitly out of scope —
+  different semantics, no shared silent-no-op shape.
+
 ## [0.9.10] — 2026-05-03
 
 Structural fix for the `scope_filter:` silent-no-op bug class.

@@ -29,8 +29,12 @@ impl Rule for DirAbsentRule {
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
     }
-    fn wants_git_tracked(&self) -> bool {
-        self.git_tracked_only
+    fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
+        if self.git_tracked_only {
+            alint_core::GitTrackedMode::DirAware
+        } else {
+            alint_core::GitTrackedMode::Off
+        }
     }
 
     fn requires_full_index(&self) -> bool {
@@ -43,11 +47,12 @@ impl Rule for DirAbsentRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
+        // v0.9.11: when `git_tracked_only` is set the engine
+        // hands us a pre-filtered `ctx.index` (dir_aware mode);
+        // the per-entry `dir_has_tracked_files` check that lived
+        // here is now subsumed by the engine narrowing.
         for entry in ctx.index.dirs() {
             if !self.scope.matches(&entry.path, ctx.index) {
-                continue;
-            }
-            if self.git_tracked_only && !ctx.dir_has_tracked_files(&entry.path) {
                 continue;
             }
             let msg = self.message.clone().unwrap_or_else(|| {
@@ -156,7 +161,18 @@ mod tests {
     }
 
     #[test]
-    fn git_tracked_only_silent_outside_repo() {
+    fn git_tracked_only_advertises_dir_aware_mode() {
+        // v0.9.11: the silent-no-op-outside-git-repo guarantee
+        // moved from a per-rule runtime check to an engine-side
+        // pre-filtered FileIndex. Calling `evaluate` directly
+        // bypasses the engine's filtering, so this unit test
+        // can no longer assert the no-op behaviour at the rule
+        // level — instead it asserts the rule advertises the
+        // correct `GitTrackedMode`, which is what tells the
+        // engine to substitute an empty index when the
+        // tracked-set is `None`. The end-to-end no-op behaviour
+        // is asserted by
+        // `crates/alint-e2e/scenarios/check/git/git_tracked_only_outside_git_silently_passes_absent.yml`.
         let spec = spec_yaml(
             "id: t\n\
              kind: dir_absent\n\
@@ -165,13 +181,10 @@ mod tests {
              git_tracked_only: true\n",
         );
         let rule = build(&spec).unwrap();
-        let idx = index_with_dirs(&[("target", true)]);
-        // ctx.git_tracked is None, so dir_has_tracked_files
-        // always returns false → rule no-ops.
-        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
-        assert!(
-            v.is_empty(),
-            "git_tracked_only without tracked-set must no-op: {v:?}",
+        assert_eq!(
+            rule.git_tracked_mode(),
+            alint_core::GitTrackedMode::DirAware,
+            "git_tracked_only on dir_absent must advertise DirAware mode",
         );
     }
 

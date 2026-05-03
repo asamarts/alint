@@ -40,6 +40,26 @@ macro_rules! phase {
     };
 }
 
+/// Pre-filtered `FileIndex`es for git-tracked rules. v0.9.11
+/// structural fix lets the engine narrow the index handed to
+/// each opted-in rule, so the rule's `evaluate()` no longer
+/// needs to do its own `is_git_tracked(...)` check per file
+/// (the `git_tracked_only`-silently-dropped recurrence-risk
+/// shape that audit-tested in v0.9.10 is closed).
+///
+/// Each variant is `Option<FileIndex>` so the engine only pays
+/// the build cost for modes that at least one rule opts into.
+#[derive(Debug)]
+struct GitTrackedIndexes {
+    /// Index containing only files where `git_tracked.contains(path)`.
+    /// Handed to rules with [`GitTrackedMode::FileOnly`].
+    file_only: Option<FileIndex>,
+    /// Index containing dirs where `dir_has_tracked_files(path,
+    /// &git_tracked)` plus tracked files. Handed to rules with
+    /// [`GitTrackedMode::DirAware`].
+    dir_aware: Option<FileIndex>,
+}
+
 /// A rule bundled with an optional `when` expression. Rules with a `when`
 /// that evaluates to false at runtime are skipped (no `RuleResult` is
 /// produced) — same observable effect as `level: off`, but gated on facts.
@@ -181,6 +201,14 @@ impl Engine {
             files = index.entries.len() as u64,
         );
 
+        let t_git_idx = Instant::now();
+        let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
+        phase!(
+            t_git_idx,
+            "build_git_tracked_indexes",
+            built = u64::from(git_tracked_indexes.is_some()),
+        );
+
         let full_ctx = Context {
             root,
             index,
@@ -199,6 +227,30 @@ impl Engine {
             git_tracked: git_tracked.as_ref(),
             git_blame: git_blame.as_ref(),
         });
+        let git_file_only_ctx = git_tracked_indexes
+            .as_ref()
+            .and_then(|gti| gti.file_only.as_ref())
+            .map(|fi| Context {
+                root,
+                index: fi,
+                registry: Some(&self.registry),
+                facts: Some(&fact_values),
+                vars: Some(&self.vars),
+                git_tracked: git_tracked.as_ref(),
+                git_blame: git_blame.as_ref(),
+            });
+        let git_dir_aware_ctx = git_tracked_indexes
+            .as_ref()
+            .and_then(|gti| gti.dir_aware.as_ref())
+            .map(|fi| Context {
+                root,
+                index: fi,
+                registry: Some(&self.registry),
+                facts: Some(&fact_values),
+                vars: Some(&self.vars),
+                git_tracked: git_tracked.as_ref(),
+                git_blame: git_blame.as_ref(),
+            });
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
@@ -233,7 +285,13 @@ impl Engine {
                 if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                     return None;
                 }
-                let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
+                let ctx = pick_ctx(
+                    entry.rule.as_ref(),
+                    &full_ctx,
+                    filtered_ctx.as_ref(),
+                    git_file_only_ctx.as_ref(),
+                    git_dir_aware_ctx.as_ref(),
+                );
                 let t_rule = Instant::now();
                 let result = run_entry(entry, ctx, &when_env, &fact_values);
                 // u128 → u64 saturating: same rationale as the
@@ -509,6 +567,7 @@ impl Engine {
     /// [`FixStatus::Unfixable`] entries so the caller sees them in the
     /// report. Rules that pass (no violations) are omitted from the
     /// result, same as [`Engine::run`]'s usual behaviour.
+    #[allow(clippy::too_many_lines)]
     pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
             return Ok(FixReport {
@@ -520,6 +579,7 @@ impl Engine {
         let git_tracked = self.collect_git_tracked_if_needed(root);
         let git_blame = self.build_blame_cache_if_needed(root);
         let filtered_index = self.build_filtered_index(index);
+        let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
         let full_ctx = Context {
             root,
             index,
@@ -538,6 +598,30 @@ impl Engine {
             git_tracked: git_tracked.as_ref(),
             git_blame: git_blame.as_ref(),
         });
+        let git_file_only_ctx = git_tracked_indexes
+            .as_ref()
+            .and_then(|gti| gti.file_only.as_ref())
+            .map(|fi| Context {
+                root,
+                index: fi,
+                registry: Some(&self.registry),
+                facts: Some(&fact_values),
+                vars: Some(&self.vars),
+                git_tracked: git_tracked.as_ref(),
+                git_blame: git_blame.as_ref(),
+            });
+        let git_dir_aware_ctx = git_tracked_indexes
+            .as_ref()
+            .and_then(|gti| gti.dir_aware.as_ref())
+            .map(|fi| Context {
+                root,
+                index: fi,
+                registry: Some(&self.registry),
+                facts: Some(&fact_values),
+                vars: Some(&self.vars),
+                git_tracked: git_tracked.as_ref(),
+                git_blame: git_blame.as_ref(),
+            });
         let when_env = WhenEnv {
             facts: &fact_values,
             vars: &self.vars,
@@ -554,7 +638,13 @@ impl Engine {
             if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                 continue;
             }
-            let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
+            let ctx = pick_ctx(
+                entry.rule.as_ref(),
+                &full_ctx,
+                filtered_ctx.as_ref(),
+                git_file_only_ctx.as_ref(),
+                git_dir_aware_ctx.as_ref(),
+            );
             if let Some(expr) = &entry.when {
                 match expr.evaluate(&when_env) {
                     Ok(true) => {}
@@ -618,7 +708,10 @@ impl Engine {
         &self,
         root: &Path,
     ) -> Option<std::collections::HashSet<std::path::PathBuf>> {
-        let any_wants = self.entries.iter().any(|e| e.rule.wants_git_tracked());
+        let any_wants = self
+            .entries
+            .iter()
+            .any(|e| e.rule.git_tracked_mode() != crate::rule::GitTrackedMode::Off);
         if !any_wants {
             return None;
         }
@@ -665,6 +758,97 @@ impl Engine {
         Some(FileIndex::from_entries(entries))
     }
 
+    /// Build the per-mode pre-filtered indexes for git-tracked
+    /// rules. v0.9.11 structural fix for the
+    /// `git_tracked_only`-silently-dropped recurrence-risk
+    /// shape (see `docs/design/v0.9/git-tracked-filtered-index.md`).
+    ///
+    /// Returns `None` when no rule opts in (no
+    /// `GitTrackedMode::FileOnly` or `DirAware` declared) OR
+    /// when the tracked-set is unavailable (no git repo). When
+    /// `Some`, contains:
+    ///
+    /// - `file_only`: files where `tracked.contains(path)`. The
+    ///   index `file_exists`-style rules iterate via
+    ///   `ctx.index.files()`. Dirs are dropped (file-mode rules
+    ///   don't iterate dirs).
+    /// - `dir_aware`: dirs where `dir_has_tracked_files(path,
+    ///   tracked)`. The index `dir_exists`-style rules iterate
+    ///   via `ctx.index.dirs()`. Tracked files are also kept so
+    ///   any nested per-file consultation by these rules still
+    ///   works against the same index.
+    ///
+    /// Build cost: O(N) per mode (one `HashSet` lookup or one
+    /// `dir_has_tracked_files` walk per entry). Amortised across
+    /// however many rules opt into each mode.
+    fn build_git_tracked_indexes(
+        &self,
+        full: &FileIndex,
+        tracked: Option<&std::collections::HashSet<std::path::PathBuf>>,
+    ) -> Option<GitTrackedIndexes> {
+        let mut any_file_only = false;
+        let mut any_dir_aware = false;
+        for entry in &self.entries {
+            match entry.rule.git_tracked_mode() {
+                crate::rule::GitTrackedMode::Off => {}
+                crate::rule::GitTrackedMode::FileOnly => any_file_only = true,
+                crate::rule::GitTrackedMode::DirAware => any_dir_aware = true,
+            }
+        }
+        if !any_file_only && !any_dir_aware {
+            return None;
+        }
+
+        // No git repo (or `git ls-files` failed): build EMPTY
+        // indexes for the modes that rules opt into. Preserves
+        // the pre-v0.9.11 silent-no-op semantics — rules that
+        // require git_tracked_only outside a git repo iterate
+        // an empty index and fire zero violations, matching
+        // user expectations for the "don't let X be committed"
+        // pattern.
+        let Some(tracked) = tracked else {
+            return Some(GitTrackedIndexes {
+                file_only: any_file_only.then(|| FileIndex::from_entries(Vec::new())),
+                dir_aware: any_dir_aware.then(|| FileIndex::from_entries(Vec::new())),
+            });
+        };
+
+        let file_only = if any_file_only {
+            let entries = full
+                .entries
+                .iter()
+                .filter(|e| !e.is_dir && tracked.contains(&*e.path))
+                .cloned()
+                .collect();
+            Some(FileIndex::from_entries(entries))
+        } else {
+            None
+        };
+
+        let dir_aware = if any_dir_aware {
+            let entries = full
+                .entries
+                .iter()
+                .filter(|e| {
+                    if e.is_dir {
+                        crate::git::dir_has_tracked_files(&e.path, tracked)
+                    } else {
+                        tracked.contains(&*e.path)
+                    }
+                })
+                .cloned()
+                .collect();
+            Some(FileIndex::from_entries(entries))
+        } else {
+            None
+        };
+
+        Some(GitTrackedIndexes {
+            file_only,
+            dir_aware,
+        })
+    }
+
     /// True when `--changed` mode is active AND the rule's
     /// `path_scope` exists AND no path in the changed-set
     /// satisfies it. Cross-file rules return `path_scope = None`
@@ -689,7 +873,24 @@ fn pick_ctx<'a>(
     rule: &dyn Rule,
     full_ctx: &'a Context<'a>,
     filtered_ctx: Option<&'a Context<'a>>,
+    git_file_only_ctx: Option<&'a Context<'a>>,
+    git_dir_aware_ctx: Option<&'a Context<'a>>,
 ) -> &'a Context<'a> {
+    // v0.9.11: git-tracked filtering wins over both `--changed`
+    // filtering and the full-index path. The 4 existence rules
+    // that opt in already declare `requires_full_index = true`
+    // (their verdict needs the whole tree, not just the changed
+    // subset), so this substitution is safe — we're swapping
+    // their full-index Context for a pre-narrowed one.
+    match rule.git_tracked_mode() {
+        crate::rule::GitTrackedMode::FileOnly => {
+            return git_file_only_ctx.unwrap_or(full_ctx);
+        }
+        crate::rule::GitTrackedMode::DirAware => {
+            return git_dir_aware_ctx.unwrap_or(full_ctx);
+        }
+        crate::rule::GitTrackedMode::Off => {}
+    }
     if rule.requires_full_index() {
         full_ctx
     } else {
