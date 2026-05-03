@@ -155,8 +155,8 @@ impl FileIndex {
     /// `&self` — use them via `&self.entries[i]` at the call site
     /// to dereference.
     ///
-    /// Build cost: O(N) (one pass over `entries`, one HashMap
-    /// insert per entry). Lookup cost: O(1) HashMap probe.
+    /// Build cost: O(N) (one pass over `entries`, one `HashMap`
+    /// insert per entry). Lookup cost: O(1) `HashMap` probe.
     /// Replaces the O(D × N) `for dir in dirs() { for file in
     /// files() { is_direct_child(file, dir) ... } }` shape that
     /// `dir_only_contains` and `dir_contains` previously used.
@@ -196,7 +196,7 @@ impl FileIndex {
             trace_index_build!("parent_to_children", start, self.entries.len());
             map
         });
-        map.get(dir).map(Vec::as_slice).unwrap_or(&[])
+        map.get(dir).map_or(&[], Vec::as_slice)
     }
 
     /// Direct file children's basenames under `dir`. Filters out
@@ -800,9 +800,9 @@ mod tests {
 
     // ── v0.9.8: parent_to_children + descendants_of ─────────────
 
-    /// Build a synthetic [`FileIndex`] with explicit (path, is_dir)
+    /// Build a synthetic [`FileIndex`] with explicit `(path, is_dir)`
     /// entries — sidesteps the filesystem walker so the
-    /// children_of/descendants_of tests can target exact tree
+    /// `children_of` / `descendants_of` tests can target exact tree
     /// shapes without per-test tempdir scaffolding.
     fn synthetic_index(entries: &[(&str, bool)]) -> FileIndex {
         let entries = entries

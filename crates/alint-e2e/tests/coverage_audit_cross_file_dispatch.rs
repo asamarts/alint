@@ -14,6 +14,7 @@
 //!
 //! Run with `cargo test -- --nocapture` to see the listing.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -51,16 +52,14 @@ fn cross_file_rules_use_children_of() {
     let mut violators: Vec<String> = Vec::new();
     for kind in CROSS_FILE_RULES_WITH_CHILDREN_OF {
         let src_path = rules_src.join(format!("{kind}.rs"));
-        let body = match fs::read_to_string(&src_path) {
-            Ok(b) => b,
-            Err(_) => {
-                summary.push_str(&format!(
-                    "  - {kind}: source missing at {}\n",
-                    src_path.display()
-                ));
-                violators.push((*kind).to_string());
-                continue;
-            }
+        let Ok(body) = fs::read_to_string(&src_path) else {
+            let _ = writeln!(
+                summary,
+                "  - {kind}: source missing at {}",
+                src_path.display()
+            );
+            violators.push((*kind).to_string());
+            continue;
         };
         let uses_children_of = body.contains("children_of") || body.contains("file_basenames_of");
         let scans_entries = body.contains("ctx.index.entries.iter()")
@@ -68,11 +67,12 @@ fn cross_file_rules_use_children_of() {
                 && !body.contains("// audit-allow: full-files-scan");
         if scans_entries && !uses_children_of {
             violators.push((*kind).to_string());
-            summary.push_str(&format!(
+            let _ = writeln!(
+                summary,
                 "  - {kind}: evaluate() still scans ctx.index.entries.iter() / ctx.index.files() \
-                 without children_of (file: {})\n",
+                 without children_of (file: {})",
                 src_path.display(),
-            ));
+            );
         }
     }
 

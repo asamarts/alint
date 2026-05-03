@@ -138,6 +138,14 @@ pub(crate) enum IterateMode {
 /// `when_iter` (compiled at rule-build time) gates each iteration:
 /// when present and false for an entry, that entry is skipped
 /// before any nested rule is built or evaluated.
+///
+/// 108 lines after the v0.9.8 literal-path bypass landed —
+/// extracting the bypass into a separate helper would require
+/// threading the `parent_id` / level / current entry / nested
+/// spec through 5 args, and the bypass and the fallback path
+/// share the violation-attribution loop. Reads better
+/// top-to-bottom as one phased dispatcher.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_for_each(
     parent_id: &str,
     level: Level,
