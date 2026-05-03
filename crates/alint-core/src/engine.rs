@@ -230,7 +230,7 @@ impl Engine {
                 if entry.rule.as_per_file().is_some() {
                     return None;
                 }
-                if self.skip_for_changed(entry.rule.as_ref()) {
+                if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                     return None;
                 }
                 let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
@@ -354,7 +354,7 @@ impl Engine {
             if entry.rule.as_per_file().is_none() {
                 continue;
             }
-            if self.skip_for_changed(entry.rule.as_ref()) {
+            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                 continue;
             }
             if let Some(expr) = &entry.when {
@@ -421,26 +421,18 @@ impl Engine {
                         // 1a. Path-scope glob — cheap, dropping
                         // files no rule cares about before any
                         // further work.
-                        if !entry
+                        // v0.9.10: `Scope::matches` consults both
+                        // path-glob AND `scope_filter` in one
+                        // call (Scope owns its optional filter
+                        // since the v0.9.10 structural fix). The
+                        // separate v0.9.6 `entry.rule.scope_filter()`
+                        // check this used to do is now folded in.
+                        entry
                             .rule
                             .as_per_file()
                             .expect("live entries are per-file rules by construction")
                             .path_scope()
-                            .matches(&file_entry.path)
-                        {
-                            return false;
-                        }
-                        // 1b. scope_filter ancestor check (v0.9.6,
-                        // None for rules that don't opt in).
-                        // Walks `Path::parent()` upward and
-                        // consults the v0.9.5 path-index at each
-                        // step; O(depth × M) per (file, rule) pair.
-                        if let Some(filter) = entry.rule.scope_filter()
-                            && !filter.matches(&file_entry.path, per_file_ctx.index)
-                        {
-                            return false;
-                        }
-                        true
+                            .matches(&file_entry.path, per_file_ctx.index)
                     })
                     .map(|(idx, entry)| (*idx, *entry))
                     .collect();
@@ -559,7 +551,7 @@ impl Engine {
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         for entry in &self.entries {
-            if self.skip_for_changed(entry.rule.as_ref()) {
+            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                 continue;
             }
             let ctx = pick_ctx(entry.rule.as_ref(), &full_ctx, filtered_ctx.as_ref());
@@ -678,14 +670,14 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
-    fn skip_for_changed(&self, rule: &dyn Rule) -> bool {
+    fn skip_for_changed(&self, rule: &dyn Rule, index: &FileIndex) -> bool {
         let Some(set) = &self.changed_paths else {
             return false;
         };
         let Some(scope) = rule.path_scope() else {
             return false;
         };
-        !set.iter().any(|p| scope.matches(p))
+        !set.iter().any(|p| scope.matches(p, index))
     }
 }
 
@@ -780,7 +772,7 @@ mod tests {
         fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
             let mut out = Vec::new();
             for entry in ctx.index.files() {
-                if self.scope.matches(&entry.path) {
+                if self.scope.matches(&entry.path, ctx.index) {
                     out.push(Violation::new("hit").with_path(entry.path.clone()));
                 }
             }

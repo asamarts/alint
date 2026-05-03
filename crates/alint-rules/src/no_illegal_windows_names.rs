@@ -14,7 +14,7 @@
 //!
 //! Check-only. The "correct" rename is a user decision.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 
 #[derive(Debug)]
 pub struct NoIllegalWindowsNamesRule {
@@ -23,7 +23,6 @@ pub struct NoIllegalWindowsNamesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for NoIllegalWindowsNamesRule {
@@ -40,12 +39,7 @@ impl Rule for NoIllegalWindowsNamesRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             for component in entry.path.components() {
@@ -63,10 +57,6 @@ impl Rule for NoIllegalWindowsNamesRule {
             }
         }
         Ok(violations)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -132,7 +122,7 @@ fn is_reserved_device_name(name: &str) -> bool {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec.paths.as_ref().ok_or_else(|| {
+    let _paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(
             &spec.id,
             "no_illegal_windows_names requires a `paths` field (often `\"**\"`)",
@@ -149,8 +139,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
     }))
 }
 

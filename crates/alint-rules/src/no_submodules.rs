@@ -48,7 +48,7 @@ impl Rule for NoSubmodulesRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let msg = self.message.clone().unwrap_or_else(|| {

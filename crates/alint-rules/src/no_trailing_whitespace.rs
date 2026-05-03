@@ -15,8 +15,7 @@
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
-    Violation,
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 
 use crate::fixers::FileTrimTrailingWhitespaceFixer;
@@ -28,7 +27,6 @@ pub struct NoTrailingWhitespaceRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileTrimTrailingWhitespaceFixer>,
 }
 
@@ -46,12 +44,7 @@ impl Rule for NoTrailingWhitespaceRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -69,10 +62,6 @@ impl Rule for NoTrailingWhitespaceRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -118,10 +107,10 @@ fn first_offending_line(bytes: &[u8]) -> Option<usize> {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec.paths.as_ref().ok_or_else(|| {
+    let _paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, "no_trailing_whitespace requires a `paths` field")
     })?;
-    let scope = Scope::from_paths_spec(paths)?;
+    let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
         Some(FixSpec::FileTrimTrailingWhitespace { .. }) => Some(FileTrimTrailingWhitespaceFixer),
         Some(other) => {
@@ -141,7 +130,6 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope,
-        scope_filter: spec.parse_scope_filter()?,
         fixer,
     }))
 }

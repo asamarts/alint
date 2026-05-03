@@ -34,7 +34,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use jsonschema::Validator;
 use serde::Deserialize;
 use serde_json::Value;
@@ -64,7 +64,6 @@ pub struct JsonSchemaPassesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     schema_path: PathBuf,
     /// Explicit format, if the user passed `format:`. When
     /// `None`, the format is detected per-file from the
@@ -107,12 +106,7 @@ impl Rule for JsonSchemaPassesRule {
         };
 
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -155,10 +149,6 @@ impl Rule for JsonSchemaPassesRule {
         }
         Ok(violations)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
 }
 
 fn compile_schema(schema_abs: &std::path::Path) -> std::result::Result<Validator, String> {
@@ -175,7 +165,7 @@ fn compile_schema(schema_abs: &std::path::Path) -> std::result::Result<Validator
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec.paths.as_ref().ok_or_else(|| {
+    let _paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, "json_schema_passes requires a `paths` field")
     })?;
     let opts: Options = spec
@@ -207,8 +197,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         schema_path: opts.schema_path,
         format_override,
         compiled: OnceLock::new(),

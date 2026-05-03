@@ -6,9 +6,7 @@
 //! `foo.spec.ts`, the stem is `foo.spec`, which will fail most case checks —
 //! use `filename_regex` for finer control in those situations.
 
-use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
-};
+use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 use crate::case::CaseConvention;
@@ -26,7 +24,6 @@ pub struct FilenameCaseRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     case: CaseConvention,
     fixer: Option<FileRenameFixer>,
 }
@@ -49,12 +46,7 @@ impl Rule for FilenameCaseRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let Some(stem) = entry.path.file_stem().and_then(|s| s.to_str()) else {
@@ -73,14 +65,10 @@ impl Rule for FilenameCaseRule {
         }
         Ok(violations)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let Some(paths) = &spec.paths else {
+    let Some(_paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,
             "filename_case requires a `paths` field",
@@ -107,8 +95,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         case: opts.case,
         fixer,
     }))

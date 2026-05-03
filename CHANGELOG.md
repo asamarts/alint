@@ -6,6 +6,79 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-05-03
+
+Structural fix for the `scope_filter:` silent-no-op bug class.
+v0.9.6 / v0.9.7 / v0.9.9 each shipped a different group of rules
+that silently dropped `scope_filter:` because rules held a
+standalone `Option<ScopeFilter>` field separate from the `Scope`
+that owned the path-glob match — the compiler had no way to
+catch a rule that forgot to consult both. v0.9.10 collapses the
+two so a single `Scope::matches(path, &FileIndex)` covers both
+predicates. The bug class can no longer recur.
+
+### Breaking — alint-core API
+
+- **`alint_core::Scope::matches` signature changed** from
+  `(&Path)` to `(&Path, &FileIndex)`. Required so the
+  `ScopeFilter` ancestor walk can consult the index. CLI users
+  + bundled rulesets unaffected; `alint-core`-as-a-library
+  consumers (out-of-tree plugin authors) will see a compile
+  error at every call site and must thread their `&FileIndex`
+  through.
+- **`alint_core::Rule::scope_filter()` trait method removed.**
+  Any rule that overrode it should drop the override; the
+  rule's `Scope` (built via `Scope::from_spec(spec)?`) now
+  carries the filter and the engine consults it via the
+  per-file dispatch's `path_scope().matches(path, index)`
+  call.
+- **New `alint_core::Scope::from_spec(spec)` constructor**
+  bundles `paths:` + `scope_filter:` parsing into one call.
+  Replaces the per-rule `Scope::from_paths_spec(paths)?` +
+  `scope_filter: spec.parse_scope_filter()?` two-line
+  pattern.
+- **New `alint_core::Scope::scope_filter()` accessor**
+  exposes the optional filter for dispatch sites that need
+  to consult it without going through `matches` (e.g. for
+  custom narrowing logic). Most callers should not need it.
+
+### Internal
+
+- **41 rules cleaned up** to drop their now-redundant
+  `scope_filter: Option<ScopeFilter>` field, the
+  `if let Some(filter) = ...` runtime check inside
+  `evaluate()`, and the `impl Rule { fn scope_filter() }`
+  override. -502 LOC across the rule files.
+- **Engine consultation removed** —
+  `crates/alint-core/src/engine.rs::run_per_file` no longer
+  separately checks `entry.rule.scope_filter()` after the
+  `path_scope().matches()` call; the latter covers it.
+- **`for_each_dir` literal-path bypass simplified** — the
+  v0.9.9 `nested_rule.scope_filter()` guard is now
+  redundant (subsumed by `pf.path_scope().matches(literal,
+  ctx.index)`).
+- **New audit test** `coverage_audit_scope_owns_filter.rs`
+  fails CI if any rule re-introduces a standalone
+  `scope_filter: Option<ScopeFilter>` field or re-declares
+  the deleted `Rule::scope_filter` trait method. Catches
+  recurrence at PR time, not at runtime.
+
+### Performance
+
+- Within ±5 % of v0.9.9 across S1-S10 at all sizes — the per-
+  rule iteration shape is unchanged (one `if !scope.matches(p,
+  idx) { continue; }` per file), only the field layout is
+  flatter. Full numbers in
+  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.10/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.10/).
+
+### Held for v0.9.11+
+
+- **`git_tracked_only` ownership** parity with `scope_filter`
+  was scoped out — different field semantics, separate work.
+  The same recurrence risk applies (a rule could ship with
+  `git_tracked_only:` silently dropped) but the field is
+  rarer in practice and currently 100 % wired up. Tracked.
+
 ## [0.9.9] — 2026-05-03
 
 Patch release for two `scope_filter:` silent-no-op gaps surfaced

@@ -43,7 +43,7 @@ impl Rule for DirExistsRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = ctx.index.dirs().any(|entry| {
-            if !self.scope.matches(&entry.path) {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 return false;
             }
             if self.git_tracked_only && !ctx.dir_has_tracked_files(&entry.path) {

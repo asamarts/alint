@@ -44,9 +44,7 @@ use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant};
 
 use alint_core::template::{PathTokens, render_path};
-use alint_core::{
-    Context, Error, FactValue, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
-};
+use alint_core::{Context, Error, FactValue, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 /// Default per-file timeout. Generous for slow tools (kubeconform
@@ -82,7 +80,6 @@ pub struct CommandRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     argv: Vec<String>,
     timeout: Duration,
 }
@@ -101,20 +98,10 @@ impl Rule for CommandRule {
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
-
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let tokens = PathTokens::from_path(&entry.path);
@@ -270,7 +257,7 @@ fn fact_to_env(v: &FactValue) -> String {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let Some(paths) = &spec.paths else {
+    let Some(_paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,
             "command requires a `paths` field",
@@ -299,8 +286,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         argv: opts.command,
         timeout,
     }))
@@ -337,7 +323,6 @@ mod tests {
             policy_url: None,
             message: None,
             scope: Scope::from_patterns(&[scope.to_string()]).unwrap(),
-            scope_filter: None,
             argv: argv.into_iter().map(String::from).collect(),
             timeout,
         }
@@ -503,7 +488,9 @@ fix:
     #[test]
     fn scope_filter_narrows() {
         // Two failing files; only the one inside a directory
-        // with `marker.lock` as ancestor should fire.
+        // with `marker.lock` as ancestor should fire. Build via
+        // YAML so the `scope_filter:` is bundled into the rule's
+        // Scope by `Scope::from_spec` — same path real configs take.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("pkg")).unwrap();
         std::fs::create_dir_all(tmp.path().join("other")).unwrap();
@@ -511,16 +498,17 @@ fix:
         std::fs::write(tmp.path().join("pkg/a.txt"), b"x").unwrap();
         std::fs::write(tmp.path().join("other/a.txt"), b"x").unwrap();
         let index = idx(&["pkg/marker.lock", "pkg/a.txt", "other/a.txt"]);
-        let r = CommandRule {
-            id: "t".into(),
-            level: Level::Error,
-            policy_url: None,
-            message: None,
-            scope: Scope::from_patterns(&["**/a.txt".into()]).unwrap(),
-            scope_filter: Some(ScopeFilter::has_ancestor_unchecked(vec!["marker.lock"])),
-            argv: vec!["/bin/sh".into(), "-c".into(), "exit 1".into()],
-            timeout: Duration::from_secs(5),
-        };
+        let yaml = r#"
+id: t
+kind: command
+level: error
+paths: "**/a.txt"
+scope_filter:
+  has_ancestor: marker.lock
+command: ["/bin/sh", "-c", "exit 1"]
+"#;
+        let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
+        let r = build(&spec).unwrap();
         let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
         assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/a.txt")));

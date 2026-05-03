@@ -21,7 +21,7 @@
 use std::time::{Duration, SystemTime};
 
 use alint_core::template::render_message;
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -47,7 +47,6 @@ pub struct GitBlameAgeRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     pattern: Regex,
     max_age: Duration,
 }
@@ -68,11 +67,6 @@ impl Rule for GitBlameAgeRule {
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
-
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         let Some(blame_cache) = ctx.git_blame else {
@@ -83,17 +77,12 @@ impl Rule for GitBlameAgeRule {
         };
         let now = SystemTime::now();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             // Apply scope_filter BEFORE the blame lookup so we
             // don't pay the per-file blame cost on out-of-scope
             // files. (Blame is the expensive bit here.)
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
-                continue;
-            }
             let Some(blame) = blame_cache.get(&entry.path) else {
                 // Untracked file or per-file blame failure —
                 // skip silently.
@@ -138,7 +127,7 @@ impl Rule for GitBlameAgeRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let Some(paths) = &spec.paths else {
+    let Some(_paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,
             "git_blame_age requires a `paths` field",
@@ -166,8 +155,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         pattern,
         max_age: Duration::from_secs(opts.max_age_days.saturating_mul(86_400)),
     }))
@@ -187,7 +175,6 @@ mod tests {
             policy_url: None,
             message: message.map(str::to_string),
             scope: Scope::from_paths_spec(&PathsSpec::Single("**/*.rs".into())).unwrap(),
-            scope_filter: None,
             pattern: Regex::new(pattern).unwrap(),
             max_age: Duration::from_secs(max_age_days * 86_400),
         }
@@ -334,8 +321,11 @@ level: warning
         let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
         let r = build(&spec).unwrap();
         assert!(
-            r.scope_filter().is_some(),
-            "scope_filter should be wired through build()"
+            r.path_scope()
+                .expect("git_blame_age exposes path_scope")
+                .scope_filter()
+                .is_some(),
+            "scope_filter should be wired through build() into Scope"
         );
         let idx = index(&["pkg/marker.lock", "pkg/a.rs", "other/b.rs"]);
         let tmp = tempfile::tempdir().unwrap();

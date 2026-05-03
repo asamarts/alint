@@ -73,7 +73,7 @@ impl Rule for UniqueByRule {
         // through a `PathBuf`.
         let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
         for entry in ctx.index.files() {
-            if !self.select_scope.matches(&entry.path) {
+            if !self.select_scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let tokens = PathTokens::from_path(&entry.path);

@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 
 #[derive(Debug)]
 pub struct NoCaseConflictsRule {
@@ -17,7 +17,6 @@ pub struct NoCaseConflictsRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
 }
 
 impl Rule for NoCaseConflictsRule {
@@ -37,12 +36,7 @@ impl Rule for NoCaseConflictsRule {
         // every violation later without re-cloning bytes.
         let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let Some(as_str) = entry.path.to_str() else {
@@ -77,14 +71,10 @@ impl Rule for NoCaseConflictsRule {
         }
         Ok(violations)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec.paths.as_ref().ok_or_else(|| {
+    let _paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(
             &spec.id,
             "no_case_conflicts requires a `paths` field (often `\"**\"`)",
@@ -101,8 +91,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
     }))
 }
 

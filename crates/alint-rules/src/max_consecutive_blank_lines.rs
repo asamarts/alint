@@ -13,8 +13,7 @@
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
-    Violation,
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 use serde::Deserialize;
 
@@ -35,7 +34,6 @@ pub struct MaxConsecutiveBlankLinesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     max: u32,
     fixer: Option<FileCollapseBlankLinesFixer>,
 }
@@ -54,12 +52,7 @@ impl Rule for MaxConsecutiveBlankLinesRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -77,10 +70,6 @@ impl Rule for MaxConsecutiveBlankLinesRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -157,7 +146,7 @@ fn first_over_limit(text: &str, max: u32) -> Option<usize> {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec.paths.as_ref().ok_or_else(|| {
+    let _paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(
             &spec.id,
             "max_consecutive_blank_lines requires a `paths` field",
@@ -186,8 +175,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         max: opts.max,
         fixer,
     }))

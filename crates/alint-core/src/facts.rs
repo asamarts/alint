@@ -203,14 +203,14 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
         FactKind::AnyFileExists { any_file_exists } => {
             let globs = any_file_exists.to_vec();
             let scope = Scope::from_patterns(&globs)?;
-            let found = index.files().any(|e| scope.matches(&e.path));
+            let found = index.files().any(|e| scope.matches(&e.path, index));
             Ok(FactValue::Bool(found))
         }
         FactKind::AllFilesExist { all_files_exist } => {
             let globs = all_files_exist.to_vec();
             for glob in &globs {
                 let scope = Scope::from_patterns(std::slice::from_ref(glob))?;
-                if !index.files().any(|e| scope.matches(&e.path)) {
+                if !index.files().any(|e| scope.matches(&e.path, index)) {
                     return Ok(FactValue::Bool(false));
                 }
             }
@@ -218,7 +218,10 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
         }
         FactKind::CountFiles { count_files } => {
             let scope = Scope::from_patterns(std::slice::from_ref(count_files))?;
-            let count = index.files().filter(|e| scope.matches(&e.path)).count();
+            let count = index
+                .files()
+                .filter(|e| scope.matches(&e.path, index))
+                .count();
             Ok(FactValue::Int(i64::try_from(count).unwrap_or(i64::MAX)))
         }
         FactKind::FileContentMatches {
@@ -228,7 +231,7 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
             let regex = Regex::new(&spec.pattern)
                 .map_err(|e| Error::Other(format!("fact pattern /{}/: {e}", spec.pattern)))?;
             let any = index.files().any(|entry| {
-                if !scope.matches(&entry.path) {
+                if !scope.matches(&entry.path, index) {
                     return false;
                 }
                 let Ok(bytes) = std::fs::read(root.join(&entry.path)) else {

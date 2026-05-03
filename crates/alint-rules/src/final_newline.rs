@@ -13,8 +13,7 @@
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
-    Violation,
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 
 use crate::fixers::FileAppendFinalNewlineFixer;
@@ -26,7 +25,6 @@ pub struct FinalNewlineRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileAppendFinalNewlineFixer>,
 }
 
@@ -44,12 +42,7 @@ impl Rule for FinalNewlineRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -67,10 +60,6 @@ impl Rule for FinalNewlineRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -110,11 +99,11 @@ impl PerFileRule for FinalNewlineRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec
+    let _paths = spec
         .paths
         .as_ref()
         .ok_or_else(|| Error::rule_config(&spec.id, "final_newline requires a `paths` field"))?;
-    let scope = Scope::from_paths_spec(paths)?;
+    let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
         Some(FixSpec::FileAppendFinalNewline { .. }) => Some(FileAppendFinalNewlineFixer),
         Some(other) => {
@@ -134,7 +123,6 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope,
-        scope_filter: spec.parse_scope_filter()?,
         fixer,
     }))
 }

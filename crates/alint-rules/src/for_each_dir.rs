@@ -170,7 +170,7 @@ pub(crate) fn evaluate_for_each(
 
     let mut violations = Vec::new();
     for entry in entries {
-        if !select_scope.matches(&entry.path) {
+        if !select_scope.matches(&entry.path, ctx.index) {
             continue;
         }
 
@@ -270,25 +270,16 @@ pub(crate) fn evaluate_for_each(
             // path fast path (contains_file lookup) since
             // v0.9.5; toml_path_matches reads the file
             // directly without scanning the full index.
-            // v0.9.9: also gate on `nested_rule.scope_filter()`
-            // so the bypass produces the same observable result
-            // as the rule's own `evaluate` would. Without this
-            // guard, a nested rule that carries `scope_filter:`
-            // (propagated through `NestedRuleSpec.scope_filter`)
-            // would have the bypass execute against the literal
-            // regardless of whether the literal's ancestor chain
-            // satisfies the filter — divergent from the rule-
-            // major fallback at the `nested_rule.evaluate(ctx)`
-            // arm below. We consult the `Rule`-side accessor
-            // (already overridden by every per-file rule whose
-            // spec carries `scope_filter:`) instead of duplicating
-            // it onto `PerFileRule`.
+            // v0.9.10: a single `path_scope().matches(literal, ctx.index)`
+            // covers both the path-glob AND the per-rule
+            // `scope_filter` ancestor predicate, since `Scope`
+            // now owns its `Option<ScopeFilter>` and `matches`
+            // consults it. The earlier v0.9.9
+            // `nested_rule.scope_filter()` guard this bypass
+            // had is no longer needed.
             if let Some(literal) = nested_spec_single_literal(&nested_spec)
                 && let Some(pf) = nested_rule.as_per_file()
-                && pf.path_scope().matches(&literal)
-                && nested_rule
-                    .scope_filter()
-                    .is_none_or(|f| f.matches(&literal, ctx.index))
+                && pf.path_scope().matches(&literal, ctx.index)
             {
                 let nested_violations = evaluate_one_per_file_rule(parent_id, i, &literal, pf, ctx);
                 for mut v in nested_violations {

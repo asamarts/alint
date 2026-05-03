@@ -123,7 +123,7 @@ impl Rule for FileExistsRule {
                 if self.root_only && entry.path.components().count() != 1 {
                     return false;
                 }
-                if !self.scope.matches(&entry.path) {
+                if !self.scope.matches(&entry.path, ctx.index) {
                     return false;
                 }
                 if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {

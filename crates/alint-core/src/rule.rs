@@ -203,22 +203,6 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// Per-file ancestor-manifest gate. Default `None` (no
-    /// filter); existing rules don't change behaviour.
-    /// Per-file rules whose spec carries a `scope_filter:`
-    /// field override to return `Some(&self.scope_filter)`.
-    ///
-    /// Cross-file rules MUST return `None`; the build-time
-    /// validation in
-    /// [`crate::reject_scope_filter_on_cross_file`]
-    /// enforces this from the rule-builder side. Returning
-    /// `Some` from a cross-file rule is a programming error
-    /// — the engine consults this method only on the
-    /// per-file dispatch path.
-    fn scope_filter(&self) -> Option<&crate::ScopeFilter> {
-        None
-    }
-
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
 
     /// Optional automatic-fix strategy. Rules whose violations can be

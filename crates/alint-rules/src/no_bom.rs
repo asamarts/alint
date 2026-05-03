@@ -12,8 +12,7 @@
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
-    Violation,
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 
 use crate::fixers::FileStripBomFixer;
@@ -80,7 +79,6 @@ pub struct NoBomRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileStripBomFixer>,
 }
 
@@ -98,12 +96,7 @@ impl Rule for NoBomRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             // Bounded read: BOMs are 2-4 bytes. Solo runs read
@@ -123,10 +116,6 @@ impl Rule for NoBomRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -161,7 +150,7 @@ impl PerFileRule for NoBomRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec
+    let _paths = spec
         .paths
         .as_ref()
         .ok_or_else(|| Error::rule_config(&spec.id, "no_bom requires a `paths` field"))?;
@@ -180,8 +169,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         fixer,
     }))
 }

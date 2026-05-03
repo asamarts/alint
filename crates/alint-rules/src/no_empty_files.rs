@@ -4,9 +4,7 @@
 //! branch or generator output that lost its content. Fixable
 //! via `file_remove`, which deletes the empty file.
 
-use alint_core::{
-    Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
-};
+use alint_core::{Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation};
 
 use crate::fixers::FileRemoveFixer;
 
@@ -17,7 +15,6 @@ pub struct NoEmptyFilesRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     fixer: Option<FileRemoveFixer>,
 }
 
@@ -35,12 +32,7 @@ impl Rule for NoEmptyFilesRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             if entry.size == 0 {
@@ -57,14 +49,10 @@ impl Rule for NoEmptyFilesRule {
     fn fixer(&self) -> Option<&dyn Fixer> {
         self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let paths = spec
+    let _paths = spec
         .paths
         .as_ref()
         .ok_or_else(|| Error::rule_config(&spec.id, "no_empty_files requires a `paths` field"))?;
@@ -86,8 +74,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         fixer,
     }))
 }

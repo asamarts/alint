@@ -52,9 +52,7 @@
 
 use std::path::Path;
 
-use alint_core::{
-    Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation,
-};
+use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -198,7 +196,6 @@ pub struct CommentedOutCodeRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     language: Language,
     min_lines: usize,
     threshold: f64,
@@ -222,12 +219,7 @@ impl Rule for CommentedOutCodeRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
@@ -241,10 +233,6 @@ impl Rule for CommentedOutCodeRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -298,7 +286,7 @@ impl PerFileRule for CommentedOutCodeRule {
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let Some(paths) = &spec.paths else {
+    let Some(_paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,
             "commented_out_code requires a `paths` field",
@@ -324,8 +312,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         language: opts.language,
         min_lines: opts.min_lines,
         threshold: opts.threshold,

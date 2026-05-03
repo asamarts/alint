@@ -11,7 +11,7 @@
 //! [`no_empty_files`](crate::no_empty_files) — `file_min_size:
 //! 1` works too but the dedicated rule carries clearer intent.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, ScopeFilter, Violation};
+use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -26,7 +26,6 @@ pub struct FileMinSizeRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     min_bytes: u64,
 }
 
@@ -44,12 +43,7 @@ impl Rule for FileMinSizeRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
-                continue;
-            }
-            if let Some(filter) = &self.scope_filter
-                && !filter.matches(&entry.path, ctx.index)
-            {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             if entry.size < self.min_bytes {
@@ -64,14 +58,10 @@ impl Rule for FileMinSizeRule {
         }
         Ok(violations)
     }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
-    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let Some(paths) = &spec.paths else {
+    let Some(_paths) = &spec.paths else {
         return Err(Error::rule_config(
             &spec.id,
             "file_min_size requires a `paths` field",
@@ -85,8 +75,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         min_bytes: opts.min_bytes,
     }))
 }

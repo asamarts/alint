@@ -168,11 +168,12 @@ impl ScopeFilter {
 /// Build-time guard for cross-file rule builders. Cross-file
 /// rules express ancestor scoping through `for_each_dir +
 /// when_iter:` instead of `scope_filter:`; the engine consults
-/// `Rule::scope_filter()` only on the per-file dispatch path,
-/// so a cross-file rule with `scope_filter:` set would silently
-/// ignore the field. This helper produces a clear build-time
-/// error so the misconfiguration surfaces at config-load time
-/// rather than as a confused-rule-doesn't-fire bug.
+/// the per-file dispatch path's `Scope::matches` (which folds
+/// in `scope_filter` since v0.9.10), so a cross-file rule with
+/// `scope_filter:` set would silently ignore the field. This
+/// helper produces a clear build-time error so the
+/// misconfiguration surfaces at config-load time rather than
+/// as a confused-rule-doesn't-fire bug.
 ///
 /// Usage in a cross-file rule builder:
 ///

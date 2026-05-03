@@ -77,7 +77,7 @@ impl Rule for DirContainsRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for dir in ctx.index.dirs() {
-            if !self.select_scope.matches(&dir.path) {
+            if !self.select_scope.matches(&dir.path, ctx.index) {
                 continue;
             }
             // v0.9.8: collect direct child basenames once per dir

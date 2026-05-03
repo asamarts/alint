@@ -470,13 +470,14 @@ impl RuleSpec {
     /// Returns `Ok(None)` when the spec has no `scope_filter`
     /// set (the common case).
     ///
-    /// Per-file rule builders call this and store the result
-    /// on the built rule; the rule's
-    /// [`Rule::scope_filter`](crate::Rule::scope_filter) method
-    /// returns it back to the engine, which gates per-file
-    /// dispatch on `ScopeFilter::matches` (`engine.rs`
-    /// `run_per_file`). Cross-file rules MUST NOT call this —
-    /// they call
+    /// Per-file rule builders typically don't call this directly
+    /// since v0.9.10 — they use
+    /// [`Scope::from_spec`](crate::Scope::from_spec) instead,
+    /// which bundles `paths:` + `scope_filter:` parsing into one
+    /// call. The Scope owns the parsed filter and consults it
+    /// inside [`Scope::matches`](crate::Scope::matches), so the
+    /// engine doesn't need a separate per-rule accessor any more.
+    /// Cross-file rules MUST NOT call this — they call
     /// [`reject_scope_filter_on_cross_file`](crate::reject_scope_filter_on_cross_file)
     /// instead so a misconfigured `scope_filter:` on a cross-
     /// file rule surfaces as a clear build-time error rather

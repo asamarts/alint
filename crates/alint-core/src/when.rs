@@ -835,7 +835,10 @@ fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, When
     let combined = format!("{}/{}", iter.path.to_string_lossy(), pattern);
     let scope = Scope::from_patterns(std::slice::from_ref(&combined))
         .map_err(|e| WhenError::Eval(format!("iter.has_file: invalid glob: {e}")))?;
-    Ok(iter.index.files().any(|e| scope.matches(&e.path)))
+    Ok(iter
+        .index
+        .files()
+        .any(|e| scope.matches(&e.path, iter.index)))
 }
 
 fn apply_cmp(l: &Value, op: CmpOp, r: &Value) -> Result<bool, WhenError> {

@@ -42,8 +42,7 @@
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    Context, Error, Level, PathsSpec, PerFileRule, Result, Rule, RuleSpec, Scope, ScopeFilter,
-    Violation,
+    Context, Error, Level, PathsSpec, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -166,7 +165,6 @@ pub struct StructuredPathRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    scope_filter: Option<ScopeFilter>,
     /// `Some(paths)` when every `paths:` entry is a plain
     /// literal (no glob metacharacters, no `!` excludes). The
     /// fast path uses these to short-circuit through the
@@ -221,11 +219,6 @@ impl Rule for StructuredPathRule {
                 if !ctx.index.contains_file(literal) {
                     continue;
                 }
-                if let Some(filter) = &self.scope_filter
-                    && !filter.matches(literal, ctx.index)
-                {
-                    continue;
-                }
                 let full = ctx.root.join(literal);
                 let Ok(bytes) = std::fs::read(&full) else {
                     continue;
@@ -234,12 +227,7 @@ impl Rule for StructuredPathRule {
             }
         } else {
             for entry in ctx.index.files() {
-                if !self.scope.matches(&entry.path) {
-                    continue;
-                }
-                if let Some(filter) = &self.scope_filter
-                    && !filter.matches(&entry.path, ctx.index)
-                {
+                if !self.scope.matches(&entry.path, ctx.index) {
                     continue;
                 }
                 let full = ctx.root.join(&entry.path);
@@ -256,10 +244,6 @@ impl Rule for StructuredPathRule {
 
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         Some(self)
-    }
-
-    fn scope_filter(&self) -> Option<&ScopeFilter> {
-        self.scope_filter.as_ref()
     }
 }
 
@@ -416,8 +400,7 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         literal_paths: extract_literal_paths(paths),
         format,
         path_expr,
@@ -445,8 +428,7 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        scope: Scope::from_paths_spec(paths)?,
-        scope_filter: spec.parse_scope_filter()?,
+        scope: Scope::from_spec(spec)?,
         literal_paths: extract_literal_paths(paths),
         format,
         path_expr,

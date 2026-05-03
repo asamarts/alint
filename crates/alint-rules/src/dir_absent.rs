@@ -44,7 +44,7 @@ impl Rule for DirAbsentRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.dirs() {
-            if !self.scope.matches(&entry.path) {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             if self.git_tracked_only && !ctx.dir_has_tracked_files(&entry.path) {

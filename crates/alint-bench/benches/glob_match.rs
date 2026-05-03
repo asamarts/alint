@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use alint_core::{PathsSpec, Scope};
+use alint_core::{FileIndex, PathsSpec, Scope};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn bench_glob_match(c: &mut Criterion) {
@@ -18,6 +18,11 @@ fn bench_glob_match(c: &mut Criterion) {
         "**/Cargo.toml".into(),
     ]))
     .unwrap();
+
+    // Empty index — this micro-bench measures pure glob match
+    // throughput; the scope built above carries no scope_filter
+    // so matches() never touches the index.
+    let idx = FileIndex::from_entries(Vec::new());
 
     for &n in &[1_000usize, 10_000, 100_000] {
         let paths: Vec<PathBuf> = (0..n)
@@ -35,7 +40,7 @@ fn bench_glob_match(c: &mut Criterion) {
             b.iter(|| {
                 let mut hits = 0usize;
                 for p in paths {
-                    if scope.matches(p) {
+                    if scope.matches(p, &idx) {
                         hits += 1;
                     }
                 }

@@ -64,7 +64,7 @@ impl Rule for PairRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.primary_scope.matches(&entry.path) {
+            if !self.primary_scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let tokens = PathTokens::from_path(&entry.path);

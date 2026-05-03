@@ -54,7 +54,7 @@ impl Rule for FileAbsentRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in ctx.index.files() {
-            if !self.scope.matches(&entry.path) {
+            if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             if self.git_tracked_only && !ctx.is_git_tracked(&entry.path) {
