@@ -8,6 +8,101 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.13] — 2026-05-04
+
+Dependency-refresh release. Closes the 10 open Dependabot PRs
+plus opportunistic bumps the version specs already accepted.
+Net workspace perf neutral-to-positive across S1-S10 — most
+scenarios are 4-13 % faster at 100k from upstream improvements
+(jsonschema 0.46's API rework + lockfile patches).
+
+### Cargo workspace deps bumped
+
+- **`anstream`** 0.6 → 1.0 — stability commit, no API changes.
+- **`trycmd`** 0.15 → 1.x — stability commit.
+- **`rand`** 0.9 → 0.10 + **`rand_chacha`** 0.9 → 0.10 (paired
+  ecosystem bump). One import in `crates/alint-bench/src/tree.rs`
+  switched from `use rand::Rng` to `use rand::{Rng, RngExt, ...}`
+  to pick up the new `random_range`/`random` methods (the rand
+  0.10 rename of `gen_range`/`gen`).
+- **`jsonschema`** 0.29 → 0.46. The 0.36 release privatised
+  `ValidationError::instance_path` and exposed it via an
+  accessor method; 4 call sites updated
+  (`alint-rules/src/json_schema_passes.rs`,
+  `alint-output/tests/{cross_formatter,fix_report_schema}.rs`,
+  `alint-dsl/tests/schema.rs`).
+- **`sha2`** 0.10 → 0.11 — workspace consumers (`alint-dsl/sri`,
+  `alint-output/gitlab`, `alint-rules/file_hash`) all use the
+  stable `Digest`/`Sha256::new()`/`update`/`finalize` API which
+  is unchanged across the major. No code changes needed.
+- **Lockfile refresh**: `rustls` 0.23.40, `libc` 0.2.186,
+  `wasm-bindgen` 0.2.120, `winnow` 1.0.2, etc. — all in-spec
+  patch-level pickups.
+
+### GitHub Actions bumped
+
+| Action | From | To |
+|---|---|---|
+| `actions/checkout` | v4 | v6 |
+| `actions/setup-node` | v4 | v6 |
+| `actions/cache` | v4 | v5 |
+| `actions/upload-artifact` | v4 | v7 |
+| `actions/download-artifact` | v4 | v8 (paired w/ upload) |
+| `codecov/codecov-action` | v4 | v6 |
+| `webfactory/ssh-agent` | v0.9.0 | v0.10.0 |
+| `docker/build-push-action` | v6 | v7 (unpinned only) |
+| `docker/login-action` | v3 | v4 (unpinned only) |
+| `docker/setup-buildx-action` | v3 | v4 (unpinned only) |
+| `docker/setup-qemu-action` | v3 | v4 (unpinned only) |
+
+The SHA-pinned variants of the docker/* actions in `release.yml`
+are intentionally left at their pinned SHAs — supply-chain
+hardening for the publishing path requires a separate "rotate
+SHA + verify" cycle, not a blanket version bump.
+
+### Performance
+
+100k/full deltas vs v0.9.12 baseline:
+
+| Scenario | v0.9.12 | v0.9.13 | Δ |
+|---|---:|---:|---:|
+| S1 | 163ms | 151ms | **-7 %** |
+| S2 | 258ms | 254ms | -2 % |
+| S3 | 1301ms | 1130ms | **-13 %** |
+| S4 | 156ms | 160ms | +3 % |
+| S5 | 885ms | 847ms | -4 % |
+| S6 | 1121ms | 1011ms | **-10 %** |
+| S7 | 329ms | 316ms | -4 % |
+| S8 | 1104ms | 1032ms | **-7 %** |
+| S9 | 694ms | 666ms | -4 % |
+| S10 | 324ms | 328ms | +1 % |
+
+S3 / S6 / S8 wins are likely jsonschema 0.46's Validator
+performance work and lockfile patch updates compounding.
+1m/full all within ±5 % (most slightly faster). Full numbers in
+[`docs/benchmarks/macro/results/linux-x86_64/v0.9.13/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.13/)
+once the bench-record workflow lands the canonical capture.
+
+### Held for v0.9.14+
+
+- **`toml` 0.9 → 1.1** — config-format-stability review needed
+  (parser/writer rewrite, `FromStr` semantics changed,
+  `serde`/`std` now opt-in default features).
+- **`tower-lsp`** dormant dep — the crate appears stalled;
+  re-evaluate at v0.10 LSP design time vs maintained
+  alternatives (`tower-lsp-server` fork, `lsp-server`,
+  `async-lsp`).
+- **SHA-pinned `docker/*` actions in `release.yml`** — separate
+  rotate + verify cycle.
+
+### Internal
+
+- All 1141 workspace tests pass.
+- `cargo clippy --workspace --all-targets --all-features --
+  -D warnings` clean.
+- `cargo doc --no-deps --workspace` with `RUSTDOCFLAGS=-D warnings`
+  clean.
+
 ## [0.9.12] — 2026-05-03
 
 Backlog cleanup release closing the explicitly-held v0.9 items
