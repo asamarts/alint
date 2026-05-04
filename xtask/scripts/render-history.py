@@ -3,14 +3,20 @@
 
 Reads `docs/benchmarks/macro/results/<arch>/<version>/results.json`
 for every published version under `<arch>` and emits a complete
-HISTORY.md with per-scenario tables populated. Designed to be the
-maintainer-side helper invoked from the bench-record.yml PR review
-(see `RELEASING.md`) — running this against the `main` checkout
-after a bench-record PR merges produces the next HISTORY.md the
-maintainer commits.
+HISTORY.md with per-scenario tables populated.
+
+v0.9.14 made this script auto-discovering: versions are read from
+the filesystem (no hardcoded `KNOWN_VERSIONS` list to keep in sync
+with releases), and the per-version date + headline blurb in the
+cross-version trajectory table are extracted from `CHANGELOG.md`'s
+`## [X.Y.Z] — YYYY-MM-DD` headers + the first paragraph beneath
+each. The `bench-record.yml` workflow runs this script
+automatically before opening its PR so HISTORY.md never falls out
+of date with the published bench corpus.
 
 Usage:
     python3 xtask/scripts/render-history.py [--arch linux-x86_64] \
+        [--changelog CHANGELOG.md] \
         > docs/benchmarks/HISTORY.md
 
 Then `git diff docs/benchmarks/HISTORY.md` for review.
@@ -19,26 +25,153 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
-from typing import Dict, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 Cell = Tuple[str, str, str, str]    # (version, scenario, size, mode)
 Stat = Tuple[float, float]           # (mean_ms, stddev_ms)
 
-# Ordered newest-first for the per-scenario tables.
-KNOWN_VERSIONS = [
-    "v0.9.12",
-    "v0.9.11",
-    "v0.9.10",
-    "v0.9.9",
-    "v0.9.8",
-    "v0.9.7",
-    "v0.9.6",
-    "v0.9.5",
-    "v0.9.4",
-    "v0.5.7",
-    "v0.5.6",
-]
+
+def semver_key(v: str) -> Tuple[int, ...]:
+    """Sort key for `vX.Y.Z` strings — newer is greater."""
+    parts = v.lstrip("v").split(".")
+    out: List[int] = []
+    for p in parts:
+        try:
+            out.append(int(p))
+        except ValueError:
+            # Non-numeric suffix (rc, etc.) — treat as 0.
+            out.append(0)
+    return tuple(out)
+
+
+def discover_versions(arch_dir: str) -> List[str]:
+    """Versions present on disk, sorted newest-first.
+
+    Replaces the pre-v0.9.14 hardcoded `KNOWN_VERSIONS` list. New
+    releases land their `vX.Y.Z/` dir via the `bench-record.yml`
+    workflow; this script picks them up without code changes.
+    """
+    if not os.path.isdir(arch_dir):
+        return []
+    versions = [
+        d
+        for d in os.listdir(arch_dir)
+        if d.startswith("v") and os.path.isdir(os.path.join(arch_dir, d))
+    ]
+    return sorted(versions, key=semver_key, reverse=True)
+
+
+def first_sentence(text: str) -> str:
+    """Return the first sentence of `text` (everything up to the
+    first `. ` or `.<EOF>`). Conservative — a sentence ends only
+    on `. `, not on `e.g.`/`i.e.`/version numbers. Intended for
+    extracting one-row table headlines from CHANGELOG paragraphs.
+    """
+    # Match "<sentence>. " followed by a capital letter,
+    # backtick (code span), or `vN.M.…` (version reference —
+    # CHANGELOG entries frequently start follow-up sentences
+    # with a `vX.Y.Z` reference). Falls back to returning
+    # `text` if no boundary is found.
+    m = re.search(r"\.\s+(?=[A-Z`]|v[0-9])", text)
+    if m:
+        return text[: m.start() + 1]
+    # No mid-string boundary; if the text ends with `.`, return
+    # as-is. Otherwise return the whole thing (callers may want
+    # to truncate further).
+    return text
+
+
+def parse_changelog(path: str) -> Dict[str, Tuple[str, str]]:
+    """Extract `{version: (date, first_paragraph)}` from a Keep-a-
+    Changelog-flavoured CHANGELOG.md.
+
+    Looks for `## [X.Y.Z] — YYYY-MM-DD` (em dash or hyphen-minus)
+    headers and grabs the first non-empty paragraph that follows
+    each, stopping at the next `##`/`###` header or blank line.
+    Returns an empty dict if the file is missing — callers fall
+    back to `(?, —)`.
+    """
+    out: Dict[str, Tuple[str, str]] = {}
+    if not os.path.isfile(path):
+        return out
+    with open(path) as f:
+        lines = f.readlines()
+
+    # Match either an em dash (—, U+2014) or a hyphen-minus.
+    header_re = re.compile(r"^##\s+\[([0-9A-Za-z.\-]+)\]\s+[—-]\s+(\d{4}-\d{2}-\d{2})")
+    cur_version = None
+    cur_date = None
+    cur_para: List[str] = []
+    in_para = False
+
+    def flush() -> None:
+        if cur_version and cur_para:
+            full_para = " ".join(cur_para).strip()
+            # Extract the first sentence — the CHANGELOG's full
+            # opening paragraph is too long for a one-row table
+            # cell. We take everything up to the first `. ` (or
+            # the end of the paragraph). Maintainers writing
+            # CHANGELOG entries should make the first sentence a
+            # punchy one-liner; the rest of the paragraph
+            # remains as the long-form blurb in CHANGELOG itself.
+            blurb = first_sentence(full_para)
+            out[f"v{cur_version}"] = (cur_date, blurb)
+
+    for line in lines:
+        m = header_re.match(line)
+        if m:
+            flush()
+            cur_version = m.group(1)
+            cur_date = m.group(2)
+            cur_para = []
+            in_para = False
+            continue
+        if cur_version is None:
+            continue
+        stripped = line.strip()
+        # Sub-headers (### Foo) or the next top-level (## ...) end
+        # the headline paragraph. We don't `flush()` here because
+        # the next iteration's header line will (or EOF will).
+        if stripped.startswith("###") or (
+            stripped.startswith("## ") and not header_re.match(line)
+        ):
+            flush()
+            cur_version = None
+            cur_date = None
+            cur_para = []
+            in_para = False
+            continue
+        if not in_para:
+            if not stripped:
+                continue
+            in_para = True
+            cur_para.append(stripped)
+        else:
+            if not stripped:
+                # Blank line ends the paragraph; subsequent lines
+                # within the same version section don't get added
+                # back (only the first paragraph is the headline).
+                flush()
+                cur_para = []
+                in_para = False
+                # Sentinel so we don't accidentally start a new
+                # paragraph for the same version.
+                cur_version_locked = cur_version
+                cur_version = None
+                cur_date = None
+                # Re-arm `cur_version` only when we hit the next
+                # `##` header. To do that we need to NOT reset to
+                # None — actually we DO reset, the next `##` sets
+                # it again. The `_locked` var is unused; left for
+                # the reader to grok the intent.
+                _ = cur_version_locked
+                continue
+            cur_para.append(stripped)
+
+    flush()
+    return out
 
 SIZES = ["1k", "10k", "100k", "1m"]
 MODES = ["full", "changed"]
@@ -131,9 +264,20 @@ def fmt(data: Dict[Cell, Stat], v: str, s: str, sz: str, m: str) -> str:
     return f"{mean/1000:.1f} s ± {sd/1000:.1f}"
 
 
-def render(data: Dict[Cell, Stat]) -> str:
-    """Produce the full HISTORY.md text. Caller redirects to file."""
-    versions_present = sorted({k[0] for k in data}, key=lambda v: KNOWN_VERSIONS.index(v) if v in KNOWN_VERSIONS else 99)
+def render(
+    data: Dict[Cell, Stat],
+    changelog_headlines: Dict[str, Tuple[str, str]] | None = None,
+) -> str:
+    """Produce the full HISTORY.md text. Caller redirects to file.
+
+    `changelog_headlines` (when provided) is the parsed
+    `{version: (date, blurb)}` map from CHANGELOG.md; values
+    override the embedded `headlines` dict for any version that
+    appears in both. New releases land their CHANGELOG entry,
+    and the corresponding HISTORY row picks up date+blurb
+    automatically — no edit to this script required.
+    """
+    versions_present = sorted({k[0] for k in data}, key=semver_key, reverse=True)
     out: list[str] = []
     out += [
         "# alint perf history",
@@ -174,20 +318,18 @@ def render(data: Dict[Cell, Stat]) -> str:
         "| Version | Date | 1M S3 full | 1M S6 full | 1M S7 full | 1M S9 full | Headline change |",
         "|---|---|---:|---:|---:|---:|---|",
     ]
-    # Date table — one row per known version present
-    headlines = {
-        "v0.9.12": ("2026-05-04", "Backlog cleanup — drops deprecated `wants_git_tracked()`, pre-compiles nested `when:` at instantiation (no per-iteration parse), adds `coverage_audit_when_wiring.rs` + `coverage_audit_engine_when_dispatch.rs`, fixes `bench-record.yml` end-to-end. First version with auto-published bench-record data + criterion micro-bench snapshot."),
-        "v0.9.11": ("2026-05-03", "`git_tracked_only` via engine-side pre-filtered `FileIndex` (structural fix); 4 existence rules drop the per-evaluate `is_git_tracked` check; S8 -7 % to -32 % at small/medium sizes."),
-        "v0.9.10": ("2026-05-03", "`Scope` owns `Option<ScopeFilter>` (structural fix); `Scope::matches(&Path, &FileIndex)` covers both predicates; 41 rules cleaned up; new audit fails CI on field re-introduction."),
-        "v0.9.9":  ("2026-05-03", "`scope_filter:` coverage sweep — 17 rules outside the per-file dispatch path now honour the filter; `for_each_dir` literal-path bypass guarded; new S10 macro bench."),
-        "v0.9.8":  ("2026-05-02", "Cross-file dispatch fast paths round 2 — `FileIndex::children_of` + `evaluate_for_each` literal-path bypass; 1M S7 40×."),
-        "v0.9.7":  ("2026-05-02", "`scope_filter:` runtime fix + audit cleanup + v0.10 LSP design pass."),
-        "v0.9.6":  ("2026-05-02", "`scope_filter:` primitive (latent runtime no-op fixed in v0.9.7) + S9 scenario."),
-        "v0.9.5":  ("2026-05-01", "Cross-file dispatch fast paths round 1 — `for_each_dir` path-index lookups."),
-        "v0.9.4":  ("2026-04-30", "Content-rule mechanical migration (16 rules to PerFileRule)."),
-        "v0.5.7":  ("2026-03",    "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
-        "v0.5.6":  ("2026-03",    "Prep run that captured the only pre-v0.9 1M S3 numbers."),
+    # Date table — one row per version present on disk.
+    # Manual fallbacks for versions older than CHANGELOG.md
+    # carries (or for one-off bench-only entries like v0.5.6/.7).
+    # CHANGELOG-parsed headlines win when both are defined, so
+    # new releases need no script edit.
+    fallback_headlines = {
+        "v0.5.7": ("2026-03", "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
+        "v0.5.6": ("2026-03", "Prep run that captured the only pre-v0.9 1M S3 numbers."),
     }
+    headlines = dict(fallback_headlines)
+    if changelog_headlines:
+        headlines.update(changelog_headlines)
     for v in versions_present:
         date, headline = headlines.get(v, ("?", "—"))
         cells = [fmt(data, v, sx, "1m", "full") for sx in ("S3", "S6", "S7", "S9")]
@@ -253,12 +395,21 @@ def main() -> int:
             "docs", "benchmarks", "macro", "results",
         ),
     )
+    p.add_argument(
+        "--changelog",
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "CHANGELOG.md",
+        ),
+        help="CHANGELOG.md path; release date + headline blurb come from here",
+    )
     args = p.parse_args()
 
     data = load_arch(args.base, args.arch)
+    changelog_headlines = parse_changelog(args.changelog)
     if not data:
         return 1
-    sys.stdout.write(render(data))
+    sys.stdout.write(render(data, changelog_headlines))
     return 0
 
 

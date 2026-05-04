@@ -180,6 +180,31 @@ jobs:
       # … which the PR body shells out for and inlines verbatim, so
       # the maintainer copy-pastes pre-formatted values.
 
+      # ── HISTORY.md auto-refresh (v0.9.14+) ───────────────────────
+      # Pre-v0.9.14 the maintainer had to manually run
+      # `python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md`
+      # after merging the bench-record PR. v0.9.14 made the
+      # script auto-discovering (versions read from filesystem;
+      # date + headline blurb extracted from CHANGELOG.md's
+      # `## [X.Y.Z] — YYYY-MM-DD` header + first sentence). We
+      # run it here so the bench-record commit also includes the
+      # refreshed HISTORY.md — one merge surfaces both the new
+      # bench data AND the row in HISTORY without further action.
+      - name: render HISTORY.md with new version row
+        run: |
+          set -euo pipefail
+          python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md
+          # Quick sanity check — make sure the new version
+          # actually shows up in the rendered output. If it
+          # doesn't (e.g. CHANGELOG missing the entry), surface
+          # that as a workflow warning instead of silently
+          # publishing a stale HISTORY.
+          if ! grep -q "^| \*\*${OUT_LABEL}\*\*" docs/benchmarks/HISTORY.md; then
+            echo "::warning ::render-history.py did not produce a row for ${OUT_LABEL}; CHANGELOG.md may be missing the entry. HISTORY.md updated anyway."
+          fi
+        env:
+          OUT_LABEL: ${{ steps.label.outputs.label }}
+
       - name: open PR with bench results
         env:
           GH_TOKEN: ${{ github.token }}
@@ -195,7 +220,11 @@ jobs:
           git checkout -b "$branch"
           git add docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/
           git add docs/benchmarks/micro/results/linux-x86_64/"${OUT_LABEL}"/
-          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S10 at 1k/10k/100k/1m × full/changed)"
+          # v0.9.14: HISTORY.md is auto-refreshed in the previous
+          # step; include it in the same commit so the PR is
+          # one-merge-completes-everything.
+          git add docs/benchmarks/HISTORY.md
+          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S10 at 1k/10k/100k/1m × full/changed) + HISTORY.md refresh"
           git push origin "$branch" --force
 
           # Render a per-cell summary the maintainer pastes into HISTORY.md.
@@ -214,14 +243,23 @@ jobs:
             changed}) at \`--warmup 3 --runs 10\`.
           - \`docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion/\`
             — trimmed criterion snapshot from \`cargo bench -p alint-bench\`.
+          - \`docs/benchmarks/HISTORY.md\` — auto-refreshed via
+            \`xtask/scripts/render-history.py\` to surface the new
+            \`${OUT_LABEL}\` row across the headline + per-scenario tables.
+            Date + headline blurb come from CHANGELOG.md's
+            \`## [X.Y.Z] — YYYY-MM-DD\` header + first sentence
+            beneath it.
 
           ## Maintainer review checklist
 
           - [ ] Skim \`results.json\` for any cell with \`stddev_ms / mean_ms > 0.10\`
             (CV > 10 %) — re-run those on a quieter system before merging.
-          - [ ] Update \`docs/benchmarks/HISTORY.md\` with the per-cell rows
-            below (one row per scenario × mode table; cross-version trajectory
-            table at the top gets a new headline row).
+          - [ ] Eyeball the HISTORY.md headline row for
+            \`${OUT_LABEL}\` — if the auto-extracted first sentence
+            from CHANGELOG.md isn't a good one-row blurb, edit
+            CHANGELOG.md to make the first sentence punchier and
+            re-render via
+            \`python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md\`.
           - [ ] Verify the workspace version in the bench fingerprint matches
             the tag/label.
 
