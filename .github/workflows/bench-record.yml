@@ -90,18 +90,23 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v gh >/dev/null 2>&1; then
-            # Self-hosted runner doesn't have `gh` preinstalled (unlike
-            # ubuntu-latest). The "open PR" step at the end of this
-            # workflow needs it; install once here so a fresh runner
-            # comes up green. v0.9.11 bench-record runs failed at the
-            # PR step with `gh: command not found` until this landed.
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-              | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-              | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-            sudo apt-get update -y -qq
-            sudo apt-get install -y -qq gh
+            # Self-hosted runner has neither `gh` preinstalled nor
+            # `sudo` available, so the apt path won't work. Install
+            # the prebuilt binary into $HOME/.local/bin and add that
+            # to GITHUB_PATH so subsequent steps see it. v0.9.11
+            # bench-record runs failed with `gh: command not found`
+            # at the PR step; v0.9.12 first attempted apt+sudo but
+            # the runner has no sudo, so this falls back to the
+            # tarball.
+            gh_ver="2.62.0"
+            mkdir -p "$HOME/.local/bin"
+            curl -fsSL -o /tmp/gh.tar.gz \
+              "https://github.com/cli/cli/releases/download/v${gh_ver}/gh_${gh_ver}_linux_amd64.tar.gz"
+            tar -xzf /tmp/gh.tar.gz -C /tmp
+            cp "/tmp/gh_${gh_ver}_linux_amd64/bin/gh" "$HOME/.local/bin/gh"
+            chmod +x "$HOME/.local/bin/gh"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.local/bin:$PATH"
           fi
           gh --version
 
