@@ -110,6 +110,30 @@ jobs:
           fi
           gh --version
 
+      - name: install python3
+        run: |
+          set -euo pipefail
+          # Self-hosted runner has neither `python3` preinstalled
+          # nor `sudo` available. Install a standalone Python from
+          # indygreg/python-build-standalone (no system package
+          # manager, no sudo) into $HOME/.local/python/ and put
+          # its bin/ on $GITHUB_PATH. Needed by the
+          # `render HISTORY.md with new version row` step below
+          # (v0.9.14 added that step; v0.9.14's first end-to-end
+          # validation run failed with `python3: command not found`
+          # until this install step landed).
+          if ! command -v python3 >/dev/null 2>&1; then
+            python_ver="3.12.7"
+            release_tag="20241016"
+            mkdir -p "$HOME/.local"
+            curl -fsSL -o /tmp/python.tar.gz \
+              "https://github.com/indygreg/python-build-standalone/releases/download/${release_tag}/cpython-${python_ver}+${release_tag}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            tar -xzf /tmp/python.tar.gz -C "$HOME/.local/"
+            echo "$HOME/.local/python/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.local/python/bin:$PATH"
+          fi
+          python3 --version
+
       - name: derive output label
         id: label
         run: |
