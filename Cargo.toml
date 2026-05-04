@@ -15,7 +15,7 @@ members = [
 default-members = ["crates/alint"]
 
 [workspace.package]
-version = "0.9.11"
+version = "0.9.12"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"

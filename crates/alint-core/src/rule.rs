@@ -209,19 +209,6 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         GitTrackedMode::Off
     }
 
-    /// Deprecated alias for `git_tracked_mode() != GitTrackedMode::Off`.
-    /// Kept for one minor version so out-of-tree rule plugins
-    /// that override this method continue to opt in to the
-    /// engine's git-tracked-paths setup. Will be removed in
-    /// v0.9.12; override [`Rule::git_tracked_mode`] instead.
-    #[deprecated(
-        since = "0.9.11",
-        note = "override `git_tracked_mode` instead; this method is delegated and will be removed in v0.9.12"
-    )]
-    fn wants_git_tracked(&self) -> bool {
-        self.git_tracked_mode() != GitTrackedMode::Off
-    }
-
     /// Whether this rule needs `git blame` output on
     /// [`Context`]. Default `false`; the `git_blame_age` rule
     /// kind overrides to return `true`. The engine builds the

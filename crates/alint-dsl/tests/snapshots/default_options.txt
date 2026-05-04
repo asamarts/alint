@@ -120,18 +120,21 @@ EveryMatchingHasRule {
     select_scope: Scope { ... },
     when_iter: None,
     require: [
-        NestedRuleSpec {
-            kind: "file_exists",
-            paths: Some(
-                Single(
-                    "{path}/package.json",
+        CompiledNestedSpec {
+            spec: NestedRuleSpec {
+                kind: "file_exists",
+                paths: Some(
+                    Single(
+                        "{path}/package.json",
+                    ),
                 ),
-            ),
-            message: None,
-            policy_url: None,
+                message: None,
+                policy_url: None,
+                when: None,
+                scope_filter: None,
+                extra: Mapping {},
+            },
             when: None,
-            scope_filter: None,
-            extra: Mapping {},
         },
     ],
 }
@@ -579,18 +582,21 @@ ForEachDirRule {
     select_scope: Scope { ... },
     when_iter: None,
     require: [
-        NestedRuleSpec {
-            kind: "file_exists",
-            paths: Some(
-                Single(
-                    "{path}/mod.rs",
+        CompiledNestedSpec {
+            spec: NestedRuleSpec {
+                kind: "file_exists",
+                paths: Some(
+                    Single(
+                        "{path}/mod.rs",
+                    ),
                 ),
-            ),
-            message: None,
-            policy_url: None,
+                message: None,
+                policy_url: None,
+                when: None,
+                scope_filter: None,
+                extra: Mapping {},
+            },
             when: None,
-            scope_filter: None,
-            extra: Mapping {},
         },
     ],
 }
@@ -603,18 +609,21 @@ ForEachFileRule {
     select_scope: Scope { ... },
     when_iter: None,
     require: [
-        NestedRuleSpec {
-            kind: "file_exists",
-            paths: Some(
-                Single(
-                    "tests/snapshots/{stem}.snap",
+        CompiledNestedSpec {
+            spec: NestedRuleSpec {
+                kind: "file_exists",
+                paths: Some(
+                    Single(
+                        "tests/snapshots/{stem}.snap",
+                    ),
                 ),
-            ),
-            message: None,
-            policy_url: None,
+                message: None,
+                policy_url: None,
+                when: None,
+                scope_filter: None,
+                extra: Mapping {},
+            },
             when: None,
-            scope_filter: None,
-            extra: Mapping {},
         },
     ],
 }

@@ -6,6 +6,94 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-05-03
+
+Backlog cleanup release closing the explicitly-held v0.9 items
+that didn't fit cleanly into earlier cuts. Three structural
+audits + one engine refactor + the bench-record CI fix.
+
+### Removed — alint-core API
+
+- **`Rule::wants_git_tracked()`** — deprecated in v0.9.11 with
+  a v0.9.12 removal date; now gone. Override
+  [`Rule::git_tracked_mode`] instead. The engine consults
+  `git_tracked_mode()` (added in v0.9.11) to pick the right
+  pre-filtered `FileIndex` for each opted-in rule.
+
+### Added — alint-core API
+
+- **`alint_core::CompiledNestedSpec`** — wraps a
+  [`NestedRuleSpec`] with its `when:` source pre-compiled to a
+  [`crate::when::WhenExpr`] at rule-build time. Mirrors the
+  v0.9.5-era `when_iter:` pattern (parse once at build,
+  evaluate per iteration with fresh iter context). The 3
+  cross-file iteration rules (`for_each_dir`, `for_each_file`,
+  `every_matching_has`) hold `Vec<CompiledNestedSpec>` and
+  consume it via the shared `evaluate_for_each` helper.
+
+### Fixed
+
+- **Nested `when:` no longer re-parses per iteration.**
+  Pre-v0.9.12 the nested `when:` source string was re-parsed
+  inside `evaluate_for_each`'s loop on every (entry,
+  nested-rule) pair — at scale (e.g. workspace bundles with
+  5000+ packages × 3+ nested rules), thousands of redundant
+  parses per cross-file rule eval. The new `CompiledNestedSpec`
+  parses each source string exactly once at build time.
+  Misconfigured nested-`when:` clauses now surface at config-
+  load time instead of mid-evaluation.
+- **`bench-record.yml` workflow now completes end-to-end.**
+  Pre-v0.9.12 the workflow's `gh pr create` step failed with
+  `gh: command not found` on the self-hosted runner — bench
+  data was captured + pushed to a `bench-record/<tag>` branch
+  but the PR-opening step crashed, leaving stale branches
+  (`bench-record/v0.9.{9,10,11}` exist on remote with captured
+  but unsurfaced data). v0.9.12 adds an `install gh CLI` step
+  before the PR-opening step. Same release adds S10 to the
+  workflow's scenarios list (was S1-S9 only, missing the
+  v0.9.9 addition).
+
+### Internal
+
+- **`coverage_audit_when_wiring.rs`** (new). Asserts every
+  cross-file iteration rule (`for_each_dir`, `for_each_file`,
+  `every_matching_has`) wires its `when_iter:` field through
+  the shared `parse_when_iter` helper at build time AND
+  consults the resulting `Option<WhenExpr>` in its dispatch
+  path. Catches the silent-no-op recurrence-risk shape on the
+  `when_iter:` axis the same way v0.9.10's audit catches it on
+  `scope_filter:`.
+- **`coverage_audit_engine_when_dispatch.rs`** (new). Asserts
+  every dispatch site in `engine.rs` that calls
+  `rule.evaluate(...)` or `run_entry(...)` is preceded by an
+  `entry.when` consultation in the surrounding 60 lines, OR
+  delegates to `run_entry` (which does the consultation
+  centrally). Separate sub-test asserts `run_per_file`'s
+  inline `entry.when` check stays in place. Catches a future
+  engine extension (e.g., a hypothetical fix-only path or LSP
+  single-file re-evaluation path) that adds a new dispatch
+  site and forgets the gate.
+- **`compile_nested_require` helper** (`alint-rules`'s
+  `for_each_dir` module) — single point all 3 cross-file
+  iteration rules call to compile their `Vec<NestedRuleSpec>`
+  into `Vec<CompiledNestedSpec>` at build time. New iteration
+  rules thread their require list through this.
+
+### Held for v0.9.13+ / indefinitely
+
+- **`when:` ownership** remains explicitly out of scope.
+  `when:` data (facts/vars/iter) varies at evaluate-time so it
+  can't be pre-computed into a struct field; the engine
+  already owns the top-level dispatch and the v0.9.12 audits
+  + pre-compilation close the remaining gaps.
+- **Stale `bench-record/v0.9.{9,10,11}` branches** on remote
+  contain captured-but-unsurfaced bench data from before the
+  workflow fix. Future bench-record runs (starting v0.9.12)
+  produce a fresh PR with S1-S10 + criterion + everything;
+  the stale branches can be deleted at the maintainer's
+  leisure or kept as historical artefacts of the broken
+  state.
+
 ## [0.9.11] — 2026-05-03
 
 Structural fix for the `git_tracked_only:` silent-no-op

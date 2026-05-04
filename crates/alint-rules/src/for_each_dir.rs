@@ -31,7 +31,10 @@
 
 use alint_core::template::PathTokens;
 use alint_core::when::{IterEnv, WhenExpr};
-use alint_core::{Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    CompiledNestedSpec, Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope,
+    Violation,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -54,7 +57,7 @@ pub struct ForEachDirRule {
     policy_url: Option<String>,
     select_scope: Scope,
     when_iter: Option<WhenExpr>,
-    require: Vec<NestedRuleSpec>,
+    require: Vec<CompiledNestedSpec>,
 }
 
 impl Rule for ForEachDirRule {
@@ -103,14 +106,34 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let select_scope = Scope::from_patterns(&[opts.select])?;
     let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
+    let require = compile_nested_require(&spec.id, opts.require)?;
     Ok(Box::new(ForEachDirRule {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         select_scope,
         when_iter,
-        require: opts.require,
+        require,
     }))
+}
+
+/// Pre-compile each `NestedRuleSpec` in `require:` so its
+/// `when:` source is parsed exactly once at rule-build time.
+/// Shared by `for_each_dir`, `for_each_file`, and
+/// `every_matching_has` — all three accept nested rules with
+/// optional `when:` clauses, and all three pre-v0.9.12 re-
+/// parsed the source per iteration. This helper is the single
+/// place new cross-file iteration rules thread their require
+/// list through.
+pub(crate) fn compile_nested_require(
+    parent_id: &str,
+    require: Vec<NestedRuleSpec>,
+) -> Result<Vec<CompiledNestedSpec>> {
+    require
+        .into_iter()
+        .enumerate()
+        .map(|(idx, spec)| CompiledNestedSpec::compile(spec, parent_id, idx))
+        .collect()
 }
 
 /// Compile a `when_iter:` source string into a `WhenExpr` at
@@ -151,7 +174,7 @@ pub(crate) fn evaluate_for_each(
     level: Level,
     select_scope: &Scope,
     when_iter: Option<&WhenExpr>,
-    require: &[NestedRuleSpec],
+    require: &[CompiledNestedSpec],
     ctx: &Context<'_>,
     mode: IterateMode,
 ) -> Result<Vec<Violation>> {
@@ -206,19 +229,17 @@ pub(crate) fn evaluate_for_each(
 
         let tokens = PathTokens::from_path(&entry.path);
         for (i, nested) in require.iter().enumerate() {
-            let nested_spec = nested.instantiate(parent_id, i, level, &tokens);
-            // Gate the nested rule on its `when:` clause (if
-            // present). Same `iter.*` context is available, so a
-            // nested rule can reach back to the iteration just
-            // like the outer `when_iter:` does.
-            if let Some(when_src) = &nested_spec.when {
+            // v0.9.12: nested `when:` is pre-compiled at rule-
+            // build time (`CompiledNestedSpec`) — gate on the
+            // already-parsed expression instead of re-parsing
+            // the source per iteration. Same `iter.*` context
+            // is available so a nested rule can reach back to
+            // the iteration just like the outer `when_iter:`
+            // does. We instantiate the per-iteration spec only
+            // AFTER the gate so a falsy `when:` skips both the
+            // template-render work AND the registry build.
+            if let Some(expr) = &nested.when {
                 if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
-                    let expr = alint_core::when::parse(when_src).map_err(|e| {
-                        Error::rule_config(
-                            parent_id,
-                            format!("nested rule #{i}: invalid when: {e}"),
-                        )
-                    })?;
                     let env = alint_core::WhenEnv {
                         facts,
                         vars,
@@ -239,6 +260,7 @@ pub(crate) fn evaluate_for_each(
                     }
                 }
             }
+            let nested_spec = nested.spec.instantiate(parent_id, i, level, &tokens);
             let nested_rule = match registry.build(&nested_spec) {
                 Ok(r) => r,
                 Err(e) => {
@@ -407,6 +429,7 @@ mod tests {
     }
 
     fn rule(select: &str, require: Vec<NestedRuleSpec>) -> ForEachDirRule {
+        let require = compile_nested_require("t", require).unwrap();
         ForEachDirRule {
             id: "t".into(),
             level: Level::Error,

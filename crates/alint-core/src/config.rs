@@ -515,6 +515,60 @@ pub struct NestedRuleSpec {
     pub extra: serde_yaml_ng::Mapping,
 }
 
+/// A [`NestedRuleSpec`] with its `when:` source pre-compiled
+/// into a [`crate::when::WhenExpr`] at rule-build time.
+///
+/// Mirrors the v0.9.5-era pattern for `when_iter:` on cross-
+/// file iteration rules: parse the source once at build, then
+/// evaluate per iteration with a fresh `iter` context. v0.9.12
+/// closed the gap: pre-v0.9.12 the nested `when:` source string
+/// was re-parsed inside `evaluate_for_each` on every iteration
+/// (one parse per (entry, nested-rule) pair, sometimes
+/// thousands of redundant parses per cross-file rule eval). The
+/// `Option<WhenExpr>` on this struct is parsed exactly once.
+///
+/// Build sites (`for_each_dir`, `for_each_file`,
+/// `every_matching_has` in `alint-rules`) construct a
+/// `Vec<CompiledNestedSpec>` from `Vec<NestedRuleSpec>` in
+/// their `build` impl; `evaluate_for_each` consumes the
+/// compiled form.
+#[derive(Debug)]
+pub struct CompiledNestedSpec {
+    /// The original nested-rule spec — passed to
+    /// [`NestedRuleSpec::instantiate`] per iteration to get a
+    /// per-iteration full `RuleSpec` with template tokens
+    /// substituted.
+    pub spec: NestedRuleSpec,
+    /// Pre-compiled `when:` expression. `None` when the nested
+    /// spec carried no `when:` clause.
+    pub when: Option<crate::when::WhenExpr>,
+}
+
+impl CompiledNestedSpec {
+    /// Compile a [`NestedRuleSpec`] — parsing its `when:`
+    /// source string once. Surfaces a build-time config error
+    /// (`"<parent_id>: nested rule #<idx>: invalid when: ..."`)
+    /// when the source fails to parse, so misconfigured
+    /// nested-when clauses fail at config-load time instead of
+    /// per-iteration during evaluation.
+    pub fn compile(
+        spec: NestedRuleSpec,
+        parent_id: &str,
+        idx: usize,
+    ) -> crate::error::Result<Self> {
+        let when = match spec.when.as_deref() {
+            Some(src) => Some(crate::when::parse(src).map_err(|e| {
+                crate::error::Error::rule_config(
+                    parent_id,
+                    format!("nested rule #{idx}: invalid when: {e}"),
+                )
+            })?),
+            None => None,
+        };
+        Ok(Self { spec, when })
+    }
+}
+
 impl NestedRuleSpec {
     /// Synthesize a full [`RuleSpec`] for a single iteration, applying
     /// path-template substitution (using the iterated entry's tokens) to

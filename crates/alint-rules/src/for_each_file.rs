@@ -17,10 +17,15 @@
 //! ```
 
 use alint_core::when::WhenExpr;
-use alint_core::{Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    CompiledNestedSpec, Context, Error, Level, NestedRuleSpec, Result, Rule, RuleSpec, Scope,
+    Violation,
+};
 use serde::Deserialize;
 
-use crate::for_each_dir::{IterateMode, evaluate_for_each, parse_when_iter};
+use crate::for_each_dir::{
+    IterateMode, compile_nested_require, evaluate_for_each, parse_when_iter,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,7 +47,7 @@ pub struct ForEachFileRule {
     policy_url: Option<String>,
     select_scope: Scope,
     when_iter: Option<WhenExpr>,
-    require: Vec<NestedRuleSpec>,
+    require: Vec<CompiledNestedSpec>,
 }
 
 impl Rule for ForEachFileRule {
@@ -82,13 +87,14 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let select_scope = Scope::from_patterns(&[opts.select])?;
     let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
+    let require = compile_nested_require(&spec.id, opts.require)?;
     Ok(Box::new(ForEachFileRule {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         select_scope,
         when_iter,
-        require: opts.require,
+        require,
     }))
 }
 
@@ -120,6 +126,7 @@ mod tests {
         let require: Vec<NestedRuleSpec> = vec![
             serde_yaml_ng::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
         ];
+        let require = compile_nested_require("t", require).unwrap();
         let r = ForEachFileRule {
             id: "t".into(),
             level: Level::Error,
@@ -153,6 +160,7 @@ mod tests {
         let require: Vec<NestedRuleSpec> = vec![
             serde_yaml_ng::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
         ];
+        let require = compile_nested_require("t", require).unwrap();
         let r = ForEachFileRule {
             id: "t".into(),
             level: Level::Error,

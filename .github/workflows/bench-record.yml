@@ -6,7 +6,7 @@ name: bench-record
 #
 # Two layers per run:
 # - macro: `xtask bench-scale --include-1m --warmup 3 --runs 10` over
-#   the full S1-S9 × {1k,10k,100k,1m} × {full,changed} matrix.
+#   the full S1-S10 × {1k,10k,100k,1m} × {full,changed} matrix.
 # - micro: `cargo bench -p alint-bench --features fs-benches` against
 #   the criterion harness, then `xtask publish-benches` to land the
 #   trim'd criterion snapshot under
@@ -86,6 +86,25 @@ jobs:
           fi
           hyperfine --version
 
+      - name: install gh CLI
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            # Self-hosted runner doesn't have `gh` preinstalled (unlike
+            # ubuntu-latest). The "open PR" step at the end of this
+            # workflow needs it; install once here so a fresh runner
+            # comes up green. v0.9.11 bench-record runs failed at the
+            # PR step with `gh: command not found` until this landed.
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+            sudo apt-get update -y -qq
+            sudo apt-get install -y -qq gh
+          fi
+          gh --version
+
       - name: derive output label
         id: label
         run: |
@@ -107,8 +126,9 @@ jobs:
         run: cargo build --release -p alint -p xtask
 
       # ── Macro: full publish-grade matrix ─────────────────────────
-      # 9 scenarios × 4 sizes × 2 modes = 72 cells. The 1M cells
-      # dominate — ~10 min each, so ~3h for the 18 1M cells alone.
+      # 10 scenarios × 4 sizes × 2 modes = 80 cells. The 1M cells
+      # dominate — ~10 min each, so ~3h for the 20 1M cells alone.
+      # S10 added in v0.9.9 (scope_filter outside per-file dispatch).
       - name: macro bench-scale
         env:
           OUT_LABEL: ${{ steps.label.outputs.label }}
@@ -119,7 +139,7 @@ jobs:
           ./target/release/xtask bench-scale \
             --include-1m \
             --sizes 1k,10k,100k,1m \
-            --scenarios S1,S2,S3,S4,S5,S6,S7,S8,S9 \
+            --scenarios S1,S2,S3,S4,S5,S6,S7,S8,S9,S10 \
             --modes full,changed \
             --tools alint \
             --warmup 3 --runs 10 \
@@ -170,7 +190,7 @@ jobs:
           git checkout -b "$branch"
           git add docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/
           git add docs/benchmarks/micro/results/linux-x86_64/"${OUT_LABEL}"/
-          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S9 at 1k/10k/100k/1m × full/changed)"
+          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S10 at 1k/10k/100k/1m × full/changed)"
           git push origin "$branch" --force
 
           # Render a per-cell summary the maintainer pastes into HISTORY.md.
@@ -185,7 +205,7 @@ jobs:
           ## What landed
 
           - \`docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/\` — full
-            publish-grade hyperfine matrix (S1-S9 × {1k, 10k, 100k, 1m} × {full,
+            publish-grade hyperfine matrix (S1-S10 × {1k, 10k, 100k, 1m} × {full,
             changed}) at \`--warmup 3 --runs 10\`.
           - \`docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion/\`
             — trimmed criterion snapshot from \`cargo bench -p alint-bench\`.
