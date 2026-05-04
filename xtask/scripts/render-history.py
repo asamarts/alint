@@ -27,6 +27,7 @@ Stat = Tuple[float, float]           # (mean_ms, stddev_ms)
 
 # Ordered newest-first for the per-scenario tables.
 KNOWN_VERSIONS = [
+    "v0.9.12",
     "v0.9.11",
     "v0.9.10",
     "v0.9.9",
@@ -175,6 +176,7 @@ def render(data: Dict[Cell, Stat]) -> str:
     ]
     # Date table — one row per known version present
     headlines = {
+        "v0.9.12": ("2026-05-04", "Backlog cleanup — drops deprecated `wants_git_tracked()`, pre-compiles nested `when:` at instantiation (no per-iteration parse), adds `coverage_audit_when_wiring.rs` + `coverage_audit_engine_when_dispatch.rs`, fixes `bench-record.yml` end-to-end. First version with auto-published bench-record data + criterion micro-bench snapshot."),
         "v0.9.11": ("2026-05-03", "`git_tracked_only` via engine-side pre-filtered `FileIndex` (structural fix); 4 existence rules drop the per-evaluate `is_git_tracked` check; S8 -7 % to -32 % at small/medium sizes."),
         "v0.9.10": ("2026-05-03", "`Scope` owns `Option<ScopeFilter>` (structural fix); `Scope::matches(&Path, &FileIndex)` covers both predicates; 41 rules cleaned up; new audit fails CI on field re-introduction."),
         "v0.9.9":  ("2026-05-03", "`scope_filter:` coverage sweep — 17 rules outside the per-file dispatch path now honour the filter; `for_each_dir` literal-path bypass guarded; new S10 macro bench."),
