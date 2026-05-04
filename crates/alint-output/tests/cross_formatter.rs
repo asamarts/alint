@@ -284,7 +284,7 @@ fn json_format_validates_against_published_schema() {
         jsonschema::validator_for(&schema_value).expect("schema compiles as Draft 2020-12");
     let errs: Vec<String> = validator
         .iter_errors(&instance)
-        .map(|e| format!("{} at {}", e, e.instance_path))
+        .map(|e| format!("{} at {}", e, e.instance_path()))
         .collect();
     assert!(
         errs.is_empty(),
@@ -306,7 +306,7 @@ fn empty_report_json_validates_against_published_schema() {
     let validator = jsonschema::validator_for(&schema_value).unwrap();
     let errs: Vec<String> = validator
         .iter_errors(&instance)
-        .map(|e| format!("{} at {}", e, e.instance_path))
+        .map(|e| format!("{} at {}", e, e.instance_path()))
         .collect();
     assert!(
         errs.is_empty(),

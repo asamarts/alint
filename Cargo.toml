@@ -15,7 +15,7 @@ members = [
 default-members = ["crates/alint"]
 
 [workspace.package]
-version = "0.9.12"
+version = "0.9.13"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"
@@ -44,19 +44,19 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 content_inspector = "0.2"
 anyhow = "1"
-jsonschema = { version = "0.29", default-features = false }
+jsonschema = { version = "0.46", default-features = false }
 criterion = "0.8"
-rand = "0.9"
-rand_chacha = "0.9"
+rand = "0.10"
+rand_chacha = "0.10"
 tempfile = "3"
 dir-test = "0.4"
 proptest = "1"
-trycmd = "0.15"
+trycmd = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
-sha2 = "0.10"
+sha2 = "0.11"
 directories = "6"
 anstyle = "1"
-anstream = "0.6"
+anstream = "1"
 supports-hyperlinks = "3"
 terminal_size = "0.4"
 indicatif = "0.18"

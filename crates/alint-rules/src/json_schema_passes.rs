@@ -142,7 +142,9 @@ impl Rule for JsonSchemaPassesRule {
             };
 
             for error in validator.iter_errors(&parsed) {
-                let detail = format!("schema violation at `{}`: {error}", error.instance_path);
+                // jsonschema 0.36+ privatised `instance_path` and exposes
+                // it via the `instance_path()` accessor method.
+                let detail = format!("schema violation at `{}`: {error}", error.instance_path());
                 let msg = self.message.clone().unwrap_or(detail);
                 violations.push(Violation::new(msg).with_path(entry.path.clone()));
             }

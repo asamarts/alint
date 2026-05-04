@@ -28,7 +28,7 @@ jobs:
       docs: ${{ steps.detect.outputs.docs }}
       bench: ${{ steps.detect.outputs.bench }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - id: detect
@@ -45,7 +45,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/fmt.sh
 
   clippy:
@@ -56,7 +56,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/clippy.sh
 
   test:
@@ -67,7 +67,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/test.sh
 
   audit:
@@ -78,7 +78,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/audit.sh
 
   build:
@@ -89,7 +89,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/build.sh
 
   docs:
@@ -101,7 +101,7 @@ jobs:
       && github.event_name == 'push'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/docs.sh
 
   dogfood:
@@ -112,7 +112,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/dogfood.sh
 
   # ── Bench smoke ───────────────────────────────────────────────────
@@ -124,7 +124,7 @@ jobs:
       && needs.changes.outputs.bench == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ci/scripts/bench-smoke.sh
 
   # ── Summary report ───────────────────────────────────────────────
@@ -143,7 +143,7 @@ jobs:
       - bench-smoke
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - env:
           RUST_CHANGED: ${{ needs.changes.outputs.rust }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs }}

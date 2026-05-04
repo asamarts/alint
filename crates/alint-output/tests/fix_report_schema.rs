@@ -64,7 +64,7 @@ fn validate(json_text: &str) {
         jsonschema::validator_for(&schema_value).expect("schema compiles as Draft 2020-12");
     let errs: Vec<String> = validator
         .iter_errors(&instance)
-        .map(|e| format!("{} at {}", e, e.instance_path))
+        .map(|e| format!("{} at {}", e, e.instance_path()))
         .collect();
     assert!(
         errs.is_empty(),

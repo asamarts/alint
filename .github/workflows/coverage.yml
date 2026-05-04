@@ -22,21 +22,21 @@ jobs:
     name: cargo-llvm-cov
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - run: ci/scripts/coverage.sh
 
       - name: Upload LCOV artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: target/coverage/coverage.lcov
           retention-days: 30
 
       - name: Upload HTML artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-html
           path: target/coverage/html/
@@ -58,7 +58,7 @@ jobs:
           fi
       - name: Upload to Codecov
         if: steps.codecov_token.outputs.present == 'true'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/coverage/coverage.lcov

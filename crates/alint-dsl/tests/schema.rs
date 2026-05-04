@@ -21,7 +21,7 @@ fn yaml_to_json(yaml: &str) -> serde_json::Value {
 fn assert_valid(validator: &jsonschema::Validator, instance: &serde_json::Value, label: &str) {
     let errors: Vec<String> = validator
         .iter_errors(instance)
-        .map(|e| format!("{} at {}", e, e.instance_path))
+        .map(|e| format!("{} at {}", e, e.instance_path()))
         .collect();
     if !errors.is_empty() {
         for e in &errors {

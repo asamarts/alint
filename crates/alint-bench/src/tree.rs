@@ -19,7 +19,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rand::{Rng, SeedableRng};
+// rand 0.10: `Rng` was renamed to `RngExt` and gains the
+// `random_range`/`random` methods we use throughout this file.
+// `Rng` itself is kept for the `&mut impl Rng` bound on the
+// helper signatures below.
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use tempfile::TempDir;
 
