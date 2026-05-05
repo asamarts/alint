@@ -241,7 +241,51 @@ jobs:
           git config user.name  "alint bench bot"
           git config user.email "aliaksandr.samartsau@gmail.com"
 
-          git checkout -b "$branch"
+          # Stage bench artefacts to /tmp so we can rebase onto
+          # main without losing them. Required because:
+          # - Tag-triggered runs check out the tag's tree, which
+          #   may have an older `bench-record.yml` than main.
+          # - workflow_dispatch with `ref=<old-tag>` makes this
+          #   even more divergent.
+          # - Force-pushing the resulting bench-record/<label>
+          #   branch triggers GitHub's "GITHUB_TOKEN cannot
+          #   create or update workflow files" protection on
+          #   any `.github/workflows/*` diff vs main. Even with
+          #   `workflows: write` declared, GitHub Apps refuse.
+          # By rebasing the bench artefacts onto current main,
+          # the resulting commit only adds bench files and never
+          # touches workflow YAML (because main has the latest
+          # YAML already).
+          stage_root=$(mktemp -d)
+          mkdir -p "$stage_root/macro" "$stage_root/micro"
+          cp -r "docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/" \
+            "$stage_root/macro/" || true
+          cp -r "docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/" \
+            "$stage_root/micro/" || true
+
+          # Rebase onto current main so the workflow file in the
+          # working tree matches origin/main exactly — no
+          # workflow-file diff in the resulting push.
+          git fetch origin main --depth=1
+          git checkout -B "$branch" origin/main
+
+          # Restore the bench artefacts on top of main.
+          mkdir -p "docs/benchmarks/macro/results/linux-x86_64/"
+          mkdir -p "docs/benchmarks/micro/results/linux-x86_64/"
+          rm -rf "docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}"
+          rm -rf "docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}"
+          cp -r "$stage_root/macro/${OUT_LABEL}" \
+            "docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}"
+          cp -r "$stage_root/micro/${OUT_LABEL}" \
+            "docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}"
+
+          # Re-render HISTORY.md against the rebased tree so the
+          # cell pickup uses main's render-history.py + the new
+          # bench data both. (The earlier render in the previous
+          # step ran against the checked-out ref's tree which is
+          # now stale.)
+          python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md
+
           git add docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/
           git add docs/benchmarks/micro/results/linux-x86_64/"${OUT_LABEL}"/
           # v0.9.14: HISTORY.md is auto-refreshed in the previous
