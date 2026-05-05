@@ -1,0 +1,56 @@
+name: Config help
+description: alint behaved correctly but you can't figure out the right config for what you're trying to do
+title: "[help] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For config-help questions, also consider [Discussions](https://github.com/asamarts/alint/discussions/categories/q-a) under "Q&A" — discoverable for others searching later.
+
+        For bugs (alint behaved incorrectly), use the bug-report template instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: alint version
+      placeholder: "alint 0.9.14"
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to enforce?
+      description: |
+        Describe the convention. Example: "every package directory under `crates/`
+        must have a README.md and the README must mention the package name in its first heading."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tree
+    attributes:
+      label: Tree shape (or link to public repo)
+    validations:
+      required: false
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What you've tried
+      description: |
+        The `.alint.yml` snippets you've tried + what they did vs what you wanted.
+      render: yaml
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I read [docs/rules.md](https://github.com/asamarts/alint/blob/main/docs/rules.md) and the relevant rule docs on alint.org
+          required: true
+        - label: I searched [Discussions](https://github.com/asamarts/alint/discussions) and didn't find a similar question
+          required: true

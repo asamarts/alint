@@ -1,0 +1,82 @@
+name: Feature request
+description: New rule kind, new bundled ruleset, new CLI capability
+title: "[feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. Half-formed ideas are also welcome —
+        consider opening a [Discussion](https://github.com/asamarts/alint/discussions/categories/ideas)
+        under "Ideas" first if you'd like to talk it through.
+
+        The bar for new rule kinds: a rule kind ships when it covers a use
+        case at least 3 real production repos need. The
+        [launch-prep validation pass](https://github.com/asamarts/alint/blob/main/docs/launch-prep.md)
+        catalogues real-repo use cases that don't have alint coverage today.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - New rule kind
+        - New bundled ruleset
+        - New auto-fix op
+        - New output format
+        - New CLI flag / subcommand
+        - Doc / config-schema improvement
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: |
+        What's the convention you're trying to enforce? What does a violation look
+        like? What's the cost of NOT enforcing it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: real-repos
+    attributes:
+      label: Real repositories that need this
+      description: |
+        Link to ≥1 (ideally ≥3) public repos that would adopt this. For each:
+        - what they do today (custom shell script? eslint plugin? README convention?)
+        - link to the existing tooling, if any
+    validations:
+      required: false
+
+  - type: textarea
+    id: yaml-sketch
+    attributes:
+      label: YAML config sketch
+      description: |
+        How would the user configure this in `.alint.yml`? Even a rough sketch helps.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Other tools that already do this (we can link to them as "for X, use Y" in our non-goals list);
+        existing alint primitives that almost-but-not-quite work.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched [open + closed issues](https://github.com/asamarts/alint/issues?q=is%3Aissue) and didn't find this proposal
+          required: true
+        - label: I checked [docs/rules.md](https://github.com/asamarts/alint/blob/main/docs/rules.md) and the [non-goals list](https://github.com/asamarts/alint/blob/main/README.md#non-goals)
+          required: true

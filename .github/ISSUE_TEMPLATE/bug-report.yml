@@ -1,0 +1,89 @@
+name: Bug report
+description: alint produced wrong output, crashed, or did something surprising
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        For security vulnerabilities, **do not** file a public issue —
+        see [SECURITY.md](https://github.com/asamarts/alint/blob/main/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: alint version
+      description: Output of `alint --version`
+      placeholder: "alint 0.9.14"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS + architecture
+      placeholder: "Linux x86_64 (Ubuntu 24.04) / macOS arm64 / Windows x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Minimal `.alint.yml` reproducing the issue
+      description: |
+        The smallest config that triggers the bug. If the bug is config-load-related,
+        include `extends:` chain.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: tree-shape
+    attributes:
+      label: Tree shape (or pointer to public repo)
+      description: |
+        If the bug depends on the repo layout, sketch the relevant tree (`tree -L 3` works), or link to a public repo + commit SHA.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      description: |
+        Include the relevant violation messages, error output, or panic backtrace.
+        For perf bugs, include `time alint check` output.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Engine logs (optional)
+      description: |
+        Re-run with `RUST_LOG=alint_core=info alint check` and paste the engine timing breakdown if relevant (especially for perf or scaling bugs).
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched [open + closed issues](https://github.com/asamarts/alint/issues?q=is%3Aissue) and didn't find this bug
+          required: true
+        - label: I'm running the latest version (or have a reason not to be)
+          required: true
