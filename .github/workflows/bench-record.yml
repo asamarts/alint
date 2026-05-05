@@ -204,31 +204,6 @@ jobs:
       # … which the PR body shells out for and inlines verbatim, so
       # the maintainer copy-pastes pre-formatted values.
 
-      # ── HISTORY.md auto-refresh (v0.9.14+) ───────────────────────
-      # Pre-v0.9.14 the maintainer had to manually run
-      # `python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md`
-      # after merging the bench-record PR. v0.9.14 made the
-      # script auto-discovering (versions read from filesystem;
-      # date + headline blurb extracted from CHANGELOG.md's
-      # `## [X.Y.Z] — YYYY-MM-DD` header + first sentence). We
-      # run it here so the bench-record commit also includes the
-      # refreshed HISTORY.md — one merge surfaces both the new
-      # bench data AND the row in HISTORY without further action.
-      - name: render HISTORY.md with new version row
-        run: |
-          set -euo pipefail
-          python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md
-          # Quick sanity check — make sure the new version
-          # actually shows up in the rendered output. If it
-          # doesn't (e.g. CHANGELOG missing the entry), surface
-          # that as a workflow warning instead of silently
-          # publishing a stale HISTORY.
-          if ! grep -q "^| \*\*${OUT_LABEL}\*\*" docs/benchmarks/HISTORY.md; then
-            echo "::warning ::render-history.py did not produce a row for ${OUT_LABEL}; CHANGELOG.md may be missing the entry. HISTORY.md updated anyway."
-          fi
-        env:
-          OUT_LABEL: ${{ steps.label.outputs.label }}
-
       - name: open PR with bench results
         env:
           GH_TOKEN: ${{ github.token }}
@@ -263,6 +238,14 @@ jobs:
           cp -r "docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/" \
             "$stage_root/micro/" || true
 
+          # Hard-reset any local changes (the bench step writes
+          # untracked files; the earlier `render HISTORY` step
+          # was removed in v0.9.14 because the canonical render
+          # happens after the rebase below) so `git checkout`
+          # can switch refs without conflicts.
+          git reset --hard HEAD
+          git clean -fd docs/benchmarks/
+
           # Rebase onto current main so the workflow file in the
           # working tree matches origin/main exactly — no
           # workflow-file diff in the resulting push.
@@ -279,12 +262,15 @@ jobs:
           cp -r "$stage_root/micro/${OUT_LABEL}" \
             "docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}"
 
-          # Re-render HISTORY.md against the rebased tree so the
-          # cell pickup uses main's render-history.py + the new
-          # bench data both. (The earlier render in the previous
-          # step ran against the checked-out ref's tree which is
-          # now stale.)
+          # Render HISTORY.md against the rebased tree (main's
+          # render-history.py + main's CHANGELOG.md + the new
+          # bench data we just restored). Sanity check: emit a
+          # warning if the new version's row doesn't appear in
+          # the output (CHANGELOG.md missing the entry).
           python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md
+          if ! grep -q "^| \*\*${OUT_LABEL}\*\*" docs/benchmarks/HISTORY.md; then
+            echo "::warning ::render-history.py did not produce a row for ${OUT_LABEL}; CHANGELOG.md may be missing the entry. HISTORY.md updated anyway."
+          fi
 
           git add docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/
           git add docs/benchmarks/micro/results/linux-x86_64/"${OUT_LABEL}"/
