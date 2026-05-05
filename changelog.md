@@ -8,6 +8,99 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.14] — 2026-05-05
+
+CI automation release. The `bench-record.yml` workflow that
+captures publish-grade bench data on every release tag is now
+fully end-to-end automated for the first time. Pre-v0.9.14 a
+maintainer had to (a) manually `gh pr create` because the
+workflow's gh CLI step lacked auth, (b) manually toggle a repo
+policy because the GITHUB_TOKEN couldn't open PRs, (c)
+manually re-render `HISTORY.md` after every bench-record
+merge, and (d) manually edit `xtask/scripts/render-history.py`
+to add each new version to its hardcoded list. v0.9.14 closes
+all four gaps. Future tag-pushes produce a one-click-merge PR
+with bench data + criterion + HISTORY refresh, no human
+in the loop until the review.
+
+No alint binary changes. CLI users see nothing different — the
+release exists to seal the bench-record automation as proven
+end-to-end (validated against the v0.9.13 tag in PR #14 before
+this release was cut).
+
+### Added
+
+- **`xtask/scripts/render-history.py` auto-discovery.** Versions
+  read from the filesystem (`docs/benchmarks/macro/results/<arch>/v*/`)
+  instead of a hardcoded `KNOWN_VERSIONS` list. Per-release
+  date + headline blurb extracted from CHANGELOG.md's
+  `## [X.Y.Z] — YYYY-MM-DD` header + first sentence of the
+  paragraph below. Manual fallback dict retained for
+  v0.5.6/v0.5.7 (predate the CHANGELOG-tracked corpus).
+  Maintainer effort to land a new release row in HISTORY drops
+  from "edit two places in the script + commit" to "make sure
+  the CHANGELOG entry has a punchy first sentence".
+- **`bench-record.yml` HISTORY auto-refresh step.** The
+  workflow now runs `render-history.py` after the bench
+  capture and includes the refreshed HISTORY.md in the same
+  bench-record commit. The PR is one-merge-completes-everything
+  for both the bench data and the HISTORY row.
+- **`bench-record.yml` standalone python3 install.** The
+  self-hosted runner has no `python3` preinstalled and no
+  `sudo` available; v0.9.14 installs a prebuilt standalone
+  Python from indygreg/python-build-standalone into
+  `$HOME/.local/python/`. Same pattern the gh CLI tarball
+  install (added in v0.9.12) uses.
+- **`bench-record.yml` rebase-onto-main before push.** When
+  `workflow_dispatch -f ref=<old-tag>` benches an older ref,
+  the working tree's workflow YAML diverges from main's; the
+  resulting push triggers GitHub's "GITHUB_TOKEN cannot create
+  or update workflow files" protection. v0.9.14 stages bench
+  artefacts to `/tmp` and rebases onto `origin/main` before
+  committing — the resulting push contains only bench data,
+  no workflow-file diff. Side benefit: tag-triggered runs are
+  also more robust (the bench commit always lands on top of
+  current main, eliminating a class of subtle merge conflicts).
+- **`bench-record.yml` working-tree reset before checkout.**
+  `git reset --hard HEAD` + `git clean -fd docs/benchmarks/`
+  clears the modified HISTORY.md (from the previous render
+  step) and untracked bench dirs (which conflict with main's
+  tracked versions of the same paths after a prior bench-record
+  PR merged). Without it, the rebase checkout aborts.
+
+### Fixed
+
+- **`bench-record.yml` `bench-record` repo label** now exists
+  (created during the v0.9.13 manual workaround). The workflow's
+  `gh pr create --label bench-record` invocation no longer
+  fails on label resolution.
+- **Repo policy** "Allow GitHub Actions to create and approve
+  pull requests" enabled. The workflow's GITHUB_TOKEN can now
+  open PRs without manual fallback (previously failed with
+  "GitHub Actions is not permitted to create or approve pull
+  requests").
+
+### Internal
+
+- 4 iterations to validate the pipeline end-to-end on the
+  v0.9.13 tag (failures: missing python3, workflow-file push
+  protection, working-tree conflicts on rebase, then success).
+  Each iteration produced a real fix; the pipeline is now
+  fully proven from `gh workflow run` to merged PR.
+- v0.9.13 bench data refreshed via PR #14 (the validation run).
+  Slightly tighter numbers than the original capture; max CV
+  0.041 across all 80 cells.
+
+### Held for future
+
+- **`v0.9.14`-tag-push validation** — this release is the first
+  one whose bench-record run will fire from a tag-push (not
+  workflow_dispatch). Expected outcome: PR auto-opens, bench
+  data + HISTORY.md ready for one-click merge.
+- **SHA-rotate the docker/* actions in `release.yml`** — still
+  pinned at the same SHAs as v0.9.12; separate "rotate +
+  verify" cycle (note from v0.9.13).
+
 ## [0.9.13] — 2026-05-04
 
 Dependency-refresh release. Closes the 10 open Dependabot PRs
