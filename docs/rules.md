@@ -1051,14 +1051,13 @@ Hygiene checks for Java / Kotlin projects (Gradle or Maven). Tree-level gate: `w
 
 ### `alint://bundled/ci/github-actions@v1`
 
-Hygiene checks for `.github/workflows/*.yml`. Gated with `when: facts.has_github_actions` (`.github/workflows/` present), so the ruleset is a safe no-op outside repos using Actions.
+Hardening for `.github/workflows/*.y{,a}ml`, guided by the two OpenSSF Scorecard checks with the strongest supply-chain signal (Token-Permissions + Pinned-Dependencies) plus a readability nudge. Scoped to workflow files, so the ruleset is a safe no-op in repos that don't use GitHub Actions.
 
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
-| `gha-workflows-have-permissions` | `yaml_path_matches` | warning | — |
-| `gha-workflows-pin-actions` | `file_content_forbidden` | warning | — |
-| `gha-workflows-final-newline` | `final_newline` | info | `file_append_final_newline` |
-| `gha-workflows-lf-line-endings` | `line_endings` (lf) | info | `file_normalize_line_endings` |
+| `gha-workflow-contents-read` | `yaml_path_equals` (`$.permissions.contents == "read"`) | warning | — |
+| `gha-pin-actions-to-sha` | `yaml_path_matches` (40-hex SHA on every `uses:`) | warning | — |
+| `gha-workflow-has-name` | `yaml_path_matches` (`$.name`) | info | — |
 
 ### `alint://bundled/agent-hygiene@v1`
 
@@ -1066,13 +1065,12 @@ Catches the canonical agent-driven-development cruft surface — backup-suffix f
 
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
-| `agent-no-backup-files` | `file_absent` (`*.bak`, `*.orig`, `*~`, `*.swp`) | error | — |
-| `agent-no-versioned-duplicates` | `filename_regex` (`*_v2.ts`, `*_old.py`, …) | warning | — |
-| `agent-no-scratch-docs-at-root` | `file_absent` (`PLAN.md`, `NOTES.md`, `ANALYSIS.md`, …) | warning | — |
-| `agent-no-tracked-env-files` | `git_no_denied_paths` (`*.env`, `.env*`) | error | — |
-| `agent-no-debug-residue` | `file_content_forbidden` (`console.log`, `debugger`, `breakpoint()`) | warning | — |
+| `agent-no-versioned-duplicates` | `file_absent` (`*_old.*`, `*_FINAL.*`, `*_copy.*`, `*_backup.*`, …) | warning | — |
+| `agent-no-scratch-docs-at-root` | `file_absent` (`PLAN.md`, `NOTES.md`, `ANALYSIS.md`, `SUMMARY.md`, `FIX.md`, `DECISION.md`, `TODO.md`, `SCRATCH.md`, `DEBUG.md`, `TEMP.md`, `WIP.md`) | warning | — |
 | `agent-no-affirmation-prose` | `file_content_forbidden` (`"You're absolutely right"`, …) | info | — |
-| `agent-no-model-attributed-todos` | `file_content_forbidden` (`TODO(claude:)`, `TODO(cursor:)`, …) | warning | — |
+| `agent-no-console-log` | `file_content_forbidden` (`console.log` / `.debug` / `.trace` in non-test JS/TS) | warning | — |
+| `agent-no-debugger-statements` | `file_content_forbidden` (`debugger;`, `breakpoint()`) | error | — |
+| `agent-no-model-todos` | `file_content_forbidden` (`TODO(claude:)`, `TODO(cursor:)`, `TODO(gpt:)`, `TODO(copilot:)`, `TODO(gemini:)`, `TODO(codex:)`, `TODO(aider:)`, `TODO(chatgpt:)`) | warning | — |
 
 The most-cited gripes about agent-generated code surface as a single one-line `extends:` adoption — pair with the per-language ruleset that fits the project.
 
@@ -1082,10 +1080,10 @@ Hygiene rules for agent-context files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`)
 
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
-| `agent-context-recommend-agents-md` | `file_exists` | info | — |
-| `agent-context-not-a-stub` | `file_min_lines` | warning | — |
-| `agent-context-not-bloated` | `file_max_lines` (300) | warning | — |
-| `agent-context-no-stale-paths` | `file_content_forbidden` (regex heuristic) | info | — |
+| `agent-context-recommended` | `file_exists` (any of `AGENTS.md` / `CLAUDE.md` / `.cursorrules`) | info | — |
+| `agent-context-non-stub` | `file_min_lines` (10) | warning | — |
+| `agent-context-not-bloated` | `file_max_lines` (300) | info | — |
+| `agent-context-no-stale-paths` | `file_content_forbidden` (regex heuristic over backticked workspace paths) | info | — |
 
 For precise stale-path detection, layer `markdown_paths_resolve` (a v0.7.1 rule kind) on top of this ruleset — the regex above flags candidates; the rule kind verifies them against the file index.
 
