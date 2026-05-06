@@ -1,21 +1,22 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a launch-prep validation pass — **17 distinct schema /
-language pitfalls** hit while writing configs for production repos. 12
-surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow, turbo);
-3 in Wave 1 (clap, tokio, ruff, uv, typescript); 1 in Wave 2 (next.js);
-1 in Wave 3 (helm). All configs ultimately parse + run, but the
+Surfaced by the P2a + P2b launch-prep validation passes — **19 distinct
+schema / language pitfalls** hit while writing configs for production
+repos. 12 surfaced in the P2a pilot (kubernetes, rust-lang/rust, deno,
+airflow, turbo); 3 in P2a Wave 1 (clap, tokio, ruff, uv, typescript);
+1 in P2a Wave 2 (next.js); 1 in P2a Wave 3 (helm); 2 in P2b Wave 1
+(bazel + tensorflow). All configs ultimately parse + run, but the
 iteration cost was high. This doc captures every one with the canonical
 correct form.
 
-> **Note on pitfall numbering.** A previously-claimed *pitfall #18*
-> (JSONPath outer-parens filter) was investigated during v0.9.15
-> Phase 4 and proven to be a misdiagnosis — `serde_json_path` 0.7.x
-> accepts outer-parens filters, and the original report had
-> mis-attributed a dashed-key error inside the filter to the parens
-> (the real fix is bracket-notation per pitfall #10, applied inside
-> the filter just as outside it). The numbering jumps from #17 to
-> nothing.
+> **Note on pitfall numbering.** The original *pitfall #18*
+> claim (JSONPath outer-parens filter) was investigated during
+> v0.9.15 Phase 4 and proven to be a misdiagnosis —
+> `serde_json_path` 0.7.x accepts outer-parens filters; the
+> original report had mis-attributed a dashed-key error inside
+> the filter to the parens. The slot was left vacant until P2b
+> Wave 1 surfaced two new walker/builder pitfalls that took
+> #18 + #19.
 
 > **TL;DR for AI agents writing alint configs:** read this entire doc
 > before drafting an `.alint.yml`. The fields documented in
@@ -38,7 +39,7 @@ correct form.
 
 ---
 
-## The 17 pitfalls
+## The 19 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -615,6 +616,117 @@ multiple matches, ask "is the intent *all* or *any*?":
   on the raw text, OR wait for the v0.10+ `*_path_contains` primitive
   (proposed in `docs/launch-prep.md`'s rule-kind candidate table).
 
+### 18. `.gitignore` masks tracked-file presence checks
+
+A file can be both `git ls-files`-tracked AND listed in `.gitignore` —
+a legitimate pattern when a tracked file ships a default that
+contributors are expected to override locally without committing the
+override. Bazel's own `.bazelversion` is the canonical example
+(tracked by upstream, gitignored line 34 so a `bazel-7.0.0` override
+locally doesn't show up in `git status`).
+
+The `ignore` crate that powers the walker honours `.gitignore` by
+default, so `file_exists` reports "no match" against a file that's on
+disk *and* in `git ls-files` output. Worse: `git_tracked_only: true`
+does NOT help — the engine pre-filters from the walker's emit set, so
+a file the walker never sees can't be intersected back in.
+
+**Wrong:**
+```yaml
+- id: bazel-version-pinned
+  kind: file_exists
+  paths: .bazelversion       # ← "no match" if .gitignore lists it
+  level: error
+```
+
+**Right (option A — disable gitignore handling for the rule, when v0.10+ ships `respect_gitignore: false` per-rule):**
+```yaml
+- id: bazel-version-pinned
+  kind: file_exists
+  paths: .bazelversion
+  respect_gitignore: false   # ← v0.10+ candidate
+  level: error
+```
+
+**Right (option B — workspace-wide via the top-level config):**
+```yaml
+respect_gitignore: false      # ← already supported at config root
+rules:
+  - id: bazel-version-pinned
+    kind: file_exists
+    paths: .bazelversion
+    level: error
+```
+
+**Right (option C — shell out for the existence check):**
+```yaml
+- id: bazel-version-pinned
+  kind: command
+  paths: .       # any anchor that exists; the script does the work
+  command: ["test", "-f", ".bazelversion"]
+  level: error
+```
+
+The trade-off with option B is global — every other rule in the config
+also stops honouring `.gitignore`, which is rarely what you want.
+Option A (per-rule) is the v0.10+ candidate motivated by this pitfall;
+option C is the available workaround until then.
+
+Source: surfaced by `examples/bazelbuild-bazel/.alint.yml` while
+authoring the `gha-pin-actions-to-sha` companion check for
+`.bazelversion`.
+
+### 19. `file_exists` with `root_only: true` silently no-matches multi-component literal paths
+
+`root_only: true` is an opt-in shortcut that limits the walk to the
+repo root (no recursion). Internally the build path
+(`file_exists::build` → `literal_is_nested(p)`) treats every
+multi-component literal entry as "not at root" and produces "no match"
+violations — but the message is the generic `file does not exist`,
+not `path is not at root`, so the user sees a stale-config-style
+error instead of the configuration mistake.
+
+**Wrong:**
+```yaml
+- id: api-goldens-present
+  kind: file_exists
+  root_only: true                                 # ← root_only filters to repo root
+  paths:                                           #   but the literals are nested
+    - tensorflow/python/tools/api/golden/v1/      # ← "no match" — silently
+    - tensorflow/python/tools/api/golden/v2/
+  level: error
+```
+
+**Right (option A — drop `root_only:` for nested literals):**
+```yaml
+- id: api-goldens-present
+  kind: file_exists
+  paths:
+    - tensorflow/python/tools/api/golden/v1/
+    - tensorflow/python/tools/api/golden/v2/
+  level: error
+```
+
+**Right (option B — `root_only:` ONLY where every literal is at root):**
+```yaml
+- id: bazel-version-at-root
+  kind: file_exists
+  root_only: true                  # ← OK; `.bazelversion` is at the root
+  paths: .bazelversion
+  level: error
+```
+
+A v0.9.16+ candidate is for `file_exists::build` to surface a
+parse-time warning when it sees `root_only: true` with multi-component
+literals: *"`.tensorflow/python/tools/api/golden/v1/` is multi-component;
+either drop `root_only: true` or move the rule to a single-segment
+literal at the repo root."* That'd land at-edit-time before the user
+hits the silent-no-match.
+
+Source: surfaced by `examples/tensorflow-tensorflow/.alint.yml` while
+authoring the API-goldens existence check (1,185 textproto goldens
+under `tensorflow/python/tools/api/golden/{v1,v2}/`).
+
 ---
 
 ## Honourable mention: JSONPath regex matching uses `match()`, not `=~`
@@ -757,16 +869,23 @@ Before merging a PR that adds or modifies an `.alint.yml`:
       `..` / multi-match selectors), OR the intent is genuinely "every
       match must equal X". For "any element of array contains X", use
       `file_content_matches` (or wait for `*_path_contains`).
+- [ ] No `file_exists` rule references a tracked-but-gitignored file
+      without either `respect_gitignore: false` (workspace-level) or
+      a `command:` shellout. `git_tracked_only: true` does not help
+      — the walker pre-filters.
+- [ ] `root_only: true` is only set when every entry in `paths:` is a
+      single-segment literal at the repo root (no `dir/file` literals).
 
 The `coverage_audit_examples_parse.rs` audit (added in v0.9.15) enforces
 the first item by re-validating every `examples/*/.alint.yml` on every
 CI run. The schema-level items (1-12, 15) are caught by the same parse,
-so the audit covers them transitively. **Items 13, 14, 16, 17 are NOT
-caught by parse-validation** — they produce silently-wrong runtime
-behaviour (regex never matches; `*_path_matches` against a bool fires
-"not a string" on every match; `*_path_equals` against `[*]` flips
-intent from "any" to "all") — see § "Parse-validation is necessary but
-not sufficient" below.
+so the audit covers them transitively. **Items 13, 14, 16, 17, 18, 19
+are NOT caught by parse-validation** — they produce silently-wrong
+runtime behaviour (regex never matches; `*_path_matches` against a bool
+fires "not a string" on every match; `*_path_equals` against `[*]` flips
+intent from "any" to "all"; `.gitignore` masks tracked files;
+`root_only: true` silently no-matches multi-component literals) — see
+§ "Parse-validation is necessary but not sufficient" below.
 
 ---
 
@@ -787,8 +906,14 @@ catch:
 - **#17** — `*_path_equals` against a `[*]` JSONPath flips intent from
   "any element matches" to "every element must match", firing on every
   element that doesn't.
+- **#18** — a tracked-but-`.gitignore`'d file is invisible to the
+  walker by default; `file_exists` reports "no match" silently, and
+  `git_tracked_only: true` doesn't help because the walker pre-filters.
+- **#19** — `file_exists` with `root_only: true` silently no-matches
+  every multi-component literal in `paths:`; the user sees a generic
+  "file does not exist" error, not the configuration mistake.
 
-All four classes share the same shape: the audit verifies the rule
+All six classes share the same shape: the audit verifies the rule
 *loads and builds*; nothing verifies the rule *fires correctly* against
 realistic input.
 

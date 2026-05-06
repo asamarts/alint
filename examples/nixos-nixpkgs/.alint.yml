@@ -1,0 +1,724 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for NixOS/nixpkgs.
+#
+# nixpkgs is the SCALE-STRESS data point in alint's case-study
+# catalogue: ~150k+ files at full checkout, ~20 678 package
+# directories under `pkgs/by-name/` alone (each its own subtree
+# with its own `package.nix`). The structural-validation surface
+# is not exotic — it's the same shape as Apache RAT-style
+# legal-discipline rules + a strong directory-layout convention
+# (`pkgs/by-name/<two-letter-prefix>/<pkg>/package.nix`) — but
+# at a scale where any rule paying O(repo) cost per iteration
+# would surface as an engine bottleneck.
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `NixOS/nixpkgs@a2d07dd9` (rev =
+# `a2d07dd99ef811a4fbd7a683670bb9f9d2265e4e`) with the heaviest
+# generated sub-trees excluded
+# (`pkgs/development/python-modules`, `haskell-modules`,
+# `ocaml-modules`, `lua-modules`, `perl-modules`, `nixos/tests`,
+# `doc`). The structural-shape questions live in the top-level +
+# `pkgs/by-name/` + `lib/` + `ci/` layout the sparse-checkout
+# preserves.
+#
+# Concrete count at HEAD (sparse, post-exclusion):
+#
+#   - 39 101 tracked files in the sparse working tree
+#   - 26 388 directories
+#   - 20 678 package subdirectories under `pkgs/by-name/<aa-zz>/<pkg>/`
+#     (one `package.nix` each — the strictest layout convention in
+#     the repo, enforced at PR-time by `nixpkgs-vet`)
+#   - 17 GitHub Actions workflows under `.github/workflows/`
+#     (relatively few — nixpkgs uses Hydra + OfBorg + the
+#     in-tree `ci/` Nix evaluation framework instead of GHA for
+#     most CI; GHA is only the *coordination* layer)
+#   - 528 lines in `ci/OWNERS` (the analogue of CODEOWNERS for
+#     non-package assets, processed by the in-tree
+#     `codeowners-validator`)
+#   - 30 841 lines in `maintainers/maintainer-list.nix` (the
+#     master maintainer registry; every package's
+#     `meta.maintainers` field references handles defined here)
+#   - 1 674 lines in `lib/licenses/licenses.nix` (the master
+#     license registry)
+#   - .gitattributes maps generated files
+#     (Cargo.lock / yarn.lock / haskell-modules/hackage-packages.nix
+#     / r-modules/*-packages.nix / beam-modules/hex-packages.nix
+#     etc.) to `linguist-generated`
+#
+# nixpkgs's structural-validation tooling is concentrated in:
+#
+#   - `ci/` — the in-tree Nix derivation framework that
+#     orchestrates parse / treefmt / nixpkgs-vet / codeowners-validator
+#     / lib-tests / eval / build into one pinned Nix evaluation.
+#     This IS nixpkgs's structural linter, and most of what it
+#     does is OUT OF alint's scope (Nix evaluation, package
+#     attribute walks, hash mismatch detection — alint reads
+#     files, it doesn't `import` them).
+#
+#   - `nixpkgs-vet` — the canonical by-name-shape validator
+#     (Rust binary in a sibling repo). Asserts the
+#     `pkgs/by-name/<2-letter>/<pkg>/package.nix` invariant and
+#     a long tail of attribute-set conventions. alint reproduces
+#     the FILESYSTEM-shape subset declaratively; the
+#     attribute-walk subset stays on nixpkgs-vet.
+#
+#   - `treefmt-nix` — the in-tree formatter orchestration
+#     (nixfmt, biome, yamlfmt, keep-sorted, actionlint, zizmor,
+#     editorconfig-checker, nixf-diagnose, markdown-code-runner).
+#     alint shells out to `treefmt` for the formatting subset; the
+#     editorconfig-checker + actionlint + zizmor checks have direct
+#     analogues in the bundled `tooling/editorconfig` and
+#     `ci/github-actions` rulesets.
+#
+#   - `lib/tests/` — Nix-side unit tests for the lib functions.
+#     Pure Nix evaluation; entirely out of alint's scope.
+#
+# What this config DOES enforce declaratively:
+#
+#   - The OSS hygiene baseline (README + LICENSE present, no
+#     merge markers, no Trojan-Source bidi, final newlines, no
+#     trailing whitespace)
+#   - Top-level GitHub Actions hardening across the 17 workflows
+#     (permissions + action SHA-pinning + workflow `name:`)
+#   - The pkgs/by-name structural invariant — every package
+#     directory has `package.nix` (the *file* shape;
+#     nixpkgs-vet still owns the attribute-set shape)
+#   - The presence of the pinned validation tooling at canonical
+#     paths (`ci/eval/`, `ci/parse.nix`, `ci/nixpkgs-vet.sh`,
+#     `ci/codeowners-validator/`, `ci/OWNERS`, `lib/tests/`,
+#     `maintainers/maintainer-list.nix`, `lib/licenses/licenses.nix`)
+#   - The cross-tooling registry — `flake.nix` + `default.nix` +
+#     `shell.nix` at root; `.editorconfig` declares `root = true`;
+#     `.gitattributes` declares `linguist-generated` markers for
+#     the generated package-set Nix files
+#   - Hygiene against accidentally-committed build outputs (the
+#     bundled `hygiene/no-tracked-artifacts@v1` ruleset)
+#   - Shell-out to the existing tooling — `treefmt`, `nixpkgs-vet`,
+#     `codeowners-validator`, `nix-build ci -A parse` (on Nix-syntax
+#     correctness) — so a single `alint check` is the equivalent
+#     of running each tool's pre-commit-style invocation.
+#
+# What this config does NOT replace (keep the existing tool):
+#
+#   - Nix evaluation itself (parse.nix / eval / nixpkgs-vet's
+#     attribute walk) — alint reads files at rest; it doesn't
+#     `nix-instantiate`.
+#   - `treefmt` formatter orchestration (nixfmt, biome, yamlfmt,
+#     keep-sorted, actionlint, zizmor, editorconfig-checker,
+#     nixf-diagnose, markdown-code-runner) — alint shells out
+#     via `command:` rules so the tools' exit codes flow through.
+#   - `lib/tests/` Nix-side unit tests — Nix evaluation.
+#   - Hash mismatch detection on `src.hash` / `vendorHash` /
+#     `cargoHash` / `npmDepsHash` — out-of-band fetch + sha256.
+#   - The Hydra eval + OfBorg per-system build matrix —
+#     operational CI infra, not structural validation.
+#   - The `meta.broken` + `meta.maintainers` per-package
+#     attribute-set conventions — needs Nix evaluation.
+#
+# Known limitations versus the existing nixpkgs-vet + treefmt-nix
+# pipeline (each requires an alint primitive that doesn't ship
+# today — see this directory's README.md for the full gap
+# catalogue):
+#
+#   - Per-package `meta.maintainers` handles must resolve to
+#     entries in `maintainers/maintainer-list.nix`
+#     (`registry_paths_resolve` v0.10+ candidate)
+#   - Per-package `meta.license` SPDX identifier must resolve
+#     to an entry in `lib/licenses/licenses.nix` (same primitive)
+#   - The `pkgs/by-name/<2-letter>/<pkg>/` directory-name shape
+#     (basename matches the inferred attribute name; nixpkgs-vet
+#     enforces this attribute-side at PR time) — same shape as
+#     turbo + next.js's `dir_name_matches_field` v0.10+ candidate.
+#   - The 528-line `ci/OWNERS` file (CODEOWNERS-syntax) — every
+#     pattern must resolve to ≥1 path on disk
+#     (`registry_paths_resolve` again; alint asserts existence
+#     but cannot validate the patterns)
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge
+  # markers, no bidi controls, final newline, etc.).
+  - alint://bundled/oss-baseline@v1
+
+  # GitHub Actions hardening — the 17 workflows under
+  # .github/workflows/ are nixpkgs's coordination layer (lint /
+  # build / eval / merge-group / pull-request-target). Workflow
+  # permissions + action SHA pinning matter especially because
+  # the merge-bot in `ci/github-script/merge.js` triggers on
+  # PR-comments with elevated permissions.
+  - alint://bundled/ci/github-actions@v1
+
+  # Hygiene: tracked artefacts that should never appear
+  # (node_modules, target/, dist/, __pycache__, etc.). nixpkgs's
+  # build outputs are typically symlinks to /nix/store and the
+  # `result*` symlinks are git-ignored, but the bundled ruleset
+  # is a useful guardrail.
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+  # EditorConfig presence + sanity (root=true, charset, etc.).
+  # nixpkgs ships a 4-language `.editorconfig` (bash/css/js/
+  # json/lock/md/nix/pl/pm/py/rb/sh/xml) and treefmt-nix shells
+  # out to `editorconfig-checker` on every CI run.
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level orchestration files — nixpkgs's "front door". The
+  # flake.nix / default.nix / shell.nix triad is what every
+  # consumer (NixOS users, CI systems, external flakes) imports.
+  # CONTRIBUTING.md and COPYING are required by the OSS-baseline
+  # ruleset, but the Nix-specific entry points are not.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-flake-nix-present
+    kind: file_exists
+    paths: flake.nix
+    root_only: true
+    level: error
+    message: >-
+      flake.nix is the canonical entry point for flake-based
+      consumers (most modern NixOS systems and downstream
+      flakes). Removing it severs nixpkgs from the modern
+      Nix-flake ecosystem.
+
+  - id: nixpkgs-default-nix-present
+    kind: file_exists
+    paths: default.nix
+    root_only: true
+    level: error
+    message: >-
+      default.nix is the canonical entry point for non-flake
+      consumers (`import (fetchTarball ...) {}`). Removing it
+      breaks every legacy `import <nixpkgs> {}` callsite.
+
+  - id: nixpkgs-shell-nix-present
+    kind: file_exists
+    paths: shell.nix
+    root_only: true
+    level: warning
+    message: >-
+      shell.nix declares the dev-shell environment used by
+      contributors (`nix-shell` from the repo root drops you
+      into a shell with the maintainers/scripts toolchain).
+      Removing it forces every contributor to roll their own.
+
+  - id: nixpkgs-contributing-md-present
+    kind: file_exists
+    paths: CONTRIBUTING.md
+    root_only: true
+    level: error
+    message: >-
+      CONTRIBUTING.md is the canonical contributor guide
+      (PR conventions, commit-message format, branch
+      classification). The lint workflow's commit-message check
+      assumes it exists; removing it strands new contributors.
+
+  - id: nixpkgs-copying-present
+    kind: file_exists
+    paths: COPYING
+    root_only: true
+    level: error
+    message: >-
+      COPYING holds the MIT-like license that nixpkgs is
+      released under. Required by every downstream packager
+      (the package metadata `meta.license` references this
+      file at the repo root).
+
+  # ──────────────────────────────────────────────────────────────────
+  # The CI-evaluation framework — `ci/` is the in-tree Nix
+  # derivation that wraps treefmt + parse + nixpkgs-vet +
+  # codeowners-validator + lib-tests + eval into a single
+  # pinned evaluation. Hydra runs `nix-build ci -A <attr>` and
+  # the GHA workflows shell into the same derivation.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-ci-default-nix-present
+    kind: file_exists
+    paths: ci/default.nix
+    level: error
+    message: >-
+      ci/default.nix is the canonical entry point for the
+      in-tree CI derivation framework. The .github/workflows/
+      lint.yml + build.yml + eval.yml + check.yml workflows all
+      shell into `nix-build nixpkgs/untrusted/ci -A <attr>`;
+      removing default.nix breaks every CI workflow at once.
+
+  - id: nixpkgs-ci-pinned-json-present
+    kind: file_exists
+    paths: ci/pinned.json
+    level: error
+    message: >-
+      ci/pinned.json holds the pinned nixpkgs revision (and
+      treefmt-nix revision) the CI derivation evaluates against.
+      Without the pin the CI build would float against the
+      branch under test, which would defeat the purpose of
+      having a pinned validator.
+
+  - id: nixpkgs-ci-update-pinned-script-present
+    kind: file_exists
+    paths: ci/update-pinned.sh
+    level: warning
+    message: >-
+      ci/update-pinned.sh refreshes ci/pinned.json against the
+      latest hydra-passed nixpkgs revision. Removing it makes
+      pin updates a manual exercise.
+
+  - id: nixpkgs-ci-parse-nix-present
+    kind: file_exists
+    paths: ci/parse.nix
+    level: error
+    message: >-
+      ci/parse.nix declares the parse-only check (`nix-instantiate
+      --parse` over every .nix file in the tree, with
+      `--keep-going` so all syntax errors surface in one pass).
+      The .github/workflows/lint.yml `parse` job depends on it.
+
+  - id: nixpkgs-ci-eval-default-nix-present
+    kind: file_exists
+    paths: ci/eval/default.nix
+    level: error
+    message: >-
+      ci/eval/default.nix is the canonical eval-tester. It walks
+      every package attribute path, evaluates each, captures the
+      out-paths, and diffs against the base-branch out-paths to
+      surface eval breakage / mass-rebuild detection. The
+      .github/workflows/eval.yml workflow + the merge bot both
+      depend on it.
+
+  - id: nixpkgs-ci-nixpkgs-vet-script-present
+    kind: file_exists
+    paths: ci/nixpkgs-vet.sh
+    level: error
+    message: >-
+      ci/nixpkgs-vet.sh is the local-runner shim around the
+      `nixpkgs-vet` validator (Rust binary in a sibling repo).
+      Contributors run `./ci/nixpkgs-vet.sh master` before
+      pushing to catch by-name-shape violations without waiting
+      for CI.
+
+  - id: nixpkgs-ci-nixpkgs-vet-derivation-present
+    kind: file_exists
+    paths: ci/nixpkgs-vet.nix
+    level: error
+    message: >-
+      ci/nixpkgs-vet.nix declares the Nix derivation that
+      packages the `nixpkgs-vet` Rust binary against the pinned
+      nixpkgs. Required by both ci/nixpkgs-vet.sh and the
+      .github/workflows/lint.yml `nixpkgs-vet` job.
+
+  - id: nixpkgs-ci-codeowners-validator-present
+    kind: dir_exists
+    paths: ci/codeowners-validator
+    level: warning
+    message: >-
+      ci/codeowners-validator/ holds the Nix expression for the
+      codeowners-validator binary (validates the syntax of
+      ci/OWNERS). The .github/workflows/check.yml `owners` job
+      runs it on every PR.
+
+  - id: nixpkgs-ci-owners-present
+    kind: file_exists
+    paths: ci/OWNERS
+    level: error
+    message: >-
+      ci/OWNERS is the CODEOWNERS-syntax file that maps
+      non-package files (CI configs, lib functions, docs sources)
+      to the team / individual that should review changes. The
+      .github/workflows/check.yml `owners` job runs the
+      codeowners-validator against it on every PR.
+
+  - id: nixpkgs-ci-supported-versions-present
+    kind: file_exists
+    paths: ci/supportedVersions.nix
+    level: warning
+    message: >-
+      ci/supportedVersions.nix declares the per-NixOS-release
+      Nix-version pin set used by parse.nix's parallel parse
+      across `nix_2_28 / nix_latest / lix / lix_latest`. Drift
+      here means CI silently stops covering an old Nix branch.
+
+  # ──────────────────────────────────────────────────────────────────
+  # The maintainer + license registries — load-bearing for every
+  # package's `meta.maintainers` and `meta.license` fields. Drift
+  # here breaks the merge-bot's "user is a maintainer" check + the
+  # PR-template auto-ping logic.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-maintainer-list-present
+    kind: file_exists
+    paths: maintainers/maintainer-list.nix
+    level: error
+    message: >-
+      maintainers/maintainer-list.nix is the master registry of
+      every nixpkgs maintainer's GitHub handle + ID + name. Every
+      package's `meta.maintainers = [ lib.maintainers.handle ]`
+      field references entries here. The merge-bot's "user is a
+      maintainer of all packages touched by this PR" check
+      depends on it.
+
+  - id: nixpkgs-maintainer-list-non-trivial
+    kind: file_min_lines
+    paths: maintainers/maintainer-list.nix
+    min_lines: 1000
+    level: warning
+    message: >-
+      maintainers/maintainer-list.nix should be at least 1 000
+      lines (~3-4 lines per active maintainer; the live file is
+      ~30k+ lines). A drastic shrink is a strong signal of an
+      accidental partial revert during a merge.
+
+  - id: nixpkgs-licenses-registry-present
+    kind: file_exists
+    paths: lib/licenses/licenses.nix
+    level: error
+    message: >-
+      lib/licenses/licenses.nix is the master registry of SPDX
+      identifiers that `meta.license = lib.licenses.<id>` may
+      reference. Drift here breaks every downstream PyPI / CRAN /
+      Hackage license-classifier check.
+
+  - id: nixpkgs-licenses-spdx-non-trivial
+    kind: file_min_lines
+    paths: lib/licenses/licenses.nix
+    min_lines: 800
+    level: warning
+    message: >-
+      lib/licenses/licenses.nix should be at least 800 lines
+      (~3-4 lines per identifier; the live file is ~1 600+
+      lines). A drastic shrink is a strong signal of an
+      accidental partial revert.
+
+  - id: nixpkgs-team-list-present
+    kind: file_exists
+    paths: maintainers/team-list.nix
+    level: error
+    message: >-
+      maintainers/team-list.nix declares the named teams
+      (`@NixOS/nixpkgs-merge-bot`, `@NixOS/nixos-release-managers`,
+      `@NixOS/security`, etc.) that ci/OWNERS routes review
+      requests to. Removing it breaks every team-mention in
+      ci/OWNERS.
+
+  - id: nixpkgs-github-teams-json-present
+    kind: file_exists
+    paths: maintainers/github-teams.json
+    level: warning
+    message: >-
+      maintainers/github-teams.json is the JSON snapshot of the
+      GitHub team memberships that maintainers/scripts/
+      check-maintainer-github-handles.sh validates against on a
+      cron cadence.
+
+  # ──────────────────────────────────────────────────────────────────
+  # The lib + lib/tests/ shape — `lib/` is the Nix-only standard
+  # library and `lib/tests/` is the Nix-side unit-test suite.
+  # alint asserts the canonical entry points exist; the actual
+  # tests are pure Nix evaluation (out of alint's scope).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-lib-default-nix-present
+    kind: file_exists
+    paths: lib/default.nix
+    level: error
+    message: >-
+      lib/default.nix is the canonical lib-extension entry point
+      (`(import nixpkgs/lib).extend ...`). Removing it breaks
+      every consumer of the Nixpkgs library.
+
+  - id: nixpkgs-lib-tests-release-present
+    kind: file_exists
+    paths: lib/tests/release.nix
+    level: warning
+    message: >-
+      lib/tests/release.nix is the canonical entry point for the
+      Nix-side lib unit tests. The .github/workflows/lint.yml
+      `lib-tests` job runs `nix-build lib/tests/release.nix`.
+
+  - id: nixpkgs-lib-tests-modules-dir-present
+    kind: dir_exists
+    paths: lib/tests/modules
+    level: warning
+    message: >-
+      lib/tests/modules/ holds the per-feature module-system
+      tests. Removing it would silently shrink the lib test
+      coverage; the release.nix entry point would still pass
+      because the test set is enumerated, not glob-discovered.
+
+  # ──────────────────────────────────────────────────────────────────
+  # The `pkgs/by-name/` shape — the strictest structural
+  # convention in nixpkgs. Every package directory is at
+  # `pkgs/by-name/<2-letter>/<pkg-name>/` and ships a
+  # `package.nix` at minimum (with optional patch files /
+  # `tests/` subdir / etc).
+  #
+  # 20 678 package directories at this scale; this is the
+  # alint primitive that gets stress-tested hardest.
+  # nixpkgs-vet enforces the attribute-set side
+  # (`pkgs.<pkg-name>` resolves; basename matches the inferred
+  # attribute); alint covers the FILE side (every package.nix
+  # exists).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-by-name-readme-present
+    kind: file_exists
+    paths: pkgs/by-name/README.md
+    level: warning
+    message: >-
+      pkgs/by-name/README.md documents the by-name discipline
+      (`pkgs/by-name/<2-letter-prefix>/<pkg>/package.nix`)
+      enforced by `nixpkgs-vet`. Removing it strands every new
+      contributor.
+
+  - id: nixpkgs-by-name-prefix-dirs-have-package
+    # Every two-letter prefix directory under pkgs/by-name/ holds
+    # only package subdirectories, each with a package.nix at the
+    # top level. This is the file-shape side of nixpkgs-vet's
+    # by-name invariant. Implemented as for_each_dir over the
+    # 20 678 package subdirs (one require: per iteration; alint
+    # walks the tree once and dispatches).
+    kind: for_each_dir
+    select: "pkgs/by-name/*/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/package.nix"
+    level: error
+    message: >-
+      Every directory at pkgs/by-name/<2-letter>/<pkg>/ MUST
+      ship a package.nix at the top level. This is the file-
+      shape side of the nixpkgs-vet by-name invariant
+      (nixpkgs-vet checks the attribute-set side; alint covers
+      the filesystem side as a fast pre-flight signal). At ~20k
+      package directories, this rule is the largest single
+      iteration in nixpkgs's alint config — perf-stressed by
+      design.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Generated-file discipline — `.gitattributes` declares
+  # `linguist-generated` markers for the files that bots /
+  # update scripts regenerate (Cargo.lock / yarn.nix / lock /
+  # haskell-modules/hackage-packages.nix /
+  # r-modules/*-packages.nix / beam-modules/hex-packages.nix /
+  # emacs-modes/*-generated.nix). These markers exclude the
+  # files from GitHub's diff view + language-stats.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-gitattributes-marks-haskell-generated
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^pkgs/development/haskell-modules/hackage-packages\.nix\s+linguist-generated'
+    level: warning
+    message: >-
+      .gitattributes MUST mark
+      pkgs/development/haskell-modules/hackage-packages.nix as
+      `linguist-generated`. The file is regenerated by
+      maintainers/scripts/haskell/regenerate-hackage-packages.sh
+      and would otherwise dominate the repo's
+      "what languages are tracked" badge.
+
+  - id: nixpkgs-gitattributes-marks-r-generated
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^pkgs/development/r-modules/\*-packages\.nix\s+linguist-generated'
+    level: warning
+    message: >-
+      .gitattributes MUST mark pkgs/development/r-modules/*-packages.nix
+      as `linguist-generated` (the CRAN + bioc snapshots are
+      bot-regenerated; without the marker every PR diff against
+      them is unreadable).
+
+  - id: nixpkgs-gitattributes-marks-emacs-generated
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^pkgs/applications/editors/emacs-modes/\*-generated\.nix\s+linguist-generated'
+    level: warning
+    message: >-
+      .gitattributes MUST mark
+      pkgs/applications/editors/emacs-modes/*-generated.nix as
+      `linguist-generated` so the auto-generated emacs-package
+      manifests don't dominate diff view.
+
+  - id: nixpkgs-gitattributes-marks-cargo-lock-generated
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\*/Cargo\.lock\s+linguist-generated'
+    level: warning
+    message: >-
+      .gitattributes MUST mark **/Cargo.lock as
+      `linguist-generated`. Every Rust package vendoring its
+      lockfile would otherwise inflate the Rust portion of the
+      repo's language-statistics badge.
+
+  - id: nixpkgs-gitattributes-marks-yarn-lock-generated
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\*/yarn\.lock\s+linguist-generated'
+    level: warning
+    message: >-
+      .gitattributes MUST mark **/yarn.lock as `linguist-generated`.
+
+  - id: nixpkgs-gitblame-ignore-revs-present
+    kind: file_exists
+    paths: .git-blame-ignore-revs
+    root_only: true
+    level: warning
+    message: >-
+      .git-blame-ignore-revs lists mass-formatting commits to
+      skip in `git blame`. The treefmt-nix derivation in
+      ci/default.nix uses .git-blame-ignore-revs as
+      `projectRootFile` (so the auto-rebase script can identify
+      the repo root without inspecting .git itself).
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub configuration files — the labeler / dependabot / PR
+  # template / issue templates / actions/checkout reusable.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-dependabot-yml-present
+    kind: file_exists
+    paths: .github/dependabot.yml
+    level: warning
+    message: >-
+      .github/dependabot.yml configures the weekly
+      github-actions-ecosystem PR cadence. Required to keep
+      action SHA-pins fresh.
+
+  - id: nixpkgs-dependabot-includes-actions
+    kind: yaml_path_matches
+    paths: .github/dependabot.yml
+    path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
+    matches: '^/$'
+    level: warning
+    message: >-
+      .github/dependabot.yml MUST declare a github-actions
+      ecosystem entry pointing at the repo root so action
+      SHA-pins are refreshed automatically.
+
+  - id: nixpkgs-pr-template-present
+    kind: file_exists
+    paths: .github/PULL_REQUEST_TEMPLATE.md
+    level: warning
+    message: >-
+      .github/PULL_REQUEST_TEMPLATE.md is the per-PR checklist
+      contributors fill in (motivation / things done / impact
+      assessment). Removing it strands every contributor at the
+      "what should I write here?" step.
+
+  - id: nixpkgs-issue-template-dir-present
+    kind: dir_exists
+    paths: .github/ISSUE_TEMPLATE
+    level: warning
+    message: >-
+      .github/ISSUE_TEMPLATE/ holds the 10 issue templates
+      (bug-report / build-failure / update-request /
+      module-request / backport-request / etc.). Removing the
+      directory drops the "create issue" UI back to a free-form
+      textarea.
+
+  - id: nixpkgs-labeler-yml-present
+    kind: file_exists
+    paths: .github/labeler.yml
+    level: warning
+    message: >-
+      .github/labeler.yml drives the auto-labeling on PR-open
+      (the `6.topic:` and `7.workflow:` label families). The
+      .github/workflows/bot.yml `labeler` job runs the
+      actions/labeler with this config.
+
+  - id: nixpkgs-checkout-action-present
+    kind: file_exists
+    paths: .github/actions/checkout/action.yml
+    level: warning
+    message: >-
+      .github/actions/checkout/action.yml is the canonical
+      checkout-with-merged-as-untrusted-at composite action.
+      Every workflow shells through it (rather than calling
+      actions/checkout directly) so the trust-boundary handling
+      is uniform. Removing it breaks every workflow.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene specific to nixpkgs — the `result` symlink (output
+  # of `nix-build`) and the `result-*` family must never be
+  # tracked. Same for the legacy `outputs/` directory.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-no-tracked-result-symlink
+    kind: file_absent
+    paths: result
+    level: error
+    message: >-
+      `result` is the canonical nix-build output symlink (points
+      into /nix/store). Should never be tracked. nixpkgs's
+      .gitignore catches it; this rule surfaces the breach if
+      `git add -f result` slips through.
+
+  - id: nixpkgs-no-tracked-outputs-dir
+    kind: dir_absent
+    paths: outputs
+    level: warning
+    message: >-
+      `outputs/` is the legacy nix-build output directory.
+      Should never be tracked.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Shell-out to existing tooling — wrap treefmt + nixpkgs-vet +
+  # parse.nix + codeowners-validator in `command:` rules so a
+  # single `alint check` run is the equivalent of running each
+  # tool's pre-commit-style invocation. Each is gated by a
+  # `paths:` filter pointing at a file the tool reads (so the
+  # rule no-ops if you delete the canonical config-of-record).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nixpkgs-treefmt-check
+    kind: command
+    paths: ci/default.nix
+    command: ["nix-build", "ci", "-A", "fmt.check"]
+    timeout: 600
+    level: error
+
+  - id: nixpkgs-parse-check
+    kind: command
+    paths: ci/parse.nix
+    command: ["nix-build", "ci", "-A", "parse", "--keep-going"]
+    timeout: 600
+    level: error
+
+  - id: nixpkgs-vet-check
+    kind: command
+    paths: ci/nixpkgs-vet.sh
+    command: ["./ci/nixpkgs-vet.sh", "master"]
+    timeout: 600
+    level: error
+
+  - id: nixpkgs-lib-tests-check
+    kind: command
+    paths: lib/tests/release.nix
+    command: ["nix-build", "lib/tests/release.nix"]
+    timeout: 600
+    level: warning
+
+  - id: nixpkgs-codeowners-validator-check
+    kind: command
+    paths: ci/OWNERS
+    command: ["nix-build", "ci", "-A", "codeownersValidator"]
+    timeout: 300
+    level: warning
+
+  # The actionlint / zizmor checks are part of the treefmt-nix
+  # derivation, but we surface them as a separate command so
+  # they fire even if treefmt's other checks are passing —
+  # GHA hardening is the highest-leverage check at nixpkgs's
+  # supply-chain blast radius.
+  - id: nixpkgs-actionlint-check
+    kind: command
+    paths: .github/workflows
+    command: ["actionlint", "-format", "{{json .}}"]
+    timeout: 120
+    level: warning
+
+  - id: nixpkgs-zizmor-check
+    kind: command
+    paths: .github/workflows
+    command: ["zizmor", ".github/workflows/"]
+    timeout: 120
+    level: warning

@@ -1,0 +1,979 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for bazelbuild/bazel.
+#
+# bazelbuild/bazel is the canonical "build system that builds itself"
+# repository — Bazel's own source tree, structured as Bazel's own
+# package model. The repo is a true polyglot: ~175 BUILD files under
+# `src/main/java/`, ~322 BUILD/BUILD.bazel files total, ~100 *.bzl
+# Starlark files, plus C++ (`src/main/cpp/`, `src/main/native/`),
+# Python (build / docs / release tooling), shell (`scripts/`,
+# `compile.sh`), bash completion templates, Windows .bat scripts,
+# protobufs (`src/main/protobuf/`), and Starlark builtins
+# (`src/main/starlark/`). The build system is driven by Bazel
+# itself (bootstrapped via `compile.sh`) — there is no Maven, no
+# Gradle, no Cargo, no `go.mod` at the repo root despite the
+# Java/C++/Go content.
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `bazelbuild/bazel` excluding `/src/test`, `/third_party`,
+# `/site`, and `/scripts/release/relnotes` (the heaviest
+# directories; not material to the structural inventory).
+#
+# Concrete count at HEAD:
+#
+#   - 322 BUILD / BUILD.bazel files (one per Bazel package)
+#   - 100 *.bzl Starlark macro / rule files
+#   - 1 root MODULE.bazel + 1 MODULE.bazel.lock + 0 root WORKSPACE
+#     (Bazel itself ships post-WORKSPACE; bzlmod is the supported
+#     dependency model. Two legacy WORKSPACE files survive in
+#     `tools/distributions/debian/protobuf/` and a builtins test
+#     fixture, kept for back-compat regression testing.)
+#   - 9 GitHub Actions workflows under `.github/workflows/` —
+#     all OPERATIONAL (cherry-picker, labeler, release-helper,
+#     scorecard, ssl-monitor, stale, trigger-docs-update); the
+#     CI that actually builds and tests Bazel runs OUT OF GITHUB
+#     on Buildkite via `.bazelci/presubmit.yml` (309 lines, 25+
+#     platform tasks: rockylinux8, ubuntu2404, fedora39, macos,
+#     windows, etc.).
+#   - 1 `.bazelrc` (117 lines) declaring 25+ named configs
+#     (`--config=ci-linux`, `--config=remote`, `--config=macos`,
+#     etc.). The discipline is enforced socially through code
+#     review; no static lint gates these names.
+#   - 1 `.bazelversion` (`9.1.0`) — Bazelisk reads this to fetch
+#     the matching Bazel binary for self-build.
+#   - 1 root `BUILD` (341 lines: license, srcs filegroup,
+#     bootstrap-jars pkg_tar, distfile genrule, etc.)
+#   - 1 `pyproject.toml` (just `[tool.pyink]` for Python
+#     formatter config — Bazel uses pyink, not black/ruff)
+#   - 1 `requirements.txt` for the Python build helpers
+#   - 2 `oneversion_allowlist*.csv` files declaring which Java
+#     class paths may have multiple JAR sources (a Bazel-specific
+#     "one-version" enforcement check baked into the build, not
+#     a separate lint)
+#   - 100-line CODEOWNERS, 482-line MODULE.bazel, 17-line
+#     `.gitattributes` (`* -text`, `*.bzl linguist-language=Python`,
+#     etc.)
+#
+# This is the **BUILD-FILE SHAPE** P2b case study: Bazel files
+# (BUILD, BUILD.bazel, MODULE.bazel, *.bzl, WORKSPACE) are
+# **Starlark** — a Python-subset DSL that NONE of the 20 P2a
+# case studies contained. alint's structured-query rule family
+# (`json_path_*`, `yaml_path_*`, `toml_path_*`) cannot parse
+# Starlark; the right tool for that layer is Google's official
+# `buildifier` / `buildozer` pair (which IS the Starlark AST
+# linter the Bazel team owns and maintains). alint complements
+# `buildifier` at the file-structure layer:
+#
+#   - filename / path conventions (BUILD vs BUILD.bazel, *.bzl
+#     suffix, MODULE.bazel at root)
+#   - presence / absence of structural files (BUILD per Java
+#     package, MODULE.bazel at root, .bazelversion at root)
+#   - content-pattern checks over Starlark text (load() statement
+#     prefix, package() copyright header, license() macro
+#     invocation, no_legacy_workspace_at_root)
+#   - cross-file conventions (every dir with .java sources has
+#     a BUILD; every BUILD with java_library declarations starts
+#     with a `load("@rules_java//java:defs.bzl", ...)` line)
+#
+# The `command:` rule wires `buildifier` and `buildozer` for the
+# Starlark-AST layer; alint owns the file-structure scaffolding.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - `buildifier` / `buildozer` — the Bazel-team-owned Starlark
+#     formatter + AST refactor tool. alint shells out via
+#     `command:` rules so the Starlark AST checks (mis-ordered
+#     load() blocks, deprecated rule-attribute usage, glob()
+#     vs filesystem inconsistency) keep firing through the same
+#     `alint check` pass.
+#   - `.bazelci/presubmit.yml` — Buildkite-driven cross-platform
+#     CI orchestration (309 lines covering 25+ platforms).
+#     alint encodes the file's *existence* and the
+#     `tasks:` mapping as a YAML schema gate, but the actual
+#     build/test orchestration stays on Buildkite.
+#   - `bazel build //src:bazel` self-build gate — the real
+#     build/test correctness check is "Bazel can build itself
+#     against itself"; runs in `.bazelci/presubmit.yml`. alint
+#     is structural-shape validation, not a build-graph driver.
+#   - `bazel mod deps --lockfile_mode=update` — keeps
+#     MODULE.bazel.lock in sync with MODULE.bazel; same shape
+#     as the `generated_file_fresh` v0.10+ candidate gap.
+#   - `oneversion_allowlist*.csv` enforcement — the Bazel build
+#     itself reads these and asserts every Java class on the
+#     classpath has exactly one source JAR; an AST-aware
+#     classpath-resolution check that's already a first-class
+#     part of the build, not a separate lint.
+#   - `.bazelrc` named-config audit — would require parsing
+#     Bazel's flag-config grammar, which has its own quirks
+#     (line continuations, `import` statements, `try-import`,
+#     platform-specific overrides). Possible as a future
+#     `bazelrc_path_*` rule kind but not on the v0.10+ list.
+#
+# ──────────────────────────────────────────────────────────────────
+# Starlark-AST gap analysis (the load-bearing honesty point)
+# ──────────────────────────────────────────────────────────────────
+#
+# The single most-frequent file shape in the repo is the BUILD /
+# BUILD.bazel / *.bzl file. Of the ~322 BUILD files + ~100 .bzl
+# files counted, **every meaningful invariant inside them is
+# Starlark-AST** territory:
+#
+#   - `cc_library` / `java_library` / `py_binary` deps: integrity
+#     (every label resolves; no cycles; visibility honored) —
+#     OUT OF SCOPE. `bazel query //src/...` is the right tool.
+#   - `glob([...])` patterns vs filesystem (does the glob match
+#     anything? does it leak `BUILD` files into srcs?) —
+#     OUT OF SCOPE. `bazel build //... --nobuild` is the right
+#     tool.
+#   - target visibility (`//visibility:public` vs `__pkg__` vs
+#     a specific package list) — OUT OF SCOPE. `buildifier`
+#     warns on suspicious visibility, `bazel query` enforces.
+#   - load() statement ordering (alphabetical, conventional
+#     bzl-load-before-stdlib-load) — OUT OF SCOPE. `buildifier
+#     --lint=fix` rewrites these in canonical order.
+#   - deprecated rule-attribute usage (e.g., the `licenses`
+#     attribute now superseded by `applicable_licenses` /
+#     rules_license) — OUT OF SCOPE. `buildifier --lint=warn`.
+#
+# alint catches the OUTER STRUCTURAL SHAPE — every BUILD file
+# starts with the canonical Apache 2.0 header, every BUILD file
+# in a Java module sub-tree exists, etc. — but the moment you
+# need to know what `cc_library` *means*, you're in `buildifier`
+# territory and that's where the work belongs.
+#
+# Quantitative split for THIS repo (see the case-study README.md
+# for the full breakdown):
+#
+#   - ~46 % of structural-validation surfaces map to existing
+#     alint rules (filename / path / presence / content-pattern
+#     over Starlark text)
+#   - ~16 % map to `command:` shellouts to `buildifier` /
+#     `buildozer` (alint orchestrates, the existing tool does
+#     the AST work)
+#   - ~38 % are Starlark-AST or build-graph territory and stay
+#     on `buildifier` / `bazel query` / `.bazelci/presubmit.yml`
+#
+# The 38 % out-of-scope is the highest of any P2a + P2b case
+# study to date — and that's the launch-honesty anchor. Bazel
+# is the case where alint's "scope is filesystem shape, not
+# language semantics" non-goal becomes most visible.
+#
+# Known limitations versus the implicit + buildifier-driven
+# pipeline (each requires an alint primitive that doesn't ship
+# today — see this directory's README.md for the full gap
+# catalogue):
+#   - `cc_library` / `java_library` / `py_binary` deps integrity
+#     — fundamentally Starlark-AST work. NOT a v0.10+ candidate;
+#     belongs to `buildifier` / `bazel query`.
+#   - `glob([...])` pattern resolution against the filesystem —
+#     same shape as cpython's `.gitattributes generated marker
+#     resolution` (`registry_paths_resolve` v0.10+ candidate),
+#     but the glob lives inside Starlark code, not a structured
+#     registry. Possible v0.10+ as `starlark_glob_resolve` IF
+#     we ship a tree-sitter-based Starlark parser; otherwise
+#     stays out of scope.
+#   - MODULE.bazel ↔ MODULE.bazel.lock freshness — same
+#     `generated_file_fresh` v0.10+ candidate from cpython,
+#     uv, and arrow.
+#   - `.bazelrc` named-config audit (`--config=foo` references
+#     a defined `common:foo` block) — NEW v0.10+ candidate
+#     unique to this repo.
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge
+  # conflict markers, bidi-control rejection, final newline,
+  # gitignore, etc.).
+  - alint://bundled/oss-baseline@v1
+
+  # Java hygiene — Bazel itself is ~175 BUILD files and a huge
+  # `src/main/java/com/google/devtools/build/lib/` Java tree.
+  # Note: Bazel doesn't ship `pom.xml` / `build.gradle` (it
+  # builds itself with Bazel), so the `has_java` fact gate on
+  # the bundled rules will trip ONLY in repos that DO ship
+  # those manifests. The Bazel repo itself returns
+  # `has_java: false` and the bundled java rules silently
+  # no-op on this tree — but several of the rules below
+  # restate the Java conventions (PascalCase filenames, source
+  # hygiene, Trojan Source defense) at the alint config layer
+  # without the `has_java` fact gate.
+  - alint://bundled/java@v1
+
+  # GitHub Actions hardening — Bazel ships 9 GHA workflows
+  # (operational; the build CI runs on Buildkite via
+  # `.bazelci/`). All 9 honor the `permissions: contents: read`
+  # default, all 9 pin actions to 40-char SHAs (the bazelbuild
+  # team is one of the cleanest large-org adopters of Pinned-
+  # Dependencies; see the dependabot.yml grouping).
+  - alint://bundled/ci/github-actions@v1
+
+  # No-tracked-artifacts hygiene (no node_modules, no
+  # __pycache__, no `.DS_Store`, etc.). Bazel's own build
+  # outputs are `bazel-bin/` / `bazel-out/` / `bazel-testlogs/`
+  # convenience symlinks, plus `output/` from `compile.sh`.
+  # The bundled set covers most; `bazel-*` symlinks are
+  # gitignored upstream and `dir_absent` walks the tracked
+  # tree, so they trivially pass.
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ===================================================================
+  # § Bazel-specific structural files — the "build-system shape"
+  # surface no P2a repo had.
+  # ===================================================================
+
+  # NOTE on .bazelversion: bazelbuild/bazel ships `.bazelversion` at
+  # the repo root AND lists it in `.gitignore` (line 34). The file is
+  # tracked (precedence wins for tracked files), but the `ignore`
+  # crate that alint's walker uses respects `.gitignore` for
+  # discovery — `.bazelversion` is therefore SKIPPED by the walk
+  # even though it's tracked. This is a quirk of bazel's own
+  # repository setup: contributors are expected to override
+  # `.bazelversion` LOCALLY (different installed Bazel version),
+  # so the file is gitignored so local edits don't drift back into
+  # commits. The trade-off: alint's `file_exists` against a
+  # path-pattern that matches a gitignored file silently returns
+  # "no match" even when the file is on disk and tracked.
+  #
+  # Workaround: if you need this rule to fire, run `alint check`
+  # with `--no-respect-gitignore` (planned for v0.10) or use a
+  # `command:` rule that shells out to `[ -f .bazelversion ]` to
+  # bypass the walker. For this case study we drop the
+  # `bazel-version-file-exists` rule and document the gap rather
+  # than ship a broken rule. This is a NEW pitfall not previously
+  # in the 17 catalogued in CONFIG-AUTHORING.md — `.gitignore`
+  # masks tracked-file presence checks.
+  #
+  # The same applies to: `.bazelci/postsubmit.yml` (also gitignored
+  # in some forks), and to ANY config file that contributors
+  # routinely override locally.
+
+  - id: bazel-version-file-shape
+    # `.bazelversion` is a single line: a semver-shaped Bazel
+    # version (`9.1.0`) or a full release identifier
+    # (`8.4.1rc2`). `last_green` is also a magic Bazelisk
+    # token that's legitimate but discouraged in repo roots.
+    #
+    # NOTE: Same gitignore caveat as above — this rule will silently
+    # match-zero against bazelbuild/bazel's tree because the file is
+    # gitignored. Listed here for adopters whose `.bazelversion` is
+    # NOT in `.gitignore` (the more common pattern).
+    kind: file_content_matches
+    paths: ".bazelversion"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+|-[a-zA-Z0-9.-]+)?\s*$'
+    level: info
+    message: >-
+      `.bazelversion` should be a single semver-shaped version
+      (e.g. `9.1.0` or `8.4.1rc2`). `latest` / `last_green`
+      magic tokens are accepted by Bazelisk but defeat the
+      reproducibility purpose of the file.
+
+  - id: bazel-bazelrc-exists
+    # `.bazelrc` is the canonical place for repo-wide build
+    # flags. Bazel projects without one usually scatter flags
+    # across CI YAML and `bazel build` invocations — checking
+    # in a `.bazelrc` consolidates them.
+    kind: file_exists
+    paths: ".bazelrc"
+    root_only: true
+    level: warning
+    message: >-
+      Bazel projects should ship `.bazelrc` at the root for
+      repo-wide flags. Without it, contributors and CI must
+      remember per-platform flags as command-line args.
+    policy_url: "https://bazel.build/run/bazelrc"
+
+  - id: bazel-module-file-exists
+    # MODULE.bazel is the bzlmod-era replacement for WORKSPACE.
+    # Every modern Bazel project ships one at the root; Bazel
+    # 7+ defaults to `--enable_bzlmod=true`.
+    kind: file_exists
+    paths: "MODULE.bazel"
+    root_only: true
+    level: error
+    message: >-
+      `MODULE.bazel` is required at the repo root for bzlmod
+      (Bazel 7+ default dependency model). Repos still on
+      legacy WORKSPACE should migrate; see the bzlmod
+      migration guide.
+    policy_url: "https://bazel.build/external/migration"
+
+  - id: bazel-module-lock-exists
+    # MODULE.bazel.lock pins the resolved bzlmod dependency
+    # graph. Required for hermetic builds; gitignoring it
+    # would let dependency drift slip into CI.
+    kind: file_exists
+    paths: "MODULE.bazel.lock"
+    root_only: true
+    level: error
+    message: >-
+      `MODULE.bazel.lock` must be committed alongside
+      `MODULE.bazel`. The lockfile pins the resolved bzlmod
+      module graph; gitignoring it lets dependency drift slip
+      between contributor and CI builds.
+    policy_url: "https://bazel.build/external/lockfile"
+
+  - id: bazel-module-declares-name
+    # MODULE.bazel must declare a `module(name = "...", ...)`
+    # block. Without it, bzlmod treats the workspace as
+    # nameless and external rules can't refer to it via
+    # `@<name>//...`.
+    kind: file_content_matches
+    paths: "MODULE.bazel"
+    pattern: '(?m)^\s*module\s*\('
+    level: error
+    message: >-
+      `MODULE.bazel` must declare a `module(name = "...", ...)`
+      block. Without it, bzlmod cannot identify the workspace.
+
+  - id: bazel-no-legacy-workspace-at-root
+    # Bazel 8+ has REMOVED the legacy WORKSPACE file model.
+    # Modern repos must use MODULE.bazel; a WORKSPACE / WORKSPACE.bazel
+    # / WORKSPACE.bzlmod at the root is at best stale, at worst
+    # actively confusing.
+    kind: file_absent
+    paths:
+      - "WORKSPACE"
+      - "WORKSPACE.bazel"
+      - "WORKSPACE.bzlmod"
+    level: warning
+    message: >-
+      Legacy WORKSPACE / WORKSPACE.bazel / WORKSPACE.bzlmod
+      files at the root are deprecated; Bazel 8 removed them
+      entirely. Migrate dependencies to `MODULE.bazel`.
+    policy_url: "https://bazel.build/external/migration"
+
+  - id: bazel-root-build-file-exists
+    # The root BUILD / BUILD.bazel file is where the repo
+    # declares its top-level filegroups, license, and
+    # bootstrap targets. Bazel itself ships `BUILD` (no
+    # `.bazel` suffix; predates the `.bazel` extension).
+    kind: file_exists
+    paths:
+      - "BUILD"
+      - "BUILD.bazel"
+    root_only: true
+    level: error
+    message: >-
+      The repo root needs a BUILD or BUILD.bazel file. Without
+      one, `bazel build //:<target>` cannot resolve any root
+      package targets.
+
+  # ===================================================================
+  # § BUILD / *.bzl filename + suffix conventions
+  # ===================================================================
+
+  - id: bazel-build-file-naming
+    # Bazel accepts both `BUILD` (no suffix) and `BUILD.bazel`.
+    # New code SHOULD use `BUILD.bazel` (the `.bazel` suffix
+    # disambiguates against shell users running `make BUILD`
+    # and against Windows directory listings sorting BUILD
+    # against bin/Build/etc.). Bazel-the-repo ships mostly
+    # `BUILD` (no suffix) for historical reasons.
+    #
+    # This rule asserts that EVERY file named `BUILD` is the
+    # canonical Bazel package file (not, say, a markdown doc
+    # named BUILD). The check is: a file literally named
+    # `BUILD` at any depth must contain Bazel-shaped content.
+    # We use file_starts_with to anchor: every BUILD file
+    # begins with either a `load(` statement, a `package(`
+    # directive, the standard Apache header `# Copyright`, or
+    # an exports_files / similar root macro.
+    kind: file_starts_with
+    paths:
+      include:
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+      exclude:
+        - "**/testdata/**"
+        - "**/test_data/**"
+    prefix: "#"
+    # Most Bazel BUILD files in this repo start with the
+    # `# Copyright` header (Apache 2.0 boilerplate); the
+    # remainder start with `# Description:` or a load comment.
+    # `prefix: "#"` is the safe shared prefix. Per pitfall #15,
+    # an empty prefix is rejected at build time, so the
+    # single-character `#` is the conservative shared anchor.
+    level: info
+    message: >-
+      BUILD / BUILD.bazel files conventionally open with a
+      comment header (Apache license boilerplate, Description,
+      or a load directive in the next line). Files starting
+      with raw rule invocations skip the convention.
+
+  - id: bazel-bzl-suffix-required
+    # *.bzl files (Starlark) MUST have the `.bzl` suffix. Bazel
+    # uses the suffix to dispatch the Starlark interpreter
+    # rather than the BUILD-file parser; mis-named Starlark
+    # gets evaluated against the BUILD grammar and silently
+    # fails. This rule catches the case where someone names a
+    # Starlark file `*.bazel` (which Bazel evaluates as a BUILD
+    # file, not a *.bzl macro library — a subtle and
+    # frustrating bug).
+    #
+    # We allowlist BUILD.bazel and MODULE.bazel; everything
+    # else with a `.bazel` suffix that isn't a BUILD file is
+    # suspect.
+    kind: filename_regex
+    paths:
+      include:
+        - "**/*.bazel"
+      exclude:
+        - "**/BUILD.bazel"
+        - "**/MODULE.bazel"
+        - "**/MODULE.bazel.lock"
+        - "**/MODULE.bazel.lock.dist"
+        - "**/REPO.bazel"
+    pattern: '^(BUILD|MODULE|REPO)\.bazel(\.lock(\.dist)?)?$'
+    level: warning
+    message: >-
+      Files with the `.bazel` extension are reserved for the
+      canonical Bazel directory files (BUILD.bazel,
+      MODULE.bazel, REPO.bazel). Starlark macro libraries
+      MUST use the `.bzl` suffix instead — Bazel dispatches
+      to the Starlark interpreter on the suffix, and a `.bazel`
+      file is parsed against the BUILD grammar (not Starlark),
+      which silently breaks load()s and helper functions.
+
+  # ===================================================================
+  # § BUILD / *.bzl Apache 2.0 license header
+  #
+  # Bazel's *.bzl files (especially the load-bearing ones at the
+  # root: `extensions.bzl`, `distdir.bzl`, `repositories.bzl`)
+  # carry a 14-line Apache 2.0 boilerplate. This is enforced
+  # NOWHERE STATICALLY today — the convention is socially
+  # enforced by code review at the bazelbuild org.
+  # ===================================================================
+
+  - id: bazel-bzl-apache-license-header
+    # The canonical Bazel Apache 2.0 header. Note: BUILD files
+    # sometimes carry the same header but commonly start with
+    # `load()` directly, so we scope this rule to `*.bzl` only
+    # where the convention is uniform. Allow some flex on the
+    # year (any 4-digit year is accepted).
+    kind: file_header
+    paths:
+      include:
+        - "**/*.bzl"
+      exclude:
+        - "**/testdata/**"
+        - "**/test_data/**"
+    pattern: '# Copyright [0-9]{4} The Bazel Authors\. All rights reserved\.'
+    lines: 5
+    level: warning
+    message: |
+      Every *.bzl file should carry the canonical Apache 2.0
+      license header in its first 5 lines:
+
+          # Copyright YYYY The Bazel Authors. All rights reserved.
+          #
+          # Licensed under the Apache License, Version 2.0 (the "License");
+          # ...
+
+      Convention is socially enforced by code review at
+      bazelbuild but not gated statically anywhere else.
+
+  # ===================================================================
+  # § GitHub Actions — Bazel hardening conventions on top of the
+  # bundled gha rules
+  # ===================================================================
+
+  - id: bazel-gha-uses-step-security-harden-runner
+    # Every Bazel-team workflow opens with `step-security/harden-runner`
+    # (egress: audit). This is a Bazel-team-wide hardening
+    # convention going beyond the OpenSSF baseline. Removing it
+    # would drop the egress-audit signal that detects exfil
+    # attempts in compromised actions.
+    kind: file_content_matches
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+    pattern: 'step-security/harden-runner@'
+    level: warning
+    message: >-
+      bazelbuild/bazel workflows convention: every workflow opens
+      with a `step-security/harden-runner@<sha>` step (egress:
+      audit). Detects exfiltration via compromised actions.
+      Removing it drops the egress-audit signal.
+
+  - id: bazel-gha-checkout-pinned-major
+    # `actions/checkout@v6.0.2` is the bazelbuild org's pinned
+    # major; raw `actions/checkout` (no version) or `@master`
+    # would be a regression.
+    kind: file_content_forbidden
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+    pattern: '(?m)uses:\s+actions/checkout@(master|main|HEAD)\b'
+    level: error
+    message: >-
+      `actions/checkout` must NOT be pinned to a mutable
+      branch (master / main / HEAD). Use a SHA pin or a
+      versioned tag (handled by the bundled
+      `gha-pin-actions-to-sha` rule).
+
+  # ===================================================================
+  # § .gitattributes — Bazel-specific invariants
+  #
+  # Bazel hand-curates EOLs and linguist hints in .gitattributes.
+  # The repo invariants ENFORCED nowhere statically today:
+  #   - `* -text` disables git EOL normalization (load-bearing
+  #     for Windows .bat scripts that hand-curate CRLF)
+  #   - `*.bzl linguist-language=Python` makes GitHub display
+  #     Starlark with Python syntax highlighting
+  #   - `MODULE.bazel.lock merge=bazel-lockfile-merge` wires
+  #     the custom merge driver
+  # ===================================================================
+
+  - id: bazel-gitattributes-no-text-normalization
+    # Same shape as golang/go's `* -text` rule. Bazel hand-curates
+    # CRLF for *.bat files (Windows entry points); enabling
+    # git's auto-normalization would corrupt those.
+    kind: file_content_matches
+    paths: ".gitattributes"
+    pattern: '(?m)^\* -text\s*$'
+    level: error
+    message: >-
+      `.gitattributes` must declare `* -text` to disable git's
+      line-ending normalization. Bazel hand-curates CRLF for
+      *.bat scripts (Windows entry points like
+      `scripts/zsh_completion/*.bat` and the launcher); enabling
+      normalization would silently corrupt Windows builds.
+
+  - id: bazel-gitattributes-bzl-linguist-python
+    # `*.bzl linguist-language=Python` tells GitHub to render
+    # Starlark with Python syntax highlighting (since Starlark
+    # is a Python subset). Removing this would make .bzl files
+    # display as plain text.
+    kind: file_content_matches
+    paths: ".gitattributes"
+    pattern: '(?m)^\*\.bzl\s+linguist-language=Python\s*$'
+    level: warning
+    message: >-
+      `.gitattributes` should declare
+      `*.bzl linguist-language=Python` so GitHub renders
+      Starlark with Python syntax highlighting (Starlark is
+      a Python subset).
+
+  - id: bazel-gitattributes-build-linguist-python
+    kind: file_content_matches
+    paths: ".gitattributes"
+    pattern: '(?m)^BUILD\s+linguist-language=Python\s*$'
+    level: warning
+    message: >-
+      `.gitattributes` should declare
+      `BUILD linguist-language=Python` for consistent rendering
+      of BUILD files on GitHub.
+
+  - id: bazel-gitattributes-lockfile-merge-driver
+    # Bazel ships a custom `bazel-lockfile-merge` driver to
+    # handle 3-way merges of MODULE.bazel.lock cleanly (the
+    # default git driver corrupts the JSON).
+    kind: file_content_matches
+    paths: ".gitattributes"
+    pattern: 'MODULE\.bazel\.lock\s+merge=bazel-lockfile-merge'
+    level: error
+    message: >-
+      `.gitattributes` must wire the
+      `MODULE.bazel.lock merge=bazel-lockfile-merge` driver.
+      Without it, 3-way merges of the lockfile use git's
+      default driver which corrupts the JSON.
+    policy_url: "https://bazel.build/external/lockfile#automatic-resolution"
+
+  # ===================================================================
+  # § Buildkite CI orchestration (`.bazelci/presubmit.yml`)
+  #
+  # Bazel's actual build-and-test CI does NOT run on GitHub Actions.
+  # It runs on Buildkite, driven by `.bazelci/presubmit.yml`. The
+  # YAML's shape is: top-level `tasks:` map, each entry a platform
+  # name, each platform declaring `build_targets:` / `test_targets:`
+  # / `build_flags:` / etc. Removing or renaming the `tasks:` key
+  # silently breaks all pre-merge CI.
+  # ===================================================================
+
+  - id: bazel-bazelci-presubmit-exists
+    kind: file_exists
+    paths: ".bazelci/presubmit.yml"
+    level: error
+    message: >-
+      `.bazelci/presubmit.yml` is the Buildkite CI driver for
+      bazelbuild/bazel. Removing it disables ALL pre-merge CI
+      (the GitHub Actions workflows are operational only —
+      they don't build or test Bazel itself).
+
+  - id: bazel-bazelci-postsubmit-exists
+    kind: file_exists
+    paths: ".bazelci/postsubmit.yml"
+    level: warning
+    message: >-
+      `.bazelci/postsubmit.yml` drives the post-merge Buildkite
+      CI (full //... matrix on more platforms).
+
+  - id: bazel-bazelci-presubmit-has-tasks
+    # The presubmit must declare a `tasks:` mapping. Renaming
+    # this key (e.g. to `platforms:`) silently disables CI.
+    #
+    # NOTE: Pitfall #16 — `$.tasks` resolves to a mapping (object),
+    # not a string, so `yaml_path_matches` runs into "value at
+    # path is not a string". Fall back to `file_content_matches`
+    # against the raw YAML text for the simpler "key is present"
+    # check (we don't need to assert anything about the mapping's
+    # contents — Buildkite parses the YAML itself and fails loudly
+    # if the schema is wrong).
+    kind: file_content_matches
+    paths: ".bazelci/presubmit.yml"
+    pattern: '(?m)^tasks:\s*$'
+    level: error
+    message: >-
+      `.bazelci/presubmit.yml` must declare a top-level
+      `tasks:` mapping. Without it, Buildkite has no platform
+      list to fan out to.
+
+  # ===================================================================
+  # § Top-level metadata files — Bazel's stricter set
+  # ===================================================================
+
+  - id: bazel-authors-exists
+    # bazelbuild/bazel ships AUTHORS + CONTRIBUTORS (CLA
+    # database lineage). The file is referenced in CONTRIBUTING.md
+    # and from the Apache 2.0 license boilerplate.
+    kind: file_exists
+    paths: "AUTHORS"
+    root_only: true
+    level: warning
+    message: >-
+      bazelbuild/bazel ships an AUTHORS file at the root.
+      It is referenced from the Apache 2.0 license boilerplate
+      and from CONTRIBUTING.md.
+
+  - id: bazel-contributors-exists
+    kind: file_exists
+    paths: "CONTRIBUTORS"
+    root_only: true
+    level: warning
+    message: >-
+      bazelbuild/bazel ships a CONTRIBUTORS file at the root
+      (CLA database lineage, distinct from AUTHORS).
+
+  - id: bazel-changelog-exists
+    # CHANGELOG.md at root is required by the
+    # `:changelog-file` filegroup in the root BUILD; the
+    # release-packages tooling reads it.
+    kind: file_exists
+    paths: "CHANGELOG.md"
+    root_only: true
+    level: error
+    message: >-
+      `CHANGELOG.md` must exist at the repo root. The release
+      package targets (`//scripts/packages:...`) reference it
+      via the `:changelog-file` filegroup; missing it breaks
+      the Debian / RPM / install.sh build steps.
+
+  - id: bazel-code-of-conduct-exists
+    kind: file_exists
+    paths: "CODE_OF_CONDUCT.md"
+    root_only: true
+    level: warning
+
+  - id: bazel-contributing-exists
+    kind: file_exists
+    paths: "CONTRIBUTING.md"
+    root_only: true
+    level: warning
+
+  - id: bazel-security-md-exists
+    # bazelbuild/bazel ships SECURITY.md at the root (vs the
+    # `.github/SECURITY.md` location). Override the bundled
+    # OSS rule's permissive set; for THIS repo, root is the
+    # canonical location.
+    kind: file_exists
+    paths: "SECURITY.md"
+    root_only: true
+    level: error
+    message: >-
+      `SECURITY.md` must exist at the repo root. bazelbuild/bazel
+      ships the file at root (not under .github/); changing
+      location would break the GitHub repository advisory
+      auto-detection.
+
+  - id: bazel-codeowners-exists
+    # CODEOWNERS at root, not under .github/. Bazel-team
+    # convention; renaming or moving it breaks PR review-routing.
+    kind: file_exists
+    paths: "CODEOWNERS"
+    root_only: true
+    level: warning
+
+  # ===================================================================
+  # § Java source-tree conventions on src/main/java/
+  # (the bundled java@v1 ruleset gates on `has_java` which
+  # requires pom.xml / build.gradle; bazelbuild/bazel uses
+  # neither, so we re-state the conventions here without the
+  # fact gate.)
+  # ===================================================================
+
+  - id: bazel-java-sources-pascal-case
+    # Java's class-file convention: every public top-level
+    # type lives in a file named after it, in PascalCase.
+    # `package-info.java` and `module-info.java` are the
+    # standard exceptions.
+    kind: filename_case
+    paths:
+      include:
+        - "src/main/java/**/*.java"
+      exclude:
+        - "**/package-info.java"
+        - "**/module-info.java"
+        - "**/testdata/**"
+    case: pascal
+    level: warning
+    message: >-
+      Java filenames in src/main/java/ should match the
+      public class name (PascalCase).
+
+  - id: bazel-java-sources-apache-header
+    # Every Java source under src/main/java/ carries the
+    # 14-line Apache 2.0 boilerplate. Convention enforced
+    # only by code review today.
+    kind: file_header
+    paths:
+      include:
+        - "src/main/java/**/*.java"
+        - "src/tools/**/*.java"
+        - "src/java_tools/**/*.java"
+      exclude:
+        - "**/testdata/**"
+    pattern: '// Copyright [0-9]{4} The Bazel Authors\. All rights reserved\.'
+    lines: 5
+    level: warning
+    message: |
+      Every Java source under src/main/java/ should carry the
+      canonical Apache 2.0 license header in its first 5
+      lines:
+
+          // Copyright YYYY The Bazel Authors. All rights reserved.
+          //
+          // Licensed under the Apache License, Version 2.0 (the "License");
+          // ...
+
+  - id: bazel-java-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "src/main/java/**/*.java"
+        - "src/tools/**/*.java"
+        - "src/java_tools/**/*.java"
+      exclude:
+        - "**/testdata/**"
+    level: info
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: bazel-java-final-newline
+    kind: final_newline
+    paths:
+      include:
+        - "src/main/java/**/*.java"
+        - "src/tools/**/*.java"
+        - "src/java_tools/**/*.java"
+      exclude:
+        - "**/testdata/**"
+    level: info
+    fix:
+      file_append_final_newline: {}
+
+  - id: bazel-java-no-bidi
+    # Trojan Source defense on Java sources.
+    kind: no_bidi_controls
+    paths:
+      include:
+        - "src/main/java/**/*.java"
+        - "src/tools/**/*.java"
+        - "src/java_tools/**/*.java"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidi override chars in Java sources are rejected."
+    policy_url: "https://trojansource.codes/"
+
+  # ===================================================================
+  # § C++ / native source conventions on src/main/cpp/, src/main/native/
+  # ===================================================================
+
+  - id: bazel-cpp-apache-header
+    kind: file_header
+    paths:
+      include:
+        - "src/main/cpp/**/*.cc"
+        - "src/main/cpp/**/*.h"
+        - "src/main/native/**/*.cc"
+        - "src/main/native/**/*.h"
+        - "src/tools/launcher/**/*.cc"
+        - "src/tools/launcher/**/*.h"
+      exclude:
+        - "**/testdata/**"
+    pattern: '// Copyright [0-9]{4} The Bazel Authors\. All rights reserved\.'
+    lines: 5
+    level: warning
+    message: >-
+      Every C++ source under src/main/cpp/ or src/main/native/
+      should carry the Apache 2.0 license header.
+
+  - id: bazel-cpp-final-newline
+    kind: final_newline
+    paths:
+      include:
+        - "src/main/cpp/**/*.cc"
+        - "src/main/cpp/**/*.h"
+        - "src/main/native/**/*.cc"
+        - "src/main/native/**/*.h"
+    level: info
+    fix:
+      file_append_final_newline: {}
+
+  - id: bazel-cpp-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "src/main/cpp/**/*.cc"
+        - "src/main/cpp/**/*.h"
+        - "src/main/native/**/*.cc"
+        - "src/main/native/**/*.h"
+    level: info
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  # ===================================================================
+  # § Python tooling (Bazel uses pyink, not black/ruff)
+  # ===================================================================
+
+  - id: bazel-pyproject-pyink-config
+    # Bazel's pyproject.toml is just a `[tool.pyink]` block.
+    # If the block disappears, contributors fall back to
+    # pyink defaults (4-space indent vs Bazel's 2-space).
+    kind: toml_path_matches
+    paths: "pyproject.toml"
+    path: "$.tool.pyink['line-length']"
+    matches: '^[0-9]+$'
+    level: warning
+    message: >-
+      pyproject.toml must declare `[tool.pyink]` with a
+      line-length. Bazel-team Python uses 2-space indent
+      and 80-col line length (set by pyink-indentation = 2).
+
+  - id: bazel-pyproject-2-space-indent
+    kind: toml_path_equals
+    paths: "pyproject.toml"
+    path: "$.tool.pyink['pyink-indentation']"
+    equals: 2
+    level: warning
+    message: >-
+      pyproject.toml must declare
+      `[tool.pyink].pyink-indentation = 2`. Bazel-team Python
+      style uses 2-space indent; raising this to the pyink
+      default (4) silently re-formats every Python file.
+
+  - id: bazel-python-source-files-conventional
+    # Bazel ships only a handful of Python files at the
+    # repo root + scripts/. They follow Python conventions
+    # (snake_case filenames).
+    kind: filename_case
+    paths:
+      include:
+        - "scripts/**/*.py"
+        - "src/*.py"
+      exclude:
+        - "**/testdata/**"
+        - "**/test_*.py"
+    case: snake
+    level: info
+
+  # ===================================================================
+  # § Shell scripts conventions
+  # ===================================================================
+
+  - id: bazel-shell-shellcheck
+    # Bazel ships ~7 shell scripts (compile.sh, scripts/ci.sh,
+    # scripts/build.sh, scripts/build_status_command.sh,
+    # combine_distfiles_to_tar.sh, scripts/bazel-dev.sh,
+    # scripts/url-for-sheriff.sh). All are pre-commit-clean
+    # against shellcheck on the Bazel team's local hooks but
+    # NO STATIC SHELLCHECK GATE LIVES IN-REPO.
+    kind: command
+    paths:
+      include:
+        - "*.sh"
+        - "scripts/**/*.sh"
+        - "scripts/bootstrap/**"
+      exclude:
+        - "**/testdata/**"
+    command: ["shellcheck", "-x", "{path}"]
+    timeout: 30
+    level: warning
+    message: >-
+      Bazel ships ~7 shell scripts; shellcheck is the
+      canonical static linter. Running it as a `command:`
+      rule catches regressions before they hit Buildkite.
+
+  - id: bazel-shell-apache-header
+    kind: file_header
+    paths:
+      include:
+        - "*.sh"
+        - "scripts/**/*.sh"
+      exclude:
+        - "**/testdata/**"
+    pattern: '(?m)^# Copyright [0-9]{4} The Bazel Authors\. All rights reserved'
+    lines: 8
+    level: warning
+    message: >-
+      Every shell script in bazelbuild/bazel should carry the
+      canonical Apache 2.0 header (`#`-comment form, may
+      follow a shebang).
+
+  # ===================================================================
+  # § Buildifier / Buildozer — the Starlark AST linter (NOT alint).
+  # alint shells out via `command:` rules; buildifier owns the
+  # AST layer.
+  # ===================================================================
+
+  - id: bazel-buildifier-format-check
+    # `buildifier --lint=warn --mode=check` reports formatting
+    # + lint issues against BUILD / *.bzl files. The Bazel
+    # team's pre-commit hook runs `buildifier --mode=fix`
+    # on every staged BUILD file; this rule is the static
+    # equivalent for adopters that don't have the hook
+    # installed.
+    kind: command
+    paths:
+      include:
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+        - "**/*.bzl"
+      exclude:
+        - "**/testdata/**"
+        - "**/test_data/**"
+    command: ["buildifier", "--mode=check", "--lint=warn", "{path}"]
+    timeout: 30
+    level: warning
+    message: >-
+      `buildifier --mode=check --lint=warn` reported issues.
+      Run `buildifier --mode=fix --lint=fix {path}` to apply
+      the canonical formatter.
+    policy_url: "https://github.com/bazelbuild/buildtools/tree/master/buildifier"
+
+  # ===================================================================
+  # § Hygiene overrides for the bundled rules (Bazel's own tree
+  # has gitignored bazel-* symlinks at the root and an output/
+  # dir from compile.sh; these are not tracked, so the bundled
+  # `dir_absent` walks pass trivially. Listed here as
+  # documentation of the contract.)
+  # ===================================================================
+
+  - id: bazel-no-output-dir
+    # `compile.sh` emits to `output/` at the repo root. Must
+    # never be tracked.
+    kind: dir_absent
+    paths: "output"
+    level: error
+    message: >-
+      `output/` is the compile.sh build output directory.
+      Must never be tracked.

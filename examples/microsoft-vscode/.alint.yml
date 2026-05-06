@@ -1,0 +1,643 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for microsoft/vscode.
+#
+# microsoft/vscode is the canonical "every developer's editor" repo —
+# ~160k stars, the top-watched OSS desktop application on GitHub. This
+# repo's structural-validation surface is unusual in two ways:
+#
+#   1. It ships a bespoke, in-tree hygiene script — `build/hygiene.ts`
+#      — that pre-commit hooks pipe the staged changeset through. It
+#      enforces *exactly* the kind of structural invariants alint is
+#      designed to express: copyright header, tab indentation,
+#      non-ASCII character allowlist, prohibited keys in product.json,
+#      and (delegated) eslint + stylelint + tsfmt. ~6 of the 7
+#      pipeline stages map cleanly onto alint primitives — the
+#      seventh is eslint.
+#
+#   2. It ships a public extension API surface in `src/vscode-dts/`
+#      (one stable `vscode.d.ts`, ~170 `vscode.proposed.*.d.ts`).
+#      Downstream extensions depend on this surface unchanged across
+#      the millions of installs in the marketplace, which forces an
+#      uncommonly strict "API proposal lifecycle" — every proposed
+#      file must carry the canonical Microsoft/MIT copyright block,
+#      compile under both `tsconfig.vscode-dts.json` and
+#      `tsconfig.vscode-proposed-dts.json`, and pass the `pr.yml`
+#      version-bump check. alint encodes the structural pieces (file
+#      naming convention, copyright header, presence of the canonical
+#      `declare module 'vscode'` opening) so they stand independently
+#      of a TypeScript compiler invocation.
+#
+# What this config replaces:
+#   - `build/hygiene.ts` copyright-header check on src/, build/,
+#     scripts/ TypeScript: alint's `file_header` against the Microsoft
+#     /MIT block.
+#   - `build/hygiene.ts` tab-indentation check (the gate against
+#     space-indented TS): alint's `indent_style: tabs`.
+#   - `build/hygiene.ts` `productJson` check that bans
+#     `extensionsGallery` from product.json: alint's
+#     `file_content_forbidden` (the field is rejected outside a
+#     specific build flag).
+#   - `build/hygiene.ts` `checkCopilotEnginesVersion`: alint's
+#     `json_path_matches` for `engines.vscode` carrying a `^${root
+#     version}` shape (the live cross-file value comparison stays in
+#     the script — see "Needs new primitive" — but the shape check
+#     catches drift).
+#   - `tsfmt.json` line-ending policy mirrored on src/build/scripts:
+#     alint's `line_endings: lf`.
+#   - `.editorconfig` invariants (final newline, trim trailing,
+#     `[*.yml,*.yaml,package.json]` 2-space indent override): alint's
+#     `final_newline`, `no_trailing_whitespace`, `indent_style: tabs`
+#     respectively. (.editorconfig is a hint to editors; alint asserts
+#     the on-disk reality.)
+#   - `.gitattributes` line-ending matrix (LICENSE.txt CRLF,
+#     ThirdPartyNotices.txt CRLF, *.bat CRLF, *.sh LF, *.ps1 LF):
+#     alint's `line_endings` rules per-extension.
+#   - `vscode-dts/` proposed-API filename grammar
+#     (`vscode.proposed.[a-zA-Z]+.d.ts` — documented in the
+#     vscode-dts README, enforced nowhere statically): alint's
+#     `filename_regex`.
+#   - `vscode-dts/` proposed-API copyright header consistency: alint's
+#     `file_header`.
+#   - `vscode-dts/` every proposed file opens with `declare module
+#     'vscode'`: alint's `file_content_matches`.
+#   - `.eslint-plugin-local/` 47 custom rules registered in
+#     `eslint.config.js`: alint asserts the plugin's `index.ts` and
+#     `package.json` exist; the AST analysis stays in eslint.
+#   - GitHub Actions hygiene (action-SHA pinning, workflow
+#     permissions): the bundled `ci/github-actions@v1` ruleset plus a
+#     vscode-specific reusable-workflow assertion.
+#   - `cglicenses.json` + `cgmanifest.json` + `ThirdPartyNotices.txt`:
+#     the three Microsoft Component Governance triple — alint asserts
+#     each exists at the root; the deep license-resolution stays in
+#     the CG tooling (which writes the .txt file from the .json).
+#   - AGENTS.md present + the canonical "Code OSS / VS Code" marker.
+#
+# Known limitations versus build/hygiene.ts (each requires either an
+# alint primitive that doesn't ship today, or a TypeScript-aware
+# linter alint deliberately doesn't try to be — see this directory's
+# README.md for the full gap catalogue):
+#
+#   - `build/hygiene.ts` `formatting` stage — runs the in-tree
+#     `formatter.verifyFormatting()` per file using the TypeScript
+#     printer (a tsfmt-equivalent). This is AST-aware formatter
+#     verification; out of alint's scope. Shelled out via `command`.
+#
+#   - `build/hygiene.ts` `eslint` stage — the 47 custom AST rules
+#     under `.eslint-plugin-local/`. AST analysis is alint's
+#     deliberate non-goal. Shelled out via `npm run eslint`.
+#
+#   - `build/hygiene.ts` `stylelint` stage — CSS AST analysis.
+#     Shelled out via `npm run stylelint`.
+#
+#   - `build/hygiene.ts` `unicode` stage — the line-by-line
+#     non-ASCII-character scanner with `// allow-any-unicode-next-line`
+#     escape hatches. alint has `file_is_ascii` for the simple case
+#     but no per-line skip-comment escape hatch; the deep version stays
+#     in the script. The simple file-level rule catches the broad case
+#     and is set at `info` so as not to compete with the script.
+#
+#   - `checkCopilotEnginesVersion` — asserts that the *value* of
+#     `engines.vscode` in `extensions/copilot/package.json` literally
+#     equals `^${rootPkg.version}` from the root package.json. This is
+#     a `cross_file_value_equals` shape: the value at JSONPath A in
+#     file B must equal the (possibly transformed) value at JSONPath
+#     C in file D. **Already on the v0.10+ candidate list** as the
+#     single highest-demand rule kind (8 sources after this case
+#     study confirms a 9th).
+#
+#   - `pr.yml` API-proposal version-bump check — when any
+#     `vscode.proposed.*.d.ts` file is modified, the `version: N`
+#     pragma in `extensionsApiProposals.ts` for that proposal must
+#     bump. PR-diff-aware; out of alint's scope. Stays in the
+#     workflow.
+#
+#   - `build/checker/layersChecker.ts` — runtime TypeScript layer
+#     boundary check. Out of scope (TS AST + runtime).
+#
+#   - `build/lib/checkCyclicDependencies.ts` — module-graph cycle
+#     detection. Out of scope.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/agent-context@v1
+
+facts:
+  # The `build/hygiene.ts` script is the marker for this repo's
+  # convention layer. Gating on its presence keeps the config a no-op
+  # if applied to a fork that has stripped the script.
+  - id: has_vscode_hygiene
+    any_file_exists: [build/hygiene.ts]
+
+  # The vscode-dts proposed-API surface is a unique-to-vscode
+  # structural fact — gates the API-surface rules.
+  - id: has_vscode_dts
+    any_file_exists: [src/vscode-dts/vscode.d.ts]
+
+rules:
+  # ─────────────────────────────────────────────────────────────────
+  # build/hygiene.ts equivalent: copyright header check.
+  # The script's `copyrights` stream asserts every TS file under the
+  # `copyrightFilter` scope (build/**, src/**, scripts/**, test/**,
+  # extensions/** minus the carve-outs in build/filters.ts) starts
+  # with the canonical 4-line block:
+  #
+  #   /*-----------------…
+  #    *  Copyright (c) Microsoft Corporation. All rights reserved.
+  #    *  Licensed under the MIT License. See License.txt in the project root for license information.
+  #    *--------------------------------------------------------------------------------------------*/
+  #
+  # The pattern below matches the first three load-bearing lines (the
+  # leading and trailing dashes vary slightly across the repo's
+  # history; the load-bearing wording is exact).
+  #
+  # Use `(?m)` so `^` anchors per line, not the whole file
+  # (CONFIG-AUTHORING.md pitfall #13).
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-copyright-header-src
+    when: facts.has_vscode_hygiene
+    kind: file_header
+    paths:
+      include:
+        - "src/**/*.ts"
+        - "src/**/*.tsx"
+        - "build/**/*.ts"
+      exclude:
+        - "src/typings/**"
+        - "src/vs/*/**/*.d.ts"
+        - "src/vs/base/browser/dompurify/**"
+        - "src/vs/base/common/marked/marked.js"
+        - "src/vs/base/common/semver/semver.js"
+        - "src/vs/workbench/contrib/terminal/common/scripts/psreadline/**"
+        - "src/vs/workbench/services/keybinding/browser/keyboardLayouts/**"
+        - "build/lib/**"
+        - "build/monaco/**"
+        - "build/win32/**"
+        - "build/checker/**"
+        - "build/loader.min/**"
+        - "build/next/**"
+        # The proposed-API d.ts files have a header but it lives in
+        # a parallel rule (vscode-dts-proposed-copyright-header) so the
+        # exclude list there is independently maintained.
+        - "src/vscode-dts/**"
+    # Single-line regex: `\s+` spans the JSDoc continuation between
+    # the two load-bearing lines. CONFIG-AUTHORING.md pitfall #14 —
+    # YAML `|` block scalars don't expand `\n` to a real newline, so
+    # we collapse the two lines into a `\s+` join here instead.
+    pattern: 'Copyright \(c\) Microsoft Corporation\. All rights reserved\.\s+\*\s+Licensed under the MIT License\.'
+    lines: 6
+    level: warning
+    message: >-
+      Every TypeScript file under src/ (modulo carve-outs) must start
+      with the canonical Microsoft/MIT copyright block. This is the
+      structural counterpart of the `copyrights` stream in
+      build/hygiene.ts; a missing header silently passes a tsc check
+      and only the hygiene script catches it today.
+
+  # ─────────────────────────────────────────────────────────────────
+  # build/hygiene.ts equivalent: indentation policy.
+  # NOT EXPRESSED HERE — see this directory's README.md "Needs new
+  # primitive". The hygiene script's `indentation` stream has a regex
+  # carve-out for `^[\t]* \*` (JSDoc block-comment continuation lines)
+  # that alint's `indent_style: tabs` doesn't model, so a naive
+  # restatement would fire on every block-comment line in the tree.
+  # Deferred to `vscode-precommit-hygiene` below until alint grows a
+  # `block_comment_continuation` exception.
+  # ─────────────────────────────────────────────────────────────────
+
+  # ─────────────────────────────────────────────────────────────────
+  # build/hygiene.ts equivalent: productJson "no extensionsGallery".
+  # The hygiene script rejects any product.json that contains an
+  # `extensionsGallery` key — the field configures the marketplace
+  # endpoint, and ships of OSS Code OSS must NOT have it (only the
+  # Microsoft proprietary Code does). The hygiene check fires unless
+  # `process.env.BUILD_SOURCEVERSION` is set, which only the official
+  # Microsoft build pipeline sets.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-product-json-no-extensions-gallery
+    when: facts.has_vscode_hygiene
+    kind: file_content_forbidden
+    paths: "product.json"
+    pattern: '"extensionsGallery"'
+    level: error
+    message: >-
+      product.json must not declare `extensionsGallery` in the OSS
+      tree (Code OSS uses no marketplace by default). The hygiene
+      script in build/hygiene.ts rejects this at pre-commit time
+      unless the official BUILD_SOURCEVERSION env var is set.
+
+  # ─────────────────────────────────────────────────────────────────
+  # build/hygiene.ts equivalent: non-ASCII character enforcement.
+  # NOT EXPRESSED HERE — see this directory's README.md "Needs new
+  # primitive". The hygiene script's `unicode` stream rejects any
+  # codepoint outside `[\t\n\r\x20-\x7E]` PLUS an explicit allowlist
+  # of ~40 glyphs (arrows, math symbols, em-dash, emoji used in
+  # logs), AND honours per-line `// allow-any-unicode-next-line`
+  # escape-hatch comments and per-file
+  # `// allow-any-unicode-comment-file` markers.
+  #
+  # alint's `file_is_ascii` rule has neither the allowlist nor the
+  # escape-hatch comment support, so a naive restatement fires on
+  # any source file with a single em-dash in a JSDoc comment (which
+  # is most of the src/ tree). Filed as `file_is_ascii.allow:` and
+  # `file_is_ascii.skip_comment:` v0.10+ candidates in the README.
+  #
+  # Deferred to `vscode-precommit-hygiene` below.
+  # ─────────────────────────────────────────────────────────────────
+
+  # ─────────────────────────────────────────────────────────────────
+  # vscode-dts proposed-API filename grammar.
+  # The src/vscode-dts/README.md documents:
+  #   "create a new file in this directory, its name must follow this
+  #    pattern `vscode.proposed.[a-zA-Z]+.d.ts`"
+  # No script enforces this at PR time — a typo (lowercase 'D' in
+  # '.D.ts', a digit in the descriptor, etc.) silently misses the
+  # discovery glob.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-dts-proposed-filename-grammar
+    when: facts.has_vscode_dts
+    kind: filename_regex
+    paths:
+      include:
+        - "src/vscode-dts/vscode.proposed.*.d.ts"
+    pattern: '^vscode\.proposed\.[a-zA-Z][a-zA-Z0-9]*\.d\.ts$'
+    level: error
+    message: >-
+      Files in src/vscode-dts/ following the proposed-API pattern must
+      be named `vscode.proposed.<name>.d.ts` where <name> is one or
+      more letters (or letters followed by digits). A misnamed file
+      drops out of the build's discovery glob — the
+      vscode-dts/README.md documents this convention but no static
+      check enforces it today.
+
+  # ─────────────────────────────────────────────────────────────────
+  # vscode-dts proposed-API copyright header — same Microsoft/MIT
+  # block as the rest of the source tree. Verified at clone time
+  # against all 171 vscode.proposed.*.d.ts files.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-dts-proposed-copyright-header
+    when: facts.has_vscode_dts
+    kind: file_header
+    paths:
+      include:
+        - "src/vscode-dts/vscode.d.ts"
+        - "src/vscode-dts/vscode.proposed.*.d.ts"
+    # Same `\s+` joiner pattern as vscode-copyright-header-src above.
+    # CONFIG-AUTHORING.md pitfall #14.
+    pattern: 'Copyright \(c\) Microsoft Corporation\. All rights reserved\.\s+\*\s+Licensed under the MIT License\.'
+    lines: 6
+    level: error
+    message: >-
+      Every public-API d.ts file in src/vscode-dts/ must start with
+      the canonical Microsoft/MIT copyright block. Downstream
+      extensions consume this surface; a missing header is a
+      structural break that downstream consumers' build tooling can
+      surface in obscure ways.
+
+  # ─────────────────────────────────────────────────────────────────
+  # vscode-dts proposed-API entry-shape: every file must open with
+  # `declare module 'vscode'` (the file is a module-augmentation
+  # ambient module; without this opener it ceases to extend the
+  # global vscode namespace).
+  #
+  # Use `(?s)` so `.` matches newlines; needed because the copyright
+  # header is multi-line above the `declare module` line.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-dts-declare-module-shape
+    when: facts.has_vscode_dts
+    kind: file_content_matches
+    paths:
+      include:
+        # Stable surface only — every proposal that actually declares
+        # TS surface should open with `declare module 'vscode'`, BUT
+        # ~32 of the 171 proposed.* files at clone time are
+        # "placeholder proposals" that gate non-TS surface (a
+        # `package.json#contributes.configuration` key, a menu slot,
+        # etc.) and intentionally have no module declaration. The
+        # cleaner alint shape would be a `file_content_matches` with
+        # an `or:` clause, or a comment-marker carve-out, neither of
+        # which exist today. Restrict the assertion to the canonical
+        # vscode.d.ts and let the placeholder proposals pass.
+        - "src/vscode-dts/vscode.d.ts"
+    # Double-quoted YAML scalar so the bare `'` characters need no
+    # YAML-level escaping. The regex itself is plain text — match
+    # the literal opening `declare module 'vscode'`.
+    pattern: "declare module 'vscode'"
+    level: error
+    message: >-
+      src/vscode-dts/vscode.d.ts (the stable public-API surface) must
+      open with `declare module 'vscode'`. Without it the file is
+      a top-level module rather than an augmentation of the public
+      `vscode` API namespace.
+
+  # ─────────────────────────────────────────────────────────────────
+  # .gitattributes line-ending matrix.
+  # The .gitattributes is short but load-bearing:
+  #   LICENSE.txt eol=crlf
+  #   ThirdPartyNotices.txt eol=crlf
+  #   *.bat eol=crlf
+  #   *.cmd eol=crlf
+  #   *.ps1 eol=lf
+  #   *.sh eol=lf
+  # Mirrored as alint line_endings rules so the working-tree state is
+  # explicitly checked (git attributes only affects checkout/commit;
+  # the on-disk file might already have the wrong endings).
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-license-files-crlf
+    when: facts.has_vscode_hygiene
+    kind: line_endings
+    paths:
+      - "LICENSE.txt"
+      - "ThirdPartyNotices.txt"
+    target: crlf
+    level: warning
+    message: >-
+      .gitattributes pins LICENSE.txt and ThirdPartyNotices.txt to
+      CRLF (these are surfaced verbatim in Windows installers).
+      Working-tree drift here will be re-converted on commit but
+      shows up as noisy diffs in the meantime.
+
+  - id: vscode-windows-bat-crlf
+    when: facts.has_vscode_hygiene
+    kind: line_endings
+    paths:
+      - "**/*.bat"
+      - "**/*.cmd"
+    target: crlf
+    level: warning
+
+  - id: vscode-shell-script-lf
+    when: facts.has_vscode_hygiene
+    kind: line_endings
+    paths:
+      - "**/*.sh"
+      - "**/*.ps1"
+    target: lf
+    level: warning
+
+  # ─────────────────────────────────────────────────────────────────
+  # tsfmt.json invariants — vscode uses `tsfmt` (the TypeScript
+  # formatter API) not Prettier. The config pins specific options;
+  # if the file is dropped or mutated, hygiene's `formatting` stream
+  # silently passes (tsfmt falls back to its own defaults).
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-tsfmt-json-exists
+    when: facts.has_vscode_hygiene
+    kind: file_exists
+    paths: tsfmt.json
+    root_only: true
+    level: error
+    message: >-
+      tsfmt.json is the canonical formatting-options file for the
+      TypeScript formatter that build/hygiene.ts's `formatting`
+      stream invokes. Missing here means hygiene silently passes for
+      formatter checks.
+
+  # ─────────────────────────────────────────────────────────────────
+  # .eslint-plugin-local custom-rules infrastructure.
+  # 47 .ts files under .eslint-plugin-local/ implement custom AST
+  # rules. The plugin's index.ts is the registration point; if it
+  # disappears, eslint silently loads zero custom rules.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-eslint-plugin-local-index-exists
+    when: facts.has_vscode_hygiene
+    kind: file_exists
+    paths:
+      - ".eslint-plugin-local/index.ts"
+      - ".eslint-plugin-local/package.json"
+      - ".eslint-plugin-local/tsconfig.json"
+      - "eslint.config.js"
+      - ".eslint-ignore"
+    level: error
+    message: >-
+      The .eslint-plugin-local/ infrastructure (index.ts + package.json
+      + tsconfig.json + eslint.config.js + .eslint-ignore) is what
+      registers vscode's 47 custom AST rules with eslint. A missing
+      file here silently disables the custom-rule layer.
+
+  # ─────────────────────────────────────────────────────────────────
+  # Component Governance trio.
+  # Microsoft Component Governance requires three on-disk files:
+  #   - cgmanifest.json (the source registry)
+  #   - cglicenses.json (license overrides for components without
+  #     unambiguous LICENSE files)
+  #   - ThirdPartyNotices.txt (the assembled notices file, generated
+  #     from the above)
+  # All three must be in lockstep with package-lock.json + Cargo.lock.
+  # alint asserts each exists; the deep license-resolution stays in
+  # the CG tooling.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-component-governance-files
+    kind: file_exists
+    paths:
+      - "cgmanifest.json"
+      - "cglicenses.json"
+      - "ThirdPartyNotices.txt"
+    root_only: true
+    level: error
+    message: >-
+      Microsoft Component Governance requires cgmanifest.json,
+      cglicenses.json, and ThirdPartyNotices.txt at the repo root.
+      ThirdPartyNotices.txt is generated from the manifest; deletion
+      of any of the three breaks the OSS-license attribution flow
+      and blocks Microsoft release pipelines.
+
+  - id: vscode-third-party-notices-non-trivial
+    # The ThirdPartyNotices.txt file is large (~3800 lines, ~200 KiB)
+    # because it embeds the verbatim license text of every transitive
+    # dependency. A truncated version (e.g. < 500 lines) is almost
+    # certainly a corrupted regeneration — the CG tooling overwrites
+    # the file but failures mid-write can leave a stub.
+    kind: file_min_lines
+    paths: "ThirdPartyNotices.txt"
+    min_lines: 500
+    level: warning
+    message: >-
+      ThirdPartyNotices.txt is much shorter than expected (typical
+      size ~3800 lines). Likely a truncated regeneration; re-run the
+      Component Governance tool.
+
+  # ─────────────────────────────────────────────────────────────────
+  # tsconfig.base.json strictness.
+  # vscode runs the full strict-mode TypeScript matrix end-to-end.
+  # tsconfig.base.json is the root that all other tsconfig*.json
+  # files extend; if `strict: true` is dropped here, every file in
+  # the tree silently degrades.
+  # CONFIG-AUTHORING.md pitfall #16 — `*_path_equals` (not _matches)
+  # for bool fields.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-tsconfig-base-strict
+    when: facts.has_vscode_hygiene
+    kind: json_path_equals
+    paths: "src/tsconfig.base.json"
+    path: "$.compilerOptions.strict"
+    equals: true
+    level: error
+    message: >-
+      src/tsconfig.base.json is the root tsconfig that all other
+      tsconfig*.json files inherit from. Dropping `strict: true` here
+      silently relaxes type-checking across the entire src/ tree.
+
+  - id: vscode-tsconfig-base-no-implicit-overrides
+    when: facts.has_vscode_hygiene
+    kind: json_path_equals
+    paths: "src/tsconfig.base.json"
+    path: "$.compilerOptions.noImplicitOverride"
+    equals: true
+    level: warning
+    message: >-
+      src/tsconfig.base.json should keep `noImplicitOverride: true`
+      so subclass methods that override a parent must use the
+      `override` keyword. This catches a common refactor footgun
+      where a parent method is renamed and the subclass silently
+      stops overriding.
+
+  # ─────────────────────────────────────────────────────────────────
+  # package.json scripts hygiene.
+  # The CI pipeline (.github/workflows/pr.yml etc.) runs:
+  #   npm run precommit (drives build/hygiene.ts)
+  #   npm run eslint
+  #   npm run stylelint
+  #   npm run compile-check-ts-native
+  #   npm run vscode-dts-compile-check
+  #   npm run valid-layers-check
+  # If any of these scripts is silently renamed, the corresponding
+  # CI step exits 0 (npm run on a missing script is a no-op).
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-package-json-precommit-script
+    when: facts.has_vscode_hygiene
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.scripts.precommit"
+    matches: 'build/hygiene\.ts'
+    level: error
+    message: >-
+      package.json#scripts.precommit must invoke build/hygiene.ts.
+      The git pre-commit hook calls `npm run precommit`; renaming the
+      script silently bypasses the hygiene check.
+
+  - id: vscode-package-json-eslint-script
+    when: facts.has_vscode_hygiene
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.scripts.eslint"
+    matches: 'build/eslint\.ts'
+    level: error
+    message: >-
+      package.json#scripts.eslint must invoke build/eslint.ts. The
+      pr.yml CI workflow runs `npm run eslint`.
+
+  - id: vscode-package-json-stylelint-script
+    when: facts.has_vscode_hygiene
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.scripts.stylelint"
+    matches: 'build/stylelint\.ts'
+    level: error
+
+  - id: vscode-package-json-vscode-dts-check
+    when: facts.has_vscode_hygiene
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.scripts['vscode-dts-compile-check']"
+    matches: 'tsgo --project src/tsconfig\.vscode-dts\.json'
+    level: error
+    message: >-
+      package.json#scripts.vscode-dts-compile-check must invoke tsgo
+      against src/tsconfig.vscode-dts.json. This is what gates the
+      public-API surface compiles cleanly under both stable and
+      proposed dts configurations.
+
+  # ─────────────────────────────────────────────────────────────────
+  # AGENTS.md hygiene.
+  # The repo ships an AGENTS.md at the root (the canonical "what
+  # AI coding agents should read first" file). Asserting it stays
+  # in place plus carries a marker referencing the OSS branding.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-agents-md-present
+    kind: file_exists
+    paths: AGENTS.md
+    root_only: true
+    level: error
+    message: >-
+      AGENTS.md is the canonical AI-coding-agent instruction file at
+      the vscode repo root. Deletion is almost certainly unintentional.
+
+  # ─────────────────────────────────────────────────────────────────
+  # GitHub Actions hygiene.
+  # ci/github-actions@v1 covers the broad action-SHA pinning rule.
+  # Layer a vscode-specific rule for workflow-level permissions
+  # blocks (every workflow at .github/workflows/*.yml should declare
+  # an explicit top-level permissions: block).
+  # CONFIG-AUTHORING.md pitfall #13 — `(?m)` for line-anchored
+  # regex.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-workflow-has-permissions
+    kind: file_content_matches
+    paths:
+      include:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+    # Match either a top-level `permissions:` block OR a `workflow_call:`
+    # trigger — reusable workflows defer permissions to the calling
+    # workflow, and pinning permissions at the reusable layer is
+    # actually counterproductive (it locks callers out of finer-
+    # grained perms). vscode has 4 reusable workflows
+    # (pr-{linux,linux-cli,darwin,win32}-test.yml + copilot-setup-steps).
+    # CONFIG-AUTHORING.md pitfall #13 — `(?m)` for line anchoring.
+    pattern: '(?m)^(permissions:|on:[\s\S]*workflow_call:)'
+    level: warning
+    message: >-
+      Every .github/workflows/*.yml file should declare a top-level
+      `permissions:` block (least-privilege default), unless it's a
+      reusable workflow that defers permissions to its caller (in
+      which case the file should declare a `workflow_call:` trigger).
+      OpenSSF Scorecard checks this post-merge; alint surfaces it at
+      PR time.
+
+  # ─────────────────────────────────────────────────────────────────
+  # Shell out to the canonical vscode tools for everything alint
+  # can't express. Pipes alint check into a drop-in for
+  # `npm run precommit && npm run eslint && npm run stylelint`.
+  # ─────────────────────────────────────────────────────────────────
+  - id: vscode-eslint
+    when: facts.has_vscode_hygiene
+    kind: command
+    paths: "package.json"
+    command: ["npm", "run", "eslint"]
+    timeout: 600
+    level: error
+    message: >-
+      `npm run eslint` failed (the eslint check that wraps the 47
+      .eslint-plugin-local/ rules + the upstream typescript-eslint
+      ruleset).
+
+  - id: vscode-stylelint
+    when: facts.has_vscode_hygiene
+    kind: command
+    paths: "package.json"
+    command: ["npm", "run", "stylelint"]
+    timeout: 300
+    level: error
+    message: >-
+      `npm run stylelint` failed. CSS files under src/**/*.css are
+      checked against the bundled stylelint config.
+
+  - id: vscode-precommit-hygiene
+    when: facts.has_vscode_hygiene
+    kind: command
+    paths: "package.json"
+    command: ["npm", "run", "precommit"]
+    timeout: 600
+    level: warning
+    message: >-
+      `npm run precommit` (build/hygiene.ts) failed. Most of what
+      this script does is captured statically by alint above; this
+      command-rule is the catch-all backstop for the AST-aware
+      `formatting` stage and the `// allow-any-unicode-next-line`
+      escape-hatch handling that alint can't model.

@@ -1,0 +1,1009 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for tensorflow/tensorflow.
+#
+# tensorflow is the LARGE-MIXED-TREE data point for P2b Wave 1: a
+# Bazel-orchestrated multi-language ML monorepo (~21k files captured
+# under sparse-checkout; the full unsparse tree exceeds 80k files +
+# 200 MiB once tensorflow/core/kernels, tensorflow/compiler,
+# third_party/, and tensorflow/lite/micro are reincluded). Languages
+# in scope: C++/CUDA core, Python frontend (the canonical user
+# surface), Java legacy binding under tensorflow/java/, Go binding
+# under tensorflow/go/, JavaScript codegen scaffolding under
+# tensorflow/js/, plus TensorFlow Lite per-device bindings under
+# tensorflow/lite/{python,java,swift,objc} (the four shipped TFLite
+# language frontends in this tree).
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `tensorflow/tensorflow@21d3ed60` (rev =
+# `21d3ed604b4a8919a7ecef8a1190f192f21d26f9`), heaviest sub-trees
+# excluded via `git sparse-checkout set --no-cone '/*'
+# '!/tensorflow/core/kernels' '!/tensorflow/compiler' '!/third_party'
+# '!/tensorflow/lite/micro'`.
+#
+# Concrete count at HEAD (after sparse-checkout):
+#
+#   - 21 553 files in scope, ~290 MiB working tree
+#   - 671 BUILD files + 87 *.bzl files (Bazel — alint asserts
+#     filename presence + does NOT parse Bazel content)
+#   - 16 GitHub Actions workflows under .github/workflows/
+#     (vs. 144 in pytorch — TF leans on internal-Google CI for the
+#     bulk; the public GHA surface is intentionally minimal)
+#   - 11 ci/official/*.sh entrypoints + 16 envs/*.env files +
+#     ci/official/utilities/code_check_full.bats with 9 @test cases
+#     (the canonical CI lint suite — wraps bazel queries for license
+#     graph integrity, pip dep coverage, CUDA-free Windows, API
+#     compatibility, and the master `bazel nobuild` smoke gate)
+#   - 1 185 *.pbtxt golden files at tensorflow/tools/api/golden/
+#     (585 v1 + 600 v2) — the explicit per-symbol API contract that
+#     `tensorflow/tools/api/tests/api_compatibility_test.py` runs
+#     `tf` against, exit-1 on any drift, blocking PR merge until
+#     `bazel run … -- --update_goldens True` (with API-leads
+#     approval) is run
+#   - 7 per-language top-level subdirectories under tensorflow/:
+#     c/, cc/, python/, java/, go/, js/, lite/
+#   - 4 TFLite per-language sub-bindings under tensorflow/lite/:
+#     python/, java/, swift/, objc/ (each with explicit
+#     <Source> ↔ <SourceTest|Tests> file-name parity discipline)
+#   - 5 requirements_lock_3_{10,11,12,13,14}.txt — pip-compile output
+#     across the supported Python interpreter matrix
+#   - 1 tensorflow/tools/ci_build/pylintrc (344 lines — the canonical
+#     Python style config; symlinked to .pylintrc at repo root)
+#   - 1 .clang-format (4 lines, Google style baseline)
+#   - .bazelrc = 60 KB, .bazelversion, .bazelignore, MODULE.bazel,
+#     WORKSPACE — Bazel-specific entry points
+#
+# Total **structural-validation surfaces** counted: **34** discrete
+# checks across the inventory (see this directory's README.md).
+#
+#   - 17 of 34 (50 %) MAP to existing alint rules — bundled
+#     oss-baseline + python + ci/github-actions +
+#     hygiene/no-tracked-artifacts + compliance/apache-2 +
+#     tooling/editorconfig ship roughly 35 rules between them, plus
+#     the 50 tensorflow-specific rules below covering per-language
+#     subdir presence, golden-file presence, build-system shape,
+#     pip lockfile matrix, CI script presence, governance files
+#   - 6 of 34 (18 %) shell out via `command:` rules — wrapping
+#     pylint, clang-format, buildifier, shellcheck (ci/utilities),
+#     codespell, the bats-driven api_compatibility_test
+#   - 11 of 34 (32 %) are out of alint's scope or need new
+#     primitives — the bazel cquery license-graph integrity check,
+#     the bazel cquery pip-dep coverage check, the API
+#     compatibility test (Python AST + protobuf reflection +
+#     1185-pbtxt cross-reference), the cross-language API parity
+#     gates (Python ↔ Java ↔ JS ↔ Swift ↔ ObjC), the
+#     `--update_goldens` regenerate-and-diff freshness check
+#
+# Headline finding: tensorflow has TWO discipline layers stacked.
+# Layer 1 (file-shape) — every TFLite source has a paired test
+# (Java <Foo>.java ↔ <Foo>Test.java; Swift <Foo>.swift ↔
+# <Foo>Tests.swift; ObjC TFL<Foo>.h ↔ TFL<Foo>Tests.m; Python
+# <foo>.py ↔ <foo>_test.py) — alint expresses every one as a
+# single `pair` rule per language, and finds drift TFLite swift
+# already has (CoreMLDelegate.swift, Delegate.swift,
+# InterpreterError.swift, SignatureRunnerError.swift,
+# SignatureRunner.swift have no matching *Tests.swift). Layer 2
+# (API parity) — every public Python symbol has a v1 and v2
+# golden pbtxt; every Java/JS/Swift/ObjC binding mirrors the
+# core API surface — this is exactly the v0.11+
+# `cross_language_implementation_complete` rule kind shape, and
+# tensorflow is the cleanest single-repo demonstration of the
+# pattern.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to
+# your local sparse-checkout layout.
+#
+# Known limitations versus the existing TF tooling (each requires
+# an alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#
+#   - tensorflow/tools/api/golden/v{1,2}/*.pbtxt freshness vs.
+#     `tf` — the api_compatibility_test boots tensorflow, walks
+#     every public symbol, serialises to ApiObjects pbtxt, diffs
+#     against the on-disk goldens. alint asserts the goldens exist
+#     and are non-empty; the regen-and-diff freshness check stays
+#     on bazel + the test (needs `generated_file_fresh` v0.10+).
+#
+#   - tensorflow/tools/api/golden/v{1,2} parity — every symbol in
+#     v1 must (with documented exceptions) have a corresponding
+#     entry in v2 and vice versa; the test enforces this dynamically
+#     by comparing two text-format protobuf trees built by walking
+#     `tf.compat.v1` and `tf` respectively. alint cannot
+#     cross-reference the two textproto trees today (needs
+#     `cross_language_implementation_complete` v0.11+ generalised
+#     to "every entry in registry A has a corresponding entry in
+#     registry B", or equivalently `cross_file_value_equals` v0.10+
+#     extended to set-equality semantics).
+#
+#   - Cross-language API parity (Python ↔ Java ↔ Go ↔ JS ↔ Swift
+#     ↔ ObjC) — the canonical Python API has a shadow surface in
+#     each binding: every TFLite operator declared in
+#     tensorflow/lite/python/lite.py has a Java counterpart in
+#     tensorflow/lite/java/src/main/java/org/tensorflow/lite/, a
+#     Swift counterpart in tensorflow/lite/swift/Sources/, etc.
+#     alint can express the FILE-shape parity (every source has a
+#     test) via `pair`; the API-symbol parity is the
+#     `cross_language_implementation_complete` v0.11+ candidate.
+#
+#   - Bazel cquery license-graph integrity (every `licenses=notice`
+#     dep in the pip wheel target also appears in the licenses
+#     bundle target) — needs `command:` shellout to bazel + the
+#     bats test. We wire the bats invocation but the deep cquery
+#     stays in the test (out of scope: requires a bazel server).
+#
+#   - bazel buildifier formatting on BUILD files — wrapped as a
+#     `command:` rule below; the actual buildifier invocation
+#     mirrors the bats script.
+#
+#   - `requirements_lock_3_{10,11,12,13,14}.txt` cross-version
+#     consistency — every package pinned in 3.10's lock SHOULD be
+#     pinned to the same version in 3.11/3.12/3.13/3.14 (modulo
+#     interpreter-conditional pkgs like `cffi` on macOS arm64).
+#     This is the textbook `cross_file_value_equals` shape
+#     (8th confirmation — strongest demand signal in P2 now).
+#
+#   - opensource_only.files registry — tensorflow ships an
+#     opensource_only.files manifest at tensorflow/opensource_only.files
+#     listing 256 files with a `tf_staging/<path>:.<ext>` -prefix
+#     marker indicating the file is OSS-only (vs. internal Google).
+#     Same shape as apache/arrow's rat_exclude_files.txt — needs the
+#     v0.10+ `registry_paths_resolve` rule kind (6th confirmation —
+#     joining rust + clap + cpython + arrow + pytorch).
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge markers,
+  # no bidi controls, etc.).
+  - alint://bundled/oss-baseline@v1
+
+  # tensorflow is Apache-2.0 licensed. Every source file carries the
+  # canonical "Licensed under the Apache License, Version 2.0" header;
+  # the bundled rule's default pattern matches cleanly without
+  # override.
+  - alint://bundled/compliance/apache-2@v1
+
+  # Python is the canonical user-facing API; pyproject.toml-shape
+  # rules from the bundled python ruleset apply (note: TF still ships
+  # via setup.py + requirements_lock_*.txt rather than pyproject.toml,
+  # so the ruleset's `python-pyproject-declares-name` will fire info-
+  # level — that's an accurate finding, TF predates PEP 621 adoption).
+  - alint://bundled/python@v1
+
+  # GitHub Actions hardening (workflow has name, permissions declared,
+  # actions pinned to SHA). Applies to the 16 workflows in
+  # .github/workflows/.
+  - alint://bundled/ci/github-actions@v1
+
+  # No tracked node_modules/, target/, dist/, .DS_Store, etc.
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+  # The .editorconfig bundled rules (TF doesn't actually ship one at
+  # the moment — the bundled ruleset's `tooling-editorconfig-exists`
+  # will fire info-level, an accurate finding for this repo).
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language subdir presence
+  #
+  # tensorflow/ contains 7 per-language sub-trees (c, cc, python,
+  # java, go, js, lite). Each has its own BUILD file at root.
+  # Asserting the dirs and BUILD files exist catches accidental
+  # deletes / mis-merges.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-language-subdirs-present
+    kind: file_exists
+    # Note: `root_only: true` would reject these paths as multi-component
+    # (file_exists/literal_is_nested treats >1 path component as "not at
+    # root"). The pattern's anchored-by-design nature makes the
+    # root-only flag redundant here.
+    paths:
+      - "tensorflow/c/BUILD"
+      - "tensorflow/cc/BUILD"
+      - "tensorflow/python/BUILD"
+      - "tensorflow/java/BUILD"
+      - "tensorflow/go/BUILD"
+      - "tensorflow/js/BUILD"
+      - "tensorflow/lite/BUILD"
+    level: error
+    message: |
+      A canonical TF per-language sub-tree is missing. The 7 dirs
+      (c/, cc/, python/, java/, go/, js/, lite/) are the load-bearing
+      language frontends; deleting one breaks the public binding for
+      that language.
+
+  - id: tensorflow-language-subdirs-have-build-file
+    kind: file_exists
+    # Multi-component paths under the root — root_only intentionally
+    # omitted because file_exists's literal-path fast path treats any
+    # path with > 1 component as "not at root" when root_only is set.
+    paths:
+      - "tensorflow/c/BUILD"
+      - "tensorflow/cc/BUILD"
+      - "tensorflow/python/BUILD"
+      - "tensorflow/java/BUILD"
+      - "tensorflow/go/BUILD"
+      - "tensorflow/js/BUILD"
+      - "tensorflow/lite/BUILD"
+    level: error
+    message: |
+      Per-language sub-tree must have its own Bazel BUILD file at root.
+      The presence of BUILD is what makes the directory a Bazel package
+      (`bazel build //tensorflow/<lang>/...` requires it).
+
+  # ──────────────────────────────────────────────────────────────────
+  # TFLite per-language sub-binding presence
+  #
+  # Under tensorflow/lite/ the 4 shipped per-language frontends are
+  # python/, java/, swift/, objc/. Each has its own BUILD (or
+  # BUILD.apple for the Apple platforms).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-lite-language-subdirs-present
+    kind: file_exists
+    # Multi-component paths — root_only omitted (the literal paths
+    # are inherently root-anchored).
+    paths:
+      - "tensorflow/lite/python/BUILD"
+      - "tensorflow/lite/java/BUILD"
+      - "tensorflow/lite/swift/BUILD.apple"
+      - "tensorflow/lite/objc/BUILD.apple"
+    level: warning
+    message: |
+      A TFLite per-language sub-binding is missing. Each shipped
+      language frontend (python, java, swift, objc) has its own
+      directory under tensorflow/lite/.
+
+  # ──────────────────────────────────────────────────────────────────
+  # TFLite Swift per-source test parity
+  #
+  # tensorflow/lite/swift/Sources/<Foo>.swift ↔
+  # tensorflow/lite/swift/Tests/<Foo>Tests.swift
+  #
+  # The `pair` rule asserts every source has a paired test file —
+  # alint's headline mechanism for "every X has a Y" file-shape
+  # parity (the v0.10+ `cross_language_implementation_complete`
+  # primitive generalises this from 2-way to N-way across languages).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-lite-swift-source-has-test
+    kind: pair
+    primary: "tensorflow/lite/swift/Sources/*.swift"
+    partner: "tensorflow/lite/swift/Tests/{stem}Tests.swift"
+    level: warning
+    message: |
+      Every Swift source under tensorflow/lite/swift/Sources/ should
+      have a paired test file under .../Tests/<Stem>Tests.swift.
+      The TFLite Swift binding's per-source test discipline is a
+      manual convention; this rule enforces it.
+
+  # ──────────────────────────────────────────────────────────────────
+  # TFLite ObjC per-source test parity
+  #
+  # tensorflow/lite/objc/sources/TFL<Foo>.{h,m,mm} ↔
+  # tensorflow/lite/objc/tests/TFL<Foo>Tests.m
+  #
+  # The ObjC binding's discipline pairs the API headers in apis/
+  # with the implementation in sources/ AND with tests in tests/.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-lite-objc-api-has-test
+    kind: pair
+    primary: "tensorflow/lite/objc/apis/TFL*.h"
+    partner: "tensorflow/lite/objc/tests/{stem}Tests.m"
+    level: info
+    message: |
+      Every TFLite ObjC API header under tensorflow/lite/objc/apis/
+      should have a paired tests/<Stem>Tests.m. Some headers ship
+      without tests (e.g. TFLDelegate.h is interface-only); this
+      rule fires info-level so the omissions surface for review
+      without blocking.
+
+  # ──────────────────────────────────────────────────────────────────
+  # TFLite Python per-source test parity
+  #
+  # tensorflow/lite/python/<foo>.py ↔
+  # tensorflow/lite/python/<foo>_test.py
+  #
+  # Python uses `_test` suffix instead of separate dirs. PyTest /
+  # bazel py_test conventions both honour this.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-lite-python-source-has-test
+    kind: pair
+    primary: "tensorflow/lite/python/*.py"
+    partner: "tensorflow/lite/python/{stem}_test.py"
+    level: info
+    message: |
+      TFLite Python sources at tensorflow/lite/python/<foo>.py should
+      have a matching <foo>_test.py. info-level: many helpers/utils
+      are tested transitively via integration tests, so partial
+      coverage is expected.
+
+  # ──────────────────────────────────────────────────────────────────
+  # API golden files presence
+  #
+  # tensorflow/tools/api/golden/v1/*.pbtxt and v2/*.pbtxt are the
+  # canonical Python API surface. Every public TF symbol has one
+  # textproto file describing its argspec + member signatures. The
+  # api_compatibility_test enforces these match the live tf module.
+  #
+  # Asserting the dirs are non-empty catches accidental deletes
+  # that would turn the API compat test into a no-op.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-api-golden-v1-present
+    # file_exists matches FILES, not directories — assert via the
+    # parent BUILD file (tensorflow/tools/api/golden/BUILD) plus
+    # via the canonical first-symbol pbtxt that's been in the tree
+    # since the v1 surface was frozen.
+    kind: file_exists
+    paths:
+      - "tensorflow/tools/api/golden/BUILD"
+      - "tensorflow/tools/api/golden/v1/tensorflow.audio.pbtxt"
+    level: error
+    message: |
+      tensorflow/tools/api/golden/v1/ is the textproto manifest of
+      every public Python API symbol in TF v1. Without it, the
+      api_compatibility_test cannot verify v1 backwards-compat.
+
+  - id: tensorflow-api-golden-v2-present
+    kind: file_exists
+    paths:
+      - "tensorflow/tools/api/golden/v2/tensorflow.audio.pbtxt"
+    level: error
+    message: |
+      tensorflow/tools/api/golden/v2/ is the textproto manifest of
+      every public Python API symbol in TF v2. Without it, the
+      api_compatibility_test cannot verify v2 backwards-compat.
+
+  - id: tensorflow-api-golden-v1-substantive
+    # The v1 golden tree at HEAD has 585 .pbtxt files. Every one is
+    # required to be non-empty (textproto manifest of public symbol).
+    kind: file_min_size
+    paths: "tensorflow/tools/api/golden/v1/*.pbtxt"
+    min_bytes: 1
+    level: warning
+    message: |
+      The v1 API golden directory exists but is suspiciously small.
+      It should contain ~585 .pbtxt files (one per public symbol).
+
+  # ──────────────────────────────────────────────────────────────────
+  # API golden v1/v2 file-shape — every .pbtxt has the canonical
+  # tf_module / tf_class first-line marker
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-api-golden-v1-has-canonical-marker
+    kind: file_content_matches
+    paths:
+      include: ["tensorflow/tools/api/golden/v1/*.pbtxt"]
+    pattern: '(?m)^path:\s*"tensorflow\.'
+    level: warning
+    message: |
+      Every v1 API golden .pbtxt should start with `path: "tensorflow.X"`
+      identifying the symbol. A file missing the marker either has the
+      wrong serialization shape or was accidentally hand-edited.
+
+  - id: tensorflow-api-golden-v2-has-canonical-marker
+    kind: file_content_matches
+    paths:
+      include: ["tensorflow/tools/api/golden/v2/*.pbtxt"]
+    pattern: '(?m)^path:\s*"tensorflow\.'
+    level: warning
+    message: |
+      Every v2 API golden .pbtxt should start with `path: "tensorflow.X"`
+      identifying the symbol. A file missing the marker either has the
+      wrong serialization shape or was accidentally hand-edited.
+
+  # ──────────────────────────────────────────────────────────────────
+  # api_compatibility_test scaffolding presence
+  #
+  # The test itself + the API_UPDATE_WARNING.txt + the proto module
+  # are load-bearing — without them, the goldens are inert.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-api-compat-test-present
+    # Multi-component literal paths are root-anchored by default.
+    kind: file_exists
+    paths:
+      - "tensorflow/tools/api/tests/api_compatibility_test.py"
+      - "tensorflow/tools/api/tests/API_UPDATE_WARNING.txt"
+      - "tensorflow/tools/api/lib/api_objects.proto"
+      - "tensorflow/tools/api/lib/python_object_to_proto_visitor.py"
+      - "tensorflow/tools/common/public_api.py"
+      - "tensorflow/tools/common/traverse.py"
+    level: error
+    message: |
+      A load-bearing API compatibility test artefact is missing.
+      The test enforces backwards-compat across every public TF
+      Python symbol; without these files no check runs.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Bazel build-system presence — top-level invariants
+  #
+  # MODULE.bazel + WORKSPACE + BUILD + .bazelrc + .bazelversion +
+  # .bazelignore are TF's Bazel entry points. Removing any of them
+  # silently breaks `bazel build` for the entire tree.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-bazel-build-system-present
+    kind: file_exists
+    paths:
+      - "MODULE.bazel"
+      - "WORKSPACE"
+      - "BUILD"
+      - ".bazelrc"
+      - ".bazelversion"
+      - ".bazelignore"
+    root_only: true
+    level: error
+    message: |
+      A canonical Bazel entry-point file is missing. TF's build is
+      Bazel-driven; removing MODULE.bazel / WORKSPACE / .bazelrc /
+      .bazelversion breaks the entire CI matrix.
+
+  - id: tensorflow-workspace-bzl-files-present
+    # Top-level workspace0/1/2/3.bzl define the Bazel workspace
+    # dependency-loading sequence. The numbered convention is TF's
+    # internal pattern; reorganising would touch every CI script.
+    # (Multi-component literal paths are root-anchored by default.)
+    kind: file_exists
+    paths:
+      - "tensorflow/workspace0.bzl"
+      - "tensorflow/workspace1.bzl"
+      - "tensorflow/workspace2.bzl"
+      - "tensorflow/workspace3.bzl"
+      - "tensorflow/tensorflow.bzl"
+      - "tensorflow/tensorflow.default.bzl"
+      - "tensorflow/tf_version.bzl"
+    level: error
+    message: |
+      A canonical workspace .bzl file is missing. TF's Bazel workspace
+      loads dependencies through workspace0..3.bzl in order; missing
+      any one breaks `bazel build`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level governance + community files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-governance-files-present
+    kind: file_exists
+    paths:
+      - "AUTHORS"
+      - "CITATION.cff"
+      - "CODEOWNERS"
+      - "CODE_OF_CONDUCT.md"
+      - "CONTRIBUTING.md"
+      - "ISSUES.md"
+      - "LICENSE"
+      - "README.md"
+      - "RELEASE.md"
+      - "SECURITY.md"
+    root_only: true
+    level: error
+    message: |
+      A canonical governance / community file is missing. TF's public
+      OSS surface includes AUTHORS, CITATION.cff, CODEOWNERS, the
+      CoC, contributor guide, ISSUES.md, LICENSE, README, RELEASE
+      notes, and SECURITY policy.
+
+  # ──────────────────────────────────────────────────────────────────
+  # configure script presence
+  #
+  # configure / configure.cmd / configure.py drive TF's pre-build
+  # `./configure` flow that detects CUDA, ROCm, MKL, etc. Building
+  # without `./configure` first is unsupported.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-configure-scripts-present
+    kind: file_exists
+    paths:
+      - "configure"
+      - "configure.cmd"
+      - "configure.py"
+    root_only: true
+    level: error
+    message: |
+      A configure entry-point script is missing. `./configure` (POSIX)
+      / configure.cmd (Windows) / configure.py (the actual config
+      logic) drives the CUDA/ROCm/MKL detection. Bazel cannot build
+      without these.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language entry-point files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-c-api-headers-present
+    # Multi-component literal paths are root-anchored by default.
+    kind: file_exists
+    paths:
+      - "tensorflow/c/c_api.h"
+      - "tensorflow/c/c_api_experimental.h"
+    level: error
+    message: |
+      The tensorflow/c/ public C API headers (c_api.h,
+      c_api_experimental.h) are the contract for every binding
+      that doesn't link the Python interpreter. Missing them
+      breaks the JavaScript / Java / Go / Swift / ObjC bindings.
+
+  - id: tensorflow-python-api-template-present
+    # api_template.__init__.py + api_template_v1.__init__.py are
+    # the Python __init__.py templates the api/generator2 toolchain
+    # fills with the public symbol re-exports during pip-wheel build.
+    # (Multi-component literal paths are root-anchored by default.)
+    kind: file_exists
+    paths:
+      - "tensorflow/api_template.__init__.py"
+      - "tensorflow/api_template_v1.__init__.py"
+      - "tensorflow/compat_template.__init__.py"
+      - "tensorflow/compat_template_v1.__init__.py"
+      - "tensorflow/virtual_root_template_v1.__init__.py"
+      - "tensorflow/virtual_root_template_v2.__init__.py"
+    level: error
+    message: |
+      A Python API __init__.py template is missing. These six files
+      drive `tensorflow/python/tools/api/generator2`'s output of the
+      pip wheel's `tensorflow.__init__` and `tensorflow.compat.v1`
+      surfaces.
+
+  # ──────────────────────────────────────────────────────────────────
+  # pip-compile lockfile parity across the Python interpreter matrix
+  #
+  # tensorflow ships requirements_lock_3_{10,11,12,13,14}.txt — one
+  # per supported interpreter. Asserting all five exist catches
+  # accidental drops when adding a new Python version.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-requirements-lock-matrix-present
+    kind: file_exists
+    paths:
+      - "requirements_lock_3_10.txt"
+      - "requirements_lock_3_11.txt"
+      - "requirements_lock_3_12.txt"
+      - "requirements_lock_3_13.txt"
+      - "requirements_lock_3_14.txt"
+    root_only: true
+    level: warning
+    message: |
+      A pip-compile lockfile for one of the supported Python
+      interpreters is missing. TF supports Python 3.10-3.14;
+      every interpreter needs its own lockfile so the pip wheel
+      build is reproducible.
+
+  - id: tensorflow-requirements-lock-non-empty
+    # The five lockfiles are ~70 KB each. Floor at 50 KB to catch
+    # accidental wipes without constraining shrinkage from upstream
+    # dep deletions.
+    kind: file_min_size
+    paths:
+      - "requirements_lock_3_10.txt"
+      - "requirements_lock_3_11.txt"
+      - "requirements_lock_3_12.txt"
+      - "requirements_lock_3_13.txt"
+      - "requirements_lock_3_14.txt"
+    min_bytes: 50000
+    level: info
+    message: |
+      A pip-compile lockfile is suspiciously small. The TF lockfiles
+      run ~70 KB each at HEAD. A short lockfile likely means a regen
+      went wrong (truncated output or pip-compile errored mid-run).
+
+  # ──────────────────────────────────────────────────────────────────
+  # ci/official/ entrypoint scripts
+  #
+  # The 11 ci/official/*.sh scripts are the canonical CI entrypoints
+  # invoked by GitHub Actions (build-reusable.yml's matrix). Missing
+  # any one breaks the corresponding CI job.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-ci-official-entrypoints-present
+    # Multi-component literal paths are root-anchored by default.
+    kind: file_exists
+    paths:
+      - "ci/official/code_check_full.sh"
+      - "ci/official/code_check_changed_files.sh"
+      - "ci/official/wheel.sh"
+      - "ci/official/installer_wheel.sh"
+      - "ci/official/libtensorflow.sh"
+      - "ci/official/pycpp.sh"
+      - "ci/official/upload.sh"
+      - "ci/official/any.sh"
+      - "ci/official/bisect.sh"
+      - "ci/official/debug_tfci.sh"
+      - "ci/official/utilities/code_check_full.bats"
+      - "ci/official/utilities/code_check_changed_files.bats"
+    level: error
+    message: |
+      A canonical ci/official/ entrypoint is missing. The TF CI
+      matrix invokes these 12 files directly; deleting any one
+      breaks the matching CI job (build-reusable.yml dispatches by
+      filename).
+
+  - id: tensorflow-ci-official-entrypoints-have-shebang
+    # All ci/official/*.sh files should start with #!/bin/bash or
+    # similar — they're invoked directly by the CI runner.
+    kind: file_starts_with
+    paths:
+      include: ["ci/official/*.sh", "ci/official/utilities/*.sh"]
+    prefix: "#!"
+    level: warning
+    message: |
+      Every shell script under ci/official/ must start with a `#!`
+      shebang line. The CI runner invokes them directly without
+      going through `bash <script>`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Apache header on the BUILD files
+  #
+  # The bundled apache-2-source-has-license-header rule covers
+  # *.c/.cc/.cpp/.h/.hpp/.py/.java/.swift/.go/.js/.ts/.rb/.scala/.kt/
+  # .rs/.sh/.mm. BUILD files (Bazel-syntax Python) and *.bzl files are
+  # NOT in that include list — they're a separate Bazel-specific
+  # extension. TF carries the Apache header at the top of every
+  # BUILD / *.bzl too; we add a dedicated rule to enforce it.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-bazel-files-have-apache-header
+    kind: file_header
+    paths:
+      include:
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+        - "**/*.bzl"
+        - "**/MODULE.bazel"
+        - "WORKSPACE"
+      exclude:
+        - "third_party/**"
+    lines: 25
+    pattern: 'Licensed under the Apache License,?\s*Version 2'
+    level: info
+    message: |
+      Every Bazel BUILD / *.bzl file should carry the canonical Apache
+      header. The bundled apache-2 ruleset doesn't cover Bazel
+      filename extensions; this rule extends the same pattern over
+      the Bazel surface.
+
+  # ──────────────────────────────────────────────────────────────────
+  # configure.py + setup.py + key Python entry-points have Apache
+  # header
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-config-py-have-apache-header
+    kind: file_header
+    paths:
+      include: ["configure.py", "tensorflow/__init__.py"]
+    lines: 25
+    pattern: 'Licensed under the Apache License,?\s*Version 2'
+    level: warning
+    message: |
+      configure.py and tensorflow/__init__.py are public OSS entry
+      points and must carry the canonical Apache header.
+
+  # ──────────────────────────────────────────────────────────────────
+  # version.txt-style: tf_version.bzl declares semver
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-tf-version-bzl-declares-semver
+    kind: file_content_matches
+    paths: "tensorflow/tf_version.bzl"
+    pattern: 'TF_VERSION_(MAJOR|MINOR|PATCH)\s*=\s*"\d+"'
+    level: warning
+    message: |
+      tensorflow/tf_version.bzl is the source-of-truth for the TF
+      version triple (MAJOR/MINOR/PATCH). The pip wheel build reads
+      this file to set the package version; missing or malformed
+      values yield a 0.0.0 wheel.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Dependabot covers github-actions + docker
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-dependabot-covers-actions
+    kind: yaml_path_matches
+    paths: ".github/dependabot.yml"
+    path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
+    matches: '^/$'
+    level: warning
+    message: |
+      .github/dependabot.yml should declare a github-actions ecosystem
+      block scoped to `/` so action-uses are kept current. TF declares
+      this; this rule is a regression guard.
+
+  # ──────────────────────────────────────────────────────────────────
+  # ISSUE_TEMPLATE / dependabot / pull-request hardening
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-issue-templates-present
+    # Multi-component literal paths are root-anchored by default.
+    kind: file_exists
+    paths:
+      - ".github/ISSUE_TEMPLATE/tensorflow_issue_template.yaml"
+      - ".github/ISSUE_TEMPLATE/config.yml"
+    level: warning
+    message: |
+      .github/ISSUE_TEMPLATE/{tensorflow_issue_template.yaml,config.yml}
+      drive TF's GitHub issue UI dropdown. Missing them yields the
+      generic "blank issue" form.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Security policy directory + advisory tree
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-security-advisory-dir-present
+    # Multi-component literal paths are root-anchored by default.
+    kind: file_exists
+    paths:
+      - "tensorflow/security/README.md"
+    level: warning
+    message: |
+      tensorflow/security/ is the canonical home for TFSA advisories.
+      The README indexes every CVE published against TF; removing it
+      breaks the public CVE-tracking surface.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Pylint config presence
+  #
+  # tensorflow/tools/ci_build/pylintrc is the canonical Python style
+  # config (344 lines). The repo-root .pylintrc is a symlink to it.
+  # The ci/official/utilities/code_check_changed_files.bats `pylint`
+  # @test reads from this file.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-pylint-config-present
+    # The .pylintrc at root is a symlink to tools/ci_build/pylintrc;
+    # accept either as evidence of presence (root_only omitted because
+    # the second path is multi-component).
+    kind: file_exists
+    paths:
+      - ".pylintrc"
+      - "tensorflow/tools/ci_build/pylintrc"
+    level: warning
+    message: |
+      The pylint configuration is missing. ci/official/utilities/
+      code_check_changed_files.bats `Check pylint for Python files`
+      @test reads from .pylintrc / tools/ci_build/pylintrc; without
+      these, every Python file fires unguided pylint defaults.
+
+  - id: tensorflow-clang-format-config-present
+    kind: file_exists
+    paths: ".clang-format"
+    root_only: true
+    level: info
+    message: |
+      .clang-format is the canonical C++ style config consumed by
+      ci/official/utilities/code_check_changed_files.bats
+      `Check formatting for C++ files` @test (which shells out to
+      clang-format-7).
+
+  # ──────────────────────────────────────────────────────────────────
+  # opensource_only.files registry presence
+  #
+  # tensorflow/opensource_only.files is a 256-line manifest declaring
+  # which files are OSS-only (vs. internal-Google). Same shape as
+  # apache/arrow's rat_exclude_files.txt — needs the v0.10+
+  # `registry_paths_resolve` rule kind to verify every entry resolves
+  # to a real file. alint can only assert the manifest itself exists
+  # today.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-opensource-only-manifest-present
+    # Multi-component literal path is root-anchored by default.
+    kind: file_exists
+    paths: "tensorflow/opensource_only.files"
+    level: info
+    message: |
+      tensorflow/opensource_only.files declares which 256 files are
+      OSS-only (vs. internal-Google). Similar shape to apache/arrow's
+      dev/release/rat_exclude_files.txt. The "every entry resolves to
+      a real file" cross-validation needs the v0.10+
+      `registry_paths_resolve` rule kind — alint asserts presence
+      only today.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Buildifier — Bazel BUILD formatter shellout
+  # The bats `Check buildifier formatting on BUILD files` @test
+  # shells out to buildifier. We mirror it here so a single alint
+  # check pass exercises the formatter.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-buildifier
+    kind: command
+    paths:
+      include:
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+        - "**/*.bzl"
+        - "MODULE.bazel"
+        - "WORKSPACE"
+      exclude:
+        - "third_party/**"
+    command: ["buildifier", "-mode=check", "-lint=warn", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # Pylint — wraps the Python AST style check
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-pylint
+    kind: command
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "third_party/**"
+        - "tensorflow/lite/micro/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/core/kernels/**"
+    command: ["pylint", "--rcfile=.pylintrc", "--disable=all", "--enable=g-bad-import-order,g-bad-file-header,g-empty-docstring,g-explicit-bool-comparison,g-explicit-length-test,g-import-not-at-top,g-line-too-long,g-tzinfo-replace,g-wrong-blank-lines", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # clang-format — C++ AST formatter shellout
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-clang-format
+    kind: command
+    paths:
+      include: ["**/*.cc", "**/*.cpp", "**/*.h", "**/*.hpp"]
+      exclude:
+        - "third_party/**"
+        - "tensorflow/core/kernels/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/lite/micro/**"
+        - "tensorflow/lite/tools/**"
+    command: ["clang-format", "--dry-run", "--Werror", "{path}"]
+    timeout: 60
+    level: info
+
+  # ──────────────────────────────────────────────────────────────────
+  # codespell — typo check on user-facing surfaces
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-codespell
+    kind: command
+    paths:
+      include:
+        - "**/*.md"
+        - "**/*.py"
+        - "**/*.cc"
+        - "**/*.h"
+      exclude:
+        - "third_party/**"
+        - "tensorflow/security/advisory/**"   # CVE titles legitimately use unusual words
+        - "RELEASE.md"                        # bulk historical content; rate of false positive is high
+    command: ["codespell", "{path}"]
+    timeout: 30
+    level: info
+
+  # ──────────────────────────────────────────────────────────────────
+  # API compatibility — bazel test shellout
+  #
+  # The api_compatibility_test.py runs under bazel:
+  #   bazel test //tensorflow/tools/api/tests:api_compatibility_test
+  # Wrapping it as a `command:` rule means a single alint check pass
+  # also fires the API-parity gate. Note: this requires bazel + a
+  # built TF wheel on PATH, so most users will skip-or-disable it
+  # locally and rely on CI.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-api-compatibility-test
+    kind: command
+    paths: "tensorflow/tools/api/tests/api_compatibility_test.py"
+    command: ["bazel", "test", "//tensorflow/tools/api/tests:api_compatibility_test"]
+    timeout: 600
+    level: info
+    message: |
+      The bazel-driven api_compatibility_test enforces every public
+      Python TF symbol matches its v1+v2 textproto golden. This
+      command rule shells out to `bazel test`; expect "tool not on
+      PATH" locally unless bazel is installed and a TF wheel is
+      already built.
+
+  # ──────────────────────────────────────────────────────────────────
+  # AGENT-FRIENDLY DOCS — TF doesn't ship CLAUDE.md / AGENTS.md
+  # at the moment. The bundled agent-context ruleset would gate
+  # this, but TF is a heavy agent-coding target and the omission
+  # is informational rather than enforced. We don't extend
+  # agent-context@v1 because TF doesn't currently ship the file —
+  # adding the rule would only fire info-level findings.
+  # ──────────────────────────────────────────────────────────────────
+
+  # ──────────────────────────────────────────────────────────────────
+  # No-tabs-in-source — lintrunner-style enforcement
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-no-tabs-in-py
+    kind: indent_style
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "third_party/**"
+        - "tensorflow/core/kernels/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/lite/micro/**"
+    style: spaces
+    level: info
+    message: |
+      Python sources should use spaces, not tabs (PEP 8). TF's
+      pylintrc declares this implicitly via `indent-string='  '`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # No trailing whitespace — applies to public source files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.cc"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.hpp"
+        - "**/*.md"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.bzl"
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+      exclude:
+        - "third_party/**"
+        - "tensorflow/core/kernels/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/lite/micro/**"
+        - "tensorflow/security/advisory/**"
+        - "**/*.diff"
+        - "**/*.patch"
+    level: info
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Final newline — applies to source + config
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-final-newline
+    kind: final_newline
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.cc"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.hpp"
+        - "**/*.md"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.bzl"
+        - "**/BUILD"
+        - "**/BUILD.bazel"
+      exclude:
+        - "third_party/**"
+        - "tensorflow/core/kernels/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/lite/micro/**"
+        - "tensorflow/security/advisory/**"
+    level: info
+    fix:
+      file_append_final_newline: {}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Trojan Source defense across non-Python sources (the bundled
+  # python ruleset already covers .py)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: tensorflow-no-bidi-in-cc-sources
+    kind: no_bidi_controls
+    paths:
+      include: ["**/*.cc", "**/*.cpp", "**/*.h", "**/*.hpp", "**/*.java", "**/*.swift", "**/*.go", "**/*.m", "**/*.mm"]
+      exclude:
+        - "third_party/**"
+        - "tensorflow/core/kernels/**"
+        - "tensorflow/compiler/**"
+        - "tensorflow/lite/micro/**"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidi override chars in source files are rejected."
+    policy_url: "https://trojansource.codes/"

@@ -5,18 +5,36 @@ v0.9 series, fully-automated bench-record CI, no public outreach yet) to a
 public launch backed by real-repo case studies and a marketing site that earns
 attention rather than just hosts documentation.
 
-**Status: 2026-05-06.** P1 done; **P2a-full COMPLETE (20 of 20 repos)**.
-`docs/development/CONFIG-AUTHORING.md` now catalogues 17 pitfalls (12
-from pilot + 3 from Wave 1: regex anchoring, YAML `\n` semantics, empty
-`file_starts_with.prefix`; +1 from Wave 2: `*_path_matches` against
-bool fields; +1 from Wave 3: `*_path_equals` against `[*]`). A
-previously-claimed 18th pitfall (JSONPath outer-parens filter) was
-investigated during Phase 4 and found to be a misdiagnosis — see the
-note at the top of CONFIG-AUTHORING.md. 7 silently-broken
+**Status: 2026-05-06.** P1 done; **P2a-full COMPLETE (20 of 20)**;
+**P2b Wave 1 COMPLETE (5 of 20 polyglot repos — curated pre-launch
+subset: NixOS/nixpkgs, bazel, TensorFlow, apache/spark, vscode)**;
+**v0.9.16 release commit landed locally** (was v0.9.15 plan; rolled
+v0.9.15 into v0.9.16 with the deny_unknown_fields uniformity audit
+pre-tag).
+
+`docs/development/CONFIG-AUTHORING.md` now catalogues **19 pitfalls**
+(17 from P2a + 2 from P2b Wave 1: #18 `.gitignore` masks tracked-file
+presence checks; #19 `root_only: true` + multi-component literals
+silently no-match). Every one is caught somewhere in the toolchain
+(schema at edit time, parse error at load time, runtime audit at PR
+time, or documented + smoke-fixture-pinned). 7 silently-broken
 structured-path rules in committed pilot+Wave 1 configs were fixed
-across the validation pass. `coverage_audit_examples_parse.rs` audit
-live; v0.9.15 P1+P2+P3+P4 done. Next: v0.9.15 Phase 5-7 → release →
-P3 marketing publish.
+across the validation pass.
+
+P2b Wave 1 saturation findings: every reasonable-information P2b case
+study mostly RECONFIRMED existing v0.10+ candidates with deeper
+demand-signal data. `cross_file_value_equals` now at 9 sources;
+`registry_paths_resolve` at 8+; `cross_language_implementation_complete`
+gets its 2nd source (TF — joins arrow as v0.11+ flagship). Three
+ship-target promotions: `apache/governance@v1` bundled ruleset moves
+"v0.10+ idea → v0.10 ship-target" (3 Apache TLPs converge); new
+`xml_path_*` family proposed (completes the structured-query family
+JSON/YAML/TOML + XML); `respect_gitignore: false` per-rule knob
+proposed to fix pitfall #18.
+
+Next: tag v0.9.16 (manual gate; triggers bench-record + crates.io +
+Homebrew + Docker + docs-bundle publish chain) → P3 marketing publish
+coordinated with the docs roll.
 
 ## State of the world (audit at 2026-05-05)
 
@@ -407,6 +425,59 @@ existing v0.10+ candidates — no new candidates from that draft. The
 candidate count is therefore at ~28 total across all P2a + migration
 work, with 3 broad-applicability v0.10 must-haves (`registry_paths_resolve`,
 `cross_file_value_equals`, `ordered_block`) leading by demand strength.
+
+### P2b Wave 1 — pre-launch curated subset (5 of 20 polyglot repos done)
+
+Five repos chosen for unknown-unknown coverage — scale stress, build-
+system shape, per-language API parity, 4-language polyglot, and
+flagship-visibility apples-to-apples comparison. All 5 ship as
+`examples/<owner>-<repo>/` case studies and pass the audit.
+
+| Repo | Why it was chosen | Headline finding |
+|---|---|---|
+| **NixOS/nixpkgs** | Scale stress (~150k+ files; upper-bound test) | At 39,101 sparse-cloned files + 20,678 `pkgs/by-name/*/*/` package directories, alint's full 79-rule pass — including the headline `for_each_dir` over the by-name tree — completes in **273 ms wall-clock**. `for_each_dir` confirms-scales gracefully; the "any size repo" pitch is now empirically defensible. Live findings: 2 legitimate `.bundle/` violations. |
+| **bazelbuild/bazel** | BUILD-file shape (Starlark — no P2a sample); honest "where alint stops" demo | bazel is THE polyglot build-system case study where alint's "scope is filesystem shape, not language semantics" non-goal becomes most visible — alint owns the file-structure layer, `buildifier` owns the Starlark AST layer. ~38 % out-of-scope (highest in P2a+P2b corpus); 422 Starlark units shelled out. **Surfaced new pitfall #18** (`.gitignore` masks tracked-file presence checks). |
+| **tensorflow/tensorflow** | ~80k files + per-language API parity | TF stacks TWO discipline layers — file-shape parity (every TFLite Swift `Sources/<X>.swift` has `Tests/<X>Tests.swift`) AND API-shape parity (1,185 textproto goldens lock the public Python surface; 10 distinct API-bearing language surfaces). alint expresses Layer 1 cleanly today (5 known TFLite Swift drifts surfaced); Layer 2 is exactly the v0.11+ `cross_language_implementation_complete` shape — **TF + arrow now jointly demand-drive it** (2 of 2 confirmed). **Surfaced new pitfall #19** (`root_only: true` + multi-component literals silently no-match). |
+| **apache/spark** | 4-language polyglot + Maven multi-module | arrow + spark + airflow give us **3 Apache TLPs with 9 of 12 governance artefacts converging** — `apache/governance@v1` bundled ruleset promotes from "v0.10+ idea" to **"v0.10 ship-target"**. Maven multi-module surfaces a **NEW v0.11+ `xml_path_*` family** (parses `pom.xml`'s `<modules>` section directly); generalises to Ant, Gradle XML, .nuspec, .csproj — **completes the structured-query family** (currently json/yaml/toml; xml is the missing fourth). |
+| **microsoft/vscode** | Flagship visibility (~160k stars) + apples-to-apples `build/hygiene.ts` | **alint covers ~75 % of `build/hygiene.ts`'s 8 distinct hygiene checks (6 of 8) declaratively in one config.** "alint is what `build/hygiene.ts` would look like as a tool, not a per-repo script" — concrete + verifiable launch claim. **Live tree run: 222 violations, zero false positives** (105 unpinned actions, 47 missing final newlines, 9 workflows without `contents: read`, …). Plus: of vscode's 45 in-tree custom eslint rules, **ZERO are alint-shaped** — every single one is a TSESTree visitor. Cleanest demonstration of the alint/eslint non-overlap boundary in any P2 study. |
+
+### P2b Wave 1 — net-new rule-kind candidates
+
+Saturation analysis: most P2b results were *reconfirmations* of existing
+v0.10+ candidates. Net-new additions:
+
+- **`xml_path_matches` / `xml_path_equals`** (spark) — completes the
+  structured-query family. Generalises to every XML-config format
+  (Maven `pom.xml`, Ant `build.xml`, Gradle XML, NPM `.nuspec`,
+  .NET `.csproj`). **Strong v0.10 candidate alongside the existing
+  high-priority three.**
+- **`cross_language_registry_consistency`** (spark — same shape as
+  arrow's `cross_language_implementation_complete`) — variant where
+  the parity is between a registry file and a per-language manifest
+  rather than between source-and-test pairs.
+- **`markdown_template_match`** (TF — TFSA advisories follow a
+  6-section template) — single-source, defer.
+- Three vscode-only refinements (low priority): `indent_style.skip_block_comment_continuation`,
+  `file_is_ascii.allow:` + `file_is_ascii.skip_per_line_marker:`,
+  `file_content_matches_or_marker`.
+- Two bazel-only deferred: `starlark_glob_resolve` (tree-sitter-starlark
+  cost), `bazelrc_path_*`.
+
+### P2b Wave 1 — bundled-ruleset promotion
+
+| Bundled ruleset | Status before P2b | After |
+|---|---|---|
+| `apache/governance@v1` | v0.10+ idea (single source: arrow) | **v0.10 ship-target** (3 sources: arrow + spark + airflow; 9 of 12 governance artefacts converge) |
+
+### P2b Wave 1 — demand reconfirmations
+
+| Candidate | Pre-P2b sources | Post-P2b sources |
+|---|---|---|
+| `cross_file_value_equals` | 8 | **9** (vscode `checkCopilotEnginesVersion`) — most consumer-facing case yet |
+| `registry_paths_resolve` | 7 | **8+** (nixpkgs alone has 3 registries; TF + spark add more) |
+| `generated_file_fresh` | 4 | **6** (bazel + TF + spark) |
+| `cross_language_implementation_complete` | 1 (arrow) | **2** (arrow + TF) — now demand-validated; v0.11+ flagship |
+| `*_path_contains` | 2 | **3** (helm + deno + bazel) |
 
 ### Saturation analysis (when to stop adding repos)
 
