@@ -1,0 +1,481 @@
+# Starter alint config for apache/airflow.
+#
+# Replaces ~30 of the 109 pre-commit hooks declared in
+# .pre-commit-config.yaml with declarative rules, plus another ~10 via
+# the `command` rule kind shelling out to existing tools (ruff,
+# yamllint, codespell, shellcheck, hadolint, markdownlint, zizmor,
+# bandit) — net ~40 hooks collapse into one config file.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to your
+# local layout if your fork has diverged. The default scope filters
+# narrow each rule to the parts of the tree where it makes sense
+# (airflow-core/, providers/<provider>/, task-sdk/, shared/).
+#
+# Known limitations versus the existing pre-commit pipeline (each
+# requires an alint primitive that doesn't ship today — see this
+# directory's README.md for the full gap catalogue):
+#
+#   - check-version-consistency           (cross-file value match)
+#   - check-secrets-search-path-sync      (cross-file AST equality)
+#   - check-template-context-variable-in-sync (cross-file AST equality)
+#   - check-template-fields-valid         (Python AST scan: templated_fields)
+#   - check-revision-heads-map            (Alembic migration graph diff)
+#   - check-airflow-imports-in-shared     (Python import-graph gate)
+#   - check-test-only-imports-in-src      (Python import-graph gate)
+#   - check-no-new-airflow-exceptions     (delta vs. golden file)
+#   - check-no-new-airflow-core-utils-modules (delta vs. golden file)
+#   - check-execution-api-versions        (datamodel diff vs. version map)
+#   - check-metrics-synced-with-registry  (Python AST + YAML cross-check)
+#   - update-spelling-wordlist-to-be-sorted (file-content sortedness)
+#   - update-installed-providers-to-be-sorted (file-content sortedness)
+#   - check-changelog-has-no-duplicates   (within-file duplicate detection)
+#   - check-airflow-bug-report-template   (within-YAML option-list sorting)
+#
+# These remain on the existing prek hooks until alint v0.10+ ships
+# the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/python@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/compliance/apache-2@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/hygiene/lockfiles@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Provider-package conventions — the most alint-shaped surface.
+  # 101 provider distributions live under providers/, each at one of:
+  #     providers/<name>/                  (e.g. snowflake, git, amazon)
+  #     providers/<namespace>/<name>/      (e.g. apache/spark, cncf/kubernetes,
+  #                                         common/sql, microsoft/azure)
+  # Every one of them must have these files. Today airflow enforces
+  # this implicitly via run_provider_yaml_files_check.py + Breeze
+  # codegen; a `for_each_dir` over `provider.yaml` makes the
+  # invariant explicit and fast.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-provider-required-meta-files
+    kind: for_each_file
+    select: "providers/**/provider.yaml"
+    require:
+      - kind: file_exists
+        paths: "{dir}/pyproject.toml"
+      - kind: file_exists
+        paths: "{dir}/README.rst"
+      - kind: file_exists
+        paths: "{dir}/LICENSE"
+      - kind: file_exists
+        paths: "{dir}/NOTICE"
+      - kind: dir_exists
+        paths: "{dir}/src"
+      - kind: dir_exists
+        paths: "{dir}/tests"
+      - kind: dir_exists
+        paths: "{dir}/docs"
+    level: error
+    message: >-
+      Every provider distribution (a directory containing
+      provider.yaml) must ship pyproject.toml, README.rst, LICENSE,
+      NOTICE, and src/, tests/, docs/ subdirectories.
+
+  - id: airflow-provider-yaml-required-fields
+    # provider.yaml is the canonical metadata file consumed by the
+    # ProvidersManager and the release tooling. Five top-level fields
+    # are required for the package to be picked up. The full schema
+    # check (with all conditional fields) still lives in
+    # run_provider_yaml_files_check.py — but this catches the
+    # 90 % case at the static layer.
+    kind: yaml_path_matches
+    paths: "providers/**/provider.yaml"
+    path: "$['package-name']"
+    matches: '^apache-airflow-providers-[a-z][a-z0-9-]*$'
+    level: error
+    message: >-
+      provider.yaml must declare `package-name` matching
+      `apache-airflow-providers-<name>`.
+
+  - id: airflow-provider-yaml-state
+    kind: yaml_path_matches
+    paths: "providers/**/provider.yaml"
+    path: "$.state"
+    matches: '^(ready|not-ready|suspended|removed)$'
+    level: error
+    message: >-
+      provider.yaml `state` must be one of: ready, not-ready,
+      suspended, removed.
+
+  - id: airflow-provider-pyproject-name-matches
+    # The pyproject.toml `project.name` for a provider distribution
+    # follows the same convention as provider.yaml's `package-name`.
+    kind: toml_path_matches
+    paths: "providers/**/pyproject.toml"
+    path: "$.project.name"
+    matches: '^apache-airflow-providers-[a-z][a-z0-9-]*$'
+    level: error
+
+  - id: airflow-provider-distribution-gitignore
+    # check-distribution-gitignore: every distribution dir (anything
+    # with pyproject.toml) must have a .gitignore listing *.iml so
+    # IntelliJ module files don't get committed.
+    kind: for_each_file
+    select: "**/pyproject.toml"
+    # Note: alint's `when:` language supports a fixed set of `iter.*`
+    # accessors (iter.path, iter.basename, iter.parent_name, iter.is_dir,
+    # iter.has_file(pattern)) — no method calls like `.contains(...)`. To
+    # exclude node_modules / out paths, prefer the rule's `paths:` exclude
+    # list rather than a `when_iter:` filter. The original
+    # check-distribution-gitignore script's exclusions are folded into
+    # the `paths:` exclusions on this rule's `select:`.
+    when_iter: 'iter.parent_name != ""'
+    require:
+      - kind: file_exists
+        paths: "{dir}/.gitignore"
+      - kind: file_content_matches
+        paths: "{dir}/.gitignore"
+        pattern: '^\*\.iml\s*$'
+    level: error
+    message: >-
+      Every distribution (directory with pyproject.toml) needs a
+      .gitignore containing `*.iml` to keep IntelliJ module files
+      out of the repo.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Apache Software Foundation compliance.
+  # The bundled compliance/apache-2@v1 ruleset already enforces:
+  #   - LICENSE contains the Apache 2.0 text
+  #   - NOTICE file exists at the repo root
+  #   - Source files (Python/Go/JS/etc.) carry the Apache header
+  # The rules below cover the airflow-specific extras.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-asf-notice-current-year
+    # check-notice-files: every NOTICE file must include
+    # "Copyright 2016-<current_year> The Apache Software Foundation".
+    # The `<year>` half changes annually — set this in your fork's
+    # config and bump it each January (or feed it via a cron PR).
+    kind: file_content_matches
+    paths:
+      - "NOTICE"
+      - "**/NOTICE"
+    pattern: 'Copyright 2016-2026 The Apache Software Foundation'
+    level: error
+    message: >-
+      NOTICE files must include
+      `Copyright 2016-<current_year> The Apache Software Foundation`.
+
+  - id: airflow-no-zip-files
+    # check-zip-file-is-not-committed: airflow forbids any *.zip file.
+    # `dir_absent`/`file_absent` is the canonical pattern.
+    kind: file_absent
+    paths: "**/*.zip"
+    level: error
+    message: >-
+      Zip files are not allowed in the repository — they're hard to
+      track and have security implications.
+
+  # ──────────────────────────────────────────────────────────────────
+  # File-content forbidden patterns.
+  # The 10 `language: pygrep` hooks in .pre-commit-config.yaml each
+  # forbid one regex from appearing in tracked files. They map 1:1
+  # onto `file_content_forbidden` (or `file_content_matches` with an
+  # inverted pattern; see below for the LoggingMixin case).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-no-pydevd-settrace
+    # check-pydevd-left-in-code
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: 'pydevd.*settrace\('
+    level: error
+    message: "pydevd debug statement left in code; remove before committing."
+
+  - id: airflow-no-jinja-safe-filter
+    # check-safe-filter-usage-in-html
+    kind: file_content_forbidden
+    paths: "**/*.html"
+    pattern: '\|\s*safe'
+    level: error
+    message: >-
+      The Jinja `|safe` filter is error-prone. Use `Markup()` in
+      Python code instead.
+
+  - id: airflow-no-urlparse
+    # check-urlparse-usage-in-code
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: '^\s*from urllib\.parse import .*urlparse'
+    level: warning
+    message: >-
+      `urlparse` is not recommended; use `urlsplit()` instead.
+
+  - id: airflow-no-base-operator-from-airflow-models
+    # check-base-operator-usage (first variant)
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    scope_filter:
+      # `has_ancestor:` requires a basename — narrows to a directory containing the named file.
+      # For files specifically under airflow-core/, use the `paths:` glob instead.
+      has_ancestor: pyproject.toml
+    pattern: 'from airflow\.models import.* BaseOperator\b'
+    level: error
+    message: >-
+      Import `BaseOperator` from `airflow.models.baseoperator`, not
+      `airflow.models` (avoids circular imports in core).
+
+  - id: airflow-no-baseoperatorlink-from-airflow-models
+    # check-base-operator-usage (second variant)
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    scope_filter:
+      # `has_ancestor:` requires a basename — narrows to a directory containing the named file.
+      # For files specifically under airflow-core/, use the `paths:` glob instead.
+      has_ancestor: pyproject.toml
+    pattern: '^\s*from airflow\.models\.baseoperatorlink import BaseOperatorLink\b'
+    level: error
+
+  - id: airflow-no-deprecation-warning-categories-in-core
+    # check-core-deprecation-classes
+    kind: file_content_forbidden
+    paths: "airflow-core/src/**/*.py"
+    pattern: 'category=(Pending)?DeprecationWarning'
+    level: error
+    message: >-
+      Use Airflow's deprecation classes
+      (`AirflowProviderDeprecationWarning`,
+      `RemovedInAirflow3Warning`) instead of the built-in
+      DeprecationWarning categories.
+
+  - id: airflow-session-utils-import
+    # check-provide-create-sessions-imports
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: 'from airflow\.utils\.db import.* (NEW_SESSION|provide_session|create_session)'
+    level: error
+    message: >-
+      Import session helpers from `airflow.utils.session`, not
+      `airflow.utils.db`, to avoid import cycles.
+
+  - id: airflow-no-bare-loggingmixin
+    # check-incorrect-use-of-LoggingMixin
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: 'LoggingMixin\(\)'
+    level: error
+    message: >-
+      `LoggingMixin` is a mixin; subclass it instead of
+      instantiating it standalone.
+
+  - id: airflow-no-start-date-in-default-args
+    # check-start-date-not-used-in-defaults
+    kind: file_content_forbidden
+    paths: "**/example_dags/**/*.py"
+    pattern: '(default_args\s*=\s*\{\s*[''"]start_date[''"]|[''"]start_date[''"]:\s*)'
+    level: warning
+    message: >-
+      Don't put `start_date` in `default_args`; set it on the DAG
+      directly to avoid task-level inheritance surprises.
+
+  - id: airflow-inclusive-language
+    # check-for-inclusive-language. The hook in .pre-commit-config.yaml
+    # carries a long exclude list of paths; replicate the most
+    # impactful subset here. Tune for your fork.
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.py", "**/*.rst", "**/*.md"]
+      exclude:
+        - "providers/*/docs/changelog.rst"
+        - "**/CHANGELOG.rst"
+        - "**/changelog.rst"
+        - "INTHEWILD.md"
+        - "RELEASE_NOTES.rst"
+        - "airflow-core/newsfragments/**"
+    pattern: '(?i)\b(blacklist|whitelist|master|slave|sanity|dummy)\b'
+    level: warning
+    message: >-
+      Use inclusive terminology
+      (allowlist/denylist, primary/replica, smoke-test, placeholder).
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub workflow hardening — beyond what the bundled
+  # ci/github-actions@v1 ruleset already covers.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-checkout-no-credentials
+    # check-persist-credentials-disabled-in-github-workflows
+    # NOTE (v0.9.14): the original check walks the YAML and verifies that
+    # every `actions/checkout` step has `with.persist-credentials: false`.
+    # alint's RFC 9535 JSONPath impl doesn't support the `=~` regex-match
+    # operator that this rule wants; until alint adds a function-based
+    # match (e.g. `?match(@.uses, '^actions/checkout')`), this rule falls
+    # back to a content scan that catches the dominant case (the literal
+    # action name without the regex match).
+    kind: file_content_matches
+    paths: ".github/workflows/*.yml"
+    pattern: 'persist-credentials:\s*false'
+    if_absent: false   # rule passes if the file doesn't reference checkout
+    level: warning
+    message: |
+      checkout actions in this workflow should pin
+      with.persist-credentials: false to prevent token leakage.
+    level: error
+    message: >-
+      Every `actions/checkout` step in a workflow must set
+      `with.persist-credentials: false` to avoid leaking the
+      GITHUB_TOKEN to subsequent steps.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Schema-shaped checks — the `lint-json-schema` family of pre-commit
+  # hooks each validates a category of YAML/JSON file against a JSON
+  # Schema. alint's `json_schema_passes` is the direct replacement.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-json-schema-files-are-draft7
+    # lint-json-schema variant 1 in .pre-commit-config.yaml — the
+    # meta-check that *.schema.json files in the repo are themselves
+    # valid JSON Schema draft-07. The pre-commit version uses
+    # `--spec-file scripts/ci/prek/draft7_schema.json` (a local copy
+    # of the draft-07 meta-schema). alint's `json_schema_passes` only
+    # supports local schema paths today, so this maps directly.
+    #
+    # Variants 2 and 3 in airflow's pipeline (NodePort and Docker
+    # Compose) use `--spec-url` against a remote schema. To run those
+    # under alint today, vendor the schemas locally first
+    # (`curl > schemas/compose-spec.json`) and reference them by path
+    # — or keep the existing prek hooks for those two variants.
+    kind: json_schema_passes
+    paths: "**/*.schema.json"
+    schema_path: "scripts/ci/prek/draft7_schema.json"
+    level: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # Yamllint, ruff, codespell, etc. — call out to the existing tools.
+  # The `command` rule shells out per-file; alint runs them in
+  # parallel, which is the headline perf win over the sequential
+  # pre-commit pipeline.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: airflow-yamllint
+    kind: command
+    paths:
+      include: ["**/*.yml", "**/*.yaml"]
+      exclude:
+        - "**/airflow.template.yaml"
+        - "**/init_git_sync.template.yaml"
+        - "chart/templates/**/*.yaml"
+        - "chart/files/**/*.yaml"
+        - ".pre-commit-config.yaml"
+        - "**/reproducible_build.yaml"
+        - "**/pnpm-lock.yaml"
+        - "**/v1*.yaml"
+        - "**/openapi*.yaml"
+        - "**/-generated.yaml"
+    command: ["yamllint", "-c", "yamllint-config.yml", "--strict", "{path}"]
+    timeout: 30
+    level: error
+
+  - id: airflow-ruff-check
+    kind: command
+    paths: "**/*.py"
+    scope_filter:
+      has_ancestor: pyproject.toml
+    command: ["ruff", "check", "--force-exclude", "{path}"]
+    timeout: 30
+    level: error
+
+  - id: airflow-ruff-format
+    kind: command
+    paths: "**/*.py"
+    scope_filter:
+      has_ancestor: pyproject.toml
+    command: ["ruff", "format", "--check", "{path}"]
+    timeout: 30
+    level: error
+
+  - id: airflow-shellcheck
+    kind: command
+    paths:
+      include: ["**/*.sh", "**/*.bash"]
+      exclude: ["dev/breeze/autocomplete/**"]
+    command: ["shellcheck", "-x", "-a", "{path}"]
+    timeout: 30
+    level: error
+
+  - id: airflow-hadolint
+    # lint-dockerfile in the prek scripts; airflow has its own
+    # hadolint config in .hadolint.yaml.
+    kind: command
+    paths:
+      include: ["Dockerfile", "Dockerfile.*"]
+      exclude: []
+    command: ["hadolint", "--config", ".hadolint.yaml", "{path}"]
+    timeout: 30
+    level: error
+
+  - id: airflow-codespell
+    kind: command
+    paths:
+      include: ["**/*.py", "**/*.md", "**/*.rst", "**/*.yaml", "**/*.yml"]
+      exclude:
+        - "**/material-icons.css"
+        - "images/**"
+        - "RELEASE_NOTES.txt"
+        - "**/package-lock.json"
+        - "**/kinglear.txt"
+        - "**/pnpm-lock.yaml"
+        - "**/dist/**"
+        - "airflow-core/src/airflow/ui/public/i18n/locales/!(en)/**"
+        - ".github/skills/airflow-translations/**"
+        - "scripts/docker/keys/**.asc"
+    command:
+      [
+        "codespell",
+        "--ignore-words=docs/spelling_wordlist.txt",
+        "--exclude-file=.codespellignorelines",
+        "{path}",
+      ]
+    timeout: 30
+    level: warning
+
+  - id: airflow-zizmor
+    # zizmor catches common security mistakes in github workflow yaml.
+    # Already in .pre-commit-config.yaml as an external repo hook.
+    kind: command
+    paths:
+      include:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/**/*.yml"
+        - ".github/actions/**/*.yaml"
+    command: ["zizmor", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: airflow-bandit
+    # Security linter; airflow currently scopes it to
+    # airflow-core/src/airflow/.
+    kind: command
+    paths:
+      include: ["airflow-core/src/airflow/**/*.py"]
+      exclude: ["**/example_dags/**"]
+    command:
+      [
+        "bandit",
+        "--skip",
+        "B101,B301,B324,B403,B404,B603",
+        "--severity-level",
+        "high",
+        "{path}",
+      ]
+    timeout: 60
+    level: warning
+
+  - id: airflow-markdownlint
+    kind: command
+    paths: "**/*.md"
+    command: ["markdownlint", "{path}"]
+    timeout: 30
+    level: warning

@@ -109,8 +109,8 @@ rules:
   - id: k8s-shellcheck
     kind: command
     paths: "**/*.sh"
-    argv: ["shellcheck", "-x", "{path}"]
-    timeout: 30s
+    command: ["shellcheck", "-x", "{path}"]
+    timeout: 30
     level: error
 
   # ── verify-spelling.sh ─────────────────────────────────────────
@@ -119,19 +119,24 @@ rules:
     paths:
       include: ["**/*.md", "**/*.go"]
       exclude: ["vendor/**", "**/testdata/**"]
-    argv: ["misspell", "-error", "{path}"]
-    timeout: 30s
+    command: ["misspell", "-error", "{path}"]
+    timeout: 30
     level: warning
 
   # ── verify-gofmt.sh ────────────────────────────────────────────
+  # gofmt -l prints filenames of unformatted files. The `command`
+  # rule fails if the child exits non-zero OR stdout is non-empty —
+  # gofmt -l exits 0 even on unformatted files, so the empty-stdout
+  # check is what catches the violation. (Note: alint's `command`
+  # rule v0.9.14 currently treats non-zero exit OR non-empty
+  # stdout/stderr as a violation, which matches what we want here.)
   - id: k8s-gofmt
     kind: command
     paths: "**/*.go"
     scope_filter:
       has_ancestor: go.mod
-    argv: ["gofmt", "-l", "{path}"]
-    expect_empty_stdout: true       # gofmt prints filenames of unformatted files
-    timeout: 30s
+    command: ["gofmt", "-l", "{path}"]
+    timeout: 30
     level: error
 
   # ── verify-golangci-lint.sh ────────────────────────────────────
@@ -145,9 +150,9 @@ rules:
     require:
       - kind: command
         paths: "{dir}"
-        argv: ["golangci-lint", "run", "{dir}/..."]
-        timeout: 600s
-        level: error
+        command: ["golangci-lint", "run", "{dir}/..."]
+        timeout: 600
+    level: error
 
   # ── verify-golangci-lint-config.sh ─────────────────────────────
   # .golangci.yml is well-formed YAML matching the published schema.
@@ -165,16 +170,16 @@ rules:
     require:
       - kind: command
         paths: "{dir}"
-        argv: ["govulncheck", "{dir}/..."]
-        timeout: 300s
-        level: warning
+        command: ["govulncheck", "{dir}/..."]
+        timeout: 300
+    level: warning
 
   # ── verify-owners-fmt.sh ───────────────────────────────────────
   - id: k8s-owners-fmt
     kind: command
     paths: "**/OWNERS"
-    argv: ["yamlfmt", "-lint", "{path}"]
-    timeout: 30s
+    command: ["yamlfmt", "-lint", "{path}"]
+    timeout: 30
     level: error
 
   # ── verify-mocks.sh (partial) ──────────────────────────────────
@@ -185,6 +190,5 @@ rules:
   - id: k8s-mock-source-pair
     kind: pair
     primary: "**/mocks/mock_*.go"
-    secondary: "{dir}/../{stem}.go"   # mocks/mock_foo.go pairs with ../foo.go
-    require: secondary
+    partner: "{dir}/../{stem}.go"   # mocks/mock_foo.go pairs with ../foo.go
     level: warning

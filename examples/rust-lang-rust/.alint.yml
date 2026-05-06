@@ -1,0 +1,282 @@
+# Starter alint config for rust-lang/rust.
+#
+# Replaces (in part) ~10 of the ~32 src/tools/tidy/src/* checks with
+# declarative rules, plus several more via the `command` rule kind shelling
+# out to existing tools (rustfmt, typos, ruff, shellcheck, eslint via
+# extra_checks). Net: ~13 of ~32 tidy checks + a handful of CI scripts move
+# to this one file.
+#
+# Adopt by saving as .alint.yml at the repo root and running `alint check`.
+# Tune the `paths:` and `scope_filter:` entries to your local layout — the
+# rust-lang/rust tree shape is unusual (compiler/, library/, tests/, src/,
+# each rooted with their own conventions), so several rules below are
+# narrowly path-scoped to mirror tidy's per-target behavior.
+#
+# Known limitations versus the existing tidy pipeline (each requires an
+# alint primitive that doesn't ship today — see this directory's README.md
+# for the full gap catalogue):
+#   - tidy::alphabetical             (sortedness between marker pairs)
+#   - tidy::triagebot                (paths in registry must exist on disk)
+#   - tidy::gcc_submodule            (submodule SHA matches a pinned version)
+#   - tidy::rustdoc_css_themes       (light/dark blocks must be in sync)
+#   - tidy::error_codes              (cross-file: code defn ↔ doc ↔ test)
+#   - tidy::features / unstable_book (feature attrs ↔ docs cross-ref)
+#   - tidy::pal / target_policy      (Rust cfg-attribute scope analysis)
+#   - tidy::unknown_revision         (compiletest header semantics)
+# These remain on `./x test tidy` until alint v0.10+ ships the matching
+# primitives — see the README for the proposed rule kinds.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ── tidy::style: line length (non-Rust files) ──────────────────
+  # tidy enforces 100 cols on most files, 120 on .goml (rustdoc-gui),
+  # and 80 on error-code markdown. Rust source is excluded — rustfmt
+  # owns line length there.
+  - id: rust-tidy-line-100-cols
+    kind: line_max_width
+    paths:
+      include:
+        - "compiler/**/*.{md,toml,yml,yaml,sh,py}"
+        - "library/**/*.{md,toml,yml,yaml,sh,py}"
+        - "src/**/*.{md,toml,yml,yaml,sh,py}"
+        - "tests/**/*.{md,toml,yml,yaml,sh,py}"
+      exclude:
+        - "**/auto-generated/**"
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+    max_width: 100
+    level: warning
+
+  - id: rust-tidy-line-120-goml
+    kind: line_max_width
+    paths: "tests/rustdoc-gui/**/*.goml"
+    max_width: 120
+    level: warning
+
+  - id: rust-tidy-line-80-error-codes
+    kind: line_max_width
+    paths: "compiler/rustc_error_codes/src/error_codes/*.md"
+    max_width: 80
+    level: warning
+
+  # ── tidy::style: file length (3000 lines, non-Rust) ─────────────
+  - id: rust-tidy-file-max-3000-lines
+    kind: file_max_lines
+    paths:
+      include:
+        - "compiler/**/*.{md,toml,yml,yaml}"
+        - "library/**/*.{md,toml,yml,yaml}"
+        - "src/**/*.{md,toml,yml,yaml}"
+        - "tests/**/*.{md,toml,yml,yaml}"
+      exclude:
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+        - "**/auto-generated/**"
+    max_lines: 3000
+    level: warning
+
+  # ── tidy::style: no trailing whitespace ────────────────────────
+  # rustfmt covers .rs; this catches the rest.
+  - id: rust-tidy-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "compiler/**/*.{md,toml,yml,yaml,sh,py}"
+        - "library/**/*.{md,toml,yml,yaml,sh,py}"
+        - "src/**/*.{md,toml,yml,yaml,sh,py}"
+        - "tests/**/*.{md,toml,yml,yaml,sh,py}"
+      exclude:
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+    level: info
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  # ── tidy::style: no CR characters (LF only) ────────────────────
+  - id: rust-tidy-lf-line-endings
+    kind: line_endings
+    paths:
+      include: ["**/*"]
+      exclude:
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+        - "**/*.bat"               # Windows batch scripts can be CRLF
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  # ── tidy::style: no TODO/XXX directives ────────────────────────
+  # tidy's exact phrasing: "no `TODO` or `XXX` directives".
+  - id: rust-tidy-no-todo-marker
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "compiler/**/*.rs"
+        - "library/**/*.rs"
+        - "src/**/*.rs"
+      exclude:
+        - "**/tests/**"
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+    pattern: '(?i)\b(TODO|XXX)\b'
+    level: warning
+    message: |
+      tidy bans TODO/XXX markers in production source. Either resolve the
+      item or open a tracking issue (and reference the issue number).
+
+  # ── tidy::tests_placement: src/test must not exist ─────────────
+  # Tests moved to tests/ years ago; this catches a re-emergence.
+  - id: rust-tidy-no-src-test-dir
+    kind: dir_absent
+    paths: "src/test"
+    level: error
+    message: |
+      Tests have been moved from src/test/ to tests/. Do not recreate the
+      old directory. (mirrors src/tools/tidy/src/tests_placement.rs)
+
+  # ── tidy::edition: every Cargo.toml uses 2021 or 2024 ──────────
+  - id: rust-tidy-cargo-edition
+    kind: toml_path_matches
+    paths:
+      include:
+        - "Cargo.toml"
+        - "compiler/**/Cargo.toml"
+        - "library/**/Cargo.toml"
+        - "src/**/Cargo.toml"
+      exclude:
+        - "src/llvm-project/**"
+        - "src/gcc/**"
+        - "src/tools/cargo/**"
+        - "src/tools/clippy/**"
+        - "src/tools/miri/**"
+        - "src/tools/rust-analyzer/**"
+        - "src/tools/rustfmt/**"
+    path: "$.package.edition"
+    matches: '^(2021|2024)$'
+    level: error
+
+  # ── tidy::extdeps: external package source allowlist ───────────
+  # tidy hardcodes the allowed `source = "..."` lines for vendored deps.
+  # JSONPath against Cargo.lock approximates: every `source` entry must
+  # match a known prefix. (Bracket-notation key access for dashes.)
+  - id: rust-tidy-cargo-lock-source-allowlist
+    kind: toml_path_matches
+    paths: "Cargo.lock"
+    path: "$['package'][*].source"
+    matches: '^(registry\+https://github.com/rust-lang/crates\.io-index|git\+https://github.com/rust-lang/team#)'
+    level: error
+
+  # ── tidy::known_bug: tests/crashes/*.rs has //@ known-bug ──────
+  - id: rust-tidy-crashes-known-bug
+    kind: file_content_matches
+    paths:
+      include: ["tests/crashes/**/*.rs"]
+      exclude: ["tests/crashes/auxiliary/**"]
+    pattern: '^//@ known-bug:'
+    level: error
+    message: |
+      Every test under tests/crashes/ must declare its tracking issue with
+      a `//@ known-bug: <issue>` directive on its own line.
+
+  # ── tidy::rustdoc_gui_tests: .goml starts with a description ───
+  - id: rust-tidy-rustdoc-gui-description
+    kind: file_starts_with
+    paths: "tests/rustdoc-gui/**/*.goml"
+    prefix: "// "
+    level: warning
+    message: |
+      rustdoc-gui tests must start with a small description comment.
+
+  # ── tidy::filenames: no characters Windows can't represent ─────
+  - id: rust-tidy-no-windows-illegal-names
+    kind: no_illegal_windows_names
+    paths: "**/*"
+    level: error
+
+  # ── tidy::unit_tests: no #[test] / #[bench] in stdlib crates ───
+  - id: rust-tidy-no-test-in-stdlib
+    kind: file_content_forbidden
+    paths:
+      include: ["library/{core,alloc,std}/src/**/*.rs"]
+      exclude: ["library/{core,alloc,std}/src/**/tests.rs", "library/{core,alloc,std}/src/**/tests/**"]
+    pattern: '^\s*#\[(test|bench)\]'
+    level: error
+    message: |
+      Tests and benches in core/alloc/std are factored into the *tests
+      sibling crates ({core,alloc}tests). Do not add #[test] / #[bench]
+      directly inside the library crates.
+
+  # ── tidy::extra_checks (spellcheck): typos crate ───────────────
+  # tidy invokes the `typos` binary against compiler/, library/,
+  # src/bootstrap/, src/librustdoc/. The repo's typos.toml supplies
+  # the allowlist.
+  - id: rust-tidy-spellcheck
+    kind: command
+    paths: "typos.toml"
+    command: ["typos"]
+    timeout: 120
+    level: warning
+
+  # ── tidy::extra_checks (shell): shellcheck on every .sh ────────
+  - id: rust-tidy-shellcheck
+    kind: command
+    paths:
+      include: ["src/ci/scripts/**/*.sh", "src/ci/*.sh"]
+      exclude: ["src/llvm-project/**", "src/gcc/**"]
+    command: ["shellcheck", "-x", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ── tidy::extra_checks (py:fmt + py:lint): ruff ────────────────
+  # tidy delegates Python formatting + lint to ruff (config:
+  # src/tools/tidy/config/ruff.toml). The same tool runs here.
+  - id: rust-tidy-ruff-format
+    kind: command
+    paths: "**/*.py"
+    command: ["ruff", "format", "--check", "--config", "src/tools/tidy/config/ruff.toml", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: rust-tidy-ruff-lint
+    kind: command
+    paths: "**/*.py"
+    command: ["ruff", "check", "--config", "src/tools/tidy/config/ruff.toml", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ── rustfmt --check on every .rs file (per-package) ────────────
+  # rustfmt itself walks the workspace; we shell out per Cargo.toml
+  # rather than per .rs file to avoid the per-process overhead.
+  - id: rust-tidy-rustfmt
+    kind: for_each_dir
+    select: "**/Cargo.toml"
+    require:
+      - kind: command
+        paths: "{dir}"
+        command: ["cargo", "fmt", "--manifest-path", "{path}", "--check"]
+        timeout: 300
+    level: warning
+
+  # ── src/ci/scripts/verify-line-endings.sh ──────────────────────
+  # Already covered above by rust-tidy-lf-line-endings; the CI script
+  # is the run-time guard, this is the static one.
+
+  # ── triagebot.toml: well-formed TOML + has known sections ──────
+  # tidy::triagebot does deeper path validation (out of alint's scope
+  # today — see README), but we can at least require the file is
+  # parseable and has the section everyone references.
+  - id: rust-triagebot-relabel-section
+    kind: toml_path_matches
+    paths: "triagebot.toml"
+    path: "$.relabel"
+    matches: '.+'
+    level: warning

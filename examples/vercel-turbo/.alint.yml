@@ -1,0 +1,429 @@
+# Starter alint config for vercel/turbo (Turborepo).
+#
+# Turborepo is a dual-language monorepo: a Rust workspace
+# (`crates/turbo*`, ~61 crates) and a pnpm workspace
+# (`packages/*`, `apps/*`, `examples/*`, ~17 first-party
+# packages plus 30+ examples). Everything beyond build
+# orchestration is delegated to per-language tools — `cargo
+# fmt` / `cargo clippy` / `cargo deny` for Rust, `oxlint` /
+# `oxfmt` / `attw` for TS — wired together by `turbo run
+# quality` and a `pre-push` husky hook.
+#
+# This config replaces the *structural* gates (the things
+# that aren't language-level lints): per-crate / per-package
+# layout, monorepo conventions, file-naming drift, examples
+# hygiene, and the few hand-rolled bash gates in CI.
+#
+# Adopt by saving as `.alint.yml` at the repo root and
+# running `alint check`. The bundled `monorepo/*` overlays
+# already enforce most of the per-member layout — the rules
+# below add Turborepo-specific layering on top.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - `cargo fmt --check`, `cargo clippy`, `cargo deny`        (per-language lints)
+#   - `oxlint --deny-warnings`, `oxfmt --check`, `taplo format` (per-language lints)
+#   - `attw --pack`                                              (npm packaging check)
+#   - `turbo run check-types check-links check-openapi`         (build-aware checks)
+#   - `examples/check-examples.ts` (sandboxed live-run of every example
+#     against pnpm/npm/yarn — out of scope, alint doesn't run code)
+#   - The release-PR-content guard in `test-js-packages.yml` /
+#     `turborepo-test.yml` (which restricts release PRs to
+#     `version.txt` / `package.json` / `Cargo.toml` / lockfiles).
+#     This is a CI-time diff check against `gh api`, not a
+#     repo-state check, so it can't move into `.alint.yml`.
+#
+# Known limitations versus the existing pipeline (each requires
+# an alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#   - Per-crate `dir-name == Cargo.toml [package].name` drift check
+#     (the `turborepo-globwalk` / `turborepo-paths` / etc. cases
+#     where the directory name and the published crate name diverge)
+#   - Per-package `dir-name == package.json .name` drift check
+#     (the `turbo-codemod` / `turbo-gen` / `turbo-types` cases
+#     where the directory is `kebab-case` and the package is
+#     `@turbo/scoped`)
+#   - JSON-Schema validation of `turbo.json` against the published
+#     `https://turborepo.dev/schema.json` (we have `yaml_path_matches`
+#     but not full schema validation)
+#   - `forbidden_imports` rule kind for `clippy.toml`-style
+#     "do not use VecDeque::new" — currently expressed in clippy
+#     itself (which alint can shell out to but not replicate).
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/node@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/monorepo/pnpm-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ── Per-crate layout: every member of the Cargo workspace
+  # must inherit `[lints]` from the workspace root so the
+  # workspace-level clippy / rustc allow-list (clippy.toml)
+  # actually applies. 6 of 61 crates currently drift.
+  - id: turbo-crate-inherits-workspace-lints
+    kind: file_content_matches
+    paths: "crates/*/Cargo.toml"
+    pattern: '(?ms)^\[lints\]\s*\nworkspace = true'
+    level: warning
+    message: >-
+      Every crate in the Turborepo workspace should inherit
+      the workspace's `[lints]` table. Add:
+
+        [lints]
+        workspace = true
+
+      to your Cargo.toml so workspace-level clippy / rustc
+      allow-list (see workspace root Cargo.toml + clippy.toml)
+      applies. Without this, per-crate clippy diverges from
+      the workspace policy and CI flakes inconsistently.
+
+  # ── Internal crates must be marked publish=false. The
+  # workspace currently has 60 of 61 crates without this
+  # guard — only one crate (`turbopath`) is intentionally
+  # publishable. Without the guard, a stray `cargo publish`
+  # uploads internal-only crates to crates.io.
+  - id: turbo-internal-crate-not-publishable
+    kind: toml_path_matches
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.publish"
+    matches: "false"
+    level: warning
+    message: >-
+      Internal crates should declare `publish = false` under
+      `[package]`. Workspaces with no publish gate risk
+      uploading internal-only code to crates.io with a
+      misfired `cargo publish --workspace`. Whitelist the
+      handful of crates you do publish; mark the rest false.
+      (Turborepo's only public crate is `turbopath` at the
+      time of this snapshot.)
+
+  # ── Per-crate README. The bundled monorepo/cargo-workspace
+  # ruleset already enforces this; we re-state it here only
+  # to upgrade the level from warning to error for first-party
+  # `turborepo-*` crates (9 currently lack README — see the
+  # case study README for the list).
+  - id: turbo-crate-has-readme
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+    message: >-
+      Every Turborepo crate needs a README.md describing what
+      the crate does and how it fits into the overall workspace.
+      A 1-paragraph stub is fine; an empty crate dir is not.
+
+  # ── Per-package layout: every npm package needs a LICENSE
+  # file (the workspace ships under MIT but the LICENSE file
+  # itself isn't inherited from the repo root by `npm pack`).
+  # 8 of 17 first-party packages currently lack one.
+  - id: turbo-package-has-license
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/LICENSE"
+    level: warning
+    message: >-
+      Each published npm package should ship a LICENSE file in
+      its own directory. `npm pack` does not auto-include the
+      repo-root LICENSE, so consumers see a manifest with
+      `"license": "MIT"` but no LICENSE in the tarball. The
+      private packages (`@turbo/test-utils`, `@turbo/tsconfig`,
+      etc.) can drop this with `private: true` + an exclusion;
+      everything published needs the file.
+
+  # ── Per-package README. Bundled rule `monorepo-packages-have-readme`
+  # already covers this at warning level; re-state at error level
+  # since Turborepo publishes most of these as standalone npm packages
+  # (a missing README ships an empty npmjs.com page).
+  - id: turbo-package-has-readme
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+    message: >-
+      Every package published to npm should have its own README.md.
+      `npm pack` does not auto-include the repo-root README, so a
+      missing file ships an empty package page on npmjs.com.
+
+  # ── Per-package `repository.directory` field — Turborepo's
+  # convention is to point each package back to its own subdir
+  # so `npm view <pkg> repository` deep-links correctly. Verified
+  # present on the published packages we sampled; this rule
+  # catches future regressions on new packages.
+  - id: turbo-package-declares-repository-directory
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.repository.directory"
+        matches: '^packages/[a-z0-9_.-]+$'
+    level: warning
+    message: >-
+      Each package.json should declare a `repository.directory`
+      field pointing to its own subdir (e.g. `"directory":
+      "packages/turbo-utils"`). Without it, `npm view` shows
+      the repo root, which is unhelpful for monorepos.
+
+  # ── Each `crates/*/Cargo.toml` inherits `edition` from the
+  # workspace, so a per-crate `edition = "2024"` is drift —
+  # it implies the author overrode the workspace and pinned a
+  # specific edition. Turborepo currently uses `edition =
+  # { workspace = true }` on every crate.
+  - id: turbo-crate-inherits-edition
+    kind: file_content_matches
+    paths: "crates/*/Cargo.toml"
+    pattern: '^edition\s*=\s*\{\s*workspace\s*=\s*true\s*\}'
+    level: warning
+    message: >-
+      Workspace crates should inherit `edition = { workspace =
+      true }` rather than pinning their own. Per-crate edition
+      drift means `rust-toolchain.toml` / `Cargo.toml` workspace
+      edition bumps don't propagate uniformly.
+
+  # ── Every `examples/*` directory must have a meta.json so
+  # `examples/check-examples.ts` can pick it up. Currently 1
+  # example (`with-microfrontends`) is missing meta.json.
+  # Without meta.json the example is silently skipped from CI.
+  - id: turbo-example-has-meta-json
+    kind: for_each_dir
+    select: "examples/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/meta.json"
+    level: error
+    message: >-
+      Every directory under `examples/` must have a `meta.json`
+      so `examples/check-examples.ts` knows whether the example
+      is core-team-maintained. Examples without `meta.json` are
+      silently skipped from CI sandbox runs.
+
+  # ── meta.json schema: every example's meta.json must declare
+  # the three fields check-examples.ts reads.
+  - id: turbo-example-meta-shape
+    kind: json_path_matches
+    paths: "examples/*/meta.json"
+    path: "$.name"
+    matches: ".+"
+    level: error
+
+  - id: turbo-example-meta-has-description
+    kind: json_path_matches
+    paths: "examples/*/meta.json"
+    path: "$.description"
+    matches: ".+"
+    level: error
+
+  - id: turbo-example-meta-declares-maintenance
+    kind: json_path_matches
+    paths: "examples/*/meta.json"
+    path: "$.maintainedByCoreTeam"
+    matches: '^(true|false)$'
+    level: error
+    message: >-
+      Every example's `meta.json` must declare
+      `maintainedByCoreTeam: true | false`. The flag drives
+      which examples get sandbox-validated by `check-examples.ts`.
+
+  # ── Every example must declare its own `turbo.json`. Currently
+  # `examples/with-nextjs` is missing one (likely a regression).
+  - id: turbo-example-has-turbo-json
+    kind: for_each_dir
+    select: "examples/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/turbo.json"
+    level: error
+    message: >-
+      Every example using turborepo should ship its own
+      `turbo.json`. Without it the example can't be cached or
+      task-orchestrated, defeating the point of being an example.
+
+  # ── Every example needs a `.gitignore` (the create-turbo
+  # template ships one; missing `.gitignore` means the user's
+  # first `git init && git add .` will commit `node_modules`
+  # / `.next` / `dist`).
+  - id: turbo-example-has-gitignore
+    kind: for_each_dir
+    select: "examples/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/.gitignore"
+    level: warning
+    message: >-
+      Examples should ship a `.gitignore`. Users who clone an
+      example as a starting point will otherwise commit
+      `node_modules/`, `.next/`, etc. on their first
+      `git init && git add .`.
+
+  # ── Conventional Commit titles on PRs. The repo enforces
+  # this via `.github/workflows/lint-pr-title.yml` against the
+  # PR title — we can't replicate the PR-title check from a
+  # repo-state config, but we *can* enforce the CHANGELOG
+  # entries / commit messages follow the same form. This rule
+  # is commented out by default because it's noisy on legacy
+  # commits; uncomment for greenfield repos.
+  #
+  # - id: turbo-conventional-commit-changelog
+  #   kind: file_content_matches
+  #   paths: "CHANGELOG*.md"
+  #   pattern: '^(feat|fix|chore|ci|docs|refactor|perf|test|style|examples)(\(.+\))?: '
+  #   level: warning
+
+  # ── deny.toml exists (required for `cargo deny check
+  # licenses` in `lint.yml`). Without it the workflow silently
+  # passes — there's no `deny` config so it has nothing to enforce.
+  - id: turbo-cargo-deny-config-present
+    kind: file_exists
+    paths: deny.toml
+    level: error
+    message: >-
+      `deny.toml` must exist at the repo root for
+      `cargo deny check licenses` (in `.github/workflows/lint.yml`)
+      to enforce the workspace's MIT/Apache/BSD allow-list.
+
+  - id: turbo-cargo-deny-licenses-section
+    kind: toml_path_matches
+    paths: deny.toml
+    path: "$.licenses.allow[*]"
+    matches: ".+"
+    level: error
+    message: >-
+      `deny.toml` must declare `[licenses] allow = [...]` —
+      otherwise `cargo deny check licenses` either rejects
+      everything (default-deny) or no-ops (no allow-list).
+
+  # ── clippy.toml exists. The repo uses it to forbid
+  # `std::collections::hash_map::DefaultHasher` and
+  # `VecDeque::new` workspace-wide. If clippy.toml goes
+  # missing, those bans silently disappear from CI.
+  - id: turbo-clippy-toml-present
+    kind: file_exists
+    paths: clippy.toml
+    level: warning
+    message: >-
+      `clippy.toml` carries Turborepo's workspace-wide bans
+      (`disallowed-types` / `disallowed-methods`). If the file
+      is removed, the bans no longer apply. Keep it tracked
+      and reviewed.
+
+  # ── rust-toolchain.toml pinned. The repo uses a nightly
+  # channel for `-Zthreads=8` etc. — drift breaks CI.
+  - id: turbo-rust-toolchain-pinned
+    kind: toml_path_matches
+    paths: rust-toolchain.toml
+    path: "$.toolchain.channel"
+    matches: '^(stable|beta|nightly|nightly-\d{4}-\d{2}-\d{2}|\d+\.\d+(\.\d+)?)$'
+    level: error
+    message: >-
+      `rust-toolchain.toml` must pin a specific channel.
+      Floating `nightly` (without a date) breaks reproducible
+      builds — every developer's `cargo build` picks up a
+      different nightly. Use `nightly-YYYY-MM-DD` instead.
+
+  # ── version.txt single-source-of-truth. The repo uses
+  # `version.txt` (two lines: <semver>\n<dist-tag>) as the
+  # canonical version. `scripts/version.js` writes to it on
+  # release. Catch malformed files before CI does.
+  - id: turbo-version-file-shape
+    kind: file_content_matches
+    paths: version.txt
+    pattern: '^\d+\.\d+\.\d+(-(canary|alpha|beta|rc)(\.\d+)?)?\n(latest|canary|alpha|beta|rc)\n'
+    level: error
+    message: >-
+      `version.txt` must contain exactly two lines: a semver
+      version and a dist-tag (latest|canary|alpha|beta|rc).
+      `scripts/version.js` and the release workflow both
+      depend on this shape.
+
+  # ── pre-push hook present and references the canonical
+  # gates. Husky-managed. If a contributor disables husky
+  # (via `git config core.hooksPath ''`) we can't catch it,
+  # but at least we can notice if the file disappears from
+  # the tree.
+  - id: turbo-prepush-hook-present
+    kind: file_exists
+    paths: .husky/pre-push
+    level: warning
+    message: >-
+      `.husky/pre-push` should be present and run the
+      pre-push gate (`cargo fmt --check`, `cargo lint`,
+      `turbo run format check:toml`). Without the hook the
+      first feedback is at CI time, not at push time.
+
+  # ── pre-push hook actually runs the canonical gates.
+  - id: turbo-prepush-runs-cargo-fmt
+    kind: file_content_matches
+    paths: .husky/pre-push
+    pattern: 'cargo fmt --check'
+    level: warning
+
+  - id: turbo-prepush-runs-cargo-lint
+    kind: file_content_matches
+    paths: .husky/pre-push
+    pattern: 'cargo (lint|clippy)'
+    level: warning
+
+  # ── Per-language lint shells: shell out to the existing tools.
+  # Each is gated to the relevant tree.
+
+  - id: turbo-cargo-fmt
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "fmt", "--check"]
+    level: error
+
+  - id: turbo-cargo-clippy
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "lint"]   # workspace alias from .cargo/config.toml
+    level: error
+
+  - id: turbo-cargo-deny-licenses
+    kind: command
+    paths: "deny.toml"
+    command: ["cargo", "deny", "check", "licenses"]
+    level: error
+
+  - id: turbo-oxlint-deny-warnings
+    kind: command
+    paths: "package.json"
+    command: ["pnpm", "exec", "oxlint", "--deny-warnings", "."]
+    level: error
+
+  - id: turbo-oxfmt-check
+    kind: command
+    paths: "package.json"
+    command: ["pnpm", "exec", "oxfmt", "--check"]
+    level: error
+
+  - id: turbo-taplo-check
+    kind: command
+    paths: ".taplo.toml"
+    command: ["pnpm", "exec", "taplo", "format", "--check"]
+    level: error
+
+  - id: turbo-shellcheck-scripts
+    kind: command
+    paths: "scripts/**/*.sh"
+    command: ["shellcheck"]
+    level: warning

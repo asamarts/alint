@@ -127,11 +127,20 @@ unique value prop.
    cross-file / structure)
 4. **Build matching alint config** — start from the bundled rulesets that fit
    (`rust@v1`, `node@v1`, etc.), add per-repo custom rules
-5. **Run + compare** — alint output vs the existing tool's output. Note: false
+5. **Parse-validate the config** — `./target/release/alint check --config
+   examples/<owner>-<repo>/.alint.yml examples/<owner>-<repo>/` MUST exit
+   without a `building rule "..."` / `loading config` / `invalid options`
+   error. Tool-not-on-PATH errors from `command:` rules ARE expected and
+   indicate the rule structure is correct. **The kubernetes pilot iteration
+   surfaced 8 schema-level bugs that wouldn't have shown up without this
+   step.** Subagents writing configs against memory of the schema (vs.
+   reading `crates/alint-rules/src/<kind>.rs::struct Options`) are the
+   highest-failure-rate work — bake this validation in.
+6. **Run + compare** — alint output vs the existing tool's output. Note: false
    positives, false negatives, perf delta
-6. **Gap catalogue** — for each existing check alint can't express, write a
+7. **Gap catalogue** — for each existing check alint can't express, write a
    one-line "needs rule kind X" note feeding the v0.10+ design
-7. **Per-repo case study** — one markdown page in
+8. **Per-repo case study** — one markdown page in
    `examples/<owner>-<repo>/README.md` with the inventory + the alint config +
    the comparison
 
