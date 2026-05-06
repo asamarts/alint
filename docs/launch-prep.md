@@ -81,10 +81,16 @@ Six sub-phases:
 - **Phase 2** — `coverage_audit_examples_parse.rs` audit (every
   `examples/*/.alint.yml` MUST load + build cleanly). ✅ DONE.
   *(Already caught one bug on its first run — duplicate `level:` in airflow.)*
-- **Phase 3** — Did-you-mean parse errors via custom serde Deserialize on
-  rule Options structs. Levenshtein-suggested field renames; hand-curated
-  high-drift overrides (`argv→command`, `secondary→partner`, `style→target`,
-  `pattern→prefix`). ~1 day.
+- **Phase 3** — Did-you-mean parse errors. ✅ DONE. Implementation
+  hooks at the central `RuleRegistry::build` boundary (no per-rule
+  edits): a curated rename map for the highest-drift schema renames
+  (`argv→command`, `secondary→partner`, `style→target`,
+  `pattern→prefix|suffix`, `matches↔equals` for the structured-path
+  family) plus a Levenshtein fallback (distance ≤ 2) for the long
+  tail. 18 unit tests + 9 integration tests through the real build
+  path. Also added `#[serde(deny_unknown_fields)]` to the structured-
+  path Options structs so the `matches:` ↔ `equals:` rename surfaces
+  as an unknown-field error rather than missing-required.
 - **Phase 4** — Domain-specific error messages: `scope_filter.has_ancestor`
   basename constraint, `when:` operator-keyword guidance, JSONPath
   bracket-notation for dashed keys. ~half day.
@@ -460,6 +466,19 @@ integration. ~3-5 days of work.
 ## Other productionalization items
 
 Worth doing but not blocking launch:
+
+- **`deny_unknown_fields` uniformity audit** (v0.9.16+) — 13 of 60 rule
+  Options structs don't carry `#[serde(deny_unknown_fields)]`
+  (file_content_matches, file_content_forbidden, file_header,
+  file_footer, file_max_lines, file_max_size, file_min_lines,
+  file_min_size, file_shebang, filename_case, filename_regex,
+  commented_out_code, markdown_paths_resolve). Without it those rules
+  silently accept extra fields, which means the Phase 3 did-you-mean
+  enricher can't fire for those kinds. v0.9.15 added the attr only to
+  `structured_path.rs` (the one needed for pitfall #16); the rest is a
+  separate audit since it's a behaviour change that could surface
+  latent typos in adopters' configs.
+
 
 - **`alint --version` includes commit SHA + build date** (verify current state)
 - **Crash-report path** — when alint panics, print a pre-filled `https://github.com/asamarts/alint/issues/new` URL with context

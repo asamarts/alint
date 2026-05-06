@@ -25,10 +25,10 @@
 //! - `level:` placed on a nested `for_each_dir.require:` rule instead
 //!   of the outer rule — surfaces as `missing field 'level'`
 //! - `scope_filter.has_ancestor:` containing a path separator —
-//!   surfaces as a custom scope_filter validation error
+//!   surfaces as a custom `scope_filter` validation error
 //! - `when:` / `when_iter:` using `&&`/`!`/method-calls — surfaces
 //!   as a when-language parse error
-//! - JSONPath dashed-key dot-notation — surfaces as a JSONPath
+//! - `JSONPath` dashed-key dot-notation — surfaces as a `JSONPath`
 //!   parse error
 //!
 //! What it deliberately does NOT catch:

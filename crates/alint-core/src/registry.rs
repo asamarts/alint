@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::RuleSpec;
+use crate::did_you_mean;
 use crate::error::{Error, Result};
 use crate::rule::Rule;
 
@@ -35,11 +36,26 @@ impl RuleRegistry {
             .builders
             .get(&spec.kind)
             .ok_or_else(|| Error::UnknownRuleKind(spec.kind.clone()))?;
-        builder(spec)
+        builder(spec).map_err(|e| enrich_error(e, &spec.kind))
     }
 
     pub fn known_kinds(&self) -> impl Iterator<Item = &str> {
         self.builders.keys().map(String::as_str)
+    }
+}
+
+/// Apply [`did_you_mean::enrich`] to the message of a `RuleConfig`
+/// error. Other error variants pass through unchanged.
+fn enrich_error(err: Error, kind: &str) -> Error {
+    match err {
+        Error::RuleConfig { rule_id, message } => {
+            let enriched = did_you_mean::enrich(kind, &message);
+            Error::RuleConfig {
+                rule_id,
+                message: enriched,
+            }
+        }
+        other => other,
     }
 }
 

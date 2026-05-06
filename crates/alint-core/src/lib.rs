@@ -4,6 +4,7 @@
 //! rule model, execution order, and crate layout rationale.
 
 mod config;
+pub mod did_you_mean;
 mod engine;
 mod error;
 pub mod facts;

@@ -138,6 +138,7 @@ pub enum Op {
 
 /// Options shared by every `*_path_equals` rule kind.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EqualsOptions {
     path: String,
     equals: Value,
@@ -147,6 +148,7 @@ struct EqualsOptions {
 
 /// Options shared by every `*_path_matches` rule kind.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MatchesOptions {
     path: String,
     matches: String,
