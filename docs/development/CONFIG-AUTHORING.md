@@ -808,14 +808,24 @@ catch the silent-failure modes. Two practical forms:
    entirely as an output optimisation, which can mislead an author into
    thinking a rule isn't loaded when it actually is — passing.
 
-A future audit (v0.9.16+ candidate) would automate this: each example
-case study ships a small "rule smoke-test fixture" tree with expected
-violation counts, and the audit asserts `actual == expected` rather
-than just "config parses." Tracked as a follow-up to the v0.9.15 DX
-hardening sweep. The v0.9.15 Phase 5 JSON Schema work would catch
-pitfall #16 at editor-keystroke time (the schema can constrain
-`*_path_matches.matches:` semantically), making the smoke-test
-fixture audit primarily a regex-correctness backstop.
+**v0.9.15 Phase 7 ships exactly that audit** — see
+`crates/alint-e2e/fixtures/smoke/` and
+`crates/alint-e2e/tests/coverage_audit_smoke_fixtures.rs`. Each
+fixture is a self-contained config + file tree + `expected.toml`
+declaring the canonical violation counts; the audit runs the engine
+over each tree and asserts the actuals match. A regression in any of
+the runtime-semantic pitfalls (#13/#14/#16/#17) — for instance, a
+refactor that drops `(?m)` from a `file_content_matches` rule —
+changes the violation count and fails the audit at PR time.
+
+Phase 5 JSON Schema work catches pitfall #16 at editor-keystroke time
+(the schema rejects `matches:` on `*_path_equals` rules); the smoke-
+test audit is the runtime-correctness backstop for the regex /
+multiline / array-semantics class.
+
+Adding a fixture for a new pitfall is the right way to expand
+coverage — see the README in `crates/alint-e2e/fixtures/smoke/` for
+the format + a worked example.
 
 ---
 

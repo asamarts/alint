@@ -1,0 +1,14 @@
+# Pitfall #17 workaround regression test.
+#
+#   - has_camelcase.json:     "camelcase" present → passes.
+#   - missing_camelcase.json: not present → 1 violation.
+#
+# If a refactor naively swaps to `*_path_equals` + `[*]` looking for
+# `equals: "camelcase"`, the rule would fire on EVERY non-matching
+# element (no-eval, no-undef in has_camelcase.json) — total would
+# jump and this audit would catch it.
+
+total = 1
+
+[per_rule]
+dlint-includes-camelcase = 1

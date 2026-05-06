@@ -143,15 +143,20 @@ Six sub-phases:
   hints from Phases 3-4 flow through transparently. Two trycmd
   snapshot tests cover the success + did-you-mean-flowing-through
   cases.
-- **Phase 7** — Smoke-test fixture audit (**moved from v0.9.16+ into
-  v0.9.15** after P2a-full's runtime-semantic pitfall surface area
-  became clear). Without it, v0.9.15 ships with 4 pitfalls (#13, #14,
-  #16, #17) silently uncatchable. Phase 5 JSON Schema covers #16 at
-  editor-keystroke time but not the regex anchoring (#13), YAML `\n`
-  (#14), or `*_path_equals + [*]` (#17) classes. Minimum viable design:
-  per-rule-kind fixture pairs (positive + negative input) under
-  `examples/_smoke/`; audit asserts actual `rule_id → violation_count
-  == expected`. ~1-2 days.
+- **Phase 7** — Smoke-test fixture audit. ✅ DONE. New audit at
+  `crates/alint-e2e/tests/coverage_audit_smoke_fixtures.rs` walks
+  `crates/alint-e2e/fixtures/smoke/<scenario>/` directories, builds
+  the engine for each, runs against the embedded `tree/`, and
+  asserts the actual `rule_id → violation_count` matches the
+  scenario's `expected.toml`. Sanity-verified: deliberately dropping
+  `(?m)` from a fixture rule made the audit fail; restoring it
+  returned to green. Initial coverage: 4 fixtures targeting the
+  runtime-semantic pitfalls — `content_matches_multiline_anchor`
+  (#13), `path_equals_native_bool` (#16), `path_matches_string_field`
+  (sanity baseline), `array_set_membership_workaround` (#17). The
+  `expected.toml` shape is documented for future expansion;
+  `crates/alint-e2e/fixtures/smoke/README.md` walks an author through
+  adding a new fixture.
 
 **Sequencing decision:** Phases 3-7 land AFTER P2a-full. Reasons:
 - The new examples-parse audit dropped iteration cost per case study;

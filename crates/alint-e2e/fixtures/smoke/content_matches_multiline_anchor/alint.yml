@@ -1,0 +1,12 @@
+# Pitfall #13: regex `^` defaults to file-start anchor; without `(?m)`,
+# `^Copyright` would only match files that have `Copyright` on the very
+# first line. Canonical form uses `(?m)` so `^` is line-anchored.
+
+version: 1
+
+rules:
+  - id: must-have-copyright-header-anywhere
+    kind: file_content_matches
+    paths: "**/*.txt"
+    pattern: '(?m)^Copyright'
+    level: error

@@ -1,0 +1,16 @@
+# Pitfall #16 regression test.
+#
+# Canonical form is `*_path_equals` with a YAML bool literal:
+#   - internal.toml:   publish = false → matches `equals: false` → passes.
+#   - published.toml:  publish = true  → does NOT match → 1 violation.
+#
+# Total = 1.
+#
+# If someone refactors to use `*_path_matches` with `'^false$'`, the rule
+# would fire a "not a string" violation on EVERY match (both files),
+# pushing total to 2 — this audit would fail.
+
+total = 1
+
+[per_rule]
+internal-crate-not-publishable = 1

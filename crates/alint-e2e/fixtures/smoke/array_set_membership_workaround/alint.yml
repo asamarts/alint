@@ -1,0 +1,17 @@
+# Pitfall #17: `*_path_equals` against `[*]` flips intent from "any
+# element matches" to "every element must match", firing on every non-
+# matching element. The canonical workaround until v0.10+ ships
+# `*_path_contains` is `file_content_matches` against the JSON text.
+#
+# This fixture pins the workaround's behaviour so a refactor that
+# silently re-introduces the broken `*_path_equals + [*]` shape would
+# trip the audit.
+
+version: 1
+
+rules:
+  - id: dlint-includes-camelcase
+    kind: file_content_matches
+    paths: "*.json"
+    pattern: '"include"\s*:\s*\[[^\]]*"camelcase"'
+    level: error

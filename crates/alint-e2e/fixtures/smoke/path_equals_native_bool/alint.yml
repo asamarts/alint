@@ -1,0 +1,14 @@
+# Pitfall #16: `*_path_matches` against a bool field fires a runtime
+# "value at path is not a string" violation on every match. Canonical
+# form for bool fields uses `*_path_equals` with a YAML-native bool
+# literal.
+
+version: 1
+
+rules:
+  - id: internal-crate-not-publishable
+    kind: toml_path_equals
+    paths: "*.toml"
+    path: "$.package.publish"
+    equals: false
+    level: error

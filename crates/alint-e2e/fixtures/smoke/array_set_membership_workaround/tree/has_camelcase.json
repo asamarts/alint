@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "include": ["camelcase", "no-eval", "no-undef"]
+  }
+}

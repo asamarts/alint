@@ -1,0 +1,13 @@
+# Sanity baseline: `*_path_matches` against a STRING field works as
+# documented — the regex applies to the value, violation iff regex
+# fails.
+
+version: 1
+
+rules:
+  - id: cargo-edition-must-be-2021-or-2024
+    kind: toml_path_matches
+    paths: "*.toml"
+    path: "$.package.edition"
+    matches: '^(2021|2024)$'
+    level: error

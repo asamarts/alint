@@ -19,9 +19,11 @@ alint-testkit.workspace = true
 dir-test.workspace = true
 jsonschema.workspace = true
 proptest.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
 tempfile.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

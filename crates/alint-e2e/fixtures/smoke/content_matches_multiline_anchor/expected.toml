@@ -1,0 +1,15 @@
+# Pitfall #13 regression test.
+#
+# With `(?m)^Copyright`:
+#   - header_at_line_1.txt: `Copyright` IS at a line start → passes.
+#   - header_at_line_5.txt: `Copyright` IS at a line start → passes.
+#   - no_header.txt:        no `Copyright` at any line start → 1 violation.
+#
+# If `(?m)` is dropped, the pattern reverts to file-start anchor and
+# header_at_line_5.txt suddenly produces a violation too — total
+# would jump from 1 to 2 and this audit would fail.
+
+total = 1
+
+[per_rule]
+must-have-copyright-header-anywhere = 1

@@ -1,0 +1,11 @@
+# Sanity baseline for the `*_path_matches` family on string fields.
+#
+#   - modern.toml: edition = "2024" → matches → passes.
+#   - legacy.toml: edition = "2018" → does NOT match → 1 violation.
+#
+# Total = 1.
+
+total = 1
+
+[per_rule]
+cargo-edition-must-be-2021-or-2024 = 1

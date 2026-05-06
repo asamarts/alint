@@ -1,0 +1,6 @@
+// Some preamble.
+// More preamble.
+//
+
+Copyright (c) 2026
+Some other content here.

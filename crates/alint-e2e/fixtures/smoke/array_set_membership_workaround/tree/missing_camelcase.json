@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "include": ["no-eval", "no-undef"]
+  }
+}

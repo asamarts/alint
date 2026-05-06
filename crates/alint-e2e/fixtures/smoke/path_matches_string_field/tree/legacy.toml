@@ -1,0 +1,3 @@
+[package]
+name = "legacy"
+edition = "2018"
