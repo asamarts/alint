@@ -316,16 +316,10 @@ rules:
     kind: file_content_matches
     paths: ".github/workflows/*.yml"
     pattern: 'persist-credentials:\s*false'
-    if_absent: false   # rule passes if the file doesn't reference checkout
     level: warning
     message: |
       checkout actions in this workflow should pin
       with.persist-credentials: false to prevent token leakage.
-    level: error
-    message: >-
-      Every `actions/checkout` step in a workflow must set
-      `with.persist-credentials: false` to avoid leaking the
-      GITHUB_TOKEN to subsequent steps.
 
   # ──────────────────────────────────────────────────────────────────
   # Schema-shaped checks — the `lint-json-schema` family of pre-commit
