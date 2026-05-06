@@ -132,8 +132,8 @@ February 2026.** Users actively shopping for a replacement tend to land
 here.
 
 **alint covers Repolinter's rule catalogue as a strict superset.** The
-bundled `oss-baseline@v1` ruleset (8 rules) maps Repolinter's
-file-presence + content-shape axioms 1:1; the rest of alint's catalogue
+bundled `oss-baseline@v1` ruleset (15 rules) maps Repolinter's
+file-presence + content-shape axioms; the rest of alint's catalogue
 (60 rule kinds total, 19 bundled rulesets) is net-additional.
 
 What you gain by switching:

@@ -80,9 +80,9 @@ Drafts under `docs/marketing/drafts/` correspond to P3 phases.
 | `alint-org-compare.md` | `alint.org/compare/` | **drafting** | Hybrid format: TL;DR routing table + 17-row feature matrix + per-tool deep dives + "use them together" patterns + migration callouts. ~265 lines on site repo. Coordinated publish with hero + gallery (hero blockquote points here; matrix cites case studies). Draft at `drafts/alint-org-compare.md`. |
 | `alint-org-examples-gallery.md` | `alint.org/examples/` (new route + 20 sub-routes) | **drafting** | Gallery page (cards organised by 5 narratives + headline-finding per repo) + per-case-study sub-pages auto-synced from `examples/*/README.md` via docs-bundle pipeline change. ~220-240 lines on site repo. Coordinated publish with `alint-org-hero.md` (which links here). Draft at `drafts/alint-org-examples-gallery.md`. |
 | `alint-org-benchmarks.md` | `alint.org/benchmarks/` | **planned** | Public-facing version of `docs/benchmarks/HISTORY.md`. |
-| `migrate-from-repolinter.md` | `alint.org/migrating-from/repolinter/` | **planned** | Step-by-step. Repolinter archived 2026-02 — high-intent search target. |
-| `migrate-from-ls-lint.md` | `alint.org/migrating-from/ls-lint/` | **planned** | Step-by-step. |
-| `migrate-from-custom-bash.md` | `alint.org/migrating-from/custom-bash-scripts/` | **planned** | Step-by-step; this is the kubernetes "50→17" story generalised. |
+| `migrate-from-repolinter.md` | `alint.org/migrating-from/repolinter/` | **drafting** | 719 lines. 24 entries mapped (17 full / 14 partial-or-manual / 3 no-clean). 4 alint-side gaps surfaced (file_hash_not / 5 missing language rulesets / HTTP link checking by design / commit-history grep). High-intent SEO target. Draft at `drafts/migrate-from-repolinter.md`. |
+| `migrate-from-ls-lint.md` | `alint.org/migrating-from/ls-lint/` | **drafting** | 514 lines. 16 ls-lint primitives mapped (9 full / 6 partial / 1 none). 5 alint-side gaps surfaced (point.case keyword / case alternation / .dir directory naming / exists:N min-files / severity-downgrade flag). Tone: "stay on ls-lint if naming-only is your need." Draft at `drafts/migrate-from-ls-lint.md`. |
+| `migrate-from-custom-bash.md` | `alint.org/migrating-from/custom-bash-scripts/` | **drafting** | 569 lines. 18 bash patterns catalogued (17 full + 6 unmapped, each pointing to existing v0.10+ candidates). Anchored by kubernetes 50→17 + cpython + airflow. Tone: "consolidation, not 100% replacement." Draft at `drafts/migrate-from-custom-bash.md`. |
 
 ### P3.2 — SEO infrastructure (drafts)
 

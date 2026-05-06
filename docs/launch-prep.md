@@ -303,6 +303,10 @@ signal). Sorted by demand strength.
 | `directory_hash` / `pair_hash` extension (content-hash of dir drives downstream cache) | pytorch (`.ci/docker/`) | CI-rebuild-trigger pattern. |
 | `yaml_path_implication` ("if path X = V₁ then path Y = V₂") | pytorch (NO_WORKFLOWS_ON_FORK) | Covers conditional-config patterns. |
 | `cross_language_implementation_complete` (every type in a schema spec has a per-language test fixture) | arrow | **Polyglot flagship primitive — v0.11+.** Tailor-made for arrow's `format/Schema.fbs` story. |
+| `file_hash_not` / hash-denylist (assert file's content hash is NOT in a known-bad set) | Repolinter migration draft | Repolinter's `file-hash-not` axiom; current alint workaround is `file_content_forbidden` against known-bad substring or `command:` shelling to `sha256sum`. |
+| `dir_basename_case` (basename-case rule on directories specifically; current `filename_case` is file-basename-only) | ls-lint migration draft | ls-lint's `.dir:` config has no clean alint shape today — the regex fallback works but is awkward enough that ls-lint adopters notice. |
+| `dir_min_files` (directory contains ≥ N matching files) | ls-lint migration draft | ls-lint's `exists:N` config for N>0; orthogonal to existing `dir_contains` (which is presence) and `max_files_per_directory` (which is upper-bound). |
+| `filename_case` keyword extensions: `point.case` keyword + `kebab\|Pascal` alternation operator | ls-lint migration draft | Cosmetic DX additions to existing `filename_case` rule; regex fallback works today but the extensions match ls-lint's vocabulary 1:1 for migrators. |
 
 **v0.10 low-priority / niche** (single-source, narrow applicability):
 
@@ -321,6 +325,7 @@ signal). Sorted by demand strength.
 | `monorepo/pnpm-workspace@v1` (extension of existing) | per-package field discipline pnpm dogfoods via `meta-updater` | pnpm |
 | `apache/governance@v1` (LICENSE+NOTICE+KEYS+RAT discipline) | hand-rolled Apache-RAT shellouts | arrow |
 | `cncf/owners@v1` (OWNERS file shape per k8s sig conventions) | k8s-sig OWNERS rules in helm-style projects | helm |
+| `ruby@v1` / `swift@v1` / `objective-c@v1` / `erlang@v1` / `elixir@v1` (per-language baselines + corresponding `has_<lang>` facts) | Repolinter's per-language `*-codeofconduct` etc.; one-liner `file_exists` workaround works today | Repolinter migration draft |
 
 **Process meta-findings:**
 - Parse-validation catches schema errors but cannot catch pitfalls #13,
@@ -337,6 +342,17 @@ signal). Sorted by demand strength.
   pattern (rule loads, builds, evaluates the wrong way) would persist
   indefinitely. **The audit gap is the single most load-bearing
   v0.9.16+ item.**
+
+**Migration-guide additions:** the three migration-guide drafts
+(`drafts/migrate-from-repolinter.md`, `drafts/migrate-from-ls-lint.md`,
+`drafts/migrate-from-custom-bash.md`) surfaced 5 additional rule-kind
+candidates (`file_hash_not`, `dir_basename_case`, `dir_min_files`,
+`filename_case` keyword extensions) and 5 bundled-ruleset candidates
+(`ruby@v1` etc.). Custom-bash mapped its 6 unmapped patterns 1:1 to
+existing v0.10+ candidates — no new candidates from that draft. The
+candidate count is therefore at ~28 total across all P2a + migration
+work, with 3 broad-applicability v0.10 must-haves (`registry_paths_resolve`,
+`cross_file_value_equals`, `ordered_block`) leading by demand strength.
 
 ### Saturation analysis (when to stop adding repos)
 

@@ -934,7 +934,7 @@ Bundled rulesets:
 
 ### `alint://bundled/oss-baseline@v1`
 
-The minimal hygiene baseline most open-source repos want. Nine rules:
+The minimal hygiene baseline most open-source repos want. Fifteen rules:
 
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
@@ -943,6 +943,10 @@ The minimal hygiene baseline most open-source repos want. Nine rules:
 | `oss-license-exists` | `file_exists` | warning | — |
 | `oss-license-non-empty` | `file_min_size` (200 B) | info | — |
 | `oss-security-policy-exists` | `file_exists` | info | — |
+| `oss-security-policy-non-empty` | `file_min_size` | info | — |
+| `oss-dependency-update-tool` | `file_exists` (Dependabot OR Renovate) | info | — |
+| `oss-codeowners-exists` | `file_exists` | info | — |
+| `oss-codeowners-non-empty` | `file_min_size` | info | — |
 | `oss-code-of-conduct-exists` | `file_exists` | info | — |
 | `oss-gitignore-exists` | `file_exists` | info | — |
 | `oss-no-merge-conflict-markers` | `no_merge_conflict_markers` | error | — |
