@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
 # Starter alint config for tokio-rs/tokio.
 #
 # tokio is a small, well-curated Rust workspace (10 members:

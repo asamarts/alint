@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
 # Starter alint config for clap-rs/clap.
 #
 # Replaces the structural-validation surface of clap's tooling

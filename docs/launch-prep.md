@@ -107,10 +107,30 @@ Six sub-phases:
   had mis-attributed a dashed-key error to the parens. Pitfall
   catalogue dropped 18 → 17. apache-arrow case study + master
   CONFIG-AUTHORING.md updated.
-- **Phase 5** — JSON Schema generation (`schemars` derive on every rule's
-  `Options` + discriminated-union top-level → `schemas/v1/config.json`).
-  Editor LSP autocomplete catches ~80 % of pitfalls at keystroke time.
-  Biggest single payoff. ~2-3 days.
+- **Phase 5** — JSON Schema editor-LSP wiring. ✅ DONE. The schema at
+  `schemas/v1/config.json` was already largely complete (60-rule
+  dispatch, `unevaluatedProperties: false` on the rule node — see
+  rule_kind_dispatch composition with rule_common). Phase 5 audited
+  vs. the pitfall catalogue and wired the workflow:
+  - **Spot-check audit** — `coverage_audit_schema_drift.rs` validates 5
+    canonical-correct configs + 5 pitfall configs (#1, #4, #9, #15, #16)
+    against the live schema using the `jsonschema` crate. Drift in
+    pitfall coverage surfaces as CI failure.
+  - **Drift audit** — same file checks every registered rule kind has a
+    `rule_kind_dispatch` $ref + every dispatch entry maps back to a
+    registered kind. Catches "added rule, forgot schema" at PR time.
+  - **Magic-comment rollout** — every example config under
+    `examples/*/.alint.yml` now ships with the
+    `# yaml-language-server: $schema=…` modeline. New audit
+    (`every_example_carries_the_yaml_language_server_directive`) keeps
+    that invariant.
+  - **CONFIG-AUTHORING.md** — new "Editor LSP via the JSON Schema"
+    section with adopter copy-paste line + table of pitfalls the
+    schema catches at edit time + explicit note on what it doesn't
+    catch (the runtime-semantic pitfalls #13/#14/#17 → Phase 7).
+  Net engineering scope was much smaller than the original 2-3 day
+  estimate (schema was already there); the value-delivery work
+  (audits + magic comment + docs) shipped in well under a day.
 - **Phase 6** — `alint validate-config <path>` subcommand (parse-only, no
   tree walk). For editor LSP, pre-commit hooks, fail-fast CI. ~half day.
 - **Phase 7** — Smoke-test fixture audit (**moved from v0.9.16+ into

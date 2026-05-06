@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
 # Starter alint config for rust-lang/rust.
 #
 # Replaces (in part) ~10 of the ~32 src/tools/tidy/src/* checks with

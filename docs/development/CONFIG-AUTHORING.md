@@ -819,6 +819,61 @@ fixture audit primarily a regex-correctness backstop.
 
 ---
 
+## Editor LSP via the JSON Schema (v0.9.15)
+
+The full surface area of `.alint.yml` is described as a JSON Schema at
+[`schemas/v1/config.json`](../../schemas/v1/config.json). Editors that
+support YAML LSP (VS Code via the
+[`redhat.vscode-yaml`](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
+extension; JetBrains via the bundled YAML plugin; neovim via
+[`coc-yaml`](https://github.com/neoclide/coc-yaml)) catch the bulk of
+the schema-level pitfalls above at keystroke time — before you ever run
+`alint check`.
+
+To opt in, drop a one-line directive at the top of your `.alint.yml`:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+version: 1
+extends:
+  - alint://bundled/oss-baseline@v1
+# …
+```
+
+All 20 case studies under `examples/*/.alint.yml` ship with this line
+as a working reference.
+
+### What the schema catches at edit time
+
+The schema uses `allOf` of `rule_common` + a per-kind dispatch oneOf,
+plus `unevaluatedProperties: false` at the top, so any unknown property
+on a rule surfaces immediately. Concretely:
+
+| Pitfall | Schema verdict |
+|---|---|
+| #1 `argv:` on `command` | rejected (unknown field) |
+| #4 `secondary:` on `pair` | rejected (unknown field) |
+| #5 `require:` on `pair` | rejected (unknown field) |
+| #8 `style:` on `line_endings` | rejected (unknown field) |
+| #9 `pattern:` on `file_starts_with` / `file_ends_with` | rejected (unknown field) |
+| #15 empty `prefix:` on `file_starts_with` | rejected (`minLength: 1`) |
+| #16 `matches:` on `*_path_equals` | rejected (unknown field) |
+
+The continuously-verified spot-check list is in
+`crates/alint-e2e/tests/coverage_audit_schema_drift.rs`. Drift between
+the registry and the schema dispatch surfaces as a CI failure in the
+same audit.
+
+### What the schema does NOT catch
+
+The runtime-semantic pitfalls (#13 regex anchoring, #14 YAML `\n` in
+regex, #17 `*_path_equals + [*]`) compile into syntactically-valid
+configs that misbehave at evaluation time. The schema can't see the
+regex semantics or the JSONPath result-set cardinality. v0.9.15 Phase 7
+adds a smoke-test fixture audit that closes that gap.
+
+---
+
 ## See also
 
 - [`docs/rules.md`](../rules.md) — full rule catalogue

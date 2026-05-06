@@ -39,6 +39,7 @@
 //!   against the example repo.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -132,5 +133,56 @@ fn every_examples_alint_yml_parses_and_builds() {
         failures.len(),
         configs.len(),
         failures.join("\n  - "),
+    );
+}
+
+/// v0.9.15 Phase 5 — every shipped example MUST start with the
+/// `yaml-language-server: $schema=…` directive that wires its
+/// editor's YAML LSP into the JSON Schema at
+/// `schemas/v1/config.json`. Without this line, an adopter who
+/// copies the config gets no editor autocomplete or schema
+/// validation, which is most of the pitch for the Phase 5 work.
+///
+/// The directive must be on the **first line** of the file —
+/// `redhat.vscode-yaml` (the de-facto LSP) only honours it as a
+/// top-of-file modeline.
+#[test]
+fn every_example_carries_the_yaml_language_server_directive() {
+    let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples");
+
+    let mut missing: Vec<String> = Vec::new();
+    for entry in fs::read_dir(&examples_dir).unwrap() {
+        let path = entry.unwrap().path();
+        if !path.is_dir() {
+            continue;
+        }
+        let alint_yml = path.join(".alint.yml");
+        if !alint_yml.is_file() {
+            continue;
+        }
+        let case_study = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        let mut reader = BufReader::new(fs::File::open(&alint_yml).unwrap());
+        let mut first_line = String::new();
+        reader.read_line(&mut first_line).unwrap();
+        if !first_line.contains("yaml-language-server:") || !first_line.contains("$schema=") {
+            missing.push(format!(
+                "{case_study}: first line is {first_line:?}, expected \
+                 a `# yaml-language-server: $schema=…` directive",
+            ));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} examples are missing the YAML LSP schema directive:\n\n  - {}\n\n\
+         Prepend this exact line (with the canonical schema URL):\n\n  \
+         # yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json\n\n\
+         Documented in `docs/development/CONFIG-AUTHORING.md` § \"Editor LSP via the JSON Schema\".",
+        missing.len(),
+        missing.join("\n  - "),
     );
 }

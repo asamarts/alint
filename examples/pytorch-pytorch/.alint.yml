@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
 # Starter alint config for pytorch/pytorch.
 #
 # pytorch is a multi-language ML mega-monorepo (~80k files; C++/CUDA
