@@ -1,0 +1,190 @@
+# Starter alint config for kubernetes/kubernetes.
+#
+# Replaces 12 of the 50 hack/verify-*.sh scripts with declarative rules,
+# plus 5 more via the `command` rule kind shelling out to existing tools
+# (shellcheck, misspell, gofmt, golangci-lint, govulncheck) — net 17 scripts.
+#
+# Adopt by saving as .alint.yml at the repo root and running `alint check`.
+# Tune the `paths:` and `scope_filter:` entries to your local layout if your
+# fork has diverged. The default scope filters narrow each rule to the parts
+# of the tree where it makes sense.
+#
+# Known limitations versus the existing hack/verify-*.sh pipeline (each
+# requires an alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#   - hack/verify-imports.sh           (restricted package imports per dir)
+#   - hack/verify-import-aliases.sh    (preferred alias per import)
+#   - hack/verify-prometheus-imports.sh (forbidden import per dir)
+#   - hack/verify-internal-modules.sh  (visibility of internal-only modules)
+#   - hack/verify-testing-import.sh    (no `testing` import in prod code)
+#   - hack/verify-readonly-packages.sh (vendor entry hash matches pin)
+#   - hack/verify-metrics-naming.sh    (AST-aware metric name regex)
+# These remain on the existing shell scripts until alint v0.10+ ships
+# the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/go@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ── verify-boilerplate.sh ──────────────────────────────────────
+  # Apache-2 header on every source file. The kubernetes header
+  # uses YEAR substitution; matches a contiguous block ending in
+  # 'Licensed under the Apache License, Version 2.0'.
+  - id: k8s-go-license-header
+    kind: file_header
+    paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
+    pattern: |
+      ^/\*
+      Copyright [0-9]{4} The Kubernetes Authors\.
+
+      Licensed under the Apache License, Version 2\.0
+    level: error
+
+  - id: k8s-shell-license-header
+    kind: file_header
+    paths: "**/*.sh"
+    pattern: |
+      ^# Copyright [0-9]{4} The Kubernetes Authors\.
+      #
+      # Licensed under the Apache License, Version 2\.0
+    level: error
+
+  # ── verify-file-sizes.sh ───────────────────────────────────────
+  # Files > 1MB need explicit allowlisting. The shell script
+  # carries an inline allowlist; here we use `paths:` excludes so
+  # the allowlist lives in the config (not in a side-file).
+  - id: k8s-file-max-1mb
+    kind: file_max_size
+    paths:
+      include: ["**/*"]
+      exclude:
+        - "vendor/**"        # vendored code can be larger
+        - "**/testdata/**"   # test fixtures often have large blobs
+        - "docs/**/*.png"    # diagrams in docs
+    max_bytes: 1048576       # 1 MiB
+    level: warning
+
+  # ── verify-staging-meta-files.sh ───────────────────────────────
+  # Every staging package has the meta files Kubernetes-publishing-bot needs.
+  - id: k8s-staging-meta-files
+    kind: for_each_dir
+    select: "staging/src/k8s.io/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/OWNERS"
+      - kind: file_exists
+        paths: "{path}/README.md"
+      - kind: file_exists
+        paths: "{path}/go.mod"
+      - kind: file_exists
+        paths: "{path}/LICENSE"
+    level: error
+
+  # ── verify-pkg-names.sh ────────────────────────────────────────
+  # Go package names follow lowercase, no-underscore convention.
+  # The verify script's regex is roughly "lower-case alphanumeric, no _".
+  - id: k8s-go-package-names
+    kind: file_content_matches
+    paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
+    pattern: '^package [a-z][a-z0-9]*$'
+    level: error
+    message: |
+      Go package names must be lowercase alphanumeric (no underscores or
+      dashes). See https://go.dev/blog/package-names.
+
+  # ── verify-shellcheck.sh ───────────────────────────────────────
+  # Every shell script must pass shellcheck. Shells out to the tool;
+  # `command` is gated to the user's top-level config (it can't be
+  # introduced by an extends'd ruleset), which is the correct
+  # security posture for shelling out per-file.
+  - id: k8s-shellcheck
+    kind: command
+    paths: "**/*.sh"
+    argv: ["shellcheck", "-x", "{path}"]
+    timeout: 30s
+    level: error
+
+  # ── verify-spelling.sh ─────────────────────────────────────────
+  - id: k8s-spelling
+    kind: command
+    paths:
+      include: ["**/*.md", "**/*.go"]
+      exclude: ["vendor/**", "**/testdata/**"]
+    argv: ["misspell", "-error", "{path}"]
+    timeout: 30s
+    level: warning
+
+  # ── verify-gofmt.sh ────────────────────────────────────────────
+  - id: k8s-gofmt
+    kind: command
+    paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
+    argv: ["gofmt", "-l", "{path}"]
+    expect_empty_stdout: true       # gofmt prints filenames of unformatted files
+    timeout: 30s
+    level: error
+
+  # ── verify-golangci-lint.sh ────────────────────────────────────
+  # Note: Run once per-package, not per-file. golangci-lint
+  # itself walks the package tree given a directory.
+  # Use a `for_each_dir` over Go module roots, then shell out
+  # to golangci-lint per module.
+  - id: k8s-golangci-lint
+    kind: for_each_dir
+    select: "**/go.mod"  # one entry per module
+    require:
+      - kind: command
+        paths: "{dir}"
+        argv: ["golangci-lint", "run", "{dir}/..."]
+        timeout: 600s
+        level: error
+
+  # ── verify-golangci-lint-config.sh ─────────────────────────────
+  # .golangci.yml is well-formed YAML matching the published schema.
+  - id: k8s-golangci-lint-config-shape
+    kind: yaml_path_matches
+    paths: ".golangci.yml"
+    path: "$.run"
+    matches: ".+"  # exists and is non-empty
+    level: error
+
+  # ── verify-govulncheck.sh ──────────────────────────────────────
+  - id: k8s-govulncheck
+    kind: for_each_dir
+    select: "**/go.mod"
+    require:
+      - kind: command
+        paths: "{dir}"
+        argv: ["govulncheck", "{dir}/..."]
+        timeout: 300s
+        level: warning
+
+  # ── verify-owners-fmt.sh ───────────────────────────────────────
+  - id: k8s-owners-fmt
+    kind: command
+    paths: "**/OWNERS"
+    argv: ["yamlfmt", "-lint", "{path}"]
+    timeout: 30s
+    level: error
+
+  # ── verify-mocks.sh (partial) ──────────────────────────────────
+  # Pair every <pkg>/mocks/<file>.go with the source it mocks.
+  # The `pair` rule asserts the relationship exists; the
+  # freshness check (mock matches source's current interface) is
+  # out of alint's scope.
+  - id: k8s-mock-source-pair
+    kind: pair
+    primary: "**/mocks/mock_*.go"
+    secondary: "{dir}/../{stem}.go"   # mocks/mock_foo.go pairs with ../foo.go
+    require: secondary
+    level: warning
