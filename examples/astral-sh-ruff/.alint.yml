@@ -268,7 +268,9 @@ rules:
   # excluding the three known publishables. Re-tune if ruff
   # publishes more crates.)
   - id: ruff-internal-crates-unpublished
-    kind: toml_path_matches
+    # *_path_equals (not *_matches) for bool fields — see
+    # CONFIG-AUTHORING.md pitfall #16.
+    kind: toml_path_equals
     paths:
       include: ["crates/*/Cargo.toml"]
       exclude:
@@ -276,7 +278,7 @@ rules:
         - "crates/ruff_linter/Cargo.toml"
         - "crates/ruff_wasm/Cargo.toml"
     path: "$.package.publish"
-    matches: '^false$'
+    equals: false
     level: warning
     message: |
       Internal `crates/*` packages must declare `publish = false`

@@ -232,10 +232,14 @@ rules:
     level: error
 
   - id: turbo-example-meta-declares-maintenance
-    kind: json_path_matches
+    # JSONPath *_matches can't operate on bool fields (see
+    # CONFIG-AUTHORING.md pitfall #16). For "must be either true or
+    # false" (where *_path_equals can only match one literal), the
+    # canonical workaround is a JSON-text regex via
+    # file_content_matches.
+    kind: file_content_matches
     paths: "examples/*/meta.json"
-    path: "$.maintainedByCoreTeam"
-    matches: '^(true|false)$'
+    pattern: '"maintainedByCoreTeam"\s*:\s*(true|false)\b'
     level: error
     message: >-
       Every example's `meta.json` must declare

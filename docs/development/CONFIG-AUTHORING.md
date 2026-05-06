@@ -1,11 +1,11 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a launch-prep validation pass — **15 distinct schema /
-language pitfalls** hit while writing configs for production repos. The
-first 12 surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow,
-turbo); the next 3 in Wave 1 (clap, tokio, ruff, uv, typescript). All
-configs ultimately parse + run, but the iteration cost was high. This doc
-captures every one with the canonical correct form.
+Surfaced by the P2a launch-prep validation pass — **16 distinct schema /
+language pitfalls** hit while writing configs for production repos. 12
+surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow, turbo);
+3 in Wave 1 (clap, tokio, ruff, uv, typescript); 1 in Wave 2 (next.js).
+All configs ultimately parse + run, but the iteration cost was high. This
+doc captures every one with the canonical correct form.
 
 > **TL;DR for AI agents writing alint configs:** read this entire doc
 > before drafting an `.alint.yml`. The fields documented in
@@ -28,7 +28,7 @@ captures every one with the canonical correct form.
 
 ---
 
-## The 15 pitfalls
+## The 16 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -470,6 +470,68 @@ with an empty prefix). Use the right rule for the job:
 (A `file_non_empty` convenience rule is on the v0.10+ candidate list — see
 each `examples/*/README.md` for the gap catalogue feeding it.)
 
+### 16. `*_path_matches` cannot regex-match against non-string values (bool, number, null) — use `*_path_equals` for typed values
+
+`json_path_matches`, `yaml_path_matches`, and `toml_path_matches` apply
+their `matches:` regex to the *string representation* of the matched
+value. The implementation requires the underlying `serde_json::Value` /
+`serde_yaml::Value` / `toml::Value` to be a string variant. Against a
+bool field (e.g. `[package].publish`, `compilerOptions.strict`,
+`engineStrict`), the rule fires this runtime error on **every match**:
+
+```
+value at path is not a string (got bool), can't apply regex
+```
+
+The kicker: this is a runtime semantic error, not a parse/build error,
+so the `coverage_audit_examples_parse.rs` audit doesn't catch it. The
+config "works" (parses, builds, evaluates) but emits the wrong signal —
+flagging files that satisfy the intended check rather than ones that
+don't. **Six instances of this bug surfaced in committed pilot + Wave 1
+configs** before next.js's case study made the pattern explicit.
+
+**Wrong:**
+```yaml
+- id: internal-crate-not-publishable
+  kind: toml_path_matches
+  paths: "internal/Cargo.toml"
+  path: "$.package.publish"
+  matches: '^false$'                       # ← runtime error: bool, not string
+```
+
+**Right (single-value bool — the common case):**
+```yaml
+- id: internal-crate-not-publishable
+  kind: toml_path_equals                   # ← *_equals handles any Value type
+  paths: "internal/Cargo.toml"
+  path: "$.package.publish"
+  equals: false                            # ← native YAML bool literal
+```
+
+`*_path_equals` deserialises the right-hand side into a generic
+`serde_yaml::Value` and compares with `==`, so it transparently handles
+booleans, numbers, null, arrays, and objects in addition to strings.
+
+**Right (either-of-many bools — `*_path_equals` only matches one literal,
+so fall back to a JSON-text regex):**
+```yaml
+- id: example-meta-declares-maintenance
+  kind: file_content_matches
+  paths: "examples/*/meta.json"
+  pattern: '"maintainedByCoreTeam"\s*:\s*(true|false)\b'
+```
+
+The `file_content_matches` workaround sacrifices JSON-aware key resolution
+(it can't follow `$.foo.bar.baz`), but for shallow top-level fields the
+text regex is unambiguous.
+
+**Rule of thumb:** if the field's value will be a bool, number, or null
+(in JSON/YAML/TOML terms), use `*_path_equals`. Reach for `*_path_matches`
+only when the value is genuinely a string AND you want a regex (substring
+match, set membership via `^(a|b|c)$`, prefix anchor, etc.).
+
+Source: `crates/alint-rules/src/structured_path.rs::check_match`.
+
 ---
 
 ## Honourable mention: JSONPath regex matching uses `match()`, not `=~`
@@ -604,39 +666,65 @@ Before merging a PR that adds or modifies an `.alint.yml`:
       scalar. Use `\s+` to span line breaks, `(?s)` + `.+?`, or a
       double-quoted YAML scalar with explicit escaping.
 - [ ] No `file_starts_with.prefix: ""` (use `file_min_lines: 1` instead).
+- [ ] Every `*_path_matches` rule's target field is a string. For bool,
+      number, or null fields, use `*_path_equals` with a YAML-native
+      literal. For "either-of-many" bools, fall back to
+      `file_content_matches` against the raw JSON text.
 
 The `coverage_audit_examples_parse.rs` audit (added in v0.9.15) enforces
 the first item by re-validating every `examples/*/.alint.yml` on every
 CI run. The schema-level items (1-12, 15) are caught by the same parse,
-so the audit covers them transitively. **Items 13-14 are NOT caught by
-parse-validation** — the regex compiles fine; it just never matches —
-see § "Parse-validation is necessary but not sufficient" below.
+so the audit covers them transitively. **Items 13, 14, and 16 are NOT
+caught by parse-validation** — they produce silently-wrong runtime
+behaviour (regex never matches; `*_path_matches` against a bool fires
+"not a string" on every match) — see § "Parse-validation is necessary
+but not sufficient" below.
 
 ---
 
 ## Parse-validation is necessary but not sufficient
 
-Pitfalls 13 and 14 (regex anchoring + YAML `\n` escape semantics) compile
-into a syntactically-valid regex that produces zero matches against any
-realistic input. The `coverage_audit_examples_parse.rs` audit catches
-schema errors but cannot tell the difference between "this rule fires
-correctly" and "this rule silently never fires."
+Three pitfalls in the catalogue above produce silently-wrong runtime
+behaviour that the `coverage_audit_examples_parse.rs` audit cannot
+catch:
 
-For configs that depend on regex semantics — `file_content_matches`,
-`file_content_forbidden`, `file_header`, `file_footer`, the `matches:`
-field on every JSONPath rule — a second-pass smoke test against
-representative input is the only way to catch this. Two practical forms:
+- **#13** — regex `^`/`$` defaults to file-level anchoring; without `(?m)`
+  the pattern silently never matches.
+- **#14** — single-quoted YAML strings don't expand `\n`; the regex
+  compiles into a literal `\n` two-char match that never appears in real
+  files.
+- **#16** — `*_path_matches` against a bool/number/null field emits a
+  "not a string" runtime violation on every match, completely inverting
+  the intended signal.
+
+All three classes share the same shape: the audit verifies the rule
+*loads and builds*; nothing verifies the rule *fires correctly* against
+realistic input.
+
+For configs that depend on regex semantics or JSONPath value types —
+`file_content_matches`, `file_content_forbidden`, `file_header`,
+`file_footer`, every `*_path_matches`, every `*_path_equals` — a
+second-pass smoke test against representative input is the only way to
+catch the silent-failure modes. Two practical forms:
 
 1. **Negative example file** — drop a file under `examples/<repo>/` that
    *should* trigger the rule, run `alint check`, confirm a violation.
 2. **Local repo run** — clone the actual upstream repo, run the config
-   against it, confirm rule counts are non-zero where expected.
+   against it, confirm rule counts are non-zero where expected. Use
+   `alint list --config <path>` to see the full set of rules the engine
+   *will* run (the human-readable text format prints all rules);
+   `alint check --format json` filters out passing per-file rules
+   entirely as an output optimisation, which can mislead an author into
+   thinking a rule isn't loaded when it actually is — passing.
 
 A future audit (v0.9.16+ candidate) would automate this: each example
 case study ships a small "rule smoke-test fixture" tree with expected
 violation counts, and the audit asserts `actual == expected` rather
 than just "config parses." Tracked as a follow-up to the v0.9.15 DX
-hardening sweep.
+hardening sweep. The v0.9.15 Phase 5 JSON Schema work would catch
+pitfall #16 at editor-keystroke time (the schema can constrain
+`*_path_matches.matches:` semantically), making the smoke-test
+fixture audit primarily a regex-correctness backstop.
 
 ---
 

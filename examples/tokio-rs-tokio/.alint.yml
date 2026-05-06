@@ -335,7 +335,9 @@ rules:
   # internal-only crates to crates.io on a misfired
   # `cargo publish --workspace`.
   - id: tokio-internal-crate-not-publishable
-    kind: toml_path_matches
+    # *_path_equals (not *_matches) for bool fields — see
+    # CONFIG-AUTHORING.md pitfall #16.
+    kind: toml_path_equals
     paths:
       include:
         - "benches/Cargo.toml"
@@ -344,7 +346,7 @@ rules:
         - "tests-build/Cargo.toml"
         - "tests-integration/Cargo.toml"
     path: "$.package.publish"
-    matches: '^false$'
+    equals: false
     level: warning
     message: |
       Internal-only workspace members must declare

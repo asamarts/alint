@@ -1,0 +1,800 @@
+# Starter alint config for vercel/next.js.
+#
+# next.js is a *hybrid* monorepo: a pnpm workspace
+# (`packages/*`, `apps/*`, `bench/*`, `crates/*/js`,
+# `turbopack/packages/*`) **and** a Cargo workspace
+# (`crates/*` + `turbopack/crates/*` + a few exceptions in
+# `scripts/`). At the time of capture (rev `98ab09903`,
+# 2026-05-06) it ships:
+#
+#   - 19 npm packages under packages/
+#   - 63 Cargo.toml files across crates/ + turbopack/crates/
+#   - 30+ GitHub Actions workflows
+#   - 51 .js / .mjs scripts under scripts/ (build, codegen,
+#     plus 7 hand-rolled `check-*` / `validate-*` scripts)
+#   - 6 root config files for as many lint tools (prettier,
+#     eslint, ast-grep, alex, typos, lint-staged)
+#   - husky pre-commit (lint-staged) + pre-push (canary
+#     push protection)
+#   - Lerna for versioning + turbo for orchestration
+#
+# The lint pipeline is canonical pnpm-monorepo style: one
+# `pnpm lint` script under package.json fans out to
+# `lint-typescript`, `prettier-check`, `lint-eslint`,
+# `lint-ast-grep`, `lint-language` (alex), and
+# `check-unused-turbo-tasks`. CI's `lint` job adds
+# `pnpm check-examples` and `pnpm validate-externals-doc`.
+#
+# This config replaces the *structural* gates — per-package
+# layout, per-crate workspace inheritance, monorepo-uniformity
+# invariants, presence of the canonical config files — and
+# wraps the existing per-language tools via `command:` rules
+# so a single `alint check` run fires the whole structural
+# pipeline plus the language linters in parallel.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - `prettier --check`        (formatter; AST-aware)
+#   - `eslint --config ...`     (TS/JS AST analysis)
+#   - `ast-grep scan`           (Rust AST pattern matching;
+#                                .config/ast-grep/rules/)
+#   - `alex .`                  (insensitive-language NLP)
+#   - `tsc --noEmit`            (TypeScript type-checker)
+#   - `cargo clippy`, `cargo fmt --check`, `rustdoc -D warnings`
+#                               (Rust language-level lints)
+#   - `check-unused-turbo-tasks.mjs` (turbo-tasks AST scan
+#                                     across 50k+ Rust LOC)
+#   - `validate-externals-doc.js` (sync between
+#                                  server-external-packages.jsonc
+#                                  and the docs table)
+#   - `check-manifests.js`      (errors/manifest.json route
+#                                graph traversal)
+#   - `check-is-release.js`     (parses the last commit
+#                                message — out of repo scope)
+#   - `check-pre-compiled.sh`   (regenerates webpack runtime
+#                                bundles + diffs git status —
+#                                git-state mutation, not a
+#                                read-only check)
+#
+# Known limitations versus the existing pipeline (each
+# requires an alint primitive that doesn't ship today — see
+# this directory's README.md for the full gap catalogue):
+#   - Per-package `dir-name == package.json[].name` after
+#     unscope drift check (`@next/font` → `font`, `@next/mdx`
+#     → `next-mdx`, `next-bundle-analyzer` → `next-bundle-analyzer`,
+#     etc. — the convention is intentionally messy)
+#   - errors/manifest.json route graph: every `errors/*.md` is
+#     reachable from the route tree (needs `cross_file_value_equals`
+#     or the proposed `registry_paths_resolve` rule kind)
+#   - server-external-packages.jsonc ↔ external-bundling.mdx
+#     table alignment (cross-file value match — same shape as
+#     the airflow `cross_file_value_equals` v0.10+ candidate)
+#   - Conventional sort order on installed-providers /
+#     wordlist files (the airflow `update-*-to-be-sorted`
+#     family — needs the `ordered_block` v0.10+ candidate)
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/monorepo/pnpm-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/hygiene/lockfiles@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/agent-context@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # pnpm-workspace.yaml shape — the file is load-bearing.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-pnpm-workspace-declares-packages
+    kind: yaml_path_matches
+    paths: pnpm-workspace.yaml
+    path: "$.packages[*]"
+    matches: ".+"
+    level: error
+    message: >-
+      `pnpm-workspace.yaml` must declare `packages: [...]`.
+      Without it, pnpm doesn't know which subdirs are
+      members and `pnpm install` silently treats the repo
+      as a single package.
+
+  # The `packages` list is the canonical source of truth for
+  # which subdirs are workspace members. Pinning the entries
+  # below catches accidental drops (e.g. someone refactors a
+  # bench dir out and forgets to remove it from the list,
+  # leaving install to silently no-op).
+  - id: nextjs-pnpm-workspace-includes-packages-glob
+    kind: file_content_matches
+    paths: pnpm-workspace.yaml
+    pattern: '(?m)^\s*-\s*''packages/\*'''
+    level: warning
+    message: >-
+      `pnpm-workspace.yaml` should include `'packages/*'` so
+      every npm-published next.js package is detected by
+      `pnpm install`. The current set is `apps/*`, `packages/*`,
+      `bench/*`, `crates/*/js`, `turbopack/crates/*/js`,
+      `turbopack/crates/turbopack-tests/tests/execution`, and
+      `turbopack/packages/*`.
+
+  - id: nextjs-pnpm-workspace-includes-turbopack-packages
+    kind: file_content_matches
+    paths: pnpm-workspace.yaml
+    pattern: '(?m)^\s*-\s*''turbopack/packages/\*'''
+    level: warning
+    message: >-
+      `pnpm-workspace.yaml` should include `'turbopack/packages/*'`
+      so the turbopack-side npm packages are wired into the same
+      workspace. Without it, `pnpm --filter` against a turbopack
+      package silently misses.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-package conventions — every npm package under packages/*
+  # must declare the canonical four fields the publish workflow +
+  # changelog generator both depend on.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-package-has-license-field
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.license"
+        matches: '^MIT$'
+    level: warning
+    message: >-
+      Every package under packages/ should declare
+      `"license": "MIT"`. next.js publishes under MIT;
+      packages without an explicit license field default to
+      "(unknown)" on npmjs.com.
+
+  - id: nextjs-package-has-version-field
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.version"
+        matches: '^\d+\.\d+\.\d+(-(canary|alpha|beta|rc)\.\d+)?$'
+    level: error
+    message: >-
+      Every package's package.json must declare a semver
+      version. Lerna's `version` command writes to all
+      packages in lockstep — a missing field breaks the
+      release workflow.
+
+  - id: nextjs-package-declares-name
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.name"
+        matches: '^(@next/[a-z0-9-]+|next|next-[a-z-]+|create-next-app|eslint-config-next)$'
+    level: warning
+    message: >-
+      Every package's package.json must declare a `name`.
+      next.js packages follow one of three conventions:
+      scoped (`@next/<name>`), the `next` umbrella itself,
+      or a `next-` / `create-next-app` / `eslint-config-next`
+      unscoped variant. New packages should follow the
+      scoped convention by default.
+
+  - id: nextjs-package-version-pinned-to-canary
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.version"
+        matches: '^16\.\d+\.\d+(-(canary|alpha|beta|rc)\.\d+)?$'
+    level: warning
+    message: >-
+      Every package in this monorepo must share the same
+      major version (currently 16.x). Lerna's exact-version
+      mode (`command.version.exact: true` in lerna.json)
+      depends on lockstep. Drift here means a partial release.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-crate conventions — every Cargo workspace member should
+  # declare `edition = "2024"` (matches rust-toolchain.toml + the
+  # workspace .rustfmt.toml). next.js's Cargo workspace currently
+  # *doesn't* use `[workspace.package]` field-inheritance — every
+  # member has its own license / edition / version line. We assert
+  # the values are uniform rather than the inheritance form.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-crate-edition-2024
+    kind: toml_path_matches
+    paths: ["crates/*/Cargo.toml", "turbopack/crates/*/Cargo.toml"]
+    path: "$.package.edition"
+    matches: '^2024$'
+    level: warning
+    message: >-
+      Every Cargo workspace member should pin
+      `edition = "2024"`. next.js's `.rustfmt.toml` and
+      rust-toolchain.toml both target the 2024 edition;
+      per-crate edition drift means rustfmt run against
+      one crate emits different output than against another.
+
+  - id: nextjs-crate-license-mit
+    kind: toml_path_matches
+    paths: ["crates/*/Cargo.toml", "turbopack/crates/*/Cargo.toml"]
+    path: "$.package.license"
+    matches: '^(MIT|MPL-2\.0|Apache-2\.0)$'
+    level: warning
+    message: >-
+      Every Cargo workspace member should declare
+      `license`. next.js publishes the npm side as MIT;
+      Rust crates inherit the same license unless they
+      pull in a copyleft transitive dep that requires
+      MPL-2.0 (a few turbopack crates do).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Workspace-root single-source-of-truth assertions.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-rust-toolchain-pinned
+    kind: toml_path_matches
+    paths: rust-toolchain.toml
+    path: "$.toolchain.channel"
+    matches: '^(stable|beta|nightly|nightly-\d{4}-\d{2}-\d{2}|\d+\.\d+(\.\d+)?)$'
+    level: error
+    message: >-
+      `rust-toolchain.toml` must pin a specific channel.
+      Floating `nightly` (without a date) breaks reproducible
+      builds — every developer's `cargo build` picks up a
+      different nightly. The repo currently uses
+      `nightly-2026-04-02`; drift here breaks the
+      `.devcontainer/rust/devcontainer-feature.json` lockstep.
+
+  - id: nextjs-rust-toolchain-includes-rustfmt-clippy
+    kind: toml_path_matches
+    paths: rust-toolchain.toml
+    path: "$.toolchain.components[*]"
+    matches: '^(rustfmt|clippy|rust-analyzer)$'
+    level: warning
+    message: >-
+      `rust-toolchain.toml` components must include `rustfmt`
+      + `clippy` so `pnpm lint` (which calls rustfmt + clippy)
+      and the `rust-check` CI job both work without an
+      extra `rustup component add` step.
+
+  - id: nextjs-rustfmt-edition-2024
+    kind: toml_path_matches
+    paths: .rustfmt.toml
+    path: "$.edition"
+    matches: '^2024$'
+    level: error
+    message: >-
+      `.rustfmt.toml` `edition` must match the Cargo
+      `package.edition`. A drift here means
+      `cargo fmt --edition 2024` (in lint-staged) and
+      `cargo fmt --check` (in `pre-commit`) format files
+      differently.
+
+  # NOTE: `json_path_matches` / `yaml_path_matches` rules can't
+  # apply a regex to a JSON bool — a `^true$` matcher against
+  # `"private": true` fails with "value at path is not a string
+  # (got bool), can't apply regex". The workaround is a
+  # `file_content_matches` regex against the raw text. Surfaced
+  # while writing this case study; documented as launch-prep
+  # pitfall #16.
+  - id: nextjs-package-json-declares-private
+    kind: file_content_matches
+    paths: package.json
+    pattern: '"private":\s*true'
+    level: error
+    message: >-
+      The root package.json must declare `"private": true`
+      so `pnpm publish` from the root can never accidentally
+      upload `nextjs-project` to npmjs.com. Per-package
+      publishing happens via Lerna.
+
+  - id: nextjs-package-json-workspaces-declared
+    kind: json_path_matches
+    paths: package.json
+    path: "$.workspaces[*]"
+    matches: '^packages/\*$'
+    level: warning
+    message: >-
+      The root package.json should declare `workspaces:
+      ["packages/*"]` even though pnpm-workspace.yaml is the
+      authoritative source. The duplication keeps `npm`
+      / `yarn` users (e.g. tooling that probes for the
+      workspaces field) functional.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Lerna alignment — the publish workflow depends on lerna.json's
+  # version + branch allowlist matching the actual layout.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-lerna-json-present
+    kind: file_exists
+    paths: lerna.json
+    level: error
+    message: >-
+      `lerna.json` is the authoritative version + branch
+      allowlist for the publish workflow. Removing it
+      breaks `pnpm version` and Lerna-driven releases.
+
+  - id: nextjs-lerna-uses-pnpm
+    kind: json_path_matches
+    paths: lerna.json
+    path: "$.npmClient"
+    matches: '^pnpm$'
+    level: error
+    message: >-
+      `lerna.json.npmClient` must be `pnpm`. Switching to
+      `npm` or `yarn` here silently bypasses the
+      pnpm-workspace.yaml layout and causes Lerna to
+      generate a different lockfile (and miss
+      `link-workspace-packages`).
+
+  - id: nextjs-lerna-publish-allowed-branches
+    kind: yaml_path_matches
+    paths: lerna.json
+    path: "$.command.publish.allowBranch[*]"
+    matches: '^canary$'
+    level: warning
+    message: >-
+      `lerna.json.command.publish.allowBranch` should pin
+      `canary` (the canonical release branch). Allowing
+      arbitrary branches risks an accidental publish from
+      a feature branch.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Tool config presence — every tool the lint pipeline shells out
+  # to needs its config file present, otherwise the tool either
+  # silently no-ops or rejects the run.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-prettierrc-present
+    kind: file_exists
+    paths: ".prettierrc.json"
+    level: error
+    message: >-
+      `.prettierrc.json` is required — `pnpm prettier-check`
+      / `pnpm prettier-fix` / lint-staged all read it. The
+      file pins three single-quote / no-semi / es5-trailing-
+      comma settings; missing it = prettier defaults to
+      double-quotes + semis, which would diff every file.
+
+  - id: nextjs-prettierignore-present
+    kind: file_exists
+    paths: ".prettierignore"
+    level: warning
+    message: >-
+      `.prettierignore` is required to keep prettier off
+      build artifacts (`.next/`, `dist/`, `compiled/`,
+      `.turbo/`) and managed-tool output (ast-grep
+      snapshots, `pnpm-lock.yaml`, `lerna.json`). Without
+      it, `prettier-check` would diff thousands of
+      generated files.
+
+  - id: nextjs-eslint-config-present
+    kind: file_exists
+    paths: "eslint.config.mjs"
+    level: error
+    message: >-
+      `eslint.config.mjs` is required — `pnpm lint-eslint`
+      and `pnpm lint-no-typescript` both depend on it.
+
+  - id: nextjs-eslint-cli-config-present
+    kind: file_exists
+    paths: "eslint.cli.config.mjs"
+    level: error
+    message: >-
+      `eslint.cli.config.mjs` is the CI-time config (uses
+      type-checked rules); `eslint.config.mjs` is the
+      IDE-time config (no type checking, fast feedback).
+      Both must coexist — `pnpm lint-eslint` invokes the
+      CLI variant.
+
+  - id: nextjs-typos-config-present
+    kind: file_exists
+    paths: ".typos.toml"
+    level: warning
+    message: >-
+      `.typos.toml` is the spell-check config — pre-commit
+      pulls it in via the typos hook.
+
+  - id: nextjs-ast-grep-config-present
+    kind: file_exists
+    paths: "sgconfig.yml"
+    level: warning
+    message: >-
+      `sgconfig.yml` is the ast-grep config; `pnpm lint-ast-grep`
+      depends on the `ruleDirs` / `testConfigs` declarations.
+
+  - id: nextjs-alex-config-present
+    kind: file_exists
+    paths: ".alexrc"
+    level: info
+    message: >-
+      `.alexrc` is the alex (insensitive-language) allow-list
+      config; `pnpm lint-language` depends on it.
+
+  - id: nextjs-lint-staged-config-present
+    kind: file_exists
+    paths: "lint-staged.config.js"
+    level: warning
+    message: >-
+      `lint-staged.config.js` declares the per-extension
+      formatter pipeline that `.husky/pre-commit` runs.
+      Without it the pre-commit hook silently no-ops.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Husky hook integrity — the hooks themselves must stay in place
+  # *and* invoke the canonical commands, otherwise `pnpm install`
+  # silently re-creates an empty `.husky/_/` directory and the
+  # contributor's first feedback is at CI time.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-husky-pre-commit-present
+    kind: file_exists
+    paths: .husky/pre-commit
+    level: error
+    message: >-
+      `.husky/pre-commit` should be present and run
+      `pnpm lint-staged` so format + lint runs on every
+      committed file. Without the hook, the first feedback
+      is at CI time.
+
+  - id: nextjs-husky-pre-commit-runs-lint-staged
+    kind: file_content_matches
+    paths: .husky/pre-commit
+    pattern: 'pnpm lint-staged'
+    level: warning
+    message: >-
+      `.husky/pre-commit` must invoke `pnpm lint-staged`
+      so the per-extension prettier/eslint pipeline fires.
+      A pre-commit hook that runs anything else
+      (or nothing) silently bypasses lint.
+
+  - id: nextjs-husky-pre-push-present
+    kind: file_exists
+    paths: .husky/pre-push
+    level: warning
+    message: >-
+      `.husky/pre-push` should be present — it implements
+      the canary-branch push protection (`git push --no-verify`
+      to bypass for legitimate releases). Without it,
+      contributors can accidentally push directly to
+      `vercel/next.js:canary`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Repo metadata + AI-context conventions — next.js maintains
+  # AGENTS.md as the canonical "this is the repo's contributor
+  # contract for coding agents" doc, plus a CLAUDE.md symlink and
+  # a .claude-plugin/ directory.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-agents-md-present
+    kind: file_exists
+    paths: "AGENTS.md"
+    level: warning
+    message: >-
+      `AGENTS.md` is next.js's canonical doc that coding
+      agents are expected to read first. Removing it strips
+      contextual guidance from agent-driven contributions.
+
+  - id: nextjs-claude-md-present
+    kind: file_exists
+    paths: "CLAUDE.md"
+    level: info
+    message: >-
+      `CLAUDE.md` is a symlink to AGENTS.md so Claude Code
+      finds the same canonical doc. The symlink keeps the
+      two views in lockstep without doubling content.
+
+  - id: nextjs-contributing-md-present
+    kind: file_exists
+    paths: ["contributing.md", "CONTRIBUTING.md"]
+    level: warning
+    message: >-
+      `contributing.md` (lowercase, the file name on disk)
+      should exist — it's referenced from AGENTS.md as the
+      "skim before submitting a PR" pointer.
+
+  - id: nextjs-code-of-conduct-present
+    kind: file_exists
+    paths: "CODE_OF_CONDUCT.md"
+    level: warning
+    message: >-
+      `CODE_OF_CONDUCT.md` is required for an OSS project of
+      next.js's reach (the OpenSSF Scorecard checks for it).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Errors directory shape — `errors/manifest.json` is the route
+  # graph that doc tooling traverses; every `errors/*.md` page
+  # except the template must be reachable from the manifest. This
+  # is what `scripts/check-manifests.js` enforces. Alint can assert
+  # the shape of manifest.json today (presence + valid JSON
+  # structure); the deep "every md is reachable" graph check needs
+  # the v0.10+ `registry_paths_resolve` rule kind.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-errors-manifest-present
+    kind: file_exists
+    paths: errors/manifest.json
+    level: error
+    message: >-
+      `errors/manifest.json` is the canonical error-page route
+      graph. Without it, the docs site can't surface
+      `https://nextjs.org/docs/messages/<slug>` pages.
+
+  - id: nextjs-errors-manifest-declares-routes
+    kind: json_path_matches
+    paths: errors/manifest.json
+    path: "$.routes[*].path"
+    matches: '^/errors/.+\.md$'
+    level: warning
+    message: >-
+      Every `errors/manifest.json` route must point at a
+      `.md` file under `errors/`. The current shape is
+      `{ "routes": [ { "path": "/errors/...", "title": ... } ] }`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions workflows — the bundled ci/github-actions ruleset
+  # already covers permissions + SHA pinning; we restate the action
+  # SHA gate at error level here because next.js has 30+ workflows
+  # and the supply-chain blast radius is large.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party actions in workflow steps should be pinned
+      to a 40-char commit SHA, not a floating tag. The
+      Scorecard "Pinned-Dependencies" check covers this on
+      a nightly cadence; alint surfaces the same gate at
+      PR time.
+
+  # ──────────────────────────────────────────────────────────────────
+  # turbo.json shape + freshness.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-turbo-json-present
+    kind: file_exists
+    paths: turbo.json
+    level: error
+    message: >-
+      `turbo.json` is required — `pnpm build` /
+      `pnpm dev` / the lint-typescript / rust-check CI
+      jobs all dispatch through `turbo run`. Removing it
+      breaks the entire build orchestration layer.
+
+  - id: nextjs-turbo-json-declares-schema
+    kind: json_path_matches
+    paths: turbo.json
+    path: "$['$schema']"
+    matches: '^https://turborepo\.(org|dev|com)/schema\.json$'
+    level: info
+    message: >-
+      `turbo.json` should declare `"$schema": "https://turborepo.org/schema.json"`
+      (or .dev / .com) so editors get autocomplete and
+      schema-validation feedback in real time.
+
+  - id: nextjs-turbo-json-declares-build-task
+    kind: json_path_matches
+    paths: turbo.json
+    path: "$.tasks.build.outputs[*]"
+    matches: '^dist/\*\*$'
+    level: warning
+    message: >-
+      `turbo.json` `tasks.build.outputs` should include
+      `dist/**`. Without it, turbo's cache misses every
+      time and `pnpm build` re-builds from scratch even
+      when inputs are unchanged.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level config files — pin the ones the build pipeline reads
+  # without going through any abstraction layer.
+  # ──────────────────────────────────────────────────────────────────
+
+  # See pitfall #16 note above — JSONPath rules can't regex
+  # against bools; use file_content_matches against the raw text.
+  - id: nextjs-tsconfig-strict-mode
+    kind: file_content_matches
+    paths: tsconfig.json
+    pattern: '"strict":\s*true'
+    level: error
+    message: >-
+      Root `tsconfig.json` must keep `strict: true` so
+      `pnpm typescript` (= `tsc --noEmit`) stays a meaningful
+      gate. Disabling strict mode globally would silently
+      pass thousands of new type errors.
+
+  - id: nextjs-npmrc-pinned-settings
+    kind: file_content_matches
+    paths: .npmrc
+    pattern: '(?m)^auto-install-peers\s*=\s*true'
+    level: warning
+    message: >-
+      `.npmrc` should declare `auto-install-peers = true`
+      so `pnpm install` resolves React's peerDependency
+      tree automatically. Without it, every contributor
+      hits a peer-dep warning storm on first install.
+
+  - id: nextjs-npmrc-strict-peer-deps-disabled
+    kind: file_content_matches
+    paths: .npmrc
+    pattern: '(?m)^strict-peer-dependencies\s*=\s*false'
+    level: warning
+    message: >-
+      `.npmrc` declares `strict-peer-dependencies = false`
+      to allow the React 19 / 18 split that some packages
+      tolerate. Removing the line flips pnpm's default to
+      strict and breaks `pnpm install`.
+
+  - id: nextjs-npmrc-provenance-on
+    kind: file_content_matches
+    paths: .npmrc
+    pattern: '(?m)^provenance\s*=\s*true'
+    level: info
+    message: >-
+      `.npmrc` declares `provenance = true` so npm publish
+      attaches an npmjs.com provenance attestation
+      (sigstore-backed). Removing the line drops a
+      supply-chain signal next.js currently ships.
+
+  - id: nextjs-node-version-pinned
+    kind: file_exists
+    paths: ".node-version"
+    level: warning
+    message: >-
+      `.node-version` should pin the Node major version
+      (currently `v20`). The `.devcontainer/devcontainer.json`
+      and CI workflows both read it; drift here means
+      contributors run a different Node than CI.
+
+  - id: nextjs-gitattributes-eol-lf
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\s+text=auto\s+eol=lf'
+    level: error
+    message: >-
+      `.gitattributes` must declare `* text=auto eol=lf`
+      (the first effective line of the file). Without it,
+      Windows checkouts produce CRLF files which fail
+      jest's snapshot tests + cargo's source-text
+      parsing on `\n`-anchored regex.
+
+  - id: nextjs-socket-yaml-present
+    kind: file_exists
+    paths: socket.yaml
+    level: info
+    message: >-
+      `socket.yaml` declares the Socket.dev supply-chain
+      scanner config. Removing it stops Socket from
+      surfacing dependency-risk reports on PRs that touch
+      `package.json` / `pnpm-lock.yaml`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene: things that should never exist in the working tree.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-no-tracked-dot-next
+    kind: dir_absent
+    paths: "**/.next"
+    level: error
+    message: >-
+      `.next/` is build output; `.gitignore` already excludes
+      it, but a `git add -f` slip can sneak it into the tree.
+
+  - id: nextjs-no-tracked-dot-turbo
+    kind: dir_absent
+    paths: "**/.turbo"
+    level: error
+    message: >-
+      `.turbo/` is turbo's local cache; should never be
+      committed.
+
+  - id: nextjs-no-tracked-target
+    kind: dir_absent
+    paths: "**/target/debug"
+    level: error
+    message: >-
+      Cargo's `target/` is build output; should never be
+      tracked. The bundled rust@v1 ruleset covers `target/`
+      at the workspace root; this rule extends the check
+      to any nested `target/debug` directory (a common
+      drift in dual-language monorepos).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language lint shell-outs — wrap the existing tools so a
+  # single `alint check` run fires the whole structural pipeline
+  # plus the language linters in parallel.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: nextjs-prettier-check
+    kind: command
+    paths: ".prettierrc.json"
+    command: ["pnpm", "prettier-check"]
+    timeout: 300
+    level: error
+
+  - id: nextjs-eslint-check
+    kind: command
+    paths: "eslint.cli.config.mjs"
+    command: ["pnpm", "lint-eslint", "."]
+    timeout: 600
+    level: error
+
+  - id: nextjs-typescript-check
+    kind: command
+    paths: "tsconfig.json"
+    command: ["pnpm", "lint-typescript"]
+    timeout: 600
+    level: error
+
+  - id: nextjs-ast-grep-scan
+    kind: command
+    paths: "sgconfig.yml"
+    command: ["pnpm", "lint-ast-grep"]
+    timeout: 300
+    level: warning
+
+  - id: nextjs-alex-language
+    kind: command
+    paths: ".alexrc"
+    command: ["pnpm", "lint-language"]
+    timeout: 120
+    level: info
+
+  - id: nextjs-cargo-fmt-check
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "fmt", "--check"]
+    timeout: 120
+    level: error
+
+  - id: nextjs-cargo-clippy
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
+    timeout: 1200
+    level: error
+
+  - id: nextjs-typos-check
+    kind: command
+    paths: ".typos.toml"
+    command: ["typos"]
+    timeout: 120
+    level: warning
+
+  - id: nextjs-check-examples
+    kind: command
+    paths: "scripts/check-examples.sh"
+    command: ["pnpm", "check-examples"]
+    timeout: 300
+    level: warning
+
+  - id: nextjs-check-unused-turbo-tasks
+    kind: command
+    paths: "scripts/check-unused-turbo-tasks.mjs"
+    command: ["pnpm", "check-unused-turbo-tasks"]
+    timeout: 300
+    level: warning
+
+  - id: nextjs-validate-externals-doc
+    kind: command
+    paths: "scripts/validate-externals-doc.js"
+    command: ["pnpm", "validate-externals-doc"]
+    timeout: 60
+    level: warning

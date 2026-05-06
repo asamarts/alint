@@ -1,0 +1,445 @@
+# Starter alint config for prettier/prettier.
+#
+# Replaces ~9 of the 11 `lint:*` package.json scripts (and their
+# Lint workflow steps) with declarative rules — plus another ~5
+# enforcing prettier's per-language-plugin convention discipline
+# that the project itself does not currently check.
+#
+# Adopt by saving as `.alint.yml` at the repo root and running
+# `alint check`.
+#
+# prettier is a single-package JS repo, so the bundled `node@v1`
+# ruleset already enforces a lot (root package.json, lockfile,
+# no committed node_modules / dist, .nvmrc-or-engines, source
+# hygiene). What this config adds on top is:
+#
+#   1. Verbatim shellouts to the existing `lint:*` scripts (yarn
+#      already wires them; alint's `command` rule lets a single
+#      `alint check` invocation drive the whole gate).
+#   2. The prettier-specific structural conventions that today
+#      live in custom node scripts (`lint-changelog.js`,
+#      `format-test-lint.js`, `check-deps.js`,
+#      `ensure-no-files-changed.js`) — restated as declarative
+#      rules so they parse-validate at config-load time and run
+#      in parallel with everything else.
+#   3. Per-language-plugin invariants under `src/language-*/` —
+#      every plugin must export `index.js` + `languages.evaluate.js`,
+#      every plugin must have a corresponding `changelog_unreleased/`
+#      category dir. These are convention rules prettier enforces
+#      socially today (review + repo memory) but does not encode.
+#
+# Known limitations vs. the existing tooling (each requires a
+# primitive alint doesn't ship today — see this directory's
+# README.md for the gap catalogue):
+#
+#   - `tsc` JSDoc typechecking                              (TS AST scope)
+#   - `eslint` ruleset incl. `prettier-internal-rules/*`    (JS AST scope)
+#   - `cspell` spellcheck against `cspell.json` allowlist   (lexical AST,
+#                                                            could `command`-shell)
+#   - `lint:knip` unused exports + dependency analysis      (JS dep-graph)
+#   - `ensure-no-files-changed.js` post-fix idempotency     (needs
+#                                                            `command_idempotent`)
+#   - changelog-category enum validity                       (covered shallowly
+#                                                            via `dir_exists`;
+#                                                            true PR # uniqueness
+#                                                            across category
+#                                                            siblings needs
+#                                                            `unique_by` cross-dir,
+#                                                            not yet a primitive)
+#
+# These remain on the existing `yarn lint` invocation until alint
+# v0.10+ ships the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/agent-context@v1
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ── package.json: pinned dependencies (mirrors scripts/check-deps.js) ─
+  # The project's `lint:deps` script asserts every entry in
+  # `dependencies` / `devDependencies` / `resolutions` is pinned
+  # (no leading `^` or `~`). Five package.json files are checked
+  # by the script; alint mirrors the gate on the root one
+  # declaratively. (The other four — website/, scripts/release/,
+  # scripts/tools/bundle-test/, scripts/tools/eslint-plugin-prettier-internal-rules/
+  # — are folded into the `command` shell-out below, since
+  # asserting "no version starts with ^ or ~" against an entire
+  # JSON object is currently a string-match against the file
+  # contents rather than a per-key JSONPath assertion.)
+  - id: prettier-deps-pinned-root
+    kind: file_content_forbidden
+    paths: "package.json"
+    # `^X.Y.Z` or `~X.Y.Z` after a JSON value `:`. The leading
+    # `(?m)` makes `^` mean line-start so we match dep entries,
+    # not the whole-file start.
+    pattern: '(?m)^\s*"[^"]+"\s*:\s*"[\^~][0-9]'
+    level: error
+    message: |
+      package.json `dependencies` / `devDependencies` / `resolutions`
+      entries must be pinned (no `^` or `~` prefixes). Mirrors
+      `scripts/check-deps.js`.
+
+  # ── Verbatim wrapper around `yarn lint` (single shellout) ─────────
+  # The most pragmatic way to surface prettier's existing 8-step
+  # `lint` pipeline through alint is one wrapper rule. This keeps
+  # the existing pipeline intact while letting `alint check` be
+  # the single entry point for the whole gate.
+  - id: prettier-yarn-lint
+    kind: command
+    paths: "package.json"
+    command: ["yarn", "lint"]
+    timeout: 600
+    level: warning
+    message: |
+      `yarn lint` runs typecheck + eslint + prettier-self-check +
+      cspell + lint-changelog + lint-deps + lint-knip +
+      lint-format-test in parallel. See package.json `scripts.lint`.
+
+  # ── prettier dogfoods itself on its own sources ────────────────────
+  # `lint:prettier` runs `prettier . --check --cache`. The
+  # equivalent alint formulation is one `command` rule per file
+  # type prettier covers — but that would shell out 50k+ times
+  # on the full tree. One workspace-wide invocation is what the
+  # project uses; mirror that.
+  - id: prettier-self-format-check
+    kind: command
+    paths: ".prettierignore"
+    command: ["prettier", ".", "--check", "--cache"]
+    timeout: 300
+    level: warning
+    message: |
+      Prettier dogfoods itself (`yarn lint:prettier`). The check
+      should pass against the entire tree minus `.prettierignore`.
+
+  # ── ESLint (`lint:eslint` step) ────────────────────────────────────
+  # eslint.config.js carries 13 file-scoped overrides + 9
+  # internal `prettier-internal-rules/*`. alint can't replace
+  # any of the AST analysis but can drive the runner.
+  - id: prettier-eslint-check
+    kind: command
+    paths: "eslint.config.js"
+    command: ["eslint", ".", "--format", "friendly"]
+    timeout: 300
+    level: warning
+
+  # ── Spellcheck (`lint:spellcheck` step) ────────────────────────────
+  - id: prettier-cspell-check
+    kind: command
+    paths: "cspell.json"
+    command: ["cspell", "--no-progress", "--relative", "--dot", "--gitignore"]
+    timeout: 120
+    level: info
+
+  # ── changelog_unreleased structure (mirrors lint-changelog.js) ─────
+  #
+  # `scripts/lint-changelog.js` enforces a multi-rule contract on
+  # `changelog_unreleased/`:
+  #   - exact directory roster matching CHANGELOG_CATEGORIES
+  #   - every category dir has a .gitkeep
+  #   - every PR file is named `^\d{4,}(-\d+)?\.md$`
+  #   - every PR file references its own #NNNN
+  #   - title starts with `#### `, ends with PR link
+  #   - author link present
+  #   - no template-comment leakage
+  #   - no `prettier master` (use "main")
+  #
+  # alint covers the structural pieces declaratively; the
+  # content-shape pieces (PR-link consistency, author-link
+  # presence) need either a deeper file_content_matches per file
+  # or the existing node script. Below: structural via
+  # for_each_dir + per-file content shape via file_content_matches.
+
+  # CHANGELOG_CATEGORIES: angular, api, cli, css, flow, graphql,
+  # handlebars, html, javascript, json, less, lwc, mjml, markdown,
+  # mdx, scss, typescript, vue, yaml, misc. Each needs to exist.
+  - id: prettier-changelog-categories-exist
+    kind: file_exists
+    paths:
+      - "changelog_unreleased/angular/.gitkeep"
+      - "changelog_unreleased/api/.gitkeep"
+      - "changelog_unreleased/cli/.gitkeep"
+      - "changelog_unreleased/css/.gitkeep"
+      - "changelog_unreleased/flow/.gitkeep"
+      - "changelog_unreleased/graphql/.gitkeep"
+      - "changelog_unreleased/handlebars/.gitkeep"
+      - "changelog_unreleased/html/.gitkeep"
+      - "changelog_unreleased/javascript/.gitkeep"
+      - "changelog_unreleased/json/.gitkeep"
+      - "changelog_unreleased/less/.gitkeep"
+      - "changelog_unreleased/lwc/.gitkeep"
+      - "changelog_unreleased/mjml/.gitkeep"
+      - "changelog_unreleased/markdown/.gitkeep"
+      - "changelog_unreleased/mdx/.gitkeep"
+      - "changelog_unreleased/scss/.gitkeep"
+      - "changelog_unreleased/typescript/.gitkeep"
+      - "changelog_unreleased/vue/.gitkeep"
+      - "changelog_unreleased/yaml/.gitkeep"
+      - "changelog_unreleased/misc/.gitkeep"
+      - "changelog_unreleased/TEMPLATE.md"
+      - "changelog_unreleased/BLOG_POST_INTRO_TEMPLATE.md"
+    level: error
+    message: |
+      changelog_unreleased/ must contain one directory per category
+      (mirrors scripts/utilities/changelog-categories.js). Each
+      category dir holds a .gitkeep so empty buckets stay tracked.
+
+  # Filename format for PR-note files inside category dirs. The
+  # script regex is `^(\d{4,})(-\d+)?\.md$`; encode it as a
+  # filename_regex. Path scope is every category dir, with the
+  # template files excluded.
+  - id: prettier-changelog-pr-filenames
+    kind: filename_regex
+    paths:
+      include: ["changelog_unreleased/*/*.md"]
+      exclude:
+        - "changelog_unreleased/TEMPLATE.md"
+        - "changelog_unreleased/BLOG_POST_INTRO_TEMPLATE.md"
+        - "changelog_unreleased/blog-post-intro.md"
+    pattern: '^[0-9]{4,}(-[0-9]+)?\.md$'
+    level: error
+    message: |
+      Changelog notes must be named `<PR_NUMBER>.md` (or
+      `<PR_NUMBER>-N.md` for multi-note PRs). Mirrors
+      scripts/lint-changelog.js.
+
+  # Each PR note must start with `#### ` (h4 heading). Multi-line
+  # mode so the anchor matches file-start (which is line-start at
+  # offset 0 anyway, but consistent with the rest of the config).
+  - id: prettier-changelog-pr-h4-title
+    kind: file_starts_with
+    paths:
+      include: ["changelog_unreleased/*/*.md"]
+      exclude:
+        - "changelog_unreleased/TEMPLATE.md"
+        - "changelog_unreleased/BLOG_POST_INTRO_TEMPLATE.md"
+        - "changelog_unreleased/blog-post-intro.md"
+    prefix: "#### "
+    level: error
+    message: |
+      Changelog notes must use `#### ` (h4) for the title.
+      Mirrors scripts/lint-changelog.js validateTitle().
+
+  # No "prettier master" leakage — use "main".
+  - id: prettier-changelog-no-master
+    kind: file_content_forbidden
+    paths:
+      include: ["changelog_unreleased/*/*.md"]
+    pattern: '(?i)prettier master'
+    level: error
+    message: |
+      Use "main" instead of "master" when referencing the prettier
+      branch in changelog notes. Mirrors scripts/lint-changelog.js.
+
+  # Template comment leakage: the TEMPLATE.md ships with `<!-- ... -->`
+  # blocks that authors are supposed to delete. The known leakage
+  # marker is the `// Prettier stable` placeholder text from the
+  # template's example block.
+  - id: prettier-changelog-no-template-placeholders
+    kind: file_content_forbidden
+    paths:
+      include: ["changelog_unreleased/*/*.md"]
+      exclude:
+        - "changelog_unreleased/TEMPLATE.md"
+        - "changelog_unreleased/BLOG_POST_INTRO_TEMPLATE.md"
+    pattern: '\(#XXXX by @user\)'
+    level: error
+    message: |
+      Changelog note still has the TEMPLATE.md placeholder
+      `(#XXXX by @user)`. Replace with the real PR number and
+      your GitHub handle.
+
+  # ── Per-language-plugin convention discipline ──────────────────────
+  #
+  # prettier ships 8 language plugins under `src/language-*/`.
+  # Each one MUST expose `index.js` + `languages.evaluate.js`
+  # (the production-build's per-language entry points) and
+  # SHOULD have a corresponding `changelog_unreleased/<lang>/`
+  # category. None of this is enforced by any of prettier's
+  # current `lint:*` scripts — review + repo memory only.
+  #
+  # The for_each_dir over `src/language-*` is the alint primitive
+  # that makes this declarative.
+  - id: prettier-each-language-plugin-has-index
+    kind: for_each_dir
+    select: "src/language-*"
+    require:
+      - kind: file_exists
+        paths: "{path}/index.js"
+    level: error
+    message: |
+      Every prettier language plugin under src/language-*/ must
+      export an index.js (the parser/printer/options entry point
+      consumed by the production-build pipeline).
+
+  - id: prettier-each-language-plugin-has-languages-evaluate
+    kind: for_each_dir
+    select: "src/language-*"
+    require:
+      - kind: file_exists
+        paths: "{path}/languages.evaluate.js"
+    level: error
+    message: |
+      Every prettier language plugin under src/language-*/ must
+      ship a `languages.evaluate.js` (the linguist-languages
+      lookup table consumed at build time).
+
+  # ── packages/plugin-* (external published plugins) ──────────────────
+  # `packages/plugin-oxc/` and `packages/plugin-hermes/` are
+  # standalone npm packages prettier publishes alongside core.
+  # Each must have an index.js + a package.json + a README.md
+  # (since `npm pack` ships the README to the npm package page).
+  - id: prettier-each-plugin-package-shape
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/index.js"
+      - kind: file_exists
+        paths: "{path}/package.json"
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+    message: |
+      Each published `packages/plugin-*` must have an `index.js`,
+      a `package.json`, and a `README.md` (the README ships to
+      the npmjs.com package page via `npm pack`).
+
+  # plugin-* packages are published under the @prettier scope.
+  - id: prettier-plugin-package-prettier-scope
+    kind: json_path_matches
+    paths: "packages/plugin-*/package.json"
+    path: "$.name"
+    matches: '^@prettier/plugin-'
+    level: error
+    message: |
+      Published plugin packages live under the `@prettier/`
+      scope (e.g. `@prettier/plugin-oxc`).
+
+  # ── prettier's own dogfooded prettier.config.js ────────────────────
+  # The repo dogfoods itself; the config sets the parser to
+  # `meriyah` for *.{js,mjs,cjs}. We don't validate the JS;
+  # we just assert the file is present (it's the canonical
+  # entry point for the dogfood loop).
+  - id: prettier-dogfood-config-exists
+    kind: file_exists
+    paths: "prettier.config.js"
+    root_only: true
+    level: error
+    message: |
+      prettier.config.js is prettier's dogfood config (parser
+      override, file-scoped overrides). It must remain present.
+
+  # ── tests/format/ format-test-lint convention (lint:format-test) ──
+  # Every leaf directory under tests/format/ that contains test
+  # files must contain a format.test.js entry. The existing
+  # node script walks tests/format recursively; alint's
+  # equivalent declarative shape is a `command` rule that just
+  # invokes the existing script (since walking only-leaf-dirs
+  # with-non-snapshot-files is more nuanced than for_each_dir
+  # alone). Kept as a `command` shellout — but the gate is
+  # surfaced through `alint check` instead of being an
+  # invisible step in `yarn lint`.
+  - id: prettier-format-test-lint
+    kind: command
+    paths: "scripts/format-test-lint.js"
+    command: ["node", "./scripts/format-test-lint.js"]
+    timeout: 60
+    level: warning
+    message: |
+      Every test directory under tests/format/ must contain a
+      `format.test.js` (mirrors scripts/format-test-lint.js).
+
+  # ── pyproject.toml-style metadata: package.json shape gates ───────
+  # Three high-signal fields prettier's package.json must keep
+  # in sync with the published package on npmjs.com / GitHub.
+  - id: prettier-package-name
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.name"
+    matches: '^prettier$'
+    level: error
+    message: |
+      package.json `name` must be `prettier` (the published
+      distribution name on npm).
+
+  - id: prettier-package-license
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.license"
+    matches: '^MIT$'
+    level: error
+    message: |
+      package.json `license` must be `MIT` to match the LICENSE
+      file at the repo root.
+
+  - id: prettier-package-engine-node
+    # The published package targets Node >=20. Drift away from
+    # that floor without a deliberate decision is a launch
+    # regression.
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.engines.node"
+    matches: '^>=2[0-9]$'
+    level: warning
+    message: |
+      package.json `engines.node` should declare a `>=20` floor
+      (or higher, monotonically). Lowering it ships a Node
+      compatibility regression.
+
+  # ── README.md mentions npm version + license badges ────────────────
+  # Smoke check — the README hasn't been gutted.
+  - id: prettier-readme-has-npm-badge
+    kind: file_content_matches
+    paths: "README.md"
+    pattern: 'npmjs\.com/package/prettier'
+    level: info
+    message: |
+      README.md should retain the npm package link (smoke check
+      that the README hasn't been accidentally trimmed).
+
+  # ── .prettierignore must exist (the dogfood relies on it) ──────────
+  - id: prettier-prettierignore-exists
+    kind: file_exists
+    paths: ".prettierignore"
+    root_only: true
+    level: error
+    message: |
+      .prettierignore is required for the prettier dogfood loop
+      (`prettier . --check`) to skip vendor / generated trees.
+
+  # ── eslint.config.js must exist (lint:eslint depends on it) ────────
+  - id: prettier-eslint-config-exists
+    kind: file_exists
+    paths: "eslint.config.js"
+    root_only: true
+    level: error
+    message: |
+      eslint.config.js is the flat-config entry point for
+      `yarn lint:eslint`.
+
+  # ── tsconfig.json must exist (lint:typecheck depends on it) ────────
+  - id: prettier-tsconfig-exists
+    kind: file_exists
+    paths: "tsconfig.json"
+    root_only: true
+    level: error
+    message: |
+      tsconfig.json drives `yarn lint:typecheck` (JSDoc-typed
+      sources via the TypeScript compiler).
+
+  # ── CONTRIBUTING.md present (it's the contributor onboarding) ──────
+  - id: prettier-contributing-exists
+    kind: file_exists
+    paths: ["CONTRIBUTING.md"]
+    root_only: true
+    level: warning
+    message: |
+      CONTRIBUTING.md is prettier's contributor onboarding doc;
+      keep it present.

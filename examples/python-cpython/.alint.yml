@@ -1,0 +1,596 @@
+# Starter alint config for python/cpython.
+#
+# cpython is the canonical Python+C hybrid mega-repo. Its structural
+# validation is unusually scattered: ~12 distinct surfaces ranging from
+# Make targets, Tools/scripts/* check programs, .pre-commit-config.yaml
+# (15 hooks across 9 ruff configs + black + several local hooks),
+# .gitattributes (the source of truth for line-endings, generated-file
+# markers, and binary classification), .editorconfig (formatting
+# defaults), and Tools/c-analyzer/, Tools/check-c-api-docs/,
+# Tools/build/{stable_abi,smelly,check_warnings,check_extension_modules}.py
+# (deep C-API checkers).
+#
+# This config replaces the SHALLOW orchestration layer with declarative
+# rules and shells out to the existing tools (ruff, black, sphinx-lint,
+# zizmor, actionlint, check-jsonschema) where alint can express the
+# scope but not the analysis. The DEEP per-tool semantic checks
+# (stable_abi.py, smelly.py, check-c-api-docs/main.py,
+# check-c-globals.py) stay on `make stable_abi` / `make smelly` /
+# `make check-c-api-docs` etc — they're AST-aware C-API logic, the
+# same "we own a runtime, of course we have AST-aware lints"
+# territory we deliberately keep out of alint scope.
+#
+# The interesting alint-shaped surface in cpython is Misc/NEWS.d/next/:
+# 12 category subdirectories, each holding ~10-200 entries with the
+# strict filename pattern
+#   YYYY-MM-DD-HH-MM-SS.gh-issue-NUMBER.NONCE.rst
+# (108 entries in Library/ alone at clone time). The .pre-commit-config
+# encodes two LOCAL hooks asserting "no entries with spaces in the
+# directory name" (because Sphinx + the blurb tool can't handle them).
+# A well-scoped `filename_regex` rule per-subdir catches both: the
+# dated-issue-nonce shape AND the no-spaces invariant.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to
+# your local layout if your fork has diverged.
+#
+# Known limitations versus the existing pipeline (each requires an
+# alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#
+#   - Argument Clinic block-marker integrity                (file_pair_block_match
+#                                                             /balanced_delimiters)
+#     Tools/clinic/clinic.py reads `/*[clinic input]*/ ... /*[clinic end
+#     generated code: ...]*/` blocks IN-PLACE in .c files and regenerates
+#     the body. alint can detect the markers exist but cannot assert each
+#     opening has a matching close in source order, nor that the
+#     generated body in `Objects/clinic/<name>.c.h` matches the in-place
+#     re-inflation. Same shape as rust-lang/rust's `rustdoc_css_themes`
+#     gap. STAYS on `make clinic` until v0.10+.
+#
+#   - cases_generator output / generated-file freshness    (cross-file_codegen)
+#     Python/{generated_cases,executor_cases,optimizer_cases}.c.h are
+#     generated from Python/bytecodes.c by Tools/cases_generator/. alint
+#     can verify the generated files exist (we do, below) but cannot
+#     assert they're up-to-date relative to their inputs. Same shape as
+#     uv's `cargo dev generate-all --mode dry-run` gap. STAYS on
+#     `make regen-cases`.
+#
+#   - .gitattributes "generated" markers ↔ on-disk presence (registry_paths_resolve)
+#     .gitattributes lists ~50 generated files (e.g.
+#     `Python/generated_cases.c.h    generated`). The path registry must
+#     resolve to a real file. Same shape as rust-lang/rust's `triagebot`
+#     gap. STAYS as a manual review item until v0.10+.
+#
+#   - Misc/stable_abi.toml ↔ exported symbols              (cross-file C-API analysis)
+#     `Tools/build/stable_abi.py --all` cross-references the TOML
+#     manifest against the exported PyAPI_* symbols in Include/. Out of
+#     alint scope (parses C); STAYS on `make check-abidump` /
+#     `Tools/build/stable_abi.py`.
+#
+#   - Tools/build/smelly.py — exported-symbol prefix gate  (binary symbol scan)
+#     Asserts every libpython exported symbol starts with `Py` / `_Py`
+#     (or covered exception). Reads ELF/Mach-O symbol tables. Out of
+#     alint scope (binary parsing); STAYS on `make smelly`.
+#
+#   - Tools/check-c-api-docs/main.py — undocumented APIs    (cross-file C-API analysis)
+#     Greps Include/**/*.h for PyAPI_FUNC/PyAPI_DATA, asserts each is
+#     documented in Doc/c-api/. Same shape as the rust-lang/rust
+#     `error_codes` gap (multi-file definition ↔ docs cross-reference).
+#     Could be expressed via a future `registry_paths_resolve` once the
+#     primitive lands. STAYS on `make check-c-api-docs`.
+#
+#   - patchcheck.py — git-state-aware preflight             (git-diff aware)
+#     "Was Misc/NEWS.d updated?", "is configure regenerated when
+#     configure.ac changed?", "did you also touch pyconfig.h.in?". These
+#     are git-diff queries rather than tree state. alint's --changed
+#     mode informs WHICH files to check, not what triggers a check. Out
+#     of scope; STAYS on `make patchcheck`.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/python@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # .editorconfig conventions — explicit assertions
+  # cpython's .editorconfig declares trim_trailing_whitespace=true and
+  # insert_final_newline=true for every {py,c,cpp,h,js,rst,md,yml,yaml,gram}
+  # file. The pre-commit `trailing-whitespace` and `end-of-file-fixer`
+  # hooks enforce a SUBSET (only types_or: [c, inc, python, rst, yaml]).
+  # We mirror the editorconfig contract directly — strictly broader than
+  # what pre-commit catches today.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.c"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.rst"
+        - "**/*.md"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.gram"
+      exclude:
+        - "Lib/test/**"
+        - "Modules/**"
+        - "**/clinic/*.c.h"
+        - "**/clinic/*.cpp.h"
+        - "**/clinic/*.h.h"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: cpython-final-newline
+    kind: final_newline
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - ".github/CODEOWNERS"
+      exclude:
+        - "Lib/test/tokenizedata/coding20731.py"   # explicitly noeol per .gitattributes
+        - "Lib/test/**"
+        - "Modules/**"
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  # ──────────────────────────────────────────────────────────────────
+  # .gitattributes line-ending policy — declarative
+  # cpython has a complex .gitattributes:
+  #   - *.bat, *.proj, *.props, *.ps1, *.sln, *.vcxproj* are CRLF (dos)
+  #   - *.rst, Lib/venv/scripts/posix/* are LF
+  #   - default text files follow autocrlf
+  # Each is encoded as a separate alint line_endings rule. The pre-commit
+  # `mixed-line-ending --fix=auto` hook does roughly the same job
+  # implicitly; we make the contract explicit and per-file-class.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-rst-lf-line-endings
+    kind: line_endings
+    paths:
+      include: ["**/*.rst"]
+      exclude: ["Lib/test/**"]
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  - id: cpython-py-lf-line-endings
+    kind: line_endings
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "Lib/test/**"
+        - "Lib/test/tokenizedata/coding20731.py"
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  - id: cpython-windows-bat-crlf
+    # `*.bat dos` in .gitattributes — Windows batch scripts must be CRLF.
+    kind: line_endings
+    paths: "**/*.bat"
+    target: crlf
+    level: warning
+
+  - id: cpython-windows-vcxproj-crlf
+    kind: line_endings
+    paths:
+      include:
+        - "**/*.vcxproj"
+        - "**/*.vcxproj.filters"
+        - "**/*.props"
+        - "**/*.proj"
+        - "**/*.sln"
+        - "**/*.ps1"
+    target: crlf
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # Trojan Source defense — broader than the bundled baseline
+  # The bundled oss-baseline restricts no_bidi_controls to docs (md/txt/
+  # toml/yml/json). cpython is a runtime; bidi controls in .py / .c are
+  # the higher-stakes case. Override at the repo level.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-no-bidi-in-source
+    kind: no_bidi_controls
+    paths:
+      include: ["**/*.py", "**/*.c", "**/*.h", "**/*.cpp", "**/*.rst"]
+      exclude:
+        - "Lib/test/**"
+        - "Modules/**"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidirectional override characters in source files are rejected."
+    policy_url: "https://trojansource.codes/"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Misc/NEWS.d/next entry filename convention
+  # Every news entry in Misc/NEWS.d/next/<Section>/ MUST match
+  #   YYYY-MM-DD-HH-MM-SS.gh-issue-NUMBER.NONCE.rst
+  # Two .pre-commit local hooks today encode the WEAKER invariant
+  # ("path must not contain spaces"). The full pattern is the actual
+  # contract — blurb generates it, sphinx parses it, the release tooling
+  # reads the dates. README.rst is the one allowed exception (each
+  # category subdir has one).
+  #
+  # This is the single most-alint-shaped check in cpython and the
+  # strongest demo of the launch pitch on this repo: the existing tooling
+  # encodes only "no spaces"; alint encodes the full filename grammar
+  # in 6 lines.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-news-entry-filename
+    kind: filename_regex
+    paths:
+      include: ["Misc/NEWS.d/next/*/*.rst"]
+      exclude: ["Misc/NEWS.d/next/*/README.rst"]
+    pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.gh-issue-[0-9]+\.[A-Za-z0-9_-]+\.rst$'
+    level: error
+    message: |
+      Misc/NEWS.d/next entries must use the blurb-generated filename:
+        YYYY-MM-DD-HH-MM-SS.gh-issue-<NUMBER>.<NONCE>.rst
+      Run `blurb add` (https://pypi.org/project/blurb/) to create entries
+      with the correct shape; do not author by hand.
+
+  - id: cpython-news-section-readme-exists
+    # Each NEWS.d/next category subdir ships a README.rst pointing
+    # contributors at `blurb`. Catches accidentally-deleted READMEs.
+    kind: for_each_dir
+    select: "Misc/NEWS.d/next/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/README.rst"
+    level: warning
+    message: >-
+      Each Misc/NEWS.d/next/<Section>/ should ship a README.rst pointing
+      contributors at the `blurb` tool.
+
+  - id: cpython-news-no-spaces-in-path
+    # The two pre-commit local hooks (blurb-no-space-c-api,
+    # blurb-no-space-core-and-builtins) encode this invariant for two
+    # specific subdirs by intercepting on filename. The general form:
+    # no NEWS.d entry path may contain a space character. forbid the
+    # legacy section names ("C API" → must be "C_API"; "Core and
+    # Builtins" → must be "Core_and_Builtins") at the alint layer.
+    kind: dir_absent
+    paths:
+      - "Misc/NEWS.d/next/C API"
+      - "Misc/NEWS.d/next/Core and Builtins"
+      - "Misc/NEWS.d/next/Tools-Demos with spaces"
+    level: error
+    message: |
+      Section directories under Misc/NEWS.d/next/ must use underscores
+      (C_API, Core_and_Builtins) — Sphinx and the blurb tool cannot handle
+      spaces in the path. Move entries from the spaced directory to the
+      underscore variant.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Argument Clinic — file pairing
+  # Every Python/.../foo.c that contains a `/*[clinic input]*/` block
+  # must have a generated header at <dir>/clinic/<basename>.c.h. We can
+  # assert the directory shape (every Objects/clinic/, Python/clinic/,
+  # Modules/clinic/, PC/clinic/ subdir exists when the parent has
+  # clinic-marked .c files) but pair-matching the in-place block to the
+  # generated header is a `file_pair_block_match` we don't have yet —
+  # see the README gap catalogue.
+  #
+  # Approximation: every parent of a clinic/ directory must contain at
+  # least one .c file (otherwise the clinic dir is orphaned).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-clinic-dir-has-parent-c-files
+    kind: for_each_dir
+    select: "{Objects,Python,PC}/clinic"
+    when_iter: 'iter.is_dir'
+    require:
+      - kind: file_exists
+        paths: "{parent}/*.c"
+    level: warning
+    message: >-
+      An Argument Clinic generated-headers directory exists with no parent
+      .c files containing `/*[clinic input]*/` markers. Either delete the
+      orphaned clinic/ subdir or restore the parent .c sources.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Generated bytecode interpreter — generated files exist
+  # Tools/cases_generator/ produces five files; if any is missing the
+  # build breaks deep into the C compile. Catch at the static layer.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-cases-generator-outputs-exist
+    kind: file_exists
+    paths:
+      - "Python/generated_cases.c.h"
+      - "Python/executor_cases.c.h"
+      - "Python/optimizer_cases.c.h"
+      - "Python/opcode_targets.h"
+      - "Include/internal/pycore_opcode_metadata.h"
+    level: error
+    message: |
+      A bytecode-interpreter generated file is missing. Run
+      `make regen-cases` (or the platform equivalent) to regenerate
+      from Python/bytecodes.c.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Pre-commit hook orchestration → declarative shellouts
+  # The .pre-commit-config.yaml runs ruff with 9 distinct configs,
+  # actionlint, zizmor, sphinx-lint, check-jsonschema, and black on
+  # Tools/jit/. We collapse the 9 ruff invocations into 9 alint
+  # `command:` rules — each scoped to the matching tree.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-ruff-check-doc
+    kind: command
+    paths:
+      include: ["Doc/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-tools-build
+    kind: command
+    paths:
+      include: ["Tools/build/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Tools/build/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-tools-clinic
+    kind: command
+    paths:
+      include: ["Tools/clinic/**/*.py", "Lib/test/test_clinic.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Tools/clinic/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-tools-i18n
+    kind: command
+    paths:
+      include: ["Tools/i18n/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Tools/i18n/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-tools-peg
+    kind: command
+    paths:
+      include: ["Tools/peg_generator/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Tools/peg_generator/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-tools-wasm
+    kind: command
+    paths:
+      include: ["Tools/wasm/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Tools/wasm/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-platforms-apple
+    kind: command
+    paths:
+      include: ["Platforms/Apple/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Platforms/Apple/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-ruff-check-platforms-wasi
+    kind: command
+    paths:
+      include: ["Platforms/WASI/**/*.py"]
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "--config=Platforms/WASI/.ruff.toml", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-actionlint
+    # Replaces the rhysd/actionlint pre-commit hook + the equivalent
+    # check in CI. One rule per workflow file; actionlint reads its
+    # config from .github/actionlint.yaml automatically.
+    kind: command
+    paths:
+      include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    command: ["actionlint", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: cpython-zizmor
+    # Replaces the zizmor-pre-commit hook. zizmor is a deeper GHA
+    # security scanner — pin-to-SHA, expression injection, etc.
+    kind: command
+    paths:
+      include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    command: ["zizmor", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: cpython-sphinx-lint-doc
+    # Replaces the sphinx-contrib/sphinx-lint pre-commit hook for Doc/
+    kind: command
+    paths:
+      include: ["Doc/**/*.rst", "Misc/NEWS.d/**/*.rst"]
+    command: ["sphinx-lint", "--enable=default-role", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: cpython-check-dependabot
+    # Replaces the python-jsonschema/check-jsonschema dependabot hook.
+    kind: command
+    paths: ".github/dependabot.yml"
+    command: ["check-jsonschema", "--builtin-schema", "vendor.dependabot", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: cpython-check-readthedocs
+    # Replaces the python-jsonschema/check-jsonschema readthedocs hook.
+    kind: command
+    paths: ".readthedocs.yml"
+    command: ["check-jsonschema", "--builtin-schema", "vendor.readthedocs", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: cpython-black-jit
+    # Replaces the black-pre-commit-mirror hook scoped to Tools/jit/.
+    kind: command
+    paths:
+      include: ["Tools/jit/**/*.py"]
+    command: ["black", "--check", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # Tabs-in-Python guard — pre-commit's `remove-tabs` hook
+  # PEP 8 forbids tab indentation in Python sources. The pre-commit hook
+  # silently fixes; we surface as a warning and offer the fix.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-no-tabs-in-python
+    kind: indent_style
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "Lib/test/**"
+        - "Modules/**"
+    style: spaces
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # CODEOWNERS conventions
+  # cpython's CODEOWNERS is 656 lines and explicitly says "GitHub
+  # usernames should be aligned to column 31". We can't enforce column
+  # alignment with alint today (no `column_alignment` rule kind), but
+  # we can assert the file exists, is non-empty, has trailing newline.
+  # The file_min_lines floor is intentionally generous.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-codeowners-substantive
+    kind: file_min_lines
+    paths: ".github/CODEOWNERS"
+    min_lines: 100
+    level: info
+    message: "CODEOWNERS is unusually short — cpython expects substantive ownership coverage."
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions reusable-workflow naming convention
+  # Every reusable workflow file in .github/workflows/ starts with
+  # `reusable-` (verified against the live tree: 12 of 25 files).
+  # Catches the case where someone copies a reusable as a top-level
+  # workflow without renaming.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-reusable-workflow-naming
+    # Every workflow file declaring `on: workflow_call` should be named
+    # `reusable-*.yml`. This is a `for_each_file` over workflow files;
+    # the inner file_content_forbidden asserts the naming convention
+    # holds — but we can't easily express "filename matches a regex
+    # conditional on contents" without `for_each_file` + a child
+    # filename_regex check, which requires a path-level rule. Express as
+    # the simpler check: every file starting with `reusable-` actually
+    # has `workflow_call:`.
+    kind: file_content_matches
+    paths:
+      include: [".github/workflows/reusable-*.yml"]
+    pattern: '(?m)^\s*workflow_call\s*:'
+    level: warning
+    message: |
+      Workflow files prefixed `reusable-*.yml` should declare
+      `on.workflow_call:` — otherwise the prefix misleads readers about
+      the workflow's call site.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Misc/sbom.spdx.json must be present and well-formed
+  # Tools/build/generate_sbom.py regenerates it; the file is committed.
+  # The CI check-sbom job runs the generator with --check.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-sbom-present
+    kind: file_exists
+    paths: "Misc/sbom.spdx.json"
+    level: error
+    message: "SBOM (Misc/sbom.spdx.json) must be committed."
+
+  - id: cpython-externals-sbom-present
+    kind: file_exists
+    paths: "Misc/externals.spdx.json"
+    level: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # Doc/ build files exist
+  # The Doc/ tree has its own Makefile + Sphinx config + .ruff.toml.
+  # Asserting presence catches accidental deletion / branch-merge
+  # mishaps before `make -C Doc html` would.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-doc-build-present
+    kind: file_exists
+    paths:
+      - "Doc/Makefile"
+      - "Doc/conf.py"
+      - "Doc/requirements.txt"
+      - "Doc/.ruff.toml"
+    level: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # configure / pyconfig.h.in regenerated together
+  # patchcheck.py asserts (git-diff aware) that touching configure.ac
+  # also regenerates configure + pyconfig.h.in. We can statically
+  # assert all three exist; the regenerated-together check needs the
+  # git-diff awareness alint doesn't have today (see README gap).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-autotools-files-present
+    kind: file_exists
+    paths:
+      - "configure"
+      - "configure.ac"
+      - "pyconfig.h.in"
+      - "aclocal.m4"
+      - "Makefile.pre.in"
+    root_only: true
+    level: error
+    message: |
+      A core autotools file is missing. cpython's build pipeline assumes
+      configure.ac → configure + pyconfig.h.in are regenerated together
+      via `make regen-configure`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stable ABI manifest must be present and TOML-parseable
+  # Tools/build/stable_abi.py reads Misc/stable_abi.toml. The
+  # manifest's deep semantics (which symbols are exported, etc.) stay
+  # on stable_abi.py — but we catch the trivial "file is missing" case.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: cpython-stable-abi-manifest-present
+    kind: file_exists
+    paths: "Misc/stable_abi.toml"
+    level: error
+
+  - id: cpython-stable-abi-manifest-non-empty
+    # The manifest must declare at least one stable-ABI item. Any of
+    # function/struct/data/macro/const/typedef counts. A malformed TOML
+    # surfaces as a parse violation here too — toml_path_matches reports
+    # it before path-matching runs.
+    kind: toml_path_matches
+    paths: "Misc/stable_abi.toml"
+    path: "$.function[*].name"
+    matches: '^[A-Za-z_][A-Za-z0-9_]*$'
+    if_present: true
+    level: warning
+    message: |
+      Misc/stable_abi.toml must contain at least one [[function]] entry.
+      The manifest is the source of truth for the stable ABI; an empty
+      manifest indicates regen breakage. Run `Tools/build/stable_abi.py
+      --check` for the full validation.

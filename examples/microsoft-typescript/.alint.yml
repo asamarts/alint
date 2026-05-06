@@ -261,16 +261,17 @@ rules:
   - id: ts-tsconfig-strict-mode
     # JSONPath against tsconfig.* — even the root tsconfig.json
     # uses jsonc-style comments (TypeScript's own loader is
-    # comment-tolerant), so the json_path_matches kind handles
+    # comment-tolerant), so the json_path_equals kind handles
     # them via the structured-path Format::Json variant
-    # (which tolerates JSONC).
-    kind: json_path_matches
+    # (which tolerates JSONC). Use *_equals (not *_matches) for
+    # bool fields — see CONFIG-AUTHORING.md pitfall #16.
+    kind: json_path_equals
     paths:
       include: ["tsconfig*.json", "src/**/tsconfig*.json", "scripts/tsconfig.json"]
       exclude:
         - "tests/**/tsconfig*.json"   # test fixtures sometimes set strict=false on purpose
     path: "$.compilerOptions.strict"
-    matches: '^true$'
+    equals: true
     level: warning
     message: >-
       The TypeScript repo runs in strict mode end-to-end. Every
@@ -281,10 +282,12 @@ rules:
     # scripts/tsconfig.json uses `allowJs: true` + `checkJs: true`
     # so the `.mjs` build scripts get type-checked alongside the
     # TS sources. Catch regressions if either is silently dropped.
-    kind: json_path_matches
+    # *_path_equals (not *_matches) for bool fields — see
+    # CONFIG-AUTHORING.md pitfall #16.
+    kind: json_path_equals
     paths: "scripts/tsconfig.json"
     path: "$.compilerOptions.checkJs"
-    matches: '^true$'
+    equals: true
     level: warning
     message: >-
       scripts/tsconfig.json should keep `allowJs: true` +
