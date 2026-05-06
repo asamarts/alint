@@ -308,7 +308,7 @@ Each one shows the source-tool config side-by-side with the equivalent
       `/examples/pytorch-pytorch/`, `/examples/microsoft-typescript/`,
       `/examples/helm-helm/`, `/examples/astral-sh-ruff/` all resolve
       (most-cited from this page).
-- [ ] `/docs/benchmarks/` exists with v0.9.15 numbers (currently public
+- [ ] `/docs/benchmarks/` exists with v0.9.16 numbers (currently public
       data is at `docs/benchmarks/HISTORY.md` in the alint repo —
       needs site-side rendering).
 - [ ] Verify the per-comparator URLs still resolve at publish time:

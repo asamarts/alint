@@ -19,7 +19,7 @@ Each marketing surface is one row. Status uses the small vocabulary:
 
 Drafts live under `docs/marketing/drafts/<surface>.md` with frontmatter
 documenting status + intended destination + dependencies (e.g., "blocks
-on v0.9.15 release for the JSON-Schema link to resolve").
+on v0.9.16 release for the JSON-Schema link to resolve").
 
 ## Current marketing surfaces
 
@@ -30,7 +30,7 @@ on v0.9.15 release for the JSON-Schema link to resolve").
 
 | Surface | Status | Concrete current state | Notes |
 |---|---|---|---|
-| `README.md` (top-level alint repo) | **live** | Hero: "Fast, language-agnostic linter for repository structure, files, and content." Value props: speed (1.1s @ 100K, 12s @ 1M), agent-aware, 60 kinds / 13 families / 19 rulesets / 12 fix ops / 8 output formats, one static Rust binary, explicit Repolinter-archived-2026 framing. Version refs: v0.9.14 (main-branch drift ahead of the v0.9.6 tag — not stale). | Strongest live surface; the alint.org hero needs to catch up to it. P3.1 will refresh once v0.9.15 ships. |
+| `README.md` (top-level alint repo) | **live** | Hero: "Fast, language-agnostic linter for repository structure, files, and content." Value props: speed (1.1s @ 100K, 12s @ 1M), agent-aware, 60 kinds / 13 families / 19 rulesets / 12 fix ops / 8 output formats, one static Rust binary, explicit Repolinter-archived-2026 framing. Version refs: v0.9.14 (main-branch drift ahead of the v0.9.6 tag — not stale). | Strongest live surface; the alint.org hero needs to catch up to it. P3.1 will refresh once v0.9.16 ships. |
 | `https://alint.org/` (landing) | **stale** | Hero: "Lint the *shape* of your repo." Value props present: `.alint.yml`, "60 rule kinds" + 13 families, 19 rulesets, auto-fix, RFC 9535, 8 output formats incl. SARIF/JUnit/GitLab/agent. CTAs: Install + Browse cookbook + Quickstart + Star. **No version badge. No "language-agnostic" in headline (only `<title>`).** | Buries the two strongest differentiators: Repolinter-replacement (only in "Why a separate tool" section) + agent-aware output (not in hero). Highest-leverage P3.1 refresh target. |
 | `https://alint.org/docs/` (docs landing) | **live** | Sections: Getting Started, Concepts, Rules, Bundled Rulesets, CLI, Cookbook (6 cards). | **No case studies linked anywhere in docs or landing.** Direct gap that P3.1's `alint.org/examples/` gallery fills. |
 | `https://alint.org/docs/rules/` | **live** | ~60 rule kinds, grouped "By family" + "Alphabetical". 13 family names confirmed: Existence, Content, Naming, Text hygiene, Structured query, Security, Encoding, Structure, Portable, Unix, Git hygiene, Cross-file, Plugin. | Auto-generated from docs-bundle. No P3 work here. |
@@ -75,7 +75,7 @@ Drafts under `docs/marketing/drafts/` correspond to P3 phases.
 
 | Draft | Destination | Status | Notes |
 |---|---|---|---|
-| `readme-hero.md` | top-level `README.md` | **drafting** | Incremental polish on P1's hero — adds "Proven on 20 real OSS repos" section + "Where alint shines" 5-narrative section. Strictly additive, ~50-70 lines. Blocks on v0.9.15 ship for version-refs bump. Draft at `drafts/readme-hero.md`. |
+| `readme-hero.md` | top-level `README.md` | **drafting** | Incremental polish on P1's hero — adds "Proven on 20 real OSS repos" section + "Where alint shines" 5-narrative section. Strictly additive, ~50-70 lines. Blocks on v0.9.16 ship for version-refs bump. Draft at `drafts/readme-hero.md`. |
 | `alint-org-hero.md` | `alint.org/` (site repo `index.md` or equivalent) | **drafting** | Mirrors README hero messaging for cross-surface consistency. New "Fast, language-agnostic linter…" headline + version badge + speed bullet + Repolinter blockquote + 20-case-study section. ~30 lines replaced + ~25 added on the site repo. Coordinated publish with `readme-hero.md`. Draft at `drafts/alint-org-hero.md`. |
 | `alint-org-compare.md` | `alint.org/compare/` | **drafting** | Hybrid format: TL;DR routing table + 17-row feature matrix + per-tool deep dives + "use them together" patterns + migration callouts. ~265 lines on site repo. Coordinated publish with hero + gallery (hero blockquote points here; matrix cites case studies). Draft at `drafts/alint-org-compare.md`. |
 | `alint-org-examples-gallery.md` | `alint.org/examples/` (new route + 20 sub-routes) | **drafting** | Gallery page (cards organised by 5 narratives + headline-finding per repo) + per-case-study sub-pages auto-synced from `examples/*/README.md` via docs-bundle pipeline change. ~220-240 lines on site repo. Coordinated publish with `alint-org-hero.md` (which links here). Draft at `drafts/alint-org-examples-gallery.md`. |

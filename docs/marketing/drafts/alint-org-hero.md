@@ -172,7 +172,7 @@ Whoever applies this brief:
    `?label=version` produces the latter — confirm the cleaner
    rendering with the site's theme.
 2. **Speed numbers.** The current numbers (1.1s @ 100K, 12s @ 1M)
-   come from v0.9.13 benches. v0.9.15 won't change the engine
+   come from v0.9.13 benches. v0.9.16 won't change the engine
    shape, so the numbers stand — but confirm at publish time.
 3. **`/examples/` route.** If gallery draft ships with a different
    route (e.g. `/case-studies/`), update the "Browse the full

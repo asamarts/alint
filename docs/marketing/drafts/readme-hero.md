@@ -1,7 +1,7 @@
 ---
 destination: README.md (top-level alint repo)
 status: drafting
-blocks_on: v0.9.15 release (for the version-refs bump from v0.9.14 → v0.9.15)
+blocks_on: v0.9.16 release (for the version-refs bump from v0.9.14 → v0.9.16)
 last_touched: 2026-05-06
 ---
 
@@ -20,7 +20,7 @@ strong. This draft does NOT rewrite it. It adds two new sections:
    positioning narratives crystallised across P2a so a first-time reader
    can self-identify which one matches their repo.
 
-Version refs (`v0.9.14` in 4 places) bump to `v0.9.15` when that
+Version refs (`v0.9.14` in 4 places) bump to `v0.9.16` when that
 version ships. That's a mechanical post-release pass, not a content
 change — left out of this draft.
 
@@ -121,13 +121,13 @@ config looks like in your shape.
 - 60-second quickstart YAML block.
 - Capability list, non-goals, install instructions, all subsequent
   sections.
-- All version refs at v0.9.14 (will bump to v0.9.15 in a separate
+- All version refs at v0.9.14 (will bump to v0.9.16 in a separate
   mechanical post-release pass).
 
 ## Open questions before publish
 
 1. The current 4-bullet hero already says *"60 rule kinds across 13
-   families, 19 bundled ecosystem rulesets"*. After v0.9.15 those
+   families, 19 bundled ecosystem rulesets"*. After v0.9.16 those
    counts may shift (rule kinds + 1 if Phase 7 ships `*_path_contains`
    in the same window; rulesets unchanged). Verify counts at
    publish time.
@@ -141,8 +141,8 @@ config looks like in your shape.
 
 ## Pre-publish checklist
 
-- [ ] v0.9.15 has shipped + the 4 `v0.9.14` references in the live
-      README updated to `v0.9.15`.
+- [ ] v0.9.16 has shipped + the 4 `v0.9.14` references in the live
+      README updated to `v0.9.16`.
 - [ ] Each `examples/<owner>-<repo>/` link tested (the directories
       exist; the relative paths from `README.md` resolve).
 - [ ] `examples/README.md` gallery up to date with the 20-case-study

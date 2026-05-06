@@ -513,7 +513,7 @@ list) will retire themselves over the next few releases.
 4. **Do we want a benchmark number in the perf section?** "On a 100k
    file repo, the alint-replaceable subset benchmarks at ~1-2
    seconds." This number is from the v0.9.13 published S3 bench
-   (`docs/benchmarks/HISTORY.md`); confirm it stands at v0.9.15
+   (`docs/benchmarks/HISTORY.md`); confirm it stands at v0.9.16
    publish time. The compare page uses the same number.
 5. **`pre-commit` framing.** This page treats pre-commit hooks as
    "bash-shaped from the migrator's perspective" via the airflow
