@@ -4,6 +4,7 @@ use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     max_bytes: u64,
 }

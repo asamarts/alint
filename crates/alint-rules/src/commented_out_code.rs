@@ -56,6 +56,7 @@ use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Sco
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     /// `auto` (default) infers the comment-marker set from
     /// each file's extension. Explicit override useful for

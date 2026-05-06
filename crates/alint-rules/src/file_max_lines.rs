@@ -16,6 +16,7 @@ use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Sco
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     max_lines: u64,
 }

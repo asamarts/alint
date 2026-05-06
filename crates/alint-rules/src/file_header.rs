@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::fixers::FilePrependFixer;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     pattern: String,
     #[serde(default = "default_lines")]

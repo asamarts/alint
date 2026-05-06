@@ -1,0 +1,18 @@
+# Pitfall #14 regression test (YAML `\n` semantics in regex).
+#
+# Canonical form uses `(?s)\[lints\]\s+workspace\s*=\s*true`:
+#   - has_lints.toml:     [lints]\nworkspace = true → regex matches → passes.
+#   - missing_lints.toml: no [lints] block → does NOT match → 1 violation.
+#
+# Total = 1.
+#
+# If someone naively writes the pattern with a literal `\n` between
+# the two segments (`'\[lints\]\s*$\n\s*workspace'`), the YAML-quoted
+# `\n` becomes a two-char literal that never appears in real files —
+# the rule's match count would drop to ZERO (both files fail to
+# match), pushing total from 1 to 2 and failing this audit.
+
+total = 1
+
+[per_rule]
+lints-workspace-true = 1

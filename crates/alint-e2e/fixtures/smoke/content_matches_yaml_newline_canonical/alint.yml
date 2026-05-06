@@ -1,0 +1,22 @@
+# Pitfall #14: YAML single-quoted strings don't expand `\n` to a literal
+# newline inside regex patterns — the regex compiles to a literal `\n`
+# two-char match that never appears in real files. Canonical form uses
+# `\s+` (or `(?s)` + `.+?`, or a YAML block-literal `|` with a real
+# newline) to span line boundaries.
+#
+# This fixture pins the canonical workaround. If a refactor naively
+# stuffs a literal `\n` between two pattern segments, the rule's match
+# count would drop to zero against the multi-line fixture file and the
+# audit would fail.
+
+version: 1
+
+rules:
+  - id: lints-workspace-true
+    kind: file_content_matches
+    paths: "*.toml"
+    # `\s+` spans line breaks correctly in YAML single-quoted strings.
+    # The naive bad form `'\[lints\]\s*$\n\s*workspace'` would compile
+    # `\n` as a literal `n` and never match.
+    pattern: '(?s)\[lints\]\s+workspace\s*=\s*true'
+    level: error

@@ -13,6 +13,7 @@ use crate::case::CaseConvention;
 use crate::fixers::FileRenameFixer;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     case: CaseConvention,
 }

@@ -1,0 +1,5 @@
+[package]
+name = "has-lints"
+
+[lints]
+workspace = true

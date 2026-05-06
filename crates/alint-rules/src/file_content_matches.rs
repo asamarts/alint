@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::fixers::FileAppendFixer;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Options {
     pattern: String,
 }
