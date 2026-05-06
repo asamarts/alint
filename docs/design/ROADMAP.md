@@ -4,12 +4,18 @@
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.9.6** (2026-05-02). Closes the v0.9
-cut with the `scope_filter:` per-file gate (see the v0.9.6
-section below). See
+**Latest release: v0.9.16** (2026-05-06). Config DX hardening
+release — closes the launch-prep validation pass with seven-
+phase coverage of the 17 schema + runtime pitfalls surfaced
+during the P2a 20-repo case-study sweep (CONFIG-AUTHORING
+catalogue, examples-parse audit, did-you-mean parse errors,
+domain-specific error messages, JSON Schema editor-LSP wiring,
+`alint validate-config` subcommand, smoke-test fixture audit).
+20 production OSS repos with working configs ship under
+`examples/<owner>-<repo>/`. No engine changes; bench corpus
+unchanged from v0.9.14. See
 [CHANGELOG.md](../../CHANGELOG.md) and
-[`docs/benchmarks/macro/results/linux-x86_64/v0.9.6/`](../benchmarks/macro/results/linux-x86_64/v0.9.6/)
-for captured numbers.
+[`docs/launch-prep.md`](../launch-prep.md) for the full sweep.
 
 **v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs

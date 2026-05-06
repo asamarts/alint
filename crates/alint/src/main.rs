@@ -17,10 +17,26 @@ mod init;
 mod progress;
 mod suggest;
 
+/// Long-form `alint --version` output: workspace version, git short
+/// SHA, and build date. Bug reports paste this verbatim and a
+/// maintainer can pinpoint the exact commit. The SHA + date come
+/// from `crates/alint/build.rs` via `cargo:rustc-env`; both fall
+/// back to `unknown` when built from a published tarball without
+/// a git tree.
+const ALINT_LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("ALINT_GIT_SHA"),
+    ", built ",
+    env!("ALINT_BUILD_DATE"),
+    ")",
+);
+
 #[derive(Parser, Debug)]
 #[command(
     name = "alint",
     version,
+    long_version = ALINT_LONG_VERSION,
     about = "Language-agnostic linter for repository structure, existence, naming, and content rules",
     long_about = None,
 )]
@@ -273,6 +289,7 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    init_panic_hook();
     init_tracing();
     let cli = Cli::parse();
     match run(cli) {
@@ -282,6 +299,71 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// Install a custom panic hook that prints a pre-filled GitHub-issue
+/// URL for the bug report. Skipped when `RUST_BACKTRACE` is set so
+/// developers running with `RUST_BACKTRACE=1` keep the standard
+/// backtrace path.
+fn init_panic_hook() {
+    if std::env::var_os("RUST_BACKTRACE").is_some() {
+        return;
+    }
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "(unknown)".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("(non-string panic payload)");
+        let title = format!("alint panic: {payload}");
+        let body = format!(
+            "alint version: {ver}\n\
+             OS: {os}\n\
+             Panic location: {location}\n\
+             Panic message: {payload}\n\n\
+             Steps to reproduce:\n\
+             1. ...\n\
+             2. ...\n\
+             3. ...\n\n\
+             Expected behaviour:\n\n\
+             Actual behaviour:\n",
+            ver = ALINT_LONG_VERSION,
+            os = std::env::consts::OS,
+        );
+        let url = format!(
+            "https://github.com/asamarts/alint/issues/new?title={}&body={}",
+            url_encode(&title),
+            url_encode(&body),
+        );
+        eprintln!("\nalint crashed unexpectedly. This is a bug — please file a report:");
+        eprintln!("  {url}\n");
+        eprintln!("Panic: {payload}");
+        eprintln!("Location: {location}");
+        eprintln!("Re-run with `RUST_BACKTRACE=1` for the full backtrace.");
+    }));
+}
+
+/// Minimal RFC 3986 percent-encoder for the panic-hook URL's query
+/// string. Hand-rolled so the panic hook stays dependency-free —
+/// pulling in `urlencoding` for one call site would expand the
+/// blast radius on a code path that runs only when alint is
+/// already in trouble.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        let c = *b;
+        if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.' | b'~') {
+            out.push(c as char);
+        } else {
+            out.push_str(&format!("%{c:02X}"));
+        }
+    }
+    out
 }
 
 fn init_tracing() {
@@ -966,6 +1048,26 @@ mod tests {
     use super::*;
     use alint_core::{FactKind, FactSpec, FactValue, FactValues, facts::OneOrMany};
     use alint_output::Format;
+
+    #[test]
+    fn url_encode_passes_through_unreserved_chars() {
+        assert_eq!(url_encode("abcXYZ012-_.~"), "abcXYZ012-_.~");
+    }
+
+    #[test]
+    fn url_encode_percent_encodes_reserved_and_unsafe() {
+        assert_eq!(url_encode(" "), "%20");
+        assert_eq!(url_encode("foo bar"), "foo%20bar");
+        assert_eq!(url_encode("a&b=c"), "a%26b%3Dc");
+        assert_eq!(url_encode("/?:@!$"), "%2F%3F%3A%40%21%24");
+    }
+
+    #[test]
+    fn url_encode_handles_unicode() {
+        // Multi-byte UTF-8 sequences each percent-encode their bytes.
+        // "ñ" is 0xC3 0xB1.
+        assert_eq!(url_encode("ñ"), "%C3%B1");
+    }
 
     fn fact_spec(id: &str, kind: FactKind) -> FactSpec {
         FactSpec {

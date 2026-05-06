@@ -83,12 +83,26 @@ fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
         return Ok(());
     }
     git(root, &["init", "-q", "-b", "main"])?;
-    if spec.add.is_empty() {
+    if !spec.add.is_empty() {
+        let mut args: Vec<&str> = vec!["add", "--"];
+        args.extend(spec.add.iter().map(String::as_str));
+        git(root, &args)?;
+    }
+    if !spec.add_force.is_empty() {
+        // `git add -f` forces tracking of paths that would
+        // normally be excluded by `.gitignore`. The bazel-style
+        // tracked-AND-gitignored pattern needs this — the file
+        // is committed upstream (so future clones see it) AND
+        // gitignored (so contributor edits don't accidentally
+        // get committed). The `--` is positional-arg disambiguator;
+        // `-f` must precede it.
+        let mut args: Vec<&str> = vec!["add", "-f", "--"];
+        args.extend(spec.add_force.iter().map(String::as_str));
+        git(root, &args)?;
+    }
+    if spec.add.is_empty() && spec.add_force.is_empty() {
         return Ok(());
     }
-    let mut args: Vec<&str> = vec!["add", "--"];
-    args.extend(spec.add.iter().map(String::as_str));
-    git(root, &args)?;
     if spec.commit {
         git(
             root,

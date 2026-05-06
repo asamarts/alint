@@ -1,0 +1,1093 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for angular/angular.
+#
+# angular/angular is the canonical "TS-monorepo + Bazel build"
+# data point — TypeScript at scale (~3M LoC across 16 published
+# `@angular/*` packages) wired through a Bazel workspace
+# (`MODULE.bazel` + 638 `BUILD.bazel` files) and orchestrated
+# through pnpm-workspace + ng-dev (Angular's in-house dev tooling).
+# At the time of capture (sparse-clone of HEAD, 2026-05-06):
+#
+#   - 16 published npm packages under `packages/*` (every one
+#     scoped `@angular/<name>`, every one pinned to literal
+#     version `0.0.0-PLACEHOLDER` — substituted at publish time)
+#   - 638 BUILD.bazel files
+#   - 78 tsconfig*.json files
+#   - 50 *.api.md golden files under `goldens/public-api/<pkg>/`
+#     (one per published package + sub-entrypoint — locks the
+#     entire public TypeScript API surface)
+#   - 12 GitHub Actions workflows (`.github/workflows/*.yml`)
+#   - 3 husky hooks (pre-commit, commit-msg, prepare-commit-msg) —
+#     all delegate to `pnpm ng-dev ...` subcommands
+#   - 1 in-house `ng-dev` CLI replacing the typical lint-staged /
+#     husky / changelog tooling, configured under `.ng-dev/`
+#   - tslint (yes, tslint — angular still uses it pinned to a
+#     local rule set under tools/tslint/) + buildifier + prettier
+#     (delegated through `ng-dev format`)
+#   - .pullapprove.yml as the code-ownership source (NOT CODEOWNERS;
+#     angular pre-dates GitHub-native CODEOWNERS support and
+#     stayed on PullApprove)
+#
+# Per-package convention enforced for every `packages/*/`:
+#   - `package.json` with name `@angular/<dir>`, license `MIT`,
+#     version `0.0.0-PLACEHOLDER`, `repository.directory: packages/<dir>`
+#   - `index.ts` — the public-entrypoint re-export
+#   - `public_api.ts` — the actual API barrel (re-exported from index.ts)
+#   - `BUILD.bazel` — Bazel target definitions (ng_project, ng_package)
+#   - `PACKAGE.md` — published-package README (replaces the missing
+#     per-package `README.md`; ng-package wires it as the npm-tarball
+#     README)
+#   - all `src/**/*.ts` files start with the canonical 6-line
+#     `@license` block (`/** @license\n * Copyright Google LLC ...`)
+#
+# What this config does NOT replace (keep the existing tool):
+#   - tslint (the AST-based subset; angular keeps a pinned tslint
+#     install + custom rules under tools/tslint/) — shelled out
+#     via `command:` rule
+#   - prettier-via-ng-dev-format — formatter; AST-aware
+#   - Bazel build itself (build orchestration, not lint)
+#   - `pnpm ng-dev pullapprove verify` (PullApprove config validity
+#     check — internal to the ng-dev CLI; AST-aware against the
+#     YAML schema)
+#   - `pnpm ng-dev ai skills validate` (validates the in-tree
+#     skills/dev-skills/ + .agent/skills/ directories; ng-dev
+#     internal AST check against an internal schema)
+#   - `pnpm ts-circular-deps:check` (runs a custom node script
+#     that walks the TS import graph; out of alint's "no AST" scope)
+#   - `pnpm public-api:check` (the goldens/public-api/ check;
+#     uses Microsoft's API Extractor against the built bundles —
+#     build-aware, out of alint's "read-only static" scope)
+#   - `pnpm symbol-extractor:check` (post-build symbol-table
+#     comparison; build-aware)
+#
+# Known limitations versus the existing pipeline (each requires
+# an alint primitive that doesn't ship today — see this
+# directory's README.md for the full gap catalogue):
+#   - **Cross-language API parity** — every `packages/<name>/`
+#     should have a corresponding `goldens/public-api/<name>/`
+#     directory with at least an `index.api.md`. This is the
+#     v0.11+ `cross_language_implementation_complete` shape
+#     applied within ONE language (TS source ↔ TS API surface
+#     golden); same shape as arrow's per-language schema parity
+#     and tensorflow's textproto goldens. Worked-around with a
+#     `for_each_dir` over `packages/*/` checking
+#     `goldens/public-api/{basename}/` exists, but the inverse
+#     direction (every golden traces back to a package) needs
+#     `pair_inverse` (ruff's snapshot-freshness candidate).
+#   - `.ng-dev/commit-message.mjs` enumerates ~22 valid commit
+#     scopes that must match the `packages/<name>/` set + a
+#     fixed extra list (`docs-infra`, `dev-infra`, etc.); the
+#     drift here would be a `cross_file_value_equals` shape
+#     between the `.ng-dev/commit-message.mjs` `scopes:` array
+#     and the directory tree.
+#   - `tools/tslint/` custom rule directory pinned by tslint.json
+#     — tslint itself is being phased out across the JS world
+#     but Angular kept it for these custom rules (`require-internal-with-underscore`,
+#     `validate-import-for-esm-cjs-interop`, etc.). The rule
+#     directory's existence is asserted; rule contents are out
+#     of alint's scope.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/pnpm-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/hygiene/lockfiles@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/agent-context@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # pnpm-workspace.yaml shape — the file is load-bearing.
+  # Angular's pnpm-workspace.yaml lists 28 entries — every published
+  # package, plus the meta-tools. Drift here means pnpm install
+  # silently treats one of them as "not a workspace member".
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-pnpm-workspace-declares-packages
+    kind: yaml_path_matches
+    paths: pnpm-workspace.yaml
+    path: "$.packages[*]"
+    matches: ".+"
+    level: error
+    message: >-
+      `pnpm-workspace.yaml` must declare `packages: [...]`. Without
+      it, pnpm install silently treats the repo as one package and
+      all 16 `@angular/*` cross-references resolve through node_modules
+      instead of through the workspace, breaking the dev loop.
+
+  - id: angular-pnpm-workspace-declares-minimum-release-age
+    kind: file_content_matches
+    paths: pnpm-workspace.yaml
+    pattern: '(?m)^minimumReleaseAge:\s*\d+'
+    level: warning
+    message: >-
+      `pnpm-workspace.yaml` should pin `minimumReleaseAge` so
+      brand-new package versions don't auto-resolve into the
+      install (current value: 1440 minutes = 1 day). This is
+      angular's supply-chain defence — without it, a malicious
+      package published in the last hour could be pulled in by a
+      `pnpm install` on a fresh clone.
+
+  - id: angular-pnpm-workspace-includes-packages-glob
+    kind: file_content_matches
+    paths: pnpm-workspace.yaml
+    pattern: '(?m)^\s*-\s*packages/core/'
+    level: warning
+    message: >-
+      `pnpm-workspace.yaml` should explicitly enumerate every
+      `packages/<name>/` entry (angular doesn't use `packages/*`
+      because of the workspace-member entries that aren't published
+      packages — `packages/core/test/bundling`, etc.). The
+      `packages/core/` line is the canonical anchor.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-package conventions — every `packages/<name>/` published
+  # under @angular/* must declare the canonical four fields
+  # (name, version, license, repository.directory) and carry the
+  # canonical six structural files (package.json, index.ts,
+  # public_api.ts, BUILD.bazel, PACKAGE.md, src/).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-package-name-is-scoped
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.name"
+        matches: '^@angular/[a-z][a-z0-9-]*$'
+    level: warning
+    message: >-
+      Every `packages/<dir>/` published package must declare
+      `name: "@angular/<dir>"`. The scope and dir-name match (the
+      `@angular/<x>` ↔ `packages/x` mapping is unambiguous in
+      angular, unlike next.js's intentionally-messy convention) —
+      a drift here breaks `pnpm install --filter @angular/<name>`
+      and the `ng-dev release` workflow.
+
+  - id: angular-package-version-is-placeholder
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.version"
+        matches: '^0\.0\.0-PLACEHOLDER$'
+    level: error
+    message: >-
+      Every published `packages/<dir>/package.json` must declare
+      `version: "0.0.0-PLACEHOLDER"`. Angular's `ng-dev release`
+      workflow substitutes the literal `0.0.0-PLACEHOLDER` string
+      across every package.json + every Bazel file at publish time;
+      a real semver baked into the source means the substitution
+      misses (no string match) and the published tarball ships
+      with the wrong version field.
+
+  - id: angular-package-license-mit
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.license"
+        matches: '^MIT$'
+    level: error
+    message: >-
+      Every `@angular/*` package must declare `license: "MIT"`.
+      Angular publishes the entire monorepo under MIT (see
+      LICENSE at root). Per-package licence drift breaks
+      `npm pack` consumers' SPDX scanners.
+
+  - id: angular-package-repository-directory-matches
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.repository.directory"
+        matches: '^packages/[a-z][a-z0-9-]*$'
+    level: warning
+    message: >-
+      Every `@angular/*` package's `repository.directory` field
+      should point at its own source directory (`packages/<name>`).
+      npmjs.com's "Repository" link uses this to deep-link into the
+      monorepo subdirectory — drift means the link 404s.
+
+  - id: angular-package-author-is-angular
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.author"
+        matches: '^angular$'
+    level: info
+    message: >-
+      Every `@angular/*` package's `author` field is the literal
+      string "angular" by convention. Soft check — the published
+      tarball renders this as the npmjs.com "publisher" field.
+
+  - id: angular-package-engines-node-pinned
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.engines.node"
+        matches: '\^22\.\d+\.\d+'
+    level: warning
+    message: >-
+      Every `@angular/*` package's `engines.node` should pin the
+      same Node-major floor (currently `^22.22.0 || ^24.13.1 ||
+      >=26.0.0`). Drift here means an end-user `npm install
+      @angular/foo` succeeds on Node 20 even though `@angular/bar`
+      requires Node 22.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-package structural-file invariants. Every published package
+  # must carry the same set of canonical files; missing any one
+  # means the Bazel build can't find the entrypoint, the public-API
+  # extractor can't find the source, or the npm tarball ships
+  # without a README.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-package-has-index-ts
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/index.ts"
+    level: warning
+    message: >-
+      Every `packages/<dir>/` published package needs `index.ts`
+      as the public entrypoint (re-exports from `public_api.ts`).
+      Both `ng_project` and `ng_package` Bazel rules consume
+      this — its absence breaks the build. Note: a few packages
+      (`language-service`, `compiler-cli`, `benchpress`)
+      legitimately don't have one; this rule fires for those at
+      `warning` level so the gaps are visible without breaking CI.
+
+  - id: angular-package-has-public-api-ts
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/public_api.ts"
+    level: warning
+    message: >-
+      Every `packages/<dir>/` published package needs
+      `public_api.ts` — the actual API barrel that index.ts
+      re-exports. The split (index.ts → public_api.ts → src/)
+      is load-bearing for the API Extractor's golden generation.
+
+  - id: angular-package-has-build-bazel
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/BUILD.bazel"
+    level: error
+    message: >-
+      Every `packages/<dir>/` published package must have its own
+      `BUILD.bazel` declaring the `ng_project` + `ng_package`
+      Bazel targets. Without it, the Bazel build doesn't know
+      how to compile the package and `bazel build //packages/...`
+      silently skips it.
+
+  - id: angular-package-has-package-md
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/PACKAGE.md"
+    level: info
+    message: >-
+      Every published `@angular/*` package should ship a
+      `PACKAGE.md` (the published npm-tarball README — angular
+      uses `PACKAGE.md` instead of the conventional `README.md`
+      because some package directories carry contributor-facing
+      `README.md` files that shouldn't ship in the tarball). A
+      missing PACKAGE.md means npmjs.com renders an empty
+      package page.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Cross-language-implementation-complete (within-language variant):
+  # every published `packages/<name>/` should have a corresponding
+  # `goldens/public-api/<name>/` directory locking its public API
+  # surface. The full v0.11+ `cross_language_implementation_complete`
+  # primitive would express this as a bidirectional check; today we
+  # express the forward direction (package → golden) via for_each_dir.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-package-has-public-api-golden
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "goldens/public-api/{basename}/index.api.md"
+    level: warning
+    message: >-
+      Every published `packages/<name>/` should have a
+      `goldens/public-api/<name>/index.api.md` golden locking its
+      TypeScript public API. Missing goldens mean `pnpm
+      public-api:check` silently passes (no golden = no diff).
+      Currently expected to fire for `compiler`, `language-service`,
+      `benchpress` (no public-API surface published — internal
+      tooling). Move them to this rule's `when_iter` exclusion
+      after one tree-wide cleanup pass.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Source-file license-header invariant. Every hand-edited TS file
+  # under packages/*/src/ + packages/*/index.ts + public_api.ts
+  # opens with the canonical 6-line `@license` block referencing
+  # the LICENSE file at https://angular.dev/license. The
+  # license-banner.txt at packages/license-banner.txt is the
+  # canonical source of truth for the bundled-output banner; the
+  # source-side block is enforced separately because Bazel's
+  # ng_package wraps the bundled output but doesn't touch source.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-source-license-header
+    kind: file_header
+    paths:
+      include:
+        - "packages/*/index.ts"
+        - "packages/*/public_api.ts"
+        - "packages/*/src/**/*.ts"
+      exclude:
+        - "packages/*/src/**/*.d.ts"
+        - "packages/*/src/**/*.generated.ts"
+        - "packages/*/test/**"
+    pattern: '(?s)^/\*[*!]\s*\n\s*\*\s*@license\s*\n\s*\*\s*Copyright\s+Google\s+LLC\b'
+    level: warning
+    message: >-
+      Every hand-edited `packages/*/{index.ts,public_api.ts,src/**/*.ts}`
+      file must open with the canonical 6-line @license block:
+      `/**\n * @license\n * Copyright Google LLC All Rights Reserved.\n
+       * ... governed by an MIT-style license ...\n */`. The
+      `packages/license-banner.txt` file is the source of truth
+      for the bundled-output banner; this rule enforces the same
+      block on source. Drift here means npm consumers see
+      inconsistent header text across files in the same package.
+
+  # ──────────────────────────────────────────────────────────────────
+  # tslint config — angular still uses tslint (deprecated upstream
+  # 2019, but angular kept it for the custom rules under
+  # tools/tslint/). The tslint.json shape is load-bearing — the
+  # `rulesDirectory` line points at the in-tree custom rule dir.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-tslint-rules-dir-points-at-tools-tslint
+    kind: file_content_matches
+    paths: tslint.json
+    pattern: 'tools/tslint'
+    level: error
+    message: >-
+      `tslint.json` must declare `rulesDirectory:
+      ["tools/tslint", ...]` so the in-tree custom tslint rules
+      (require-internal-with-underscore, no-implicit-override-abstract,
+      validate-import-for-esm-cjs-interop, etc.) actually run.
+      A drop here means `pnpm tslint` silently degrades to
+      stock tslint and the angular-specific invariants stop
+      being checked.
+
+  - id: angular-tslint-config-present
+    kind: file_exists
+    paths: tslint.json
+    level: error
+    message: >-
+      `tslint.json` is required — `pnpm lint` invokes
+      `pnpm tslint` (= `tslint -c tslint.json --project
+      tsconfig-tslint.json`) which fails to load without it.
+
+  - id: angular-tools-tslint-rules-dir-present
+    kind: dir_contains
+    select: "tools/tslint"
+    require: "*.ts"
+    level: warning
+    message: >-
+      `tools/tslint/` must contain at least one `.ts` file —
+      the directory holds the angular-specific custom tslint
+      rules. Empty or missing means `tslint.json`'s
+      rulesDirectory points at nothing and the custom rules
+      stop running.
+
+  # ──────────────────────────────────────────────────────────────────
+  # ng-dev configuration — angular replaces the typical
+  # changesets/lerna/lint-staged stack with a single in-house CLI
+  # configured under .ng-dev/. Three configs are load-bearing:
+  # commit-message.mjs (defines valid commit scopes),
+  # format.mjs (toggles prettier + buildifier), and
+  # pull-request.mjs (validates merge-ready PR state).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-ng-dev-config-present
+    kind: file_exists
+    paths: ".ng-dev/config.mjs"
+    level: error
+    message: >-
+      `.ng-dev/config.mjs` is the entrypoint that `pnpm ng-dev <cmd>`
+      reads. Removing it breaks every ng-dev subcommand —
+      `format`, `commit-message`, `pullapprove`, `release`,
+      `caretaker`, the lot.
+
+  - id: angular-ng-dev-format-config-present
+    kind: file_exists
+    paths: ".ng-dev/format.mjs"
+    level: error
+    message: >-
+      `.ng-dev/format.mjs` declares which formatters are enabled
+      (prettier + buildifier). Removing it leaves `pnpm ng-dev
+      format` with an empty config — silent no-op on every
+      pre-commit.
+
+  - id: angular-ng-dev-commit-message-config-present
+    kind: file_exists
+    paths: ".ng-dev/commit-message.mjs"
+    level: error
+    message: >-
+      `.ng-dev/commit-message.mjs` declares the ~22 valid commit
+      scopes (`animations`, `core`, `compiler`, `dev-infra`, etc.).
+      The husky `commit-msg` hook reads this; without it,
+      `pnpm ng-dev commit-message pre-commit-validate` silently
+      passes on any scope name.
+
+  - id: angular-ng-dev-pull-request-config-present
+    kind: file_exists
+    paths: ".ng-dev/pull-request.mjs"
+    level: warning
+    message: >-
+      `.ng-dev/pull-request.mjs` declares the merge-ready
+      validation contract — required statuses, target labels,
+      etc. Removing it skips the gates that ensure only
+      lint+test+adev-passing PRs auto-merge.
+
+  - id: angular-ng-dev-google-sync-config-present
+    kind: file_exists
+    paths: ".ng-dev/google-sync-config.json"
+    level: warning
+    message: >-
+      `.ng-dev/google-sync-config.json` declares which file
+      patterns sync to google3. Drift here means new files go
+      out of sync with the internal mirror — caretaker has to
+      catch this manually otherwise.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Husky hooks — three hooks total, all delegating to ng-dev.
+  # If any goes missing on a fresh clone, `pnpm install`'s prepare
+  # script creates an empty .husky/_/ directory and the
+  # contributor's first feedback is at CI time.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-husky-pre-commit-present
+    kind: file_exists
+    paths: .husky/pre-commit
+    level: warning
+    message: >-
+      `.husky/pre-commit` should be present — invokes
+      `pnpm ng-dev format staged` so format runs on every
+      committed file. The hook uses `set +e` so a missing
+      ng-dev install warns but doesn't block — but a missing
+      hook file silently bypasses format entirely.
+
+  - id: angular-husky-pre-commit-runs-ng-dev-format
+    kind: file_content_matches
+    paths: .husky/pre-commit
+    pattern: 'ng-dev format staged'
+    level: warning
+    message: >-
+      `.husky/pre-commit` must invoke `ng-dev format staged`.
+      The hook can technically run anything; angular's
+      convention pins this exact command.
+
+  - id: angular-husky-commit-msg-present
+    kind: file_exists
+    paths: .husky/commit-msg
+    level: warning
+    message: >-
+      `.husky/commit-msg` should be present — invokes
+      `pnpm ng-dev commit-message pre-commit-validate $1` so
+      commit-message-format violations fire at commit time
+      rather than at CI time.
+
+  - id: angular-husky-prepare-commit-msg-present
+    kind: file_exists
+    paths: .husky/prepare-commit-msg
+    level: info
+    message: >-
+      `.husky/prepare-commit-msg` should be present — invokes
+      `pnpm ng-dev commit-message restore-commit-message-draft`
+      so a contributor's draft commit message survives a
+      `git rebase -i` interrupt.
+
+  # ──────────────────────────────────────────────────────────────────
+  # PullApprove configuration — angular pre-dates GitHub's native
+  # CODEOWNERS support and stayed on PullApprove. The .pullapprove.yml
+  # is the authoritative code-ownership map; CI's `pnpm ng-dev
+  # pullapprove verify` step asserts this is well-formed YAML and
+  # has expected groups.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-pullapprove-config-present
+    kind: file_exists
+    paths: .pullapprove.yml
+    level: error
+    message: >-
+      `.pullapprove.yml` is required — it's the authoritative
+      code-ownership map for angular (replacing GitHub-native
+      CODEOWNERS). Removing it means PRs can be approved by
+      any reviewer with write access, bypassing scope-specific
+      review (e.g. router changes only-merging through the
+      router team).
+
+  - id: angular-pullapprove-version-pinned
+    kind: yaml_path_matches
+    paths: .pullapprove.yml
+    path: "$.version"
+    matches: '^3$'
+    level: warning
+    message: >-
+      `.pullapprove.yml` should pin `version: 3` (the v3 schema
+      angular's groups depend on). A silent bump to a future
+      schema version risks PullApprove rejecting the config
+      with a vague error.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Bazel workspace — angular is a Bazel-driven build, so MODULE.bazel
+  # + .bazelversion + the per-package BUILD.bazel set are load-bearing.
+  # The .bazelversion uses the `.gitignore` masking pattern noted in
+  # CONFIG-AUTHORING.md pitfall #18; we work around it via
+  # respect_gitignore: false at config root (see top-level setting).
+  # Wait — actually angular's .bazelversion isn't gitignored. Verified
+  # via `git check-ignore .bazelversion` (no output = not ignored).
+  # So the simple file_exists works.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-bazel-version-pinned
+    kind: file_exists
+    paths: .bazelversion
+    level: error
+    message: >-
+      `.bazelversion` is required — pins the Bazel version
+      (currently 8.6.0) that bazelisk fetches before running
+      `pnpm test` (= `bazelisk test`). Drift means contributors
+      run a different Bazel than CI, which surfaces as
+      hard-to-reproduce build failures.
+
+  - id: angular-bazel-version-shape
+    kind: file_content_matches
+    paths: .bazelversion
+    pattern: '^\d+\.\d+\.\d+$'
+    level: warning
+    message: >-
+      `.bazelversion` should be a single semver line (no
+      trailing newline trickery; bazelisk parses the file
+      strictly). The current value is `8.6.0`.
+
+  - id: angular-module-bazel-present
+    kind: file_exists
+    paths: MODULE.bazel
+    level: error
+    message: >-
+      `MODULE.bazel` is the bzlmod module declaration —
+      replaces the legacy WORKSPACE file. Without it, Bazel
+      8+ refuses to start and `pnpm test` fails before the
+      first target compiles.
+
+  - id: angular-module-bazel-lock-present
+    kind: file_exists
+    paths: MODULE.bazel.lock
+    level: warning
+    message: >-
+      `MODULE.bazel.lock` should be checked in (bzlmod's
+      lockfile, equivalent to package-lock.json for npm).
+      Without it, every contributor resolves bzlmod deps
+      anew; non-deterministic builds.
+
+  - id: angular-root-build-bazel-present
+    kind: file_exists
+    paths: BUILD.bazel
+    level: error
+    message: >-
+      The repo-root `BUILD.bazel` is required — it declares the
+      `npm_link_all_packages` + `validate_ts_version_matching`
+      rules that wire pnpm into Bazel.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Source-of-truth files — `packages/license-banner.txt` is the
+  # canonical license banner that ng_package prepends to every
+  # bundled output. `packages/tsconfig-build.json` is the canonical
+  # TS compiler config every `packages/<dir>/tsconfig-build.json`
+  # extends.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-license-banner-present
+    kind: file_exists
+    paths: packages/license-banner.txt
+    level: error
+    message: >-
+      `packages/license-banner.txt` is required — every
+      ng_package Bazel target prepends this 4-line block to
+      bundled output. Removing it silently drops the @license
+      header from every published @angular/* package.
+
+  - id: angular-license-banner-content
+    kind: file_content_matches
+    paths: packages/license-banner.txt
+    pattern: 'Copyright .* Google LLC'
+    level: error
+    message: >-
+      `packages/license-banner.txt` must contain a `Copyright
+      ... Google LLC` line — referenced by every published
+      package's bundled output. Drift here is what 22 million
+      weekly @angular/core consumers see at the top of every
+      bundled file.
+
+  - id: angular-packages-tsconfig-build-present
+    kind: file_exists
+    paths: packages/tsconfig-build.json
+    level: error
+    message: >-
+      `packages/tsconfig-build.json` is the canonical TS
+      compiler config every per-package tsconfig-build.json
+      extends. Removing it cascades to every package failing
+      its `ng_project` Bazel rule.
+
+  # NOTE: angular's tsconfig-build.json is JSONC (has comments) so
+  # json_path_equals parses fail with "not a valid JSON document".
+  # Workaround per CONFIG-AUTHORING.md pitfall #16's option B:
+  # file_content_matches against the raw text (no JSON-aware key
+  # resolution; works for top-level fields).
+  - id: angular-packages-tsconfig-build-strict
+    kind: file_content_matches
+    paths: packages/tsconfig-build.json
+    pattern: '"strict"\s*:\s*true'
+    level: error
+    message: >-
+      The canonical `packages/tsconfig-build.json` must keep
+      `"strict": true`. Angular runs strict mode end-to-end
+      across all 16 packages; flipping this would pass thousands
+      of new type errors silently. (JSONC file — using
+      file_content_matches because json_path_equals can't parse
+      the leading block-comment.)
+
+  # ──────────────────────────────────────────────────────────────────
+  # Goldens directory shape — the `goldens/` directory is the
+  # canonical location for API parity files. Every check-in to
+  # public-api/ goes through `pnpm public-api:check` (which calls
+  # API Extractor against the built bundles).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-goldens-readme-present
+    kind: file_exists
+    paths: goldens/README.md
+    level: warning
+    message: >-
+      `goldens/README.md` documents how to update goldens
+      (`pnpm public-api:update`). Without it, contributors who
+      hit a golden diff have no in-repo pointer to the
+      regeneration command.
+
+  - id: angular-goldens-public-api-build-bazel-present
+    kind: file_exists
+    paths: goldens/BUILD.bazel
+    level: error
+    message: >-
+      `goldens/BUILD.bazel` declares the `api_golden_test` Bazel
+      targets that gate the `pnpm public-api:check` invocation.
+      Without it, the goldens are present but no test enforces
+      them.
+
+  - id: angular-goldens-manage-script-present
+    kind: file_exists
+    paths: goldens/public-api/manage.js
+    level: error
+    message: >-
+      `goldens/public-api/manage.js` is the entrypoint for
+      `pnpm public-api:check` and `pnpm public-api:update`.
+      Both package.json scripts reference it directly; missing
+      file = both scripts fail with `module not found` instead
+      of a useful error.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Repo metadata — angular maintains AGENTS.md, .agent/, and
+  # skills/dev-skills/ as the canonical agentic-context surface.
+  # CI's `pnpm ng-dev ai skills validate` runs against these
+  # directories; the structural existence is asserted here.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-agents-md-present
+    kind: file_exists
+    paths: AGENTS.md
+    level: warning
+    message: >-
+      `AGENTS.md` is angular's canonical doc that AI coding
+      agents read first. Removing it strips contextual guidance
+      from agent-driven contributions.
+
+  - id: angular-skills-dev-skills-present
+    kind: dir_contains
+    select: skills/dev-skills
+    require: "*"
+    level: info
+    message: >-
+      `skills/dev-skills/` is the in-tree skills directory that
+      `pnpm ng-dev ai skills validate` walks. Empty or missing
+      means the skill catalogue is gone — agentic workflows
+      fall back to bare model knowledge.
+
+  - id: angular-agent-skills-present
+    kind: dir_contains
+    select: .agent/skills
+    require: "*"
+    level: info
+    message: >-
+      `.agent/skills/` mirrors `skills/dev-skills/` for
+      agent-tooling discovery (some IDE integrations look for
+      `.agent/` specifically). Soft check.
+
+  - id: angular-context7-config-present
+    kind: file_exists
+    paths: context7.json
+    level: info
+    message: >-
+      `context7.json` configures Context7 (LLM context lookup
+      service) for angular's docs. Soft check.
+
+  - id: angular-contributing-md-present
+    kind: file_exists
+    paths: CONTRIBUTING.md
+    level: warning
+    message: >-
+      `CONTRIBUTING.md` is required for an OSS project of
+      angular's reach (~95k stars). The OpenSSF Scorecard
+      check looks for it.
+
+  - id: angular-contributing-docs-dir-present
+    kind: dir_contains
+    select: contributing-docs
+    require: "*.md"
+    level: info
+    message: >-
+      `contributing-docs/` carries the long-form contributor
+      docs (commit-message-guidelines.md, coding-standards.md,
+      etc.) that CONTRIBUTING.md references.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Workspace-root config files — the `.gitattributes` EOL pin and
+  # the `.nvmrc` Node version pin are load-bearing for cross-platform
+  # contributors and CI alignment.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-gitattributes-eol-lf-on-ts
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\.ts\s+eol=lf'
+    level: error
+    message: >-
+      `.gitattributes` must declare `*.ts eol=lf` so Windows
+      checkouts produce LF-line-ended TS files. Tools downstream
+      (esbuild, ng-packagr, the bundled output) all assume
+      LF — CRLF in source breaks `.bin` shebang detection and
+      jest snapshot stability.
+
+  - id: angular-gitattributes-eol-lf-on-js
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\.js\s+eol=lf'
+    level: error
+    message: >-
+      `.gitattributes` must declare `*.js eol=lf` (same logic
+      as the .ts version above).
+
+  - id: angular-nvmrc-pinned
+    kind: file_exists
+    paths: ".nvmrc"
+    level: warning
+    message: >-
+      `.nvmrc` should pin the Node major version (currently
+      `22.22.2`). The `actions/setup-node` GitHub action and
+      the `dev-infra/github-actions/npm/checkout-and-setup-node`
+      angular-specific composite action both read it.
+
+  - id: angular-nvmrc-shape
+    kind: file_content_matches
+    paths: .nvmrc
+    pattern: '^\d+\.\d+\.\d+$'
+    level: warning
+    message: >-
+      `.nvmrc` should be a single semver line. The current
+      value is `22.22.2`.
+
+  - id: angular-npmrc-hoist-disabled
+    kind: file_content_matches
+    paths: .npmrc
+    pattern: '(?m)^hoist\s*=\s*false'
+    level: warning
+    message: >-
+      `.npmrc` should declare `hoist = false`. Required for
+      rules_js (Bazel's npm rule set) — without it, pnpm
+      hoists deps and the Bazel build sees a different
+      node_modules layout than runtime, causing
+      "module not found" errors only inside Bazel.
+
+  - id: angular-npmrc-engine-strict-disabled
+    kind: file_content_matches
+    paths: .npmrc
+    pattern: '(?m)^engine-strict\s*=\s*false'
+    level: warning
+    message: >-
+      `.npmrc` should declare `engine-strict = false` (matches
+      Yarn Berry's behaviour, per the inline comment). Otherwise
+      pnpm hard-fails on engines mismatch — and angular's
+      published packages declare `engines.node: ^22 || ^24 || >=26`
+      which a contributor on Node 20 would otherwise hit at
+      install time.
+
+  - id: angular-pnpmfile-cjs-present
+    kind: file_exists
+    paths: .pnpmfile.cjs
+    level: info
+    message: >-
+      `.pnpmfile.cjs` carries the pnpm install hooks angular
+      uses to patch upstream dep manifests at install time.
+      Removing it silently disables those patches.
+
+  - id: angular-renovate-json-present
+    kind: file_exists
+    paths: renovate.json
+    level: info
+    message: >-
+      `renovate.json` configures Renovate Bot's dep updates.
+      Angular extends a shared preset
+      (`github>angular/dev-infra//renovate-presets/default.json5`)
+      so the local file is mostly the per-repo overrides.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions — angular has 12 workflows. The bundled
+  # ci/github-actions@v1 ruleset covers permissions + SHA pinning;
+  # we restate the SHA-pinning rule at warning level here because
+  # angular leans heavily on the angular/dev-infra composite
+  # actions which CAN be loaded by SHA but historically aren't
+  # uniformly so.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party GitHub Actions should be pinned to a 40-char
+      commit SHA. The angular-specific composite actions under
+      `angular/dev-infra/github-actions/*` already follow this;
+      restate at warning level so external action drift surfaces
+      at PR time.
+
+  - id: angular-ci-workflow-present
+    kind: file_exists
+    paths: .github/workflows/ci.yml
+    level: error
+    message: >-
+      `.github/workflows/ci.yml` is the canonical "push to main"
+      CI workflow. Removing it means main branch state is
+      no longer continuously verified.
+
+  - id: angular-pr-workflow-present
+    kind: file_exists
+    paths: .github/workflows/pr.yml
+    level: error
+    message: >-
+      `.github/workflows/pr.yml` is the canonical "PR opened"
+      CI workflow. Removing it bypasses lint/test checks at
+      PR time — drift only catches at the merge-time CI run.
+
+  - id: angular-merge-ready-status-workflow-present
+    kind: file_exists
+    paths: .github/workflows/merge-ready-status.yml
+    level: warning
+    message: >-
+      `.github/workflows/merge-ready-status.yml` aggregates
+      CI status checks into the `merge-ready` GitHub status
+      that branch protection requires. Removing it stops PRs
+      from being mergeable.
+
+  - id: angular-scorecard-workflow-present
+    kind: file_exists
+    paths: .github/workflows/scorecard.yml
+    level: warning
+    message: >-
+      `.github/workflows/scorecard.yml` runs OpenSSF Scorecard
+      nightly. Removing it drops the supply-chain signal
+      angular currently exposes on github.com/angular/angular's
+      About panel.
+
+  # ──────────────────────────────────────────────────────────────────
+  # angular-robot.yml + ISSUE_TEMPLATE + PULL_REQUEST_TEMPLATE
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-angular-robot-config-present
+    kind: file_exists
+    paths: .github/angular-robot.yml
+    level: warning
+    message: >-
+      `.github/angular-robot.yml` configures the angular-robot
+      bot's behaviour (size guard, merge plugin, etc.).
+      Removing it means the bot reverts to defaults — no
+      size-guard threshold, no merge-label automation.
+
+  - id: angular-pr-template-present
+    kind: file_exists
+    paths: .github/PULL_REQUEST_TEMPLATE.md
+    level: warning
+    message: >-
+      `.github/PULL_REQUEST_TEMPLATE.md` is required — angular's
+      template asks every PR author to declare the type of
+      change (bug fix, feature, etc.) and run through a checklist.
+
+  - id: angular-issue-template-dir-present
+    kind: dir_contains
+    select: .github/ISSUE_TEMPLATE
+    require: "*"
+    level: warning
+    message: >-
+      `.github/ISSUE_TEMPLATE/` should contain at least one
+      template — bug-report, feature-request, etc. Without
+      them, every issue lands as free-form text.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene — things that should never exist in the working tree.
+  # The bundled hygiene/no-tracked-artifacts@v1 covers the typical
+  # node_modules/ + dist/ + build/. Restate the angular-specific ones.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-no-tracked-bazel-out
+    kind: dir_absent
+    paths: "**/bazel-out"
+    level: error
+    message: >-
+      `bazel-out/` is Bazel's output tree (symlink); should
+      never be tracked. The `.gitignore` already excludes it,
+      but `git add -f` slips happen.
+
+  - id: angular-no-tracked-bazel-bin
+    kind: dir_absent
+    paths: "**/bazel-bin"
+    level: error
+    message: >-
+      `bazel-bin/` is Bazel's binary output tree (symlink);
+      should never be tracked.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language lint shell-outs — wrap the existing tools so a
+  # single `alint check` run fires the whole structural pipeline
+  # plus the language linters in parallel.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: angular-tslint
+    kind: command
+    paths: tslint.json
+    command: ["pnpm", "tslint"]
+    timeout: 600
+    level: error
+    message: >-
+      `pnpm tslint` failed (= `tslint -c tslint.json --project
+      tsconfig-tslint.json`). Angular still uses tslint for the
+      custom-rules subset under `tools/tslint/`.
+
+  - id: angular-ng-dev-format-check
+    kind: command
+    paths: ".ng-dev/format.mjs"
+    command: ["pnpm", "ng-dev", "format", "changed", "--check"]
+    timeout: 300
+    level: error
+    message: >-
+      `pnpm ng-dev format changed --check` failed (= prettier
+      + buildifier through the ng-dev wrapper, scoped to files
+      changed since main). Run `pnpm ng-dev format changed`
+      to apply the diff.
+
+  - id: angular-ng-dev-pullapprove-verify
+    kind: command
+    paths: .pullapprove.yml
+    command: ["pnpm", "ng-dev", "pullapprove", "verify"]
+    timeout: 60
+    level: warning
+    message: >-
+      `pnpm ng-dev pullapprove verify` failed (validates
+      .pullapprove.yml against the PullApprove schema +
+      against the actual repo file tree). The CI lint job
+      runs this — restated as an alint shell-out so local
+      runs catch the same regression.
+
+  - id: angular-ng-dev-ngbot-verify
+    kind: command
+    paths: .github/angular-robot.yml
+    command: ["pnpm", "ng-dev", "ngbot", "verify"]
+    timeout: 60
+    level: warning
+    message: >-
+      `pnpm ng-dev ngbot verify` failed (validates
+      .github/angular-robot.yml against the angular-robot
+      bot's schema).
+
+  - id: angular-ng-dev-ai-skills-validate
+    kind: command
+    paths: skills/dev-skills/README.md
+    command: ["pnpm", "ng-dev", "ai", "skills", "validate"]
+    timeout: 60
+    level: warning
+    message: >-
+      `pnpm ng-dev ai skills validate` failed (validates
+      skills/dev-skills/ + .agent/skills/ against the internal
+      skills schema).
+
+  - id: angular-ts-circular-deps
+    kind: command
+    paths: packages/circular-deps-test.conf.cjs
+    command: ["pnpm", "ts-circular-deps:check"]
+    timeout: 300
+    level: error
+    message: >-
+      `pnpm ts-circular-deps:check` failed (walks the TS import
+      graph for cycles; out of alint's "no AST" scope).
+
+  - id: angular-public-api-check
+    kind: command
+    paths: goldens/public-api/manage.js
+    command: ["pnpm", "public-api:check"]
+    timeout: 600
+    level: error
+    message: >-
+      `pnpm public-api:check` failed (the goldens/public-api/
+      check via Microsoft's API Extractor against the built
+      bundles). Run `pnpm public-api:update` to regenerate
+      goldens after intentional API changes.
+
+  - id: angular-check-tooling-setup
+    kind: command
+    paths: scripts/tsconfig.json
+    command: ["pnpm", "check-tooling-setup"]
+    timeout: 120
+    level: warning
+    message: >-
+      `pnpm check-tooling-setup` failed (= `tsc --project
+      scripts/tsconfig.json`). Catches type errors in the
+      build/release scripts before they fail at release time.

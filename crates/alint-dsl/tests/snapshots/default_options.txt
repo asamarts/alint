@@ -264,6 +264,7 @@ FileExistsRule {
     ),
     root_only: true,
     git_tracked_only: false,
+    respect_gitignore: None,
     fixer: Some(
         FileCreateFixer {
             path: ".editorconfig",
@@ -296,6 +297,7 @@ FileExistsRule {
     ),
     root_only: true,
     git_tracked_only: false,
+    respect_gitignore: None,
     fixer: None,
 }
 

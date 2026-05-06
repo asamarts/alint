@@ -1,0 +1,745 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for dotnet/runtime.
+#
+# dotnet/runtime is Microsoft's CLR + BCL monorepo: the implementation of
+# the .NET runtime (CoreCLR + Mono + NativeAOT), the Base Class Library
+# (System.*, Microsoft.Extensions.*, ~250 libraries under src/libraries/),
+# the per-OS native libs (System.Native, System.Globalization.Native,
+# Cryptography.Native.{Apple,Android}, …), and the cross-arch installer.
+#
+# Build is MSBuild + the Arcade SDK (`Microsoft.DotNet.Arcade.Sdk`,
+# pinned in `global.json::msbuild-sdks`); orchestrated by the Azure
+# DevOps pipelines under `eng/pipelines/` (186 yml). The `.github/`
+# workflows are GitHub-side automation (markdownlint, JIT-format,
+# labeler, copilot agents, backport, branch-merge-flow) — NOT the build
+# matrix, which lives in Azure DevOps. Source-build (the dotnet/dotnet
+# VMR) is gated by `eng/SourceBuild.targets` + per-project
+# `Source*.props` overrides.
+#
+# Repo state captured: 2026-05-06, sparse-clone of `dotnet/runtime`
+# (latest main):
+#   git clone --depth=1 --filter=blob:none --sparse \
+#       https://github.com/dotnet/runtime /tmp/dotnet-runtime
+#   git -C /tmp/dotnet-runtime sparse-checkout set --no-cone \
+#       '/*' '!/src/tests' '!/src/coreclr/tools/aot' '!/src/installer/pkg'
+#
+# (test trees + the AOT compiler tools + installer pkg layout are heavy
+# and orthogonal to the structural-validation surfaces we care about.)
+#
+# Concrete count at HEAD (post-sparse-checkout):
+#
+#   - 1,091 .csproj files spread across:
+#       * src/libraries/    902  (the Base Class Library — every
+#                                  System.* / Microsoft.Extensions.*
+#                                  has src/, ref/, tests/, often gen/
+#                                  for source-generators, each its own
+#                                  csproj with its own TargetFrameworks)
+#       * src/mono/          59  (the Mono runtime: msbuild integration,
+#                                  AOT compiler, sample apps)
+#       * src/tools/         30
+#       * src/native/        30  (the build-glue csprojs for the per-OS
+#                                  native libs — the C/C++ sources
+#                                  themselves are CMake)
+#       * src/coreclr/       29  (the JIT, GC, debugger, type-system
+#                                  support tooling — most native code
+#                                  here is CMake, the csprojs glue
+#                                  the managed tooling)
+#       * src/installer/     28  (the installer projects + PKG/MSI/RPM
+#                                  packagers; pkg/ excluded from sparse)
+#       * src/tasks/         15  (the per-platform MSBuild task DLLs —
+#                                  AppleAppBuilder, AndroidAppBuilder,
+#                                  Crossgen2Tasks, etc.)
+#   - 234 solution files (.slnx + .sln): 231 .slnx (the new XML-shape
+#     introduced in VS 17.10; per-library "build just this one
+#     library" entry-point) + 3 vendored .sln under
+#     src/native/external/zstd
+#   - 280 .props files + 187 .targets files in eng/, src/, plus 49
+#     Directory.Build.targets + 257 Directory.Build.{props,targets}
+#     forming the MSBuild parent-config inheritance chain
+#   - 76 .props/.targets under eng/ alone (build-glue for the Arcade
+#     SDK integration: Subsets.props (the "what to build" dispatch
+#     table — 796 lines), OSArch.props, packaging.targets,
+#     Versions.props, Analyzers.targets, illink.targets,
+#     ApiCompat*.txt — the ApiCompat baseline registry)
+#   - 1,068 of 1,091 csprojs declare Sdk="Microsoft.NET.Sdk"
+#     (986 plain + 82 specialised: Sdk.Web (8), Sdk.BlazorWebAssembly (6),
+#      Sdk.WebAssembly (5), Sdk.Razor (1), Microsoft.Build.NoTargets (3))
+#   - 430 csprojs declare <TargetFrameworks> (multi-target — the BCL
+#     pattern: every library targets `$(NetCoreAppCurrent);
+#     $(NetCoreAppPrevious);$(NetCoreAppMinimum);netstandard2.0;
+#     $(NetFrameworkMinimum)` to ship the same DLL into every supported
+#     SDK band)
+#   - 517 csprojs declare <TargetFramework> (single-target — typically
+#     test/tooling projects pinned to one TFM)
+#   - 696 csprojs declare ProjectReference (intra-tree references)
+#   - 227 csprojs declare PackageReference (NuGet dependencies — most
+#     deps are intra-tree ProjectReferences because this IS the
+#     .NET runtime)
+#   - 20 .github/workflows/*.yml (GitHub-side automation — labeler,
+#     markdownlint, jit-format, backport, branch-merge-flow,
+#     copilot-echo, etc.); the actual build matrix lives in the 186
+#     yml under eng/pipelines/ (Azure DevOps)
+#   - eng/Versions.props (50 lines) is the pinned-versions registry —
+#     ProductVersion=11.0.0, MajorVersion/MinorVersion/PatchVersion
+#     numerics, PackageVersionNet{6,7,8,9} servicing-band pins; same
+#     shape as cargo's version.workspace pattern but XML-typed
+#   - global.json pins the SDK version
+#     (11.0.100-preview.3.26170.106) AND the msbuild-sdks
+#     (Arcade.Sdk + Helix.Sdk + SharedFramework.Sdk + Build.NoTargets +
+#     Build.Traversal + NET.Sdk.IL); without it `dotnet build` picks
+#     up the system SDK and the Arcade integration silently no-ops
+#   - .config/dotnet-tools.json — the local-tools manifest (coverlet.console,
+#     dotnet-reportgenerator-globaltool, microsoft.dotnet.xharness.cli,
+#     microsoft.visualstudio.slngen.tool)
+#   - LICENSE.TXT (MIT) + PATENTS.TXT (Microsoft .NET patent grant) +
+#     THIRD-PARTY-NOTICES.TXT (every transitively-bundled native
+#     dependency: zlib-ng, libunwind, brotli, …)
+#   - .markdownlint.json — the Markdown lint config used by the
+#     markdownlint workflow
+#   - .devcontainer/devcontainer.json + per-target Dockerfiles (android,
+#     wasm, libraries) — the Codespaces-ready dev environment
+#   - .github/CODEOWNERS (112 lines) — per-area ownership; consumed by
+#     the GitHub PR-reviewer auto-assignment + the labeler models
+#
+# **The headline structural shape this config validates:** every csproj
+# declares Sdk="Microsoft.NET.Sdk" (or one of the 5 specialised SDKs)
+# AND has a TargetFramework(s) declaration. ~10 invariants per csproj
+# could be expressed if alint had `xml_path_*`; today the config falls
+# back to `file_content_matches` regex against the XML text.
+#
+# This config replaces the *structural* gates — the global.json /
+# eng/Versions.props / NuGet.config / Directory.Build.{props,targets}
+# triad that anchors the MSBuild graph, the per-csproj shape uniformity
+# (every csproj is Sdk-style + has TargetFramework{s}), the per-area
+# Directory.Build.props presence (every src/{coreclr,libraries,mono,
+# installer,tasks,tools,samples} declares its area-level overrides),
+# the build-orchestration anchors under eng/, and the GitHub Actions
+# hardening across the 20 in-repo workflows. Wraps the existing
+# eng/formatting/format.sh + .devcontainer entry-points via `command:`
+# rules.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - dotnet format                 (Roslyn-driven C# formatter +
+#                                     style enforcement; the canonical
+#                                     dotnet ecosystem formatter)
+#   - dotnet/format CI workflow     (.github/workflows/jit-format.yml
+#                                     runs jitutils' jit-format
+#                                     against the JIT subset)
+#   - the Arcade SDK signing /     (eng/Sign* + the Microsoft signing
+#     publish targets                 service — operational, not a
+#                                     structural assertion)
+#   - ApiCompat baselines          (eng/ApiCompatBaseline*.txt —
+#                                     diffs the public surface area
+#                                     against the previous shipped
+#                                     version; binary-shape check that
+#                                     parses .NET assembly metadata)
+#   - markdownlint                 (.github/workflows/markdownlint.yml
+#                                     wraps `markdownlint **/*.md` —
+#                                     Markdown-AST-aware checks; alint
+#                                     covers Markdown trailing-whitespace
+#                                     + final-newline + bidi-controls)
+#   - the MSBuild evaluation       (every csproj's `<TargetFrameworks>`
+#                                     evaluates against eng/Versions.props
+#                                     + eng/Configurations.props — alint
+#                                     can't evaluate MSBuild expressions;
+#                                     the assertion is "the variable
+#                                     references EXIST", not "they
+#                                     resolve to the right values")
+#
+# Known limitations versus the existing pipeline (each requires an
+# alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#   - **Per-csproj XML invariants** (every csproj declares
+#     Sdk="Microsoft.NET.Sdk", every csproj has either
+#     <TargetFramework> or <TargetFrameworks>, every <TargetFrameworks>
+#     references only known TFM variables from Directory.Build.props)
+#     — needs the v0.10 candidate `xml_path_matches` / `xml_path_equals`
+#     primitive. Today the config falls back to file_content_matches
+#     regex against the XML text, which catches the headline pattern but
+#     not the structural shape (e.g. "<Project Sdk=...>" anywhere ≠
+#     "the root element's Sdk attribute"). **dotnet/runtime is the
+#     SECOND repo to surface this need (after apache/spark) and brings
+#     the demand to 2 sources at scale: spark for pom.xml, dotnet/runtime
+#     for csproj.** — both are MSBuild/Maven-shaped XML manifests.
+#   - **eng/Subsets.props membership ↔ on-disk csproj resolution**
+#     (every <ItemGroup>'s subset-list entries must point at csprojs
+#     that exist; conversely, every csproj should appear in some subset)
+#     — same shape as spark's Maven `<modules>` ↔ on-disk dir resolution;
+#     extends the v0.10 `registry_paths_resolve` candidate to XML
+#     subsets/modules.
+#   - **Solution-file ↔ csproj cross-reference** (every project entry
+#     in a .slnx must point at a .csproj that exists; conversely, every
+#     csproj should be in at least one .slnx) — third instance of the
+#     `registry_paths_resolve` shape with XML extraction as the
+#     upstream stage. **231 .slnx files at HEAD; the cross-reference
+#     check is purely manual today.**
+#   - **No bundled csharp@v1 / dotnet@v1 ruleset** (alint ships
+#     rust@v1, java@v1, python@v1, node@v1, go@v1 — but no C#/dotnet
+#     equivalent). dotnet/runtime is the FIRST P2b repo where this
+#     gap is the dominant story. **Strong v0.10 candidate for the
+#     bundled-ruleset list** (alongside the v0.10 ship-target
+#     `apache/governance@v1`). Per-rule anchors: csproj-uses-net-sdk,
+#     csproj-has-target-framework{s}, root-global-json-pins-sdk,
+#     root-nuget-config-clears-fallback, area-directory-build-props-
+#     present, no-tracked-bin-obj.
+#   - **dotnet-tools.json freshness vs. global.json** (the
+#     .config/dotnet-tools.json `tools.coverlet.console.version` AND
+#     each Arcade Sdk version under msbuild-sdks should be coherent
+#     with the SDK pinned in global.json) — needs a value-equality
+#     check across files. Same shape as the v0.10 `cross_file_value_equals`
+#     candidate that's already past-saturation (8 sources).
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge markers,
+  # no bidi controls, final newline, etc.). dotnet/runtime ships every
+  # one of these.
+  - alint://bundled/oss-baseline@v1
+
+  # GitHub Actions hardening (workflow permissions, action SHA
+  # pinning, top-level `name:`). Only 20 workflows in dotnet/runtime —
+  # the Azure DevOps pipeline matrix under eng/pipelines/ runs the
+  # actual build — but all 20 should still be hardened.
+  - alint://bundled/ci/github-actions@v1
+
+  # Hygiene: tracked artefacts that should never appear (node_modules,
+  # __pycache__, target/, dist/, .DS_Store, etc.). Catches the
+  # cross-language ones — bin/, obj/, .vs/ would be in a `dotnet@v1`
+  # ruleset that doesn't exist yet (see this directory's README "Gap"
+  # section).
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # MIT-license source-header presence — dotnet/runtime uses the
+  # short MIT 2-line preamble:
+  #
+  #   // Licensed to the .NET Foundation under one or more agreements.
+  #   // The .NET Foundation licenses this file to you under the MIT license.
+  #
+  # on every C# / C++ / C source file. The bundled compliance/apache-2
+  # ruleset's header pattern is Apache-shaped; for MIT we restate as a
+  # custom rule.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-source-has-mit-header
+    kind: file_header
+    paths:
+      include:
+        - "src/**/*.cs"
+        - "src/**/*.cpp"
+        - "src/**/*.h"
+        - "src/**/*.c"
+      exclude:
+        - "**/bin/**"
+        - "**/obj/**"
+        - "**/artifacts/**"
+        - "**/generated/**"
+        - "**/_generated/**"
+        - "**/*.Designer.cs"
+        - "src/native/external/**"          # vendored: zlib-ng, libunwind, brotli, …
+        - "src/coreclr/pal/inc/rt/cpp/**"
+        - "src/coreclr/inc/clr_std/**"
+        - "src/libraries/**/ref/**"          # ref-assembly stubs are codegen
+        - "src/coreclr/jit/**/*.h"           # historical headers under JIT use varied banners
+        - "src/mono/mono/**"                 # mono fork has its own LGPL header history
+    lines: 10
+    pattern: 'Licensed to the \.NET Foundation under one or more agreements'
+    level: warning
+    message: >-
+      MIT: source files in dotnet/runtime should carry the canonical
+      ".NET Foundation under one or more agreements" header.
+      The 2-line MIT preamble is required by every new file added to
+      the runtime — verified by the dotnet/format pre-commit hook
+      under eng/formatting/.
+    policy_url: "https://github.com/dotnet/runtime/blob/main/CONTRIBUTING.md"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Build-system anchors — the global.json + eng/Versions.props +
+  # NuGet.config + Directory.Build.{props,targets} triad that anchors
+  # the entire MSBuild evaluation graph. Removing any one of these
+  # silently switches the build to the system-installed SDK + falls
+  # back to nuget.org (instead of the dotnet-public Azure DevOps
+  # feeds), producing a "passing" build that ships the wrong artefacts.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-global-json-present
+    kind: file_exists
+    paths: global.json
+    root_only: true
+    level: error
+    message: >-
+      global.json is the SDK-version pin — without it `dotnet build`
+      uses whatever SDK is on PATH instead of the
+      11.0.100-preview.* the Arcade integration expects. The
+      `msbuild-sdks` block ALSO pins the Arcade SDK + Helix SDK +
+      SharedFramework SDK + Build.NoTargets + Build.Traversal +
+      NET.Sdk.IL — every one of these is dynamically loaded by the
+      restore step.
+
+  - id: dotnet-runtime-global-json-pins-sdk-version
+    kind: json_path_matches
+    paths: global.json
+    path: "$.sdk.version"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+    level: error
+    message: >-
+      global.json `$.sdk.version` MUST be a concrete semver string —
+      no floating "latest" or "preview". The Arcade SDK integration
+      reads this exact value to decide which dotnet binary to download
+      under .dotnet/. Drift here breaks the bootstrap.
+
+  - id: dotnet-runtime-global-json-pins-arcade-sdk
+    kind: file_content_matches
+    paths: global.json
+    pattern: '"Microsoft\.DotNet\.Arcade\.Sdk"\s*:\s*"[0-9]'
+    level: error
+    message: >-
+      global.json `msbuild-sdks` MUST pin Microsoft.DotNet.Arcade.Sdk
+      to a concrete version. Arcade is the Microsoft-internal
+      build-orchestration framework that propagates the signing
+      targets, source-build targets, and packaging targets to every
+      submodule. A missing pin causes `dotnet restore` to fall back
+      to the latest published Arcade version, which can break the
+      build mid-cycle.
+
+  - id: dotnet-runtime-nuget-config-present
+    kind: file_exists
+    paths: NuGet.config
+    root_only: true
+    level: error
+    message: >-
+      NuGet.config at the repo root configures the dotnet-public +
+      dotnet-tools + dotnet-eng + dotnet-libraries Azure DevOps feeds
+      (the Microsoft-internal NuGet sources that host the Arcade SDK,
+      the test-runner packages, and the per-band runtime artefacts).
+      Without it, `dotnet restore` falls through to nuget.org and
+      can't find the prerelease Arcade SDK pinned in global.json.
+
+  - id: dotnet-runtime-nuget-config-clears-fallback-folders
+    kind: file_content_matches
+    paths: NuGet.config
+    pattern: '<fallbackPackageFolders>\s*<clear\s*/>'
+    level: warning
+    message: >-
+      NuGet.config should `<clear />` the <fallbackPackageFolders> to
+      isolate the build from any user/machine-level NuGet state.
+      Without it, a developer with a populated user-cache can produce
+      builds that succeed locally but fail in CI (where the cache is
+      empty).
+
+  - id: dotnet-runtime-root-directory-build-props-present
+    kind: file_exists
+    paths: Directory.Build.props
+    root_only: true
+    level: error
+    message: >-
+      Directory.Build.props at the repo root is the MSBuild
+      parent-config that EVERY csproj inherits from (MSBuild walks
+      ancestors at evaluation time). It anchors the Arcade SDK import,
+      the Subsets.props dispatch, and the OSArch.props target-framework
+      derivation. Removing it causes every csproj to evaluate against
+      MSBuild defaults and the build silently produces wrong artefacts.
+
+  - id: dotnet-runtime-root-directory-build-targets-present
+    kind: file_exists
+    paths: Directory.Build.targets
+    root_only: true
+    level: error
+    message: >-
+      Directory.Build.targets is the post-import counterpart to
+      Directory.Build.props — same MSBuild parent-walk discovery, but
+      evaluated AFTER each csproj's own targets. Used by Arcade for
+      cross-cutting build steps (signing, packaging, TFM-conditional
+      framework references).
+
+  - id: dotnet-runtime-eng-versions-props-present
+    kind: file_exists
+    paths: eng/Versions.props
+    level: error
+    message: >-
+      eng/Versions.props is the pinned-versions registry —
+      ProductVersion=11.0.0, MajorVersion/MinorVersion/PatchVersion
+      numerics, PackageVersionNet{6,7,8,9} servicing-band pins, every
+      tool-package version (UsingToolMicrosoftNetCompilers,
+      UsingToolXliff, etc.). Same shape as Cargo's [workspace.dependencies]
+      version pinning, just XML-typed.
+
+  - id: dotnet-runtime-eng-subsets-props-present
+    kind: file_exists
+    paths: eng/Subsets.props
+    level: error
+    message: >-
+      eng/Subsets.props (796 lines at HEAD) is the canonical
+      "what to build" dispatch table. Every alias in `./build.sh
+      <subset>` (libs, host.native, libs+host.native, mono.runtime,
+      etc.) maps to a list of csprojs/projs declared here. Removing it
+      collapses the build to "build everything" (which the official
+      pipelines DO NOT do — they slice the build by subset).
+
+  - id: dotnet-runtime-config-dotnet-tools-present
+    kind: file_exists
+    paths: .config/dotnet-tools.json
+    level: warning
+    message: >-
+      .config/dotnet-tools.json is the local-tools manifest
+      (coverlet.console for coverage, dotnet-reportgenerator-globaltool
+      for HTML coverage reports, microsoft.dotnet.xharness.cli for
+      mobile-runtime test orchestration, microsoft.visualstudio.slngen.tool
+      for the per-library .slnx generator).
+      `dotnet tool restore` reads it; without the file, the test +
+      mobile workflows can't run.
+
+  - id: dotnet-runtime-arcade-sdk-version-format
+    kind: json_path_matches
+    paths: global.json
+    path: "$['msbuild-sdks']['Microsoft.DotNet.Arcade.Sdk']"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+    level: error
+    message: >-
+      global.json `msbuild-sdks.Microsoft.DotNet.Arcade.Sdk` MUST be a
+      concrete semver string. Floating versions cause non-deterministic
+      builds across runs.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-area Directory.Build.props presence — every src/{area}/ has
+  # its own area-level Directory.Build.props that overrides the root's
+  # for area-specific defaults (Nullable annotation defaults, IsTestProject
+  # flag, IL-link options, etc.). MSBuild's parent-walk discovery means
+  # the area-level file is what each csproj under it inherits.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-areas-have-directory-build-props
+    kind: for_each_dir
+    select: "src/{coreclr,libraries,mono,installer,tasks,tools,samples}"
+    require:
+      - kind: file_exists
+        paths: "{path}/Directory.Build.props"
+    level: error
+    message: >-
+      Every MSBuild-managed area subdir under src/ MUST declare its
+      own Directory.Build.props — the area-level config that
+      propagates to every csproj beneath it. Without it, csprojs
+      evaluate against the root config + MSBuild defaults, missing
+      the area-specific Nullable / TestProject / packaging defaults.
+      NOTE — `src/native/` is intentionally excluded because it's
+      CMake-driven (not MSBuild); only `src/native/managed/` carries
+      a Directory.Build.props for the managed cdac glue projects.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-csproj XML-shape uniformity — the headline structural pattern
+  # this case study validates. dotnet/runtime has 1,091 csprojs. Every
+  # one should:
+  #   1. Use Sdk="Microsoft.NET.Sdk" (or one of the 5 specialised SDKs)
+  #   2. Declare either <TargetFramework> or <TargetFrameworks>
+  #   3. Inherit area-level Directory.Build.props (implicit via
+  #      MSBuild parent-walk; no explicit assertion needed)
+  #
+  # Today these are checked as `file_content_matches` regex against the
+  # XML text — works for the canonical shape but doesn't catch
+  # attribute-reorder drift or commented-out duplicates. The v0.10
+  # candidate `xml_path_*` family would express this as
+  # `xml_path_matches: $.Project[@Sdk]` against an XML schema, which
+  # is what spark + dotnet/runtime both want at scale.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-csproj-uses-net-sdk
+    kind: file_content_matches
+    paths:
+      include: ["src/**/*.csproj"]
+      exclude:
+        - "**/bin/**"
+        - "**/obj/**"
+        - "**/artifacts/**"
+        - "**/external/**"
+    pattern: '(<Project\s+[^>]*Sdk=("Microsoft\.NET\.Sdk(\.\w+)?"|"Microsoft\.Build\.NoTargets"|"Microsoft\.Build\.Traversal"))|(<Import\s+Sdk="Microsoft\.NET\.Sdk")'
+    level: error
+    message: >-
+      Every csproj under src/ MUST be Sdk-style — declaring one of:
+      Microsoft.NET.Sdk (the canonical .NET project SDK, either as
+      a `<Project Sdk="...">` attribute OR a `<Import Sdk="..." />`
+      element), one of its specialised variants (.Web, .Razor,
+      .BlazorWebAssembly, .WebAssembly), or Microsoft.Build.NoTargets /
+      .Traversal (for meta-projects that group references without
+      producing artefacts). Legacy non-SDK csprojs are no longer
+      supported — Arcade integration breaks against them. NOTE: this is a regex
+      file_content_matches check; the cleaner expression is
+      `xml_path_matches: $.Project[@Sdk]` once the v0.10 `xml_path_*`
+      primitive ships (this case study is the second source for it,
+      after spark; see this directory's README "Gap" section).
+
+  - id: dotnet-runtime-csproj-declares-target-framework
+    kind: file_content_matches
+    paths:
+      include: ["src/**/*.csproj"]
+      exclude:
+        - "**/bin/**"
+        - "**/obj/**"
+        - "**/artifacts/**"
+        - "**/external/**"
+    pattern: '<TargetFramework[s]?(\s|>)'
+    level: warning
+    message: >-
+      Most csprojs SHOULD declare either <TargetFramework> (single-target,
+      typical for tests + tooling) or <TargetFrameworks> (multi-target,
+      typical for BCL libraries that ship into multiple SDK bands).
+      Without it, MSBuild relies on inheritance from area-level
+      Directory.Build.props or .targets — which works for shim stubs +
+      .Common projects but is the exception, not the rule. **NOTE:**
+      this pattern accepts conditional declarations
+      (`<TargetFramework Condition="...">`) — the cleaner expression
+      is `xml_path_matches: $.Project.PropertyGroup.TargetFramework`
+      once the v0.10 `xml_path_*` primitive ships, which would let us
+      assert "exactly one of TargetFramework / TargetFrameworks
+      under the Project root" rather than counting substring matches.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Solution-file presence — dotnet/runtime adopted the new .slnx
+  # XML-shaped solution format (introduced in VS 17.10) for per-library
+  # entry-points. 231 .slnx files at HEAD, one per src/libraries/<name>/
+  # plus a handful at higher levels (src/libraries/sfx.slnx,
+  # src/installer/Microsoft.DotNet.CoreSetup.slnx, etc.).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-libraries-have-slnx
+    kind: for_each_dir
+    select: "src/libraries/System.Text.Json"
+    require:
+      - kind: file_exists
+        paths: "{path}/System.Text.Json.slnx"
+    level: warning
+    message: >-
+      Each src/libraries/<name>/ should declare a per-library .slnx
+      entry-point — the new XML-shaped solution format introduced in
+      VS 17.10, used as the per-library "build just this one library"
+      handle by the slngen tool. dotnet/runtime has 231 .slnx files
+      at HEAD; this rule spot-checks System.Text.Json. The full
+      "every src/libraries/<name>/ has <name>.slnx" check needs the
+      v0.10 `xml_path_*` primitive (to extract the project list from
+      each .slnx and assert the projects exist).
+
+  # ──────────────────────────────────────────────────────────────────
+  # MSBuild .props/.targets discipline — every Directory.Build.* file
+  # in the parent-walk chain must declare the canonical <Project>
+  # root element. Sloppy edits sometimes drop the wrapper; MSBuild
+  # then evaluates the file as a property-only fragment with no
+  # project context, silently dropping every <Import> + <Target>.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-msbuild-files-have-project-root
+    kind: file_content_matches
+    paths:
+      include:
+        - "**/Directory.Build.props"
+        - "**/Directory.Build.targets"
+        - "eng/**/*.props"
+        - "eng/**/*.targets"
+      exclude:
+        - "**/bin/**"
+        - "**/obj/**"
+        - "**/artifacts/**"
+    pattern: '<Project(\s|>|/)'
+    level: warning
+    message: >-
+      Every MSBuild .props/.targets file MUST contain a canonical
+      <Project> root element (with or without an Sdk attribute).
+      Without it, MSBuild evaluates the file as an orphaned fragment,
+      dropping every <Import>, <Target>, and <UsingTask> silently.
+      Especially load-bearing for Directory.Build.* files which
+      propagate via parent-walk discovery. NOTE — pattern is
+      whole-file (no line-start anchor) because dotnet/runtime files
+      commonly begin with either an XML/HTML comment block (license
+      header / file-purpose preamble) OR a UTF-8 BOM byte (EF BB BF)
+      before the root element. The cleaner expression is
+      `xml_path_*: $.Project` once the v0.10 `xml_path_*` primitive
+      ships, which would let us assert presence of the root element
+      without text-anchor heuristics or BOM gymnastics.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Governance + community-doc shape — dotnet/runtime is a flagship
+  # Microsoft OSS project; the .github/ + community-doc set is
+  # comprehensive and should stay that way.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-codeowners-present
+    kind: file_exists
+    paths: .github/CODEOWNERS
+    level: warning
+    message: >-
+      .github/CODEOWNERS (112 lines at HEAD) declares per-area
+      ownership: who reviews PRs touching src/coreclr/jit/,
+      src/libraries/System.Text.Json/, eng/pipelines/, etc. Drives
+      the GitHub PR-reviewer auto-assignment AND feeds the labeler
+      models that classify issues.
+
+  - id: dotnet-runtime-third-party-notices-present
+    kind: file_exists
+    paths: THIRD-PARTY-NOTICES.TXT
+    root_only: true
+    level: error
+    message: >-
+      THIRD-PARTY-NOTICES.TXT enumerates every transitively-bundled
+      native dependency (zlib-ng, libunwind, brotli, libffi, …) +
+      its license. Required by Microsoft OSS policy for any binary
+      release; the OSS-publish pipeline rejects builds without it.
+
+  - id: dotnet-runtime-patents-txt-present
+    kind: file_exists
+    paths: PATENTS.TXT
+    root_only: true
+    level: warning
+    message: >-
+      PATENTS.TXT is the Microsoft .NET patent grant — an explicit
+      license to use Microsoft-held patents that cover the .NET runtime.
+      Distinct from LICENSE.TXT (which is the MIT copyright grant).
+
+  - id: dotnet-runtime-security-md-present
+    kind: file_exists
+    paths: SECURITY.md
+    root_only: true
+    level: warning
+    message: >-
+      SECURITY.md declares the vulnerability-disclosure path. Microsoft
+      Security Response Center (MSRC) coordinates dotnet/runtime
+      embargo-grade disclosures.
+
+  - id: dotnet-runtime-markdownlint-config-present
+    kind: file_exists
+    paths: .markdownlint.json
+    root_only: true
+    level: warning
+    message: >-
+      .markdownlint.json pins the Markdown lint config consumed by
+      .github/workflows/markdownlint.yml. Without it, the workflow
+      reverts to markdownlint defaults and the lint signal becomes
+      noisy.
+
+  - id: dotnet-runtime-devcontainer-present
+    kind: file_exists
+    paths: .devcontainer/devcontainer.json
+    level: warning
+    message: >-
+      .devcontainer/devcontainer.json + per-target Dockerfiles
+      (.devcontainer/{android,wasm,libraries}/) define the
+      Codespaces-ready dev environment. Used by both GitHub Codespaces
+      AND the local VS Code Dev Containers extension.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions hardening — re-state the SHA-pinning rule at
+  # warning level here. Only 20 workflows in dotnet/runtime (the build
+  # matrix is in Azure DevOps under eng/pipelines/), but the labeler /
+  # backport / branch-merge-flow workflows have write permissions and
+  # should still pin third-party actions.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party actions in workflow steps should be pinned to a
+      40-char commit SHA, not a floating tag. dotnet/runtime has 20
+      .github/workflows/*.yml at HEAD; several have `permissions:
+      contents: write` (backport, branch-merge-flow, copilot-echo) so
+      the supply-chain blast radius is real even without the build
+      matrix.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene: dotnet-specific tracked-artifact patterns. These extend
+  # the bundled hygiene/no-tracked-artifacts ruleset with .NET-specific
+  # build outputs (bin/, obj/, .vs/, artifacts/) — this is what a
+  # `dotnet@v1` bundled ruleset would carry by default once it exists.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-no-tracked-bin
+    kind: dir_absent
+    paths: "src/**/bin"
+    git_tracked_only: true
+    level: warning
+    message: >-
+      bin/ is the MSBuild build-output directory — should NEVER be
+      tracked. .gitignore lists `bin/` at root; this rule catches
+      drift if a contributor force-adds a build output. Same shape
+      as the bundled java@v1 ruleset's `**/target` rule.
+
+  - id: dotnet-runtime-no-tracked-obj
+    kind: dir_absent
+    paths: "src/**/obj"
+    git_tracked_only: true
+    level: warning
+    message: >-
+      obj/ holds the MSBuild intermediate-build state (per-csproj
+      project.assets.json, *.cache files, *.csproj.FileListAbsolute.txt,
+      etc.). Should NEVER be tracked; .gitignore lists it at root.
+
+  - id: dotnet-runtime-no-tracked-artifacts
+    kind: dir_absent
+    paths: artifacts
+    root_only: true
+    git_tracked_only: true
+    level: warning
+    message: >-
+      artifacts/ is the per-build output staging directory created by
+      Arcade — assemblies, packages, logs, test results all land here.
+      Should NEVER be tracked.
+
+  - id: dotnet-runtime-no-tracked-vs-folder
+    kind: dir_absent
+    paths: ".vs"
+    git_tracked_only: true
+    level: warning
+    message: >-
+      .vs/ is the Visual Studio per-solution scratch directory (UI
+      state, IntelliSense indices, browse caches). Should NEVER be
+      tracked.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Wrap the existing eng/formatting/format.sh entry-point via
+  # `command:`. dotnet/format is the canonical Roslyn-driven C# style
+  # enforcer; the script orchestrates the multi-step format pass
+  # (the first invocation populates the local .dotnet/ if needed,
+  # then dispatches to dotnet-format with the right global.json).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-format-script-present
+    kind: file_exists
+    paths: eng/formatting/format.sh
+    level: warning
+    message: >-
+      eng/formatting/format.sh is the entry-point for the dotnet/format
+      Roslyn-style formatter. The .github/workflows/jit-format.yml
+      workflow shells into it; the script is idempotent and safe to
+      run locally before pushing.
+
+  # ──────────────────────────────────────────────────────────────────
+  # eng/Versions.props pinned-versions integrity — every version
+  # field declared as a property in eng/Versions.props should be a
+  # concrete semver string, no floating "*"/"latest"/"-prerelease.*"
+  # without a build-id. Drift here causes non-deterministic builds.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: dotnet-runtime-versions-props-product-version-format
+    kind: file_content_matches
+    paths: eng/Versions.props
+    pattern: '<ProductVersion>[0-9]+\.[0-9]+\.[0-9]+</ProductVersion>'
+    level: error
+    message: >-
+      eng/Versions.props <ProductVersion> MUST be a concrete x.y.z
+      string (no MSBuild expression). This is the canonical .NET
+      product brand version that propagates to every assembly's
+      AssemblyInformationalVersion attribute.
+
+  - id: dotnet-runtime-versions-props-major-minor-patch-numeric
+    kind: file_content_matches
+    paths: eng/Versions.props
+    pattern: '(?s)<MajorVersion>[0-9]+</MajorVersion>\s*<MinorVersion>[0-9]+</MinorVersion>\s*<PatchVersion>[0-9]+</PatchVersion>'
+    level: error
+    message: >-
+      eng/Versions.props MUST declare numeric MajorVersion / MinorVersion
+      / PatchVersion in a single property group — these compose the
+      AssemblyVersion attribute on every shipped DLL. Drift to
+      MSBuild expressions makes the version non-deterministic across
+      restore states.

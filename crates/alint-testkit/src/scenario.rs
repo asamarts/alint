@@ -84,6 +84,18 @@ pub struct GivenGit {
     /// `commit` is `true`, the runner then `git commit`s.
     #[serde(default)]
     pub add: Vec<String>,
+    /// Paths to `git add -f` after init — forces tracking of
+    /// files that would otherwise be excluded by `.gitignore`.
+    /// Useful for the bazel-style "tracked AND gitignored"
+    /// pattern (a file like `.bazelversion` ships a default
+    /// upstream so the upstream config commits the canonical
+    /// value, but the filename is also gitignored so individual
+    /// contributors can override locally without committing the
+    /// override). Both `add` and `add_force` entries land in the
+    /// same `git add` step (forced entries via `-f`); the commit
+    /// step runs once afterward when `commit` is `true`.
+    #[serde(default)]
+    pub add_force: Vec<String>,
     /// Whether to make a commit after `git add`. Defaults to
     /// `true` because `git ls-files` reports both staged and
     /// committed files identically — but a never-committed repo

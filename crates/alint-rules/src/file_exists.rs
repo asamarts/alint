@@ -42,6 +42,14 @@ pub struct FileExistsRule {
     /// no-op — no entries qualify, so the rule reports the
     /// "missing" violation as if no file existed.
     git_tracked_only: bool,
+    /// When `Some(false)`, the literal-path fast path also
+    /// checks the filesystem directly via `ctx.root.join(p)` —
+    /// finds files that are present-on-disk but
+    /// `.gitignore`-masked from the walker (closes the
+    /// `bazel-style "tracked AND gitignored"` pattern from
+    /// pitfall #18 in `docs/development/CONFIG-AUTHORING.md`).
+    /// Default `None` (inherit workspace `respect_gitignore`).
+    respect_gitignore: Option<bool>,
     fixer: Option<FileCreateFixer>,
 }
 
@@ -112,11 +120,25 @@ impl Rule for FileExistsRule {
             // built path set is O(1) per pattern; for
             // `for_each_dir`-spawned rules at 1M scale this is
             // the difference between O(D × N) and O(D).
+            //
+            // Pitfall #18 (per-rule `respect_gitignore: false`):
+            // when set, also check the filesystem directly so a
+            // `.bazelversion`-style tracked-but-gitignored file is
+            // found even though the walker pre-filtered it out.
+            // Direct stat is O(1) per literal regardless of tree
+            // size, so the cost is bounded.
+            let bypass_walker_for_ignored = self.respect_gitignore == Some(false);
             literals.iter().any(|p| {
                 if self.root_only && literal_is_nested(p) {
                     return false;
                 }
-                ctx.index.contains_file(p)
+                if ctx.index.contains_file(p) {
+                    return true;
+                }
+                if bypass_walker_for_ignored && ctx.root.join(p).is_file() {
+                    return true;
+                }
+                false
             })
         } else {
             // Slow path: glob patterns. v0.9.11: when
@@ -230,6 +252,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         literal_paths,
         root_only: opts.root_only,
         git_tracked_only: spec.git_tracked_only,
+        respect_gitignore: spec.respect_gitignore,
         fixer,
     }))
 }

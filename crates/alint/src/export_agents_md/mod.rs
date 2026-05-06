@@ -267,6 +267,7 @@ mod tests {
             when: None,
             fix: None,
             git_tracked_only: false,
+            respect_gitignore: None,
             scope_filter: None,
             extra: serde_yaml_ng::Mapping::new(),
         }

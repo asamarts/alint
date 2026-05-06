@@ -1,0 +1,576 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for istio/istio.
+#
+# istio is a CNCF service-mesh polyglot — single-module Go monorepo
+# (~1,238 production .go files, one root go.mod, ~6,400 tracked
+# files) with Helm-chart packaging discipline (9 Chart.yaml files
+# under manifests/charts/, 230 YAML templates + values + profiles)
+# and per-component Dockerfiles (29 across pilot/, cni/, ztunnel/,
+# istioctl/, operator/, samples/, pkg/test/). CI runs in Prow
+# (out-of-tree) so .github/workflows/ is empty — the
+# `ci/github-actions@v1` ruleset no-ops.
+#
+# This config replaces the structural pieces of `make lint` (the
+# orchestrator that fans out to lint-go / lint-python / lint-yaml /
+# lint-helm-global / lint-copyright-banner / lint-scripts /
+# lint-dockerfiles / lint-markdown / lint-licenses, plus
+# bin/check_samples.sh) with declarative rules, plus 5 `command`
+# shellouts to the existing tools (golangci-lint, helm lint,
+# hadolint, shellcheck, yamllint). Net: every structural assertion
+# istio's `make lint` performs that isn't a Go-AST analysis moves
+# to one declarative file.
+#
+# Particular emphasis on the Helm-chart structural surface —
+# istio's release-engineering pipeline sets a hard contract on what
+# every Chart.yaml + values.yaml + templates/* must look like
+# (templated `version: 1.0.0` → istio/release-builder substitutes
+# at build time; per-chart `_internal_defaults_do_not_set.global.hub`
+# → registry.istio.io/testing for dev builds; per-component image
+# refs in Deployment/DaemonSet templates → same hub/tag/variant
+# fallback chain). alint asserts these invariants per-chart via
+# `for_each_dir` over `manifests/charts/*/Chart.yaml`.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to
+# your local layout if your fork has diverged. The default scope
+# filters narrow each rule to the parts of the tree where it makes
+# sense.
+#
+# Known limitations versus the existing `make lint` pipeline (each
+# requires an alint primitive that doesn't ship today — see this
+# directory's README.md for the full gap catalogue):
+#
+#   - .golangci.yml `linters.settings.depguard.rules.AllGoFiles.deny`
+#     (forbid 16+ packages including gomodules.xyz/jsonpatch/v3,
+#     k8s.io/utils/sets, k8s.io/utils/strings/slices, gopkg.in/yaml.v2,
+#     etc. — replace with istio.io/istio/pkg/* equivalents)
+#                                                       — needs `import_gate`
+#   - .golangci.yml `depguard.DenyOperatorAndIstioctl` (operator/ and
+#     istioctl/ may not be imported from anywhere except themselves
+#     and a small allowlist) — per-directory Go import boundary
+#                                                       — needs `import_gate`
+#   - check_samples.sh (`istioctl validate -x` against every
+#     samples/**/*.yaml that isn't a helm template)     — Kubernetes-
+#                                                          object-aware
+#                                                          validation; out
+#                                                          of alint's scope
+#   - check-clean-repo (`git status --porcelain` after `make gen`
+#     to assert generated files are fresh)               — needs
+#                                                          `command_idempotent`
+#                                                          / generator-diff
+#                                                          primitive
+#   - cross-component image-pinning equality (every chart that
+#     declares global.hub uses the SAME literal across charts —
+#     captured here via 5 file_content_matches rules; one
+#     declarative `cross_file_value_equals` would replace them)
+#                                                       — needs
+#                                                          `cross_file_value_equals`
+#
+# These remain on `make lint` (golangci-lint, etc.) until alint
+# v0.10+ ships the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/go@v1
+  - alint://bundled/ci/github-actions@v1   # no-op: istio uses Prow, not GHA
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ─── common/scripts/lint_copyright_banner.sh ────────────────────
+  # The shell script greps for "Apache License, Version 2" + "Copyright"
+  # in every *.go, *.cc, *.h, *.proto, *.py, *.sh, *.rs file (excluding
+  # *.gen.go, *.pb.go, *_pb2.py). The canonical Go header is in
+  # common/scripts/copyright-banner-go.txt; the shell-style header is
+  # the same body with `#` line comments. We mirror the per-extension
+  # tolerance with two `file_header` rules — Go-style for source files
+  # and shell-style for scripts. Like helm's case study, we use a
+  # `(?s)` regex with non-greedy gap so multiple comment shapes match.
+  - id: istio-go-license-header
+    kind: file_header
+    paths:
+      include:
+        - "**/*.go"
+        - "**/*.cc"
+        - "**/*.h"
+        - "**/*.proto"
+      exclude:
+        - "**/*.gen.go"
+        - "**/*.pb.go"
+        - "**/testdata/**"
+        - "vendor/**"
+        - "common/**"      # vendored from istio/common-files
+    # NOTE on regex tolerance: istio's actual headers carry an
+    # optional year (`Copyright 2017 Istio Authors`,
+    # `Copyright 2019 Istio Authors`, ...) — the canonical
+    # banner-go.txt template is bare (`Copyright Istio Authors`)
+    # but real files freely interpolate the year. Match both shapes
+    # with `(?:\d{4}\s+)?`. The `.{0,500}?` non-greedy gap also
+    # accommodates the rare "Go-Authors-attribution preamble +
+    # istio header" shape (e.g. pilot/pkg/leaderelection/k8sleaderelection/
+    # carries a Kubernetes copyright preamble before any istio
+    # content) by widening the gap window.
+    pattern: '(?s)\A.{0,500}?Copyright (?:\d{4} )?(?:The Kubernetes Authors|Istio Authors).{0,500}?Licensed under the Apache License, Version 2'
+    level: error
+    message: >-
+      Every Go/C++/proto source file must start with an Apache-2.0
+      header (Istio Authors or — for vendored k8s code — The
+      Kubernetes Authors). See common/scripts/copyright-banner-go.txt
+      for the canonical block; `make fix-copyright-banner` to auto-fix.
+
+  - id: istio-shell-license-header
+    kind: file_header
+    paths:
+      include: ["**/*.sh", "**/*.py"]
+      exclude:
+        - "**/*_pb2.py"
+        - "**/testdata/**"
+        - "vendor/**"
+        - "common/**"
+        - "samples/**"     # per-sample shell scripts often opt out
+        - "tools/packaging/**"  # postinst.sh shipped with debian package, no license required
+        - "security/tools/jwt/**"  # vendored jwt sample scripts
+    pattern: '(?s)\A.{0,500}?Copyright (?:\d{4} )?Istio Authors.{0,500}?Licensed under the Apache License, Version 2'
+    level: error
+    message: >-
+      Every shell/python script must carry the Istio Apache-2.0
+      header (after the shebang). See common/scripts/lint_copyright_banner.sh.
+
+  # ─── Makefile :: lint-go → golangci-lint ────────────────────────
+  # istio's .golangci.yml lives under common/config/ (vendored from
+  # istio/common-files). One root go.mod → one shellout. The config
+  # path is non-default so we pass it explicitly.
+  #
+  # Done as a `for_each_dir` on go.mod so the rule degrades gracefully
+  # if istio ever splits into multiple modules — the same pattern
+  # works for the per-component gomod direction istio has discussed
+  # in CONTRIBUTING.md.
+  - id: istio-golangci-lint
+    kind: for_each_dir
+    select: "go.mod"
+    when_iter: 'not iter.path matches "testdata"'
+    require:
+      - kind: command
+        paths: "{dir}"
+        command: ["golangci-lint", "run", "-c", "./common/config/.golangci.yml", "{dir}/..."]
+        timeout: 600
+    level: error
+
+  # ─── Makefile :: format-go → gofmt -l ───────────────────────────
+  # Read-only "would `make format` change anything?" gate. gofmt -l
+  # prints filenames of unformatted files and exits 0; alint's
+  # `command` rule treats non-empty stdout as a violation, which is
+  # the signal we want. (See CONFIG-AUTHORING.md §3.)
+  - id: istio-gofmt-clean
+    kind: command
+    paths:
+      include: ["**/*.go"]
+      exclude:
+        - "**/*.gen.go"
+        - "**/*.pb.go"
+        - "**/testdata/**"
+        - "vendor/**"
+        - "common/**"
+    scope_filter:
+      has_ancestor: go.mod
+    command: ["gofmt", "-l", "{path}"]
+    timeout: 30
+    level: error
+    message: >-
+      File is not gofmt-clean. Run `gofmt -w` (or `make format`).
+
+  # ─── Makefile :: tidy-go → go mod tidy ──────────────────────────
+  # CI runs `go mod tidy` and check-clean-repo to assert the go.mod /
+  # go.sum pair are minimal. One go.mod root → one shellout per
+  # module (currently only the root).
+  - id: istio-go-mod-tidy
+    kind: command
+    paths: "go.mod"
+    command: ["go", "mod", "tidy", "-diff"]
+    timeout: 120
+    level: error
+    message: >-
+      go.mod / go.sum are out of sync. Run `make tidy` (= `go mod
+      tidy`) and commit the diff.
+
+  # ─── Makefile :: lint-helm-global → helm lint ───────────────────
+  # The Makefile target finds every Chart.yaml under manifests/ and
+  # runs `helm lint` on the chart's directory. We mirror that shape
+  # with a `for_each_dir` over the Chart.yaml files. NOTE: the
+  # repo's lint-helm-global is non-strict; common/Makefile.common.mk's
+  # lint-helm uses --strict. Pick whichever your release pipeline
+  # already does — istio/istio runs the non-strict variant.
+  - id: istio-helm-lint
+    kind: for_each_dir
+    select: "manifests/charts/**/Chart.yaml"
+    require:
+      - kind: command
+        paths: "{dir}"
+        command: ["helm", "lint", "{dir}"]
+        timeout: 60
+    level: error
+    message: >-
+      `helm lint` failed for the chart. Fix the chart-shape errors
+      reported by helm itself.
+
+  # ─── Per-chart structural assertions (manifests/charts/*/Chart.yaml)
+  # Every Chart.yaml carries the same release-builder placeholder:
+  # `version: 1.0.0` and `appVersion: 1.0.0`. istio/release-builder
+  # substitutes the real semver at build time. If a contributor edits
+  # version: directly in a chart (e.g. to bump for a local test) and
+  # forgets to revert, the published chart ships with a stale literal.
+  # This pair of rules catches that drift at PR time.
+  #
+  # NOTE on rule-shape choice: we use yaml_path_equals (not
+  # yaml_path_matches) because `1.0.0` is a single literal and the
+  # path is single-valued. If a chart legitimately needs a different
+  # local version for testing, override the rule per-chart with
+  # `paths:` excludes.
+  - id: istio-chart-version-templated
+    kind: yaml_path_equals
+    paths: "manifests/charts/**/Chart.yaml"
+    path: "$.version"
+    equals: "1.0.0"
+    level: error
+    message: >-
+      Chart.yaml version: must remain "1.0.0" (the placeholder
+      that istio/release-builder substitutes at build time). If you
+      need a local version bump, do it in a fork.
+
+  - id: istio-chart-appversion-templated
+    kind: yaml_path_equals
+    paths: "manifests/charts/**/Chart.yaml"
+    path: "$.appVersion"
+    equals: "1.0.0"
+    level: error
+    message: >-
+      Chart.yaml appVersion: must remain "1.0.0" (the placeholder
+      that istio/release-builder substitutes at build time).
+
+  - id: istio-chart-apiversion-v2
+    kind: yaml_path_equals
+    paths: "manifests/charts/**/Chart.yaml"
+    path: "$.apiVersion"
+    equals: "v2"
+    level: error
+    message: >-
+      Chart.yaml apiVersion must be "v2" (Helm 3+).
+    policy_url: "https://helm.sh/docs/topics/charts/#the-apiversion-field"
+
+  - id: istio-chart-sources-istio-istio
+    kind: yaml_path_equals
+    paths: "manifests/charts/**/Chart.yaml"
+    path: "$.sources[0]"
+    equals: "https://github.com/istio/istio"
+    level: warning
+    message: >-
+      Chart.yaml sources[0] should point to the istio/istio repo
+      (the canonical upstream for these charts).
+
+  # ─── Cross-component image-pinning convention ───────────────────
+  # Every chart that declares a default `hub:` (in either the
+  # _internal_defaults_do_not_set top-level OR under the global
+  # block, depending on the chart) uses the literal
+  # `registry.istio.io/testing` for dev builds. The release pipeline
+  # rewrites this to `gcr.io/istio-release` (or `docker.io/istio`)
+  # when shipping. The drift to catch: a contributor accidentally
+  # pinning a personal registry, or stripping the literal entirely
+  # so `helm install` falls through to no-op defaults.
+  #
+  # NOTE on rule-shape choice: the path of `hub:` differs per chart
+  # (some have it at `$._internal_defaults_do_not_set.hub`, others
+  # at `$._internal_defaults_do_not_set.global.hub`), so a single
+  # `yaml_path_*` against a fixed JSONPath doesn't fit. We use
+  # `file_content_matches` against the YAML text, which side-steps
+  # the structure mismatch. The v0.10+ `cross_file_value_equals`
+  # primitive (proposed in launch-prep.md) would let one declarative
+  # rule replace this whole block: "every chart's `hub:` value
+  # equals the same literal across charts."
+  - id: istio-chart-hub-pins-testing-registry
+    kind: file_content_matches
+    paths:
+      include:
+        - "manifests/charts/ztunnel/values.yaml"
+        - "manifests/charts/istio-cni/values.yaml"
+        - "manifests/charts/istio-control/istio-discovery/values.yaml"
+        - "manifests/charts/gateways/istio-ingress/values.yaml"
+        - "manifests/charts/gateways/istio-egress/values.yaml"
+    pattern: '(?m)^\s*hub:\s*registry\.istio\.io/testing\s*$'
+    level: warning
+    message: >-
+      Per-chart values.yaml must set `hub: registry.istio.io/testing`
+      as the dev-build default. istio/release-builder rewrites this
+      at release time; the drift to catch is a personal-registry
+      pin or a stripped default.
+
+  - id: istio-chart-tag-pins-latest
+    kind: file_content_matches
+    paths:
+      include:
+        - "manifests/charts/ztunnel/values.yaml"
+        - "manifests/charts/istio-cni/values.yaml"
+        - "manifests/charts/istio-control/istio-discovery/values.yaml"
+        - "manifests/charts/gateways/istio-ingress/values.yaml"
+        - "manifests/charts/gateways/istio-egress/values.yaml"
+    pattern: '(?m)^\s*tag:\s*latest\s*$'
+    level: warning
+    message: >-
+      Per-chart values.yaml must set `tag: latest` as the dev-build
+      default. istio/release-builder substitutes the real semver at
+      release time.
+
+  # ─── values.yaml uses the _internal_defaults_do_not_set wrapper ─
+  # Every per-chart values.yaml top-level is keyed under
+  # `_internal_defaults_do_not_set:` (a Helm-3-workaround so users
+  # can `--set foo=bar` rather than `--set
+  # _internal_defaults_do_not_set.foo=bar`). The wrapper is
+  # load-bearing — strip it and `helm install` no-ops every default.
+  - id: istio-chart-internal-defaults-wrapper
+    kind: file_content_matches
+    paths:
+      include:
+        - "manifests/charts/*/values.yaml"
+        - "manifests/charts/*/*/values.yaml"
+      exclude:
+        - "manifests/charts/base/values.yaml"     # base ships an empty values.yaml
+        - "manifests/charts/default/values.yaml"  # ditto for default
+        - "manifests/charts/gateway/values.yaml"  # standalone gateway uses a different shape
+    pattern: '(?m)^_internal_defaults_do_not_set:'
+    level: error
+    message: >-
+      values.yaml must wrap defaults under
+      `_internal_defaults_do_not_set:` so contributors can
+      `--set foo=bar` (not `--set _internal_defaults_do_not_set.foo=bar`).
+      See the comment block at the top of any chart's values.yaml.
+
+  # ─── manifests/charts/base CRDs file ────────────────────────────
+  # The base chart's CRDs are shipped via `crd-all.gen.yaml` (a
+  # single concatenated file generated from the istio/api repo). The
+  # file is .gitattributes-marked `linguist-generated=true` and
+  # `*.gen.yaml linguist-generated=true`, so it should always be
+  # present. Strip it and the base chart can't install CRDs.
+  - id: istio-base-crds-present
+    kind: file_exists
+    paths: "manifests/charts/base/files/crd-all.gen.yaml"
+    level: error
+    message: >-
+      manifests/charts/base/files/crd-all.gen.yaml is required —
+      the base chart ships every Istio CRD via this single
+      generated file. Run `make gen` if it's missing.
+
+  # ─── manifests/charts/<chart>/templates/_helpers.tpl ────────────
+  # Every non-trivial chart carries a `_helpers.tpl` (the standard
+  # Helm convention for shared template helpers). Pair the chart's
+  # Chart.yaml with the templates/_helpers.tpl that defines the
+  # chart's helpers.
+  - id: istio-chart-has-helpers
+    kind: for_each_dir
+    select: "manifests/charts/*/Chart.yaml"
+    when_iter: 'not iter.path matches "base"'   # base chart legitimately omits _helpers.tpl
+    require:
+      - kind: file_exists
+        paths: "{dir}/templates/_helpers.tpl"
+    level: warning
+    message: >-
+      Every Helm chart should carry templates/_helpers.tpl for
+      shared helpers (chart name, fullname, labels). Base chart
+      legitimately omits it.
+
+  # ─── istio.deps cross-repo SHA pins ─────────────────────────────
+  # istio.deps lists the git SHAs (or image tags) of three sibling
+  # repos that ship binaries istio links against at build/deploy
+  # time: proxy (Envoy), ztunnel (ambient sidecar), agentgateway.
+  # Every entry must declare a `lastStableSHA` field; missing it
+  # means the build pipeline falls through to a default that may
+  # not exist in upstream.
+  - id: istio-deps-has-proxy-sha
+    kind: json_path_matches
+    paths: "istio.deps"
+    path: "$[0].lastStableSHA"
+    matches: '^[a-f0-9]{40}$|^v\d+\.\d+\.\d+$'
+    level: error
+    message: >-
+      istio.deps[0] (PROXY_REPO_SHA) must declare a 40-char SHA or
+      semver tag in lastStableSHA.
+
+  - id: istio-deps-has-ztunnel-sha
+    kind: json_path_matches
+    paths: "istio.deps"
+    path: "$[1].lastStableSHA"
+    matches: '^[a-f0-9]{40}$|^v\d+\.\d+\.\d+$'
+    level: error
+    message: >-
+      istio.deps[1] (ZTUNNEL_REPO_SHA) must declare a 40-char SHA
+      or semver tag in lastStableSHA.
+
+  # ─── Makefile :: lint-dockerfiles → hadolint ────────────────────
+  # 29 Dockerfiles across pilot/, cni/, ztunnel/, istioctl/,
+  # operator/, samples/, pkg/test/. hadolint config lives at
+  # common/config/.hadolint.yml; pass it explicitly.
+  - id: istio-hadolint
+    kind: command
+    paths:
+      include:
+        - "**/Dockerfile"
+        - "**/Dockerfile.*"
+      exclude:
+        - "common/**"
+    command: ["hadolint", "-c", "./common/config/.hadolint.yml", "{path}"]
+    timeout: 30
+    level: error
+
+  # ─── Makefile :: lint-scripts → shellcheck ──────────────────────
+  - id: istio-shellcheck
+    kind: command
+    paths:
+      include: ["**/*.sh"]
+      exclude:
+        - "common/**"
+        - "vendor/**"
+    command: ["shellcheck", "{path}"]
+    timeout: 30
+    level: error
+
+  # ─── Makefile :: lint-yaml → yamllint ───────────────────────────
+  # The yamllint config under common/config skips files containing
+  # Helm `{{` template directives (the shell command pre-greps).
+  # alint can't easily replicate the "skip if file contains {{"
+  # filter without a pre-walk, so we exclude the templates
+  # subdirectories explicitly.
+  - id: istio-yamllint
+    kind: command
+    paths:
+      include:
+        - "**/*.yaml"
+        - "**/*.yml"
+      exclude:
+        - "manifests/charts/**/templates/**"     # Helm templates contain {{ }}
+        - "manifests/charts/**/files/profile-*.yaml"
+        - "manifests/charts/base/files/crd-all.gen.yaml"
+        - "manifests/addons/**"
+        - "common/**"
+        - "vendor/**"
+        - "**/*.gen.yaml"
+        - "samples/**"                           # samples carry many template snippets
+    command: ["yamllint", "-c", "./common/config/.yamllint.yml", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ─── Makefile :: lint-licenses → license-lint ───────────────────
+  # license-lint reads common/config/license-lint.yml. We register
+  # it as a single shellout — the tool walks the licenses/ tree
+  # itself.
+  - id: istio-license-lint
+    kind: command
+    paths: "common/config/license-lint.yml"
+    command: ["license-lint", "--config", "./common/config/license-lint.yml"]
+    timeout: 120
+    level: warning
+
+  # ─── CODEOWNERS shape (istio uses CODEOWNERS, not OWNERS) ───────
+  # Unlike kubernetes (which uses k8s-style YAML OWNERS files
+  # per-subdir), istio uses GitHub's CODEOWNERS file at the repo
+  # root. The file routes review requests to the maintainer working
+  # groups. Catch the regression where a PR strips a path entry.
+  - id: istio-codeowners-has-fallback
+    kind: file_content_matches
+    paths: "CODEOWNERS"
+    pattern: '(?m)^\*\s+@\S+'
+    level: warning
+    message: >-
+      CODEOWNERS must declare a fallback owner pattern (`* @owner1
+      @owner2 ...`) on the first non-comment line so unmatched
+      paths still route to a default reviewer.
+
+  # ─── Release-notes shape ────────────────────────────────────────
+  # Every PR with user-facing changes adds a YAML file under
+  # releasenotes/notes/ with a fixed schema (apiVersion, kind, area,
+  # issue, releaseNotes). The template lives at
+  # releasenotes/template.yaml. We pin the apiVersion + kind enum so
+  # a malformed release-note file gets caught at PR time, before the
+  # release-notes generator chokes on it. ~1,699 files in this
+  # directory at the time of capture; the rule fires per-file.
+  - id: istio-releasenotes-apiversion
+    kind: yaml_path_equals
+    paths: "releasenotes/notes/*.yaml"
+    path: "$.apiVersion"
+    equals: "release-notes/v2"
+    level: error
+    message: >-
+      releasenotes/notes/<id>.yaml must declare
+      `apiVersion: release-notes/v2`. See releasenotes/template.yaml.
+
+  - id: istio-releasenotes-kind
+    kind: yaml_path_matches
+    paths: "releasenotes/notes/*.yaml"
+    path: "$.kind"
+    matches: '^(bug-fix|security-fix|feature|test|promotion)$'
+    if_present: true
+    level: warning
+    message: >-
+      release-note kind must be one of: bug-fix, security-fix,
+      feature, test, promotion. See releasenotes/template.yaml.
+
+  # ─── istio-specific top-level files ─────────────────────────────
+  - id: istio-version-file-exists
+    kind: file_exists
+    paths: "VERSION"
+    root_only: true
+    level: error
+    message: >-
+      VERSION file is required — Makefile.core.mk reads it as the
+      build-time version source when $VERSION is unset.
+
+  - id: istio-version-file-shape
+    kind: file_content_matches
+    paths: "VERSION"
+    pattern: '^\d+\.\d+(\.\d+)?(-\w+)?\s*$'
+    level: error
+    message: >-
+      VERSION file must be a single semver line (e.g. `1.31` or
+      `1.31.0-dev`). Makefile.core.mk appends `-dev` if no patch
+      version is present.
+
+  - id: istio-istiodeps-file-exists
+    kind: file_exists
+    paths: "istio.deps"
+    root_only: true
+    level: error
+    message: >-
+      istio.deps lists the SHAs of cross-repo dependencies (proxy,
+      ztunnel, agentgateway image). Required for release builds.
+
+  - id: istio-makefile-core-exists
+    kind: file_exists
+    paths: "Makefile.core.mk"
+    root_only: true
+    level: error
+    message: >-
+      Makefile.core.mk is the canonical build-system entry point.
+      The top-level Makefile is a thin wrapper.
+
+  # ─── Hygiene: vendored common-files do-not-edit warning ─────────
+  # The common/ directory is vendored from istio/common-files via
+  # `make update-common`. Every file in it carries a "DO NOT EDIT"
+  # banner pointing at the upstream repo. Catch the regression
+  # where a contributor edits a common/ file directly (which gets
+  # silently overwritten on the next `make update-common`).
+  #
+  # NOTE: this is informational rather than a hard error — a
+  # legitimate path is "edit in fork, then upstream the change to
+  # istio/common-files". The rule fires at warning level so the
+  # contributor sees the right escalation path.
+  - id: istio-common-files-marker
+    kind: file_content_matches
+    paths:
+      include: ["common/**/*.mk", "common/**/*.sh", "common/**/*.yml"]
+      exclude:
+        - "common/.commonfiles.sha"
+    pattern: 'DO NOT EDIT.*PROBABLY A COPY'
+    level: info
+    message: >-
+      common/ is vendored from istio/common-files via `make
+      update-common`. Edits made directly here will be silently
+      overwritten — upstream the change to istio/common-files
+      first, then re-run `make update-common`.

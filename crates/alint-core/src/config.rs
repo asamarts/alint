@@ -206,6 +206,28 @@ pub struct RuleSpec {
     /// Default `false`. Has no effect outside a git repo.
     #[serde(default)]
     pub git_tracked_only: bool,
+    /// Per-rule override for the workspace-level
+    /// `respect_gitignore:` setting. When `Some(false)`, this
+    /// rule treats `.gitignore`-listed files as if they were
+    /// untracked-but-on-disk: the rule sees them. The canonical
+    /// use case is the bazel-style "tracked AND gitignored"
+    /// pattern (a file like `.bazelversion` ships a default
+    /// upstream and contributors override it locally without
+    /// committing the override) — the workspace walker honours
+    /// the gitignore, so `file_exists` reports "no match"
+    /// against a file that's both on disk AND in `git ls-files`.
+    /// This per-rule knob lets that single rule see the file
+    /// without flipping the workspace-wide setting.
+    ///
+    /// Currently honoured by `file_exists` for literal-path
+    /// patterns (the common case the pitfall surfaced). Other
+    /// rule kinds + glob patterns fall through to the workspace
+    /// setting; future versions will broaden coverage.
+    ///
+    /// Default `None` (inherit the workspace `respect_gitignore`).
+    /// See `docs/development/CONFIG-AUTHORING.md` pitfall #18.
+    #[serde(default)]
+    pub respect_gitignore: Option<bool>,
     /// Per-file ancestor-manifest gate. When set, the rule
     /// only fires on files that have at least one ancestor
     /// directory (including the file's own directory)
@@ -597,11 +619,12 @@ impl NestedRuleSpec {
             when: self.when.clone(),
             fix: None,
             // Nested rules don't currently expose
-            // `git_tracked_only` from their parent's spec — the
-            // option is meaningful on top-level rules only for
-            // now. If/when `for_each_dir`'s nested rules need it,
-            // plumb it through here.
+            // `git_tracked_only` or `respect_gitignore` from their
+            // parent's spec — both options are meaningful on
+            // top-level rules only for now. If/when `for_each_dir`'s
+            // nested rules need either, plumb them through here.
             git_tracked_only: false,
+            respect_gitignore: None,
             scope_filter: self.scope_filter.clone(),
             extra: crate::template::render_mapping(self.extra.clone(), tokens),
         }

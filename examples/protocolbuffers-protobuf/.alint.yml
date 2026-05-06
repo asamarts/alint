@@ -1,0 +1,1066 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for protocolbuffers/protobuf.
+#
+# protocolbuffers/protobuf is the **densest polyglot binding repo in
+# the OSS evidence catalogue** — a single tree shipping the protoc
+# compiler (C++) plus runtime + codegen for ~10 languages, glued
+# together by `conformance/` (the cross-language wire-format test
+# suite that EVERY binding must pass) and the canonical version
+# manifests `version.json` + `protobuf_version.bzl` (which pin every
+# binding's released version in lock-step). It's the canonical
+# "every language implements the same wire-format spec" repository
+# on GitHub.
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `protocolbuffers/protobuf@3b402b46` (rev =
+# `3b402b46ead91e95cc2576dd093ff740072281ce`); heavy generated
+# subtrees excluded (`/src/google/protobuf/compiler`, `/third_party`,
+# `/conformance/binary_protos`).
+#
+# Concrete count at HEAD:
+#
+#   - 11 in-tree language binding sub-trees: src/ (C++ runtime +
+#     protoc compiler), java/ (with 3 Maven sub-modules: bom/,
+#     kotlin/, protoc/ each shipping their own pom.xml), python/,
+#     ruby/, go/, objectivec/, csharp/, php/ (with PHP-C extension
+#     under php/ext/), rust/, lua/, plus 2 sister C/C++ binding
+#     trees: hpb/ (C++) + upb/ (C). Dart is ALSO covered by the
+#     conformance suite (failure_list_dart_upb.txt) but the runtime
+#     lives in a sibling repo (dart-lang/protobuf.dart) — same
+#     "spun-out per-language repo" pattern as apache/arrow's Java +
+#     Go + JS + Rust + Swift + Julia.
+#   - **9 languages in version.json** (cpp, csharp, java,
+#     javascript, objectivec, php, python, ruby, rust) — the
+#     canonical cross-language version-pin manifest, lock-stepped
+#     to a single `protoc_version` (currently 36-dev) so every
+#     binding releases together.
+#   - **6 versions in protobuf_version.bzl** (PROTOC_VERSION,
+#     PROTOBUF_JAVA_VERSION, PROTOBUF_PYTHON_VERSION,
+#     PROTOBUF_PHP_VERSION, PROTOBUF_RUBY_VERSION,
+#     PROTOBUF_RUST_VERSION) — the Bazel-side version mirror
+#     (must match version.json's per-language entries; drift
+#     here means Bazel-built artefacts ship a wrong version).
+#   - 19 conformance/failure_list_*.txt files (cpp, csharp,
+#     csharp_performance, dart_upb, java, java_lite, jruby,
+#     jruby_ffi, objc, objc_performance, php, php_c, python,
+#     python_cpp, python-post26, python_upb, ruby, rust_cc,
+#     rust_upb) — the per-binding wire-format test failure
+#     allowlist that the conformance test runner consumes.
+#     Every binding ships its own list because each binding has
+#     a different progress curve through the test suite.
+#   - 8 conformance/text_format_failure_list_*.txt — same shape,
+#     for the human-readable text-format test suite.
+#   - 6 in-tree conformance test runners: conformance_cpp.cc,
+#     ConformanceJava.java + ConformanceJavaLite.java,
+#     conformance_python.py, conformance/ruby/conformance_ruby.rb,
+#     conformance_objc.m, conformance_php.php, conformance_rust.rs.
+#     (csharp is run via `bazel test //csharp:conformance_test`
+#     against a Bazel target — no separate runner file. Same for
+#     hpb / upb / dart's host-language binding.)
+#   - 22 GitHub Actions workflows under .github/workflows/.
+#     **15 are test_<lang>.yml or test_<scope>.yml**: test_bazel,
+#     test_cpp, test_csharp, test_hpb, test_java, test_objectivec,
+#     test_php, test_php_ext, test_python, test_ruby, test_rust,
+#     test_upb, test_yaml, test_runner (the orchestrator),
+#     test_release_branches.
+#   - 137 BUILD / BUILD.bazel files + 117 *.bzl Starlark files —
+#     this is a **Bazel-built repo** (MODULE.bazel + WORKSPACE
+#     present at root). The C++ runtime ALSO ships a CMake
+#     alternative under cmake/ (libprotobuf.cmake,
+#     libprotobuf-lite.cmake, libprotoc.cmake, etc.) for
+#     packagers who don't use Bazel.
+#   - 13 editions/golden/ goldens + 5 editions/input/ inputs —
+#     the new "editions" feature (proto2/proto3 evolution) ships
+#     its own golden-file test discipline.
+#   - Cross-language presence files: PrivacyInfo.xcprivacy
+#     (Apple privacy manifest, required by App Store for the
+#     Objective-C runtime), Protobuf.podspec (CocoaPods),
+#     global.json (.NET SDK pin), composer.json (PHP), Gemfile
+#     (Ruby), pom.xml (Java BOM), version.json (cross-language
+#     version), MODULE.bazel + WORKSPACE (Bazel), CMakeLists.txt
+#     (CMake), appveyor.yml (legacy Windows CI), .readthedocs.yml
+#     (docs), SECURITY.md (vuln intake), CODE_OF_CONDUCT.md.
+#
+# **Why this case study matters for alint launch positioning:**
+# protobuf is the **canonical "densest polyglot binding repo" on
+# GitHub** — 10 in-tree language bindings (vs. arrow's 6) plus the
+# spun-out Dart binding, sharing a single conformance/ wire-format
+# test suite, with version.json + protobuf_version.bzl pinning
+# every language's release version in lock-step. It's the
+# **strongest test for the v0.11+ `cross_language_implementation_complete`
+# rule-kind candidate** anywhere in the OSS catalogue: every binding
+# has parity discipline (own runner + own failure_list + own
+# version pin); the canonical conformance check is "every test in
+# conformance.proto must be implemented by every binding, with any
+# known-failing tests explicitly listed in the per-binding
+# failure_list_<lang>.txt". This is **the** canonical cross-language-
+# binding shape. With this case study committed, the v0.11+
+# `cross_language_implementation_complete` candidate has 4
+# demand-driving sources (apache/arrow + tensorflow/tensorflow +
+# google/flutter + protocolbuffers/protobuf) and the v0.11 design
+# phase becomes ship-ready.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - `bazel test //src:conformance_test` (and the per-language
+#     equivalent: //java:conformance_test, //csharp:conformance_test,
+#     etc.) — the actual cross-language wire-format check, which
+#     spawns a tester process + a per-language testee process and
+#     exchanges binary protos over a pipe. alint sees files at rest;
+#     it doesn't run conformance binaries.
+#   - `buildifier` / `buildozer` — the Bazel-team-owned Starlark
+#     formatter + AST refactor tool (covers the 137 BUILD.bazel +
+#     117 *.bzl files). Same shape as the bazelbuild/bazel case
+#     study: alint owns file-shape, `buildifier` owns Starlark-AST.
+#     Wired via `command:` rules below.
+#   - `clang-format` (C++ runtime + protoc + objectivec + php-ext),
+#     `gofmt` (go/ binding), `rubocop` (ruby/), `flake8`/`autopep8`
+#     (python/), per-language style checkers — alint deliberately
+#     doesn't try to be a parser. Each shells out via `command:`.
+#   - The Kokoro internal Google CI orchestration — protobuf's
+#     internal CI runs partly on Google-internal Kokoro and partly
+#     on the public GitHub Actions workflows. Kokoro config is NOT
+#     in this repo (it's hosted in Google-internal repos); only the
+#     public test_*.yml mirror is alint-visible.
+#   - PrivacyInfo.xcprivacy semantic correctness (the Apple App
+#     Store privacy manifest is consumed by Apple's own validation
+#     pipeline; alint just verifies its file-presence + that it
+#     parses as XML).
+#
+# Known limitations versus the existing conformance + Bazel pipeline
+# (each requires an alint primitive that doesn't ship today — see
+# this directory's README.md for the full gap catalogue):
+#
+#   - `version.json`'s 9 per-language version strings should
+#     match `protobuf_version.bzl`'s 6 PROTOBUF_*_VERSION constants
+#     (java, python, php, ruby, rust agree on the same major.minor.
+#     patch in both files; drift means the Bazel-built artefact
+#     ships a different version than the language manifest claims).
+#     **Single canonical instance of the v0.11+ `cross_language_
+#     implementation_complete` candidate** — every "language" key
+#     in version.json must have a matching PROTOBUF_<LANG>_VERSION
+#     in protobuf_version.bzl AND a matching version literal in the
+#     language's binding manifest (java/bom/pom.xml `<version>`,
+#     ruby/google-protobuf.gemspec `s.version`, php/composer.json
+#     `version`, Protobuf.podspec `s.version`, etc.). Today: 5
+#     manual sites of truth that drift independently.
+#
+#   - `conformance/failure_list_<lang>.txt` ↔ binding presence:
+#     every language with an in-tree binding directory should ship
+#     a failure_list_<lang>.txt; every failure_list_<lang>.txt
+#     should reference a real conformance test from
+#     conformance.proto. Same `cross_language_implementation_complete`
+#     shape — protobuf provides a SECOND concrete instance after
+#     the version-pinning case (2 distinct manifestations of the
+#     same v0.11+ rule-kind in one repo).
+#
+#   - `failure_list_<lang>.txt` is conventionally one-test-per-line
+#     and could be sort-checked. Currently NOT alphabetised
+#     (verified via `LC_ALL=C sort -c conformance/failure_list_cpp.txt`
+#     → exits non-zero). v0.10+ `ordered_block` candidate (re-
+#     confirmed by 7+ sources now: rust + airflow + tokio + cpython
+#     + arrow + tensorflow + protobuf — joins `registry_paths_resolve`
+#     at the top of v0.10).
+#
+#   - Each test_<lang>.yml workflow should map 1:1 to an in-tree
+#     binding directory under <lang>/. Every binding-bearing
+#     directory should have a matching test_<lang>.yml.
+#     Today: 11 test_<lang>.yml exist, 11 binding dirs exist
+#     (csharp/, cpp via src/, hpb/, java/, objectivec/, php/, php_ext
+#     via php/ext/, python/, ruby/, rust/, upb/) — perfect parity,
+#     but no automated check enforces this.
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge markers,
+  # no bidi controls, final newline, etc.). protobuf has README.md +
+  # LICENSE + CONTRIBUTING.md + SECURITY.md + CODE_OF_CONDUCT.md at
+  # root — the full governance triad.
+  - alint://bundled/oss-baseline@v1
+
+  # GitHub Actions hardening — protobuf has 22 workflows; the supply-
+  # chain blast radius is large because every binding's release fans
+  # through the workflow set.
+  - alint://bundled/ci/github-actions@v1
+
+  # Hygiene: no tracked artefacts (build/, target/, node_modules/,
+  # __pycache__, etc.) — protobuf is Bazel-built, so the bazel-bin/
+  # bazel-out/ symlinks are .gitignored already; this rule catches
+  # anyone who sneaks a build output past .gitignore.
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Cross-language structural conventions — the launch-pitch angle.
+  # Every per-language binding subdirectory MUST carry README + LICENSE
+  # + a build manifest. This is exactly what no per-language linter
+  # sees: clang-format only sees C++, rubocop only sees Ruby, flake8
+  # only sees Python, gofmt only sees Go. alint's for_each_dir over
+  # the canonical binding-subtree list catches drift across the whole
+  # polyglot tree at once.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-binding-subdir-has-readme
+    kind: for_each_file
+    select: "{src,java,python,ruby,go,objectivec,csharp,php,rust,upb,hpb,lua}/README.md"
+    require:
+      - kind: file_min_lines
+        paths: "{path}"
+        min_lines: 3
+    level: warning
+    message: >-
+      Every per-language binding subdirectory under protocolbuffers/
+      protobuf MUST carry a README.md explaining the binding and
+      pointing at the canonical https://protobuf.dev/getting-started/
+      docs. **Surfaces 3 missing READMEs at clone time**: go/ (binding
+      lives in google.golang.org/protobuf — sibling-repo pattern
+      mirroring apache/arrow's spun-out languages), rust/ (the in-tree
+      crate doesn't ship a top-level README — the per-crate metadata
+      lives under rust/release_crates/ READMEs), and hpb/ (which is
+      pre-release and intentionally undocumented). All 3 are
+      legitimate; alint surfaces them so a future regression in the
+      ones that DO ship a README (src/, java/, python/, ruby/,
+      objectivec/, csharp/, php/, upb/, lua/) doesn't slip through.
+
+  # The `version.json` file is the canonical cross-language version
+  # manifest — every supported language's released version is pinned
+  # here. Removing it strands every release tooling that auto-bumps
+  # binding versions in lock-step.
+  - id: protobuf-version-manifest-present
+    kind: file_exists
+    paths: version.json
+    level: error
+    message: >-
+      version.json is the canonical cross-language version manifest:
+      a single JSON file pinning protoc_version + per-language
+      released versions (cpp, csharp, java, javascript, objectivec,
+      php, python, ruby, rust). Removing it breaks the release
+      pipeline that bumps every binding's version in lock-step at
+      release time.
+
+  - id: protobuf-version-manifest-declares-protoc-version
+    kind: json_path_matches
+    paths: version.json
+    path: "$.main.protoc_version"
+    matches: '^\d+(?:-dev|\.\d+(?:\.\d+)?)?$'
+    level: error
+    message: >-
+      version.json `main.protoc_version` MUST be present and follow
+      the canonical `<major>` (e.g. `36`), `<major>-dev` (e.g.
+      `36-dev`), or `<major>.<minor>.<patch>` form. Drift here means
+      the protoc binary that ships in releases declares a version
+      mismatched against the language bindings.
+
+  - id: protobuf-version-manifest-declares-cpp-version
+    kind: json_path_matches
+    paths: version.json
+    path: "$.main.languages.cpp"
+    matches: '^\d+\.\d+(?:[-.]\w+)?$'
+    level: error
+    message: >-
+      version.json `main.languages.cpp` MUST be present and follow the
+      semver-ish form (e.g. `7.36-dev`, `7.36.0`, `7.36.0-rc1`). Every
+      binding has a per-language version key here; cpp is the canonical
+      sentinel. Drift here means the C++ runtime ships with a wrong
+      version sticker baked into stubs/common.h's GOOGLE_PROTOBUF_VERSION.
+
+  - id: protobuf-version-manifest-declares-java-version
+    kind: json_path_matches
+    paths: version.json
+    path: "$.main.languages.java"
+    matches: '^\d+\.\d+(?:[-.]\w+)?$'
+    level: error
+    message: >-
+      version.json `main.languages.java` MUST be present and follow
+      the semver-ish form. The Java binding's BOM (java/bom/pom.xml)
+      `<version>` field MUST agree (today both declare 4.36-dev /
+      4.36.0); drift means the Bazel-built JAR vs. the Maven-published
+      JAR ship different versions.
+
+  - id: protobuf-version-manifest-declares-python-version
+    kind: json_path_matches
+    paths: version.json
+    path: "$.main.languages.python"
+    matches: '^\d+\.\d+(?:[-.]\w+)?$'
+    level: error
+    message: >-
+      version.json `main.languages.python` MUST be present. The Python
+      binding's setup.py / pyproject.toml MUST agree; drift here means
+      the wheel published to PyPI ships a different version than
+      version.json claims.
+
+  - id: protobuf-version-bzl-present
+    kind: file_exists
+    paths: protobuf_version.bzl
+    level: error
+    message: >-
+      protobuf_version.bzl is the Bazel-side cross-language version
+      mirror — declares PROTOC_VERSION, PROTOBUF_JAVA_VERSION,
+      PROTOBUF_PYTHON_VERSION, PROTOBUF_PHP_VERSION,
+      PROTOBUF_RUBY_VERSION, PROTOBUF_RUST_VERSION as Starlark
+      constants every BUILD.bazel rule consumes. MUST mirror the
+      values in version.json.languages — drift means the Bazel-built
+      artefact ships a different version than the language manifest
+      claims.
+
+  - id: protobuf-version-bzl-declares-protoc-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOC_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOC_VERSION as a quoted
+      semver-ish string. The Bazel `//:protoc` target reads this
+      constant; missing or malformed = the release-built protoc
+      binary has no version sticker.
+
+  - id: protobuf-version-bzl-declares-java-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOBUF_JAVA_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOBUF_JAVA_VERSION as a
+      quoted semver-ish string. Mirrors version.json's
+      `main.languages.java`; drift between the two manifests is the
+      v0.11+ `cross_language_implementation_complete` candidate's
+      canonical demand-driver.
+
+  - id: protobuf-version-bzl-declares-python-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOBUF_PYTHON_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOBUF_PYTHON_VERSION as a
+      quoted semver-ish string.
+
+  - id: protobuf-version-bzl-declares-php-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOBUF_PHP_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOBUF_PHP_VERSION as a
+      quoted semver-ish string. The PHP binding's
+      php/ext/google/protobuf/protobuf.h's PHP_PROTOBUF_VERSION
+      MUST agree.
+
+  - id: protobuf-version-bzl-declares-ruby-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOBUF_RUBY_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOBUF_RUBY_VERSION as a
+      quoted semver-ish string. The Ruby binding's
+      ruby/google-protobuf.gemspec's `s.version` MUST agree.
+
+  - id: protobuf-version-bzl-declares-rust-version
+    kind: file_content_matches
+    paths: protobuf_version.bzl
+    pattern: '(?m)^PROTOBUF_RUST_VERSION\s*=\s*"\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      protobuf_version.bzl MUST declare PROTOBUF_RUST_VERSION as a
+      quoted semver-ish string.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Conformance suite — the cross-language wire-format gate. EVERY
+  # in-tree binding MUST ship its own conformance test runner +
+  # failure_list. Removing either silently drops the binding from
+  # the cross-language wire-format check.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-conformance-proto-present
+    kind: file_exists
+    paths: conformance/conformance.proto
+    level: error
+    message: >-
+      conformance/conformance.proto is the canonical cross-language
+      wire-format test contract — every binding implements a tester
+      that consumes a `ConformanceRequest` and emits a
+      `ConformanceResponse` over a pipe. Removing it breaks the entire
+      cross-language conformance test suite.
+
+  - id: protobuf-conformance-test-runner-present
+    kind: file_exists
+    paths: conformance/conformance_test_runner.cc
+    level: error
+    message: >-
+      conformance/conformance_test_runner.cc is the C++ harness that
+      drives every per-binding conformance test (spawns the binding's
+      tester process, exchanges binary ConformanceRequest/Response
+      protos over a pipe, applies the per-binding failure_list_<lang>.
+      txt allowlist). Removing it breaks the entire conformance test
+      flow.
+
+  - id: protobuf-conformance-cpp-runner-present
+    kind: file_exists
+    paths: conformance/conformance_cpp.cc
+    level: error
+    message: >-
+      conformance/conformance_cpp.cc is the C++ binding's conformance
+      tester — implements the wire-format read/write loop against the
+      C++ runtime. Removing it drops the C++ binding from the
+      cross-language conformance check.
+
+  - id: protobuf-conformance-java-runner-present
+    kind: file_exists
+    paths: ["conformance/ConformanceJava.java", "conformance/ConformanceJavaLite.java"]
+    level: error
+    message: >-
+      conformance/ConformanceJava.java + ConformanceJavaLite.java are
+      the Java binding's conformance testers (full + lite runtime
+      variants). The full + lite split mirrors the per-runtime
+      failure_list_java.txt + failure_list_java_lite.txt — the lite
+      runtime has stricter coverage gaps and ships its own allowlist.
+
+  - id: protobuf-conformance-python-runner-present
+    kind: file_exists
+    paths: conformance/conformance_python.py
+    level: error
+    message: >-
+      conformance/conformance_python.py is the Python binding's
+      conformance tester. Drives the four python-* failure lists
+      (failure_list_python.txt, _python_cpp.txt, _python_upb.txt,
+      _python-post26.txt) — Python's three implementation backends
+      (pure-Python, C++-extension, upb) each have their own coverage
+      curve.
+
+  - id: protobuf-conformance-ruby-runner-present
+    kind: file_exists
+    paths: conformance/ruby/conformance_ruby.rb
+    level: error
+    message: >-
+      conformance/ruby/conformance_ruby.rb is the Ruby binding's
+      conformance tester (the only language whose tester lives in a
+      sub-directory rather than directly under conformance/ — Ruby's
+      LOAD_PATH discipline forced the layout).
+
+  - id: protobuf-conformance-objc-runner-present
+    kind: file_exists
+    paths: conformance/conformance_objc.m
+    level: error
+    message: >-
+      conformance/conformance_objc.m is the Objective-C binding's
+      conformance tester. Drives failure_list_objc.txt +
+      failure_list_objc_performance.txt (the per-binding performance
+      regression suite — same ConformanceRequest/Response protocol but
+      time-bounded).
+
+  - id: protobuf-conformance-php-runner-present
+    kind: file_exists
+    paths: conformance/conformance_php.php
+    level: error
+    message: >-
+      conformance/conformance_php.php is the PHP binding's conformance
+      tester. Drives failure_list_php.txt + failure_list_php_c.txt
+      (pure-PHP vs. C-extension implementation backends).
+
+  - id: protobuf-conformance-rust-runner-present
+    kind: file_exists
+    paths: conformance/conformance_rust.rs
+    level: error
+    message: >-
+      conformance/conformance_rust.rs is the Rust binding's
+      conformance tester. Drives failure_list_rust_cc.txt +
+      failure_list_rust_upb.txt (the two Rust-backend variants:
+      C++-bridged vs. upb-native).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-binding failure_list files — the cross-language parity gate.
+  # EVERY language with an in-tree binding ships a per-binding
+  # failure_list_<lang>.txt; the conformance test runner reads it as
+  # the "known-failing tests" allowlist.
+  #
+  # **This is the canonical "cross_language_implementation_complete"
+  # surface** (v0.11+ candidate): every binding has parity discipline,
+  # so a missing failure_list = the binding silently passes 0 tests.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-conformance-failure-list-cpp
+    kind: file_exists
+    paths: conformance/failure_list_cpp.txt
+    level: error
+    message: >-
+      conformance/failure_list_cpp.txt is the C++ binding's known-
+      failing-tests allowlist. Required for the conformance suite to
+      evaluate the C++ binding (the runner consumes it as
+      --failure_list at invocation time).
+
+  - id: protobuf-conformance-failure-list-csharp
+    kind: file_exists
+    paths: conformance/failure_list_csharp.txt
+    level: error
+    message: >-
+      conformance/failure_list_csharp.txt is the C# binding's known-
+      failing-tests allowlist. The csharp_performance.txt sibling is
+      the perf-suite-specific allowlist.
+
+  - id: protobuf-conformance-failure-list-java
+    kind: file_exists
+    paths: ["conformance/failure_list_java.txt", "conformance/failure_list_java_lite.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_java.txt + failure_list_java_lite.txt
+      are the per-runtime Java allowlists (full + lite). Missing
+      either silently drops one of the two Java backends from the
+      conformance suite.
+
+  - id: protobuf-conformance-failure-list-python
+    kind: file_exists
+    paths: ["conformance/failure_list_python.txt", "conformance/failure_list_python_cpp.txt", "conformance/failure_list_python_upb.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_python*.txt — three Python
+      implementation backends (pure-Python, C++-extension, upb-native)
+      each ship their own allowlist. Missing any one silently drops
+      that backend from the conformance suite.
+
+  - id: protobuf-conformance-failure-list-ruby
+    kind: file_exists
+    paths: ["conformance/failure_list_ruby.txt", "conformance/failure_list_jruby.txt", "conformance/failure_list_jruby_ffi.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_ruby.txt + failure_list_jruby*.txt
+      cover the MRI-Ruby + JRuby + JRuby-FFI variants. The 3
+      separate lists exist because each Ruby runtime exercises a
+      different binding (MRI uses the C-extension, JRuby uses the
+      Java runtime, JRuby-FFI bridges via FFI).
+
+  - id: protobuf-conformance-failure-list-objc
+    kind: file_exists
+    paths: ["conformance/failure_list_objc.txt", "conformance/failure_list_objc_performance.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_objc.txt + failure_list_objc_
+      performance.txt cover the Objective-C correctness + perf
+      suites.
+
+  - id: protobuf-conformance-failure-list-php
+    kind: file_exists
+    paths: ["conformance/failure_list_php.txt", "conformance/failure_list_php_c.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_php.txt + failure_list_php_c.txt
+      cover the pure-PHP and C-extension PHP backends.
+
+  - id: protobuf-conformance-failure-list-rust
+    kind: file_exists
+    paths: ["conformance/failure_list_rust_cc.txt", "conformance/failure_list_rust_upb.txt"]
+    level: error
+    message: >-
+      conformance/failure_list_rust_cc.txt + failure_list_rust_upb.txt
+      cover the two Rust backends (C++-bridged + upb-native).
+
+  - id: protobuf-conformance-failure-list-dart
+    kind: file_exists
+    paths: conformance/failure_list_dart_upb.txt
+    level: error
+    message: >-
+      conformance/failure_list_dart_upb.txt covers the spun-out Dart
+      binding (lives in dart-lang/protobuf.dart but is conformance-
+      tested from this repo via the upb runtime). Same "spun-out
+      sibling repo + in-tree conformance allowlist" pattern as
+      apache/arrow's Java/Go/JS/Rust bindings.
+
+  - id: protobuf-conformance-text-format-failure-lists-mirror-binary
+    kind: file_exists
+    paths: ["conformance/text_format_failure_list_cpp.txt", "conformance/text_format_failure_list_java.txt", "conformance/text_format_failure_list_java_lite.txt", "conformance/text_format_failure_list_python.txt", "conformance/text_format_failure_list_php.txt", "conformance/text_format_failure_list_rust_cc.txt", "conformance/text_format_failure_list_rust_upb.txt", "conformance/text_format_failure_list_dart_upb.txt"]
+    level: warning
+    message: >-
+      Each per-binding text_format_failure_list_<lang>.txt mirrors
+      its binary failure_list_<lang>.txt for the human-readable text-
+      format suite. The two suites run as siblings; missing the
+      text-format list silently drops the binding from the text-
+      format conformance check.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language test workflows — every in-tree binding subtree MUST
+  # have a matching test_<lang>.yml workflow under .github/workflows/.
+  # Today perfect parity (11 bindings ↔ 11 test_<lang>.yml workflows);
+  # this rule makes the contract explicit so a future regression
+  # (new binding added without CI, or workflow accidentally renamed)
+  # surfaces at PR time.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-test-workflow-cpp-present
+    kind: file_exists
+    paths: .github/workflows/test_cpp.yml
+    level: error
+    message: >-
+      .github/workflows/test_cpp.yml is the C++ binding's CI
+      workflow. The test_runner.yml orchestrator workflow_call's into
+      it; missing this workflow silently drops C++ from the CI matrix.
+
+  - id: protobuf-test-workflow-java-present
+    kind: file_exists
+    paths: .github/workflows/test_java.yml
+    level: error
+    message: >-
+      .github/workflows/test_java.yml is the Java binding's CI
+      workflow.
+
+  - id: protobuf-test-workflow-python-present
+    kind: file_exists
+    paths: .github/workflows/test_python.yml
+    level: error
+    message: >-
+      .github/workflows/test_python.yml is the Python binding's CI
+      workflow.
+
+  - id: protobuf-test-workflow-ruby-present
+    kind: file_exists
+    paths: .github/workflows/test_ruby.yml
+    level: error
+    message: >-
+      .github/workflows/test_ruby.yml is the Ruby binding's CI
+      workflow.
+
+  - id: protobuf-test-workflow-csharp-present
+    kind: file_exists
+    paths: .github/workflows/test_csharp.yml
+    level: error
+    message: >-
+      .github/workflows/test_csharp.yml is the C# binding's CI
+      workflow.
+
+  - id: protobuf-test-workflow-objectivec-present
+    kind: file_exists
+    paths: .github/workflows/test_objectivec.yml
+    level: error
+    message: >-
+      .github/workflows/test_objectivec.yml is the Objective-C
+      binding's CI workflow.
+
+  - id: protobuf-test-workflow-php-present
+    kind: file_exists
+    paths: [".github/workflows/test_php.yml", ".github/workflows/test_php_ext.yml"]
+    level: error
+    message: >-
+      .github/workflows/test_php.yml + test_php_ext.yml cover the PHP
+      binding's pure-PHP + C-extension test paths separately (the
+      PHP-C extension under php/ext/ has its own build-and-test
+      lifecycle that warrants a dedicated workflow).
+
+  - id: protobuf-test-workflow-rust-present
+    kind: file_exists
+    paths: .github/workflows/test_rust.yml
+    level: error
+    message: >-
+      .github/workflows/test_rust.yml is the Rust binding's CI
+      workflow.
+
+  - id: protobuf-test-workflow-upb-present
+    kind: file_exists
+    paths: .github/workflows/test_upb.yml
+    level: error
+    message: >-
+      .github/workflows/test_upb.yml is the upb (small C runtime
+      that backs the Rust + Python upb backends) CI workflow.
+
+  - id: protobuf-test-workflow-hpb-present
+    kind: file_exists
+    paths: .github/workflows/test_hpb.yml
+    level: error
+    message: >-
+      .github/workflows/test_hpb.yml is the hpb (a C++ binding
+      experiment using upb under the hood) CI workflow.
+
+  - id: protobuf-test-workflow-bazel-present
+    kind: file_exists
+    paths: .github/workflows/test_bazel.yml
+    level: error
+    message: >-
+      .github/workflows/test_bazel.yml is the Bazel-build CI
+      workflow — protobuf is a Bazel-built repo, so this is the
+      "bazel build //..." gate that catches Bazel-rule regressions
+      affecting any binding.
+
+  - id: protobuf-test-workflow-runner-present
+    kind: file_exists
+    paths: .github/workflows/test_runner.yml
+    level: error
+    message: >-
+      .github/workflows/test_runner.yml is the orchestrator workflow
+      that workflow_call's into every per-language test_<lang>.yml.
+      Removing it disconnects every per-language workflow from the
+      PR-trigger surface.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language binding manifests — every binding's manifest at the
+  # canonical location.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-cpp-cmakelists-present
+    kind: file_exists
+    paths: CMakeLists.txt
+    level: error
+    message: >-
+      CMakeLists.txt at root is the CMake-build entry point for the
+      C++ runtime + protoc. Bazel is the canonical build system, but
+      CMake is required for downstream packagers (vcpkg, conan,
+      Homebrew, the Apple frameworks) who don't use Bazel.
+
+  - id: protobuf-bazel-workspace-present
+    kind: file_exists
+    paths: WORKSPACE
+    level: warning
+    message: >-
+      WORKSPACE is the legacy Bazel workspace marker. With Bzlmod
+      (MODULE.bazel) being the supported model in Bazel 8+, WORKSPACE
+      is kept for backward compatibility; removing it strands users
+      still on pre-Bzlmod Bazel.
+
+  - id: protobuf-bazel-module-present
+    kind: file_exists
+    paths: MODULE.bazel
+    level: error
+    message: >-
+      MODULE.bazel is the canonical Bzlmod entry point (Bazel 8+).
+      Required for `bazel build` of every binding's targets.
+
+  - id: protobuf-java-bom-present
+    kind: file_exists
+    paths: java/bom/pom.xml
+    level: error
+    message: >-
+      java/bom/pom.xml is the Java Bill-of-Materials POM that pins
+      every protobuf-java artefact's version + dependency tree.
+      Required for the Maven Central publish flow; downstream Java
+      consumers depend on the BOM coordinate.
+
+  - id: protobuf-java-bom-declares-protobuf-bom-artifact
+    kind: file_content_matches
+    paths: java/bom/pom.xml
+    pattern: '(?m)^\s*<artifactId>protobuf-bom</artifactId>\s*$'
+    level: error
+    message: >-
+      java/bom/pom.xml `<artifactId>` MUST be `protobuf-bom`. The
+      published Maven coordinate is `com.google.protobuf:protobuf-bom`;
+      drift here breaks the canonical Maven dependency
+      `<dependencyManagement><dependency>...protobuf-bom...</dependency>`
+      pattern that downstream Java projects use.
+
+  - id: protobuf-java-bom-declares-group-id
+    kind: file_content_matches
+    paths: java/bom/pom.xml
+    pattern: '(?m)^\s*<groupId>com\.google\.protobuf</groupId>\s*$'
+    level: error
+    message: >-
+      java/bom/pom.xml `<groupId>` MUST be `com.google.protobuf`. The
+      Maven Central coordinate is hard-coded in every downstream
+      dependency declaration; drift here means downstream Maven
+      consumers can't resolve the artefact.
+
+  - id: protobuf-python-binding-present
+    kind: file_exists
+    paths: python/BUILD.bazel
+    level: error
+    message: >-
+      python/BUILD.bazel is the Bazel manifest for the Python binding
+      (the Python binding is Bazel-built by default; the legacy
+      python/dist/setup.py path is the wheel-publishing fallback).
+
+  - id: protobuf-ruby-gemspec-present
+    kind: file_exists
+    paths: ruby/google-protobuf.gemspec
+    level: error
+    message: >-
+      ruby/google-protobuf.gemspec is the Ruby gem manifest
+      (RubyGems-required). The published gem name is
+      `google-protobuf`; drift here breaks `gem install
+      google-protobuf`.
+
+  - id: protobuf-ruby-gemspec-declares-name
+    kind: file_content_matches
+    paths: ruby/google-protobuf.gemspec
+    pattern: 's\.name\s*=\s*"google-protobuf"'
+    level: error
+    message: >-
+      ruby/google-protobuf.gemspec `s.name` MUST be
+      `"google-protobuf"`. The published RubyGems coordinate is hard-
+      coded; drift here means `gem install google-protobuf` no
+      longer fetches the canonical artefact.
+
+  - id: protobuf-ruby-gemspec-declares-version
+    kind: file_content_matches
+    paths: ruby/google-protobuf.gemspec
+    pattern: 's\.version\s*=\s*"\d+\.\d+\.\d+(?:[-.]\w+)?"'
+    level: error
+    message: >-
+      ruby/google-protobuf.gemspec `s.version` MUST be a quoted
+      semver-ish string. MUST mirror version.json
+      `main.languages.ruby` AND protobuf_version.bzl
+      PROTOBUF_RUBY_VERSION; today all three sources declare
+      `4.36-dev` / `4.36.0`. Drift between these sites of truth is
+      the v0.11+ `cross_language_implementation_complete` candidate's
+      canonical demand-driver in this repo.
+
+  - id: protobuf-ruby-gemfile-present
+    kind: file_exists
+    paths: ruby/Gemfile
+    level: warning
+    message: >-
+      ruby/Gemfile declares the dev-time bundler dependencies for
+      the Ruby gem build (rake, rake-extensiontask, etc.).
+
+  - id: protobuf-ruby-rakefile-present
+    kind: file_exists
+    paths: ruby/Rakefile
+    level: warning
+    message: >-
+      ruby/Rakefile orchestrates the Ruby gem's build (compiles the
+      C-extension via rake-extensiontask, runs the conformance test
+      suite, packages the gem).
+
+  - id: protobuf-php-composer-present
+    kind: file_exists
+    paths: php/composer.json
+    level: error
+    message: >-
+      php/composer.json is the PHP package manifest (Composer-
+      required). The published Packagist coordinate is
+      `google/protobuf`.
+
+  - id: protobuf-php-composer-declares-name
+    kind: json_path_matches
+    paths: php/composer.json
+    path: "$.name"
+    matches: '^google/protobuf$'
+    level: error
+    message: >-
+      php/composer.json `name` MUST be `google/protobuf`. The
+      published Packagist coordinate is hard-coded; drift here means
+      `composer require google/protobuf` no longer fetches the
+      canonical artefact.
+
+  - id: protobuf-php-composer-declares-license
+    kind: json_path_matches
+    paths: php/composer.json
+    path: "$.license"
+    matches: '^BSD-3-Clause$'
+    level: error
+    message: >-
+      php/composer.json `license` MUST be `BSD-3-Clause` (the SPDX
+      identifier matching protobuf's repo-wide LICENSE file). Drift
+      here means Packagist surfaces a wrong license badge to
+      downstream PHP consumers.
+
+  - id: protobuf-objc-podspec-present
+    kind: file_exists
+    paths: Protobuf.podspec
+    level: error
+    message: >-
+      Protobuf.podspec is the CocoaPods manifest for the Objective-C
+      binding (intentionally at the repo root, not under objectivec/,
+      because CocoaPods has discovery quirks with subdirectory podspecs
+      — see the comment in the podspec file itself).
+
+  - id: protobuf-objc-podspec-declares-name
+    kind: file_content_matches
+    paths: Protobuf.podspec
+    pattern: "s\\.name\\s*=\\s*'Protobuf'"
+    level: error
+    message: >-
+      Protobuf.podspec `s.name` MUST be `'Protobuf'`. The published
+      CocoaPods coordinate is hard-coded; drift here means
+      `pod 'Protobuf'` no longer resolves.
+
+  - id: protobuf-objc-podspec-declares-license
+    kind: file_content_matches
+    paths: Protobuf.podspec
+    pattern: "s\\.license\\s*=\\s*'BSD-3-Clause'"
+    level: error
+    message: >-
+      Protobuf.podspec `s.license` MUST be `'BSD-3-Clause'` (matching
+      the repo's BSD-3-Clause LICENSE).
+
+  - id: protobuf-objc-privacy-manifest-present
+    kind: file_exists
+    paths: PrivacyInfo.xcprivacy
+    level: error
+    message: >-
+      PrivacyInfo.xcprivacy is the Apple privacy manifest required
+      for App Store submission of any iOS app linking the Objective-C
+      runtime. Apple requires this file at the framework root since
+      iOS 17+; missing it causes App Store Connect to reject the
+      uploaded build.
+
+  - id: protobuf-csharp-global-json-present
+    kind: file_exists
+    paths: global.json
+    level: error
+    message: >-
+      global.json pins the .NET SDK version used by the C# binding's
+      build (`dotnet build` reads it). Drift here means `dotnet
+      build` resolves a different SDK than the test_csharp.yml
+      workflow expects.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Governance + release-tooling presence — the canonical OSS-project
+  # tripod (CONTRIBUTING.md + SECURITY.md + CODE_OF_CONDUCT.md).
+  # protobuf has all three at root; rule asserts they stay there.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-contributing-md-present
+    kind: file_exists
+    paths: CONTRIBUTING.md
+    level: error
+    message: >-
+      CONTRIBUTING.md describes the patch-submission discipline
+      (what types of contributions are accepted, the requirement for
+      tests, the high bar for new public API). Removing it strands
+      first-time contributors.
+
+  - id: protobuf-security-md-present
+    kind: file_exists
+    paths: SECURITY.md
+    level: error
+    message: >-
+      SECURITY.md is the canonical entry point for vulnerability
+      reports (points at https://bughunters.google.com/report).
+      Required by GitHub's "Security policy" tab.
+
+  - id: protobuf-code-of-conduct-md-present
+    kind: file_exists
+    paths: CODE_OF_CONDUCT.md
+    level: warning
+    message: >-
+      CODE_OF_CONDUCT.md is required for OpenSSF Scorecard's "Code-
+      Review" + "Maintained" checks; missing it lowers the project's
+      Scorecard score.
+
+  - id: protobuf-contributors-txt-present
+    kind: file_exists
+    paths: CONTRIBUTORS.txt
+    level: info
+    message: >-
+      CONTRIBUTORS.txt lists the canonical contributor record (the
+      Google-style "AUTHORS"-equivalent). Removing it loses the
+      authoritative attribution list.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Editions — the new "editions" feature (proto2/proto3 evolution)
+  # ships its own golden-file test discipline. Every edition has a
+  # canonical defaults file the codegen consumes.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-editions-defaults-bzl-present
+    kind: file_exists
+    paths: editions/defaults.bzl
+    level: error
+    message: >-
+      editions/defaults.bzl declares the Bazel rule that generates
+      the per-edition feature-set defaults file consumed by every
+      language's codegen. Removing it breaks the editions feature
+      across every binding.
+
+  - id: protobuf-editions-build-present
+    kind: file_exists
+    paths: editions/BUILD
+    level: error
+    message: >-
+      editions/BUILD declares the Bazel targets for the editions
+      feature (input protos, golden files, codegen tests). The
+      `bazel test //editions:...` flow consumes this file.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Bazel-built repo — has both MODULE.bazel + WORKSPACE at root,
+  # plus 137 BUILD/BUILD.bazel and 117 *.bzl Starlark files. alint
+  # owns file-shape; buildifier owns Starlark AST. Wiring buildifier
+  # via command: surfaces the same "single alint check covers
+  # structural + per-language tooling" pattern as apache/arrow.
+  #
+  # NOTE: each command: rule's paths: anchor points at a per-binding
+  # config-file the tool reads. If the config-file is removed, the
+  # command rule no-ops, so the wiring doesn't fight the structural
+  # rules.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-buildifier-check
+    kind: command
+    paths: MODULE.bazel
+    command: ["buildifier", "-mode=check", "-r", "."]
+    timeout: 600
+    level: warning
+
+  - id: protobuf-bazel-build-target
+    kind: command
+    paths: MODULE.bazel
+    command: ["bazel", "build", "//src:protoc"]
+    timeout: 600
+    level: error
+
+  - id: protobuf-cpp-clang-format-check
+    kind: command
+    paths: src/google/protobuf/BUILD.bazel
+    command: ["clang-format", "--dry-run", "--Werror"]
+    timeout: 300
+    level: warning
+
+  - id: protobuf-python-flake8-check
+    kind: command
+    paths: python/BUILD.bazel
+    command: ["flake8", "python/"]
+    timeout: 300
+    level: warning
+
+  - id: protobuf-ruby-rubocop-check
+    kind: command
+    paths: ruby/google-protobuf.gemspec
+    command: ["rubocop", "ruby/"]
+    timeout: 300
+    level: warning
+
+  - id: protobuf-go-fmt-check
+    kind: command
+    paths: go/BUILD.bazel
+    command: ["gofmt", "-l", "go/"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions hardening — restated at warning level here because
+  # protobuf has 22 workflows + the supply-chain blast radius is
+  # large (every binding's release fans through the workflow set).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party actions in workflow steps should be pinned to a
+      40-char commit SHA, not a floating tag. The OpenSSF Scorecard
+      "Pinned-Dependencies" check covers this on a nightly cadence;
+      alint surfaces the same gate at PR time.
+
+  - id: protobuf-dependabot-includes-actions
+    kind: yaml_path_matches
+    paths: .github/dependabot.yml
+    path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
+    matches: '^/$'
+    level: warning
+    message: >-
+      .github/dependabot.yml MUST declare a github-actions ecosystem
+      entry pointing at the repo root so action SHA-pins get refreshed
+      automatically as upstream actions release new versions.
+
+  # ──────────────────────────────────────────────────────────────────
+  # OpenSSF Scorecard workflow — protobuf already runs Scorecard
+  # weekly (.github/workflows/scorecard.yml). Asserting the file's
+  # presence keeps a future regression visible.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: protobuf-scorecard-workflow-present
+    kind: file_exists
+    paths: .github/workflows/scorecard.yml
+    level: warning
+    message: >-
+      .github/workflows/scorecard.yml runs OpenSSF Scorecard weekly
+      against the repo (badge surfaces in README.md). Removing it
+      drops protobuf's continuous supply-chain hygiene check.

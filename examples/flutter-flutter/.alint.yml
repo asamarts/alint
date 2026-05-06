@@ -1,0 +1,840 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+# Starter alint config for flutter/flutter.
+#
+# flutter/flutter is the canonical PLATFORM-DRIVEN polyglot monorepo:
+# 5 native-platform languages (Dart for the framework + tools; Java for
+# the Android engine surface; Kotlin for the Gradle plugin + integration-
+# test apps; Swift + Objective-C for the iOS / macOS engine surface;
+# C++ for the engine core), each living in its own per-platform subdir
+# under a strict naming discipline. Where apache/arrow is the
+# data-format-driven polyglot (one schema, six per-language readers
+# living as peers under format/), flutter is the platform-driven
+# polyglot (one framework, six native-OS embedders living as peers
+# under engine/src/flutter/shell/platform/).
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `flutter/flutter@240c85cf` (rev =
+# `240c85cf08a05c234e66f4ef28e7d8a3f2361717`), heavy test trees
+# excluded via:
+#
+#   git clone --depth=1 --filter=blob:none --sparse \
+#       https://github.com/flutter/flutter /tmp/flutter
+#   cd /tmp/flutter
+#   git sparse-checkout set --no-cone '/*' \
+#       '!/packages/flutter/test' \
+#       '!/packages/flutter_tools/test' \
+#       '!/dev/automated_tests' \
+#       '!/engine/src/flutter/third_party'
+#
+# After sparse-checkout: ~14 000 files / 188 MiB working tree.
+#
+# Concrete count at HEAD (after sparse-checkout):
+#
+#   - 9 per-package Dart workspaces under packages/ (flutter,
+#     flutter_driver, flutter_goldens, flutter_localizations,
+#     flutter_test, flutter_tools, flutter_web_plugins,
+#     fuchsia_remote_debug_protocol, integration_test) — every
+#     pubspec.yaml MUST declare `resolution: workspace` and slot
+#     into the root pubspec.yaml workspace list (77 members)
+#   - 6 native-platform engine subdirs under
+#     engine/src/flutter/shell/platform/{android,darwin/ios,
+#     darwin/macos,linux,windows,fuchsia,glfw,embedder} — every
+#     one MUST declare BUILD.gn (the GN entry point that
+#     engine/src/flutter/shell/platform/BUILD.gn cases on per
+#     `is_android` / `is_mac` / `is_linux` / `is_win` / `is_fuchsia`)
+#   - 5 cross-platform `flutter create` template subdirs under
+#     packages/flutter_tools/templates/app/{android,ios,linux,
+#     macos,windows}.tmpl — every Flutter app `flutter create`
+#     scaffolds MUST contain matching template per platform
+#   - 39 analysis_options.yaml files (per-package + per-test-tree
+#     — the canonical Dart linter chain that the root file is
+#     `include:`d into)
+#   - 232 BUILD.gn files (engine GN graph), 134 pubspec.yaml
+#     (Dart workspace members + per-app native-host shells),
+#     94 CMakeLists.txt (Linux + Windows native), 91
+#     build.gradle / build.gradle.kts (Android), 25 Podfile +
+#     3 .podspec files (iOS / macOS native dep chain), 409
+#     AndroidManifest.xml (one per Android app variant), 97
+#     Info.plist (iOS / macOS Runner shell + framework targets)
+#   - 304 Java + 61 Kotlin + 131 Swift + 342 ObjC (.m/.mm) +
+#     3227 C/C++ (.cc/.cpp/.h) + 4857 Dart files in scope —
+#     all 5 native-platform languages PLUS Dart with uniform
+#     "Copyright YYYY The Flutter Authors. All rights reserved.
+#     ... BSD-style license" header discipline at the top of
+#     EVERY file
+#   - 16 GitHub Actions workflows under .github/workflows/
+#     (PR / release / labeler / mirror / coverage / cherry-pick
+#     / freeze / sync-engine-version) — the public surface; bulk
+#     of CI runs against .ci.yaml (7198 lines, 464 named targets
+#     orchestrated by Flutter's internal LUCI infra via
+#     dev/bots/test.dart, the 663-line canonical CI orchestrator)
+#   - 13 root-level governance / compliance files: LICENSE,
+#     PATENT_GRANT (the BSD+patent pair), AUTHORS (149 lines —
+#     contributor enumeration), CODEOWNERS (67 lines), TESTOWNERS
+#     (379 lines — the per-test-shard ownership manifest unique
+#     to flutter), CODE_OF_CONDUCT.md, CONTRIBUTING.md, SECURITY.md
+#     (under docs/security/), .gitattributes, .gitignore,
+#     analysis_options.yaml (root linter chain), dartdoc_options.yaml,
+#     pubspec.yaml (the root `_flutter_packages` workspace anchor)
+#   - .ci.yaml = 7198 lines orchestrating 464 named CI targets
+#     across linux / mac / win / android-emu / ios-device / fuchsia
+#     shards. Each shard is a SHARD env var passed to dev/bots/test.dart
+#   - dev/bots/test.dart = 663 lines, the canonical "run-all-the-
+#     tests" orchestrator that .ci.yaml shards out to
+#   - engine/src/build_overrides/ = 12 .gni override files declaring
+#     dependency selection for the engine's vendored builds (vulkan,
+#     wayland, swiftshader, glslang, spirv-tools, angle)
+#
+# This config replaces the *structural* gates — per-package
+# pubspec discipline, per-platform engine subdir parity, per-language
+# Flutter-Authors-BSD source header (across Dart + Java + Kotlin +
+# Swift + ObjC + C/C++), root governance triad, GitHub Actions
+# hardening, EOL discipline (.gitattributes pins CRLF for Windows
+# build files, LF for shell scripts) — and wraps the existing Dart
+# analyzer + per-language tools via `command:` rules so a single
+# `alint check` run fires the whole structural pipeline plus the
+# language linters in parallel.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - dart analyze                            (Dart static analysis)
+#   - dart format                             (Dart formatter)
+#   - flutter analyze                         (Flutter framework checks)
+#   - clang-format / clang-tidy              (engine C++ AST + style)
+#   - engine/src/flutter/ci/clang_tidy.sh    (engine clang-tidy gate)
+#   - engine/src/flutter/ci/format.sh        (engine multi-language fmt)
+#   - engine/src/flutter/ci/licenses_cpp.sh  (engine license scan)
+#   - engine/src/flutter/ci/pylint.sh        (engine pylint pass)
+#   - dev/bots/test.dart                      (the canonical CI orchestrator;
+#                                              runs ALL of the above as
+#                                              SHARD-selected sub-passes)
+#   - dev/bots/analyze.dart                   (extra static-analysis pass
+#                                              for the framework)
+#   - dev/bots/check_code_samples.dart        (sample-code embedded-snippet
+#                                              cross-validation)
+#   - dev/bots/check_tests_cross_imports.dart (test-tree import graph check)
+#
+# Known limitations versus the existing dev/bots/test.dart pipeline
+# (each requires an alint primitive that doesn't ship today — see
+# this directory's README.md for the full gap catalogue):
+#
+#   - Per-platform engine parity (every native-platform subdir under
+#     engine/src/flutter/shell/platform/ ships the same SURFACE — a
+#     PlatformView, an external-texture binding, a key-event handler,
+#     a vsync-waiter, a platform-message responder). The shape is
+#     EXACTLY the v0.11+ `cross_language_implementation_complete`
+#     candidate, in its PLATFORM-DRIVEN variant rather than the
+#     DATA-FORMAT-DRIVEN variant arrow + tensorflow demonstrate.
+#     See the README for why this is the third independent demand
+#     signal for the v0.11+ flagship rule kind.
+#
+#   - .ci.yaml ↔ dev/bots/test.dart shard registry resolution
+#     (every `shard:` value in .ci.yaml's 464 target list MUST
+#     resolve to a switch-case branch in dev/bots/test.dart — same
+#     `registry_paths_resolve` shape as arrow's rat_exclude_files.txt
+#     + rust-lang's triagebot.toml + cpython's check-c-api-docs).
+#
+#   - .ci.yaml target list alphabetisation by `name:` within each
+#     OS group (the convention is alphabetised but unenforced —
+#     same `ordered_block` shape as arrow's rat_exclude_files.txt
+#     + rust-lang + airflow + tokio + cpython).
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge markers,
+  # no bidi controls, final newline, etc.).
+  - alint://bundled/oss-baseline@v1
+
+  # GitHub Actions hardening (workflow permissions, action SHA
+  # pinning, top-level `name:`). 16 workflows, narrower public surface
+  # than apache/arrow (28) or pytorch (144) since the bulk of
+  # flutter's CI runs against .ci.yaml on internal LUCI infra, but
+  # the public 16 still matter for supply-chain hardening.
+  - alint://bundled/ci/github-actions@v1
+
+  # Hygiene: tracked artefacts that should never appear (node_modules,
+  # __pycache__, target/, dist/, .DS_Store, etc.).
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Flutter Authors BSD-style license header — the cross-language
+  # discipline that defines the repo. Every source file under
+  # packages/, dev/, examples/, and engine/src/flutter/ MUST carry:
+  #
+  #   // Copyright YYYY The Flutter Authors. All rights reserved.
+  #   // Use of this source code is governed by a BSD-style license
+  #   // that can be found in the LICENSE file.
+  #
+  # (with `#` for Python / shell / Gradle, `<!--` for AndroidManifest
+  # XML). This is the SINGLE invariant that runs across all 5 native-
+  # platform languages PLUS Dart — no per-language linter sees this
+  # cross-language consistency, because each language's linter only
+  # knows about its own tree. alint catches it once, across the
+  # entire polyglot tree.
+  #
+  # NOTE: bundled compliance/apache-2 doesn't apply (flutter is BSD,
+  # not Apache); we restate the rule with the Flutter Authors header
+  # pattern. The `Use of this source code is governed by a BSD-style`
+  # second-line check makes this a STRONG match — Google's other BSD
+  # repos (Chromium, V8, Skia, Dart SDK) use a near-identical form
+  # but with the OWN project's "Authors" string, so the regex
+  # specifically pins on `Flutter Authors`.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-bsd-source-header
+    kind: file_header
+    paths:
+      include:
+        - "**/*.dart"
+        - "**/*.java"
+        - "**/*.kt"
+        - "**/*.kts"
+        - "**/*.swift"
+        - "**/*.m"
+        - "**/*.mm"
+        - "**/*.h"
+        - "**/*.cc"
+        - "**/*.cpp"
+        - "**/*.gradle"
+      exclude:
+        - "**/build/**"
+        - "**/.dart_tool/**"
+        - "**/.gradle/**"
+        - "**/.idea/**"
+        - "**/Pods/**"
+        - "**/Generated.xcconfig"
+        - "**/.flutter-plugins"
+        - "**/third_party/**"
+        - "**/vendor/**"
+        - "**/generated/**"
+        - "**/*.g.cc"
+        - "**/*.g.dart"
+        - "**/*_test.dart" # framework + tools test trees were sparse-excluded
+        - "engine/src/flutter/third_party/**"
+        - "packages/flutter/test_fixes/**" # fix-data corpora intentionally header-free
+        - "packages/flutter/test_release/**"
+        - "packages/flutter/test_private/**"
+        - "packages/flutter_localizations/lib/src/l10n/**" # auto-generated translations
+    lines: 6
+    pattern: 'Copyright [0-9]{4}(-[0-9]{4})? The Flutter Authors\. All rights reserved\.'
+    level: warning
+    message: >-
+      Every source file across flutter/flutter's polyglot tree (Dart,
+      Java, Kotlin, Swift, ObjC, C/C++, Gradle) must carry the
+      canonical Flutter Authors BSD-style license header
+      ("Copyright YYYY The Flutter Authors. All rights reserved. /
+      Use of this source code is governed by a BSD-style license
+      that can be found in the LICENSE file."). The
+      engine/src/flutter/ci/format.sh script enforces this on the
+      engine subtree at CI time; this rule extends the gate to the
+      framework subtree (packages/, dev/, examples/) — where it's
+      currently enforced only by review discipline.
+    policy_url: "https://github.com/flutter/flutter/blob/master/LICENSE"
+
+  # Same header in shell-comment form (Python, shell scripts, gradle,
+  # CMake, GN). The `#`-comment variant is the same discipline applied
+  # to the build-tooling layer (engine GN graph, gradle plugin,
+  # CMakeLists.txt for Linux/Windows).
+  - id: flutter-bsd-source-header-shell-comment
+    kind: file_header
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.sh"
+        - "**/*.gn"
+        - "**/*.gni"
+        - "**/CMakeLists.txt"
+        - "**/*.cmake"
+        - "**/Brewfile"
+      exclude:
+        - "**/build/**"
+        - "**/third_party/**"
+        - "**/vendor/**"
+        - "**/generated/**"
+        - "engine/src/flutter/third_party/**"
+        - "engine/src/build/**" # vendored from chromium build/
+    lines: 6
+    pattern: 'Copyright [0-9]{4}(-[0-9]{4})? The Flutter Authors\. All rights reserved\.'
+    level: warning
+    message: >-
+      Every shell / Python / GN / CMake build script under
+      flutter/flutter must carry the Flutter Authors BSD-style header
+      in shell-comment form (`# Copyright YYYY The Flutter Authors`).
+      The engine GN graph (engine/src/flutter/shell/platform/BUILD.gn
+      + 232 BUILD.gn files across the engine) is the canonical
+      example — every BUILD.gn in the engine carries this header.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Cross-platform structural conventions — the launch-pitch angle.
+  # Every native-platform subdir under engine/src/flutter/shell/platform/
+  # MUST declare BUILD.gn (the GN entry point that
+  # engine/src/flutter/shell/platform/BUILD.gn cases on per is_*
+  # platform predicate). This is the engine analogue of arrow's
+  # "every per-language subdir has a README" — the cross-language
+  # invariant that no per-platform native linter sees, because each
+  # native linter only knows its own tree.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-engine-platform-has-build-gn
+    kind: for_each_dir
+    select: "engine/src/flutter/shell/platform/{android,linux,windows,fuchsia,glfw,embedder,common}"
+    require:
+      - kind: file_exists
+        paths: "{path}/BUILD.gn"
+    level: error
+    message: >-
+      Every native-platform engine subdirectory under
+      engine/src/flutter/shell/platform/ must declare a BUILD.gn.
+      The top-level BUILD.gn at engine/src/flutter/shell/platform/
+      cases on `is_android` / `is_linux` / `is_win` / `is_fuchsia`
+      / desktop and `deps += [<platform>]` — a missing BUILD.gn
+      means the platform is silently dropped from the engine build.
+      This is the canonical "every native-OS embedder is present"
+      invariant; no per-platform linter sees it because each one
+      only knows about its own (Android Studio for android/,
+      Xcode for darwin/, MSVC for windows/, etc.).
+
+  # darwin is structured differently (one parent dir with ios/ +
+  # macos/ children) — so handle ios/ and macos/ separately
+  - id: flutter-engine-darwin-platforms-have-build-gn
+    kind: for_each_dir
+    select: "engine/src/flutter/shell/platform/darwin/{ios,macos,common}"
+    require:
+      - kind: file_exists
+        paths: "{path}/BUILD.gn"
+    level: error
+    message: >-
+      Every Darwin-platform engine subdirectory (ios/, macos/, common/)
+      under engine/src/flutter/shell/platform/darwin/ must declare a
+      BUILD.gn. Same shape as the parent rule — Darwin gets a separate
+      rule because its layout nests ios/ + macos/ underneath
+      engine/src/flutter/shell/platform/darwin/, rather than as
+      siblings to android/ / linux/ / windows/.
+
+  # The framework-side analogue: every Apple-framework subdir
+  # under engine/src/flutter/shell/platform/darwin/{ios,macos}/
+  # ships a `framework/` subdir with the canonical four-file
+  # Apple framework layout (Headers/, Source/, Info.plist,
+  # module.modulemap). This is what `xcodebuild` reads as the
+  # framework target.
+  - id: flutter-darwin-framework-layout
+    kind: for_each_dir
+    select: "engine/src/flutter/shell/platform/darwin/{ios,macos}/framework"
+    require:
+      - kind: dir_exists
+        paths: "{path}/Headers"
+      - kind: dir_exists
+        paths: "{path}/Source"
+      - kind: file_exists
+        paths: "{path}/Info.plist"
+      - kind: file_exists
+        paths: "{path}/module.modulemap"
+    level: error
+    message: >-
+      Every Apple framework target under
+      engine/src/flutter/shell/platform/darwin/{ios,macos}/framework/
+      must ship the canonical four-file layout: Headers/, Source/,
+      Info.plist, module.modulemap. xcodebuild reads this layout
+      exactly; missing any one breaks the framework build (and
+      silently — Xcode warnings only show up when an external app
+      tries to import the broken framework).
+
+  # ──────────────────────────────────────────────────────────────────
+  # `flutter create` template parity — every cross-platform template
+  # under packages/flutter_tools/templates/app/ MUST exist. When a
+  # user runs `flutter create my_app`, flutter_tools scaffolds a
+  # native-host shell per-platform from these templates; missing a
+  # template means `flutter create` silently skips that platform.
+  #
+  # This is the OTHER cross-platform parity surface — alongside the
+  # engine, the templates are what make flutter "all 5 native
+  # platforms supported". Drift here is what tells you the project
+  # has dropped (or not yet added) a platform.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-create-templates-platform-coverage
+    kind: dir_exists
+    paths:
+      - packages/flutter_tools/templates/app/android.tmpl
+      - packages/flutter_tools/templates/app/android-java.tmpl
+      - packages/flutter_tools/templates/app/android-kotlin.tmpl
+      - packages/flutter_tools/templates/app/ios.tmpl
+      - packages/flutter_tools/templates/app/linux.tmpl
+      - packages/flutter_tools/templates/app/macos.tmpl
+      - packages/flutter_tools/templates/app/windows.tmpl
+    level: error
+    message: >-
+      Every cross-platform `flutter create` template under
+      packages/flutter_tools/templates/app/ must be present (android,
+      android-java, android-kotlin, ios, linux, macos, windows). When
+      a user runs `flutter create my_app`, flutter_tools scaffolds a
+      per-platform native-host shell from these templates; missing
+      a template means `flutter create` silently skips that platform
+      (and `flutter run -d <platform>` fails later with a confusing
+      "no platform-specific code found" error).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-Dart-package conventions — packages/ contains 9 first-party
+  # Dart packages, EVERY one of which MUST declare:
+  #   - pubspec.yaml at the package root with `resolution: workspace`
+  #     (the per-member workspace marker that pairs with the root
+  #     pubspec.yaml's `workspace:` list)
+  #   - analysis_options.yaml (per-package linter overrides on top of
+  #     the root chain)
+  # The 6 published-to-pub.dev packages (flutter, flutter_driver,
+  # flutter_localizations, flutter_test, flutter_web_plugins,
+  # flutter_tools) additionally MUST declare `homepage: https://flutter.dev`.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-package-has-pubspec
+    kind: for_each_dir
+    select: "packages/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/pubspec.yaml"
+    level: error
+    message: >-
+      Every Dart package under packages/ must declare a pubspec.yaml.
+      The root pubspec.yaml's `workspace:` list (77 members) lifts
+      every per-package pubspec into the unified workspace; a missing
+      pubspec.yaml means the package silently disappears from the
+      workspace and any cross-package refs (e.g. `dependencies:
+      flutter:`) fail to resolve.
+
+  - id: flutter-package-resolution-workspace
+    kind: file_content_matches
+    paths:
+      include: ["packages/*/pubspec.yaml"]
+      exclude: ["packages/flutter_goldens/pubspec.yaml"] # historical exception
+    pattern: '(?m)^resolution:\s*workspace'
+    level: warning
+    message: >-
+      Every per-package pubspec.yaml under packages/ MUST declare
+      `resolution: workspace` so the root workspace
+      (pubspec.yaml's `workspace:` list with 77 members) lifts the
+      per-package deps into the unified resolution graph. Missing
+      this line means `flutter pub get` resolves the package
+      independently — drift across versions, broken cross-package
+      refs at runtime.
+
+  - id: flutter-package-has-analysis-options
+    kind: for_each_dir
+    select: "packages/{flutter,flutter_driver,flutter_test,flutter_tools,integration_test}"
+    require:
+      - kind: file_exists
+        paths: "{path}/analysis_options.yaml"
+    level: warning
+    message: >-
+      The 5 first-party Dart packages with their own analyzer-rules
+      tier (flutter, flutter_driver, flutter_test, flutter_tools,
+      integration_test) must each declare an analysis_options.yaml.
+      Per-package analyzer rules `include:` the root
+      analysis_options.yaml and add stricter linting (e.g.
+      packages/flutter/analysis_options.yaml additionally requires
+      `public_member_api_docs` since flutter is a public framework).
+
+  # The 6 published packages declare a homepage — pub.dev surfaces
+  # this in the package landing page sidebar
+  - id: flutter-published-package-has-homepage
+    kind: file_content_matches
+    paths: "packages/{flutter,flutter_driver,flutter_localizations,flutter_test,flutter_web_plugins,flutter_tools}/pubspec.yaml"
+    pattern: '(?m)^homepage:\s*https://flutter\.dev'
+    level: warning
+    message: >-
+      Each pub.dev-published Dart package (flutter, flutter_driver,
+      flutter_localizations, flutter_test, flutter_web_plugins,
+      flutter_tools) MUST declare `homepage: https://flutter.dev`
+      so pub.dev's package landing page sidebar links back to the
+      project. Drift here means the pub.dev page shows a stale URL
+      or no homepage link.
+
+  # The 2 internal packages (integration_test, fuchsia_remote_debug_protocol)
+  # explicitly declare `publish_to: none` to prevent accidental
+  # publication. The framework's release tooling assumes this gate
+  # exists; removing it would publish an internal-only package
+  # to pub.dev on the next release.
+  - id: flutter-internal-package-publish-to-none
+    kind: file_content_matches
+    paths: "packages/{integration_test,fuchsia_remote_debug_protocol}/pubspec.yaml"
+    pattern: '(?m)^publish_to:\s*(none|''none'')'
+    level: error
+    message: >-
+      Internal-only Dart packages (integration_test,
+      fuchsia_remote_debug_protocol) MUST declare `publish_to: none`
+      to prevent accidental publication to pub.dev. The framework's
+      release tooling treats these as internal; removing the gate
+      would publish them to pub.dev under flutter.dev's namespace
+      on the next `flutter pub publish` invocation.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-engine pubspec — the engine subtree itself ships its own
+  # pubspec.yaml at engine/src/flutter/pubspec.yaml that's a SEPARATE
+  # workspace (the "_flutter_engine_packages" workspace) with its own
+  # 30+ members. Confirms the multi-workspace topology no per-package
+  # tool sees end-to-end.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-engine-has-pubspec
+    kind: file_exists
+    paths: engine/src/flutter/pubspec.yaml
+    level: error
+    message: >-
+      engine/src/flutter/pubspec.yaml is the engine-side Dart workspace
+      anchor; multiple Dart tools and packages inside the engine
+      subtree (flutter_frontend_server, flutter_vma, web_sdk, etc.)
+      slot into it. Removing it breaks the engine's Dart-tooling
+      build and the engine's GN graph (which calls `dart pub get`
+      against this manifest at gn-gen time).
+
+  - id: flutter-engine-has-analysis-options
+    kind: file_exists
+    paths: engine/src/flutter/analysis_options.yaml
+    level: warning
+    message: >-
+      engine/src/flutter/analysis_options.yaml is the engine-side
+      analyzer config (separate from the framework chain at
+      analysis_options.yaml in the root). The engine's Dart tooling
+      depends on this for stricter linting — removing it falls back
+      to defaults that mask real bugs.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Root governance triad — the LICENSE + PATENT_GRANT + AUTHORS
+  # combo is unique to flutter (BSD-licensed projects rarely ship
+  # a separate PATENT_GRANT). PATENT_GRANT is what makes the BSD
+  # license "Google-grade safe" for downstream commercial use.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-patent-grant-present
+    kind: file_exists
+    paths: PATENT_GRANT
+    root_only: true
+    level: error
+    message: >-
+      flutter/flutter ships a PATENT_GRANT alongside LICENSE — this
+      is the Google-issued patent license that's unique to flutter
+      among major BSD-licensed OSS projects (the V8, Chromium, and
+      Skia ones are the closest cousins). Removing PATENT_GRANT
+      would create a downstream-licensing surprise for commercial
+      users assuming the standard BSD-with-patent-grant terms.
+
+  - id: flutter-authors-present
+    kind: file_exists
+    paths: AUTHORS
+    root_only: true
+    level: warning
+    message: >-
+      AUTHORS lists the Flutter contributors whose copyright is
+      asserted by the BSD license header ("Copyright YYYY The
+      Flutter Authors") — the file is the authoritative anchor for
+      that "Authors" word. Removing it strips the legal anchor
+      from the per-file copyright line.
+
+  - id: flutter-codeowners-present
+    kind: file_exists
+    paths: CODEOWNERS
+    root_only: true
+    level: warning
+    message: >-
+      CODEOWNERS routes per-path PR-review requests to the Flutter
+      team (e.g. `/packages/flutter_tools/lib/src/ios/ @vashworth`
+      auto-routes iOS-tooling PRs to vashworth). Removing it
+      breaks the auto-review-routing GitHub bot.
+
+  - id: flutter-testowners-present
+    kind: file_exists
+    paths: TESTOWNERS
+    root_only: true
+    level: warning
+    message: >-
+      TESTOWNERS is unique to flutter — a per-test-shard ownership
+      manifest (379 lines) that the flaky-test triage bot uses to
+      auto-assign new flaky-test bugs to the right team lead and
+      sub-team label. Removing it leaves new flaky bugs in the
+      unassigned bucket, where they don't get triaged.
+
+  - id: flutter-ci-config-present
+    kind: file_exists
+    paths: .ci.yaml
+    root_only: true
+    level: error
+    message: >-
+      .ci.yaml is the canonical CI-target manifest (7198 lines, 464
+      named targets) consumed by flutter's internal LUCI infra to
+      generate the per-PR build checklist. Each target's `shard:`
+      field maps to a switch-case branch in dev/bots/test.dart.
+      Removing it disables the entire LUCI CI pipeline (the
+      .github/workflows/ public surface only handles labeling /
+      release-tracking / cherry-pick — bulk CI is .ci.yaml-driven).
+
+  - id: flutter-test-orchestrator-present
+    kind: file_exists
+    paths: dev/bots/test.dart
+    level: error
+    message: >-
+      dev/bots/test.dart (663 lines) is the canonical "run-all-the-
+      tests" orchestrator that .ci.yaml shards out to via the SHARD
+      env var (dev/bots/test.dart cases on it: framework_tests,
+      build_tests, tool_tests, web_tests, etc.). Removing it breaks
+      every .ci.yaml target — the bots can no longer run any
+      shard.
+
+  - id: flutter-dartdoc-options-present
+    kind: file_exists
+    paths: dartdoc_options.yaml
+    root_only: true
+    level: warning
+    message: >-
+      dartdoc_options.yaml configures dartdoc's snippet/sample/dartpad
+      tool integration (the `{@tool snippet}` directive that embeds
+      live dartpad samples in API docs). Removing it breaks the
+      api.flutter.dev docs build (the dev/bots/docs.sh CI target
+      shells out to dartdoc -e dartdoc_options.yaml).
+
+  # ──────────────────────────────────────────────────────────────────
+  # Root analysis_options.yaml and per-platform analyzer chain —
+  # 39 analysis_options.yaml files form the canonical Dart linter
+  # chain. The root file is `include:`d into every per-package and
+  # per-tree options file; if root is missing or doesn't declare
+  # certain settings, the entire framework loses static-analysis
+  # discipline.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-analysis-options-present
+    kind: file_exists
+    paths: analysis_options.yaml
+    root_only: true
+    level: error
+    message: >-
+      analysis_options.yaml at repo root is the master Dart analyzer
+      config. Every per-package/per-tree analysis_options.yaml
+      `include:`s it (39 such files in tree). Removing the root
+      file makes every per-tree analyzer fall back to defaults
+      that mask hundreds of real bugs.
+
+  - id: flutter-analysis-options-strict-casts
+    kind: file_content_matches
+    paths: analysis_options.yaml
+    pattern: '(?m)^\s*strict-casts:\s*true'
+    level: error
+    message: >-
+      The root analysis_options.yaml MUST declare `strict-casts: true`
+      under the analyzer.language tier — this is the
+      cross-framework Dart soundness gate that flutter pioneered
+      and Google-internal Dart projects later adopted. Drift here
+      reverts cast-checking to inferred mode, which has historically
+      surfaced as null-safety violations at runtime.
+
+  - id: flutter-analysis-options-strict-inference
+    kind: file_content_matches
+    paths: analysis_options.yaml
+    pattern: '(?m)^\s*strict-inference:\s*true'
+    level: error
+    message: >-
+      The root analysis_options.yaml MUST declare `strict-inference:
+      true` so the analyzer flags every implicitly-`dynamic` type
+      (the implicit-dynamic-is-a-bug stance). Drift here means new
+      framework code can ship implicitly-dynamic params that
+      silently crash on the wrong runtime type.
+
+  - id: flutter-analysis-options-strict-raw-types
+    kind: file_content_matches
+    paths: analysis_options.yaml
+    pattern: '(?m)^\s*strict-raw-types:\s*true'
+    level: error
+    message: >-
+      The root analysis_options.yaml MUST declare `strict-raw-types:
+      true` so the analyzer flags raw type uses (e.g. `List` instead
+      of `List<int>`). The Flutter Style Guide treats this as a
+      hard requirement; drift here breaks the convention.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions hardening — re-state the SHA-pinning rule at
+  # warning level here because flutter has a smaller GHA surface
+  # (16 workflows) but the supply-chain blast radius is still large
+  # (release-tracker / cut-release-branch / cherry-pick / mirror —
+  # all of which interact with the production release flow).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party actions in workflow steps should be pinned to a
+      40-char commit SHA, not a floating tag. The OpenSSF Scorecard
+      "Pinned-Dependencies" check covers this on a nightly cadence;
+      alint surfaces the same gate at PR time.
+
+  - id: flutter-dependabot-includes-actions
+    kind: yaml_path_matches
+    paths: .github/dependabot.yml
+    path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
+    matches: '^/$'
+    level: warning
+    message: >-
+      .github/dependabot.yml MUST declare a github-actions ecosystem
+      entry pointing at the repo root so action SHA-pins get refreshed
+      automatically as upstream actions release new versions. flutter's
+      dependabot.yml additionally groups all-github-actions into one
+      PR (groups.all-github-actions.patterns: ["*"]), which is the
+      anti-PR-spam config best practice.
+
+  # ──────────────────────────────────────────────────────────────────
+  # gitattributes EOL discipline — flutter's .gitattributes is
+  # particularly strict because of cross-platform development:
+  # Windows-specific build files (*.bat, *.ps1, *.sln, *.props,
+  # *.vcxproj) MUST keep CRLF; shell scripts MUST keep LF. Drift
+  # here breaks the Windows build (the .vcxproj parser is
+  # CRLF-strict) AND breaks `bin/flutter` on Linux/macOS (LF
+  # required for the shebang line).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-gitattributes-present
+    kind: file_exists
+    paths: .gitattributes
+    root_only: true
+    level: error
+    message: >-
+      .gitattributes is required at the repo root — it pins CRLF for
+      Windows build files (.bat, .ps1, .sln, .props, .vcxproj) and
+      LF for shell scripts (bin/flutter, bin/dart). Removing it
+      means Windows checkouts get LF-line-endings on .vcxproj
+      (parser fails) AND Linux checkouts get CRLF on bin/flutter
+      (shebang line broken).
+
+  - id: flutter-gitattributes-windows-crlf-pin
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^\*\.bat\s+text\s+eol=crlf'
+    level: warning
+    message: >-
+      .gitattributes must pin Windows files (*.bat, *.ps1, *.sln,
+      *.props, *.vcxproj) to CRLF line endings. Without this pin,
+      a Linux contributor can normalize a .bat file to LF and
+      silently break the Windows build.
+
+  - id: flutter-gitattributes-flutter-bin-lf-pin
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '(?m)^bin/flutter\s+text\s+eol=lf'
+    level: warning
+    message: >-
+      .gitattributes must pin bin/flutter to LF line endings.
+      Without the pin, a Windows contributor can normalize the
+      script to CRLF and silently break the shebang line on
+      Linux/macOS (`#!/usr/bin/env bash` becomes `#!/usr/bin/env bash\r`,
+      which the kernel rejects with "no such file or directory").
+
+  # ──────────────────────────────────────────────────────────────────
+  # Engine build_overrides — the cross-vendor dependency selection
+  # hook. engine/src/build_overrides/ contains 12 .gni files that
+  # tell the GN graph which vendored implementation of each shared
+  # library to use (vulkan, wayland, glslang, swiftshader, etc.).
+  # Removing any one means the engine falls back to a default
+  # path that may not exist in the third_party tree.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-engine-build-overrides-present
+    kind: file_exists
+    paths:
+      - engine/src/build_overrides/build.gni
+      - engine/src/build_overrides/vulkan_headers.gni
+      - engine/src/build_overrides/vulkan_loader.gni
+      - engine/src/build_overrides/swiftshader.gni
+      - engine/src/build_overrides/glslang.gni
+      - engine/src/build_overrides/spirv_tools.gni
+      - engine/src/build_overrides/angle.gni
+    level: error
+    message: >-
+      The engine's build_overrides/ .gni files are the vendor-selection
+      hook for shared graphics libraries (vulkan, wayland,
+      swiftshader, glslang, spirv-tools, angle). Removing any one
+      breaks the engine GN graph; gn-gen errors out with
+      "Could not load build_overrides/<x>.gni" and the engine
+      build never starts.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene: tracked artefacts specific to flutter's polyglot tree.
+  # Extends the bundled hygiene/no-tracked-artifacts ruleset to the
+  # framework-specific build outputs each per-platform host produces.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-no-tracked-dart-tool
+    kind: dir_absent
+    paths: ".dart_tool"
+    level: error
+    message: >-
+      .dart_tool/ is the per-package Dart-pub cache; should never
+      be tracked at the repo root. The bundled hygiene/no-tracked-
+      artifacts ruleset doesn't catch this exact path; flutter's
+      polyglot workspace stresses it (77 workspace members, each of
+      which would generate one if checked-in).
+
+  - id: flutter-no-tracked-build
+    kind: dir_absent
+    paths: "build"
+    level: warning
+    message: >-
+      build/ is the canonical Flutter build output directory.
+      Should never be tracked at the repo root.
+
+  - id: flutter-no-tracked-flutter-plugins
+    kind: file_absent
+    paths: ".flutter-plugins"
+    level: warning
+    message: >-
+      .flutter-plugins is the auto-generated per-app plugin manifest
+      (regenerated by `flutter pub get`). Should never be tracked.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language tool shell-outs — wrap the existing per-language
+  # linters so a single `alint check` run drives the whole structural
+  # pipeline plus the per-language tools in parallel. Each is gated
+  # by a `paths:` filter pointing at the canonical config-file the
+  # tool reads (so the rule no-ops if you delete the config).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: flutter-dart-analyze
+    kind: command
+    paths: analysis_options.yaml
+    command: ["dart", "analyze"]
+    timeout: 600
+    level: error
+
+  - id: flutter-dart-format-check
+    kind: command
+    paths: analysis_options.yaml
+    command: ["dart", "format", "--output=none", "--set-exit-if-changed", "."]
+    timeout: 300
+    level: warning
+
+  - id: flutter-engine-clang-tidy
+    kind: command
+    paths: engine/src/flutter/ci/clang_tidy.sh
+    command: ["bash", "engine/src/flutter/ci/clang_tidy.sh"]
+    timeout: 1800
+    level: warning
+
+  - id: flutter-engine-format-sh
+    kind: command
+    paths: engine/src/flutter/ci/format.sh
+    command: ["bash", "engine/src/flutter/ci/format.sh"]
+    timeout: 600
+    level: warning
+
+  - id: flutter-engine-pylint
+    kind: command
+    paths: engine/src/flutter/ci/pylint.sh
+    command: ["bash", "engine/src/flutter/ci/pylint.sh"]
+    timeout: 300
+    level: warning
+
+  - id: flutter-engine-licenses-cpp
+    kind: command
+    paths: engine/src/flutter/ci/licenses_cpp.sh
+    command: ["bash", "engine/src/flutter/ci/licenses_cpp.sh"]
+    timeout: 600
+    level: warning

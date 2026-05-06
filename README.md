@@ -60,7 +60,7 @@ Bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_pyth
 - **Nineteen bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `ci/github-actions`, `monorepo`, `monorepo/cargo-workspace`, `monorepo/pnpm-workspace`, `monorepo/yarn-workspace`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `compliance/reuse`, `compliance/apache-2`, `agent-hygiene`, `agent-context`. Built into the binary — no network round-trip.
 - **Eight output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
 - **JSON Schemas** — config at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete; report shapes at [`schemas/v1/check-report.json`](schemas/v1/check-report.json) and [`schemas/v1/fix-report.json`](schemas/v1/fix-report.json) for downstream tooling.
-- **Official GitHub Action** — `asamarts/alint@v0.9.14`.
+- **Official GitHub Action** — `asamarts/alint@v0.9.16`.
 
 ## Non-goals
 
@@ -102,7 +102,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.9.14 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.9.16 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -111,7 +111,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.9.14`).
+Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.9.16`).
 
 ### From crates.io
 
@@ -658,15 +658,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.9.14
+- uses: asamarts/alint@v0.9.16
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.9.14
+- uses: asamarts/alint@v0.9.16
   with:
-    version: v0.9.14        # alint release tag (default: latest)
+    version: v0.9.16        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github | markdown | junit | gitlab (default: github)
     config: |              # extra config path(s), one per line
@@ -678,7 +678,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.9.14
+- uses: asamarts/alint@v0.9.16
   id: alint
   with:
     format: sarif
@@ -696,7 +696,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.9.14
+    rev: v0.9.16
     hooks:
       - id: alint
 ```

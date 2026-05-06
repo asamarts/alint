@@ -1,0 +1,43 @@
+name: file_exists misses a tracked-AND-gitignored file when per-rule respect_gitignore is unset
+tags: [check, file_exists, respect_gitignore, git]
+
+# Companion to file_exists_per_rule_respect_gitignore_finds_tracked_and_ignored.yml
+# — this scenario LOCKS IN the pitfall so a future change to the
+# walker / `file_exists` interaction can't silently fix the
+# pitfall without flipping a regression-prevention test.
+#
+# Same setup (the bazel-style tracked-AND-gitignored file), but
+# the rule does NOT set `respect_gitignore: false`. Workspace
+# `respect_gitignore` defaults to `true`, so the walker hides
+# `.bazelversion` from the file index — and `file_exists` reports
+# the rule as failing despite `git ls-files` showing the file.
+#
+# This is the v0.9.16 documented behaviour (pitfall #18 in
+# CONFIG-AUTHORING.md). If a future version makes `file_exists`
+# look through the gitignore by default, expect the violation
+# count here to drop to 0 — at which point delete this scenario
+# (the pitfall is gone) and update the doc.
+
+given:
+  tree:
+    .gitignore: ".bazelversion\n"
+    README.md: "# demo\n"
+    .bazelversion: "7.0.0\n"
+  config: |
+    version: 1
+    rules:
+      - id: bazelversion-required
+        kind: file_exists
+        paths: ".bazelversion"
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    add_force: [.bazelversion]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations:
+      - rule: bazelversion-required

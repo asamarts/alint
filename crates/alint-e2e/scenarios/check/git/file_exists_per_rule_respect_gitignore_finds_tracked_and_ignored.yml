@@ -1,0 +1,44 @@
+name: file_exists per-rule respect_gitignore:false finds a file that's tracked AND .gitignored
+tags: [check, file_exists, respect_gitignore, git]
+
+# Pitfall #18 (CONFIG-AUTHORING.md): the bazel-style pattern of
+# tracking a file (so an upstream default ships) AND
+# .gitignore'ing it (so contributors can override locally without
+# committing the override) trips up rules that walk through
+# `WalkOptions.respect_gitignore` — the walker silently hides the
+# file, so a `file_exists` rule says "no match" even though
+# `git ls-files` would show it.
+#
+# The per-rule `respect_gitignore: false` knob (added in v0.9.16)
+# lets a single rule bypass the workspace-level setting WITHOUT
+# flipping it for every other rule. This scenario proves the
+# bypass works for the literal-path fast path.
+
+given:
+  tree:
+    .gitignore: ".bazelversion\n"
+    README.md: "# demo\n"
+    .bazelversion: "7.0.0\n"
+  config: |
+    version: 1
+    rules:
+      - id: bazelversion-required
+        kind: file_exists
+        paths: ".bazelversion"
+        respect_gitignore: false
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    # `.bazelversion` is in the .gitignore yet still committed
+    # — `git add -f` is the only way to land that state. This
+    # is the bazel pattern: an upstream-default file the repo
+    # ships AND that contributors can locally override without
+    # committing.
+    add_force: [.bazelversion]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations: []

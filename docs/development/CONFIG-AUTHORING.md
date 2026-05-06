@@ -1,13 +1,13 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a + P2b launch-prep validation passes — **19 distinct
-schema / language pitfalls** hit while writing configs for production
-repos. 12 surfaced in the P2a pilot (kubernetes, rust-lang/rust, deno,
-airflow, turbo); 3 in P2a Wave 1 (clap, tokio, ruff, uv, typescript);
-1 in P2a Wave 2 (next.js); 1 in P2a Wave 3 (helm); 2 in P2b Wave 1
-(bazel + tensorflow). All configs ultimately parse + run, but the
-iteration cost was high. This doc captures every one with the canonical
-correct form.
+Surfaced by the P2a + P2b launch-prep validation passes — **21 distinct
+schema / language / runtime pitfalls** hit while writing configs for
+production repos. 12 surfaced in the P2a pilot (kubernetes,
+rust-lang/rust, deno, airflow, turbo); 3 in P2a Wave 1 (clap, tokio,
+ruff, uv, typescript); 1 in P2a Wave 2 (next.js); 1 in P2a Wave 3
+(helm); 2 in P2b Wave 1 (bazel + tensorflow); 2 in P2b Wave 2 (istio).
+All configs ultimately parse + run, but the iteration cost was high.
+This doc captures every one with the canonical correct form.
 
 > **Note on pitfall numbering.** The original *pitfall #18*
 > claim (JSONPath outer-parens filter) was investigated during
@@ -39,7 +39,7 @@ correct form.
 
 ---
 
-## The 19 pitfalls
+## The 21 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -639,12 +639,12 @@ a file the walker never sees can't be intersected back in.
   level: error
 ```
 
-**Right (option A — disable gitignore handling for the rule, when v0.10+ ships `respect_gitignore: false` per-rule):**
+**Right (option A — per-rule `respect_gitignore: false`, v0.9.16+):**
 ```yaml
 - id: bazel-version-pinned
   kind: file_exists
   paths: .bazelversion
-  respect_gitignore: false   # ← v0.10+ candidate
+  respect_gitignore: false   # ← shipped in v0.9.16
   level: error
 ```
 
@@ -669,12 +669,20 @@ rules:
 
 The trade-off with option B is global — every other rule in the config
 also stops honouring `.gitignore`, which is rarely what you want.
-Option A (per-rule) is the v0.10+ candidate motivated by this pitfall;
-option C is the available workaround until then.
+Option A (per-rule, shipped in v0.9.16) is the surgical fix; option C
+remains a portable fallback for adopters on older versions.
+
+The v0.9.16 implementation honours `respect_gitignore: false` for
+`file_exists`'s literal-path fast path (the common case the pitfall
+surfaced). Glob patterns and other rule kinds inherit the workspace
+setting; broader coverage is on the v0.10 backlog.
 
 Source: surfaced by `examples/bazelbuild-bazel/.alint.yml` while
 authoring the `gha-pin-actions-to-sha` companion check for
-`.bazelversion`.
+`.bazelversion`. Regression-locked by
+`crates/alint-e2e/scenarios/check/git/file_exists_per_rule_respect_gitignore_finds_tracked_and_ignored.yml`
+(positive direction) and the matching `_misses_*` companion (negative
+direction — proves the workspace-default behaviour without the override).
 
 ### 19. `file_exists` with `root_only: true` silently no-matches multi-component literal paths
 
@@ -716,16 +724,113 @@ error instead of the configuration mistake.
   level: error
 ```
 
-A v0.9.16+ candidate is for `file_exists::build` to surface a
-parse-time warning when it sees `root_only: true` with multi-component
-literals: *"`.tensorflow/python/tools/api/golden/v1/` is multi-component;
-either drop `root_only: true` or move the rule to a single-segment
-literal at the repo root."* That'd land at-edit-time before the user
-hits the silent-no-match.
+A v0.10 candidate is for `file_exists::build` to surface a parse-time
+warning when it sees `root_only: true` with multi-component literals:
+*"`.tensorflow/python/tools/api/golden/v1/` is multi-component; either
+drop `root_only: true` or move the rule to a single-segment literal at
+the repo root."* The runtime guard already produces the safe
+no-match-for-this-pattern outcome (so misconfigurations don't fire on
+unrelated files), so the build-time check is purely a DX upgrade —
+catching the mistake at edit time instead of at first run.
 
 Source: surfaced by `examples/tensorflow-tensorflow/.alint.yml` while
 authoring the API-goldens existence check (1,185 textproto goldens
 under `tensorflow/python/tools/api/golden/{v1,v2}/`).
+
+### 20. Cross-file value-equality across structurally-different files needs per-file value extraction
+
+`cross_file_value_equals` (v0.10 candidate) reads one JSONPath / YAMLPath
+expression and asserts the same value at that path across every matching
+file. That works when the files share a schema — `pom.xml`'s
+`<project><version>` lives at the same path in every Maven module, so
+"every pom.xml has the same `<version>`" maps to one rule. It breaks
+down when the *value* lives at a *different* path per file.
+
+istio's per-chart container-image hub is the canonical example.
+`manifests/charts/base/values.yaml` has it at
+`_internal_defaults_do_not_set.global.hub`, while
+`manifests/charts/istio-control/istio-discovery/values.yaml` has it at
+`_internal_defaults_do_not_set.hub` — same semantic value, different
+JSONPath positions per file. A single shared `path:` can't reach both.
+
+**Wrong (one shared JSONPath misses half the files):**
+```yaml
+- id: image-hub-pinned
+  kind: cross_file_value_equals
+  paths: "manifests/charts/**/values.yaml"
+  path: "$._internal_defaults_do_not_set.global.hub"   # ← only hits some
+  level: error
+```
+
+**Right (workaround until v0.10 — one `file_content_matches` rule per
+distinct value-location, asserting the literal hub string):**
+```yaml
+- id: image-hub-pinned-global
+  kind: file_content_matches
+  paths:
+    - "manifests/charts/base/values.yaml"
+    - "manifests/charts/gateways/istio-ingress/values.yaml"
+  pattern: 'hub: registry.istio.io/testing'
+  level: error
+```
+
+The v0.10 design candidate is a `value_extractor:` block that takes a
+`{path-pattern: extractor-expression}` mapping so one rule can scope to
+the right path per file. Designed shape:
+```yaml
+- id: image-hub-pinned
+  kind: cross_file_value_equals
+  value_extractor:
+    "manifests/charts/{base,gateways/*}/values.yaml":
+      "$._internal_defaults_do_not_set.global.hub"
+    "manifests/charts/istio-control/*/values.yaml":
+      "$._internal_defaults_do_not_set.hub"
+```
+
+Source: surfaced by `examples/istio-istio/.alint.yml` while authoring
+the per-chart image-hub pin check (8 charts, 2 distinct value-paths,
+identical semantic value).
+
+### 21. `yaml_path_*` rules error on multi-document YAML files
+
+`yaml_path_equals` and the `yaml_path_*` family parse the YAML body
+through `serde_yaml_ng::from_str::<serde_yaml::Value>()`, which rejects
+streams containing more than one `---`-separated document. Files that
+contain multi-doc streams (k8s manifests bundled together, release-notes
+stitched into one file, helm-chart-rendered output) trip a runtime
+"more than one document is not supported" error rather than a clean rule
+verdict.
+
+**Wrong (rule fires runtime error on multi-doc files):**
+```yaml
+- id: release-note-kind-enum
+  kind: yaml_path_equals
+  paths: "releasenotes/notes/*.yaml"   # ← some are multi-doc
+  path: "$.kind"
+  value: "feature"
+  level: warn
+```
+
+**Right (workaround until v0.10 — `file_content_matches` with a regex
+that doesn't need YAML parsing):**
+```yaml
+- id: release-note-kind-enum
+  kind: file_content_matches
+  paths: "releasenotes/notes/*.yaml"
+  pattern: '^kind: (feature|bug-fix|breaking-change|security)$'
+  multiline: true
+  level: warn
+```
+
+The v0.10 design candidate is a `multi_doc_mode:` knob: `error` (the
+current behaviour), `first` (validate only the first document, common
+for "the metadata block lives on top"), or `every` (loop over every
+document, treat each as a separate match). Default would stay `error`
+so no existing config silently changes behaviour.
+
+Source: surfaced by `examples/istio-istio/.alint.yml` while authoring
+the release-notes `$.kind` enum check against
+`releasenotes/notes/50328.yaml` (multi-doc bundle).
 
 ---
 

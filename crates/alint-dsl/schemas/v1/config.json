@@ -515,7 +515,8 @@
           "default": false,
           "description": "If true, only files directly at the repository root satisfy the rule."
         },
-        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" }
+        "git_tracked_only": { "$ref": "#/$defs/git_tracked_only" },
+        "respect_gitignore": { "$ref": "#/$defs/per_rule_respect_gitignore" }
       }
     },
 
@@ -553,6 +554,11 @@
       "type": "boolean",
       "default": false,
       "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; other rule kinds ignore the field. See https://alint.org/docs/concepts/walker-and-gitignore/ for the full semantics."
+    },
+
+    "per_rule_respect_gitignore": {
+      "type": "boolean",
+      "description": "Per-rule override for the workspace-level `respect_gitignore:` setting. When `false`, this rule treats `.gitignore`-listed files as if they were untracked-but-on-disk: the rule sees them. The canonical use case is the bazel-style \"tracked AND gitignored\" pattern (a file like `.bazelversion` ships a default upstream and contributors override it locally without committing the override) — the workspace walker honours the gitignore, so `file_exists` reports \"no match\" against a file that's both on disk AND in `git ls-files`. This per-rule knob lets that single rule see the file without flipping the workspace-wide setting. Currently honoured by `file_exists` for literal-path patterns; other rule kinds + glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`. See `docs/development/CONFIG-AUTHORING.md` pitfall #18."
     },
 
     "scope_filter": {

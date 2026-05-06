@@ -12,7 +12,7 @@ subset: NixOS/nixpkgs, bazel, TensorFlow, apache/spark, vscode)**;
 v0.9.15 into v0.9.16 with the deny_unknown_fields uniformity audit
 pre-tag).
 
-`docs/development/CONFIG-AUTHORING.md` now catalogues **19 pitfalls**
+`docs/development/CONFIG-AUTHORING.md` now catalogues **21 pitfalls**
 (17 from P2a + 2 from P2b Wave 1: #18 `.gitignore` masks tracked-file
 presence checks; #19 `root_only: true` + multi-component literals
 silently no-match). Every one is caught somewhere in the toolchain
@@ -479,6 +479,70 @@ v0.10+ candidates. Net-new additions:
 | `cross_language_implementation_complete` | 1 (arrow) | **2** (arrow + TF) — now demand-validated; v0.11+ flagship |
 | `*_path_contains` | 2 | **3** (helm + deno + bazel) |
 
+### P2b Wave 2 — 5 more polyglot repos (4 of 5 done; flutter in flight)
+
+5 monorepos curated for *platform-driven* polyglot density —
+distinct from the *data-format-driven* polyglot density of Wave 1.
+At time of writing (4 of 5 audits landed):
+
+| Repo | Rules | Headline |
+|---|---|---|
+| `angular/angular` | 50 | TypeScript framework with 16 packages; `goldens/public-api/<pkg>/index.api.md` discipline locks the TS API surface of 13/16 packages — canonical single-language `cross_language_implementation_complete` instance |
+| `istio/istio` | 65 | Single-module Go monorepo with 9 Helm charts, Prow CI (no GHA), CODEOWNERS not k8s-OWNERS; per-chart image-hub at *different* JSONPath positions per file — surfaces pitfall #20 + a `value_extractor:` design candidate |
+| `dotnet/runtime` | 60 | **1,091 .csproj files** (sparse checkout, src/libraries alone is 902); **234 solution files** + **257 Directory.Build.{props,targets}** + **520 .props/.targets** = ~2,300 distinct XML manifests stress-testing the v0.10 `xml_path_*` candidate at one order of magnitude bigger scale than spark |
+| `protocolbuffers/protobuf` | 108 | **10 in-tree language bindings** (cpp, java, python, csharp, ruby, php, objc, hpb, upb, rust) + 1 spun-out (dart) with per-binding wire-format failure-allowlist files (failure_list_<lang>.txt) and per-binding GHA test workflow — densest single-repo source for `cross_language_implementation_complete`, ~45 cross-language assertions one rule would express |
+| `flutter/flutter` | 39 | **Platform-driven** polyglot variant — single Dart framework, native-OS embedders (Android/iOS/macOS/Linux/Windows/Fuchsia/GLFW + ABI) as peer subdirs under `engine/src/flutter/shell/platform/`, each implementing the same surface (audit pending final aggregation) |
+
+Wave 2 totals so far: **322 rules across 4 case studies** (flutter
+adds 39 once aggregated).
+
+### P2b Wave 2 — 2 new pitfalls (#20, #21)
+
+Both surfaced by `istio/istio`:
+
+- **#20 — Cross-file value-equality across structurally-different files
+  needs per-file value extraction.** istio's per-chart image-hub
+  setting lives at `_internal_defaults_do_not_set.global.hub` in some
+  charts and `_internal_defaults_do_not_set.hub` in others. One shared
+  `path:` on `cross_file_value_equals` (v0.10 candidate) misses half
+  the files. Workaround: 5 `file_content_matches` rules. v0.10 design
+  candidate: `value_extractor:` block with `{path-pattern: extractor}`
+  mapping.
+- **#21 — `yaml_path_*` rules error on multi-document YAML files.**
+  The serde_yaml-backed parser rejects multi-doc streams. istio's
+  release-notes `releasenotes/notes/50328.yaml` is multi-doc; a
+  natural `yaml_path_equals` rule on `$.kind` runtime-errors instead
+  of returning a verdict. v0.10 candidate: `multi_doc_mode: error |
+  first | every` knob, default `error` so existing configs don't
+  silently change behaviour.
+
+Both documented in CONFIG-AUTHORING.md as pitfalls #20 and #21.
+
+### P2b Wave 2 — bundled-ruleset promotion
+
+| Bundled ruleset | Status before Wave 2 | After |
+|---|---|---|
+| `dotnet@v1` (proposed) | not on candidate list | **v0.10 ship-target** (justified by dotnet/runtime + adopter surface: every dotnet/* + every Azure SDK + every microsoft/* .NET project); 12 of 14 dotnet-specific rules in the case study consolidate into one `extends:` line |
+
+### P2b Wave 2 — rule-kind candidate promotions
+
+| Candidate | Pre-Wave-2 status | Post-Wave-2 |
+|---|---|---|
+| `xml_path_matches` / `xml_path_equals` | v0.10 candidate (1 source: spark) | **v0.10 ship-target** (2 sources: spark + dotnet/runtime; dotnet stress-tests at ~2,300 manifests vs spark's 49 pom.xml) |
+| `cross_language_implementation_complete` | v0.11+ flagship (2 sources) | **v0.11+ ship-target** (4 sources: arrow + TF + protobuf + angular; protobuf is the densest with ~45 cross-language assertions, angular gives the within-language source↔golden variant) |
+| `ordered_block` | v0.10 candidate (6 sources) | **v0.10 ship-target** (7 sources: protobuf failure_list files; ties with `registry_paths_resolve` at the top of the v0.10 backlog) |
+| `cross_file_value_equals` | 9 sources | **10 sources** (istio per-chart image-hub joins; istio also surfaces the per-file extractor variant — pitfall #20 design candidate) |
+
+### P2b Wave 2 — net-new rule-kind candidates
+
+Saturation continues — Wave 2 adds zero net-new candidates beyond the
+v0.10/v0.11 backlogs. Every Wave 2 finding is either a reconfirmation
+of existing candidates with deeper data, or a refinement (the istio
+`value_extractor:` shape is a refinement of `cross_file_value_equals`
+rather than a new candidate). Pitfall discovery rate, by contrast,
+held steady at 2 (#20, #21) — both runtime-semantics class, same
+flavour as Wave 1's #18/#19.
+
 ### Saturation analysis (when to stop adding repos)
 
 By Wave 3, ~80 % of new rule-kind candidates surfaced were *single-source*
@@ -505,7 +569,7 @@ Three concrete value props, evidence-backed from P2:
 
 1. "Sub-second on 100K-file repos" (cite v0.9.13 100k bench: S3 1.13s)
 2. "Agentic-aware: structured `agent` output format + `agent-hygiene` ruleset for AI-touched repos"
-3. "60 rule kinds + 19 bundled ecosystem rulesets — zero plugins to install"
+3. "60 rule kinds + 19 bundled ecosystem rulesets — zero plugins to install" (P2b Wave 2: dotnet/runtime + protobuf both validate the v0.10 `xml_path_*` + `cross_language_implementation_complete` candidates with massive scale evidence)
 
 Pages to add:
 - `alint.org/compare` — direct table: alint vs Repolinter (archived), ls-lint, Megalinter, custom shell scripts
