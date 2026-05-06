@@ -5,7 +5,11 @@ v0.9 series, fully-automated bench-record CI, no public outreach yet) to a
 public launch backed by real-repo case studies and a marketing site that earns
 attention rather than just hosts documentation.
 
-Status: **Drafted 2026-05-05.** P1 in progress; P2a pilot next.
+**Status: 2026-05-06.** P1 done; P2a pilot done (5 of 20 repos +
+`docs/development/CONFIG-AUTHORING.md` + `coverage_audit_examples_parse.rs`);
+v0.9.15 P1+P2 done (findings doc + examples-parse audit). Next: scale P2a to
+the full 20 BEFORE v0.9.15 Phase 3-6, so the DX hardening fixes are informed
+by the full pitfall set rather than just the pilot's 12.
 
 ## State of the world (audit at 2026-05-05)
 
@@ -22,40 +26,92 @@ Status: **Drafted 2026-05-05.** P1 in progress; P2a pilot next.
 
 ---
 
-## Five-phase plan
+## Phased plan
 
 ```
-P1 Repo hygiene        ──┐
-P2a Validation pass    ──┼──► P3 Marketing refresh ──► P4 Launch ──► P5 Post-launch
-   (20 repos, diverse)   ┘                ▲                              │
-P2b Validation pass     ────────────────────────────────────────────────►│
-   (20 polyglot         (P2 findings drive P3 evidence)                  │
-    monorepos, ongoing)                                          (post-launch
-                                                                  case studies)
+P1   Repo hygiene             ──┐ (DONE)
+P1.5 v0.9.15 config DX        ──┼──► P3 Marketing refresh ──► P4 Launch ──► P5 Post-launch
+     hardening (6 phases)       │              ▲                              │
+P2a  Validation pass          ──┤              │                              │
+     (20 repos, diverse)        │ (P2a findings inform P1.5 phase 3+5;        │
+P2b  Validation pass          ──┘  P2 case studies become P3 evidence)        │
+     (20 polyglot monorepos,                                                  │
+     ongoing post-launch)        ───────────────────────────────────────────► │
+
+Sequencing nuance: P2a-full (15 remaining repos) runs BEFORE
+v0.9.15 Phase 3-6 (did-you-mean errors + JSON Schema +
+validate-config subcommand) so the DX fixes target the full
+pitfall catalogue rather than just the pilot's 12.
 ```
 
-### P1 — Repo hygiene & community foundation (~1.5 days)
+### P1 — Repo hygiene & community foundation (~1.5 days, DONE 2026-05-05)
 
 Foundational; happens first because launch traffic is unpredictable and these need
 to be live before the first link is shared.
 
-- `CONTRIBUTING.md`
-- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
-- `SECURITY.md` (PGP/contact + 90-day disclosure window)
-- `.github/ISSUE_TEMPLATE/{bug-report,feature-request,config-help}.yml`
-- `.github/pull_request_template.md`
-- GitHub repo About:
-  - `description = "Language-agnostic linter for repository structure, files, and content"`
-  - `homepage = "https://alint.org"`
-  - `topics = [linter, repository-quality, devtools, ci-cd, rust-cli, agent-friendly, monorepo, repolinter-alternative, language-agnostic, file-structure]`
-- Enable Discussions (categorise: Q&A, Ideas, Show-and-tell, Announcements)
-- README cleanup: opening hero rewrite, version refs to v0.9.14, 60-second quickstart near the top
-- `examples/` directory scaffold (populated by P2)
+- ✅ `CONTRIBUTING.md`
+- ✅ `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
+- ✅ `SECURITY.md` (PGP/contact + 90-day disclosure window)
+- ✅ `.github/ISSUE_TEMPLATE/{bug-report,feature-request,config-help}.yml`
+- ✅ `.github/pull_request_template.md`
+- ✅ GitHub repo About: description, homepage, 10 topics
+- ✅ Discussions enabled
+- ✅ README hero rewrite + version refs refreshed to v0.9.14
+- ✅ `examples/` directory scaffold
+
+### P1.5 — v0.9.15 config DX hardening (~3-4 days, IN PROGRESS)
+
+Surfaced by the P2a pilot — 12 schema/language pitfalls hit while writing
+configs for the first 5 repos. Two layers of prevention:
+
+1. **Editor / write-time** — JSON Schema for `.alint.yml` (Phase 5); ~80 % of
+   pitfalls caught before save.
+2. **Parser / load-time** — clearer errors with did-you-mean suggestions
+   (Phases 3-4) for the residual 20 %.
+
+Six sub-phases:
+
+- **Phase 1** — `docs/development/CONFIG-AUTHORING.md` findings doc. ✅ DONE.
+- **Phase 2** — `coverage_audit_examples_parse.rs` audit (every
+  `examples/*/.alint.yml` MUST load + build cleanly). ✅ DONE.
+  *(Already caught one bug on its first run — duplicate `level:` in airflow.)*
+- **Phase 3** — Did-you-mean parse errors via custom serde Deserialize on
+  rule Options structs. Levenshtein-suggested field renames; hand-curated
+  high-drift overrides (`argv→command`, `secondary→partner`, `style→target`,
+  `pattern→prefix`). ~1 day.
+- **Phase 4** — Domain-specific error messages: `scope_filter.has_ancestor`
+  basename constraint, `when:` operator-keyword guidance, JSONPath
+  bracket-notation for dashed keys. ~half day.
+- **Phase 5** — JSON Schema generation (`schemars` derive on every rule's
+  `Options` + discriminated-union top-level → `schemas/v1/config.json`).
+  Editor LSP autocomplete catches ~80 % of pitfalls at keystroke time.
+  Biggest single payoff. ~2-3 days.
+- **Phase 6** — `alint validate-config <path>` subcommand (parse-only, no
+  tree walk). For editor LSP, pre-commit hooks, fail-fast CI. ~half day.
+
+**Sequencing decision:** Phases 3-6 land AFTER P2a-full (the remaining 15
+case studies). Reasons:
+- The new examples-parse audit dropped iteration cost per case study; doing
+  15 more is cheap.
+- More repos surface more pitfalls — Phases 3-4 hand-curated suggestions
+  benefit from the full set.
+- Phase 5 JSON Schema work targets the right fields when the most-misused
+  ones are known.
 
 ### P2a — First 20 repos, single-language + diverse-ecosystem (~10-15 days)
 
 Diverse ecosystems + scales + tooling shapes. Becomes the case-study foundation
 for P3 and the gap-catalogue for v0.10+.
+
+**Pilot status (5 of 20 done, committed):** kubernetes, rust-lang/rust, deno,
+airflow, turbo. Each has a per-repo case study + working `.alint.yml` at
+`examples/<owner>-<repo>/`. The pilot iteration surfaced the 12 pitfalls now
+documented in `docs/development/CONFIG-AUTHORING.md`.
+
+**P2a-full Wave 1-3 (15 remaining):** 3 batches of 5 parallel subagents each.
+Each subagent briefing includes the parse-validate requirement (Step 5
+below) + a pointer to `docs/development/CONFIG-AUTHORING.md` so the
+canonical-correct YAML is one click away.
 
 | # | Repo | Ecosystem | Why |
 |---|---|---|---|
@@ -259,10 +315,13 @@ Worth doing but not blocking launch:
 ## Timeline summary
 
 ```
-Week 1:    P1 (hygiene) + start P2a pilot (5 repos)
-Week 2-3:  P2a-full (remaining 15) ─► first case-study set
-Week 4:    P3 (hero + content + SEO + AI/LLM discovery)
-Week 5:    P4 (launch prep + beta)
+Week 1:    ✅ P1 hygiene + P2a pilot (5 of 20 repos, +12 pitfalls catalogued)
+                + v0.9.15 P1+P2 (findings doc + examples-parse audit)
+Week 2:    P2a-full Waves 1-3 (15 remaining repos in 3 batches of 5)
+                + v0.9.15 Phase 3-4 (did-you-mean errors + domain-specific messages)
+Week 3:    v0.9.15 Phase 5-6 (JSON Schema + validate-config subcommand) → ship v0.9.15
+Week 4:    P3.1 hero + content + P3.2 SEO + P3.3 AI/LLM discovery
+Week 5:    P4 launch prep + beta
 Week 6:    Launch
 Week 7+:   P2b (polyglot monorepos) — runs as evidence-driven content marketing
             + P5 post-launch infra (MCP server, sponsors, analytics)
@@ -276,9 +335,18 @@ studies + post-launch infra including MCP server): ~10-12 weeks.
 ## First concrete steps
 
 1. ✅ **This doc** — committed for tracking
-2. **P1 in one sitting** (~half-day): get the repo launch-presentable
-3. **Start the P2a pilot** with 5 representative repos to validate methodology
-   before scaling
+2. ✅ **P1 in one sitting** — repo launch-presentable (committed `52e7494f`)
+3. ✅ **P2a pilot** with 5 repos — methodology validated (committed `e7451b95` + `481b32db`)
+4. ✅ **v0.9.15 Phase 1+2** — findings doc + examples-parse audit (committed `ba7802fa`)
+5. **P2a-full Wave 1** — 5 parallel subagents (tokio, uv, ruff, clap, typescript)
+6. **P2a-full Wave 2** — next 5 (next.js, pnpm, react, prettier, cpython)
+7. **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node)
+8. **P2a aggregation** — update CONFIG-AUTHORING.md with new pitfalls; aggregate v0.10+ rule-kind candidate list
+9. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue
+10. **v0.9.15 release**
+11. **P3 marketing refresh** — hero + SEO + AI/LLM discovery
+12. **P4 launch**
+13. **P5 post-launch** — concurrent with **P2b** (20 polyglot monorepos)
 
 The plan is intentionally a living doc — every phase will surface adjustments.
 Update this file as we learn.
