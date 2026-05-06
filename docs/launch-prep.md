@@ -5,16 +5,17 @@ v0.9 series, fully-automated bench-record CI, no public outreach yet) to a
 public launch backed by real-repo case studies and a marketing site that earns
 attention rather than just hosts documentation.
 
-**Status: 2026-05-06.** P1 done; P2a pilot + Wave 1 + Wave 2 done (15 of
-20 repos); `docs/development/CONFIG-AUTHORING.md` now catalogues 16
-pitfalls (12 from pilot + 3 from Wave 1: regex anchoring, YAML `\n`
-semantics, empty `file_starts_with.prefix`; +1 from Wave 2:
-`*_path_matches` against bool fields). 6 silently-broken bool-match
-rules in committed pilot+Wave 1 configs were fixed in the same pass.
-`coverage_audit_examples_parse.rs` audit live; v0.9.15 P1+P2 done.
-Next: dispatch Wave 3 (golang/go, helm, arrow, pytorch, nodejs/node) —
-completes P2a-full at 20 repos BEFORE v0.9.15 Phase 3-6, so the DX
-hardening fixes are informed by the full pitfall set.
+**Status: 2026-05-06.** P1 done; **P2a-full COMPLETE (20 of 20 repos)**.
+`docs/development/CONFIG-AUTHORING.md` now catalogues 18 pitfalls (12
+from pilot + 3 from Wave 1: regex anchoring, YAML `\n` semantics, empty
+`file_starts_with.prefix`; +1 from Wave 2: `*_path_matches` against
+bool fields; +2 from Wave 3: `*_path_equals` against `[*]`,
+JSONPath outer-parens). 7 silently-broken structured-path rules in
+committed pilot+Wave 1 configs were fixed across the validation pass
+(6 bool-match in Wave 2, 1 array-semantics in Wave 3).
+`coverage_audit_examples_parse.rs` audit live; v0.9.15 P1+P2 done. Next:
+v0.9.15 Phase 3-6 (DX hardening) → v0.9.15 release → P3 marketing
+refresh.
 
 ## State of the world (audit at 2026-05-05)
 
@@ -114,33 +115,39 @@ airflow, turbo. Each has a per-repo case study + working `.alint.yml` at
 documented in `docs/development/CONFIG-AUTHORING.md`.
 
 **Wave 1 status (DONE):** clap, tokio, ruff, uv, typescript. Surfaced 3
-new pitfalls (§13-15 in CONFIG-AUTHORING.md) and 6 new rule-kind
-candidates.
+pitfalls (§13-15) + 6 rule-kind candidates.
 
 **Wave 2 status (DONE):** next.js, pnpm, react, prettier, cpython.
-Surfaced 1 new pitfall (§16 — `*_path_matches` against bool fields), 6
-more rule-kind candidates, and **caught 6 silently-broken bool-match
-rules in committed pilot+Wave 1 configs** (fixed in the same pass).
-All 15 configs (pilot + Wave 1 + Wave 2) parse cleanly under
-`coverage_audit_examples_parse.rs`.
+Surfaced 1 pitfall (§16 — `*_path_matches` against bool fields) + 6
+more rule-kind candidates + **caught 6 silently-broken bool-match
+rules in committed configs** (fixed).
 
-Three distinct positioning narratives crystallised across Wave 1+2 — all
-three reinforced by Wave 2 data:
+**Wave 3 status (DONE):** golang/go, helm, arrow, pytorch, nodejs/node.
+Surfaced 2 pitfalls (§17 `*_path_equals` against `[*]`; §18 JSONPath
+outer-parens) + 9 more rule-kind candidates + **caught 1 silently-broken
+array-semantics rule in deno** (fixed).
 
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| "Replaces N hand-rolled validation scripts" | kubernetes (50→17), airflow (109 hooks→40 %), cpython (12 surfaces consolidated) | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 scripts), uv (67-crate workspace), pnpm (`meta-updater` plugin replaced), react (codes.json + version-sync) | Repos that rely on convention without explicit checks |
-| "Adds structural floor on top of mature tooling" | typescript (eslint+dprint+knip), ruff (900+ Python rules, 0 internal), prettier (5 net-new gates) | Repos with mature tooling but missing structural layer |
+All 20 configs parse cleanly under `coverage_audit_examples_parse.rs`.
 
-**Polyglot bonus (Wave 2):** next.js — first hybrid pnpm + Cargo
-dual-workspace win. Anticipates P2b's "language-agnostic" pitch with a
-strong soundbite: *"drift no per-language linter catches because each
-linter only sees half the tree."*
+**Five distinct positioning narratives** crystallised across the full
+P2a pass — one per "shape" of OSS project structural-validation
+reality:
 
-**P2a-full Wave 3 (5 remaining):** 1 batch of 5 parallel subagents.
-Same briefing template (parse-validate requirement + CONFIG-AUTHORING.md
-pointer + closest case-study template).
+| # | Narrative | Strongest data points | Use case |
+|---|---|---|---|
+| 1 | "Replaces N hand-rolled validation scripts" | kubernetes (50→17), airflow (109 hooks→40 %), cpython (12 surfaces consolidated) | Repos with verify-script sprawl |
+| 2 | "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 scripts), uv (67-crate workspace), pnpm (`meta-updater` plugin replaced), react (codes.json + version-sync), nodejs/node (15-year-old conventions enforced via human review) | Repos that rely on convention without explicit checks |
+| 3 | "Adds structural floor on top of mature tooling" | typescript (eslint+dprint+knip), ruff (900+ Python rules, 0 internal-crate), prettier (5 net-new gates), helm (Trojan-Source defence + GHA hardening on top of golangci-lint) | Repos with mature tooling but missing structural layer |
+| 4 | "Replaces the structural subset of your custom orchestration layer" | pytorch (49 of 57 lintrunner adapters ≈ 86 % structural) | Repos that built their own lint-orchestration tool |
+| 5 | "Encodes conventions enforced only by code-review discipline" | golang/go (zero workflows / Makefile / golangci.yml; 31-rule alint config encodes the contract for the first time) | Tightly-curated minimal-tooling segment |
+
+**Polyglot wins (Wave 2 + Wave 3):**
+- **next.js** — first hybrid pnpm + Cargo dual-workspace win. *"Drift no per-language linter catches because each linter only sees half the tree."*
+- **apache/arrow** — the polyglot flagship: 6 languages in one tree, 21 lint hooks across 14 tool repos, 0 tools that see cross-language conventions. *"alint is the layer that does."* Live findings against the real arrow clone: 16 source files missing the Apache header (all listed in `dev/release/rat_exclude_files.txt`).
+
+These two case studies anticipate P2b's full polyglot mandate and may
+end up driving the launch-marketing message ahead of any single-language
+case study.
 
 | # | Repo | Ecosystem | Why |
 |---|---|---|---|
@@ -239,50 +246,61 @@ methodology, iterate the per-repo template based on what we learn, then dispatch
 the remaining 15 in batches of 3-5 (possibly with subagents for the inventory
 phase).
 
-### Rule-kind candidates surfaced by P2a (running tally — 15 of 20 done)
+### Rule-kind candidates surfaced by P2a (FINAL — 20 of 20 done)
 
 Aggregated from the per-repo `examples/<owner>-<repo>/README.md` gap
-catalogues. Will be the primary input to v0.10+ rule-kind design once
-P2a-full is complete. Demand counted as the number of distinct repos
-that surface the same need (saturation signal). Sorted by demand
-strength.
+catalogues. Primary input to v0.10+ rule-kind design. Demand counted as
+the number of distinct repos that surface the same need (saturation
+signal). Sorted by demand strength.
 
-**v0.10 high-priority** (≥3 sources, broad applicability):
+**v0.10 — design first** (≥4 sources, broad applicability, clear shape):
 
 | Candidate | Demand | Notes |
 |---|---|---|
-| `cross_file_value_equals` (incl. `cross_file_field_equals` variant — JSONPath value at point X in file A equals JSONPath value at point Y in file B; pnpm adds a "key-set membership" sub-shape: value in A appears in *keys at* Y in B) | airflow + tokio + clap + uv + react + pnpm (6) | **Strongest demand signal in P2a.** Covers split-workspace lockfile sync, root README ↔ per-crate README, version-in-CHANGELOG, pnpm `meta-updater`'s 13 cross-package invariants, react's `ReactVersion.js` propagated to 3 per-package fields. |
-| `registry_paths_resolve` (every path/key in a registry file resolves to an on-disk artefact) | rust + clap + cpython (×2) (4 sources, 5 confirmations) | cpython subagent flags as **"the single highest-leverage gap."** tidy::triagebot, .github/settings.yml referenced files, codeowners patterns, cpython's check-c-api-docs symbol↔docs cross-ref + .gitattributes generated markers. |
-| `ordered_block` (lines between marker pairs sorted unique under configurable comparator) | rust + airflow + tokio + cpython (4) | tidy::alphabetical + spellcheck.dic + airflow allowed-imports lists + cpython's `Modules/Setup`. |
-| `for_each_leaf_dir` / `iter.is_leaf` accessor (leaf-walk variant of `for_each_dir`) | prettier + rust + ruff (3) | prettier (format-test-lint per leaf), rust (`tests/ui/`), ruff (per-rule snapshots). Extends existing `for_each_dir` rather than a new kind. |
-| `balanced_delimiters` + `file_pair_block_match` (paired marker blocks must stay in sync) | rust + cpython (3 confirmations: rust×1 + cpython×2) | tidy::rustdoc_css_themes + cpython's Argument Clinic block markers. |
-| `import_gate` (forbid imports of pattern X in path scope Y) | k8s + airflow (2) | Already a recurring shape across multiple OSS pipelines. |
-| `pair_hash` (computed property of file A appears at offset Y in file A) | k8s + tokio (2) | spellcheck.dic header line + k8s manifest checksum. |
-| `json_schema_passes` config-shape mode (validate a config file against an inline JSON Schema) | k8s + turbo (2) | Replaces hand-rolled `argv:`-shape checks. |
-| `generated_file_fresh` (run a generator and diff the output against the on-disk file) | uv + cpython (2) | uv's `cargo dev generate-*`, cpython's `cases_generator`. Tension: alint's deliberate non-goal is running codegen — propose as opt-in primitive. |
-| `command_idempotent` mode (run tool in --check mode, fail if working-tree would change) | ruff + prettier (2) | mdformat, markdownlint, prettier, ruff-format, dprint-check all share this shape. |
-| `json_key_value_forbidden` (JSON-aware variant of `file_content_forbidden`; assert values at JSONPath X across glob Y don't match regex Z) | prettier + turbo + uv (3) | Cleanest abstraction over the very common "no foo:bar in any package.json under packages/" pattern. |
+| `registry_paths_resolve` (every path/key in a registry file resolves to an on-disk artefact) | rust + clap + cpython (×2) + next.js + arrow + pytorch + nodejs/node (**7 sources, 8 confirmations**) | **Highest-leverage gap in P2a** (cpython subagent's words). tidy::triagebot, .github/settings.yml, CODEOWNERS, cpython check-c-api-docs symbol↔docs + .gitattributes generated markers, arrow `dev/release/rat_exclude_files.txt`, pytorch HEADER_ONLY_LINTER, node `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔ `deps/<libname>/`. |
+| `cross_file_value_equals` (incl. `cross_file_field_equals` variant + pnpm's "key-set membership" sub-shape) | airflow + tokio + clap + uv + react + pnpm + nodejs/node + pytorch (**8 sources**) | **Past-saturation demand.** split-workspace lockfile sync, root README ↔ per-crate README, version-in-CHANGELOG, pnpm `meta-updater`'s 13 cross-package invariants, react's `ReactVersion.js` propagated to 3 per-package fields, nodejs `tools/eslint-rules/*` ↔ `eslint.config.mjs`, pytorch WORKFLOWSYNC. |
+| `ordered_block` (lines between marker pairs sorted unique under configurable comparator) | rust + airflow + tokio + cpython + arrow + golang/go (**6 sources**) | tidy::alphabetical + spellcheck.dic + airflow allowed-imports + cpython `Modules/Setup` + arrow + golang/go `api/go1*.txt` golden files. |
 
-**v0.10 single-source candidates** (worth designing if cheap, lower demand):
+**v0.10 — design if cheap** (2-3 sources, broad-enough applicability):
+
+| Candidate | Demand | Notes |
+|---|---|---|
+| `for_each_leaf_dir` / `iter.is_leaf` accessor | prettier + rust + ruff (3) | Leaf-walk variant of `for_each_dir`. Extends existing rather than new kind. |
+| `balanced_delimiters` + `file_pair_block_match` | rust + cpython (×2) (3 confirmations) | tidy::rustdoc_css_themes + cpython Argument Clinic block markers. |
+| `import_gate` (forbid imports of pattern X in path scope Y) | k8s + airflow + golang/go + pytorch (4) | Recurring shape; pytorch IMPORT_LINTER reconfirms. |
+| `generated_file_fresh` (run a generator and diff the output against the on-disk file) | uv + cpython + pytorch (3-4) | uv `cargo dev generate-*`, cpython `cases_generator`, pytorch NATIVEFUNCTIONS + GENERATED_SHIMS_VERSION. Tension: alint's deliberate non-goal is running codegen — propose as opt-in primitive. |
+| `pair_hash` (computed property of file A appears at offset Y in file A) | k8s + tokio + golang/go (3) | spellcheck.dic header line + k8s manifest checksum + **golang/go FIPS** (highest-stakes use case to date — CMVP submission references the file format). |
+| `json_schema_passes` config-shape mode (validate a config file against an inline JSON Schema) | k8s + turbo (2) | Replaces hand-rolled `argv:`-shape checks. |
+| `command_idempotent` mode (run tool in --check mode, fail if working-tree would change) | ruff + prettier (2) | mdformat, markdownlint, prettier, ruff-format, dprint-check all share this shape. |
+| `json_key_value_forbidden` (JSON-aware variant of `file_content_forbidden`) | prettier + turbo + uv (3) | "no foo:bar in any package.json under packages/" pattern. |
+| **`*_path_contains` (set-membership shorthand for "value X is present in array at JSONPath Y")** | helm + deno (existing fix) (2) | **Resolves pitfall #17.** Direct response to the `*_path_equals + [*]` semantics gap. |
+
+**v0.10 single-source** (worth designing if cheap, lower demand):
 
 | Candidate | Source | Notes |
 |---|---|---|
 | `pair_inverse` (every partner traces back to a primary; reverse of `pair`) | ruff | Snapshot freshness; covers `cargo insta --unreferenced=reject`. |
 | `pair_count` (assert N≥1 partner files match a registry entry) | typescript | Diagnostic-ID-appears-in-baseline; airflow `check-no-new-airflow-exceptions` family. |
 | `regex_resolves_in_file` (pre-release-replacement pattern in file A resolves to a real string in file B) | clap | cargo-release `pre-release-replacements` integrity. |
-| `archive_contents_matches` (open `*.{whl,tar.gz,zip}`, compare member set against expected with template substitution) | uv | check_uv_wheel_contents.py; applies to every Python package on PyPI. |
-| `dir_name_matches_field` (directory basename matches a field inside a manifest in that directory) | turbo | per-package `name` field in package.json must equal directory name. |
-| `violation_baseline` (suppress N existing violations; fail if N grows) | deno | TS-style `lint:` baseline files; deno lint `--ignore`. |
-| `file_non_empty` (convenience for "file exists + has ≥1 byte"; resolves pitfall #15) | uv (implicit) | Cleaner than `file_min_lines: 1` for the common case. |
-| `unique_by` cross-dir mode (extends existing `unique_by` for cross-sibling-dir uniqueness) | prettier | PR-number uniqueness across changeset categories. |
-| `registry_append_only` (assert HEAD's JSON object keys are a superset of HEAD~1's keys, no key reassignment) | react | Novel git-history-aware shape. Covers `codes.json`; generalises to i18n/feature-flag/API-endpoint registries. |
+| `archive_contents_matches` (open `*.{whl,tar.gz,zip}`, compare member set against expected) | uv | check_uv_wheel_contents.py; applies to every Python package on PyPI. |
+| `dir_name_matches_field` (directory basename matches a field inside a manifest in that directory) | turbo + next.js (2) | per-package `name` field in package.json must equal directory name. |
+| `violation_baseline` (suppress N existing violations; fail if N grows) | deno | TS-style `lint:` baseline files. |
+| `file_non_empty` (convenience for "file exists + has ≥1 byte"; resolves pitfall #15) | uv (implicit) | Cleaner than `file_min_lines: 1`. |
+| `unique_by` cross-dir mode | prettier | PR-number uniqueness across changeset categories. |
+| `registry_append_only` (HEAD's JSON object keys are a superset of HEAD~1's; no key reassignment) | react | **Novel git-history-aware shape.** Covers `codes.json`; generalises to i18n/feature-flag/API-endpoint registries. |
+| `not_executable` (file doesn't have +x bit) | pytorch | Convenience over `command:` shellout. |
+| `line_spacing` (every non-blank line followed by N blanks) | pytorch (MERGE_CONFLICTLESS_CSV) | Niche format; defer. |
+| `directory_hash` / `pair_hash` extension (content-hash of dir drives downstream cache) | pytorch (`.ci/docker/`) | CI-rebuild-trigger pattern. |
+| `yaml_path_implication` ("if path X = V₁ then path Y = V₂") | pytorch (NO_WORKFLOWS_ON_FORK) | Covers conditional-config patterns. |
+| `cross_language_implementation_complete` (every type in a schema spec has a per-language test fixture) | arrow | **Polyglot flagship primitive — v0.11+.** Tailor-made for arrow's `format/Schema.fbs` story. |
 
 **v0.10 low-priority / niche** (single-source, narrow applicability):
 
 | Candidate | Source | Notes |
 |---|---|---|
-| `json_key_sort_order` (alphabetical key-order assertion on JSON objects) | pnpm | High machinery cost (serde_json into Value loses key order); narrow demand. |
-| `column_alignment` (assert text aligned to column N or next multiple) | cpython | CODEOWNERS GitHub-username alignment. Niche; defer. |
+| `json_key_sort_order` (alphabetical key-order assertion on JSON objects) | pnpm | High machinery cost (serde_json into Value loses key order). |
+| `column_alignment` (text aligned to column N or next multiple) | cpython | CODEOWNERS GitHub-username alignment. Defer. |
+| `file_header_consistency` (`file_header.alt_pattern` field for "drifted" historical headers) | nodejs/node | Joyent BSD/MIT banner drift; cleaner outcome is editorial cleanup. |
 
 **Bundled-ruleset candidates** (no new rule kinds, just composition):
 
@@ -290,19 +308,43 @@ strength.
 |---|---|---|
 | `python/pep-621-shape@v1` | `validate-pyproject` shellouts, manual PEP 621 checks | uv |
 | `rust/cargo-release-conventions@v1` | clap's `pre-release-replacements` patterns | clap |
-| `monorepo/pnpm-workspace@v1` (extension of existing pnpm bundling) | per-package field discipline pnpm dogfoods via `meta-updater` | pnpm |
+| `monorepo/pnpm-workspace@v1` (extension of existing) | per-package field discipline pnpm dogfoods via `meta-updater` | pnpm |
+| `apache/governance@v1` (LICENSE+NOTICE+KEYS+RAT discipline) | hand-rolled Apache-RAT shellouts | arrow |
+| `cncf/owners@v1` (OWNERS file shape per k8s sig conventions) | k8s-sig OWNERS rules in helm-style projects | helm |
 
 **Process meta-findings:**
-- Parse-validation catches schema errors but cannot catch pitfalls #13-14
-  (anchoring, `\n` semantics) or #16 (`*_path_matches` against bool fields)
-  — all three produce silently-wrong runtime behaviour. A v0.9.16+
-  "smoke-test fixture" audit is proposed at the bottom of
+- Parse-validation catches schema errors but cannot catch pitfalls #13,
+  #14, #16, #17 — all four produce silently-wrong runtime behaviour. A
+  v0.9.16+ "smoke-test fixture" audit is proposed at the bottom of
   `docs/development/CONFIG-AUTHORING.md`.
 - `--format json` output filters out passing per-file rules (engine
   optimisation), which can mislead a config author into thinking rules
   aren't loaded. `alint list --config <path>` is the authoritative view.
-  Documented in CONFIG-AUTHORING.md § "Parse-validation is necessary but
-  not sufficient."
+- 7 silently-broken structured-path rules in committed pilot+Wave 1
+  configs (6 bool-match in Wave 2; 1 array-semantics in Wave 3) were
+  caught + fixed only because subsequent case studies happened to surface
+  the underlying pitfall. Without the smoke-test fixture audit, this
+  pattern (rule loads, builds, evaluates the wrong way) would persist
+  indefinitely. **The audit gap is the single most load-bearing
+  v0.9.16+ item.**
+
+### Saturation analysis (when to stop adding repos)
+
+By Wave 3, ~80 % of new rule-kind candidates surfaced were *single-source*
+or refinements of existing ones; ≥3-source candidates stopped appearing
+after Wave 2. Existing v0.10 candidates instead saw 3rd-7th confirmations
+with fresh substantive use cases (FIPS for `pair_hash`, lintrunner for
+`cross_file_value_equals` + `import_gate` + `generated_file_fresh`,
+arrow's `rat_exclude_files.txt` for `registry_paths_resolve`). Pitfall
+discovery rate also tailed: pilot 12 → Wave 1 (3) → Wave 2 (1) → Wave 3
+(2). The Wave 3 pair surfaced a *runtime semantics* class (#17, #18)
+distinct from the schema/regex classes, suggesting a remaining unknown
+unknown but a converging surface.
+
+**Implication for P2b:** the polyglot wave should optimise for *new
+narrative shapes* (multi-language stress, scale stress) rather than
+*new rule-kind candidates*. Most P2b case studies will reconfirm
+existing v0.10 candidates with deeper data, not surface new ones.
 
 ### P3 — Marketing refresh (~5-6 days; depends on P2a)
 
@@ -435,10 +477,10 @@ studies + post-launch infra including MCP server): ~10-12 weeks.
 5. ✅ **P2a-full Wave 1** — 5 parallel subagents (tokio, uv, ruff, clap, typescript) — surfaced pitfalls 13-15 + 6 new rule-kind candidates
 6. ✅ **P2a aggregation (Wave 1)** — CONFIG-AUTHORING.md §13-15 added; rule-kind candidate table added to launch-prep.md
 7. ✅ **P2a-full Wave 2** — 5 parallel subagents (next.js, pnpm, react, prettier, cpython) — surfaced pitfall #16 + 6 more rule-kind candidates + caught 6 silently-broken bool-match rules in committed configs
-8. ✅ **P2a aggregation (Wave 2)** — CONFIG-AUTHORING.md §16 added; 6 broken rules fixed (use `*_path_equals` for bool fields); rule-kind candidate table reorganised by demand strength
-9. **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node)
-10. **P2a aggregation (Wave 3)** — final pitfall + rule-kind sweep
-11. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue
+8. ✅ **P2a aggregation (Wave 2)** — CONFIG-AUTHORING.md §16 added; 6 broken rules fixed
+9. ✅ **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node) — surfaced pitfalls #17 + #18 + 9 more rule-kind candidates + caught 1 silently-broken array-semantics rule in deno
+10. ✅ **P2a aggregation (Wave 3 + final)** — CONFIG-AUTHORING.md §17-18 added; deno rule fixed; rule-kind table reorganised final; 5 positioning narratives tabled
+11. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue (18 pitfalls; 4 of them runtime-semantic and not parse-catchable)
 12. **v0.9.15 release**
 13. **P3 marketing refresh** — hero + SEO + AI/LLM discovery
 14. **P4 launch**

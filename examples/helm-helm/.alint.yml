@@ -1,0 +1,397 @@
+# Starter alint config for helm/helm.
+#
+# helm is a midsize, modular Go monorepo (~530 .go files, ~150k LoC,
+# one root go.mod plus one nested go.mod under
+# internal/plugin/testdata/src/extismv1-test). Its existing
+# structural-validation surface is workmanlike rather than ambitious:
+# a Makefile with `test-style` / `test-source-headers`, one
+# `.golangci.yml`, one ~50-line `scripts/validate-license.sh`, plus
+# the standard CNCF GitHub Actions and OWNERS file.
+#
+# This config replaces the Makefile's structural-test surface
+# (`test-source-headers`, the per-file gofmt + goimports + license
+# header gates that golangci-lint hides inside its formatters block,
+# and the `tidy`-as-validation pattern) with declarative rules, plus
+# 4 `command` shellouts to the existing tools (golangci-lint, gofmt,
+# misspell, govulncheck). Net: every structural check helm runs in CI
+# moves to one declarative file; the deep-Go checks (depguard,
+# gomodguard, revive, modernize, etc.) stay inside golangci-lint
+# where they belong.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to
+# your local layout if your fork has diverged.
+#
+# Known limitations versus the existing Makefile / golangci-lint
+# pipeline (each requires an alint primitive that doesn't ship today
+# — see this directory's README.md for the full gap catalogue):
+#
+#   - .golangci.yml `linters.settings.depguard.rules` (forbid
+#     hashicorp/go-multierror, pkg/errors)            — needs `import_gate`
+#   - .golangci.yml `linters.settings.gomodguard.blocked` (force
+#     evanphx/json-patch/v5 over v1)                  — needs `import_gate`
+#   - revive `var-naming` initialism overrides         — Go-AST aware; out
+#                                                        of scope
+#   - testifylint, modernize, perfsprint, sloglint,
+#     usestdlibvars, usetesting, etc.                  — Go-AST checks; live
+#                                                        with golangci-lint
+#   - gen-test-golden test-golden freshness check      — needs
+#                                                        `command_idempotent`
+#                                                        / generator-diff
+#                                                        primitive
+#
+# These remain on `make test-style` (golangci-lint) until alint
+# v0.10+ ships the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/go@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ─── scripts/validate-license.sh ───────────────────────────────
+  # The bash script greps every *.go and *.sh file (excluding
+  # testdata + third_party) for two literal strings. alint's
+  # `file_header` is the right primitive for the per-file enforcement:
+  # the contiguous block has to appear at the top of the file. The
+  # combined regex below matches the four-line header helm uses:
+  #
+  #   /*
+  #   Copyright The Helm Authors.
+  #   <BLANK LINE>
+  #   Licensed under the Apache License, Version 2.0 (the "License");
+  #
+  # for *.go (C-style comment block) and the "#"-prefixed variant
+  # for *.sh.
+  - id: helm-go-license-header
+    kind: file_header
+    paths:
+      include: ["**/*.go"]
+      exclude:
+        - "**/testdata/**"
+        - "internal/third_party/**"
+    scope_filter:
+      has_ancestor: go.mod
+    # Two header shapes coexist in the tree:
+    #   /*\nCopyright ...\n\nLicensed under ...      (most files)
+    #   /*\nCopyright ...\nLicensed under ...        (no blank, internal/chart/v3, internal/fileutil)
+    #   // Copyright ...\n// Licensed under ...      (line-comment style, pkg/helmpath/lazypath_darwin.go, etc.)
+    # The validate-license.sh script accepts all three because it
+    # greps for the two literals separately. Mirror that tolerance
+    # with `(?s)` + `.{0,N}?` between the two anchor strings.
+    pattern: '(?s)\A.{0,400}?Copyright The Helm Authors\..{0,400}?Licensed under the Apache License, Version 2\.0 \(the "License"\);'
+    level: error
+    message: >-
+      Every Go source file under a Go module must start with the
+      Helm Apache-2.0 header. See scripts/validate-license.sh.
+
+  - id: helm-shell-license-header
+    kind: file_header
+    paths:
+      include: ["**/*.sh"]
+      exclude:
+        - "**/testdata/**"
+        - "internal/third_party/**"
+    pattern: |
+      ^#!/usr/bin/env bash
+
+      # Copyright The Helm Authors\.
+      #
+      # Licensed under the Apache License, Version 2\.0 \(the "License"\);
+    level: error
+    message: >-
+      Every shell script must start with the Helm Apache-2.0
+      header (after the shebang). See scripts/validate-license.sh.
+
+  # ─── Makefile :: test-style → golangci-lint run ./... ───────────
+  # The .golangci.yml enables 17 linters + two formatters (gofmt,
+  # goimports). golangci-lint walks the whole module — one shot at
+  # the repo root is the right granularity here (helm has only one
+  # production go.mod; the second one in
+  # internal/plugin/testdata/... is a fixture, not a build target).
+  #
+  # Done as a `for_each_dir` on go.mod so the rule degrades gracefully
+  # if helm ever splits into multiple modules — the same pattern
+  # works for the future "helm-charts" subrepo direction.
+  - id: helm-golangci-lint
+    kind: for_each_dir
+    select: "go.mod"
+    when_iter: 'not iter.path matches "testdata"'
+    require:
+      - kind: command
+        paths: "{dir}"
+        command: ["golangci-lint", "run", "{dir}/..."]
+        timeout: 600
+    level: error
+
+  # ─── .golangci.yml shape: required formatters block ─────────────
+  # If a contributor strips the formatters.enable list (or the
+  # local-prefixes block that pins helm.sh/helm/v4 as the import
+  # group separator), goimports stops sorting helm-internal imports
+  # away from third-party imports. That regression is silent under
+  # `make test-style` because golangci-lint runs whatever its config
+  # says — but it's structural, so alint can catch it.
+  #
+  # NOTE on rule-shape choice: a `yaml_path_equals` against
+  # `$.formatters.enable[*]` would return one match per array
+  # element, and EVERY match must equal the target — so for an
+  # array `[gofmt, goimports]` one rule per value reports the
+  # other element as a violation. The cleanest workaround is
+  # `file_content_matches` against the YAML text directly. The
+  # v0.10+ `*_path_contains` candidate (set-membership shorthand)
+  # would let these be one rule each.
+  - id: helm-golangci-config-has-gofmt
+    kind: file_content_matches
+    paths: ".golangci.yml"
+    pattern: '(?m)^\s*-\s*gofmt\b'
+    level: warning
+    message: >-
+      .golangci.yml should keep `gofmt` in formatters.enable so
+      every PR is gofmt-clean.
+
+  - id: helm-golangci-config-has-goimports
+    kind: file_content_matches
+    paths: ".golangci.yml"
+    pattern: '(?m)^\s*-\s*goimports\b'
+    level: warning
+    message: >-
+      .golangci.yml should keep `goimports` in formatters.enable
+      so import grouping stays consistent.
+
+  - id: helm-golangci-config-has-local-prefix
+    kind: yaml_path_equals
+    paths: ".golangci.yml"
+    path: "$.formatters.settings.goimports['local-prefixes'][0]"
+    equals: "helm.sh/helm/v4"
+    level: warning
+    message: >-
+      .golangci.yml should pin
+      formatters.settings.goimports.local-prefixes[0] to
+      "helm.sh/helm/v4" so internal imports are grouped separately.
+
+  # ─── Makefile :: format target → goimports -w -local helm.sh/helm
+  # Single-shot goimports check across the module. We don't shell out
+  # for the auto-fix variant (the user runs `make format` for that);
+  # this is the read-only "would `make format` change anything?" gate
+  # that mirrors gofmt -l.
+  #
+  # gofmt -l prints filenames of unformatted files and exits 0. The
+  # `command` rule treats non-empty stdout as a violation, which is
+  # the signal we want. (See CONFIG-AUTHORING.md §3.)
+  - id: helm-gofmt-clean
+    kind: command
+    paths: "**/*.go"
+    scope_filter:
+      has_ancestor: go.mod
+    command: ["gofmt", "-l", "{path}"]
+    timeout: 30
+    level: error
+    message: >-
+      File is not gofmt-clean. Run `gofmt -w` (or `make format`).
+
+  # ─── Makefile :: tidy → go mod tidy ─────────────────────────────
+  # CI runs `go mod tidy -diff` to assert the go.mod / go.sum pair
+  # are both up-to-date and minimal. One go.mod root → one shellout.
+  - id: helm-go-mod-tidy
+    kind: command
+    paths: "go.mod"
+    command: ["go", "mod", "tidy", "-diff"]
+    timeout: 120
+    level: error
+    message: >-
+      go.mod / go.sum are out of sync. Run `make tidy` (= `go mod
+      tidy`) and commit the diff.
+
+  # ─── .github/workflows/govulncheck.yml ──────────────────────────
+  # Daily cron + on-push when go.sum changes. We register it as an
+  # alint rule so contributors can run the same gate locally with
+  # `alint check` instead of waiting for CI feedback.
+  - id: helm-govulncheck
+    kind: for_each_dir
+    select: "go.mod"
+    when_iter: 'not iter.path matches "testdata"'
+    require:
+      - kind: command
+        paths: "{dir}"
+        command: ["govulncheck", "{dir}/..."]
+        timeout: 300
+    level: warning
+    message: >-
+      `govulncheck ./...` reports a known Go vulnerability. See
+      https://go.dev/security/vuln/.
+
+  # ─── .golangci.yml :: linters.settings.misspell ─────────────────
+  # golangci-lint runs misspell as a linter, but it's also worth
+  # exposing as a stand-alone alint rule so a contributor running
+  # `alint check` against a docs PR (no Go files touched) still gets
+  # spelling feedback. golangci-lint skips invocation when no Go
+  # files are in scope; misspell-the-tool doesn't have that
+  # restriction.
+  - id: helm-spelling
+    kind: command
+    paths:
+      include: ["**/*.md", "**/*.go"]
+      exclude:
+        - "vendor/**"
+        - "**/testdata/**"
+        - "internal/third_party/**"
+        - "KEYS"
+    command: ["misspell", "-error", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ─── OWNERS files (CNCF / Kubernetes convention) ────────────────
+  # helm follows the k8s.io OWNERS convention: top-level OWNERS
+  # plus whatever per-subdir OWNERS files maintainers add. The
+  # convention has three load-bearing top-level keys: `maintainers`,
+  # `triage` (helm-specific addition over the bare k8s spec), and
+  # `emeritus`. The shape matters because the kubernetes
+  # publishing-bot + GitHub OWNERS-action both parse these files.
+  - id: helm-owners-file-exists
+    kind: file_exists
+    paths: "OWNERS"
+    root_only: true
+    level: warning
+    message: >-
+      Top-level OWNERS file is required for the CNCF
+      maintainer-routing convention.
+
+  - id: helm-owners-has-maintainers
+    kind: yaml_path_matches
+    paths: "OWNERS"
+    path: "$.maintainers[0]"
+    matches: '^[A-Za-z0-9_-]+$'
+    level: error
+    message: >-
+      OWNERS.maintainers must be a non-empty list of GitHub
+      usernames (no spaces, slashes, or quotes).
+
+  # ─── Test-file convention: every package has a *_test.go ───────
+  # Go's idiomatic discipline is that every meaningful package
+  # carries its own test file. helm is well above 90% on this
+  # already; alint enforces it as a soft floor so a new package
+  # added without tests gets flagged at PR time.
+  #
+  # Pair primary = the package's primary .go file (any non-test .go
+  # under the dir); partner = a *_test.go in the same dir. Done with
+  # `for_each_dir` over the package roots that contain at least one
+  # .go file.
+  - id: helm-package-has-tests
+    kind: for_each_dir
+    select: "pkg/*/"
+    when_iter: 'iter.has_file("*.go") and iter.is_dir'
+    require:
+      - kind: file_exists
+        paths: "{path}/*_test.go"
+    level: warning
+    message: >-
+      Every pkg/*/ package should carry at least one *_test.go file.
+      (Helm's existing convention; flag at PR time, not at release.)
+
+  # ─── .github/env :: GOLANG_VERSION must match go.mod's go directive
+  # Two sources of truth for the toolchain version: .github/env
+  # (consumed by every CI workflow) and go.mod's `go <version>`
+  # directive. They drift apart silently — we guard against that
+  # with two field-pinning rules. (Cross-file value-equality is on
+  # the v0.10+ candidate list as `cross_file_value_equals`; in the
+  # meantime we hardcode the version in both rules and let the
+  # config carry the cross-reference.)
+  - id: helm-github-env-pins-go-version
+    kind: file_content_matches
+    paths: ".github/env"
+    pattern: '(?m)^GOLANG_VERSION=\d+\.\d+'
+    level: warning
+    message: >-
+      .github/env must declare GOLANG_VERSION=<major>.<minor>
+      (the workflows source it via `cat .github/env >> $GITHUB_ENV`).
+
+  - id: helm-github-env-pins-golangci-lint-version
+    kind: file_content_matches
+    paths: ".github/env"
+    pattern: '(?m)^GOLANGCI_LINT_VERSION=v\d+\.\d+\.\d+'
+    level: warning
+    message: >-
+      .github/env must pin GOLANGCI_LINT_VERSION=v<x.y.z>; the
+      `make test-style` target diff-checks the locally-installed
+      golangci-lint against this value.
+
+  # ─── .goreleaser.yaml structural shape ─────────────────────────
+  # helm publishes binaries via goreleaser. Two shape assertions
+  # catch the regressions that have actually happened in the past:
+  # CGO_ENABLED accidentally re-enabled (defeats the static-binary
+  # promise), and the `dist` directory accidentally being bumped
+  # off the .gitignored `_dist/` (which would land binaries in git).
+  - id: helm-goreleaser-cgo-disabled
+    kind: yaml_path_matches
+    paths: ".goreleaser.yaml"
+    path: "$.builds[0].env[*]"
+    matches: '^CGO_ENABLED=0$'
+    level: error
+    message: >-
+      .goreleaser.yaml must set CGO_ENABLED=0 — helm's release
+      binaries are statically linked.
+
+  - id: helm-goreleaser-dist-underscored
+    kind: yaml_path_equals
+    paths: ".goreleaser.yaml"
+    path: "$.dist"
+    equals: "_dist"
+    level: warning
+    message: >-
+      .goreleaser.yaml's `dist:` should remain `_dist` so the
+      .gitignore entry catches the build artefacts.
+
+  # ─── helm-specific top-level files ──────────────────────────────
+  # Existence checks for the assets the project advertises: the
+  # ADOPTERS list, the AGENTS.md (codebase tour for AI agents), the
+  # GPG key file used by signed-release verification, the
+  # code-of-conduct pointer to the Kubernetes one.
+  - id: helm-adopters-exists
+    kind: file_exists
+    paths: "ADOPTERS.md"
+    root_only: true
+    level: info
+    message: "ADOPTERS.md is the canonical user-list for the project; keep it at the root."
+
+  - id: helm-agents-md-exists
+    kind: file_exists
+    paths: "AGENTS.md"
+    root_only: true
+    level: info
+    message: >-
+      AGENTS.md gives AI agents the codebase tour helm contributors
+      maintain. Keep it at the root.
+
+  - id: helm-keys-file-exists
+    kind: file_exists
+    paths: "KEYS"
+    root_only: true
+    level: info
+    message: >-
+      KEYS is the GPG keyring users verify signed releases against.
+      Keep it at the root.
+
+  - id: helm-code-of-conduct-points-to-cncf
+    kind: file_content_matches
+    paths: "code-of-conduct.md"
+    pattern: 'kubernetes/community.*code-of-conduct'
+    level: info
+    message: >-
+      code-of-conduct.md should redirect to the upstream Kubernetes
+      / CNCF Code of Conduct.
+
+  # ─── Hygiene: no committed _dist or vendor ─────────────────────
+  # The .gitignore lists `_dist/`, `_dist_versions/`, `bin/`, and
+  # `vendor/`. The bundled `hygiene/no-tracked-artifacts@v1` ruleset
+  # already catches `bin/` and `vendor/` (via the cargo-target +
+  # node-modules family); _dist is helm-specific so we add it here.
+  - id: helm-no-tracked-dist
+    kind: dir_absent
+    paths: ["_dist", "_dist_versions"]
+    level: error
+    message: >-
+      _dist/ and _dist_versions/ are release artefacts and must
+      not be committed. They live in .gitignore for a reason.

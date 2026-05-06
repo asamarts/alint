@@ -1,11 +1,12 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a launch-prep validation pass — **16 distinct schema /
+Surfaced by the P2a launch-prep validation pass — **18 distinct schema /
 language pitfalls** hit while writing configs for production repos. 12
 surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow, turbo);
-3 in Wave 1 (clap, tokio, ruff, uv, typescript); 1 in Wave 2 (next.js).
-All configs ultimately parse + run, but the iteration cost was high. This
-doc captures every one with the canonical correct form.
+3 in Wave 1 (clap, tokio, ruff, uv, typescript); 1 in Wave 2 (next.js);
+2 in Wave 3 (helm, arrow). All configs ultimately parse + run, but the
+iteration cost was high. This doc captures every one with the canonical
+correct form.
 
 > **TL;DR for AI agents writing alint configs:** read this entire doc
 > before drafting an `.alint.yml`. The fields documented in
@@ -28,7 +29,7 @@ doc captures every one with the canonical correct form.
 
 ---
 
-## The 16 pitfalls
+## The 18 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -532,6 +533,89 @@ match, set membership via `^(a|b|c)$`, prefix anchor, etc.).
 
 Source: `crates/alint-rules/src/structured_path.rs::check_match`.
 
+### 17. `*_path_equals` against `[*]` JSONPath fires "wrong" on every non-matching element
+
+`*_path_equals` against a JSONPath that returns multiple matches (e.g.
+`$.formatters.enable[*]`) requires **every match** to equal the target.
+The natural reading "is this value present in the array?" is *not*
+what the rule does — it's "is every element of the array this value?".
+
+Hit by helm's `helm-golangci-config-has-{gofmt,goimports}` first-draft
+rules and silently broken in deno's `deno-dlint-includes-camelcase` for
+weeks before Wave 3 caught it. Same flavour of silent runtime bug as
+pitfall #16 — the rule loads + builds, but its semantics are inverted.
+
+**Wrong (intent: "camelcase must be present in rules.include"):**
+```yaml
+- id: dlint-includes-camelcase
+  kind: json_path_equals
+  paths: .dlint.json
+  path: "$.rules.include[*]"               # ← returns one match per element
+  equals: "camelcase"                      # ← every element must equal "camelcase";
+                                           #   fires on every other rule listed
+```
+
+**Right (option A — `file_content_matches` against the JSON text):**
+```yaml
+- id: dlint-includes-camelcase
+  kind: file_content_matches
+  paths: .dlint.json
+  pattern: '"include"\s*:\s*\[[^\]]*"camelcase"'
+```
+
+**Right (option B — when "every element must satisfy a regex" *is* the
+intent, `*_path_matches` is fine because the regex can validly cover the
+union of legal values):**
+```yaml
+- id: cargo-deny-allowed-licenses
+  kind: toml_path_matches
+  paths: deny.toml
+  path: "$.licenses.allow[*]"
+  matches: '^(MIT|Apache-2\.0|BSD-3-Clause)$'
+```
+
+**Rule of thumb:** if the JSONPath ends in `[*]` or otherwise returns
+multiple matches, ask "is the intent *all* or *any*?":
+- *All* (every element must satisfy a constraint) → `*_path_matches` with
+  a regex that matches every legal element, OR `*_path_equals` with a
+  single literal that every element must equal (rare).
+- *Any* (one element must satisfy a constraint) → `file_content_matches`
+  on the raw text, OR wait for the v0.10+ `*_path_contains` primitive
+  (proposed in `docs/launch-prep.md`'s rule-kind candidate table).
+
+### 18. JSONPath filter expressions: no outer parentheses around the predicate (RFC 9535)
+
+`serde_json_path` (alint's JSONPath impl) is RFC 9535-compliant. The spec
+defines filter selectors as `?<predicate>`, **not** `?(<predicate>)`. The
+outer-parens form is common in pre-RFC tutorials and the JS `jsonpath`
+package, but `serde_json_path` rejects it at parse time.
+
+**Wrong:**
+```yaml
+- id: dependabot-actions-grouped
+  kind: yaml_path_matches
+  paths: .github/dependabot.yml
+  path: "$.updates[?(@.package-ecosystem == 'github-actions')].groups"
+  matches: '.+'
+```
+
+**Right:**
+```yaml
+- id: dependabot-actions-grouped
+  kind: yaml_path_matches
+  paths: .github/dependabot.yml
+  path: "$.updates[?@['package-ecosystem'] == 'github-actions'].groups"
+  matches: '.+'
+```
+
+Note also pitfall #10 (bracket notation for dashed keys: `@['package-ecosystem']`,
+not `@.package-ecosystem`).
+
+A v0.9.15 Phase 4 did-you-mean message ("did you mean `?@.foo == 'bar'`
+without the outer parens?") would catch this at parse time.
+
+Source: [RFC 9535 § 2.3.5](https://www.rfc-editor.org/rfc/rfc9535#section-2.3.5).
+
 ---
 
 ## Honourable mention: JSONPath regex matching uses `match()`, not `=~`
@@ -670,21 +754,28 @@ Before merging a PR that adds or modifies an `.alint.yml`:
       number, or null fields, use `*_path_equals` with a YAML-native
       literal. For "either-of-many" bools, fall back to
       `file_content_matches` against the raw JSON text.
+- [ ] Every `*_path_equals` rule's path is single-valued (no `[*]` /
+      `..` / multi-match selectors), OR the intent is genuinely "every
+      match must equal X". For "any element of array contains X", use
+      `file_content_matches` (or wait for `*_path_contains`).
+- [ ] JSONPath filter selectors use the RFC 9535 form `?@.foo == 'bar'`,
+      not the pre-RFC `?(@.foo == 'bar')` outer-parens form.
 
 The `coverage_audit_examples_parse.rs` audit (added in v0.9.15) enforces
 the first item by re-validating every `examples/*/.alint.yml` on every
-CI run. The schema-level items (1-12, 15) are caught by the same parse,
-so the audit covers them transitively. **Items 13, 14, and 16 are NOT
-caught by parse-validation** — they produce silently-wrong runtime
+CI run. The schema-level items (1-12, 15, 18) are caught by the same
+parse, so the audit covers them transitively. **Items 13, 14, 16, 17 are
+NOT caught by parse-validation** — they produce silently-wrong runtime
 behaviour (regex never matches; `*_path_matches` against a bool fires
-"not a string" on every match) — see § "Parse-validation is necessary
-but not sufficient" below.
+"not a string" on every match; `*_path_equals` against `[*]` flips
+intent from "any" to "all") — see § "Parse-validation is necessary but
+not sufficient" below.
 
 ---
 
 ## Parse-validation is necessary but not sufficient
 
-Three pitfalls in the catalogue above produce silently-wrong runtime
+Four pitfalls in the catalogue above produce silently-wrong runtime
 behaviour that the `coverage_audit_examples_parse.rs` audit cannot
 catch:
 
@@ -696,8 +787,11 @@ catch:
 - **#16** — `*_path_matches` against a bool/number/null field emits a
   "not a string" runtime violation on every match, completely inverting
   the intended signal.
+- **#17** — `*_path_equals` against a `[*]` JSONPath flips intent from
+  "any element matches" to "every element must match", firing on every
+  element that doesn't.
 
-All three classes share the same shape: the audit verifies the rule
+All four classes share the same shape: the audit verifies the rule
 *loads and builds*; nothing verifies the rule *fires correctly* against
 realistic input.
 

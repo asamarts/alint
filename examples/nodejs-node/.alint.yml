@@ -1,0 +1,932 @@
+# Starter alint config for nodejs/node.
+#
+# nodejs/node is the canonical mature C++/JS hybrid mega-repo: ~15
+# years of accumulated convention discipline, with structural
+# validation scattered across a 1700-line Makefile (dozens of
+# `lint-*`, `format-*`, `tidy-*`, `check-*` targets), tools/eslint-rules/
+# (27 in-tree custom eslint rules), tools/checkimports.py, tools/cpplint.py
+# (a fork), tools/lint-md/, tools/lint-{pr-url,readme-lists,sh}.mjs,
+# .editorconfig, .clang-format, .cpplint, eslint.config.mjs +
+# 7 per-tier eslint.config_partial.mjs files, .gitattributes (terse
+# but load-bearing for line-endings + binary classification), 25
+# .github/workflows/ files (linters.yml dispatches the lint matrix),
+# pyproject.toml (ruff config + Python lint), tools/lint-md/lint-md.mjs
+# (remark-lint pipeline), and a 27-version per-major-version
+# CHANGELOG_V*.md convention under doc/changelogs/.
+#
+# This config replaces the SHALLOW orchestration layer with declarative
+# alint rules and shells out to the existing tools (eslint, cpplint,
+# clang-format, ruff, yamllint, lint-md/remark, sphinx-lint where
+# applicable) where alint can express the SCOPE but not the ANALYSIS.
+# The DEEP per-tool semantic checks stay where they are:
+#   - tools/eslint-rules/* (27 TSESTree visitors — AST analysis)
+#   - tools/cpplint.py (parses C++; AST-aware)
+#   - tools/checkimports.py (parses C++ using-declarations)
+#   - tools/lint-md/lint-md.mjs (markdown AST)
+#   - V8 + libuv + ICU + nghttp2 vendored under deps/ (we exclude entirely)
+#
+# The interesting alint-shaped surface in node is the doc/changelogs/
+# CHANGELOG_V*.md convention (a strict per-major-version filename
+# pattern enforced nowhere statically — only by editorial review of
+# the release-prep PR), and the test/parallel/test-* discovery
+# convention (driven by tools/test.py reading the filenames; a
+# misnamed file silently drops out of the test pass).
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to your
+# local layout if your fork has diverged.
+#
+# Known limitations versus the existing pipeline (each requires an
+# alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#
+#   - tools/eslint-rules/ — 27 custom AST rules                  (out of scope)
+#     prefer-primordials, no-array-destructuring, alphabetize-errors,
+#     alphabetize-primordials, must-call-assert, prefer-assert-iferror,
+#     etc. Each is a TSESTree visitor; AST analysis is alint's
+#     deliberate non-goal. STAYS in eslint.config.mjs.
+#
+#   - tools/cpplint.py — Google C++ style enforcement            (out of scope)
+#     A fork of the upstream cpplint that parses C++. Filtered via
+#     .cpplint to drop ~9 categories. STAYS on `make lint-cpp`.
+#
+#   - tools/checkimports.py — using-declaration freshness        (out of scope)
+#     Parses C++ `using <ns>::<name>;` declarations and asserts each
+#     declared name is actually referenced in the file. Same shape as
+#     `unused_imports` in TS/JS but for C++ — AST analysis. STAYS on
+#     `make lint-cpp` (which calls it via the makefile).
+#
+#   - tools/find-inactive-{collaborators,tsc}.mjs                (git-history aware)
+#     Walks `git log` to find collaborators with no recent commits.
+#     alint sees one tree at a time, no git-history awareness.
+#     STAYS as a CRON-driven workflow (.github/workflows/find-inactive-*).
+#
+#   - tools/lint-pr-url.mjs                                       (PR-diff aware)
+#     Reads `git diff` of doc/api/*.md for `pr-url:` strings and
+#     asserts they match the current PR's URL. Operates on the
+#     PR-time diff, not on the working tree. Out of scope; STAYS as
+#     part of the commit-queue workflow.
+#
+#   - tools/lint-md/lint-md.mjs — remark-lint markdown pipeline   (out of scope)
+#     Drives a deep remark-preset-lint-node pipeline (~50 markdown
+#     AST rules including "no-literal-urls", "prohibited-strings",
+#     etc.). alint shells out via `command:` instead of replicating.
+#
+#   - test/parallel/test-* discovery convention                  (filename grammar)
+#     tools/test.py loads tests by filename — every parallel/sequential
+#     test must be `test-<name>.{js,mjs,cjs}`. alint encodes the
+#     grammar via filename_regex (below). New finding: enforced
+#     nowhere statically today; a misnamed file silently drops out
+#     of the test run.
+#
+#   - doc/changelogs/CHANGELOG_V*.md per-major-version convention (filename grammar)
+#     27 files at clone time, each named CHANGELOG_V<NN>.md (or the
+#     three legacy IOJS/V010/V012/ARCHIVE variants). alint encodes
+#     the grammar as filename_regex; today only release-prep editorial
+#     review enforces it.
+#
+#   - tools/dep_updaters/update-*.{sh,mjs} ↔ deps/<libname>/      (registry_paths_resolve)
+#     Each update-<libname>.sh script in tools/dep_updaters/ should
+#     correspond to a vendored deps/<libname>/ tree. Same shape as
+#     rust-lang/rust's `triagebot` gap and cpython's check-c-api-docs
+#     gap. Awaits `registry_paths_resolve` rule kind in v0.10+.
+#
+#   - tools/eslint-rules/* registered in eslint.config.mjs        (cross-file_value_equals)
+#     Each .js file under tools/eslint-rules/ should be referenced
+#     from eslint.config.mjs's `plugins:` block (otherwise it's dead
+#     code). Cross-file value equals — awaits the cross_file_value_equals
+#     primitive (#1 demand item from prior P2a aggregation).
+#
+#   - clang-format diff against base                              (git-diff aware)
+#     `make format-cpp` relies on `git merge-base HEAD origin/$BASE`
+#     to scope clang-format to changed files only. Operates on git
+#     diff, not on the working tree. Out of scope; STAYS in CI.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/tooling/editorconfig@v1
+
+facts:
+  # node has had src/ as the C++ source root since the original commit;
+  # gating on its presence is defensive but cheap.
+  - id: has_node_src
+    any_file_exists: [src/node.h, src/node.cc]
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # .editorconfig conventions — explicit assertions
+  # node's .editorconfig declares trim_trailing_whitespace=true,
+  # insert_final_newline=true, end_of_line=lf for [*]. The
+  # corresponding pre-commit / CI hooks don't catch these uniformly
+  # (the cpplint fork cares about trailing whitespace in C++ but not
+  # in markdown / yaml). The alint contract is broader by design.
+  # The deps/ tree is excluded per the [deps/**] block in .editorconfig.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-no-trailing-whitespace
+    when: facts.has_node_src
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "lib/**/*.{js,mjs,cjs}"
+        - "src/**/*.{cc,c,h,hpp}"
+        - "tools/**/*.{js,mjs,py}"
+        - "doc/**/*.md"
+        - "doc/api/*.md"
+        - "*.md"
+        - ".github/**/*.{yml,yaml}"
+      exclude:
+        - "deps/**"
+        - "test/fixtures/**"
+        - "tools/cpplint.py"
+        - "tools/gyp/**"
+        - "tools/icu/**"
+        - "tools/inspector_protocol/**"
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "tools/msvs/**"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: node-final-newline
+    when: facts.has_node_src
+    kind: final_newline
+    paths:
+      include:
+        - "lib/**/*.{js,mjs,cjs}"
+        - "src/**/*.{cc,c,h,hpp}"
+        - "tools/**/*.{js,mjs,py}"
+        - "doc/**/*.md"
+        - "*.md"
+        - ".github/**/*.{yml,yaml}"
+      exclude:
+        - "deps/**"
+        - "test/fixtures/**"
+        - "tools/cpplint.py"
+        - "tools/gyp/**"
+        - "tools/icu/**"
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "tools/msvs/**"
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  # ──────────────────────────────────────────────────────────────────
+  # .gitattributes line-ending policy — declarative
+  # node's .gitattributes is terse but load-bearing:
+  #   - test/fixtures/* -text                   (no line-ending normalization)
+  #   - vcbuild.bat text eol=crlf               (Windows batch)
+  #   - tools/msvs/find_python.cmd text eol=crlf
+  #   - deps/npm/bin/npm text eol=lf            (forced LF on shell scripts)
+  #   - doc/**/*.md text eol=lf
+  # The default for the rest of the repo is LF (per .editorconfig
+  # `end_of_line = lf`). We mirror the explicit cases as separate
+  # alint line_endings rules; the test/fixtures exclusion is mostly
+  # already excluded by the broad "exclude test/fixtures/**" pattern.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-windows-bat-crlf
+    when: facts.has_node_src
+    kind: line_endings
+    paths:
+      - "vcbuild.bat"
+      - "tools/msvs/find_python.cmd"
+    target: crlf
+    level: warning
+
+  - id: node-doc-md-lf
+    when: facts.has_node_src
+    kind: line_endings
+    paths:
+      include:
+        - "doc/**/*.md"
+      exclude:
+        - "deps/**"
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  - id: node-source-lf-line-endings
+    # Default LF policy from .editorconfig [*] — explicit on JS/C++
+    # source files where the most-common rebase-on-Windows churn shows
+    # up. Excluded: deps/, test/fixtures/, *.bat (handled above), and
+    # the vendored tools.
+    when: facts.has_node_src
+    kind: line_endings
+    paths:
+      include:
+        - "lib/**/*.{js,mjs,cjs}"
+        - "src/**/*.{cc,c,h,hpp}"
+        - "tools/**/*.{js,mjs,py}"
+      exclude:
+        - "deps/**"
+        - "test/fixtures/**"
+        - "tools/cpplint.py"
+        - "tools/gyp/**"
+        - "tools/icu/**"
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "tools/msvs/**"
+        - "**/*.bat"
+        - "**/*.cmd"
+    target: lf
+    level: warning
+    fix:
+      file_normalize_line_endings: {}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Trojan Source defense — broader than the bundled baseline
+  # The bundled oss-baseline restricts no_bidi_controls to docs
+  # (md/txt/toml/yml/json). node is a runtime; bidi controls in
+  # .js / .mjs / .cc / .h are the higher-stakes case. Override at the
+  # repo level.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-no-bidi-in-source
+    when: facts.has_node_src
+    kind: no_bidi_controls
+    paths:
+      include:
+        - "lib/**/*.{js,mjs,cjs}"
+        - "src/**/*.{cc,c,h,hpp}"
+        - "tools/**/*.{js,mjs,py}"
+      exclude:
+        - "deps/**"
+        - "test/fixtures/**"
+        - "tools/cpplint.py"
+        - "tools/gyp/**"
+        - "tools/icu/**"
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "tools/msvs/**"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidirectional override characters are rejected in node sources."
+    policy_url: "https://trojansource.codes/"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Test-discovery filename convention — the headline finding
+  # tools/test.py loads tests by filename: every test in
+  #   test/{parallel,sequential,async-hooks,es-module,message,
+  #         pseudo-tty,internet,known_issues,pummel,report,sea,
+  #         sqlite,system-ca,wasi,wpt,...}/*
+  # must be named `test-<descriptor>.{js,mjs,cjs}`. A misnamed file
+  # silently drops out of the test pass — there's no static check for
+  # this today. The pre-commit / CI matrix runs `tools/test.py` which
+  # GLOBS for `test-*.{js,mjs,cjs}`; nothing flags a stray `tst-foo.js`
+  # or `text-foo.js` typo.
+  #
+  # README.md and common.js / *.config* / index.js / status files are
+  # the recognised exceptions in each test directory.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-test-filename-grammar
+    kind: filename_regex
+    paths:
+      include:
+        - "test/parallel/*.{js,mjs,cjs}"
+        - "test/sequential/*.{js,mjs,cjs}"
+        - "test/async-hooks/*.{js,mjs,cjs}"
+        - "test/es-module/*.{js,mjs,cjs}"
+        - "test/message/*.{js,mjs,cjs}"
+        - "test/pseudo-tty/*.{js,mjs,cjs}"
+        - "test/known_issues/*.{js,mjs,cjs}"
+        - "test/internet/*.{js,mjs,cjs}"
+        - "test/pummel/*.{js,mjs,cjs}"
+        - "test/abort/*.{js,mjs,cjs}"
+        - "test/report/*.{js,mjs,cjs}"
+        - "test/sea/*.{js,mjs,cjs}"
+        - "test/sqlite/*.{js,mjs,cjs}"
+        - "test/system-ca/*.{js,mjs,cjs}"
+        - "test/wasi/*.{js,mjs,cjs}"
+      exclude:
+        - "test/*/index.{js,mjs,cjs}"
+        - "test/*/common.{js,mjs,cjs}"
+        - "test/*/eslint.config_partial.mjs"
+    pattern: '^test-[A-Za-z0-9][A-Za-z0-9_.-]*\.(js|mjs|cjs)$'
+    level: error
+    message: |
+      Tests under test/{parallel,sequential,...}/ must be named
+      `test-<descriptor>.{js,mjs,cjs}` to be discovered by
+      tools/test.py. A file not matching this pattern silently
+      drops out of the test run.
+
+  # ──────────────────────────────────────────────────────────────────
+  # CHANGELOG_V<MAJOR>.md per-major-version convention
+  # 27 files at clone time, each named CHANGELOG_V<NN>.md or the
+  # three legacy IOJS/V010/V012/ARCHIVE variants. Editorial review
+  # of the release-prep PR catches a typo today; alint encodes the
+  # grammar so a `CHANGELOG_v27.md` (lowercase) or `CHANGELOG_V27` (no
+  # extension) can't be merged accidentally.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-changelog-per-major-filename
+    kind: filename_regex
+    paths:
+      include:
+        - "doc/changelogs/CHANGELOG_*.md"
+    pattern: '^CHANGELOG_(V[0-9]+|V010|V012|IOJS|ARCHIVE)\.md$'
+    level: error
+    message: |
+      Per-major-version changelogs in doc/changelogs/ must be named
+      CHANGELOG_V<MAJOR>.md (e.g. CHANGELOG_V25.md) or one of the
+      three legacy variants CHANGELOG_V010.md / CHANGELOG_V012.md /
+      CHANGELOG_IOJS.md / CHANGELOG_ARCHIVE.md. A misnamed file
+      misses the changelog index in the main README.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level governance / community files exist
+  # Every PR landing on main is reviewed against these — a deletion
+  # would be a load-bearing change. The bundled oss-baseline asserts
+  # README + LICENSE + CONTRIBUTING; we layer the node-specific docs
+  # (GOVERNANCE, glossary, onboarding, doc/contributing/) here.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-governance-files-present
+    kind: file_exists
+    paths:
+      - "GOVERNANCE.md"
+      - "CODE_OF_CONDUCT.md"
+      - "BUILDING.md"
+      - "CHANGELOG.md"
+      - "glossary.md"
+      - "onboarding.md"
+      - "SECURITY.md"
+    root_only: true
+    level: error
+    message: |
+      A top-level governance / community document is missing. node has
+      maintained these for ~15 years; deletion is almost certainly
+      unintentional and breaks the contributor onboarding flow
+      documented in doc/contributing/.
+
+  - id: node-doc-contributing-substantive
+    # doc/contributing/ holds the deeper contributor docs (cpp-style-guide,
+    # collaborator-guide, etc.). Deletion of the whole directory would
+    # be catastrophic; the file_exists check on the most-load-bearing
+    # entries flags it early.
+    kind: file_exists
+    paths:
+      - "doc/contributing/cpp-style-guide.md"
+      - "doc/contributing/collaborator-guide.md"
+      - "doc/contributing/code-of-conduct.md"
+      - "doc/contributing/pull-requests.md"
+      - "doc/contributing/issues.md"
+    level: error
+    message: |
+      A canonical doc/contributing/*.md file is missing. These are
+      load-bearing documents linked from CONTRIBUTING.md and the
+      collaborator workflow.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Build / configure files exist
+  # node is a build-from-source runtime; its top-level configure /
+  # Makefile / common.gypi / node.gyp / node.gypi are load-bearing.
+  # Catch accidental deletion before `./configure && make` would.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-build-files-present
+    kind: file_exists
+    paths:
+      - "configure"
+      - "configure.py"
+      - "Makefile"
+      - "BSDmakefile"
+      - "common.gypi"
+      - "node.gyp"
+      - "node.gypi"
+      - "node.gni"
+      - "BUILD.gn"
+      - "vcbuild.bat"
+      - "android-configure"
+      - "android_configure.py"
+    root_only: true
+    level: error
+    message: |
+      A core build file is missing. node's build pipeline assumes
+      configure(.py) → Makefile / vcbuild.bat / GN / GYP are all
+      present.
+
+  # ──────────────────────────────────────────────────────────────────
+  # node_version.h — present and contains the canonical macros
+  # The release pipeline reads NODE_MAJOR_VERSION / NODE_MINOR_VERSION /
+  # NODE_PATCH_VERSION from src/node_version.h. A missing or
+  # malformed file breaks the release build deep into the C++ link
+  # phase; catch at the static layer.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-version-header-present
+    kind: file_exists
+    paths: "src/node_version.h"
+    level: error
+    message: "src/node_version.h is the canonical version source for the release pipeline."
+
+  - id: node-version-header-major-defined
+    kind: file_content_matches
+    paths: "src/node_version.h"
+    pattern: '(?m)^#define\s+NODE_MAJOR_VERSION\s+[0-9]+'
+    level: error
+    message: |
+      src/node_version.h must define NODE_MAJOR_VERSION as an integer.
+      The release pipeline reads this macro to compute the release tag.
+
+  - id: node-version-header-minor-defined
+    kind: file_content_matches
+    paths: "src/node_version.h"
+    pattern: '(?m)^#define\s+NODE_MINOR_VERSION\s+[0-9]+'
+    level: error
+
+  - id: node-version-header-patch-defined
+    kind: file_content_matches
+    paths: "src/node_version.h"
+    pattern: '(?m)^#define\s+NODE_PATCH_VERSION\s+[0-9]+'
+    level: error
+
+  - id: node-version-header-lts-codename-defined
+    kind: file_content_matches
+    paths: "src/node_version.h"
+    pattern: '(?m)^#define\s+NODE_VERSION_LTS_CODENAME\s+"'
+    level: warning
+    message: |
+      src/node_version.h is expected to define NODE_VERSION_LTS_CODENAME
+      (empty string for non-LTS releases, codename for LTS ones).
+
+  # ──────────────────────────────────────────────────────────────────
+  # CODEOWNERS substantive
+  # node maintains .github/CODEOWNERS for courtesy-ping automation.
+  # Catches accidental empty file / partial deletion.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-codeowners-present
+    kind: file_exists
+    paths: ".github/CODEOWNERS"
+    level: warning
+    message: ".github/CODEOWNERS drives courtesy-ping automation; missing means PRs lose team-level visibility."
+
+  - id: node-codeowners-substantive
+    kind: file_min_lines
+    paths: ".github/CODEOWNERS"
+    min_lines: 20
+    level: info
+    message: "CODEOWNERS is unusually short — node expects substantive ownership coverage."
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-tier eslint config presence
+  # node has 7 eslint.config_partial.mjs files (lib/, test/, doc/,
+  # benchmark/, tools/eslint/) composed by the root eslint.config.mjs.
+  # A missing partial silently drops the tier from lint coverage.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-eslint-config-root-present
+    kind: file_exists
+    paths: "eslint.config.mjs"
+    root_only: true
+    level: error
+    message: "Root eslint.config.mjs is the entry point for `make lint-js`."
+
+  - id: node-eslint-tier-partials-present
+    # Each tier has its own config partial composed by the root.
+    # Keeps the per-tier configuration discoverable and catches tier
+    # deletion before lint silently drops the coverage.
+    kind: file_exists
+    paths:
+      - "lib/eslint.config_partial.mjs"
+      - "test/eslint.config_partial.mjs"
+      - "doc/eslint.config_partial.mjs"
+      - "benchmark/eslint.config_partial.mjs"
+      - "tools/eslint/eslint.config_partial.mjs"
+      - "tools/eslint/eslint.config_utils.mjs"
+    level: error
+    message: |
+      A per-tier eslint.config_partial.mjs is missing. node composes
+      the root eslint.config.mjs from per-tier partials; a missing
+      partial silently drops the tier from `make lint-js` coverage.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Custom in-tree eslint rules registered
+  # tools/eslint-rules/ holds 27 .js files (each a custom eslint rule).
+  # alint asserts the directory is non-empty and the index of the
+  # most-load-bearing rules exists. The "registered in eslint.config.mjs"
+  # cross-check awaits the cross_file_value_equals primitive (gap below).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-eslint-custom-rules-present
+    kind: file_exists
+    paths:
+      - "tools/eslint-rules/prefer-primordials.js"
+      - "tools/eslint-rules/required-modules.js"
+      - "tools/eslint-rules/avoid-prototype-pollution.js"
+      - "tools/eslint-rules/no-unescaped-regexp-dot.js"
+      - "tools/eslint-rules/rules-utils.js"
+    level: error
+    message: |
+      A canonical custom eslint rule under tools/eslint-rules/ is
+      missing. These are referenced from the per-tier
+      eslint.config_partial.mjs files; a missing rule means the lint
+      tier silently fires no diagnostics for the convention it owns.
+
+  # ──────────────────────────────────────────────────────────────────
+  # primordials guard
+  # lib/internal/per_context/primordials.js is the canonical wrapper
+  # over JS built-ins; the prefer-primordials custom eslint rule
+  # enforces its use. The file existing is the precondition.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-primordials-present
+    kind: file_exists
+    paths: "lib/internal/per_context/primordials.js"
+    level: error
+    message: |
+      lib/internal/per_context/primordials.js is the prototype-pollution
+      defense layer; the prefer-primordials eslint rule and dozens of
+      lib/ modules import from it.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Lint config files — pinned tooling
+  # node's lint pipeline depends on .clang-format, .cpplint, pyproject.toml,
+  # and tools/lint-md/package.json. Each pinning a specific tool config.
+  # A missing config means the corresponding `make lint-*` target
+  # silently runs with default config (or fails outright).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-lint-configs-present
+    kind: file_exists
+    paths:
+      - ".clang-format"
+      - ".cpplint"
+      - "pyproject.toml"
+      - "tools/lint-md/package.json"
+      - "tools/lint-md/lint-md.mjs"
+      - "tools/clang-format/package.json"
+      - "tools/eslint/package.json"
+      - "tsconfig.json"
+    level: error
+    message: |
+      A lint-tooling config file is missing. node's `make lint-*`
+      targets depend on these for their canonical configurations.
+
+  # ──────────────────────────────────────────────────────────────────
+  # tools/lint-md/package.json — declares the remark-preset-lint-node dep
+  # The markdown lint pipeline relies on remark-preset-lint-node; if the
+  # dependency is removed, lint-md silently drops most of its rules.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-lint-md-remark-preset-pinned
+    kind: json_path_matches
+    paths: "tools/lint-md/package.json"
+    path: "$.dependencies['remark-preset-lint-node']"
+    matches: '^[\^~]?[0-9]+\.[0-9]+\.[0-9]+$'
+    level: error
+    message: |
+      tools/lint-md/package.json must declare a version-pinned
+      remark-preset-lint-node dependency. This preset drives the
+      ~50 markdown-lint rules `make lint-md` runs.
+
+  - id: node-lint-md-remark-parse-pinned
+    kind: json_path_matches
+    paths: "tools/lint-md/package.json"
+    path: "$.dependencies['remark-parse']"
+    matches: '^[\^~]?[0-9]+\.[0-9]+\.[0-9]+$'
+    level: error
+    message: |
+      tools/lint-md/package.json must pin remark-parse — it's the
+      AST entry point for the lint-md pipeline.
+
+  # ──────────────────────────────────────────────────────────────────
+  # pyproject.toml — ruff lint config
+  # `make lint-py` runs `tools/pip/site-packages/bin/ruff check .` against
+  # the root pyproject.toml. The deep config (which lint families to enable)
+  # stays in the file; alint asserts the file parses + declares the
+  # project-level [tool.ruff] section.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-pyproject-has-ruff-section
+    kind: toml_path_matches
+    paths: "pyproject.toml"
+    path: "$.tool.ruff['target-version']"
+    matches: '^py3[0-9]+$'
+    level: warning
+    message: |
+      pyproject.toml [tool.ruff] should declare a target-version
+      (e.g. target-version = "py310"). `make lint-py` reads this
+      section to scope the lint rules.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions reusable-workflow naming convention
+  # node has 25 workflow files under .github/workflows/. Reusable
+  # workflows historically follow the `reusable-*.yml` prefix
+  # convention (matched against helm and other Wave 3 repos), but
+  # node hasn't formally adopted it — we don't enforce naming, only
+  # the inverse: every file named `reusable-*.yml` actually declares
+  # `on.workflow_call:`. (No matches today; rule fires only if the
+  # convention is adopted later.)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-reusable-workflow-declares-call
+    kind: file_content_matches
+    paths:
+      include: [".github/workflows/reusable-*.yml"]
+    pattern: '(?m)^\s*workflow_call\s*:'
+    level: warning
+    message: |
+      Workflow files prefixed `reusable-*.yml` should declare
+      `on.workflow_call:` — otherwise the prefix misleads readers.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions — every uses: pinned to a 40-char SHA
+  # node's existing convention (verified across linters.yml +
+  # commit-lint.yml + scorecard.yml + 22 others) is to pin every
+  # third-party action by 40-char commit SHA, with a `# vN.M.K`
+  # trailing comment for legibility. Scorecard runs nightly and
+  # would catch drift; alint surfaces the same gate at PR time.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths:
+      include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    path: "$.jobs.*.steps[?match(@.uses, '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@')].uses"
+    matches: '^[A-Za-z0-9_./-]+@[0-9a-f]{40}$'
+    if_present: true
+    level: error
+    message: |
+      Every third-party `uses:` in a workflow must be pinned to a
+      40-char commit SHA (with a trailing `# vN.M.K` comment for
+      legibility). node's existing CI pins every action this way;
+      scorecard checks it nightly — alint surfaces the same gate at
+      PR time.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Workflow-level permissions block
+  # Every .github/workflows/*.yml at node declares a top-level
+  # `permissions:` block (verified across linters.yml + 24 others).
+  # Asserting it stays catches the case where a refactor drops the
+  # block and every job inherits the GITHUB_TOKEN's full scope.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-workflow-has-permissions
+    kind: file_content_matches
+    paths:
+      include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+      exclude:
+        - ".github/workflows/*-problem-matcher.json"
+    pattern: '(?m)^permissions:'
+    level: warning
+    message: |
+      Each .github/workflows/*.yml should declare a top-level
+      permissions: block. Without one, jobs inherit the GITHUB_TOKEN's
+      full default scope — node's hardened CI baseline avoids this.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-tier shellouts to the existing tools
+  # The .github/workflows/linters.yml workflow dispatches to:
+  #   - make lint-cpp        (cpplint + checkimports)
+  #   - make lint-md         (lint-md/lint-md.mjs)
+  #   - make lint-js         (eslint via tools/eslint/)
+  #   - make lint-py         (ruff via tools/pip/)
+  #   - make lint-yaml       (yamllint via tools/pip/)
+  #   - make lint-addon-docs (the addon-docs linter)
+  # We collapse each into an alint command rule scoped to the tree
+  # the tool covers.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-eslint-lib
+    kind: command
+    paths:
+      include: ["lib/**/*.{js,mjs,cjs}"]
+      exclude: ["deps/**", "test/fixtures/**"]
+    command: ["npx", "eslint", "--no-warn-ignored", "{path}"]
+    timeout: 120
+    level: warning
+
+  - id: node-eslint-test
+    kind: command
+    paths:
+      include: ["test/**/*.{js,mjs,cjs}"]
+      exclude: ["deps/**", "test/fixtures/**", "tools/eslint/node_modules/**"]
+    command: ["npx", "eslint", "--no-warn-ignored", "{path}"]
+    timeout: 120
+    level: warning
+
+  - id: node-eslint-doc
+    kind: command
+    paths:
+      include: ["doc/**/*.md"]
+      exclude: ["deps/**"]
+    command: ["npx", "eslint", "--no-warn-ignored", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: node-eslint-tools
+    kind: command
+    paths:
+      include: ["tools/**/*.{js,mjs}"]
+      exclude:
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "tools/clang-format/node_modules/**"
+        - "tools/doc/node_modules/**"
+        - "tools/gyp/**"
+        - "tools/inspector_protocol/**"
+    command: ["npx", "eslint", "--no-warn-ignored", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: node-cpplint
+    # tools/cpplint.py is node's vendored fork of the upstream Google
+    # cpplint. Configuration via .cpplint at the repo root.
+    kind: command
+    paths:
+      include: ["src/**/*.{cc,c,h,hpp}"]
+      exclude: ["deps/**", "src/inspector_protocol/**"]
+    command: ["python3", "tools/cpplint.py", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: node-checkimports
+    # tools/checkimports.py asserts every `using <ns>::<name>;`
+    # declaration is actually used in the file. Per-file shellout.
+    kind: command
+    paths:
+      include: ["src/**/*.{cc,h}"]
+      exclude: ["deps/**", "src/inspector_protocol/**"]
+    command: ["python3", "tools/checkimports.py", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: node-clang-format
+    # tools/clang-format/ ships the node-pinned clang-format binary.
+    # Configuration in .clang-format at the repo root.
+    kind: command
+    paths:
+      include: ["src/**/*.{cc,c,h,hpp}"]
+      exclude: ["deps/**", "src/inspector_protocol/**"]
+    command: ["clang-format", "--dry-run", "--Werror", "{path}"]
+    timeout: 30
+    level: info
+
+  - id: node-ruff
+    # `make lint-py` runs the vendored ruff (tools/pip/site-packages/bin/ruff)
+    # against the whole tree, with config from pyproject.toml. We
+    # delegate to system ruff for the per-file shellout.
+    kind: command
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "deps/**"
+        - "tools/cpplint.py"
+        - "tools/gyp/**"
+        - "tools/inspector_protocol/**"
+        - "tools/eslint/node_modules/**"
+        - "test/fixtures/**"
+    command: ["ruff", "check", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: node-yamllint
+    kind: command
+    paths:
+      include: ["**/*.{yml,yaml}"]
+      exclude:
+        - "deps/**"
+        - "tools/eslint/node_modules/**"
+        - "tools/lint-md/node_modules/**"
+        - "test/fixtures/**"
+    command: ["yamllint", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: node-lint-md-remark
+    # `make lint-md` runs tools/lint-md/lint-md.mjs against the doc
+    # corpus + top-level *.md. Per-file shellout via node.
+    kind: command
+    paths:
+      include:
+        - "doc/**/*.md"
+        - "*.md"
+      exclude:
+        - "deps/**"
+        - "tools/lint-md/node_modules/**"
+    command: ["node", "tools/lint-md/lint-md.mjs", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: node-shellcheck
+    # `make lint-shell` (via tools/lint-sh.mjs) runs shellcheck across
+    # the project's shell scripts. Per-file shellout.
+    kind: command
+    paths:
+      include: ["**/*.sh"]
+      exclude:
+        - "deps/**"
+        - "tools/dep_updaters/**"
+        - "test/fixtures/**"
+    command: ["shellcheck", "-x", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # Orphan-cleanup checks — directories that should never exist
+  # node's .gitignore covers most build outputs; a hand-committed
+  # build dir / out/ / Release/ / Debug/ is almost certainly an
+  # accidental commit. The bundled hygiene/no-tracked-artifacts ruleset
+  # already catches most of these; we add the node-specific ones.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-no-tracked-build-outputs
+    kind: dir_absent
+    paths:
+      - "out"
+      - "build"
+      - "Release"
+      - "Debug"
+    level: error
+    message: |
+      A build output directory (out/, build/, Release/, Debug/) is
+      tracked. node's build pipeline writes to these; they are in
+      .gitignore — a tracked copy is almost certainly an accidental
+      commit.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Source tree must contain a non-trivial src/ and lib/
+  # If either is empty, the build pipeline silently produces nothing.
+  # Floor at 50 entries to allow legitimate sparse checkouts during
+  # bisection / experimentation.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-src-substantive
+    kind: file_exists
+    paths:
+      - "src/node.h"
+      - "src/node.cc"
+      - "src/node_main.cc"
+      - "src/node_version.h"
+      - "src/util.h"
+      - "src/env.h"
+    level: error
+    message: |
+      A canonical src/ entry point is missing. node's build pipeline
+      assumes these are always present.
+
+  - id: node-lib-substantive
+    kind: file_exists
+    paths:
+      - "lib/buffer.js"
+      - "lib/fs.js"
+      - "lib/path.js"
+      - "lib/util.js"
+      - "lib/internal/per_context/primordials.js"
+      - "lib/internal/bootstrap/realm.js"
+    level: error
+    message: |
+      A canonical lib/ entry point is missing. The Node.js public-API
+      surface assumes these modules are always present.
+
+  # ──────────────────────────────────────────────────────────────────
+  # tsconfig.json — typings discipline
+  # node ships ambient types under typings/ for the internal `.d.ts`
+  # consumption (the embedder API). Asserting tsconfig.json's strict
+  # mode catches regressions where a refactor relaxes the contract.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-tsconfig-strict
+    kind: json_path_equals
+    paths: "tsconfig.json"
+    path: "$.compilerOptions.strict"
+    equals: true
+    level: warning
+    message: |
+      tsconfig.json compilerOptions.strict should be true. node ships
+      ambient types under typings/ that consumers depend on; relaxing
+      strict here can let a `null`-leaking signature land.
+
+  # ──────────────────────────────────────────────────────────────────
+  # node.gyp / common.gypi — JSON-ish files that must parse
+  # gyp files use a JSON dialect; a parse error here breaks `./configure`.
+  # Catching at the static layer.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: node-clang-format-config-substantive
+    kind: file_min_lines
+    paths: ".clang-format"
+    min_lines: 5
+    level: warning
+    message: |
+      .clang-format is unusually short — node's C++ style guide
+      depends on a non-trivial set of config knobs.
+
+  - id: node-cpplint-config-substantive
+    kind: file_min_lines
+    paths: ".cpplint"
+    min_lines: 1
+    level: warning
+    message: |
+      .cpplint is unusually short — node depends on it to filter
+      ~9 default cpplint categories.

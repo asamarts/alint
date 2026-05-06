@@ -1,0 +1,961 @@
+# Starter alint config for apache/arrow.
+#
+# apache/arrow is the canonical multi-language polyglot monorepo —
+# a single tree hosting the columnar-format reference implementations
+# in C++, C (GLib), Python, R, Ruby, and MATLAB, plus the shared
+# format/ specification (FlatBuffers + Protobuf) that every
+# implementation conforms to. (Java, Go, JS, Rust, C#, Swift, and
+# Julia have since spun out into sibling repos under apache/, but the
+# sub-tree shape inside apache/arrow remains the canonical pattern.)
+#
+# Repo state captured: 2026-05-06, sparse-clone of
+# `apache/arrow@f69ccb08` (rev = `f69ccb08d62bf0f1e8b07db3b9d561c234c88abb`),
+# heavy source trees (cpp/src, python/pyarrow, java/vector/src,
+# r/inst) excluded.
+#
+# Concrete count at HEAD:
+#
+#   - 6 per-language top-level subdirectories (cpp/, c_glib/,
+#     python/, r/, ruby/, matlab/) + the shared format/ spec
+#   - 8 Ruby gem subdirectories under ruby/red-* (each its own
+#     LICENSE+NOTICE+README+Rakefile+Gemfile+gemspec — uniform
+#     per-package shape)
+#   - 7 GLib subdirectories under c_glib/{arrow,arrow-cuda,arrow-dataset,
+#     arrow-flight,arrow-flight-sql,gandiva,parquet}-glib (each with
+#     meson.build)
+#   - 28 GitHub Actions workflows under .github/workflows/
+#   - 53 dev/release/* scripts implementing the Apache release dance
+#     (rat report, source tarball, binary submit/upload/verify, vote
+#     email, post-release cleanup)
+#   - 4436 lines across ci/scripts/ (per-language build/test runners
+#     that the language-specific workflows shell out to)
+#   - 11 root-level lint/format tool configs: .clang-format,
+#     .clang-tidy, .clang-tidy-ignore, CPPLINT.cfg, .editorconfig,
+#     .rubocop.yml, .shellcheckrc, .hadolint.yaml, cmake-format.py,
+#     .pre-commit-config.yaml, .gitattributes
+#   - .pre-commit-config.yaml = 396 lines, 21 distinct hook ids across
+#     14 external + 2 local hook repos
+#   - .asf.yaml = the canonical ASF infra-config (description,
+#     homepage, notification mailing lists, branch protection)
+#   - dev/release/rat_exclude_files.txt = 102 lines of license-header-
+#     exempt path patterns consumed by Apache RAT (the Release Audit
+#     Tool that gates every Apache release)
+#
+# This config replaces the *structural* gates — per-language subdir
+# layout, per-package metadata uniformity, Apache compliance
+# (LICENSE / NOTICE / source headers), root tool-config presence,
+# gitattributes EOL discipline, GitHub Actions hardening — and wraps
+# the existing per-language linters via `command:` rules so a single
+# `alint check` run fires the whole structural pipeline plus the
+# language linters in parallel.
+#
+# What this config does NOT replace (keep the existing tool):
+#   - clang-format / clang-tidy / cpplint    (C++ AST + style)
+#   - rubocop                                 (Ruby AST + style)
+#   - flake8 / autopep8 / cython-lint        (Python AST + style)
+#   - numpydoc-validation                    (NumPy docstring lint)
+#   - lintr / air-format                     (R AST + style)
+#   - shellcheck / shfmt                     (shell AST)
+#   - hadolint                               (Dockerfile lint)
+#   - cmake-format                           (CMake formatter)
+#   - sphinx-lint                            (RST/Sphinx)
+#   - meson-fmt                              (Meson formatter)
+#   - apache-rat                             (The official Release
+#                                             Audit Tool — runs as
+#                                             a Java jar against a
+#                                             tar archive of HEAD,
+#                                             cross-references
+#                                             rat_exclude_files.txt)
+#
+# Known limitations versus the existing pre-commit + RAT pipeline
+# (each requires an alint primitive that doesn't ship today — see
+# this directory's README.md for the full gap catalogue):
+#   - dev/release/rat_exclude_files.txt path-registry resolution
+#     (every glob-pattern in the exclude list must resolve to at
+#     least one on-disk file — same shape as the rust-lang/rust +
+#     cpython `registry_paths_resolve` v0.10+ candidate)
+#   - format/Schema.fbs ↔ per-language test-fixture coverage
+#     (every cross-language type defined in Schema.fbs must have
+#     a corresponding test case in cpp/, python/, r/, ruby/ — this
+#     is the "every language implements the format" cross-language
+#     conformance check; needs `cross_file_value_equals` v0.10+
+#     extended to "for each value in registry A, assert N partner
+#     files exist matching template B")
+#   - rat_exclude_files.txt sort order (file is conventionally
+#     alphabetised; needs the `ordered_block` v0.10+ candidate from
+#     rust + airflow + tokio + cpython)
+#   - .pre-commit-config.yaml file-pattern lists alphabetised
+#     (the long shellcheck / shfmt files: lists are convention-sorted
+#     but unenforced; same `ordered_block` shape)
+
+version: 1
+
+extends:
+  # OSS hygiene baseline (README, LICENSE presence, no merge markers,
+  # no bidi controls, final newline, etc.).
+  - alint://bundled/oss-baseline@v1
+
+  # Apache 2.0 compliance bundle is the canonical anchor for this
+  # repo: enforces LICENSE-text-Apache-2, NOTICE presence, and the
+  # canonical Apache source header on every C++/C/Python/Ruby/etc.
+  # source file. This single ruleset replaces what `apache-rat`
+  # checks at the source-header layer, with the caveat that the full
+  # per-file authority remains with RAT (which also handles binary
+  # exclusion and version metadata).
+  #
+  # NOTE: the bundled apache-2 rule's default header pattern matches
+  # the SHORT form ("Licensed under the Apache License, Version 2.0").
+  # apache/arrow uses the longer ASF-preamble form across every
+  # source file ("Licensed to the Apache Software Foundation (ASF)
+  # under one or more contributor license agreements...
+  # to you under the Apache License, Version 2.0"). The pattern
+  # override below in `rules:` (`apache-2-source-has-license-header`)
+  # widens the regex to accept either form so arrow's actual headers
+  # validate cleanly.
+  - alint://bundled/compliance/apache-2@v1
+
+  # Per-language hygiene — the bundles auto-gate via fact detection
+  # (`facts.has_python` = any pyproject.toml in tree, etc.) and use
+  # `scope_filter: { has_ancestor: <manifest> }` to confine per-file
+  # rules to the right subtree. In a polyglot monorepo this is exactly
+  # the right shape — the python rules only fire under python/, the
+  # rust rules NO-OP entirely (no Cargo.toml at clone time), etc.
+  - alint://bundled/python@v1
+
+  # GitHub Actions hardening (workflow permissions, action SHA
+  # pinning, top-level `name:`). 28 workflows, supply-chain blast
+  # radius is large.
+  - alint://bundled/ci/github-actions@v1
+
+  # Hygiene: tracked artefacts that should never appear (node_modules,
+  # __pycache__, target/, dist/, .DS_Store, etc.).
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+  # EditorConfig presence + sanity (root=true, charset, etc.) — arrow
+  # has a 67-line .editorconfig that's the source of truth for
+  # cross-language formatter defaults.
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # Override bundled apache-2-source-has-license-header to accept
+  # arrow's longer ASF-preamble header form. The same id reused at
+  # the rule level overrides the bundled definition while keeping
+  # the rule active (rather than disabling it via `level: off` which
+  # would silently drop the gate entirely).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: apache-2-source-has-license-header
+    kind: file_header
+    paths:
+      include:
+        ["**/*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,hh,sh,rb,swift,scala,cs,m,mm,pyx,pxd,fbs,proto}"]
+      exclude:
+        - "**/vendor/**"
+        - "**/node_modules/**"
+        - "**/target/**"
+        - "**/build/**"
+        - "**/dist/**"
+        - "**/.cargo/**"
+        - "**/generated/**"
+        - "**/__generated__/**"
+        - "**/_generated*"
+        - "cpp/src/arrow/vendored/**"
+        - "cpp/src/generated/**"
+        - "cpp/thirdparty/**"
+        - "cpp/submodules/**"
+        - "cpp/subprojects/**"
+        - "python/pyarrow/vendored/**"
+        - "ruby/red-arrow-format/lib/arrow-format/org/**"
+    lines: 30
+    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)'
+    level: warning
+    message: >-
+      Apache-2.0: source files must carry an Apache license header.
+      apache/arrow uses the longer ASF-preamble form ("Licensed to
+      the Apache Software Foundation (ASF) under one or more
+      contributor license agreements...") on every file; the canonical
+      Apache RAT release-audit tool enforces this at release-vote
+      time. This rule overrides the bundled compliance/apache-2
+      header-pattern default (which matches only the shorter "Licensed
+      under the Apache License" form) to accept either.
+    policy_url: "https://www.apache.org/licenses/LICENSE-2.0#apply"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Cross-language structural conventions — the launch-pitch angle.
+  # Every per-language subdirectory MUST carry a README. This
+  # invariant is exactly what no per-language linter sees: clang-format
+  # only sees C++, rubocop only sees Ruby, flake8 only sees Python.
+  # alint's for_each_dir over the canonical language-subtree list is
+  # the layer that catches drift across the whole polyglot tree at
+  # once.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-language-subdir-has-readme
+    kind: for_each_file
+    select: "{cpp,c_glib,python,r,ruby,matlab,format}/README.{md,rst}"
+    require:
+      - kind: file_min_lines
+        paths: "{path}"
+        min_lines: 5
+    level: warning
+    message: >-
+      Every per-language subdirectory under apache/arrow's polyglot
+      monorepo (cpp/, c_glib/, python/, r/, ruby/, matlab/) plus the
+      shared format/ spec MUST carry a README explaining the package
+      and pointing at the canonical docs. The `arrow.apache.org/docs/`
+      site auto-discovers per-language READMEs as the per-binding
+      landing page.
+
+  # The shared `format/` directory is what makes this an Arrow repo
+  # and not just six independent libraries. Every artefact below MUST
+  # be present — they are the language-independent schema definitions
+  # that every implementation conforms to. A missing fbs/proto file
+  # means broken cross-language interop.
+  - id: arrow-format-spec-files-present
+    kind: file_exists
+    paths:
+      - format/Schema.fbs
+      - format/Message.fbs
+      - format/File.fbs
+      - format/Tensor.fbs
+      - format/SparseTensor.fbs
+      - format/Flight.proto
+      - format/FlightSql.proto
+    level: error
+    message: >-
+      The format/ directory holds the cross-language Arrow schema
+      definitions (FlatBuffers + Protobuf). Every per-language
+      implementation depends on these files; removing any one breaks
+      cross-language interop and the integration test suite under
+      dev/archery/.
+
+  - id: arrow-format-readme-present
+    kind: file_exists
+    paths: format/README.rst
+    level: warning
+    message: >-
+      format/README.rst is the canonical entry point for someone
+      writing a new Arrow implementation in a not-yet-supported
+      language. Removing it strands new contributors.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-Ruby-gem conventions — the most uniform per-package surface
+  # in the repo. ruby/red-* contains 8 gem subdirectories, each
+  # required to ship LICENSE + NOTICE + README + Rakefile + Gemfile +
+  # <name>.gemspec. This is the analogue of npm's `packages/*` ↔
+  # `package.json` convention, but for RubyGems. No single Ruby tool
+  # (rubocop, rake) sees the whole layout.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-ruby-gem-required-meta-files
+    kind: for_each_file
+    select: "ruby/red-*/Rakefile"
+    require:
+      - kind: file_exists
+        paths: "{dir}/LICENSE.txt"
+      - kind: file_exists
+        paths: "{dir}/NOTICE.txt"
+      - kind: file_exists
+        paths: "{dir}/README.md"
+      - kind: file_exists
+        paths: "{dir}/Gemfile"
+      - kind: dir_exists
+        paths: "{dir}/lib"
+      - kind: dir_exists
+        paths: "{dir}/test"
+    level: error
+    message: >-
+      Every Ruby gem subdirectory under ruby/red-* must ship
+      LICENSE.txt + NOTICE.txt + README.md + Gemfile + lib/ + test/.
+      The Apache release tooling (dev/release/post-06-ruby.sh,
+      dev/release/account-ruby.sh) walks ruby/red-* assuming this
+      layout — drift here breaks the gem-publishing dance.
+
+  - id: arrow-ruby-gem-has-gemspec
+    kind: for_each_file
+    select: "ruby/red-*/Rakefile"
+    require:
+      - kind: file_exists
+        paths: ["{dir}/red-arrow.gemspec", "{dir}/red-arrow-cuda.gemspec",
+                "{dir}/red-arrow-dataset.gemspec", "{dir}/red-arrow-flight.gemspec",
+                "{dir}/red-arrow-flight-sql.gemspec", "{dir}/red-arrow-format.gemspec",
+                "{dir}/red-gandiva.gemspec", "{dir}/red-parquet.gemspec"]
+    level: error
+    message: >-
+      Every Ruby gem subdirectory must declare a <name>.gemspec.
+      Lacking it, `gem build` and the dev/release/post-06-ruby.sh
+      publishing script silently skip the gem.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-GLib subdir conventions — c_glib/ is the C-binding layer
+  # (built via Meson). 7 sub-libraries, each in its own subdirectory,
+  # each MUST declare meson.build. The c_glib/meson.build file
+  # subdir()s into them; missing meson.build = skipped sub-library.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-c-glib-sublibrary-has-meson-build
+    kind: for_each_dir
+    select: "c_glib/{arrow,arrow-cuda,arrow-dataset,arrow-flight,arrow-flight-sql,gandiva,parquet}-glib"
+    require:
+      - kind: file_exists
+        paths: "{path}/meson.build"
+    level: error
+    message: >-
+      Every C-GLib sub-library under c_glib/ must declare a
+      meson.build. The top-level c_glib/meson.build subdir()s into
+      each named directory; a missing meson.build causes the
+      sub-library to be silently skipped at build time.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Apache governance + release-tooling shape — the dev/release/ +
+  # .asf.yaml + .pre-commit-config.yaml triad is what makes this
+  # repo an Apache-Software-Foundation project rather than just an
+  # OSS data-format library.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-asf-yaml-present
+    kind: file_exists
+    paths: .asf.yaml
+    level: error
+    message: >-
+      .asf.yaml is the canonical ASF infrastructure config:
+      description, homepage, notification mailing list addresses
+      (commits@arrow.apache.org, dev@arrow.apache.org), and branch
+      protection. Removing it severs the repo from ASF infra (PR
+      notification routing, JIRA-link auto-detection, etc.).
+
+  - id: arrow-asf-declares-homepage
+    kind: yaml_path_matches
+    paths: .asf.yaml
+    path: "$.github.homepage"
+    matches: '^https://arrow\.apache\.org/?$'
+    level: warning
+    message: >-
+      .asf.yaml `github.homepage` should point at
+      https://arrow.apache.org/. The ASF-infra bot reads this field
+      and propagates it to the GitHub repo "About" sidebar; drift
+      means GitHub shows a stale URL.
+
+  - id: arrow-asf-declares-notification-list
+    kind: yaml_path_matches
+    paths: .asf.yaml
+    path: "$.notifications.commits"
+    matches: '^commits@arrow\.apache\.org$'
+    level: warning
+    message: >-
+      .asf.yaml `notifications.commits` MUST be
+      commits@arrow.apache.org so every commit broadcasts to the
+      Apache-required commit-archive mailing list. Apache governance
+      requires this address to be the canonical commits list.
+
+  - id: arrow-pre-commit-config-present
+    kind: file_exists
+    paths: .pre-commit-config.yaml
+    level: error
+    message: >-
+      .pre-commit-config.yaml orchestrates all per-language linters
+      via the `pre-commit` framework. The `rat` local hook (which
+      runs the Apache Release Audit Tool against an archive of HEAD)
+      is the gate that prevents an unauthorised license-header
+      regression from landing.
+
+  - id: arrow-pre-commit-runs-rat
+    kind: file_content_matches
+    paths: .pre-commit-config.yaml
+    pattern: '(?m)^\s*-\s*id:\s*rat\b'
+    level: error
+    message: >-
+      .pre-commit-config.yaml MUST register the `rat` hook (the
+      Apache Release Audit Tool). Removing this hook means a license-
+      header drop slips through PR review and only fails at official
+      release-vote time, blocking the release.
+
+  - id: arrow-rat-exclude-list-present
+    kind: file_exists
+    paths: dev/release/rat_exclude_files.txt
+    level: error
+    message: >-
+      dev/release/rat_exclude_files.txt is the path-pattern allowlist
+      consumed by the Apache RAT runner (dev/release/run-rat.sh).
+      Without it, every binary fixture, generated file, and vendored
+      blob would fail RAT and block the release vote.
+
+  - id: arrow-rat-runner-script-present
+    kind: file_exists
+    paths: dev/release/run-rat.sh
+    level: error
+    message: >-
+      dev/release/run-rat.sh is the script the .pre-commit `rat` hook
+      shells out to; it downloads apache-rat-${VERSION}.jar from Maven
+      Central and runs it against an archive of HEAD. Required for
+      both pre-commit and the formal release-candidate verification.
+
+  - id: arrow-rat-check-report-script-present
+    kind: file_exists
+    paths: dev/release/check-rat-report.py
+    level: error
+    message: >-
+      dev/release/check-rat-report.py post-processes the RAT report
+      against the rat_exclude_files.txt allowlist. Together with
+      run-rat.sh it forms the two-script Apache compliance gate
+      that every PR + every release candidate must clear.
+
+  - id: arrow-release-verify-script-present
+    kind: file_exists
+    paths: dev/release/verify-release-candidate.sh
+    level: warning
+    message: >-
+      dev/release/verify-release-candidate.sh is the canonical script
+      a PMC member runs against an unfreezed RC tarball during the
+      Apache 72-hour vote window. Removing it forces every voter to
+      cobble together their own verification.
+
+  - id: arrow-merge-script-present
+    kind: file_exists
+    paths: ["dev/merge_arrow_pr.py", "dev/merge_arrow_pr.sh"]
+    level: info
+    message: >-
+      dev/merge_arrow_pr.{py,sh} is the canonical PR-merge script
+      (squashes commits, formats the merge message, links the JIRA
+      issue if present). Removing it forces committers to merge by
+      hand and risks malformed merge commits the bot can't ingest.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language root manifests — every language subdirectory must
+  # declare its build manifest at the canonical location. This is the
+  # gate the language-specific CI workflow reads to decide whether
+  # the build job runs at all.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-cpp-manifest-present
+    kind: file_exists
+    paths: cpp/CMakeLists.txt
+    level: error
+    message: >-
+      cpp/CMakeLists.txt is the C++ build manifest; removing it
+      breaks `cmake -S cpp -B build` and the cpp.yml workflow.
+
+  - id: arrow-cpp-vcpkg-manifest-present
+    kind: file_exists
+    paths: cpp/vcpkg.json
+    level: warning
+    message: >-
+      cpp/vcpkg.json declares the vcpkg-manifest dependency set used
+      by both the Windows build and the cpp/Brewfile fallback path.
+      The release-candidate verification scripts assume both files
+      exist for cross-platform binary builds.
+
+  - id: arrow-cpp-meson-manifest-present
+    kind: file_exists
+    paths: cpp/meson.build
+    level: warning
+    message: >-
+      cpp/meson.build is the alternative Meson build manifest used by
+      packagers who prefer Meson over CMake. The c_glib/ build
+      requires the Meson path; removing meson.build silently breaks
+      the GLib bindings.
+
+  - id: arrow-c-glib-manifest-present
+    kind: file_exists
+    paths: c_glib/meson.build
+    level: error
+    message: >-
+      c_glib/meson.build is the top-level Meson manifest that
+      subdir()s into the 7 GLib sub-libraries. Removing it breaks
+      all GLib-binding builds.
+
+  - id: arrow-python-pyproject-present
+    kind: file_exists
+    paths: python/pyproject.toml
+    level: error
+    message: >-
+      python/pyproject.toml is the canonical Python build manifest
+      (PEP 517 / PEP 621). The python.yml workflow + the conda
+      environment files (ci/conda_env_python.txt) both assume it
+      exists at this path.
+
+  - id: arrow-python-pyproject-declares-name
+    kind: toml_path_matches
+    paths: python/pyproject.toml
+    path: "$.project.name"
+    matches: '^pyarrow$'
+    level: error
+    message: >-
+      python/pyproject.toml `project.name` MUST be `pyarrow`. The
+      published PyPI package name is `pyarrow`; drift here breaks
+      `pip install pyarrow` because the wheel name no longer matches.
+
+  - id: arrow-python-pyproject-declares-license
+    kind: toml_path_matches
+    paths: python/pyproject.toml
+    path: "$.project.license"
+    matches: '^Apache-2\.0$'
+    level: error
+    message: >-
+      python/pyproject.toml `project.license` MUST be the SPDX
+      identifier `Apache-2.0` (PEP 639 form, recently adopted by
+      arrow). Drift here means the wheel's metadata fails PyPI's
+      license-classifier check.
+
+  - id: arrow-r-description-present
+    kind: file_exists
+    paths: r/DESCRIPTION
+    level: error
+    message: >-
+      r/DESCRIPTION is the R package manifest (CRAN-required).
+      Removing it breaks `R CMD build r/` and the r.yml workflow,
+      and means the package vanishes from CRAN at the next release.
+
+  - id: arrow-r-description-package-name
+    kind: file_content_matches
+    paths: r/DESCRIPTION
+    pattern: '(?m)^Package:\s*arrow$'
+    level: error
+    message: >-
+      r/DESCRIPTION `Package:` MUST be `arrow`. The CRAN package
+      name is `arrow`; drift here breaks `install.packages("arrow")`
+      and the cran-comments.md release-prep file.
+
+  - id: arrow-r-description-license
+    kind: file_content_matches
+    paths: r/DESCRIPTION
+    pattern: '(?m)^License:\s*Apache License'
+    level: error
+    message: >-
+      r/DESCRIPTION `License:` MUST declare the Apache License (the
+      canonical CRAN form is `Apache License (>= 2.0)`). CRAN
+      validates the license string against its allowlist; missing or
+      drifted licenses block the next release.
+
+  - id: arrow-ruby-top-rakefile-present
+    kind: file_exists
+    paths: ruby/Rakefile
+    level: error
+    message: >-
+      ruby/Rakefile is the orchestration Rakefile that fans out
+      tasks across every red-* gem subdirectory. The
+      dev/release/post-06-ruby.sh release script invokes
+      `cd ruby && rake test` to validate every gem at once.
+
+  - id: arrow-matlab-cmakelists-present
+    kind: file_exists
+    paths: matlab/CMakeLists.txt
+    level: warning
+    message: >-
+      matlab/CMakeLists.txt is the MATLAB MEX build manifest. The
+      matlab.yml workflow shells into matlab/ and runs `cmake -S .`
+      against it; removing it breaks the MATLAB binding build.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language tool config files — pinning the canonical
+  # locations the language-specific CI workflows assume.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-cpp-clang-format-present
+    kind: file_exists
+    paths: .clang-format
+    root_only: true
+    level: error
+    message: >-
+      .clang-format is required at the repo root — the
+      .pre-commit-config `clang-format` hook (the C++ Format hook,
+      scoped to ^cpp/) reads it via clang-format's discovery walk.
+      Without it, pre-commit silently no-ops on C++ format checks
+      and CI catches the drift only on the next push.
+
+  - id: arrow-cpp-clang-tidy-present
+    kind: file_exists
+    paths: .clang-tidy
+    root_only: true
+    level: warning
+    message: >-
+      .clang-tidy + .clang-tidy-ignore declare the C++ static-analysis
+      gate. The cpp_extra.yml workflow runs `clang-tidy -p build` and
+      reads both files; missing either drops the static-analysis
+      check entirely.
+
+  - id: arrow-cpp-clang-tidy-ignore-present
+    kind: file_exists
+    paths: .clang-tidy-ignore
+    root_only: true
+    level: warning
+    message: >-
+      .clang-tidy-ignore lists files clang-tidy must skip (typically
+      vendored / auto-generated). Required by cpp_extra.yml.
+
+  - id: arrow-cpp-cpplint-config-present
+    kind: file_exists
+    paths: CPPLINT.cfg
+    root_only: true
+    level: warning
+    message: >-
+      CPPLINT.cfg pins cpplint's filter set + line length (90 chars).
+      The .pre-commit-config `cpplint` hook reads it. Missing config
+      means cpplint reverts to upstream defaults (80 chars, more
+      filters), producing thousands of false positives.
+
+  - id: arrow-cmake-format-config-present
+    kind: file_exists
+    paths: cmake-format.py
+    root_only: true
+    level: warning
+    message: >-
+      cmake-format.py is the cmake-format config (Python-syntax),
+      consumed by the .pre-commit `cmake-format` hook. Without it
+      cmake-format uses upstream defaults and reformats every
+      CMakeLists.txt on next commit.
+
+  - id: arrow-ruby-rubocop-config-present
+    kind: file_exists
+    paths: .rubocop.yml
+    root_only: true
+    level: warning
+    message: >-
+      .rubocop.yml is the Ruby style config. The .pre-commit
+      `rubocop` hook + dev/release/post-06-ruby.sh both depend on
+      it. Without it, rubocop reverts to upstream defaults and
+      every gem's `bundle exec rake test` fails on style drift.
+
+  - id: arrow-shellcheckrc-present
+    kind: file_exists
+    paths: .shellcheckrc
+    root_only: true
+    level: warning
+    message: >-
+      .shellcheckrc declares external-sources=true + source-path=
+      SCRIPTDIR so shellcheck can follow `source` statements
+      across ci/scripts/. Without it, shellcheck flags every
+      sourced file as "unable to check"; the .pre-commit
+      `shellcheck` hook reverts to ineffective defaults.
+
+  - id: arrow-hadolint-config-present
+    kind: file_exists
+    paths: .hadolint.yaml
+    root_only: true
+    level: warning
+    message: >-
+      .hadolint.yaml lists the Dockerfile-lint rules to ignore (the
+      DL3008/DL3013/DL3015/DL3018/DL3041 trio that arrow's
+      conda-installed dockerfiles legitimately violate). Without it,
+      every Dockerfile under ci/docker/ fails the .pre-commit
+      `hadolint-docker` hook.
+
+  - id: arrow-editorconfig-root-true
+    kind: file_content_matches
+    paths: .editorconfig
+    pattern: '(?m)^root\s*=\s*true'
+    level: error
+    message: >-
+      .editorconfig MUST declare `root = true` at the top of the
+      file. Without it, EditorConfig's discovery walk continues up
+      the parent directory tree and arrow's per-language formatting
+      can be silently overridden by a parent project's .editorconfig.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Compose / docker orchestration — apache/arrow uses Docker Compose
+  # heavily for cross-language integration testing via `archery
+  # docker run`.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-compose-yaml-present
+    kind: file_exists
+    paths: compose.yaml
+    level: warning
+    message: >-
+      compose.yaml declares the Docker Compose services (dozens —
+      one per language × OS × Python-version permutation) used by
+      the integration test suite. dev/archery wraps `docker compose`
+      to fan out cross-language tests; removing compose.yaml breaks
+      `archery docker run`.
+
+  - id: arrow-env-file-present
+    kind: file_exists
+    paths: .env
+    root_only: true
+    level: warning
+    message: >-
+      .env declares default values for every parameter compose.yaml
+      references (Python versions, CUDA versions, base image tags,
+      etc.). Removing it forces every contributor to set ~50
+      environment variables by hand before `docker compose up`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # gitattributes EOL discipline — apache/arrow ships ~50 generated
+  # files under cpp/src/generated/, go/, r/R/, r/man/. Marking them
+  # `linguist-generated=true` excludes them from GitHub's diff view
+  # and language-statistics calculation.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-gitattributes-present
+    kind: file_exists
+    paths: .gitattributes
+    level: warning
+    message: >-
+      .gitattributes is the canonical declaration of generated-file
+      markers (used by GitHub for diff display + language-stats),
+      EOL discipline, and merge=union for r/NEWS.md. Removing it
+      means generated files clutter every PR diff and Windows
+      checkouts produce CRLF line endings that break the Python
+      tests' snapshot comparisons.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions hardening — re-state the SHA-pinning rule at
+  # warning level here because arrow has 28 workflows + the
+  # supply-chain blast radius is large (every release shells through
+  # the workflow set).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^/]+/[^/@]+@[a-f0-9]{40}')].uses"
+    matches: '^[^/]+/[^/@]+@[a-f0-9]{40}'
+    level: warning
+    message: >-
+      Third-party actions in workflow steps should be pinned to a
+      40-char commit SHA, not a floating tag. The OpenSSF Scorecard
+      "Pinned-Dependencies" check covers this on a nightly cadence;
+      alint surfaces the same gate at PR time.
+
+  - id: arrow-dependabot-includes-actions
+    kind: yaml_path_matches
+    paths: .github/dependabot.yml
+    path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
+    matches: '^/$'
+    level: warning
+    message: >-
+      .github/dependabot.yml MUST declare a github-actions ecosystem
+      entry pointing at the repo root so action SHA-pins get refreshed
+      automatically as upstream actions release new versions.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language scope_filter restatement — make sure the bundled
+  # python@v1 ruleset's scope-filter chain is also applied to
+  # arrow's specific Python files. The bundled ruleset already
+  # gates on `has_ancestor: pyproject.toml`; this adds an explicit
+  # rule for arrow's specific path-shape (so future per-package
+  # additions remain confined to python/).
+  # ──────────────────────────────────────────────────────────────────
+
+  # NOTE on header form: apache/arrow uses the longer ASF-style
+  # preamble ("Licensed to the Apache Software Foundation (ASF)
+  # under one or more contributor license agreements...") rather than
+  # the shorter "Licensed under the Apache License, Version 2.0"
+  # form that the bundled compliance/apache-2 ruleset matches by
+  # default. The pattern below catches BOTH forms (any line starting
+  # with "Licensed to the Apache Software Foundation" OR "Licensed
+  # under the Apache License").
+  - id: arrow-python-files-have-apache-header
+    kind: file_header
+    paths:
+      include: ["python/**/*.py", "python/**/*.cfg", "python/**/*.cmake"]
+      exclude:
+        - "python/pyarrow/vendored/**"
+        - "python/_build_backend/**"
+        - "python/build/**"
+        - "python/dist/**"
+        - "python/**/_generated*"
+        - "python/cmake_modules/UseCython.cmake"
+        - "python/cmake_modules/FindNumPy.cmake"
+        - "python/cmake_modules/FindPythonLibsNew.cmake"
+    lines: 25
+    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License)'
+    level: warning
+    message: >-
+      Every Python source file under python/ must carry the canonical
+      ASF-preamble Apache 2.0 header ("Licensed to the Apache Software
+      Foundation (ASF) under one or more contributor license
+      agreements..."). The Apache RAT release-audit tool enforces this
+      at release-vote time; alint surfaces the same gate at PR time.
+
+  - id: arrow-cpp-files-have-apache-header
+    kind: file_header
+    paths:
+      include: ["cpp/**/*.cmake", "cpp/**/*.cmake.in"]
+      exclude:
+        - "cpp/cmake_modules/FindNumPy.cmake"
+        - "cpp/cmake_modules/FindPythonLibsNew.cmake"
+        - "cpp/cmake_modules/UseCython.cmake"
+        - "cpp/thirdparty/**"
+        - "cpp/submodules/**"
+        - "cpp/subprojects/**"
+        - "cpp/src/arrow/vendored/**"
+        - "cpp/src/generated/**"
+    lines: 25
+    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License)'
+    level: warning
+    message: >-
+      Every CMake / .cmake.in file under cpp/ must carry the canonical
+      ASF-preamble Apache 2.0 header. The bundled compliance/apache-2
+      ruleset covers the .{c,cc,cpp,h} extensions; this rule extends
+      coverage to the cmake-shaped files that house the C++ build
+      logic.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Hygiene: tracked artefacts specific to apache/arrow's polyglot
+  # tree — extends the bundled hygiene/no-tracked-artifacts ruleset
+  # to the language-specific build outputs each implementation
+  # produces.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-no-tracked-cpp-build
+    kind: dir_absent
+    paths: "cpp/build"
+    level: error
+    message: >-
+      cpp/build/ is the canonical CMake out-of-tree build directory.
+      Should never be tracked. The bundled hygiene/no-tracked-
+      artifacts ruleset doesn't catch this exact path because
+      `build/` is too generic for the global glob (would false-
+      positive against any Meson `build/`).
+
+  - id: arrow-no-tracked-r-libs
+    kind: dir_absent
+    paths: "r/libs"
+    level: warning
+    message: >-
+      r/libs/ is the per-platform compiled-library staging dir,
+      regenerated by `R CMD INSTALL`. Should never be tracked.
+
+  - id: arrow-no-tracked-python-build-eggs
+    kind: dir_absent
+    paths: ["python/build", "python/*.egg-info", "python/wheelhouse"]
+    level: error
+    message: >-
+      Python build outputs (build/, *.egg-info/, wheelhouse/) must
+      not be tracked. The python/.gitignore catches them by default;
+      this rule surfaces the breach if `git add -f` slips one
+      through.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-language tool shell-outs — wrap the existing per-language
+  # linters so a single `alint check` run drives the whole structural
+  # pipeline plus the per-language tools in parallel. Each is gated
+  # by a `paths:` filter pointing at the canonical config-file the
+  # tool reads (so the rule no-ops if you delete the config).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: arrow-pre-commit-run
+    kind: command
+    paths: .pre-commit-config.yaml
+    command: ["pre-commit", "run", "--all-files"]
+    timeout: 600
+    level: error
+
+  - id: arrow-cpp-clang-format-check
+    kind: command
+    paths: .clang-format
+    command: ["pre-commit", "run", "--all-files", "clang-format"]
+    timeout: 300
+    level: error
+
+  - id: arrow-cpp-cpplint-check
+    kind: command
+    paths: CPPLINT.cfg
+    command: ["pre-commit", "run", "--all-files", "cpplint"]
+    timeout: 300
+    level: error
+
+  - id: arrow-ruby-rubocop-check
+    kind: command
+    paths: .rubocop.yml
+    command: ["pre-commit", "run", "--all-files", "rubocop"]
+    timeout: 300
+    level: error
+
+  - id: arrow-python-flake8-check
+    kind: command
+    paths: python/setup.cfg
+    command: ["pre-commit", "run", "--all-files", "flake8"]
+    timeout: 300
+    level: error
+
+  - id: arrow-python-autopep8-check
+    kind: command
+    paths: python/setup.cfg
+    command: ["pre-commit", "run", "--all-files", "autopep8"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-python-cython-lint-check
+    kind: command
+    paths: python/setup.cfg
+    command: ["pre-commit", "run", "--all-files", "cython-lint"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-python-numpydoc-check
+    kind: command
+    paths: python/pyproject.toml
+    command: ["pre-commit", "run", "--all-files", "numpydoc-validation"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-r-lintr-check
+    kind: command
+    paths: r/DESCRIPTION
+    command: ["pre-commit", "run", "--all-files", "lintr"]
+    timeout: 600
+    level: warning
+
+  - id: arrow-r-air-format-check
+    kind: command
+    paths: r/air.toml
+    command: ["pre-commit", "run", "--all-files", "air-format"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-cmake-format-check
+    kind: command
+    paths: cmake-format.py
+    command: ["pre-commit", "run", "--all-files", "cmake-format"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-shellcheck-run
+    kind: command
+    paths: .shellcheckrc
+    command: ["pre-commit", "run", "--all-files", "shellcheck"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-shfmt-run
+    kind: command
+    paths: .shellcheckrc
+    command: ["pre-commit", "run", "--all-files", "shfmt"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-hadolint-run
+    kind: command
+    paths: .hadolint.yaml
+    command: ["pre-commit", "run", "--all-files", "hadolint-docker"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-sphinx-lint-run
+    kind: command
+    paths: docs/source
+    command: ["pre-commit", "run", "--all-files", "sphinx-lint"]
+    timeout: 300
+    level: warning
+
+  - id: arrow-meson-fmt-run
+    kind: command
+    paths: c_glib/meson.build
+    command: ["pre-commit", "run", "--all-files", "meson-fmt"]
+    timeout: 120
+    level: warning
+
+  # The release-audit hook itself — the canonical Apache compliance
+  # gate. Pre-commit runs it on every commit (always_run: true,
+  # pass_filenames: false), and CI re-runs it on every PR. We surface
+  # it as a top-level alint command so a single `alint check` is the
+  # equivalent of `pre-commit run rat`.
+  - id: arrow-rat-run
+    kind: command
+    paths: dev/release/run-rat.sh
+    command: ["pre-commit", "run", "--all-files", "rat"]
+    timeout: 600
+    level: error

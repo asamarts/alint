@@ -1,0 +1,1002 @@
+# Starter alint config for pytorch/pytorch.
+#
+# pytorch is a multi-language ML mega-monorepo (~80k files; C++/CUDA
+# core, Python frontend, Bazel + setup.py + CMake build, generated
+# `_C` stubs, JIT/FX graph machinery, distributed/cuda/xpu/mps/rocm
+# backend matrix). Its structural-validation surface is dominated by
+# ONE artefact: `.lintrunner.toml` — a 1876-line TOML manifest
+# declaring 57 distinct linter "adapters" orchestrated by `lintrunner`,
+# pytorch's bespoke per-file lint runner (Rust + Python; pytorch built
+# it because at the time no existing tool handled their orchestration
+# needs).
+#
+# This is the launch-pitch headline for alint on pytorch:
+#
+#   * `lintrunner` invented an orchestration layer. alint is an
+#     orchestration layer for the structural subset of that contract.
+#   * Of the 57 adapters in .lintrunner.toml, ~28 are pure
+#     STRUCTURAL/regex checks (24 grep_linter shims + EXEC + NEWLINE
+#     + SPACES + TABS), ~21 are command shellouts to mature external
+#     tools (clang-format, clang-tidy, ruff, codespell, pyfmt, mypy,
+#     pyrefly, actionlint, shellcheck, cmake), and ~8 are
+#     AST-aware/semantic (test_has_main libcst, scoped_library ast,
+#     set_linter, gb_registry, header_only, import_linter,
+#     pyproject_linter, no_workflows_on_fork, stable_shim_*).
+#   * alint can express the first two categories (~49/57 ≈ 86 %)
+#     declaratively. The AST-aware tail (~8/57 ≈ 14 %) stays on
+#     lintrunner.
+#
+# So this config doesn't replace lintrunner — it sits BENEATH it
+# as the structural floor. Drop the 28 pure-grep adapters into
+# alint, keep the 21 shellout adapters in lintrunner with `command:`
+# rules in alint as a redundant safety net (CI runs both; alint
+# catches issues before lintrunner spins up its Python venv), and
+# leave the 8 AST adapters strictly to lintrunner.
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune the `paths:` and `scope_filter:` entries to
+# your local sparse-checkout layout.
+#
+# Known limitations versus the existing lintrunner pipeline (each
+# requires an alint primitive that doesn't ship today — see this
+# directory's README.md for the full gap catalogue):
+#
+#   - WORKFLOWSYNC — cross-workflow `sync-tag` consistency
+#                                                     (cross_file_value_equals)
+#     Asserts every job under a `sync-tag` matches every other job
+#     under the same tag across .github/workflows/*.yml. Same shape
+#     as airflow's split-workspace lockfile sync. STAYS on
+#     lintrunner until v0.10+.
+#
+#   - WORKFLOW_CONSISTENCY / NO_WORKFLOWS_ON_FORK — workflow-shape rules
+#                                                     (yaml_path_*)
+#     Some can map to `yaml_path_matches` once we rewrite as
+#     declarative path predicates; others (the cross-workflow
+#     dedup checks) need cross_file_value_equals. STAYS on
+#     lintrunner today.
+#
+#   - HEADER_ONLY_LINTER — symbol registry resolves to test fixture
+#                                                     (registry_paths_resolve)
+#     Reads `torch/header_only_apis.txt` (one symbol per line),
+#     greps each symbol against the .cpp test files. Same shape as
+#     cpython's check-c-api-docs and rust-lang/rust's tidy::triagebot.
+#     STAYS on lintrunner.
+#
+#   - GB_REGISTRY — graph-break registry ↔ source AST
+#                                                     (cross_file + AST)
+#     Greps `unimplemented_v2(...)` calls under torch/_dynamo/ and
+#     compares against `tools/dynamo/graph_break_registry.json`.
+#     AST-aware; OUT OF SCOPE.
+#
+#   - IMPORT_LINTER — banned-third-party-imports (per-tree)
+#                                                     (import_gate)
+#     Reads `_imports.toml`-style allow/deny lists per directory,
+#     parses Python AST imports. Same shape as kubernetes
+#     `import-boss` and airflow's allowed-imports lists. STAYS on
+#     lintrunner; queued behind v0.10+ `import_gate`.
+#
+#   - SET_LINTER — built-in `set` reachability under torch/_inductor
+#                                                     (Python AST)
+#     Replaces built-in `set` (unstable iteration order) with sorted
+#     equivalents. AST-aware; OUT OF SCOPE.
+#
+#   - DOCSTRING_LINTER / TEST_HAS_MAIN / SCOPED_LIBRARY / GENERATED_SHIMS_VERSION
+#                                                     (Python/C AST)
+#     All four parse Python or C source AST; OUT OF SCOPE. STAY on
+#     lintrunner.
+#
+#   - STABLE_SHIM_VERSION / STABLE_SHIM_USAGE — git-diff-aware version
+#                                                     macro placement
+#     Compares git diff against current shim function declarations,
+#     asserts new declarations are wrapped in TORCH_FEATURE_VERSION.
+#     git-diff-aware (alint --changed informs WHICH files; not WHAT
+#     fires); OUT OF SCOPE.
+#
+#   - PYREFLY / MYPY / FLAKE8 / RUFF / CLANGFORMAT / CLANGTIDY /
+#     PYFMT / CMAKE / SHELLCHECK / ACTIONLINT / CODESPELL
+#                                                     (mature external tools)
+#     Wrapped as `command:` shellouts below. The deep semantics
+#     stay in the upstream tools; alint just routes the right files
+#     to the right tool with the right config. We MIRROR the
+#     lintrunner config rather than replace it (CI runs both,
+#     fail-fast on whichever flags first).
+#
+#   - .ci/docker/ content-hash drives Docker rebuilds            (file-tree hash)
+#     A change anywhere under .ci/docker/ rebuilds the entire CI
+#     docker image. CLAUDE.md flags this as a foot-gun. alint
+#     can't compute content hashes today; would need a
+#     `pair_hash` or `directory_hash` primitive.
+#
+#   - generated-*.yml workflow freshness                         (generated_file_fresh)
+#     `.github/workflows/generated-*.yml` are produced by
+#     .github/scripts/. Same shape as cpython's cases_generator
+#     and uv's `cargo dev generate-all` gaps. STAYS on the
+#     upstream generator.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/python@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/agent-hygiene@v1
+  - alint://bundled/tooling/editorconfig@v1
+
+rules:
+  # ──────────────────────────────────────────────────────────────────
+  # .editorconfig contract — explicit assertions
+  # The .editorconfig declares end_of_line=lf, insert_final_newline=true,
+  # charset=utf-8 across the tree. lintrunner's NEWLINE adapter enforces
+  # the final-newline invariant separately; we mirror it as the dedicated
+  # rule for clarity.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-final-newline
+    # Mirrors lintrunner NEWLINE adapter scope (excludes binary-ish
+    # extensions and third_party).
+    kind: final_newline
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.pyi"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.hpp"
+        - "**/*.cu"
+        - "**/*.cuh"
+        - "**/*.mm"
+        - "**/*.metal"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.md"
+        - "**/*.cmake"
+        - "**/CMakeLists.txt"
+        - "**/*.toml"
+      exclude:
+        - "third_party/**"
+        - "**/contrib/**"
+        - "**/fb/**"
+        - "fb/**"
+        - "torch/_inductor/fx_passes/serialized_patterns/**"
+        - "torch/_inductor/autoheuristic/artifacts/**"
+        - "torch/_vendor/**"
+        - "test/dynamo/cpython/**"
+        - "torch/csrc/**"          # excluded by sparse-checkout
+        - "aten/src/**"            # excluded by sparse-checkout
+        - "test/**"                # excluded by sparse-checkout
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  - id: pytorch-no-trailing-whitespace
+    # Mirrors lintrunner SPACES adapter (`grep '[[:blank:]]$'`).
+    kind: no_trailing_whitespace
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.pyi"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.hpp"
+        - "**/*.cu"
+        - "**/*.cuh"
+        - "**/*.mm"
+        - "**/*.metal"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.md"
+        - "**/*.toml"
+      exclude:
+        - "**/*.diff"
+        - "**/*.patch"
+        - "third_party/**"
+        - "**/contrib/**"
+        - "**/fb/**"
+        - "fb/**"
+        - "aten/src/ATen/native/vulkan/api/vk_mem_alloc.h"
+        - "torch/csrc/**"          # excluded by sparse-checkout
+        - "aten/src/**"
+        - "test/**"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: pytorch-no-tabs-in-source
+    # Mirrors lintrunner TABS adapter (excludes Makefiles, .svg, etc.).
+    # editorconfig declares indent_style=space for .py and .cpp.
+    kind: indent_style
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.pyi"
+        - "**/*.cpp"
+        - "**/*.h"
+        - "**/*.hpp"
+        - "**/*.cu"
+        - "**/*.cuh"
+        - "**/*.mm"
+        - "**/*.metal"
+      exclude:
+        - "**/*Makefile"
+        - "**/contrib/**"
+        - "third_party/**"
+        - "**/.gitattributes"
+        - "**/.gitmodules"
+        - "**/fb/**"
+        - "fb/**"
+        - "aten/src/ATen/native/vulkan/api/vk_mem_alloc.h"
+        - "**/*.patch"
+        - "torch/csrc/**"
+        - "aten/src/**"
+        - "test/**"
+    style: spaces
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # Trojan Source defense
+  # The bundled oss-baseline restricts no_bidi_controls to docs.
+  # pytorch is a runtime — bidi controls in .py / .cpp / .cu source
+  # are the higher-stakes case (CVE-2021-42574).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-no-bidi-in-source
+    kind: no_bidi_controls
+    paths:
+      include: ["**/*.py", "**/*.cpp", "**/*.h", "**/*.cu", "**/*.cuh"]
+      exclude:
+        - "third_party/**"
+        - "test/**"
+        - "torch/csrc/**"
+        - "aten/src/**"
+        - "**/fb/**"
+    level: error
+    message: "Trojan Source (CVE-2021-42574): bidirectional override characters in source files are rejected."
+    policy_url: "https://trojansource.codes/"
+
+  # ──────────────────────────────────────────────────────────────────
+  # COPYRIGHT — confidential-code accidental-commit guard
+  # lintrunner COPYRIGHT adapter greps every file for the literal
+  # string "Confidential and proprietary". This is the textbook
+  # `file_content_forbidden` pattern. Catches accidental copy-paste
+  # of internal-FB headers (or any Big-Co confidentiality marker)
+  # into public OSS commits.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-no-confidential-headers
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*"]
+      exclude:
+        - ".lintrunner.toml"
+        - ".alint.yml"          # self-exclude: this rule mentions the literal string
+        - "**/fb/**"
+        - "fb/**"
+        - "**/*.png"
+        - "**/*.gz"
+        - "**/*.patch"
+        - "third_party/**"
+        - "torch/csrc/**"
+        - "aten/src/**"
+        - "test/**"
+    pattern: 'Confidential and proprietary'
+    level: error
+    message: |
+      Proprietary header text committed to a public OSS file. Replace
+      with the BSD-3-Clause header used elsewhere in pytorch.
+
+  # ──────────────────────────────────────────────────────────────────
+  # PYPIDEP — unpinned PyPI installs in .github/**
+  # lintrunner pattern: `(pip|python -m pip) install <pkg>` without a
+  # version pin. Catches the supply-chain footgun where a CI workflow
+  # installs whatever's latest on PyPI. Native fit for
+  # `file_content_forbidden`.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-pypi-install-must-be-pinned
+    kind: file_content_forbidden
+    paths:
+      include: [".github/**"]
+      exclude:
+        - "**/*.rst"
+        - "**/*.py"
+        - "**/*.md"
+        - "**/*.diff"
+        - "**/fb/**"
+    pattern: '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install [a-zA-Z0-9][A-Za-z0-9._\-]+([^/=<>~!]+)[A-Za-z0-9._\-*+!]*$'
+    level: error
+    message: |
+      Unpinned PyPI install in a CI workflow. Pin the version to
+      'pkg==X.Y.Z' (or use a constraints file). Lintrunner adapter:
+      PYPIDEP.
+
+  # ──────────────────────────────────────────────────────────────────
+  # TYPEIGNORE / NOQA — qualified suppressions only
+  # Two of the most common lintrunner adapters. Both are
+  # `file_content_forbidden` over .py/.pyi sources. The pattern
+  # forbids unqualified `# type: ignore` and `# noqa` (without the
+  # rule code in brackets); the qualified forms `# type: ignore[xxx]`
+  # and `# noqa: ABC` are allowed.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-typeignore-must-be-qualified
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.py", "**/*.pyi"]
+      exclude:
+        - "**/fb/**"
+        - "fb/**"
+        - "test/**"
+    pattern: '# type:\s*ignore([^\[]|$)'
+    level: warning
+    message: |
+      Unqualified `# type: ignore`. Use `# type: ignore[code]` so the
+      ignore is targeted. Lintrunner adapter: TYPEIGNORE.
+
+  - id: pytorch-noqa-must-be-qualified
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.py", "**/*.pyi"]
+      exclude:
+        - "caffe2/**"
+        - "**/fb/**"
+        - "fb/**"
+        - "torch/_vendor/**"
+        - "test/**"
+    pattern: '# noqa([^:]|$)'
+    level: warning
+    message: |
+      Unqualified `# noqa`. Use `# noqa: XXXX` with the specific rule
+      code. Lintrunner adapter: NOQA.
+
+  # ──────────────────────────────────────────────────────────────────
+  # TYPENOSKIP — mypy.ini must not use follow_imports = skip
+  # Single-file scope, single-pattern forbid. Trivial fit.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-mypy-no-follow-imports-skip
+    kind: file_content_forbidden
+    paths:
+      include: ["mypy.ini", "mypy-strict.ini"]
+    pattern: 'follow_imports\s*=\s*skip'
+    level: error
+    message: |
+      `follow_imports = skip` in mypy.ini silently disables type
+      checking. Use a top-level `# mypy: ignore-errors` or per-line
+      `# type: ignore[code]` instead. Lintrunner adapter: TYPENOSKIP.
+
+  # ──────────────────────────────────────────────────────────────────
+  # C++ deprecated-macro guards
+  #
+  # Five lintrunner adapters in this family — each is a single-pattern
+  # `file_content_forbidden` over the C++ tree. With sparse-checkout
+  # excluding torch/csrc, aten/src, and test/, these mainly fire on
+  # c10/. Mirror each as its own rule so the messages stay actionable.
+  # (We could collapse into one rule with a regex alternation, but
+  # per-rule messages give better remediation prompts.)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-no-c10-unused-macro
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "torch/headeronly/macros/Macros.h"
+    pattern: 'C10_UNUSED'
+    level: warning
+    message: |
+      C10_UNUSED is deprecated. Use `[[maybe_unused]]` directly.
+      Lintrunner adapter: C10_UNUSED.
+
+  - id: pytorch-no-c10-nodiscard-macro
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "torch/headeronly/macros/Macros.h"
+    pattern: 'C10_NODISCARD'
+    level: warning
+    message: |
+      C10_NODISCARD is deprecated. Use `[[nodiscard]]` directly.
+      Lintrunner adapter: C10_NODISCARD.
+
+  - id: pytorch-no-std-call-once
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "c10/util/CallOnce.h"
+        - "**/fb/**"
+    pattern: 'std::call_once'
+    level: warning
+    message: |
+      std::call_once is forbidden — use c10::call_once.
+      Lintrunner adapter: CALL_ONCE.
+
+  - id: pytorch-no-std-once-flag
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "**/fb/**"
+    pattern: 'std::once_flag'
+    level: warning
+    message: |
+      std::once_flag is forbidden — use c10::once_flag.
+      Lintrunner adapter: ONCE_FLAG.
+
+  - id: pytorch-no-quoted-include
+    # Mirrors INCLUDE adapter. With sparse-checkout we mostly hit c10.
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "**/fb/**"
+    pattern: '#include "'
+    level: warning
+    message: |
+      Quoted include — use `#include <...>` instead. Lintrunner adapter:
+      INCLUDE.
+
+  # ──────────────────────────────────────────────────────────────────
+  # PYBIND11_INCLUDE — direct pybind11 includes must use torch wrapper
+  # Tighter scope (`*.cpp`, `*.h`); same shape — single-pattern forbid.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-no-direct-pybind11-include
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "torch/csrc/utils/pybind.h"
+        - "torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp"
+        - "caffe2/**/*"
+    pattern: '#include <pybind11/(^|[^(gil_simple\.h)])'
+    level: warning
+    message: |
+      Direct pybind11 include without including torch/csrc/utils/pybind.h
+      first. Some specialisations may not be loaded. Lintrunner adapter:
+      PYBIND11_INCLUDE.
+
+  # ──────────────────────────────────────────────────────────────────
+  # PYBIND11_SPECIALIZATION — declared in non-standard locations
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-no-orphan-pybind11-specialization
+    kind: file_content_forbidden
+    paths:
+      include: ["c10/**/*.cpp", "c10/**/*.h"]
+      exclude:
+        - "torch/csrc/utils/pybind.h"
+        - "torch/csrc/distributed/c10d/init.cpp"
+        - "torch/csrc/jit/python/pybind.h"
+        - "fb/**"
+        - "**/fb/**"
+        - "c10/**/*"
+    pattern: 'PYBIND11_DECLARE_HOLDER_TYPE'
+    level: warning
+    message: |
+      pybind11 holder-type specialization in non-standard location.
+      Place in torch/csrc/utils/pybind.h. Lintrunner adapter:
+      PYBIND11_SPECIALIZATION.
+
+  # ──────────────────────────────────────────────────────────────────
+  # CODESPELL substitute — no easy regex; shells out
+  # The lintrunner CODESPELL adapter wraps the upstream `codespell`
+  # tool. We shell out the same way.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-codespell
+    kind: command
+    paths:
+      include:
+        - "**/*.py"
+        - "**/*.md"
+        - "**/*.rst"
+        - "**/*.cpp"
+        - "**/*.h"
+      exclude:
+        - "caffe2/**"
+        - "fb/**"
+        - "**/fb/**"
+        - "third_party/**"
+        - "test/dynamo/cpython/**"
+        - "torch/_vendor/**"
+        - "torch/_inductor/fx_passes/serialized_patterns/**"
+        - "torch/_inductor/autoheuristic/artifacts/**"
+        - "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**"
+        - "torch/utils/model_dump/preact.mjs"
+    command: ["codespell", "--toml", "pyproject.toml", "{path}"]
+    timeout: 120
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # CMAKE — cmakelint shellout
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-cmakelint
+    kind: command
+    paths:
+      include:
+        - "**/*.cmake"
+        - "**/*.cmake.in"
+        - "**/CMakeLists.txt"
+      exclude:
+        - "cmake/Modules/**"
+        - "cmake/Modules_CUDA_fix/**"
+        - "cmake/Caffe2Config.cmake.in"
+        - "aten/src/ATen/ATenConfig.cmake.in"
+        - "cmake/TorchConfig.cmake.in"
+        - "cmake/TorchConfigVersion.cmake.in"
+        - "fb/**"
+        - "**/fb/**"
+    command: ["cmakelint", "--config=.cmakelintrc", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # SHELLCHECK — shellcheck shellout for .ci/pytorch/**/*.sh
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-shellcheck
+    kind: command
+    paths:
+      include: [".ci/pytorch/**/*.sh"]
+      exclude:
+        - "**/fb/**"
+    command: ["shellcheck", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # ACTIONLINT — Actionlint shellout for workflow files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-actionlint
+    kind: command
+    paths:
+      include:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+      exclude:
+        - "**/fb/**"
+    command: ["actionlint", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # CLANGFORMAT — shellout to clang-format --dry-run
+  # The lintrunner adapter calls a vendored clang-format binary
+  # downloaded from S3. We rely on the user's PATH-installed
+  # clang-format (or skip if not present — alint reports
+  # "tool not on PATH" but won't fail the rule's BUILD step).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-clang-format
+    kind: command
+    paths:
+      include:
+        - "c10/**/*.h"
+        - "c10/**/*.cpp"
+        - "torch/headeronly/**/*.h"
+      exclude:
+        - "c10/util/strong_type.h"
+        - "**/fb/**"
+        - "torch/csrc/inductor/aoti_torch/generated/**"
+        - "torch/csrc/jit/serialization/mobile_bytecode_generated.h"
+        - "torch/csrc/utils/pythoncapi_compat.h"
+        - "aten/src/ATen/dlpack.h"
+    command: ["clang-format", "--dry-run", "--Werror", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # FLAKE8 — shellout to flake8 (lintrunner uses uv run script)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-flake8
+    kind: command
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - ".git/**"
+        - "build_test_custom_build/**"
+        - "build/**"
+        - "caffe2/**"
+        - "docs/caffe2/**"
+        - "docs/cpp/src/**"
+        - "docs/src/**"
+        - "fb/**"
+        - "**/fb/**"
+        - "functorch/docs/**"
+        - "functorch/examples/**"
+        - "torch/_inductor/fx_passes/serialized_patterns/**"
+        - "torch/_inductor/autoheuristic/artifacts/**"
+        - "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**"
+        - "torch/_vendor/**"
+        - "scripts/**"
+        - "third_party/**"
+        - "torch/include/**"
+        - "torch/lib/**"
+        - "venv/**"
+        - "**/*.pyi"
+        - "tools/experimental/torchfuzz/**"
+        - "tools/test/test_selective_build.py"
+        - "test/**"           # excluded by sparse-checkout
+    command: ["flake8", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # RUFF — shellout (mirrors lintrunner RUFF adapter)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-ruff
+    kind: command
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "caffe2/**"
+        - "fb/**"
+        - "**/fb/**"
+        - "third_party/**"
+        - "torch/_vendor/**"
+        - "test/**"
+    command: ["ruff", "check", "--exit-non-zero-on-fix", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # PYREFLY — shellout (lintrunner uses uv-driven pyrefly)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-pyrefly
+    kind: command
+    paths:
+      include:
+        - "torch/**/*.py"
+        - "torchgen/**/*.py"
+        - "functorch/**/*.py"
+        - "tools/**/*.py"
+      exclude:
+        - "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**"
+        - "torch/_vendor/**"
+    command: ["pyrefly", "check", "--config=pyrefly.toml", "{path}"]
+    timeout: 120
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # PYFMT — usort + ruff-format pipeline (mirrors lintrunner PYFMT)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-pyfmt-ruff-format
+    kind: command
+    paths:
+      include: ["**/*.py", "**/*.pyi"]
+      exclude:
+        - "tools/gen_vulkan_spv.py"
+        - "caffe2/**/*.py"
+        - "caffe2/**/*.pyi"
+        - "fb/**"
+        - "**/fb/**"
+        - "test/dynamo/cpython/**"
+        - "third_party/**/*.py"
+        - "third_party/**/*.pyi"
+        - "torch/_vendor/**"
+        - "torch/_inductor/fx_passes/serialized_patterns/**"
+        - "torch/_inductor/autoheuristic/artifacts/**"
+        - "torch/_C/__init__.pyi"
+        - "torch/_C/_nn.pyi"
+        - "torch/_C/_VariableFunctions.pyi"
+        - "torch/_VF.pyi"
+        - "torch/return_types.pyi"
+        - "torch/nn/functional.pyi"
+        - "torch/utils/data/datapipes/datapipe.pyi"
+        - "torch/testing/_internal/py312_intrinsics.py"
+    command: ["ruff", "format", "--check", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ──────────────────────────────────────────────────────────────────
+  # MERGE_CONFLICTLESS_CSV — every non-blank line followed by 3 blanks
+  # The lintrunner adapter is a 50-line Python script asserting
+  # `benchmarks/dynamo/ci_expected_accuracy/*.csv` files have a blank-line
+  # separator between every row to avoid merge conflicts. The shape is:
+  # "every non-empty line N is followed by 3 blank lines". This is a
+  # `cross_line_pattern`/`unique_line_spacing` shape we don't have today.
+  # We approximate with a `file_min_lines` floor + a TODO note.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-merge-conflictless-csv-non-empty
+    kind: file_min_lines
+    paths:
+      include:
+        - "benchmarks/dynamo/ci_expected_accuracy/*.csv"
+        - "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv"
+    min_lines: 1
+    level: info
+    message: |
+      The MERGE_CONFLICTLESS_CSV lintrunner adapter asserts every row in
+      these CSVs is separated by 3 blank lines (avoids merge conflicts
+      on parallel benchmark updates). alint can only assert non-empty
+      today — full check stays on `lintrunner -t MERGE_CONFLICTLESS_CSV`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # NATIVEFUNCTIONS — native_functions.yaml shape
+  # The lintrunner NATIVEFUNCTIONS adapter regenerates the file in-place
+  # from torchgen and asserts no diff (codegen freshness — same shape as
+  # cpython's cases_generator gap and uv's `cargo dev generate-all`).
+  # alint asserts the file exists and is YAML-parseable; the regen-and-
+  # diff check stays on lintrunner.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-native-functions-yaml-present
+    kind: file_exists
+    paths: "aten/src/ATen/native/native_functions.yaml"
+    level: info
+    message: |
+      aten/src/ATen/native/native_functions.yaml is the source of truth
+      for the ATen native ops table. The codegen-freshness check stays
+      on lintrunner NATIVEFUNCTIONS; alint just asserts presence
+      (excluded by sparse-checkout in this validation pass — info level).
+
+  # ──────────────────────────────────────────────────────────────────
+  # LINTRUNNER_VERSION — the version pin lives in pyproject.toml
+  # The adapter shells out to `lintrunner --version` and compares
+  # against the pinned version. We can statically assert the
+  # requirements line is present. Out of immediate scope for the
+  # static config; placeholder.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-lintrunner-pinned-in-pyproject
+    kind: file_content_matches
+    paths: "pyproject.toml"
+    pattern: '(?m)^\s*"lintrunner'
+    level: info
+    message: |
+      pytorch's pyproject.toml declares `lintrunner` as a dev dependency
+      with a platform conditional. Lintrunner adapter LINTRUNNER_VERSION
+      enforces the version pin matches; alint just asserts the entry
+      exists.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level required files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-toplevel-build-system
+    kind: file_exists
+    paths:
+      - "setup.py"
+      - "pyproject.toml"
+      - "CMakeLists.txt"
+      - "Makefile"
+      - "version.txt"
+      - ".lintrunner.toml"
+      - "CODEOWNERS"
+      - "SECURITY.md"
+      - "RELEASE.md"
+      - "CITATION.cff"
+    root_only: true
+    level: error
+    message: |
+      A canonical pytorch top-level file is missing. The build system
+      assumes setup.py + pyproject.toml + CMakeLists.txt + Makefile;
+      community files include CODEOWNERS / SECURITY.md / CITATION.cff;
+      the lint contract lives in .lintrunner.toml.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Bazel build files exist (top-level .bzl + per-tree BUILD)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-bazel-files-present
+    kind: file_exists
+    paths:
+      - "BUILD.bazel"
+      - "WORKSPACE"
+    root_only: true
+    level: warning
+    message: |
+      Bazel WORKSPACE / root BUILD.bazel missing — pytorch supports both
+      CMake and Bazel builds. Bazel CI may break.
+
+  # ──────────────────────────────────────────────────────────────────
+  # version.txt parseable as a semver-ish prefix
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-version-txt-shape
+    kind: file_content_matches
+    paths: "version.txt"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+'
+    level: error
+    message: |
+      version.txt must start with a MAJOR.MINOR.PATCH version. Build
+      tooling parses this directly.
+
+  # ──────────────────────────────────────────────────────────────────
+  # CODEOWNERS coverage floor
+  # 259 lines as of the captured tree state. Asserting a generous
+  # minimum catches accidental wipes / merge mishaps.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-codeowners-substantive
+    kind: file_min_lines
+    paths: "CODEOWNERS"
+    min_lines: 50
+    level: info
+    message: |
+      CODEOWNERS is unusually short — pytorch expects substantive
+      ownership coverage across torch/, aten/, c10/, .github/, tools/
+      subtrees.
+
+  # ──────────────────────────────────────────────────────────────────
+  # GitHub Actions reusable-workflow naming convention
+  # pytorch ships 25 of 144 workflows as `_*.yml` (the convention for
+  # callable workflows; analogous to cpython's `reusable-*.yml`). Every
+  # `_*.yml` file should declare `on.workflow_call`. Catches the case
+  # where someone copies a callable as a top-level workflow without
+  # renaming.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-callable-workflow-declares-workflow-call
+    kind: file_content_matches
+    paths:
+      include: [".github/workflows/_*.yml", ".github/workflows/_*.yaml"]
+    pattern: '(?m)^\s*workflow_call\s*:'
+    level: warning
+    message: |
+      Workflow files prefixed `_*.yml` follow pytorch's callable-workflow
+      naming convention and should declare `on.workflow_call:`.
+
+  # ──────────────────────────────────────────────────────────────────
+  # generated-*.yml workflows must declare the linguist-generated marker
+  # The .gitattributes lists `.github/workflows/generated-*.yml
+  # linguist-generated=true`. The files are produced by
+  # .github/scripts/generate_ci_workflows.py. Asserting the generated
+  # marker comment exists at the top catches accidental hand-edits.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-generated-workflow-has-warning
+    kind: file_content_matches
+    paths:
+      include: [".github/workflows/generated-*.yml"]
+    pattern: '# @generated'
+    level: warning
+    message: |
+      Generated workflow files should carry an `# @generated` marker so
+      reviewers know not to hand-edit. Run
+      `python .github/scripts/generate_ci_workflows.py` to regenerate.
+
+  # ──────────────────────────────────────────────────────────────────
+  # AGENT-HYGIENE EXTENSION — pytorch repo has a CLAUDE.md
+  # The agent-hygiene ruleset already catches the canonical agent
+  # patterns. pytorch's own CLAUDE.md flags ".ci/docker/ is content-
+  # hashed" as a foot-gun for agents. We assert CLAUDE.md exists at
+  # root so the warning is discoverable.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-claude-md-present
+    kind: file_exists
+    paths: "CLAUDE.md"
+    root_only: true
+    level: info
+    message: |
+      pytorch ships a CLAUDE.md at root with project-specific agent
+      guidance (build commands, .ci/docker/ content-hash trap, scratch
+      space conventions). Treat as required documentation — agent
+      sessions should read it before issuing commands.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Per-tool config files exist
+  # The lintrunner contract assumes these configs live where each
+  # adapter expects them. Catches accidental wipes that would surface
+  # as opaque "could not load config" failures inside the adapter.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-linter-configs-present
+    kind: file_exists
+    paths:
+      - ".clang-format"
+      - ".clang-tidy"
+      - ".cmakelintrc"
+      - ".editorconfig"
+      - "pyrefly.toml"
+      - "mypy.ini"
+      - "mypy-strict.ini"
+      - "pytest.ini"
+      - "ubsan.supp"
+    root_only: true
+    level: warning
+    message: |
+      A linter configuration file is missing. Lintrunner adapters that
+      shell out to clang-format / clang-tidy / cmakelint / pyrefly /
+      mypy / pytest / sanitizers will fail to start without these.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Top-level docker / dev-environment files
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-docker-and-devcontainer-present
+    kind: file_exists
+    paths:
+      - "Dockerfile"
+      - ".devcontainer"
+    root_only: true
+    level: info
+    message: |
+      pytorch ships a top-level Dockerfile + .devcontainer/. Used by
+      Codespaces and the Docker-based CI image build pipeline.
+
+  # ──────────────────────────────────────────────────────────────────
+  # tools/linter/adapters/ presence — the lintrunner contract
+  # Asserting these adapters exist catches accidental deletes that
+  # would silently disable a check. The 57 adapters span 30 files
+  # (24 of which are grep_linter.py shims + a handful of bespoke
+  # Python adapters).
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-lintrunner-adapter-dir-present
+    kind: file_exists
+    paths:
+      - "tools/linter/adapters"
+      - ".lintrunner.toml"
+    root_only: true
+    level: error
+    message: |
+      The lintrunner adapter directory or .lintrunner.toml is missing.
+      pytorch's structural validation entirely depends on
+      lintrunner — without these files NO structural check runs in CI.
+
+  - id: pytorch-grep-linter-shim-present
+    kind: file_exists
+    paths:
+      - "tools/linter/adapters/grep_linter.py"
+      - "tools/linter/adapters/clangformat_linter.py"
+      - "tools/linter/adapters/clangtidy_linter.py"
+      - "tools/linter/adapters/ruff_linter.py"
+      - "tools/linter/adapters/pyfmt_linter.py"
+      - "tools/linter/adapters/codespell_linter.py"
+      - "tools/linter/adapters/actionlint_linter.py"
+      - "tools/linter/adapters/shellcheck_linter.py"
+      - "tools/linter/adapters/cmake_linter.py"
+      - "tools/linter/adapters/pyrefly_linter.py"
+    root_only: true
+    level: error
+    message: |
+      A core lintrunner adapter is missing. The matching .lintrunner.toml
+      [[linter]] block will fail at adapter-spawn time with an opaque
+      "no such file" error. Restore the adapter or remove the linter
+      block.
+
+  # ──────────────────────────────────────────────────────────────────
+  # CI-config presence (the .ci/ directory)
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-ci-pytorch-tree-present
+    kind: file_exists
+    paths:
+      - ".ci/pytorch"
+      - ".ci/docker"
+    root_only: true
+    level: error
+    message: |
+      The .ci/{pytorch,docker} directories drive every CI image build.
+      A missing directory means the entire CI matrix is broken.
+
+  # ──────────────────────────────────────────────────────────────────
+  # SHELLs in .ci/pytorch must use #! shebang
+  # Mirrors lintrunner SHELLCHECK adapter scope — ensures consistency.
+  # alint catches the file_starts_with check; shellcheck handles the rest.
+  # ──────────────────────────────────────────────────────────────────
+
+  - id: pytorch-ci-shell-scripts-have-shebang
+    kind: file_starts_with
+    paths:
+      include: [".ci/pytorch/**/*.sh"]
+      exclude:
+        - "**/fb/**"
+    prefix: "#!"
+    level: warning
+    message: |
+      Every shell script under .ci/pytorch/ must start with a `#!`
+      shebang line. Consumers (CI runners, cron, manual invocation)
+      assume the shebang is present.

@@ -293,10 +293,14 @@ rules:
 
   - id: deno-dlint-includes-camelcase
     when: facts.has_dlint_config
-    kind: json_path_equals
+    # Intent is "camelcase must be present in rules.include" — i.e. ANY
+    # element matches. *_path_equals against [*] would mean EVERY element
+    # must equal "camelcase" (firing on every other listed rule); see
+    # CONFIG-AUTHORING.md pitfall #17. Until v0.10+ ships `*_path_contains`,
+    # the canonical workaround is a regex against the raw JSON text.
+    kind: file_content_matches
     paths: .dlint.json
-    path: "$.rules.include[*]"
-    equals: "camelcase"
+    pattern: '"include"\s*:\s*\[[^\]]*"camelcase"'
     level: info
     message: >-
       .dlint.json should keep `camelcase` in `rules.include`.
