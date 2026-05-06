@@ -1,0 +1,400 @@
+# Starter alint config for clap-rs/clap.
+#
+# Replaces the structural-validation surface of clap's tooling
+# (workspace-metadata pinning, MSRV consistency, per-crate
+# manifest hygiene, GHA hardening, conventional-commit + typos
+# pre-commit), plus 4 more checks via the `command` rule kind
+# shelling out to existing tools (typos, committed, cargo deny,
+# cffconvert).
+#
+# Adopt by saving as .alint.yml at the repo root and running
+# `alint check`. Tune `paths:` and `scope_filter:` if your fork
+# has diverged.
+#
+# Known limitations vs. the existing tooling (each requires an
+# alint primitive that doesn't ship today — see this directory's
+# README.md for the full gap catalogue):
+#   - clippy.toml `disallowed-methods` enforcement (needs Rust
+#     AST awareness; out of alint's no-AST scope by design)
+#   - cargo deny `bans`/`licenses`/`sources` (needs Cargo
+#     metadata graph; out of scope, keep `cargo deny`)
+#   - rustdoc warnings as errors (needs cargo doc; out of scope)
+#   - minimal-versions check (needs cargo lockfile resolution;
+#     out of scope)
+#   - rustfmt / clippy lint enforcement (compiler-driven; out of
+#     scope by design — alint is for the structural shell, not
+#     the source-code body)
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ── workspace.package single source of truth ─────────────────
+  # clap pins `repository`, `license`, `edition`, `rust-version`,
+  # and `include` once at the workspace root, then every member
+  # inherits via `field.workspace = true`. Asserting the root
+  # values lets `monorepo/cargo-workspace@v1`'s `members` iteration
+  # carry the contract down implicitly. The license field is the
+  # exact dual-license string clap uses across all family crates.
+  - id: clap-workspace-license-mit-or-apache
+    kind: toml_path_equals
+    paths: Cargo.toml
+    path: "$.workspace.package.license"
+    equals: "MIT OR Apache-2.0"
+    level: error
+    message: >-
+      The clap family is dual-licensed MIT OR Apache-2.0. Workspace-root
+      license must be exactly that SPDX expression so every member
+      crate inherits it via `license.workspace = true`.
+
+  - id: clap-workspace-edition-2024
+    kind: toml_path_equals
+    paths: Cargo.toml
+    path: "$.workspace.package.edition"
+    equals: "2024"
+    level: error
+    message: >-
+      Workspace edition is pinned to 2024 (Cargo edition, not Rust
+      version). Members inherit via `edition.workspace = true`.
+
+  - id: clap-workspace-rust-version-pinned
+    kind: toml_path_matches
+    paths: Cargo.toml
+    path: "$.workspace.package['rust-version']"
+    matches: '^1\.\d{2,}$'
+    level: error
+    message: >-
+      MSRV must be declared at the workspace level (e.g. `1.85`)
+      so every member inherits the same floor and CI's `check-msrv`
+      job has a single source of truth.
+
+  - id: clap-workspace-repository-canonical
+    kind: toml_path_equals
+    paths: Cargo.toml
+    path: "$.workspace.package.repository"
+    equals: "https://github.com/clap-rs/clap"
+    level: error
+    message: >-
+      Workspace repository URL must be the canonical clap-rs/clap
+      GitHub URL so docs.rs and crates.io consistently link back.
+
+  # ── per-crate manifest must inherit, not duplicate ───────────
+  # Drift catcher: any member that hand-writes its own license,
+  # edition, or rust-version (instead of `field.workspace = true`)
+  # bypasses the workspace pin and will silently diverge on the
+  # next bump. Iterate over every member dir that has a Cargo.toml
+  # and assert each inherits.
+  - id: clap-member-license-inherits
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_equals
+        paths: "{path}/Cargo.toml"
+        path: "$.package.license.workspace"
+        equals: true
+    level: error
+    message: >-
+      Member crate must inherit `license` from the workspace via
+      `license.workspace = true` — not declare its own SPDX string.
+
+  - id: clap-member-edition-inherits
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_equals
+        paths: "{path}/Cargo.toml"
+        path: "$.package.edition.workspace"
+        equals: true
+    level: error
+    message: >-
+      Member crate must inherit `edition` from the workspace via
+      `edition.workspace = true`.
+
+  - id: clap-member-rust-version-inherits
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_equals
+        paths: "{path}/Cargo.toml"
+        path: "$.package['rust-version'].workspace"
+        equals: true
+    level: error
+    message: >-
+      Member crate must inherit `rust-version` (MSRV) from the
+      workspace via `rust-version.workspace = true`. Hand-rolled
+      MSRV here defeats the workspace pin and the CI matrix.
+
+  - id: clap-member-repository-inherits
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_equals
+        paths: "{path}/Cargo.toml"
+        path: "$.package.repository.workspace"
+        equals: true
+    level: error
+    message: >-
+      Member crate must inherit `repository` from the workspace via
+      `repository.workspace = true`. Per-crate URLs drift on rename.
+
+  # ── per-crate metadata sync (categories / keywords) ──────────
+  # Every clap-family crate carries `categories =
+  # ["command-line-interface"]`. clap_derive adds the proc-macro
+  # category; the matches regex accepts either set. Workspace
+  # inheritance doesn't cover this field (categories/keywords
+  # are per-crate), so the assertion lives at member level.
+  - id: clap-member-cli-category
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_mangen,clap_lex}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_matches
+        paths: "{path}/Cargo.toml"
+        path: "$.package.categories[*]"
+        matches: '^command-line-interface$|^development-tools::procedural-macro-helpers$'
+    level: warning
+    message: >-
+      Every clap-family crate should declare
+      `categories = ["command-line-interface"]` (clap_derive
+      additionally declares the proc-macro-helpers category).
+      Keeps crates.io discoverability consistent across the family.
+
+  - id: clap-member-has-cli-keyword
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_mangen,clap_lex}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/Cargo.toml"
+        pattern: '"cli"'
+    level: warning
+    message: >-
+      Every clap-family crate carries `"cli"` in its `keywords`
+      array. Search-engine signal on crates.io.
+
+  # ── lints inherited from workspace ───────────────────────────
+  # The workspace declares `[workspace.lints.rust]` and
+  # `[workspace.lints.clippy]` blocks; every member must opt in
+  # via `[lints] workspace = true`. A member that omits this
+  # bypasses the entire lint policy silently.
+  - id: clap-member-lints-inherit
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_equals
+        paths: "{path}/Cargo.toml"
+        path: "$.lints.workspace"
+        equals: true
+    level: error
+    message: >-
+      Member crate must opt in to the workspace lint policy via
+      `[lints]\nworkspace = true`. Without it the workspace's
+      ~70 clippy lints don't apply to this crate.
+
+  # ── docs.rs metadata coherence ───────────────────────────────
+  # Every member declares `[package.metadata.docs.rs]` so
+  # docs.rs builds with the right cargo-features. The
+  # `--generate-link-to-definition` rustdoc-arg is the cross-crate
+  # convention so every clap doc page has source-code links.
+  - id: clap-member-docsrs-link-defs
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: toml_path_matches
+        paths: "{path}/Cargo.toml"
+        path: "$.package.metadata.docs.rs.rustdoc-args[*]"
+        matches: '^--generate-link-to-definition$'
+        if_present: true   # clap_lex is metadata-light; tolerate omission
+    level: info
+    message: >-
+      Member crate's `[package.metadata.docs.rs]` should pass
+      `--generate-link-to-definition` to rustdoc so docs.rs links
+      identifiers to their source — clap-family-wide convention.
+
+  # ── README.md per crate ──────────────────────────────────────
+  - id: clap-member-has-readme
+    kind: for_each_dir
+    select: "{clap_builder,clap_derive,clap_complete,clap_lex,clap_mangen}"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: warning
+    message: >-
+      Every clap family crate should ship a README.md so its
+      docs.rs landing page has substance and the directory tree
+      is self-documenting.
+
+  # ── CITATION.cff present and well-formed ─────────────────────
+  # clap publishes a citation file (cffconvert validates in CI).
+  # We assert the file's structural shape; deep CFF schema
+  # validation stays with cffconvert via a `command` rule below.
+  - id: clap-citation-exists
+    kind: file_exists
+    paths: CITATION.cff
+    root_only: true
+    level: warning
+    message: >-
+      CITATION.cff exists at the repo root so `cite as` info is
+      machine-readable. Validated by cffconvert in CI.
+
+  - id: clap-citation-cff-version
+    kind: yaml_path_matches
+    paths: CITATION.cff
+    path: "$['cff-version']"
+    matches: '^1\.[0-9]+\.[0-9]+$'
+    level: warning
+    message: >-
+      CITATION.cff must declare a `cff-version` (e.g. `1.2.0`).
+
+  # ── conventional-commit configuration present ────────────────
+  # clap uses crate-ci/committed for commit-msg linting in pre-commit
+  # hooks AND the dedicated committed.yml workflow.
+  - id: clap-committed-config-exists
+    kind: file_exists
+    paths: committed.toml
+    root_only: true
+    level: warning
+    message: >-
+      Conventional-commit policy is enforced by `committed`; its
+      committed.toml at the repo root configures the style. Keep
+      it co-located with the workflow that runs the lint.
+
+  - id: clap-committed-style-conventional
+    kind: toml_path_equals
+    paths: committed.toml
+    path: "$.style"
+    equals: "conventional"
+    level: warning
+    message: >-
+      `committed.toml.style` must be "conventional" for clap's
+      Conventional Commits policy.
+
+  # ── typos config present (spell-check) ───────────────────────
+  - id: clap-typos-config-exists
+    kind: file_exists
+    paths: typos.toml
+    root_only: true
+    level: info
+    message: >-
+      `typos` runs in pre-commit + a dedicated workflow; its
+      typos.toml carries the per-repo allowlist.
+
+  # ── deny.toml present (cargo deny is in CI security_audit) ───
+  - id: clap-deny-config-exists
+    kind: file_exists
+    paths: deny.toml
+    root_only: true
+    level: warning
+    message: >-
+      `cargo deny check bans licenses sources` runs in CI; its
+      deny.toml carries the policy.
+
+  # ── pre-commit hooks declared ────────────────────────────────
+  # The repo wires .pre-commit-config.yaml + a CI workflow that
+  # runs `prek` to enforce hooks. Asserting both exist keeps the
+  # contract intact.
+  - id: clap-pre-commit-config-exists
+    kind: file_exists
+    paths: .pre-commit-config.yaml
+    root_only: true
+    level: info
+    message: >-
+      `pre-commit` hooks (typos, committed, generic file checks)
+      are wired via .pre-commit-config.yaml + the
+      .github/workflows/pre-commit.yml CI gate.
+
+  # ── repo-settings (probot/settings) declares topics ──────────
+  - id: clap-repo-settings-topics-declared
+    kind: yaml_path_matches
+    paths: .github/settings.yml
+    path: "$.repository.topics"
+    matches: '.+'
+    level: info
+    message: >-
+      .github/settings.yml is synced by probot/settings; declaring
+      `repository.topics` keeps GitHub topics in version control.
+
+  # ── source-tree dual-license headers (LICENSE-APACHE + -MIT) ──
+  # clap is dual-licensed and ships BOTH license files at the root
+  # (the workspace.package.include glob lists `LICENSE*` so both
+  # are bundled into every published crate tarball).
+  - id: clap-license-apache-exists
+    kind: file_exists
+    paths: LICENSE-APACHE
+    root_only: true
+    level: error
+    message: >-
+      Dual-licensed `MIT OR Apache-2.0` projects must ship both
+      LICENSE-APACHE and LICENSE-MIT at the repo root.
+
+  - id: clap-license-mit-exists
+    kind: file_exists
+    paths: LICENSE-MIT
+    root_only: true
+    level: error
+    message: >-
+      Dual-licensed `MIT OR Apache-2.0` projects must ship both
+      LICENSE-APACHE and LICENSE-MIT at the repo root.
+
+  # ── workspace include glob protects published crates ─────────
+  # If the workspace.package.include array drops `README.md` or
+  # `LICENSE*`, the resulting `cargo publish` tarballs lose their
+  # docs/legal anchor. Assert each required entry is present.
+  - id: clap-workspace-include-readme
+    kind: file_content_matches
+    paths: Cargo.toml
+    pattern: '"README\.md"'
+    level: warning
+    message: >-
+      `[workspace.package].include` must list "README.md" so it's
+      bundled into every published crate tarball.
+
+  - id: clap-workspace-include-license
+    kind: file_content_matches
+    paths: Cargo.toml
+    pattern: '"LICENSE\*"'
+    level: warning
+    message: >-
+      `[workspace.package].include` must list "LICENSE*" so both
+      LICENSE-APACHE and LICENSE-MIT bundle into every tarball.
+
+  # ── shell out to existing tools we don't subsume ─────────────
+  # Each of these runs in clap's existing CI; the `command` rule
+  # gives one declarative entry point so a contributor can run
+  # the full suite locally with `alint check` instead of
+  # remembering each tool's invocation. (The tools themselves
+  # remain authoritative; alint just orchestrates.)
+
+  - id: clap-typos-shellout
+    kind: command
+    paths: typos.toml
+    command: ["typos", "--config", "{path}"]
+    timeout: 120
+    level: warning
+
+  - id: clap-cffconvert-shellout
+    kind: command
+    paths: CITATION.cff
+    command: ["cffconvert", "--validate", "-i", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: clap-cargo-deny-shellout
+    kind: command
+    paths: deny.toml
+    command: ["cargo", "deny", "check", "bans", "licenses", "sources"]
+    timeout: 300
+    level: warning

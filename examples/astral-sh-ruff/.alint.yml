@@ -1,0 +1,332 @@
+# Starter alint config for astral-sh/ruff.
+#
+# Replaces ~10 of the 16 pre-commit hooks declared in
+# `.pre-commit-config.yaml` with declarative rules, plus another ~5
+# via the `command` rule kind shelling out to existing tools (typos,
+# zizmor, shellcheck, actionlint, ruff itself, mdformat, prettier,
+# markdownlint). Net: ~15 of the prek hooks + 3 ad-hoc CI gates
+# collapse into one config file.
+#
+# Adopt by saving as `.alint.yml` at the repo root and running
+# `alint check`. The bundled `monorepo/cargo-workspace` overlay
+# already enforces per-crate `Cargo.toml` + `README.md` presence,
+# which matches ruff's actual workspace shape (`crates/*` with
+# every entry having a `Cargo.toml`).
+#
+# Known limitations versus the existing `.pre-commit-config.yaml` +
+# `crates/ruff_dev/` pipeline (each requires a primitive alint
+# doesn't ship today — see this directory's README.md for the gap
+# catalogue):
+#
+#   - `cargo dev generate-all` codegen drift              (codegen out of scope)
+#   - `cargo dev generate-json-schema` ↔ `ruff.schema.json` (codegen out of scope)
+#   - `clippy.toml::disallowed-methods` enforcement        (Rust AST scan)
+#   - `cargo shear` unused-dep detection                   (cargo dep-graph analysis)
+#   - mdformat / markdownlint-fix idempotency              (formatter dogfood)
+#   - `validate-pyproject` deep-shape check                (PEP 621 schema beyond
+#                                                           `project.name`)
+#   - ecosystem regression check vs. baseline binary       (out of scope)
+#   - cargo-insta `--unreferenced=reject` snapshot drift   (cross-file source ↔
+#                                                           snapshot freshness)
+#   - prek priority ordering (0 → 1 → 2)                   (alint runs all rules
+#                                                           in parallel; see README)
+#
+# These remain on the existing `prek run -a` invocation until
+# alint v0.10+ ships the matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/python@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/agent-context@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ── pre-commit `check-merge-conflict` ──────────────────────────
+  # The `oss-baseline` ruleset already catches conflict markers in
+  # most files; this rule extends that to the workspace's `crates/`
+  # tree (the bulk of the source).
+  - id: ruff-no-merge-markers-in-crates
+    kind: no_merge_conflict_markers
+    paths:
+      include: ["crates/**/*.rs", "crates/**/*.toml", "crates/**/*.md"]
+      exclude:
+        - "crates/ty_vendored/vendor/**"
+        - "crates/**/resources/**"
+        - "crates/**/snapshots/**"
+    level: error
+
+  # ── pre-commit `end-of-file-fixer` (TOML subset) ───────────────
+  # The repo's pre-commit gates this only on `*.toml` files because
+  # the Python parser/linter/formatter test fixtures legitimately
+  # omit trailing newlines. Match the same scope.
+  - id: ruff-toml-final-newline
+    kind: final_newline
+    paths: "**/*.toml"
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  # ── pre-commit `validate-pyproject` (shallow) ──────────────────
+  # The full validate-pyproject hook runs the PEP 621 JSON Schema
+  # against the file. Until alint can shell to that as a `command`,
+  # enforce the two fields ruff actually relies on.
+  - id: ruff-pyproject-name
+    kind: toml_path_matches
+    paths: "pyproject.toml"
+    path: "$.project.name"
+    matches: '^ruff$'
+    level: error
+    message: |
+      pyproject.toml `project.name` must be `ruff` (the published
+      distribution name on PyPI).
+
+  - id: ruff-pyproject-license
+    kind: toml_path_matches
+    paths: "pyproject.toml"
+    path: "$.project.license"
+    matches: '^MIT$'
+    level: error
+    message: |
+      pyproject.toml `project.license` must be `MIT` to match the
+      LICENSE file at the repo root.
+
+  - id: ruff-pyproject-requires-python
+    # `requires-python` has a dash → bracket-notation key access
+    # (RFC 9535: dot-notation is reserved for [A-Za-z_][A-Za-z0-9_]*).
+    kind: toml_path_matches
+    paths: "pyproject.toml"
+    path: "$.project['requires-python']"
+    matches: '^>=3\.[0-9]+$'
+    level: warning
+    message: |
+      pyproject.toml `project.requires-python` should declare a
+      Python floor (currently `>=3.7`).
+
+  # ── pre-commit `typos` ─────────────────────────────────────────
+  # The `crate-ci/typos` hook checks every committed file against
+  # `_typos.toml`'s allowlist. Shelling out to the same binary
+  # gives byte-identical behaviour.
+  - id: ruff-typos
+    kind: command
+    paths: "_typos.toml"
+    command: ["typos"]
+    timeout: 120
+    level: warning
+
+  # ── pre-commit `shellcheck` ────────────────────────────────────
+  # ruff's shell scripts live under `scripts/` and `.github/`.
+  - id: ruff-shellcheck
+    kind: command
+    paths:
+      include: ["scripts/**/*.sh", ".github/**/*.sh"]
+    command: ["shellcheck", "-x", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ── pre-commit `zizmor` (GitHub Actions security) ──────────────
+  - id: ruff-zizmor
+    kind: command
+    paths: ".github/workflows"
+    command: ["zizmor", "--config", ".github/zizmor.yml", ".github/workflows"]
+    timeout: 60
+    level: warning
+
+  # ── pre-commit `actionlint` (workflow syntax) ──────────────────
+  # Bundled GitHub Actions ruleset only checks pinning + perms; it
+  # doesn't validate workflow grammar. Shell out for that.
+  - id: ruff-actionlint
+    kind: command
+    paths: ".github/workflows"
+    command: ["actionlint", "-config-file", ".github/actionlint.yaml"]
+    timeout: 60
+    level: warning
+
+  # ── pre-commit `check-github-workflows` (JSON Schema) ──────────
+  # The pre-commit hook runs `check-jsonschema --builtin-schema
+  # github-workflows`. Equivalent: validate every workflow YAML
+  # against the published GitHub Actions JSON Schema.
+  #
+  # NOTE: `json_schema_passes` requires a *local* schema path; the
+  # GitHub Actions schema can be vendored under e.g.
+  # `.github/schemas/github-workflow.json`. Without that file
+  # present the rule yields one violation; install via
+  #     curl -L -o .github/schemas/github-workflow.json \
+  #       https://json.schemastore.org/github-workflow.json
+  # and uncomment.
+  #
+  # - id: ruff-workflows-against-schema
+  #   kind: json_schema_passes
+  #   paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+  #   schema_path: ".github/schemas/github-workflow.json"
+  #   format: yaml
+  #   level: warning
+
+  # ── pre-commit `ruff-format` + `ruff-check` (self-hosted) ──────
+  # ruff dogfoods itself on its own Python sources. Since we're
+  # dispatching from alint, treat ruff like any other external
+  # tool. (Yes — alint shelling out to ruff to lint ruff's own
+  # Python is the meta-loop the case-study calls out.)
+  - id: ruff-self-format
+    kind: command
+    paths: "**/*.py"
+    command: ["ruff", "format", "--check", "{path}"]
+    timeout: 60
+    level: warning
+
+  - id: ruff-self-lint
+    kind: command
+    paths: "**/*.py"
+    command: ["ruff", "check", "{path}"]
+    timeout: 60
+    level: warning
+
+  # ── pre-commit `mdformat` / `markdownlint-fix` (Markdown) ──────
+  # Two hooks chain in priority order. Replace with one `command`
+  # invocation each per file; alint runs them in parallel rather
+  # than the prek priority chain (see README — mdformat then
+  # markdownlint-fix is order-sensitive only because both modify
+  # files; in `--check` mode they're commutative).
+  - id: ruff-mdformat
+    kind: command
+    paths: "**/*.md"
+    command: ["mdformat", "--check", "{path}"]
+    timeout: 30
+    level: info
+
+  - id: ruff-markdownlint
+    kind: command
+    paths: "**/*.md"
+    command: ["markdownlint", "{path}"]
+    timeout: 30
+    level: info
+
+  # ── pre-commit `prettier` (YAML) ───────────────────────────────
+  - id: ruff-prettier-yaml
+    kind: command
+    paths: "**/*.{yaml,yml}"
+    command: ["prettier", "--check", "{path}"]
+    timeout: 30
+    level: info
+
+  # ── pre-commit `rustfmt` ───────────────────────────────────────
+  # Per-package invocation rather than per-file — `cargo fmt`
+  # walks the workspace itself given a manifest. Shelling out
+  # 50 times (one per crate) would be wasteful: emit one
+  # workspace-wide check.
+  - id: ruff-cargo-fmt
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "fmt", "--all", "--check"]
+    timeout: 300
+    level: warning
+
+  # ── ci.yaml `cargo-clippy` ─────────────────────────────────────
+  # Same pattern: one workspace-wide invocation.
+  - id: ruff-cargo-clippy
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--locked", "--", "-D", "warnings"]
+    timeout: 600
+    level: warning
+
+  # ── ci.yaml `cargo-shear` ──────────────────────────────────────
+  - id: ruff-cargo-shear
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "shear", "--deny-warnings"]
+    timeout: 120
+    level: warning
+
+  # ── ci.yaml `cargo doc` (RUSTDOCFLAGS=-D warnings) ─────────────
+  # Mirrors the published feedback note that rustdoc warnings
+  # bypass cargo check / test / clippy. Worth keeping in the
+  # validation gate.
+  - id: ruff-cargo-doc
+    kind: command
+    paths: "Cargo.toml"
+    command: ["cargo", "doc", "--all", "--no-deps"]
+    timeout: 600
+    level: warning
+    # RUSTDOCFLAGS env var would normally be set in CI; alint's
+    # command rule doesn't yet expose env injection — keep this
+    # `warning` and let the CI workflow continue to set it.
+
+  # ── ruff workspace conventions: per-crate manifest discipline ──
+  # Most crates in `crates/*` use `version = "0.0.0"` +
+  # `publish = false` (only `ruff` itself, `ruff_linter`, and
+  # `ruff_wasm` are versioned). The convention is: an internal
+  # crate must mark itself unpublished. Alint can enforce one
+  # half of this — that an internal crate's manifest carries
+  # `publish = false`. (Detecting "internal" is the gap: today
+  # the rule fires on every `crates/*/Cargo.toml`, including
+  # the published ones, so we narrow to internal crates by
+  # excluding the three known publishables. Re-tune if ruff
+  # publishes more crates.)
+  - id: ruff-internal-crates-unpublished
+    kind: toml_path_matches
+    paths:
+      include: ["crates/*/Cargo.toml"]
+      exclude:
+        - "crates/ruff/Cargo.toml"
+        - "crates/ruff_linter/Cargo.toml"
+        - "crates/ruff_wasm/Cargo.toml"
+    path: "$.package.publish"
+    matches: '^false$'
+    level: warning
+    message: |
+      Internal `crates/*` packages must declare `publish = false`
+      so they aren't accidentally published to crates.io.
+
+  # ── snapshot/source pair convention (insta) ────────────────────
+  # ruff_linter rules under `crates/ruff_linter/src/rules/<linter>/rules/<rule>.rs`
+  # have paired snapshots under `crates/ruff_linter/src/rules/<linter>/snapshots/`.
+  # The exact source ↔ snapshot freshness check is out of alint's
+  # scope (insta itself does that with `--unreferenced=reject`),
+  # but we can at least assert that snapshots/ exists wherever
+  # rules/ exists. Approximate via `every_matching_has`: every
+  # `rules/` directory under a `flake8_*` linter dir has a
+  # sibling `snapshots/`.
+  #
+  # Disabled by default — ruff's tree includes plenty of
+  # rules/ dirs without snapshots/ (e.g. utility-only crates).
+  # Enable per-linter with explicit paths if you want this gate.
+  #
+  # - id: ruff-rules-have-snapshots-dir
+  #   kind: every_matching_has
+  #   select: "crates/ruff_linter/src/rules/*/rules"
+  #   require:
+  #     - kind: dir_exists
+  #       paths: "{path}/../snapshots"
+  #   level: info
+
+  # ── README.md must mention current version ─────────────────────
+  # Rooster's release process keeps `README.md` version in sync
+  # with `pyproject.toml::project.version`. We can't easily
+  # cross-check across files in alint today, but we can at least
+  # verify README is non-stub (covered by oss-baseline) and that
+  # it contains the project's MIT license badge — a lightweight
+  # smoke test that the README hasn't been gutted.
+  - id: ruff-readme-mentions-license-badge
+    kind: file_content_matches
+    paths: "README.md"
+    pattern: 'shields\.io/pypi/l/ruff'
+    level: info
+    message: |
+      README.md should retain the PyPI license badge (smoke check
+      that the README hasn't been accidentally trimmed).
+
+  # ── .github/CODEOWNERS exists ──────────────────────────────────
+  # ruff's `CODEOWNERS` is the auto-reviewer routing for ~50
+  # crates and is part of the maintainer rotation contract.
+  - id: ruff-codeowners-exists
+    kind: file_exists
+    paths: ".github/CODEOWNERS"
+    level: warning
+    message: |
+      ruff's CODEOWNERS file routes per-crate review requests to
+      the relevant maintainer subteam. It must remain present.

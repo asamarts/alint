@@ -1,0 +1,312 @@
+# Starter alint config for astral-sh/uv.
+#
+# Replaces ~12 of the ~20 structural-validation surfaces in uv's CI +
+# scripts with declarative rules, plus 4 more via the `command` rule
+# kind shelling out to existing tools (typos, ruff, shellcheck,
+# cargo-shear). Net: ~16 of ~20 checks move to this one file.
+#
+# uv is a dual-language repo:
+#   - Rust core: 69 crates under `crates/uv-*` (workspace `resolver = "2"`,
+#     `[workspace.lints]` inheritance, every crate uses `[lints]
+#     workspace = true` and `{ workspace = true }` for license/edition/etc.)
+#   - Python distribution: a maturin-built `pyproject.toml` at the root
+#     plus a build-backend crate (`crates/uv-build`) that ships its own
+#     `pyproject.toml`.
+#
+# Adopt by saving as .alint.yml at the repo root and running `alint check`.
+# Tune the `paths:` and `scope_filter:` entries to your local layout.
+#
+# Known limitations versus the existing pipeline (each requires an alint
+# primitive that doesn't ship today — see this directory's README.md for
+# the full gap catalogue):
+#   - check-trampoline-version-consistency.py (cross-lockfile equality
+#     of the `windows` crate version)
+#   - check_uv_wheel_contents.py (built-wheel manifest equality)
+#   - cargo dev generate-all --mode dry-run (codegen drift)
+#   - cargo dev generate-json-schema --mode check (schema drift)
+#   - validate-pyproject (PEP 621 schema validation)
+#   - cargo-deny bans (license/dep policy beyond simple regex)
+#   - zizmor (deeper GHA security analysis beyond pin-to-SHA)
+# These remain on their existing scripts until alint v0.10+ ships the
+# matching primitives.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/python@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+
+rules:
+  # ── Per-crate Cargo.toml conventions ───────────────────────────
+  # uv has 67 of 69 crates using `[lints] workspace = true` to
+  # inherit `[workspace.lints]` from the root. The only exceptions
+  # are uv-trampoline (excluded from the workspace; needs nightly)
+  # and uv-performance-memory-allocator (special build flags).
+  # Both ship with comments justifying the exception. For everyone
+  # else, missing `[lints] workspace = true` means the new crate
+  # silently misses the project-wide clippy gate. Catching this at
+  # config time is the single highest-leverage rule for uv.
+  - id: uv-crate-inherits-workspace-lints
+    kind: for_each_dir
+    select: "crates/uv-*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/Cargo.toml"
+        # `(?m)` enables multiline mode; `\s+` spans the literal
+        # newline between the `[lints]` header line and the
+        # `workspace = true` body line. Without `(?m)`, `^` would
+        # only anchor to start-of-text.
+        pattern: '(?m)^\[lints\]\s+workspace\s*=\s*true'
+    level: warning
+    message: |
+      Every crate in `crates/uv-*` should opt into the workspace's
+      shared lint config with `[lints]` followed by
+      `workspace = true`. Two crates (uv-trampoline,
+      uv-performance-memory-allocator) are legitimate exceptions;
+      both carry inline comments explaining why. Tune the `select:`
+      here to drop them, or set this rule's `level: off` for those
+      packages.
+
+  # uv's per-crate `[package]` section uses `{ workspace = true }`
+  # for every shared field (edition, rust-version, homepage,
+  # repository, authors, license). 63 of 69 crates also share the
+  # boilerplate description "This is an internal component crate of
+  # uv". Enforcing edition + rust-version inheritance catches the
+  # most common drift.
+  - id: uv-crate-edition-from-workspace
+    kind: for_each_dir
+    select: "crates/uv-*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/Cargo.toml"
+        # `(?m)` enables multiline mode so `^` matches the start of
+        # any line (not just the start of the file). uv uses two
+        # equivalent inheritance forms — `edition = { workspace =
+        # true }` (most crates) and `edition.workspace = true`
+        # (newer crates) — so the alternation accepts both.
+        pattern: '(?m)^edition(\.workspace\s*=\s*true|\s*=\s*\{\s*workspace\s*=\s*true\s*\})'
+    level: warning
+    message: |
+      Every workspace member should pull `edition` from the
+      workspace via `edition = { workspace = true }` (or the
+      shorthand `edition.workspace = true`) so the whole tree
+      moves to the next Rust edition together.
+
+  - id: uv-crate-license-from-workspace
+    kind: for_each_dir
+    select: "crates/uv-*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/Cargo.toml"
+        pattern: '(?m)^license(\.workspace\s*=\s*true|\s*=\s*\{\s*workspace\s*=\s*true\s*\})'
+    level: warning
+    message: |
+      Workspace members should inherit `license` from the workspace
+      so the whole tree advertises one consistent license string
+      (`MIT OR Apache-2.0`).
+
+  # Every crate has both a README and a src/ directory. Using
+  # `every_matching_has` on the Cargo.toml index would also work,
+  # but `for_each_dir` reads more naturally for monorepos.
+  - id: uv-crate-has-readme
+    kind: for_each_dir
+    select: "crates/uv-*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: warning
+    message: |
+      Every crate under `crates/uv-*` should have a README.md.
+      uv's convention: per-crate READMEs are auto-generated from
+      `scripts/generate-crate-readmes.py`, which hard-fails if any
+      crate is missing its README.
+
+  # ── Workspace-level Cargo.toml shape ───────────────────────────
+  # The workspace must declare resolver, edition (workspace
+  # package), and rust-version. Catching their absence at config
+  # time is faster than waiting for `cargo metadata` to fail.
+  - id: uv-workspace-resolver-declared
+    kind: toml_path_matches
+    paths: Cargo.toml
+    path: "$.workspace.resolver"
+    matches: '^[23]$'
+    level: error
+    message: |
+      Workspace must declare `[workspace] resolver = "2"` (or "3").
+      The default ("1") is the legacy resolver and produces wrong
+      results for workspaces with mixed edition crates.
+
+  - id: uv-workspace-package-edition
+    kind: toml_path_matches
+    paths: Cargo.toml
+    path: "$.workspace.package.edition"
+    matches: '^(2021|2024)$'
+    level: error
+    message: |
+      `[workspace.package] edition` must be `2021` or `2024` so
+      every member crate inheriting it gets a supported edition.
+
+  - id: uv-workspace-rust-version-pinned
+    kind: toml_path_matches
+    paths: Cargo.toml
+    path: "$.workspace.package['rust-version']"
+    matches: '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+    level: warning
+    message: |
+      Pin `[workspace.package] rust-version` to a specific MSRV so
+      contributors get a clear failure when their toolchain is too
+      old, instead of obscure macro / trait errors.
+
+  # ── rust-toolchain.toml: pin a channel ──────────────────────────
+  - id: uv-rust-toolchain-pinned
+    kind: toml_path_matches
+    paths: rust-toolchain.toml
+    path: "$.toolchain.channel"
+    matches: '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+    level: warning
+    message: |
+      `rust-toolchain.toml` should pin `channel` to a specific
+      version (e.g. "1.95.0"), not "stable" — local + CI builds
+      need to agree on which compiler is canonical.
+
+  # ── pyproject.toml: maturin shape ──────────────────────────────
+  # uv is built with maturin. The build-system table must declare
+  # maturin as the backend. The shape of `[tool.maturin]` matters
+  # too — `bindings = "bin"` + `manifest-path = "crates/uv/..."`.
+  - id: uv-pyproject-build-backend-maturin
+    kind: toml_path_matches
+    paths: pyproject.toml
+    path: "$['build-system']['build-backend']"
+    matches: '^maturin$'
+    level: error
+    message: |
+      `pyproject.toml` must declare `build-backend = "maturin"`
+      under `[build-system]` for the wheel build pipeline.
+
+  - id: uv-pyproject-license-files-listed
+    kind: toml_path_matches
+    paths: pyproject.toml
+    path: "$.project['license-files'][*]"
+    matches: '^LICENSE-(APACHE|MIT)$'
+    level: warning
+    message: |
+      `pyproject.toml` should advertise both license files via
+      `license-files = ["LICENSE-APACHE", "LICENSE-MIT"]` so the
+      published wheel ships the full dual-license text.
+
+  # ── License files: both must exist ─────────────────────────────
+  # uv ships dual-licensed (MIT OR Apache-2.0). The oss-baseline
+  # ruleset accepts EITHER LICENSE-APACHE or LICENSE-MIT — but
+  # uv's policy is BOTH must be present. Add a stricter check.
+  - id: uv-license-apache-exists
+    kind: file_exists
+    paths: LICENSE-APACHE
+    root_only: true
+    level: error
+    message: |
+      uv is dual-licensed (MIT OR Apache-2.0). `LICENSE-APACHE`
+      must exist at the repo root.
+
+  - id: uv-license-mit-exists
+    kind: file_exists
+    paths: LICENSE-MIT
+    root_only: true
+    level: error
+    message: |
+      uv is dual-licensed (MIT OR Apache-2.0). `LICENSE-MIT`
+      must exist at the repo root.
+
+  # ── Workflow versioning: dist version pinned with checksum ─────
+  # check-release.yml pins cargo-dist to a SHA256 checksum
+  # (CARGO_DIST_CHECKSUM env var). A floating CARGO_DIST_VERSION
+  # without a paired checksum is the failure mode this catches.
+  # Lightweight check: both vars must appear together. (Full
+  # consistency between the two needs a `pair` rule kind on
+  # contents — out of scope for this iteration.)
+
+  # ── shellcheck via the command rule ────────────────────────────
+  # uv's check-lint.yml runs shellcheck on every .sh in the tree.
+  # Same shape as kubernetes/rust-lang configs — shell out per
+  # file. shellcheck must be on PATH (CI installs it from a
+  # tagged release).
+  - id: uv-shellcheck
+    kind: command
+    paths: "**/*.sh"
+    command: ["shellcheck", "--shell", "bash", "--severity", "style", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ── ruff via the command rule ──────────────────────────────────
+  # uv's check-lint.yml runs `uvx ruff check .` once for the whole
+  # tree (cheaper than per-file). We invoke per-file here because
+  # alint's `command` is per-file. For huge Python trees, prefer
+  # a single shell-out via a `for_each_dir` over the project root;
+  # uv's Python footprint is small (a handful of scripts + python/uv/).
+  - id: uv-ruff-check
+    kind: command
+    paths: "**/*.py"
+    command: ["uvx", "ruff", "check", "{path}"]
+    timeout: 30
+    level: warning
+
+  - id: uv-ruff-format
+    kind: command
+    paths: "**/*.py"
+    command: ["uvx", "ruff", "format", "--check", "{path}"]
+    timeout: 30
+    level: warning
+
+  # ── typos via the command rule ─────────────────────────────────
+  # uv's check-lint.yml runs `crate-ci/typos`. Single invocation
+  # for the whole tree (it reads `_typos.toml` automatically).
+  - id: uv-typos
+    kind: command
+    paths: _typos.toml
+    command: ["typos"]
+    timeout: 120
+    level: warning
+
+  # ── cargo-shear: detect unused dependencies ────────────────────
+  - id: uv-cargo-shear
+    kind: command
+    paths: Cargo.toml
+    command: ["cargo", "shear", "--deny-warnings"]
+    timeout: 120
+    level: warning
+
+  # ── cargo fmt + clippy via the command rule ────────────────────
+  # uv runs `cargo fmt --all --check` and
+  # `cargo clippy --workspace --all-targets --all-features --locked
+  # -- -D warnings`. Both are workspace-wide invocations; trigger
+  # them off the root manifest.
+  - id: uv-cargo-fmt
+    kind: command
+    paths: Cargo.toml
+    command: ["cargo", "fmt", "--all", "--check"]
+    timeout: 60
+    level: warning
+
+  - id: uv-cargo-clippy
+    kind: command
+    paths: Cargo.toml
+    command:
+      - "cargo"
+      - "clippy"
+      - "--workspace"
+      - "--all-targets"
+      - "--all-features"
+      - "--locked"
+      - "--"
+      - "-D"
+      - "warnings"
+    timeout: 600
+    level: warning

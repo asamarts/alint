@@ -1,10 +1,11 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a launch-prep validation pass — 12 distinct schema /
-language pitfalls hit while writing configs for the first 5 production
-repos (kubernetes, rust-lang/rust, deno, airflow, turbo). All
-configs ultimately parse + run, but the iteration cost was high.
-This doc captures every one with the canonical correct form.
+Surfaced by the P2a launch-prep validation pass — **15 distinct schema /
+language pitfalls** hit while writing configs for production repos. The
+first 12 surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow,
+turbo); the next 3 in Wave 1 (clap, tokio, ruff, uv, typescript). All
+configs ultimately parse + run, but the iteration cost was high. This doc
+captures every one with the canonical correct form.
 
 > **TL;DR for AI agents writing alint configs:** read this entire doc
 > before drafting an `.alint.yml`. The fields documented in
@@ -27,7 +28,7 @@ This doc captures every one with the canonical correct form.
 
 ---
 
-## The 12 pitfalls
+## The 15 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -366,6 +367,109 @@ those paths entirely, before `when_iter:` even fires.)
 
 Source: `crates/alint-core/src/when.rs`.
 
+### 13. `file_content_matches` / `file_content_forbidden`: regex `^` and `$` anchor file-start / file-end by default, NOT line-start / line-end
+
+alint compiles patterns with the `regex` crate's default mode, where `^`
+matches the start of the *input* (the whole file as one string) and `$`
+matches the end. To make `^` and `$` match line boundaries, prefix the
+pattern with the `(?m)` multi-line flag.
+
+This is the single highest-cost regex pitfall in practice — `pattern: '^edition'`
+"works" against a file that starts with `edition = "2021"` on the first byte,
+then silently fails for every other file in the tree. Parse-validation
+catches the schema error but cannot catch the semantic miss.
+
+**Wrong (matches only files where `[lints]` IS the first line):**
+```yaml
+- id: per-crate-workspace-lints
+  kind: file_content_matches
+  paths: "crates/**/Cargo.toml"
+  pattern: '^\[lints\]'
+```
+
+**Right (matches `[lints]` anywhere as a line start):**
+```yaml
+- id: per-crate-workspace-lints
+  kind: file_content_matches
+  paths: "crates/**/Cargo.toml"
+  pattern: '(?m)^\[lints\]'
+```
+
+When in doubt, default to `(?m)` for any pattern that uses `^` or `$`
+unless you explicitly mean "anchored to byte 0" or "anchored to EOF".
+
+### 14. YAML scalar strings do NOT expand `\n` to a literal newline inside regex patterns
+
+YAML single-quoted and plain scalars treat `\n` as a literal two-character
+sequence (`\` followed by `n`). A pattern like `'^\[lints\]\s*$\n\s*workspace'`
+compiles successfully (it's a valid regex matching `\n` literally) but never
+matches a real file because real files contain a U+000A newline byte, not
+the two-character `\n` sequence.
+
+Three correct forms:
+
+**Right (option A — `\s+` spans line breaks):**
+```yaml
+- id: lints-workspace-true
+  kind: file_content_matches
+  paths: "crates/**/Cargo.toml"
+  pattern: '(?m)^\[lints\]\s+workspace\s*=\s*true'
+```
+
+**Right (option B — `(?s)` + `.+?` lets `.` match newlines):**
+```yaml
+- id: lints-workspace-true
+  kind: file_content_matches
+  paths: "crates/**/Cargo.toml"
+  pattern: '(?s)\[lints\].+?workspace\s*=\s*true'
+```
+
+**Right (option C — YAML double-quoted string explicitly expands `\n`):**
+```yaml
+- id: lints-workspace-true
+  kind: file_content_matches
+  paths: "crates/**/Cargo.toml"
+  pattern: "(?m)^\\[lints\\]\\s*$\nworkspace\\s*=\\s*true"
+```
+
+Option A is the most readable; option C requires escaping every regex
+metacharacter twice. Default to A unless you need exact line-spacing
+semantics.
+
+### 15. `file_starts_with.prefix:` rejects an empty string at build time
+
+A natural-feeling shorthand for "file is non-empty" is `prefix: ""` —
+every non-empty file trivially starts with the empty string. The schema
+rejects this at registry-build time (the rule has no useful semantics
+with an empty prefix). Use the right rule for the job:
+
+**Wrong:**
+```yaml
+- id: spelling-dict-non-empty
+  kind: file_starts_with
+  paths: "spellcheck.dic"
+  prefix: ""                               # ← rejected at build time
+```
+
+**Right (option A — minimum line count):**
+```yaml
+- id: spelling-dict-non-empty
+  kind: file_min_lines
+  paths: "spellcheck.dic"
+  min_lines: 1
+```
+
+**Right (option B — content-shape assertion if you know the literal first chars):**
+```yaml
+- id: spelling-dict-has-header
+  kind: file_starts_with
+  paths: "spellcheck.dic"
+  prefix: "1"                              # at minimum a digit-as-line-count header
+```
+
+(A `file_non_empty` convenience rule is on the v0.10+ candidate list — see
+each `examples/*/README.md` for the gap catalogue feeding it.)
+
 ---
 
 ## Honourable mention: JSONPath regex matching uses `match()`, not `=~`
@@ -494,11 +598,45 @@ Before merging a PR that adds or modifies an `.alint.yml`:
 - [ ] `scope_filter.has_ancestor:` is a basename (no `/`).
 - [ ] `when:` / `when_iter:` use `and`/`or`/`not` keywords, no `&&`/`||`/`!`.
 - [ ] `iter.*` references only use the documented accessor set.
+- [ ] Every regex with `^` or `$` either uses `(?m)` (line anchors) or has
+      a comment explaining why file-level anchoring is intended.
+- [ ] No regex pattern contains a literal `\n` inside a single-quoted YAML
+      scalar. Use `\s+` to span line breaks, `(?s)` + `.+?`, or a
+      double-quoted YAML scalar with explicit escaping.
+- [ ] No `file_starts_with.prefix: ""` (use `file_min_lines: 1` instead).
 
 The `coverage_audit_examples_parse.rs` audit (added in v0.9.15) enforces
 the first item by re-validating every `examples/*/.alint.yml` on every
-CI run. The other items are caught by the same parse, so the audit
-covers them transitively.
+CI run. The schema-level items (1-12, 15) are caught by the same parse,
+so the audit covers them transitively. **Items 13-14 are NOT caught by
+parse-validation** — the regex compiles fine; it just never matches —
+see § "Parse-validation is necessary but not sufficient" below.
+
+---
+
+## Parse-validation is necessary but not sufficient
+
+Pitfalls 13 and 14 (regex anchoring + YAML `\n` escape semantics) compile
+into a syntactically-valid regex that produces zero matches against any
+realistic input. The `coverage_audit_examples_parse.rs` audit catches
+schema errors but cannot tell the difference between "this rule fires
+correctly" and "this rule silently never fires."
+
+For configs that depend on regex semantics — `file_content_matches`,
+`file_content_forbidden`, `file_header`, `file_footer`, the `matches:`
+field on every JSONPath rule — a second-pass smoke test against
+representative input is the only way to catch this. Two practical forms:
+
+1. **Negative example file** — drop a file under `examples/<repo>/` that
+   *should* trigger the rule, run `alint check`, confirm a violation.
+2. **Local repo run** — clone the actual upstream repo, run the config
+   against it, confirm rule counts are non-zero where expected.
+
+A future audit (v0.9.16+ candidate) would automate this: each example
+case study ships a small "rule smoke-test fixture" tree with expected
+violation counts, and the audit asserts `actual == expected` rather
+than just "config parses." Tracked as a follow-up to the v0.9.15 DX
+hardening sweep.
 
 ---
 

@@ -5,11 +5,14 @@ v0.9 series, fully-automated bench-record CI, no public outreach yet) to a
 public launch backed by real-repo case studies and a marketing site that earns
 attention rather than just hosts documentation.
 
-**Status: 2026-05-06.** P1 done; P2a pilot done (5 of 20 repos +
-`docs/development/CONFIG-AUTHORING.md` + `coverage_audit_examples_parse.rs`);
-v0.9.15 P1+P2 done (findings doc + examples-parse audit). Next: scale P2a to
-the full 20 BEFORE v0.9.15 Phase 3-6, so the DX hardening fixes are informed
-by the full pitfall set rather than just the pilot's 12.
+**Status: 2026-05-03.** P1 done; P2a pilot + Wave 1 done (10 of 20 repos);
+`docs/development/CONFIG-AUTHORING.md` now catalogues 15 pitfalls (12 from
+pilot + 3 from Wave 1: regex anchoring, YAML `\n` semantics, empty
+`file_starts_with.prefix`); `coverage_audit_examples_parse.rs` audit live;
+v0.9.15 P1+P2 done. Next: dispatch Wave 2 (next.js, pnpm, react,
+prettier, cpython), then Wave 3 (golang/go, helm, arrow, pytorch,
+nodejs/node) — completes P2a-full at 20 repos BEFORE v0.9.15 Phase 3-6,
+so the DX hardening fixes are informed by the full pitfall set.
 
 ## State of the world (audit at 2026-05-05)
 
@@ -108,7 +111,21 @@ airflow, turbo. Each has a per-repo case study + working `.alint.yml` at
 `examples/<owner>-<repo>/`. The pilot iteration surfaced the 12 pitfalls now
 documented in `docs/development/CONFIG-AUTHORING.md`.
 
-**P2a-full Wave 1-3 (15 remaining):** 3 batches of 5 parallel subagents each.
+**Wave 1 status (5 of 15 done, ready to commit):** clap, tokio, ruff, uv,
+typescript. All 10 configs (pilot + Wave 1) parse cleanly under
+`coverage_audit_examples_parse.rs`. Wave 1 surfaced **3 new pitfalls**
+(now §13-15 in CONFIG-AUTHORING.md) and **6 new rule-kind candidates** for
+the v0.10+ pipeline (see § "Rule-kind candidates surfaced by P2a" below).
+
+Three distinct positioning narratives crystallised in Wave 1:
+
+| Narrative | Strongest data point | Use case |
+|---|---|---|
+| "Replaces N hand-rolled validation scripts" | kubernetes (50 → 17), airflow (109 hooks → 40 %) | Repos with verify-script sprawl |
+| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 hand-rolled scripts), uv (67-crate workspace conventions) | Repos that rely on convention without explicit checks |
+| "Adds a structural floor on top of mature tooling" | typescript (eslint + dprint + knip already tight), ruff (900+ Python rules, 0 internal-crate rules) | Repos with mature tooling but missing structural layer |
+
+**P2a-full Wave 2-3 (10 remaining):** 2 batches of 5 parallel subagents each.
 Each subagent briefing includes the parse-validate requirement (Step 5
 below) + a pointer to `docs/development/CONFIG-AUTHORING.md` so the
 canonical-correct YAML is one click away.
@@ -209,6 +226,43 @@ header" → `scope_filter: { has_ancestor: setup.py }`).
 methodology, iterate the per-repo template based on what we learn, then dispatch
 the remaining 15 in batches of 3-5 (possibly with subagents for the inventory
 phase).
+
+### Rule-kind candidates surfaced by P2a (running tally — 10 of 20 done)
+
+Aggregated from the per-repo `examples/<owner>-<repo>/README.md` gap
+catalogues. Will be the primary input to v0.10+ rule-kind design once
+P2a-full is complete. Demand counted as the number of distinct repos
+that surface the same need (saturation signal).
+
+| Candidate | Demand | Earliest source | Notes |
+|---|---|---|---|
+| `cross_file_value_equals` (incl. `cross_file_field_equals` variant — JSONPath value at point X in file A equals JSONPath value at point Y in file B) | airflow + tokio + clap + uv | airflow | Strong v0.10 candidate; covers split-workspace lockfile sync, root README ↔ per-crate README, version-in-CHANGELOG patterns |
+| `import_gate` (forbid imports of pattern X in path scope Y) | k8s + airflow | k8s | Already a recurring shape across multiple OSS pipelines |
+| `ordered_block` (lines between marker pairs sorted unique under configurable comparator) | rust + airflow + tokio | rust | tidy::alphabetical + spellcheck.dic + airflow allowed-imports lists |
+| `pair_hash` (computed property of file A appears at offset Y in file A, e.g. line-count header) | k8s + tokio | k8s | spellcheck.dic header line + k8s manifest checksum |
+| `registry_paths_resolve` (every path/key in a registry file resolves to an on-disk artefact) | rust + clap | rust | tidy::triagebot, .github/settings.yml referenced files, codeowners patterns |
+| `pair_inverse` (every partner traces back to a primary; reverse of `pair`) | ruff | ruff | Snapshot freshness — every `*.snap` traces to a `#[test]`; covers `cargo insta --unreferenced=reject` |
+| `pair_count` (assert N≥1 partner files match a registry entry) | typescript | typescript | Every diagnostic ID appears in ≥1 baseline; airflow `check-no-new-airflow-exceptions` family |
+| `command_idempotent` mode (run tool in --check mode, fail if working-tree would change) | ruff | ruff | mdformat, markdownlint, prettier, ruff-format all share this shape |
+| `regex_resolves_in_file` (pre-release-replacement pattern in file A resolves to a real string in file B) | clap | clap | cargo-release `pre-release-replacements` integrity |
+| `archive_contents_matches` (open `*.{whl,tar.gz,zip}`, compare member set against expected with template substitution) | uv | uv | check_uv_wheel_contents.py; applies to every Python package on PyPI |
+| `dir_name_matches_field` (directory basename matches a field inside a manifest in that directory) | turbo | turbo | per-package `name` field in package.json must equal directory name |
+| `json_schema_passes` config-shape mode (validate a config file against an inline JSON Schema) | k8s + turbo | k8s | Replaces hand-rolled `argv:`-shape checks |
+| `violation_baseline` (suppress N existing violations; fail if N grows) | deno | deno | TS-style `lint:` baseline files; deno lint `--ignore` |
+| `file_pair_block_match` + `balanced_delimiters` (light/dark CSS theme blocks must be in sync) | rust | rust | tidy::rustdoc_css_themes |
+| `file_non_empty` (convenience for "file exists + has ≥1 byte"; resolves pitfall #15) | uv (implicit) | uv | Cleaner than `file_min_lines: 1` for the common case |
+
+**Bundled-ruleset candidates** (no new rule kinds, just composition):
+
+| Ruleset | Replaces | Source |
+|---|---|---|
+| `python/pep-621-shape@v1` | `validate-pyproject` shellouts, manual PEP 621 checks | uv |
+| `rust/cargo-release-conventions@v1` | clap's `pre-release-replacements` patterns | clap |
+
+**Process meta-finding:** parse-validation catches schema errors but cannot
+catch regex pitfalls #13-14 (anchoring, `\n` semantics) where the regex
+compiles but never matches. A v0.9.16+ "smoke-test fixture" audit is
+proposed at the bottom of `docs/development/CONFIG-AUTHORING.md`.
 
 ### P3 — Marketing refresh (~5-6 days; depends on P2a)
 
@@ -338,15 +392,16 @@ studies + post-launch infra including MCP server): ~10-12 weeks.
 2. ✅ **P1 in one sitting** — repo launch-presentable (committed `52e7494f`)
 3. ✅ **P2a pilot** with 5 repos — methodology validated (committed `e7451b95` + `481b32db`)
 4. ✅ **v0.9.15 Phase 1+2** — findings doc + examples-parse audit (committed `ba7802fa`)
-5. **P2a-full Wave 1** — 5 parallel subagents (tokio, uv, ruff, clap, typescript)
-6. **P2a-full Wave 2** — next 5 (next.js, pnpm, react, prettier, cpython)
-7. **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node)
-8. **P2a aggregation** — update CONFIG-AUTHORING.md with new pitfalls; aggregate v0.10+ rule-kind candidate list
-9. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue
-10. **v0.9.15 release**
-11. **P3 marketing refresh** — hero + SEO + AI/LLM discovery
-12. **P4 launch**
-13. **P5 post-launch** — concurrent with **P2b** (20 polyglot monorepos)
+5. ✅ **P2a-full Wave 1** — 5 parallel subagents (tokio, uv, ruff, clap, typescript) — surfaced pitfalls 13-15 + 6 new rule-kind candidates
+6. ✅ **P2a aggregation (Wave 1)** — CONFIG-AUTHORING.md §13-15 added; rule-kind candidate table added to launch-prep.md
+7. **P2a-full Wave 2** — next 5 (next.js, pnpm, react, prettier, cpython)
+8. **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node)
+9. **P2a aggregation (Wave 2-3)** — fold new pitfalls + rule-kind candidates into the same docs
+10. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue
+11. **v0.9.15 release**
+12. **P3 marketing refresh** — hero + SEO + AI/LLM discovery
+13. **P4 launch**
+14. **P5 post-launch** — concurrent with **P2b** (20 polyglot monorepos)
 
 The plan is intentionally a living doc — every phase will surface adjustments.
 Update this file as we learn.

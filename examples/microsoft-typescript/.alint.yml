@@ -1,0 +1,475 @@
+# Starter alint config for microsoft/TypeScript.
+#
+# TypeScript is the JavaScript-based TypeScript compiler — by far the
+# most-watched JS-tooling repo on GitHub (>100k stars, >12k forks).
+# As of 2026 it's in maintenance mode (TS 6.0 is the last
+# JS-based release; future development moved to microsoft/typescript-go),
+# which makes its remaining structural-validation surface a
+# stable snapshot to lint against.
+#
+# Hereby (the in-house gulp-replacement task runner) declares 6
+# CI-gating quality jobs in `Herebyfile.mjs` + `package.json`:
+# `lint` (eslint), `format` / `check-format` (dprint), `knip`
+# (unused exports), and the `lint`/`format`/`knip`/`baselines`
+# CI jobs in `.github/workflows/ci.yml`. Of those, lint + knip
+# are AST-based (out of alint's scope) and dprint is delegated
+# via the `command` rule.
+#
+# What this config replaces:
+#   - Apache-2 copyright header on every source file
+#     (currently silently enforced — no script today verifies it,
+#      but `scripts/CopyrightNotice.txt` is the canonical text
+#      and `scripts/build/utils.mjs` prepends it to generated bundles).
+#   - .editorconfig invariants (CRLF in src/scripts, final newline,
+#     no trailing whitespace, 4-space indent) that today have no
+#     dedicated check — only dprint's full-format pass catches them.
+#   - File-size guard against the test-baseline corpus (~53k files
+#     under tests/baselines/reference, average <1 KiB each, but
+#     occasional regressions check in 100 KiB+ blobs that should
+#     be reviewed).
+#   - .github workflow hygiene (action SHAs pinned, every workflow
+#     declares an explicit permissions block) — already enforced
+#     by `.github/workflows/scorecard.yml` running OpenSSF Scorecard,
+#     restated here as alint rules so violations surface at PR
+#     time, not on the next nightly scorecard run.
+#   - dprint check, ESLint, knip — shelled out via the `command`
+#     rule. Net result: alint check + 3 command rules is a drop-in
+#     replacement for `npm run lint && npx dprint check && npm run knip`,
+#     with the structural checks above bolted on for free.
+#
+# Known limitations versus the existing CI pipeline (each requires
+# either an alint primitive that doesn't ship today, or a TypeScript-
+# AST analyser that alint deliberately doesn't try to be — see this
+# directory's README.md for the full gap catalogue):
+#   - All 9 custom eslint rules under scripts/eslint/rules/
+#     (only-arrow-functions, argument-trivia, no-in-operator,
+#      debug-assert, no-keywords, jsdoc-format, js-extensions,
+#      no-array-mutating-method-expressions, no-direct-import).
+#     These are TSESTree visitors — out of alint's "no AST" scope.
+#   - `knip` (unused-export detection across the import graph) —
+#     module-graph analysis, out of scope. Shelled out via `command`.
+#   - `scripts/find-unused-diganostic-messages.mjs` — couples a
+#      generated TS file to a regex grep of every src/**/*.ts;
+#      out of scope.
+#   - `scripts/errorCheck.mjs` — pairs each diagnostic message in
+#     `src/compiler/diagnosticMessages.json` against its appearance
+#     in `tests/baselines/reference/*.errors.txt`. A `pair_count`
+#     primitive (assert N>=1 partner files match a registry entry)
+#     would express it; today it stays as the standalone script.
+#   - `scripts/checkPackageSize.mjs` — diffs a `npm pack --dry-run`
+#     between two refs. Cross-ref diff is out of alint's scope.
+#   - `scripts/checkModuleFormat.mjs` — runtime dynamic-import probe
+#     of the published bundle. Runtime check, not a repo-state check.
+#   - `pr-modified-files.yml` — runs against the PR's *changed* files
+#     (a `git diff --name-only` set), not the working tree. Same
+#     class of "diff-time" check as the package-size workflow.
+#   - Baseline accept/check loop (`tests/baselines/reference/`):
+#     adds/modifies/deletes are detected via `git diff --staged`
+#     after the test pass regenerates them. This is a CI-time diff
+#     against the working tree, not a repo-state property.
+
+version: 1
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/agent-context@v1
+
+facts:
+  # All structural rules below gate on this fact so the config
+  # no-ops when applied to a fork that has stripped the dprint
+  # config. Defensive but cheap.
+  - id: has_dprint_config
+    any_file_exists: [.dprint.jsonc, .dprint.json]
+
+rules:
+  # ─────────────────────────────────────────────────────────────────
+  # scripts/CopyrightNotice.txt
+  # The canonical Apache-2 / Microsoft copyright block. Today it's
+  # only enforced for *generated* bundles (Herebyfile.mjs's
+  # generateLibs prepends it), not for hand-edited TS source.
+  # alint expresses the source-side invariant: every src/**/*.ts
+  # file should start with the same block.
+  #
+  # Pattern matches the header's first three lines so we tolerate
+  # year drift / minor wording tweaks below the third line.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-copyright-header-src
+    kind: file_header
+    paths: "src/**/*.ts"
+    pattern: |
+      ^/\*! \*+
+      Copyright \(c\) Microsoft Corporation\. All rights reserved\.
+      Licensed under the Apache License, Version 2\.0
+    level: warning
+    message: >-
+      Every src/**/*.ts file should start with the
+      scripts/CopyrightNotice.txt block. The Hereby `generateLibs`
+      task prepends this to bundled output; aligning source files
+      keeps the header consistent end-to-end.
+
+  - id: ts-copyright-header-scripts
+    # Scripts are .mjs / .cjs / .mts; same header convention but
+    # rarely enforced in practice today. Set to `info` so it
+    # doesn't break a maintenance-mode CI; raise to `warning`
+    # before the next major-version pin.
+    kind: file_header
+    paths: ["scripts/**/*.mjs", "scripts/**/*.cjs", "scripts/**/*.mts"]
+    pattern: |
+      ^// Copyright \(c\) Microsoft Corporation
+    level: info
+
+  # ─────────────────────────────────────────────────────────────────
+  # .editorconfig invariants for src/ + scripts/.
+  # The .editorconfig declares end_of_line=crlf, charset=utf-8,
+  # trim_trailing_whitespace=true, insert_final_newline=true,
+  # indent_style=space, indent_size=4 for `[{src,scripts}/**.{ts,json,js}]`.
+  # No dedicated CI check enforces these directly today — only
+  # dprint's full-format pass catches them. The rules below
+  # restate them as alint primitives so violations surface at
+  # `alint check` time before dprint even runs.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-src-line-endings-crlf
+    when: facts.has_dprint_config
+    kind: line_endings
+    paths:
+      include: ["src/**/*.ts", "src/**/*.json", "src/**/*.js", "scripts/**/*.ts", "scripts/**/*.json", "scripts/**/*.js"]
+      exclude:
+        - "src/lib/*.generated.d.ts"
+        - "**/*.generated.*"
+    target: crlf
+    level: warning
+    message: >-
+      .editorconfig declares `end_of_line = crlf` for src/ and
+      scripts/. Files with LF endings here will be re-written by
+      dprint or git on the next commit; pre-empting that keeps
+      diffs small.
+
+  - id: ts-src-final-newline
+    kind: final_newline
+    paths:
+      include: ["src/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs", "scripts/**/*.cjs"]
+      exclude: ["**/*.generated.*", "src/lib/*.generated.d.ts"]
+    level: warning
+    fix:
+      file_append_final_newline: {}
+
+  - id: ts-src-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include: ["src/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs", "scripts/**/*.cjs"]
+      exclude: ["**/*.generated.*", "src/lib/*.generated.d.ts"]
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+
+  - id: ts-src-no-bom
+    # eslint config sets `unicode-bom: ['error', 'never']`. alint's
+    # `no_bom` is the static-file equivalent: catches BOMs that
+    # eslint can't see (e.g. JSON / config files).
+    kind: no_bom
+    paths:
+      include:
+        - "src/**/*.ts"
+        - "src/**/*.json"
+        - "scripts/**/*.{ts,mjs,cjs,json}"
+        - "**/tsconfig*.json"
+        - "package.json"
+        - ".dprint.jsonc"
+        - ".c8rc.json"
+      exclude: ["**/*.generated.*"]
+    level: error
+    message: >-
+      Files in src/ and scripts/ must not carry a UTF-8 BOM
+      (`unicode-bom: never` in eslint config). The static check
+      catches BOMs in JSON/config files that eslint doesn't
+      look at.
+
+  # ─────────────────────────────────────────────────────────────────
+  # Test-baseline directory hygiene.
+  # tests/baselines/reference/ holds ~53k .baseline.txt / .js /
+  # .symbols / .types / .errors.txt files (one set per compiler
+  # test). Average size <1 KiB; occasional regressions check in
+  # large blobs (memory dumps, long generated outputs) that
+  # should at least be reviewed. The 256 KiB ceiling below is
+  # conservative — set to error after one tree-wide cleanup pass.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-baseline-file-max-size
+    kind: file_max_size
+    paths:
+      include: ["tests/baselines/reference/**/*"]
+      exclude:
+        # Project-output dumps can legitimately be large.
+        - "tests/baselines/reference/projectOutput/**"
+        # API surface dumps are large by design (~500 KiB).
+        - "tests/baselines/reference/api/**"
+    max_bytes: 262144  # 256 KiB
+    level: warning
+    message: >-
+      Baseline files over 256 KiB are usually a sign a test
+      generated a runaway output. Either trim the test, or
+      add the file to this rule's `exclude` list with a
+      one-line justification.
+
+  # ─────────────────────────────────────────────────────────────────
+  # Test-baseline pairing: every .errors.txt has a matching .js.
+  # The test harness writes these as a set; an .errors.txt without
+  # its companion .js usually means a stale checkin from a
+  # previously-failing test that's since been removed. The
+  # `pair` rule expresses the structural invariant; the
+  # freshness check (errors-text matches the latest compiler
+  # diagnostics) lives in `npx hereby baseline-accept`.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-baseline-errors-pair-with-js
+    kind: pair
+    primary: "tests/baselines/reference/*.errors.txt"
+    partner: "{dir}/{stem}.js"
+    level: warning
+    message: >-
+      Every *.errors.txt baseline must have a matching *.js
+      sibling (same test, different output channel). A lone
+      *.errors.txt is usually a leftover from a deleted test;
+      run `npx hereby baseline-accept` to regenerate.
+
+  # ─────────────────────────────────────────────────────────────────
+  # tests/baselines/.gitattributes — the TS repo's .gitattributes
+  # at the root sets `* -text` so git doesn't touch line endings
+  # on baselines. If that disappears we'd re-introduce the
+  # cross-platform CRLF/LF baseline drift the team spent years
+  # eradicating.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-gitattributes-keeps-binary-default
+    kind: file_content_matches
+    paths: .gitattributes
+    pattern: '^\* -text$'
+    level: error
+    message: >-
+      .gitattributes must keep `* -text` so git treats unknown
+      files as binary and doesn't munge line endings on
+      baselines. This was a recurring source of cross-platform
+      diff churn before it was added.
+
+  # ─────────────────────────────────────────────────────────────────
+  # tsconfig.json conventions.
+  # The repo carries multiple tsconfig.* files (root + per-package).
+  # Each one's `compilerOptions.strict` should be true (the project
+  # is strict-mode end-to-end).
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-tsconfig-strict-mode
+    # JSONPath against tsconfig.* — even the root tsconfig.json
+    # uses jsonc-style comments (TypeScript's own loader is
+    # comment-tolerant), so the json_path_matches kind handles
+    # them via the structured-path Format::Json variant
+    # (which tolerates JSONC).
+    kind: json_path_matches
+    paths:
+      include: ["tsconfig*.json", "src/**/tsconfig*.json", "scripts/tsconfig.json"]
+      exclude:
+        - "tests/**/tsconfig*.json"   # test fixtures sometimes set strict=false on purpose
+    path: "$.compilerOptions.strict"
+    matches: '^true$'
+    level: warning
+    message: >-
+      The TypeScript repo runs in strict mode end-to-end. Every
+      tsconfig*.json (outside tests/) should set
+      `compilerOptions.strict: true`.
+
+  - id: ts-scripts-tsconfig-checkjs
+    # scripts/tsconfig.json uses `allowJs: true` + `checkJs: true`
+    # so the `.mjs` build scripts get type-checked alongside the
+    # TS sources. Catch regressions if either is silently dropped.
+    kind: json_path_matches
+    paths: "scripts/tsconfig.json"
+    path: "$.compilerOptions.checkJs"
+    matches: '^true$'
+    level: warning
+    message: >-
+      scripts/tsconfig.json should keep `allowJs: true` +
+      `checkJs: true` so the .mjs build scripts get
+      type-checked. The eslint config relies on this for
+      proper type-aware lint rules.
+
+  # ─────────────────────────────────────────────────────────────────
+  # .dprint.jsonc shape: the project relies on TypeScript +
+  # JSON + YAML plugins. If any plugin is dropped, the
+  # corresponding files stop being formatted at all (silently).
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-dprint-typescript-plugin-pinned
+    when: facts.has_dprint_config
+    kind: file_content_matches
+    paths: .dprint.jsonc
+    pattern: 'plugins\.dprint\.dev/typescript-'
+    level: warning
+    message: >-
+      .dprint.jsonc must keep the TypeScript plugin reference,
+      otherwise *.ts files silently stop being formatted.
+
+  - id: ts-dprint-json-plugin-pinned
+    when: facts.has_dprint_config
+    kind: file_content_matches
+    paths: .dprint.jsonc
+    pattern: 'plugins\.dprint\.dev/json-'
+    level: warning
+    message: >-
+      .dprint.jsonc must keep the JSON plugin reference,
+      otherwise *.json / *.jsonc files silently stop being
+      formatted.
+
+  - id: ts-dprint-yaml-plugin-pinned
+    when: facts.has_dprint_config
+    kind: file_content_matches
+    paths: .dprint.jsonc
+    pattern: 'plugins\.dprint\.dev/g-plane/pretty_yaml'
+    level: warning
+    message: >-
+      .dprint.jsonc must keep the YAML plugin reference,
+      otherwise *.yml / *.yaml files (incl. CI workflows)
+      silently stop being formatted.
+
+  # ─────────────────────────────────────────────────────────────────
+  # package.json sanity — `scripts.lint`, `scripts.format`, and
+  # `scripts.knip` are the three entry points referenced in
+  # `.github/workflows/ci.yml`. If any goes missing the
+  # corresponding CI job silently passes (npm run on a
+  # missing script exits 0).
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-package-json-has-lint-script
+    kind: json_path_matches
+    paths: package.json
+    path: "$.scripts.lint"
+    matches: '^hereby lint$'
+    level: error
+    message: >-
+      package.json#scripts.lint must invoke `hereby lint`. The
+      CI workflow runs `npm run lint` and would silently pass
+      if the script were renamed.
+
+  - id: ts-package-json-has-format-script
+    kind: json_path_matches
+    paths: package.json
+    path: "$.scripts.format"
+    matches: 'dprint fmt'
+    level: error
+    message: >-
+      package.json#scripts.format must invoke `dprint fmt`.
+
+  - id: ts-package-json-has-knip-script
+    kind: json_path_matches
+    paths: package.json
+    path: "$.scripts.knip"
+    matches: '^hereby knip$'
+    level: error
+
+  # ─────────────────────────────────────────────────────────────────
+  # GitHub Actions hygiene.
+  # The repo already runs `scripts/codeql.yml` + `.github/workflows/scorecard.yml`
+  # which checks action-version pinning post-merge. The rule
+  # below catches the same class of regression at PR time.
+  # Pattern asserts every `uses:` line either pins to a 40-char
+  # commit SHA or references a local action under `./.github/`.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-workflow-actions-pinned-by-sha
+    kind: yaml_path_matches
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.jobs.*.steps[?match(@.uses, '^[^./]')].uses"
+    matches: '^[a-z0-9_.-]+/[a-z0-9_.-]+@[0-9a-f]{40}'
+    level: warning
+    message: >-
+      Third-party GitHub Actions should be pinned to a 40-char
+      commit SHA (with a version tag in a trailing comment).
+      OpenSSF Scorecard already enforces this post-merge via
+      `.github/workflows/scorecard.yml`; the alint rule
+      surfaces the same gate at PR time.
+
+  # ─────────────────────────────────────────────────────────────────
+  # AGENTS.md is the load-bearing "this repo is in maintenance
+  # mode" doc that coding agents are expected to read before
+  # opening a PR. Verify it still exists at the root and still
+  # carries the maintenance-mode marker.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-agents-md-present
+    kind: file_exists
+    paths: AGENTS.md
+    root_only: true
+    level: error
+    message: >-
+      AGENTS.md is the canonical "TypeScript is in maintenance
+      mode" doc for AI coding agents (referenced from
+      CONTRIBUTING.md). It must remain at the repo root.
+
+  - id: ts-agents-md-maintenance-marker
+    kind: file_content_matches
+    paths: AGENTS.md
+    pattern: 'CRITICAL: This Repository Is in Maintenance Mode'
+    level: error
+    message: >-
+      AGENTS.md must keep the "Maintenance Mode" marker so
+      automated coding agents abort before opening drive-by
+      PRs to this repo. The marker is referenced verbatim in
+      external docs.
+
+  # ─────────────────────────────────────────────────────────────────
+  # Top-level deno-style hygiene: the repo carries
+  # ThirdPartyNoticeText.txt + LICENSE.txt + SECURITY.md +
+  # CODE_OF_CONDUCT.md as required Microsoft OSS templates.
+  # The oss-baseline ruleset already covers LICENSE / SECURITY /
+  # CODE_OF_CONDUCT; the third-party-notice file is repo-specific.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-third-party-notice-present
+    kind: file_exists
+    paths: ThirdPartyNoticeText.txt
+    root_only: true
+    level: warning
+    message: >-
+      Microsoft OSS releases require ThirdPartyNoticeText.txt
+      at the repo root. This file enumerates every bundled
+      dependency's license; npm packs it into the published
+      tarball (see package.json `files`).
+
+  # ─────────────────────────────────────────────────────────────────
+  # Shell out to the canonical tools for everything alint can't
+  # express. The `command` rule rounds out the static config so
+  # `alint check` is a drop-in for the existing `npm run lint &&
+  # npx dprint check && npm run knip` triple.
+  # ─────────────────────────────────────────────────────────────────
+  - id: ts-eslint
+    # Shell out to npm's lint script (which is `hereby lint`,
+    # which is `node_modules/eslint/bin/eslint --max-warnings 0 .`).
+    # Single invocation against the whole tree — the eslint cache
+    # makes this cheap on incremental runs.
+    kind: command
+    paths: package.json
+    command: ["npm", "run", "lint"]
+    timeout: 600
+    level: error
+    message: >-
+      `npm run lint` failed (eslint with `--max-warnings 0`).
+      See https://github.com/microsoft/TypeScript/blob/main/Herebyfile.mjs
+      for the eslint task definition.
+
+  - id: ts-dprint-check
+    kind: command
+    paths: .dprint.jsonc
+    command: ["npx", "dprint", "check"]
+    timeout: 300
+    level: error
+    message: >-
+      `npx dprint check` failed. Run `npm run format` (or
+      `npx dprint fmt`) and commit the diff.
+
+  - id: ts-knip
+    # knip walks the import graph to find unused exports — out
+    # of alint's scope to replicate, but trivially shelled out.
+    # Depends on `hereby generate-diagnostics` having run first
+    # (per Herebyfile.mjs); the script alias handles that.
+    kind: command
+    paths: knip.jsonc
+    command: ["npm", "run", "knip"]
+    timeout: 600
+    level: warning
+    message: >-
+      `npm run knip` reported unused exports/dependencies.
+      See knip.jsonc for the configured entry points.
