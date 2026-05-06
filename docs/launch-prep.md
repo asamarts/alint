@@ -94,15 +94,25 @@ Six sub-phases:
   Biggest single payoff. ~2-3 days.
 - **Phase 6** — `alint validate-config <path>` subcommand (parse-only, no
   tree walk). For editor LSP, pre-commit hooks, fail-fast CI. ~half day.
+- **Phase 7** — Smoke-test fixture audit (**moved from v0.9.16+ into
+  v0.9.15** after P2a-full's runtime-semantic pitfall surface area
+  became clear). Without it, v0.9.15 ships with 4 pitfalls (#13, #14,
+  #16, #17) silently uncatchable. Phase 5 JSON Schema covers #16 at
+  editor-keystroke time but not the regex anchoring (#13), YAML `\n`
+  (#14), or `*_path_equals + [*]` (#17) classes. Minimum viable design:
+  per-rule-kind fixture pairs (positive + negative input) under
+  `examples/_smoke/`; audit asserts actual `rule_id → violation_count
+  == expected`. ~1-2 days.
 
-**Sequencing decision:** Phases 3-6 land AFTER P2a-full (the remaining 15
-case studies). Reasons:
-- The new examples-parse audit dropped iteration cost per case study; doing
-  15 more is cheap.
+**Sequencing decision:** Phases 3-7 land AFTER P2a-full. Reasons:
+- The new examples-parse audit dropped iteration cost per case study;
+  doing the 15 remaining was cheap.
 - More repos surface more pitfalls — Phases 3-4 hand-curated suggestions
-  benefit from the full set.
+  benefit from the full 18-pitfall catalogue.
 - Phase 5 JSON Schema work targets the right fields when the most-misused
   ones are known.
+- Phase 7 fixture design benefits from knowing the 4 runtime-semantic
+  pitfall shapes the fixtures need to assert against.
 
 ### P2a — First 20 repos, single-language + diverse-ecosystem (~10-15 days)
 
@@ -480,11 +490,12 @@ studies + post-launch infra including MCP server): ~10-12 weeks.
 8. ✅ **P2a aggregation (Wave 2)** — CONFIG-AUTHORING.md §16 added; 6 broken rules fixed
 9. ✅ **P2a-full Wave 3** — final 5 (golang/go, helm, arrow, pytorch, nodejs/node) — surfaced pitfalls #17 + #18 + 9 more rule-kind candidates + caught 1 silently-broken array-semantics rule in deno
 10. ✅ **P2a aggregation (Wave 3 + final)** — CONFIG-AUTHORING.md §17-18 added; deno rule fixed; rule-kind table reorganised final; 5 positioning narratives tabled
-11. **v0.9.15 Phase 3-6** — DX hardening with full pitfall catalogue (18 pitfalls; 4 of them runtime-semantic and not parse-catchable)
-12. **v0.9.15 release**
-13. **P3 marketing refresh** — hero + SEO + AI/LLM discovery
-14. **P4 launch**
-15. **P5 post-launch** — concurrent with **P2b** (20 polyglot monorepos)
+11. **v0.9.15 Phase 3-7** — DX hardening with full pitfall catalogue (18 pitfalls; Phases 3-6 close the parse-time gap, Phase 7 closes the runtime-semantic gap via smoke-test fixtures)
+12. **P3 marketing draft work** — runs *in parallel with* v0.9.15 Phases 3-7. Drafts only (not published) until v0.9.15 ships and v0.9.6 → v0.9.15 docs roll on alint.org. Single source of truth: `docs/marketing/STATE.md` (current marketing inventory + draft locations + per-draft status).
+13. **v0.9.15 release**
+14. **P3 marketing publish** — promote drafts to published; refresh alint.org with v0.9.15 evidence + 20 case studies + 18-pitfall narrative
+15. **P4 launch**
+16. **P5 post-launch** — concurrent with **P2b** (20 polyglot monorepos)
 
 The plan is intentionally a living doc — every phase will surface adjustments.
 Update this file as we learn.
