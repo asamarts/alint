@@ -111,9 +111,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     if opts.prefix.is_empty() {
+        // Pitfall #15 in `docs/development/CONFIG-AUTHORING.md`: an
+        // empty prefix is sometimes reached for as a shorthand for
+        // "file is non-empty". Point at the right tool for the job.
         return Err(Error::rule_config(
             &spec.id,
-            "file_starts_with.prefix must not be empty",
+            "file_starts_with.prefix must not be empty.\n  \
+             hint: for non-emptiness checks, use `file_min_lines: 1` or \
+             `file_min_size: <bytes>` instead. file_starts_with is for \
+             literal-prefix assertions like `prefix: \"#!/bin/bash\\n\"`.",
         ));
     }
     if spec.fix.is_some() {

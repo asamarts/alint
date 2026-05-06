@@ -395,7 +395,10 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
-        Error::rule_config(&spec.id, format!("invalid JSONPath {:?}: {e}", opts.path))
+        Error::rule_config(
+            &spec.id,
+            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+        )
     })?;
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
@@ -420,7 +423,10 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
-        Error::rule_config(&spec.id, format!("invalid JSONPath {:?}: {e}", opts.path))
+        Error::rule_config(
+            &spec.id,
+            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+        )
     })?;
     let re = Regex::new(&opts.matches).map_err(|e| {
         Error::rule_config(&spec.id, format!("invalid regex {:?}: {e}", opts.matches))

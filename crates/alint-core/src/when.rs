@@ -213,11 +213,94 @@ pub struct IterEnv<'a> {
 // ─── Public entry points ─────────────────────────────────────────────
 
 pub fn parse(src: &str) -> Result<WhenExpr, WhenError> {
+    parse_inner(src).map_err(|e| enrich_diagnostic(src, e))
+}
+
+fn parse_inner(src: &str) -> Result<WhenExpr, WhenError> {
     let tokens = lex(src)?;
     let mut p = Parser { tokens, pos: 0 };
     let expr = p.parse_expr()?;
     p.expect_eof()?;
     Ok(expr)
+}
+
+/// Enrich a [`WhenError::Parse`] with domain-specific hints for the
+/// pitfalls catalogued in `docs/development/CONFIG-AUTHORING.md` § 12:
+///
+/// - **#12a** — `&&` / `||` / `!` symbols → suggest `and` / `or` / `not`.
+/// - **#12b** — `iter.foo.bar(` method-call shapes → suggest the
+///   `matches` operator or the bounded iter accessor set.
+///
+/// Only applies to `WhenError::Parse`; evaluation errors pass through
+/// unchanged. The original message is preserved; hints are appended on
+/// new lines so callers that just `Display` the error still get the
+/// position info.
+fn enrich_diagnostic(src: &str, err: WhenError) -> WhenError {
+    let WhenError::Parse { pos, message } = err else {
+        // Eval / Regex errors don't have positional context to
+        // diagnose; pass them through unchanged.
+        return err;
+    };
+    let hint = symbol_keyword_hint(src, pos).or_else(|| method_call_hint(src, pos));
+    match hint {
+        Some(h) => WhenError::Parse {
+            pos,
+            message: format!("{message}\n  hint: {h}"),
+        },
+        None => WhenError::Parse { pos, message },
+    }
+}
+
+/// Detect `&&` / `||` / `!` near `pos` and return a keyword
+/// suggestion. Pitfall #12a.
+fn symbol_keyword_hint(src: &str, pos: usize) -> Option<&'static str> {
+    let bytes = src.as_bytes();
+    let at = bytes.get(pos).copied();
+    let next = bytes.get(pos + 1).copied();
+    let prev = pos.checked_sub(1).and_then(|p| bytes.get(p).copied());
+
+    let _ = next; // kept for future second-character refinement
+    match at {
+        Some(b'&') if prev != Some(b'&') => {
+            Some("`&&` is not a `when:` operator. Use the keyword `and` instead.")
+        }
+        Some(b'|') if prev != Some(b'|') => {
+            Some("`||` is not a `when:` operator. Use the keyword `or` instead.")
+        }
+        Some(b'!') => Some("`!` is not a `when:` operator. Use the keyword `not` instead."),
+        _ => None,
+    }
+}
+
+/// Detect `iter.foo.bar(` method-call shapes anywhere in `src`
+/// and return a hint. Pitfall #12b.
+///
+/// The `iter.*` accessors are a fixed set: `iter.path`,
+/// `iter.basename`, `iter.parent_name`, `iter.is_dir`,
+/// `iter.has_file(...)`. There are no string method calls; use the
+/// `matches` operator for regex matching.
+///
+/// We use a global regex rather than a position-relative check
+/// because the lexer's failure column for `iter.path.contains("foo")`
+/// is on the second `.`, not the open paren — the position alone
+/// doesn't carry enough context to infer the bad shape.
+fn method_call_hint(src: &str, _pos: usize) -> Option<&'static str> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // `iter.<ident>.<ident>(` — a double-dot chain off iter that
+        // ends in a function-call-shaped token. Catches
+        // `iter.path.contains(...)`, `iter.basename.starts_with(...)`,
+        // `iter.parent_name.ends_with(...)`, etc.
+        regex::Regex::new(r"\biter\.\w+\.\w+\s*\(").expect("static regex")
+    });
+    if re.is_match(src) {
+        return Some(
+            "`iter.*` accessors are a fixed set; method calls aren't supported. Use the `matches` \
+             operator for regex matching, e.g. `iter.path matches \"node_modules\"`. The supported \
+             accessors are documented in `docs/development/CONFIG-AUTHORING.md` § 12b.",
+        );
+    }
+    None
 }
 
 impl WhenExpr {

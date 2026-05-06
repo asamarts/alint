@@ -247,11 +247,19 @@ fn validate_manifest_name(rule_id: &str, name: &str) -> Result<()> {
         ));
     }
     if name.contains('/') || name.contains('\\') {
+        // Pitfall #11 in `docs/development/CONFIG-AUTHORING.md`: the
+        // most common adopter mistake is reaching for `has_ancestor`
+        // to scope by directory (e.g. `airflow-core/pyproject.toml`),
+        // when the right answer is a `paths:` glob on the rule's
+        // main scope. Surface that distinction in the error message.
+        let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
         return Err(Error::rule_config(
             rule_id,
             format!(
-                "scope_filter.has_ancestor name {name:?} must be a basename — no path separators \
-                 (use a literal filename like `Cargo.toml`)"
+                "scope_filter.has_ancestor name {name:?} must be a basename — no path separators.\n  \
+                 hint: to match files inside a specific subtree, use `paths:` on the rule's main \
+                 scope (e.g. `paths: \"airflow-core/**/*.py\"`); to match files in any subtree \
+                 that has this manifest, use the basename only (e.g. `has_ancestor: {basename:?}`)."
             ),
         ));
     }

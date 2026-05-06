@@ -9,6 +9,7 @@ mod engine;
 mod error;
 pub mod facts;
 pub mod git;
+pub mod jsonpath_diagnostics;
 mod level;
 mod registry;
 mod report;

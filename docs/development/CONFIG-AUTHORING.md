@@ -1,12 +1,21 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a launch-prep validation pass — **18 distinct schema /
+Surfaced by the P2a launch-prep validation pass — **17 distinct schema /
 language pitfalls** hit while writing configs for production repos. 12
 surfaced in the pilot (kubernetes, rust-lang/rust, deno, airflow, turbo);
 3 in Wave 1 (clap, tokio, ruff, uv, typescript); 1 in Wave 2 (next.js);
-2 in Wave 3 (helm, arrow). All configs ultimately parse + run, but the
+1 in Wave 3 (helm). All configs ultimately parse + run, but the
 iteration cost was high. This doc captures every one with the canonical
 correct form.
+
+> **Note on pitfall numbering.** A previously-claimed *pitfall #18*
+> (JSONPath outer-parens filter) was investigated during v0.9.15
+> Phase 4 and proven to be a misdiagnosis — `serde_json_path` 0.7.x
+> accepts outer-parens filters, and the original report had
+> mis-attributed a dashed-key error inside the filter to the parens
+> (the real fix is bracket-notation per pitfall #10, applied inside
+> the filter just as outside it). The numbering jumps from #17 to
+> nothing.
 
 > **TL;DR for AI agents writing alint configs:** read this entire doc
 > before drafting an `.alint.yml`. The fields documented in
@@ -29,7 +38,7 @@ correct form.
 
 ---
 
-## The 18 pitfalls
+## The 17 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -259,9 +268,10 @@ Source: `crates/alint-rules/src/file_starts_with.rs::struct Options`.
 alint's JSONPath impl is RFC 9535-compliant (`serde_json_path`
 crate). Per the spec, dot-notation is reserved for keys matching
 the identifier production `[A-Za-z_][A-Za-z0-9_]*`. Dashed,
-dotted, and other non-identifier keys must use bracket notation.
+dotted, and other non-identifier keys must use bracket notation —
+in **any** segment, top-level or inside a filter expression.
 
-**Wrong:**
+**Wrong (top-level):**
 ```yaml
 - id: provider-package-name
   kind: yaml_path_matches
@@ -270,7 +280,7 @@ dotted, and other non-identifier keys must use bracket notation.
   matches: '^apache-airflow-providers-'
 ```
 
-**Right:**
+**Right (top-level):**
 ```yaml
 - id: provider-package-name
   kind: yaml_path_matches
@@ -278,6 +288,28 @@ dotted, and other non-identifier keys must use bracket notation.
   path: "$['package-name']"              # ← bracket notation
   matches: '^apache-airflow-providers-'
 ```
+
+**Wrong (inside a filter):**
+```yaml
+- id: dependabot-actions-grouped
+  kind: yaml_path_matches
+  paths: ".github/dependabot.yml"
+  path: "$.updates[?(@.package-ecosystem == 'github-actions')]"   # ← @.package-ecosystem dashed
+  matches: '.+'
+```
+
+**Right (inside a filter):**
+```yaml
+- id: dependabot-actions-grouped
+  kind: yaml_path_matches
+  paths: ".github/dependabot.yml"
+  path: "$.updates[?(@['package-ecosystem'] == 'github-actions')]"
+  matches: '.+'
+```
+
+Either with or without the outer parens around the predicate is
+fine for `serde_json_path` 0.7.x; the load-bearing fix is the
+bracket-notation key access.
 
 This applies to *any* segment with a non-identifier character,
 including dots inside keys (rare but real in some YAML configs).
@@ -583,39 +615,6 @@ multiple matches, ask "is the intent *all* or *any*?":
   on the raw text, OR wait for the v0.10+ `*_path_contains` primitive
   (proposed in `docs/launch-prep.md`'s rule-kind candidate table).
 
-### 18. JSONPath filter expressions: no outer parentheses around the predicate (RFC 9535)
-
-`serde_json_path` (alint's JSONPath impl) is RFC 9535-compliant. The spec
-defines filter selectors as `?<predicate>`, **not** `?(<predicate>)`. The
-outer-parens form is common in pre-RFC tutorials and the JS `jsonpath`
-package, but `serde_json_path` rejects it at parse time.
-
-**Wrong:**
-```yaml
-- id: dependabot-actions-grouped
-  kind: yaml_path_matches
-  paths: .github/dependabot.yml
-  path: "$.updates[?(@.package-ecosystem == 'github-actions')].groups"
-  matches: '.+'
-```
-
-**Right:**
-```yaml
-- id: dependabot-actions-grouped
-  kind: yaml_path_matches
-  paths: .github/dependabot.yml
-  path: "$.updates[?@['package-ecosystem'] == 'github-actions'].groups"
-  matches: '.+'
-```
-
-Note also pitfall #10 (bracket notation for dashed keys: `@['package-ecosystem']`,
-not `@.package-ecosystem`).
-
-A v0.9.15 Phase 4 did-you-mean message ("did you mean `?@.foo == 'bar'`
-without the outer parens?") would catch this at parse time.
-
-Source: [RFC 9535 § 2.3.5](https://www.rfc-editor.org/rfc/rfc9535#section-2.3.5).
-
 ---
 
 ## Honourable mention: JSONPath regex matching uses `match()`, not `=~`
@@ -758,14 +757,12 @@ Before merging a PR that adds or modifies an `.alint.yml`:
       `..` / multi-match selectors), OR the intent is genuinely "every
       match must equal X". For "any element of array contains X", use
       `file_content_matches` (or wait for `*_path_contains`).
-- [ ] JSONPath filter selectors use the RFC 9535 form `?@.foo == 'bar'`,
-      not the pre-RFC `?(@.foo == 'bar')` outer-parens form.
 
 The `coverage_audit_examples_parse.rs` audit (added in v0.9.15) enforces
 the first item by re-validating every `examples/*/.alint.yml` on every
-CI run. The schema-level items (1-12, 15, 18) are caught by the same
-parse, so the audit covers them transitively. **Items 13, 14, 16, 17 are
-NOT caught by parse-validation** — they produce silently-wrong runtime
+CI run. The schema-level items (1-12, 15) are caught by the same parse,
+so the audit covers them transitively. **Items 13, 14, 16, 17 are NOT
+caught by parse-validation** — they produce silently-wrong runtime
 behaviour (regex never matches; `*_path_matches` against a bool fires
 "not a string" on every match; `*_path_equals` against `[*]` flips
 intent from "any" to "all") — see § "Parse-validation is necessary but

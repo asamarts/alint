@@ -572,62 +572,39 @@ strength of demand across P2a):
 
 ---
 
-## NEW pitfall surfaced by this case study
+## Filter-expression pitfall: see CONFIG-AUTHORING.md § 10
 
-While writing this config, **one schema/language pitfall**
-surfaced that's not in `docs/development/CONFIG-AUTHORING.md`'s
-existing 16:
+The original write-up of this case study claimed a NEW pitfall
+(#17) — *"JSONPath filter expressions `?(@.foo == 'bar')` are
+parser-rejected"*. Investigation during v0.9.15 Phase 4
+disproved that:
 
-### 17. JSONPath filter expressions: `?(@.foo == 'bar')` parser-rejected; use `?@.foo == 'bar'`
+- `serde_json_path` 0.7.x **accepts** outer-parens filter
+  predicates (`?(@.foo == 'bar')`).
+- The arrow config's actual failure was the dashed
+  `package-ecosystem` key inside the filter — i.e. a filter-
+  context instance of CONFIG-AUTHORING.md **pitfall #10**
+  (dashed-key access requires bracket notation).
+- The fix is bracket notation, not removing the outer parens.
 
-alint's RFC 9535-compliant JSONPath impl
-(`serde_json_path`) follows the canonical filter-expression
-syntax: `?<filter-expression>`. The older
-`?(<filter-expression>)` shape with parenthesised body
-(common in JsonPath libraries pre-RFC 9535, including the
-JavaScript `jsonpath` package and many tutorials) is
-rejected with a parser error.
+So the canonical correct path (either form works as long as the
+dashed key is bracketed):
 
-**Wrong:**
 ```yaml
-- id: arrow-dependabot-includes-actions
-  kind: yaml_path_matches
-  paths: .github/dependabot.yml
-  path: "$.updates[?(@.package-ecosystem=='github-actions')].directory"
-                    ^^^                                    ^^^
-                    parser fails: "at position 11, in long-hand segment, parser error"
+# Both forms parse cleanly under serde_json_path 0.7.x:
+path: "$.updates[?(@['package-ecosystem'] == 'github-actions')].directory"
+path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
 ```
 
-**Right (option A — drop the outer parens):**
-```yaml
-- id: arrow-dependabot-includes-actions
-  kind: yaml_path_matches
-  paths: .github/dependabot.yml
-  path: "$.updates[?@['package-ecosystem'] == 'github-actions'].directory"
-```
+The v0.9.15 Phase 4 JSONPath diagnostic helper catches the dashed-
+key shape — both top-level and inside filter contexts — and
+suggests bracket notation. See `docs/development/CONFIG-AUTHORING.md`
+§ 10 for the full canonical form.
 
-Note also that `package-ecosystem` is a dashed key, so
-bracket notation is mandatory inside the filter (CONFIG-
-AUTHORING.md pitfall #10).
-
-**Significance:** the same shape appears in two existing
-case studies' filter expressions (next.js's
-`nextjs-workflow-actions-pinned-by-sha` already uses the
-correct `?match(@.uses, '^...')` form, but a writer drawing
-on JsonPath tutorials would naturally reach for the
-parenthesised form). The bundled `ci/github-actions@v1`
-ruleset's filter-expression rules use the correct form;
-this gap is at the per-config user-authoring layer, not the
-bundled-ruleset layer.
-
-The fix in this case study's config dropped the outer
-parens. The alternative — extending the JSONPath parser to
-accept the older parenthesised form as a backwards-
-compatibility shim — would be a half-day's work in
-`crates/alint-core/src/structured_path.rs` and would
-unblock the natural reach-for-tutorials idiom. Tracked as a
-v0.10+ "schema parser DX" candidate alongside the
-existing did-you-mean Phase 3 work.
+(Lesson for AI agent reviewers: when a JSONPath fails with "long-hand
+segment, parser error", the most common cause is a dashed key
+needing bracket notation, regardless of whether outer parens are
+present.)
 
 ---
 
@@ -636,11 +613,12 @@ existing did-you-mean Phase 3 work.
 - Audit (`cargo test -p alint-e2e --test
   coverage_audit_examples_parse`) **passes** with this
   config in place.
-- One NEW pitfall surfaced (#17 JSONPath filter-expression
-  parens). One iteration cycle (parse failure → fix → re-run
-  → success) hit during config authoring. The pitfall would
-  benefit from a domain-specific did-you-mean in v0.9.15
-  Phase 4.
+- The original report attributed a JSONPath parse failure
+  to outer parens; v0.9.15 Phase 4 disproved that — the real
+  issue was a dashed key inside the filter (an instance of
+  pitfall #10). v0.9.15 Phase 4 added a JSONPath diagnostic
+  helper that suggests bracket notation in both filter and
+  non-filter contexts.
 - Config runs cleanly against the actual cloned repo at
   `/tmp/apache-arrow/` (243 violations across 28 failing
   files: 149 GHA SHA-pin warnings + 24 arrow-specific GHA

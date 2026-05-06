@@ -6,16 +6,17 @@ public launch backed by real-repo case studies and a marketing site that earns
 attention rather than just hosts documentation.
 
 **Status: 2026-05-06.** P1 done; **P2a-full COMPLETE (20 of 20 repos)**.
-`docs/development/CONFIG-AUTHORING.md` now catalogues 18 pitfalls (12
+`docs/development/CONFIG-AUTHORING.md` now catalogues 17 pitfalls (12
 from pilot + 3 from Wave 1: regex anchoring, YAML `\n` semantics, empty
 `file_starts_with.prefix`; +1 from Wave 2: `*_path_matches` against
-bool fields; +2 from Wave 3: `*_path_equals` against `[*]`,
-JSONPath outer-parens). 7 silently-broken structured-path rules in
-committed pilot+Wave 1 configs were fixed across the validation pass
-(6 bool-match in Wave 2, 1 array-semantics in Wave 3).
-`coverage_audit_examples_parse.rs` audit live; v0.9.15 P1+P2 done. Next:
-v0.9.15 Phase 3-6 (DX hardening) → v0.9.15 release → P3 marketing
-refresh.
+bool fields; +1 from Wave 3: `*_path_equals` against `[*]`). A
+previously-claimed 18th pitfall (JSONPath outer-parens filter) was
+investigated during Phase 4 and found to be a misdiagnosis — see the
+note at the top of CONFIG-AUTHORING.md. 7 silently-broken
+structured-path rules in committed pilot+Wave 1 configs were fixed
+across the validation pass. `coverage_audit_examples_parse.rs` audit
+live; v0.9.15 P1+P2+P3+P4 done. Next: v0.9.15 Phase 5-7 → release →
+P3 marketing publish.
 
 ## State of the world (audit at 2026-05-05)
 
@@ -91,9 +92,21 @@ Six sub-phases:
   path. Also added `#[serde(deny_unknown_fields)]` to the structured-
   path Options structs so the `matches:` ↔ `equals:` rename surfaces
   as an unknown-field error rather than missing-required.
-- **Phase 4** — Domain-specific error messages: `scope_filter.has_ancestor`
-  basename constraint, `when:` operator-keyword guidance, JSONPath
-  bracket-notation for dashed keys. ~half day.
+- **Phase 4** — Domain-specific error messages. ✅ DONE. Covers:
+  pitfall #10 (JSONPath dashed-key bracket-notation, also inside
+  filter contexts), #11 (`scope_filter.has_ancestor` path-separator
+  → `paths:` glob hint), #12a (`&&`/`||`/`!` symbols → `and`/`or`/`not`
+  keyword hint), #12b (`iter.*` method-call shape → `matches`
+  operator hint), #15 (`file_starts_with.prefix: ""` →
+  `file_min_lines: 1` hint). New `jsonpath_diagnostics` module in
+  alint-core (9 unit tests); `when:` parser enriched in-place
+  (post-error diagnosis). 10 integration tests through the real
+  build path. **Investigation drive-by**: a previously-claimed
+  pitfall #18 (JSONPath outer-parens filter) was disproven —
+  `serde_json_path` 0.7.x accepts outer parens; the original report
+  had mis-attributed a dashed-key error to the parens. Pitfall
+  catalogue dropped 18 → 17. apache-arrow case study + master
+  CONFIG-AUTHORING.md updated.
 - **Phase 5** — JSON Schema generation (`schemars` derive on every rule's
   `Options` + discriminated-union top-level → `schemas/v1/config.json`).
   Editor LSP autocomplete catches ~80 % of pitfalls at keystroke time.
