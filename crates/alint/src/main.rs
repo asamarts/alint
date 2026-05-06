@@ -247,6 +247,29 @@ enum Command {
         #[arg(long)]
         explain: bool,
     },
+    /// Parse-validate an `.alint.yml` (resolves `extends:`, builds
+    /// every rule, parses every `when:`) and report any errors —
+    /// without walking the tree. For editor LSP, pre-commit hooks,
+    /// and fail-fast CI steps that just want to know "is the config
+    /// loadable?". Exit 0 on success; exit 1 on validation failure.
+    ValidateConfig {
+        /// Path to the config file to validate. Defaults to the
+        /// `.alint.yml` discovered upward from the current
+        /// directory (same discovery rules as `alint check`).
+        path: Option<PathBuf>,
+        /// Output format. `human` prints a one-line success or a
+        /// rich error trace; `json` emits a stable
+        /// `{"valid": bool, "rule_count": N, "config_path": ...,
+        /// "error": "...?"}` envelope for editor / CI consumption.
+        #[arg(
+            long,
+            short = 'f',
+            value_name = "FORMAT",
+            default_value = "human",
+            value_parser = clap::builder::PossibleValuesParser::new(["human", "json"]),
+        )]
+        format: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -321,6 +344,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             },
             &cli,
         ),
+        Command::ValidateConfig { path, format } => cmd_validate_config(path, &format, &cli),
     }
 }
 
@@ -768,6 +792,131 @@ struct LoadedConfig {
 
 /// Load the effective config from disk and instantiate every rule,
 /// parsing any `when:` clauses into AST at build time.
+/// `alint validate-config <path>` — Phase 6 of v0.9.15.
+///
+/// Runs the same load + build + when-parse path as `check`, but
+/// stops before the engine spins up. Editor LSP, pre-commit hooks,
+/// and fail-fast CI steps want to know "is the config loadable?"
+/// without paying for a tree walk.
+///
+/// Exit codes:
+/// - `0` — config valid, all N rules built cleanly
+/// - `1` — config invalid (load / build / when-parse error). The
+///   underlying error message includes the v0.9.15 Phase 3 +
+///   Phase 4 enrichments (did-you-mean, `JSONPath` dashed-key hints,
+///   `&&` → `and` keyword hints, etc.)
+/// - `2` — invocation error (file missing, etc.) — propagated by
+///   `main`'s top-level error handler.
+fn cmd_validate_config(path: Option<PathBuf>, format: &str, cli: &Cli) -> Result<ExitCode> {
+    // Resolve the config path. Three sources, in priority order:
+    // 1. positional `path` arg — file path or directory (most explicit;
+    //    editor LSP invocations pass the YAML file directly, while
+    //    `validate-config .` is a natural shorthand for "validate the
+    //    config in this repo")
+    // 2. `--config` global flag (carried via `cli.config`)
+    // 3. discovery from the current directory (same as `check`)
+    let config_path: PathBuf = if let Some(p) = path {
+        if p.is_dir() {
+            if let Some(found) = alint_dsl::discover(&p) {
+                found
+            } else {
+                let err = anyhow::anyhow!("no .alint.yml found under directory {}", p.display());
+                return emit_validate_failure(&err, None, format);
+            }
+        } else {
+            p
+        }
+    } else if let Some(first) = cli.config.first() {
+        first.clone()
+    } else if let Some(p) = alint_dsl::discover(Path::new(".")) {
+        p
+    } else {
+        let err = anyhow::anyhow!(
+            "no .alint.yml found (searched from {})",
+            Path::new(".").display()
+        );
+        return emit_validate_failure(&err, None, format);
+    };
+
+    if !config_path.exists() {
+        let err = anyhow::anyhow!("config file not found: {}", config_path.display());
+        return emit_validate_failure(&err, Some(&config_path), format);
+    }
+
+    // Same load + build + when-parse path as `check`, with the
+    // failures plumbed back as a Result for the validate handler
+    // rather than aborting the run.
+    match validate_config_inner(&config_path) {
+        Ok(rule_count) => emit_validate_success(rule_count, &config_path, format),
+        Err(e) => emit_validate_failure(&e, Some(&config_path), format),
+    }
+}
+
+fn validate_config_inner(config_path: &Path) -> Result<usize> {
+    let config = alint_dsl::load(config_path)?;
+    let registry: alint_core::RuleRegistry = alint_rules::builtin_registry();
+    let mut count = 0usize;
+    for spec in &config.rules {
+        if matches!(spec.level, alint_core::Level::Off) {
+            continue;
+        }
+        registry
+            .build(spec)
+            .with_context(|| format!("building rule {:?}", spec.id))?;
+        if let Some(when_src) = &spec.when {
+            alint_core::when::parse(when_src)
+                .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
+        }
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn emit_validate_success(rule_count: usize, config_path: &Path, format: &str) -> Result<ExitCode> {
+    if format == "json" {
+        let envelope = serde_json::json!({
+            "valid": true,
+            "rule_count": rule_count,
+            "config_path": config_path.display().to_string(),
+            "error": serde_json::Value::Null,
+        });
+        println!("{}", serde_json::to_string(&envelope)?);
+    } else {
+        // human format
+        println!(
+            "✓ Config valid: {rule_count} rule(s) loaded from {}",
+            config_path.display()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn emit_validate_failure(
+    err: &anyhow::Error,
+    config_path: Option<&Path>,
+    format: &str,
+) -> Result<ExitCode> {
+    if format == "json" {
+        // Render the error chain as a single string so editors get
+        // the full context including did-you-mean hints.
+        let chain = format!("{err:#}");
+        let envelope = serde_json::json!({
+            "valid": false,
+            "rule_count": 0,
+            "config_path": config_path.map(|p| p.display().to_string()),
+            "error": chain,
+        });
+        println!("{}", serde_json::to_string(&envelope)?);
+    } else {
+        // Human format prints to stderr to stay out of the way of
+        // stdout consumers, then a one-line summary on stdout so
+        // terminals show something either way.
+        eprintln!("alint: {err:#}");
+        println!("✗ Config invalid");
+    }
+    Ok(ExitCode::from(1))
+}
+
 fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     let config_path = if let Some(first) = cli.config.first() {
         first.clone()

@@ -819,6 +819,50 @@ fixture audit primarily a regex-correctness backstop.
 
 ---
 
+## `alint validate-config` (v0.9.15)
+
+Parse-validate a config without walking the tree:
+
+```sh
+# Default: discover from cwd, human format
+alint validate-config
+
+# Specific file (most explicit; what editor LSP integrations pass)
+alint validate-config path/to/.alint.yml
+
+# Specific directory (discovers `.alint.yml` inside)
+alint validate-config path/to/repo
+
+# JSON envelope for programmatic consumers (editor LSP, pre-commit, CI)
+alint validate-config -f json
+```
+
+Three exit codes:
+
+- `0` — config valid; all rules built cleanly
+- `1` — config invalid (load / build / when-parse error). The error
+  message carries the v0.9.15 Phase 3 + Phase 4 enrichments
+  (did-you-mean, JSONPath dashed-key bracket-notation hints, `&&` →
+  `and` keyword hints, etc.)
+- `2` — invocation error (file missing, etc.)
+
+The JSON shape is stable:
+
+```json
+{
+  "valid": true,
+  "rule_count": 70,
+  "config_path": "examples/clap-rs-clap/.alint.yml",
+  "error": null
+}
+```
+
+Use this in a pre-commit hook to fail-fast on the way in, or wire it
+into your editor's LSP runner to surface errors without paying for the
+full tree walk that `alint check` does.
+
+---
+
 ## Editor LSP via the JSON Schema (v0.9.15)
 
 The full surface area of `.alint.yml` is described as a JSON Schema at

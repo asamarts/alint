@@ -131,8 +131,18 @@ Six sub-phases:
   Net engineering scope was much smaller than the original 2-3 day
   estimate (schema was already there); the value-delivery work
   (audits + magic comment + docs) shipped in well under a day.
-- **Phase 6** — `alint validate-config <path>` subcommand (parse-only, no
-  tree walk). For editor LSP, pre-commit hooks, fail-fast CI. ~half day.
+- **Phase 6** — `alint validate-config <path>` subcommand. ✅ DONE.
+  Parse-only command (no tree walk) that runs the full load + build +
+  when-parse path and reports pass/fail. Accepts a file path or a
+  directory (discovers `.alint.yml`). Two output formats:
+  - `--format human` (default) — human one-liner on stdout, error
+    chain on stderr. Matches the existing CLI's stdout/stderr split.
+  - `--format json` — stable envelope `{valid, rule_count, config_path,
+    error}` for editor LSP / pre-commit / CI consumption.
+  Exit codes: 0 valid, 1 invalid, 2 invocation error. Did-you-mean
+  hints from Phases 3-4 flow through transparently. Two trycmd
+  snapshot tests cover the success + did-you-mean-flowing-through
+  cases.
 - **Phase 7** — Smoke-test fixture audit (**moved from v0.9.16+ into
   v0.9.15** after P2a-full's runtime-semantic pitfall surface area
   became clear). Without it, v0.9.15 ships with 4 pitfalls (#13, #14,

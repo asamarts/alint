@@ -1,0 +1,2 @@
+alint: building rule "bad-shellcheck": rule "bad-shellcheck": invalid options: YAML parse error: unknown field `argv`, expected `command` or `timeout`
+  did you mean: `command`?

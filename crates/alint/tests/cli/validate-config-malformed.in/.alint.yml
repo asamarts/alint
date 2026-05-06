@@ -1,0 +1,7 @@
+version: 1
+rules:
+  - id: bad-shellcheck
+    kind: command
+    level: error
+    paths: "**/*.sh"
+    argv: ["shellcheck"]
