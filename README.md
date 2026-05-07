@@ -11,6 +11,48 @@
 - 🧰 **Powerful + extensible.** 60 rule kinds across 13 families, 19 bundled ecosystem rulesets, 12 auto-fix ops, 8 output formats, structured-query rules with full RFC 9535 JSONPath, cross-file relational rules, conditional `when:` gates over per-run facts, and `extends:` composition with SRI-pinned URLs.
 - 📦 **One static Rust binary.** Any language, any repo. No plugin install, no Node/JVM/Python runtime needed.
 
+## Proven on 30 real OSS repos
+
+alint configs covering the structural-validation surfaces of:
+
+**Single-language workspaces** (P2a) —
+[kubernetes](examples/kubernetes-kubernetes/),
+[rust-lang/rust](examples/rust-lang-rust/),
+[golang/go](examples/golang-go/),
+[python/cpython](examples/python-cpython/),
+[nodejs/node](examples/nodejs-node/),
+[apache/airflow](examples/apache-airflow/),
+[denoland/deno](examples/denoland-deno/),
+[tokio-rs/tokio](examples/tokio-rs-tokio/),
+[astral-sh/uv](examples/astral-sh-uv/),
+[astral-sh/ruff](examples/astral-sh-ruff/),
+[clap-rs/clap](examples/clap-rs-clap/),
+[microsoft/typescript](examples/microsoft-typescript/),
+[facebook/react](examples/facebook-react/),
+[prettier/prettier](examples/prettier-prettier/),
+[pnpm/pnpm](examples/pnpm-pnpm/),
+[helm/helm](examples/helm-helm/),
+[pytorch/pytorch](examples/pytorch-pytorch/),
+[vercel/turbo](examples/vercel-turbo/).
+
+**Polyglot monorepos** (P2b) —
+[apache/arrow](examples/apache-arrow/) (6 languages: C++/Java/Python/Rust/Go/JS),
+[vercel/next.js](examples/vercel-next.js/) (TS + Rust hybrid),
+[NixOS/nixpkgs](examples/nixos-nixpkgs/) (39,101 files / 20,678 by-name dirs — full 79-rule pass in 273 ms wall-clock),
+[bazelbuild/bazel](examples/bazelbuild-bazel/),
+[tensorflow/tensorflow](examples/tensorflow-tensorflow/) (1,185 textproto API goldens; cross-language implementation parity),
+[apache/spark](examples/apache-spark/) (49 pom.xml files; XML-path structural query),
+[microsoft/vscode](examples/microsoft-vscode/) (apples-to-apples vs `build/hygiene.ts` — covers ~75% of 8 hygiene checks declaratively, 222 violations on the live tree),
+[angular/angular](examples/angular-angular/) (TypeScript framework — 16 packages, public-API goldens locking 13 of them),
+[istio/istio](examples/istio-istio/) (Go monorepo + 9 Helm charts; surfaces v0.10 cross-file value-equality candidate),
+[dotnet/runtime](examples/dotnet-runtime/) (1,091 .csproj files + 234 solutions + 257 Directory.Build.* + 520 .props/.targets ≈ 2,300 XML manifests),
+[protocolbuffers/protobuf](examples/protocolbuffers-protobuf/) (10 in-tree language bindings + 1 spun-out — densest source for v0.11 cross-language-implementation-complete),
+[flutter/flutter](examples/flutter-flutter/) (platform-driven polyglot variant — Dart framework + 6 native-OS embedders).
+
+**Headline catch:** alint surfaces **5 real Trojan-Source / [CVE-2021-42574](https://nvd.nist.gov/vuln/detail/CVE-2021-42574)** bidirectional-control-character files in flutter's `docs/releases/archive/` via the bundled `oss-baseline` ruleset's `no_bidi_controls` rule. Flutter's existing tooling (analyzer, dart format, per-package pre-commits) doesn't catch this class.
+
+Each case study includes a working `.alint.yml` you can copy as a starting point + a markdown writeup explaining what alint catches that the repo's existing tooling misses. See [`examples/`](examples/) for the full gallery.
+
 alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, structured-query, and agent-aware primitives.
 
 ## 60-second quickstart
@@ -61,6 +103,20 @@ Bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_pyth
 - **Eight output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
 - **JSON Schemas** — config at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete; report shapes at [`schemas/v1/check-report.json`](schemas/v1/check-report.json) and [`schemas/v1/fix-report.json`](schemas/v1/fix-report.json) for downstream tooling.
 - **Official GitHub Action** — `asamarts/alint@v0.9.17`.
+
+## Where alint shines
+
+alint isn't trying to be everything to everyone. The validation pass across 30 OSS repos surfaced five distinct shapes of project where alint earns its keep:
+
+1. **Repos with verify-script sprawl.** *"Replaces the structural subset of N hand-rolled validation scripts."* Best fit: kubernetes (50 verify scripts → 17 declarative rules), apache/airflow (109 pre-commit hooks → ~40% map cleanly), python/cpython (12 validation surfaces consolidated into 1 alint config), microsoft/vscode (`build/hygiene.ts` → ~75% covered declaratively).
+2. **Repos that rely on convention without explicit checks.** *"Catches the conventions your pipeline assumes but doesn't verify."* Best fit: tokio (zero hand-rolled scripts; alint catches 15 conventions tokio's pipeline silently assumes), uv (67-crate workspace conventions enforced nowhere in CI today), pnpm (replaces the in-tree `meta-updater` plugin), facebook/react, nodejs/node.
+3. **Repos with mature tooling that lacks a structural layer.** *"Adds a structural floor on top of mature tooling."* Best fit: microsoft/typescript (eslint + dprint + knip already tight), astral-sh/ruff (900+ Python lint rules but zero rules for ruff's own internal-crate `publish = false` discipline), prettier, helm, dotnet/runtime (~2,300 XML manifests with structural invariants no existing tool covers).
+4. **Repos that built their own lint-orchestration tool.** *"Replaces the structural subset of your custom orchestration layer."* Best fit: pytorch (≈86% of pytorch's 57 [`lintrunner.toml`](https://github.com/suo/lintrunner) adapters are structural; alint sits beneath, lintrunner keeps the AST-aware tail), bazel (alint replaces the structural subset of bazel's hand-rolled CI scripts).
+5. **Tightly-curated minimal-tooling projects.** *"Encodes conventions enforced only by code-review discipline."* Best fit: golang/go (zero `.github/workflows/`, zero `Makefile`, zero `.golangci.yml`; the 31-rule alint config encodes the project's structural contract for the first time anywhere).
+
+**Polyglot wins as a sixth shape:** when a single tree spans languages or platforms (apache/arrow's 6 languages, vercel/next.js's TS+Rust, NixOS/nixpkgs at 39k files, flutter's Dart-framework-with-6-native-embedders, protobuf's 11 language bindings), no per-language linter sees the cross-cutting conventions; alint is the layer that does.
+
+If your repo doesn't match one of these shapes — alint is probably still useful (the rule catalogue is broad), but you may want to start by reading the closest case study above to see what a working config looks like in your shape.
 
 ## Non-goals
 
