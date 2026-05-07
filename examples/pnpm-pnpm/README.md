@@ -1,5 +1,7 @@
 # Case study: `pnpm/pnpm`
 
+> Marketing/positioning writeup at https://alint.org/examples/pnpm-pnpm/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `pnpm/pnpm` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -51,22 +53,14 @@ surfaces:
   shapes (per-package `switch (manifest.name)` carve-outs in
   `.meta-updater/src/index.ts`).
 
-**Headline finding:** pnpm's `meta-updater` plugin enforces 13
+**Cross-cutting finding:** pnpm's `meta-updater` plugin enforces 13
 cross-package field invariants on every install — exactly the
 `cross_file_value_equals` shape now a v0.10 ship-target on alint's
-roadmap (10 sources past saturation). Until it ships, alint covers 11
-of the 13 invariants by asserting against the *expected literal value*
-rather than against "whatever the workspace root declares" — close
-enough that catching drift on a new package is a one-line PR for alint
-vs. requiring contributors to install + run the meta-updater plugin
-locally.
-
-For the launch story, **this is the "hand-rolled cross-package
-field-sync plugin" data point** — alongside microsoft/typescript
-(famously frozen, meticulously curated) and apache/airflow (109-hook
-pre-commit pipeline). pnpm pushed `cross_file_value_equals` past
-saturation: it was the 8th of 10 confirmed sources (airflow, tokio,
-clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio).
+roadmap (10 sources past saturation: airflow, tokio, clap, uv, react,
+pnpm, nodejs/node, pytorch, vscode, istio). Until it ships, alint
+covers 11 of the 13 invariants by asserting against the *expected
+literal value* rather than against "whatever the workspace root
+declares".
 
 ---
 
@@ -228,7 +222,7 @@ counted as one row each):
 + hygiene/no-tracked-artifacts + hygiene/lockfiles + tooling/editorconfig
 + agent-context` overlays, then layers ~40 pnpm-specific rules on top.
 
-Headline rules:
+Notable rules:
 
 - **`pnpm-catalog-mode-strict`** — locks `catalogMode: strict` so the
   catalog-protocol discipline can't silently drift to `manual`. The
@@ -400,35 +394,11 @@ measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work
 
-This case study is **the "hand-rolled cross-package field-sync
-plugin" data point** for the launch:
-
-- pnpm-workspace.yaml is the canonical shape every TS/JS monorepo
-  ecosystem references (16M weekly downloads of the `pnpm` package
-  at the time of capture).
-- Showing alint configures cleanly *against the pnpm reference
-  itself* gives instant credibility with the JS/TS audience —
-  and makes `examples/pnpm-pnpm/.alint.yml` a literal copy-paste
-  starter for any downstream pnpm-workspace user.
-- The `meta-updater` story is the v0.10 ship-target pitch: alint
-  covers 11 of 13 invariants today *without* requiring contributors
-  to install + run a per-repo plugin; once `cross_file_value_equals`
-  ships in v0.10, the remaining 2 (catalog completeness,
-  internal/external dep remap) close.
-- The agent-guardrail rules (`prepare-commit-msg-blocks-claude-amend`,
-  `pre-commit-blocks-claude-on-main-branch`) are the only multi-hook
-  agentic-aware setup we've found across 10 P2a repos so far —
-  a strong data point for the agent-hygiene ruleset positioning.
-
-Position it as the fourth tile on alint.org/examples (after
-kubernetes + airflow + microsoft/typescript), with the angle: "for
-repos using a custom cross-package-sync plugin like meta-updater,
-alint replicates the structural floor declaratively — no plugin,
-no install step, runs the same on every contributor machine."
-
-Followup feature work surfaced (consolidated):
+Marketing/positioning context for this case study lives at
+https://alint.org/examples/pnpm-pnpm/. The engineering follow-up
+work surfaced is consolidated below.
 
 - **`cross_file_value_equals` rule kind** — v0.10 ship-target (10
   sources past saturation). pnpm reinforces the demand from a Tier-1

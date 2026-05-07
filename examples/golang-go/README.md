@@ -1,5 +1,10 @@
 # Case study: `golang/go`
 
+> Marketing writeup (narrative, headline catch, competitive framing)
+> lives at <https://alint.org/examples/golang-go/>. This README is
+> the engineering reference: tooling inventory, mapping table, gap
+> catalogue, validation status.
+
 Inventory of the structural-validation tooling in `golang/go` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -58,16 +63,15 @@ inventoried. Of those:
   `src/internal/buildcfg/` GOOS/GOARCH parsing, and the
   `src/cmd/compile/`-resident SSA / mkasm / mkconst codegen pipelines)
 
-The headline is **NOT** "alint replaces N hand-rolled scripts" (golang/go
-has effectively zero hand-rolled structural-validation scripts) — it's
-**"alint encodes the unwritten Go conventions enforceable for the first
-time."** The 3-line BSD license header, the 4-go.mod canonical layout,
-the `.github/PULL_REQUEST_TEMPLATE` "No Markdown" rule, the `.gitattributes
-* -text` line that's load-bearing for Windows builds, the
-`doc/next/6-stdlib/99-minor/<package>/<issue>.md` filename grammar — none
-of these are checked by any script, anywhere in golang/go today. They are
-enforced by Russ Cox & co. in code review. alint makes them
-machine-checkable in 31 rules across one file.
+**Key finding:** golang/go has effectively zero hand-rolled
+structural-validation scripts. The conventions encoded here — the
+3-line BSD license header, the 4-go.mod canonical layout, the
+`.github/PULL_REQUEST_TEMPLATE` "No Markdown" rule, the
+`.gitattributes * -text` line load-bearing for Windows builds, the
+`doc/next/6-stdlib/99-minor/<package>/<issue>.md` filename grammar
+— are not checked by any script anywhere in golang/go today. They
+are enforced by code-review discipline. The 31 alint rules in this
+config make them machine-checkable.
 
 ---
 
@@ -375,40 +379,7 @@ that's the work alint adds that wasn't being done at all today.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the canonical "convention-heavy minimal-tooling"
-example**. Use it as the third leg of the launch positioning:
-
-> "kubernetes has 50 hand-rolled shell scripts; alint replaces 17 of
-> them. tokio has zero hand-rolled scripts but 12 implicit conventions
-> in CI workflows; alint catches the 15 conventions tokio's pipeline
-> assumes but doesn't verify. **golang/go has effectively zero
-> hand-rolled scripts AND zero CI workflows — its structural contract
-> is enforced exclusively by code-review discipline. alint encodes
-> that contract as 31 testable rules — the BSD license header, the
-> 4-go.mod canonical layout, the `.gitattributes` line that's
-> load-bearing for Windows builds, the release-notes filename
-> grammar, the FIPS module registry — for the first time.**"
-
-The narrative naturally extends the **three positioning narratives**
-crystallised in P2a Wave 1+2:
-
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| "Replaces N hand-rolled validation scripts" | kubernetes (50→17), airflow (109 hooks→40 %), cpython (12 surfaces consolidated) | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 scripts), uv (67-crate workspace), pnpm (`meta-updater` plugin replaced), react (codes.json + version-sync) | Repos that rely on convention without explicit checks |
-| "Adds structural floor on top of mature tooling" | typescript (eslint+dprint+knip), ruff (900+ Python rules, 0 internal), prettier (5 net-new gates) | Repos with mature tooling but missing structural layer |
-| **"Encodes conventions enforced only by code-review discipline"** (NEW from golang/go) | **golang/go (31 conventions, 0 scripts, 0 workflows — every rule is "this convention exists only as oral history and review etiquette today")** | **Tightly-curated, minimal-tooling projects (small but high-leverage segment: golang/go itself, plan9, suckless tools, the Linux kernel's structural conventions)** |
-
-golang/go is the **fourth distinct narrative** and the most extreme
-along this axis. The alint pitch lands as: "you have a clear set of
-unwritten rules that everyone reviewing your code knows; alint writes
-them down, makes them testable, and lets the next contributor read
-them in one file instead of inferring them from the corpus."
-
-Followup feature work surfaced (priority order, all confirmations
-of existing v0.10+ candidates):
+## Followup feature work surfaced (priority order, all confirmations of existing v0.10+ candidates)
 
 - **`pair_hash` rule kind** — `v0.10 ship-target` (3 sources;
   highest-stakes use case CMVP-FIPS-submission).

@@ -1,5 +1,10 @@
 # Case study: `istio/istio`
 
+> Marketing writeup (narrative, headline catch, competitive framing)
+> lives at <https://alint.org/examples/istio-istio/>. This README is
+> the engineering reference: tooling inventory, mapping table, gap
+> catalogue, validation status.
+
 Inventory of the structural-validation tooling in `istio/istio` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -365,9 +370,9 @@ silently:
    replace it before the PR. istio's
    `lint_copyright_banner.sh` accepts the file because it just
    greps for the literals "Apache License" + "Copyright" — both
-   present. **Net-new structural finding alint's regex-anchored
-   `file_header` catches that the existing bash + grep pipeline
-   does not.** Headline finding for the launch story.
+   present. alint's regex-anchored `file_header` catches the
+   placeholder leak that the existing bash + grep pipeline does
+   not.
 
 2. **`pkg/channels/unbounded.go` and
    `pkg/channels/unbounded_test.go` carry the gRPC-Authors header**
@@ -564,52 +569,7 @@ on the same checkout. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-istio is the **largest CNCF / service-mesh OSS adoption target** of
-the case-study set. Earlier case studies anchor the surrounding
-shape:
-
-- **kubernetes/kubernetes** — the verify-script empire (50 hack/verify-*.sh
-  scripts, 17 collapsible)
-- **helm/helm** — the canonical CNCF-shape Go monorepo (1 Makefile,
-  1 .golangci.yml, 1 license-bash, 1 OWNERS)
-- **istio/istio** (this study) — **the multi-component
-  Helm-chart-discipline polyglot**: 9 charts + cross-chart image-
-  pinning + extensive depguard rules + Prow-only CI + the `common/`
-  vendored-from-istio/common-files pattern
-
-The launch-pitch story for istio should specifically frame:
-
-> "istio is the largest CNCF service-mesh project — 9 Helm charts
-> with cross-component image-pinning conventions, ~250 lines of
-> golangci-lint depguard rules, and 1,699 release-note files
-> carrying a fixed schema. alint replaces the orchestration layer
-> (one declarative file replaces 9 Make targets + 4 home-grown bash
-> scripts), keeps golangci-lint as the deep-Go-AST workhorse and
-> helm/hadolint/shellcheck/yamllint as the per-format linters, and
-> adds a structural floor (Trojan-Source defence, per-chart
-> placeholder enforcement, release-note schema enforcement) that
-> istio's existing pipeline doesn't currently enforce. **In the
-> live snapshot, alint surfaced the cobra-CLI `Copyright © 2021
-> NAME HERE <EMAIL ADDRESS>` placeholder leak in
-> `istioctl/pkg/precheck/precheck.go` (which the existing
-> `lint_copyright_banner.sh` accepts because it greps for
-> substrings only), the gRPC-Authors-headered vendored files in
-> `pkg/channels/`, the `http://`-not-`https://` regression in
-> `manifests/charts/gateways/istio-ingress/Chart.yaml`, the
-> `piVersion: release-notes/v2` typo in
-> `releasenotes/notes/27430.yaml`, and three release-note files
-> with non-enum `kind:` values — net-new structural findings the
-> existing pipeline doesn't catch.**"
-
-This is the **complementary case study to kubernetes + helm**:
-those two anchor the Go-monorepo extremes (mega-repo + canonical
-midsize). istio adds the Helm-chart structural-discipline axis
-that no earlier case study has covered.
-
-Followup feature work surfaced (de-duplicated against earlier
-case-study gap lists):
+## Followup feature work surfaced (de-duplicated against earlier case-study gap lists)
 
 - **`cross_file_value_equals` rule kind** — `v0.10 ship-target`
   (10 sources per launch-evidence.md). istio is the named source

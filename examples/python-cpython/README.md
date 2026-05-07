@@ -1,5 +1,7 @@
 # Case study: `python/cpython`
 
+> Marketing/positioning writeup at https://alint.org/examples/python-cpython/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `python/cpython` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -177,7 +179,7 @@ Maps trivially — `trim_trailing_whitespace=true` + `insert_final_newline=true`
 become bundled `oss-no-trailing-whitespace` + `oss-final-newline`,
 overridden in our config to broaden the scope from docs to source files.
 
-### Misc/NEWS.d/next/ — the headline finding
+### Misc/NEWS.d/next/ — convention enforced only by tool-write-time grace
 
 12 category subdirectories (Build, C_API, Core_and_Builtins, Documentation,
 IDLE, Library, macOS, Security, Tests, Tools-Demos, Windows; plus some
@@ -344,18 +346,13 @@ sequence over the staged files only — `prek run` (the cpython runner of
 choice in CI) parallelises across hooks but each hook still spawns its
 own tool process per file batch.
 
-The alint pitch here is **not** speed — it's **inventory legibility**. A
-new contributor staring at cpython's structural-validation surface today
-has to read 122 Make targets, 35 pre-commit hooks, 7+ Tools/build/*
-scripts, the Azure Pipelines YAML, the .gitattributes file, two LOCAL
-pre-commit shell hooks, and 9 separate `.ruff.toml` configs to understand
-what rules apply where. The alint config in this directory is **one
-file**, declarative, with each rule's scope, severity, and rationale
-visible in 5-10 lines.
-
-For the 38 % of checks that fit alint's grammar today, the pitch is:
-**"adopt alint to consolidate the orchestration layer so contributors can
-read the structural contract in one file."** The deep tools
+Operationally: cpython's structural-validation surface today spans 122
+Make targets, 35 pre-commit hooks, 7+ Tools/build/* scripts, the
+Azure Pipelines YAML, the .gitattributes file, two LOCAL pre-commit
+shell hooks, and 9 separate `.ruff.toml` configs. The alint config in
+this directory is one file, declarative, with each rule's scope,
+severity, and rationale visible in 5-10 lines — covering the 38 % of
+checks that fit alint's grammar today. The deep tools
 (`stable_abi.py`, `smelly.py`, `check-c-api-docs/main.py`,
 `check-c-globals.py`, the codegens) stay where they are.
 
@@ -368,37 +365,11 @@ shell-out-to-ruff subset (the ruff invocation dominates).
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work
 
-**Headline launch quote:** "cpython's structural validation is scattered
-across 12 distinct surfaces — 122 Make targets, 35 pre-commit hooks, 9
-ruff configs, 7 Tools/build/* check scripts, .gitattributes, .editorconfig,
-and 25 GitHub Actions workflows. alint consolidates the 38 % that's
-declarative orchestration into one 72-rule config (34 cpython-specific +
-38 from 4 bundled rulesets) — and the most alint-shaped surface
-(`Misc/NEWS.d/next/*` filename grammar) is enforced nowhere statically
-today, only by a downstream tool (`blurb`) that must generate the right
-shape at write time. alint encodes the full grammar as a single 6-line
-`filename_regex` rule."
-
-This is the **third positioning narrative** crystallised in P2a-Wave 2:
-
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| "Replaces N hand-rolled validation scripts" | kubernetes (50 → 17), airflow (109 hooks → 40 %) | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 hand-rolled scripts), uv (67-crate workspace conventions), **cpython (NEWS.d filename grammar — enforced nowhere statically today)** | Repos that rely on convention without explicit checks |
-| "Adds a structural floor on top of mature tooling" | typescript (eslint + dprint + knip already tight), ruff (900+ Python rules, 0 internal-crate rules), **cpython (9 ruff configs + black + actionlint + zizmor + sphinx-lint exist; alint sits BENEATH them as orchestrator)** | Repos with mature tooling but missing structural layer |
-
-cpython is uniquely valuable as a case study because it sits at the
-**intersection of all three** — it has scattered hand-rolled validation
-scripts (smelly, stable_abi, check-c-globals), it has unverified
-conventions (NEWS.d filename grammar), AND it has mature per-tree linting
-(9 ruff configs). The alint pitch lands as: "we sit beneath your existing
-linters as the structural-orchestration layer, we collapse the
-hand-rolled scripts you've outgrown, and we surface the conventions your
-tooling assumes but never checks."
-
-Followup feature work surfaced (priority order):
+Marketing/positioning context for this case study lives at
+https://alint.org/examples/python-cpython/. The engineering follow-up
+work surfaced (priority order) is consolidated below.
 
 - **`balanced_delimiters` + `file_pair_block_match`** — v0.10 design
   candidate (3 sources: rust + cpython×2). cpython adds Argument Clinic

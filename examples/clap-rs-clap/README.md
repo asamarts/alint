@@ -1,5 +1,7 @@
 # Case study: `clap-rs/clap`
 
+> Marketing/positioning writeup at https://alint.org/examples/clap-rs-clap/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `clap-rs/clap` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -14,14 +16,13 @@ catalogue of the rules that need new alint primitives.
 
 ## Summary
 
-clap is the canonical "well-curated Rust **library** workspace" — five
-published members (`clap_builder`, `clap_derive`, `clap_complete`,
-`clap_mangen`, `clap_lex`) plus the umbrella `clap` facade and
-`clap_bench`, all sharing one `[workspace.package]` block for license,
-edition, MSRV, repository, and `include` glob. The structural surface
-is **small but dense**: ~30 distinct checks across CI workflows,
-pre-commit hooks, cargo-release config, and the workspace metadata
-itself.
+clap ships a five-published-member Rust **library** workspace
+(`clap_builder`, `clap_derive`, `clap_complete`, `clap_mangen`,
+`clap_lex`) plus the umbrella `clap` facade and `clap_bench`, all
+sharing one `[workspace.package]` block for license, edition, MSRV,
+repository, and `include` glob. The structural surface is small but
+dense: ~30 distinct checks across CI workflows, pre-commit hooks,
+cargo-release config, and the workspace metadata itself.
 
 Roughly **65 % map directly to existing alint rules** (workspace
 metadata pinning, per-member inheritance assertions, license-file
@@ -31,12 +32,9 @@ kind** to existing tools (`typos`, `cffconvert`, `cargo deny`), and
 **~30 % are out of alint's scope** by design (rustfmt, clippy lints,
 rustdoc warnings, `cargo deny` graph reasoning, minimal-versions
 resolver behaviour — the cargo-toolchain-aware checks alint isn't
-trying to do, mirroring the kubernetes/rust-lang non-goals catalogue).
+trying to do).
 
-The fit is **higher than rust-lang/rust** because clap doesn't carry
-its own custom AST-aware linter — the structural surface is exactly
-the kind of "metadata pinning + manifest hygiene" alint targets. The
-24-rule starter config in [`/.alint.yml`](.alint.yml) replaces every
+The 24-rule starter config in [`/.alint.yml`](.alint.yml) covers every
 structural assertion clap makes about its own workspace.
 
 ---
@@ -62,9 +60,8 @@ The root manifest concentrates almost the entire structural contract:
 | Per-member `[package.metadata.docs.rs] rustdoc-args = ["--generate-link-to-definition"]` | docs.rs source-link convention | `clap-member-docsrs-link-defs` |
 | Per-member README.md presence | docs.rs landing page | `clap-member-has-readme` (covered by `cargo-workspace@v1` already; we restate at family scope for the explicit message) |
 
-12 distinct manifest assertions, all expressible as TOML path queries.
-This is the case study's headline: **clap's entire workspace-metadata
-contract maps to ~12 alint rules.**
+12 distinct manifest assertions, all expressible as TOML path queries
+— clap's entire workspace-metadata contract maps to ~12 alint rules.
 
 ### `committed.toml`, `release.toml`, `typos.toml`, `deny.toml`, `.clippy.toml`
 
@@ -207,11 +204,11 @@ into one walk. Expected wall-clock: well under 100 ms for the alint
 subset, dominated by the `command:` shell-outs (which run in
 parallel by file but each tool itself is the bottleneck).
 
-The pitch here is **not** speed — clap is small enough that nothing
-is slow. The pitch is **discoverability + onboarding**: a contributor
-runs `alint check` once and gets the same structural verdict that 5
-separate tools (`committed`, `typos`, `cffconvert`, `cargo deny`,
-`pre-commit`) plus the bundled rules cover today, in one
+clap is small enough that the wall-clock delta is dominated by the
+`command:` shellouts. The structural-rule subset itself runs in well
+under 100 ms on this tree — the bundled rules + the 12 manifest
+assertions cover what 5 separate tools (`committed`, `typos`,
+`cffconvert`, `cargo deny`, `pre-commit`) cover today, in one
 declarative file with grep-able rule IDs.
 
 To benchmark wall-clock for real: `time { committed && typos &&
@@ -220,26 +217,7 @@ cffconvert --validate -i CITATION.cff && cargo deny check; }` vs
 
 ---
 
-## Recommendation for the launch story
-
-clap is the **canonical "well-curated Rust library workspace"
-example** — high alint coverage (~70 % including bundled rulesets +
-shell-outs), almost no out-of-scope leakage, the entire workspace
-metadata contract expressible in 12 alint rules. Use it as the
-**positive baseline** in the launch positioning:
-
-> "clap is what a clean Rust library workspace looks like, and alint
-> can describe its entire structural-validation surface in 24 lines
-> of YAML. If your Rust workspace is messier than clap's, alint is
-> probably the cheapest way to surface that delta."
-
-This is the **complementary case study to kubernetes/rust-lang** —
-those are the "huge polyglot monorepo" stories; clap is the "small,
-disciplined, every-decision-deliberate" story. Together the three
-span the adoption spectrum.
-
-Followup feature work surfaced (de-duplicated against earlier
-case-study gap lists):
+## Followup feature work surfaced (de-duplicated against earlier case-study gap lists)
 
 - **`cross_file_field_equals` rule kind** (every file matching
   `select:` has the same value at `path:`) — covers the per-crate

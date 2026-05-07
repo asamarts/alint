@@ -1,5 +1,7 @@
 # Case study: `apache/spark`
 
+> Marketing/positioning writeup at https://alint.org/examples/apache-spark/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `apache/spark`
 and an alint config that replaces the rules alint can express
 today, plus a catalogue of the rules that need new alint
@@ -150,19 +152,17 @@ the namespacing dirs `common/`, `connector/`, `sql/`,
 `sql/connect/`, the two-tier LICENSE-binary + licenses-binary/
 structural completeness).
 
-**Headline finding:** apache/spark + apache/arrow + apache/
-airflow give us **3 Apache TLPs** with a converging
-structural-discipline pattern (LICENSE / NOTICE / KEYS / RAT
-exclude registry / `dev/create-release/` / two-tier license
-discipline / `.asf.yaml` / per-language lint-script
-orchestration / Maven or per-language module registry as the
-source of truth for `<modules>`/test-selection) — promoting
-the proposed **`apache/governance@v1` bundled ruleset** from
-"v0.10+ idea" to **"v0.10 ship-target"** (now confirmed in
-`launch-evidence.md`). The same ~12-rule bundle would land in
-every Apache TLP `extends:` list, consolidating today's 3
-case-study restatements (arrow + spark + airflow) into one
-canonical declaration.
+**Cross-TLP convergence (factual):** apache/spark + apache/arrow +
+apache/airflow share a structural-discipline pattern (LICENSE /
+NOTICE / KEYS / RAT exclude registry / `dev/create-release/` /
+two-tier license discipline / `.asf.yaml` / per-language lint-script
+orchestration / Maven or per-language module registry as the source
+of truth for `<modules>` / test-selection). The convergence across 3
+Apache TLPs is the basis for the proposed `apache/governance@v1`
+bundled ruleset (v0.10 ship-target per `launch-evidence.md`). The
+same ~12-rule bundle would land in every Apache TLP `extends:` list,
+consolidating today's 3 case-study restatements (arrow + spark +
+airflow) into one canonical declaration.
 
 ---
 
@@ -234,8 +234,6 @@ large.
 
 ### Per-language MODULE — the polyglot conventions
 
-This is where alint earns its keep on apache/spark.
-
 | Subdir | Manifest at root | Per-package shape | alint disposition |
 |---|---|---|---|
 | `core/`, `mllib/`, `mllib-local/`, `graphx/`, `streaming/`, `launcher/`, `examples/`, `assembly/`, `repl/`, `tools/` | `pom.xml` (each is its own Maven module) | (single-module-per-dir; Scala + Java co-mingled under `src/main/scala/` + `src/main/java/`) | `for_each_dir` over the canonical 10-module list with `require: pom.xml` |
@@ -248,8 +246,8 @@ This is where alint earns its keep on apache/spark.
 
 ### Apache governance artefacts
 
-This is where the **`apache/governance@v1` v0.10 ship-target**
-crystallises across arrow + spark + airflow:
+The artefacts that crystallise the proposed `apache/governance@v1`
+v0.10 ship-target across arrow + spark + airflow:
 
 | Artefact | What it does | alint disposition |
 |---|---|---|
@@ -342,10 +340,9 @@ resolve** to at least one on-disk file. alint has the file
 present; what's missing is the cross-validation that every
 pattern in the registry file maps to ≥1 real file.
 
-Per `launch-evidence.md`, this is now an **8-source v0.10
-ship-target** (rust-lang + clap + cpython×2 + next.js + arrow +
-pytorch + nodejs/node + NixOS×3 — spark joins the saturation
-cohort). The highest-leverage gap in P2a.
+Per `launch-evidence.md`, this is an 8-source v0.10 ship-target
+(rust-lang + clap + cpython×2 + next.js + arrow + pytorch +
+nodejs/node + NixOS×3 — spark joins the saturation cohort).
 
 ### 2. Maven `<modules>` registry resolution
 
@@ -390,14 +387,12 @@ different languages. Same shape as arrow's
 fixture" gap), generalised to "values in registry A map 1:1 to
 values in registry B".
 
-**Strong v0.11+ signal**: this is the spark-shaped polyglot
-primitive — pattern shows up wherever a polyglot project has
-two registries (one per language) that must stay in sync.
-Same family as `cross_language_implementation_complete` (now a
-**v0.11+ ship-target** with 5 saturated demand sources per
-`launch-evidence.md`); spark's modules.py ↔ pom.xml registry
-shape is a refinement worth folding into the spec at design
-time.
+Pattern shows up wherever a polyglot project has two registries
+(one per language) that must stay in sync. Same family as
+`cross_language_implementation_complete` (a v0.11+ ship-target with
+5 saturated demand sources per `launch-evidence.md`); spark's
+modules.py ↔ pom.xml registry shape is a refinement worth folding
+into the spec at design time.
 
 ### 4. LICENSE-binary ↔ licenses-binary/ cross-reference (proposed `apache/governance@v1`)
 
@@ -415,9 +410,8 @@ directory B (licenses-binary/)" — a third instance of the
 `registry_paths_resolve` pattern with text-extraction as the
 upstream stage.
 
-**Strong v0.10 signal for `apache/governance@v1`**: every
-Apache TLP that ships a binary distribution has this exact
-pattern.
+Every Apache TLP that ships a binary distribution has this exact
+pattern — feeds into the `apache/governance@v1` v0.10 ship-target.
 
 ### 5. `*_path_traverse` for the root `pom.xml`'s `<modules>` (XML-aware structured query)
 
@@ -439,11 +433,12 @@ a Rust ecosystem standard).
 
 ---
 
-## Apache governance discipline notes — `apache/governance@v1` is now a v0.10 ship-target
+## Apache governance discipline notes — `apache/governance@v1` v0.10 ship-target
 
 The structural-discipline pattern that arrow demonstrated, spark
-re-confirms in full and **promotes from "v0.10+ idea" to
-"v0.10 ship-target"**:
+re-confirms in full (per `launch-evidence.md`, this is the basis
+for promoting `apache/governance@v1` from v0.10+ idea to v0.10
+ship-target):
 
 | Apache governance artefact | arrow has it? | spark has it? | airflow has it? | Bundleable? |
 |---|---|---|---|---|
@@ -461,13 +456,13 @@ re-confirms in full and **promotes from "v0.10+ idea" to
 | PR-merge helper with JIRA-link extraction | yes (`dev/merge_arrow_pr.py`) | yes (`dev/merge_spark_pr.py`) | (Airflow uses GitHub PR + JIRA bot; no dev/ script) | NEW: OPTIONAL in `apache/governance@v1` |
 | KEYS file (PGP keys) | NOT in-repo (at https://downloads.apache.org/arrow/KEYS) | NOT in-repo (at https://downloads.apache.org/spark/KEYS) | NOT in-repo | NEW: OPTIONAL with `external_url:` annotation (pattern doesn't fit alint's "files at rest" model — flag as info-level "did you publish KEYS to https://downloads.apache.org/<project>/KEYS?") |
 
-**Convergence: 9 of 12 governance artefacts converge across all
-3 TLPs examined (with the 3 binary-distribution artefacts
-gated on whether the TLP ships binary).** That's a strong
-enough signal to ship `apache/governance@v1` in v0.10
-alongside the existing `compliance/apache-2@v1` (which only
-covers LICENSE / NOTICE / source-header today). Adopters can
-then drop down to a **3-line `extends:`**:
+**Convergence: 9 of 12 governance artefacts converge across all 3
+TLPs examined** (with the 3 binary-distribution artefacts gated on
+whether the TLP ships binary). This is the basis for shipping
+`apache/governance@v1` in v0.10 alongside the existing
+`compliance/apache-2@v1` (which only covers LICENSE / NOTICE /
+source-header today). Adopters can then drop down to a 3-line
+`extends:`:
 
 ```yaml
 extends:
@@ -483,9 +478,9 @@ restating the 6 governance rules in every TLP-specific config.
 
 ## Maven multi-module findings
 
-The **Maven multi-module shape** is the polyglot dimension P2a
-didn't sample (cargo + pnpm + yarn covered the top JS/Rust
-workspace shapes). Three findings specific to Maven's
+The Maven multi-module shape is a polyglot dimension P2a hadn't
+sampled before this case study (cargo + pnpm + yarn covered the top
+JS/Rust workspace shapes). Three findings specific to Maven's
 parent/child structure:
 
 ### 1. `for_each_dir` over modules covers presence, NOT membership
@@ -606,86 +601,34 @@ Listed by category for clarity:
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the** flagship "Maven-multi-module
-polyglot Apache TLP" story for the launch:
-
-- **apache/spark is the canonical big-data engine** (~38k stars,
-  used at every FAANG + every major bank + every cloud
-  provider). Naming it as a target gives alint instant
-  credibility with the JVM + data-engineering audience.
-- **No per-language linter sees the cross-language MODULE shape**
-  — scalastyle only sees Scala, checkstyle only sees Java,
-  ruff/black/mypy only see Python, lintr only sees R. The
-  invariants this case study enforces (Maven multi-module
-  integrity, per-language tool-config presence, the
-  3-PySpark-packaging-variants uniformity, R/pkg/DESCRIPTION
-  + NAMESPACE + cran-comments.md set, two-tier license
-  discipline, `.asf.yaml` ASF-infra config, RAT exclude
-  registry presence) are exactly the layer alint owns.
-- **The `apache/governance@v1` bundle** is now a **v0.10
-  ship-target** (confirmed in `launch-evidence.md`) because
-  spark + arrow + airflow converge on 9 of 12 governance
-  artefacts. Three Apache TLPs is enough to crystallise the
-  bundle. Position it as "drop one line in your `extends:` and
-  inherit the Apache TLP discipline that the ASF Incubator
-  graduation process requires".
-- **The Maven multi-module shape** (49 pom.xml files, 48
-  declared `<module>` entries) gives alint a structural
-  primitive that pnpm + yarn + cargo workspaces also need
-  but currently express via hard-coded `for_each_dir` lists.
-  Add the `xml_path_*` primitive (now **v0.10 ship-target**
-  per `launch-evidence.md` — promoted via dotnet/runtime's
-  scale) and the `registry_paths_resolve` primitive (v0.10
-  ship-target) and the workspace-registry consistency story
-  lands in one shape across all build systems.
-
-Position it as the **fifth tile** on alint.org/examples
-(after kubernetes, airflow, microsoft/typescript, next.js, arrow),
-with the angle: *"apache/spark has 4 languages, 49 Maven
-modules, 3 PySpark packaging variants, 72 GHA workflows, and 6
-per-language lint scripts under dev/. alint is the layer that
-sees the structural shape that no per-language linter does — and
-the Apache-governance bundle ships in v0.10."*
-
-The pitch lands harder when paired with the per-language-MODULE
-finding: 3 PySpark packaging variants × 2 required files each =
-6 file-existence assertions wrapped in a single `for_each_dir`
-rule. No Python tool checks the layout because no Python tool
-sees the layout from above.
-
-Followup feature work surfaced (consolidated, sorted by
-strength of demand across P2a + P2b):
+## Followup primitive demand (consolidated, sorted by demand across P2a + P2b)
 
 - **`registry_paths_resolve` rule kind** — covers
   `dev/.rat-excludes` here, plus the rust-lang triagebot.toml +
   clap pre-release-replacements + cpython .gitattributes
   generated markers + check-c-api-docs + arrow
   rat_exclude_files.txt + next.js check-manifests.js + pytorch
-  + nodejs/node + NixOS×3. **Demand: 8 distinct sources** per
-  `launch-evidence.md` — strongest demand signal in P2a + P2b.
-  **v0.10 ship-target**.
-- **`apache/governance@v1` bundled ruleset** — confirmed
-  **v0.10 ship-target** by the spark case study. arrow + spark
-  + airflow = 3 Apache TLPs converging on 9 of 12 governance
-  artefacts.
-- **`generated_file_fresh` rule kind** — now a **v0.10
-  ship-target** per `launch-evidence.md` with 6 demand sources
-  (uv + cpython + pytorch + bazel + TF + spark). Tension
-  flagged: alint's deliberate non-goal is running codegen —
-  proposed as opt-in primitive.
-- **`xml_path_matches` / `xml_path_equals` rule kinds** — now
-  a **v0.10 ship-target** per `launch-evidence.md` (promoted
-  via dotnet/runtime's ~2,300 XML manifests at one OOM bigger
-  scale, alongside spark's 49 pom.xml files). Completes the
+  + nodejs/node + NixOS×3. Demand: 8 distinct sources per
+  `launch-evidence.md`. v0.10 ship-target.
+- **`apache/governance@v1` bundled ruleset** — v0.10 ship-target
+  per `launch-evidence.md`. arrow + spark + airflow = 3 Apache
+  TLPs converging on 9 of 12 governance artefacts.
+- **`generated_file_fresh` rule kind** — v0.10 ship-target per
+  `launch-evidence.md` with 6 demand sources (uv + cpython +
+  pytorch + bazel + TF + spark). Tension flagged: alint's
+  deliberate non-goal is running codegen — proposed as opt-in
+  primitive.
+- **`xml_path_matches` / `xml_path_equals` rule kinds** — v0.10
+  ship-target per `launch-evidence.md` (promoted via
+  dotnet/runtime's ~2,300 XML manifests at one OOM bigger scale,
+  alongside spark's 49 pom.xml files). Completes the
   structured-query family (JSON/YAML/TOML/XML).
-- **`cross_language_registry_consistency` rule kind** —
-  surfaced by spark (`dev/sparktestsupport/modules.py` ↔ root
-  pom.xml `<modules>`). Same family as
-  `cross_language_implementation_complete` (now **v0.11+
-  ship-target** with 5 sources); spark's modules.py ↔ pom.xml
-  shape is a refinement of the same primitive.
+- **`cross_language_registry_consistency` rule kind** — surfaced
+  by spark (`dev/sparktestsupport/modules.py` ↔ root pom.xml
+  `<modules>`). Same family as
+  `cross_language_implementation_complete` (v0.11+ ship-target
+  with 5 sources); spark's modules.py ↔ pom.xml shape is a
+  refinement of the same primitive.
 
 ---
 

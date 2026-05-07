@@ -1,5 +1,10 @@
 # Case study: `helm/helm`
 
+> Marketing writeup (narrative, headline catch, competitive framing)
+> lives at <https://alint.org/examples/helm-helm/>. This README is
+> the engineering reference: tooling inventory, mapping table, gap
+> catalogue, validation status.
+
 Inventory of the structural-validation tooling in `helm/helm` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -345,40 +350,7 @@ Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-helm is the **realistic adoption target** for the launch
-positioning. Three earlier case studies anchor the "alint at
-scale" narrative — kubernetes (50→17 verify scripts collapsed),
-rust-lang/rust (replacing pieces of `src/tools/tidy`),
-clap (small-and-disciplined). helm is **none of those**: it's the
-typical midsize Go OSS project that doesn't have a custom
-verify-script empire OR a pure-Makefile-with-no-lint pipeline.
-It has the **standard CNCF/Go shape**: golangci-lint config,
-license-header bash, OWNERS file, GHA workflows, dependabot,
-goreleaser. That's the population alint needs to convert.
-
-The launch-pitch story for helm should specifically frame:
-
-> "helm is the typical CNCF-shape Go monorepo: one Makefile
-> orchestrates lint via golangci-lint and a 50-line bash script
-> that greps for license headers. alint replaces the
-> orchestration layer with one declarative file, keeps
-> golangci-lint as the deep-Go AST workhorse, and adds a
-> structural floor (Trojan-Source defence, GitHub Actions
-> hardening, top-level-file conventions) that helm doesn't
-> currently enforce. **In the live snapshot, alint surfaced one
-> zero-width-char comment in plugin.go and 5 workflows missing
-> `permissions.contents: read` — net-new structural findings the
-> existing pipeline doesn't catch.**"
-
-This is the **complementary case study to kubernetes/golang-go**:
-those two anchor the extremes (mega-monorepo with a bespoke
-verify-script empire vs canonical-with-minimal-tooling). helm
-anchors the centre — the population alint actually needs to win.
-
-Followup feature work surfaced (de-duplicated against earlier
-case-study gap lists):
+## Followup feature work surfaced (de-duplicated against earlier case-study gap lists)
 
 - **`*_path_contains` set-membership shorthand** — `v0.10
   design candidate` per launch-evidence.md (3 sources: helm,

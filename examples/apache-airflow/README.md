@@ -1,5 +1,7 @@
 # Case study: `apache/airflow`
 
+> Marketing/positioning writeup at https://alint.org/examples/apache-airflow/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `apache/airflow` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -31,16 +33,16 @@ for any structural linter.
 
 The 35 % that *do* fit translate into a 25-rule alint config (below).
 Replacing those ~30 hooks with one declarative file + the bundled
-`compliance/apache-2@v1` ruleset is the headline win — a *single* place to
-look for "what does airflow consider a valid provider package" instead of
+`compliance/apache-2@v1` ruleset consolidates the "what does airflow
+consider a valid provider package" question to one place instead of
 chasing eight pre-commit IDs into eight Python files.
 
-The **most alint-shaped surface in the entire airflow tree** is
-`providers/`: 101 provider distributions, each obeying the exact pattern alint
-was built to express. `for_each_file: providers/**/provider.yaml` plus a
-nested `require:` block of `file_exists` / `dir_exists` + a couple of
-`yaml_path_matches` rules covers what airflow today enforces with the 1085-line
-`scripts/in_container/run_provider_yaml_files_check.py`.
+The most-uniform structural surface in the airflow tree is
+`providers/`: 101 provider distributions, each conforming to the same
+pattern. `for_each_file: providers/**/provider.yaml` plus a nested
+`require:` block of `file_exists` / `dir_exists` + a couple of
+`yaml_path_matches` rules covers what airflow today enforces with the
+1085-line `scripts/in_container/run_provider_yaml_files_check.py`.
 
 ---
 
@@ -354,13 +356,13 @@ S3 bench; airflow's pre-commit-mappable subset roughly doubles that because
 of the two `for_each_file` iterations over `**/pyproject.toml` and
 `providers/**/provider.yaml`).
 
-Wall-time win specifically for the **provider-package conventions** subset
-(the 6 hooks that today live in `run_provider_yaml_files_check.py` + breeze
-codegen): airflow's existing check spawns a docker container, imports every
-provider package via Python, walks `ProvidersManager`. Cold runtime: 30-60
-seconds. alint's `for_each_file: providers/**/provider.yaml` + nested
-`require:` block: under 1 second on the same checkout. **The ~50× speedup
-on this subset is the headline perf number.**
+Wall-time delta specifically for the **provider-package conventions**
+subset (the 6 hooks that today live in `run_provider_yaml_files_check.py`
++ breeze codegen): airflow's existing check spawns a docker container,
+imports every provider package via Python, walks `ProvidersManager`.
+Cold runtime: 30-60 seconds. alint's `for_each_file:
+providers/**/provider.yaml` + nested `require:` block: under 1 second
+on the same checkout. ~50× speedup on this subset.
 
 To benchmark for real: run `time prek run --all-files` against
 `time alint check` on the same checkout, with the alint config narrowed to
@@ -368,28 +370,7 @@ match `prek`'s coverage. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is the **strongest piece of evidence for the
-Python-ecosystem launch positioning**:
-
-> "alint expresses Airflow's 101-provider-package layout invariants in 25
-> lines of YAML. The same invariants today live in
-> `scripts/in_container/run_provider_yaml_files_check.py` (1085 lines of
-> Python that has to spin up a docker container)."
-
-Pair with the kubernetes case study for the cross-language pitch:
-
-> "Airflow's `for_each_file: providers/**/provider.yaml` with nested file-
-> existence requirements is the Python expression of Kubernetes'
-> `staging/src/k8s.io/*` meta-files check. Same shape, same primitive, two
-> ecosystems."
-
-Use this case study as the **primary example on alint.org/examples/python**
-and in the HN/Reddit launch posts targeting Python infrastructure
-audiences (data engineering / Airflow user community in particular).
-
-Followup feature work surfaced (priority order):
+## Followup primitive demand (consolidated, priority order)
 
 1. **`cross_file_value_equals` rule kind** — version / constant sync across
    N files. ~11 airflow hooks plus several kubernetes ones plus the Cargo

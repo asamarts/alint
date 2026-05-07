@@ -1,5 +1,11 @@
 # Case study: `microsoft/vscode`
 
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/microsoft-vscode/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> validation status. Same facts, different language.
+
 Inventory of the structural-validation tooling in `microsoft/vscode`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives.
@@ -13,12 +19,10 @@ source).
 
 ## Summary
 
-`microsoft/vscode` is the canonical "every developer's editor" repo —
-**~160k stars, top-watched OSS desktop application on GitHub**, and
-the alint case study with the **highest direct apples-to-apples
-comparison surface of any P2 study to date**: the repo literally
-ships a custom hygiene-check script (`build/hygiene.ts`) that does
-exactly what alint is designed to do.
+`microsoft/vscode` ships a custom hygiene-check script (`build/hygiene.ts`)
+that does structurally what alint is designed to do — making this the
+case study with the most direct apples-to-apples comparison surface in
+the catalogue.
 
 Concrete count: **34 distinct structural-validation surfaces**
 inventoried, including:
@@ -85,18 +89,13 @@ The 50 % that *do* fit translate to the **67-rule alint config** in
 
 ---
 
-## Headline finding
+## Headline coverage
 
-> **`build/hygiene.ts` is what alint would look like as a per-repo
-> script — and alint covers ~75 % of what `build/hygiene.ts` does
-> (6 of 8 distinct hygiene checks) declaratively, in one file, with
-> editor-LSP autocomplete and the stages that *do* belong in a
-> dedicated script (the AST-aware `formatting` stage and the
-> per-line `// allow-any-unicode-next-line` escape-hatch unicode
-> stream) shelled out via `command:`.** The launch claim "alint is
-> what `build/hygiene.ts` would look like as a tool, not a per-repo
-> script" is concrete + verifiable: this case study covers 6 of the
-> 8 stages cleanly and documents the 2 that need new primitives.
+**`build/hygiene.ts` coverage: 6 of 8 hygiene-pipeline stages (75 %)**
+covered declaratively by alint primitives. The remaining 2 stages
+(`formatting` — TS-AST-aware printer round-trip; `unicode` — per-line
+`// allow-any-unicode-next-line` escape-hatch semantics) shell out via
+`command:` rules; per-stage details below.
 
 ---
 
@@ -121,13 +120,11 @@ stages plus 1 cross-file check. Direct alint coverage:
 directly by alint primitives; 2 of 8 (25 %) need either new
 primitives or stay in the script.**
 
-This is the highest direct-comparison ratio of any P2 study so far —
-microsoft/typescript's `Herebyfile.mjs` doesn't have a single
-"hygiene" check this concentrated; nodejs/node's hygiene is spread
-across the 1700-line Makefile + Python helpers + cpplint fork.
-**vscode is uniquely positioned for the launch pitch because the
-target it competes against is one well-defined script that any reader
-can audit in 5 minutes.**
+vscode's `build/hygiene.ts` is the most concentrated single-script
+hygiene comparison surface in the catalogue —
+microsoft/typescript's `Herebyfile.mjs` doesn't have a "hygiene"
+check this concentrated, and nodejs/node's hygiene is spread across
+the 1700-line Makefile + Python helpers + cpplint fork.
 
 ---
 
@@ -160,19 +157,15 @@ Sample (all out of alint's scope):
 | ... (32 more) | All TSESTree visitors |
 
 **Of 45 rules: 0 are alint-shaped (structural/declarative); all 45
-are AST-aware.** This is the cleanest example in any P2 study of the
-"alint and eslint are non-overlapping by design" boundary — every
-single in-tree rule is in the right place. The closest near-AST
-ones (`vscode-dts-event-naming`, `vscode-dts-interface-naming`)
-require parsing the `.d.ts` to extract type/interface names from
-declarations; alint would need a TS parser to replicate them. They
-correctly stay in `.eslint-plugin-local/`.
+are AST-aware.** Every in-tree rule is correctly placed in eslint
+rather than alint. The closest near-AST ones
+(`vscode-dts-event-naming`, `vscode-dts-interface-naming`) require
+parsing the `.d.ts` to extract type/interface names from
+declarations; alint would need a TS parser to replicate them.
 
-The vscode case study **strengthens** the launch story's
-"complementary, not competing" framing: the second-most-watched OSS
-TS repo on GitHub deliberately maintains 45 in-tree eslint rules
-*alongside* a 335-line hygiene script — they do different jobs.
-alint maps onto the hygiene script half of that dichotomy.
+vscode maintains 45 in-tree eslint rules *alongside* the 335-line
+hygiene script — they do different jobs. alint maps onto the
+hygiene-script half of that dichotomy.
 
 ---
 
@@ -571,77 +564,25 @@ changeset) is sub-second for a typical PR (< 50 files modified). The
 bottleneck is the `eslint` + `stylelint` cold-cache pass when run
 across the full tree, which is multiple minutes.
 
-The alint pitch here is **not** speed — it's **legibility +
-LSP-driven adoption**. A new vscode contributor reading
-`build/hygiene.ts` has to grok 335 lines of streaming-pipeline code
-plus 250 lines of `build/filters.ts` cascading filters plus the gulp
-machinery to understand what the hygiene pre-commit hook actually
-checks. The alint config in this directory is **one declarative
-file**, with each rule's scope, severity, and rationale visible in
-5-10 lines, with editor-LSP autocomplete via the JSON Schema, with
-the `validate-config` exit code as a pre-commit fail-fast.
-
-For the 50 % of checks that fit alint's grammar today, the pitch is:
-**"adopt alint to express the hygiene-script invariants
-declaratively so contributors can read the structural contract in
-the same shape the rest of the OSS ecosystem ships configs in."**
-The deep tools (eslint, stylelint, tsfmt, tsec, the AST checkers in
+For the 50 % of checks that fit alint's grammar today, the alint
+config replaces the relevant `build/hygiene.ts` stages declaratively
+in one file, with editor-LSP autocomplete via the JSON Schema, and
+with the `validate-config` exit code as a pre-commit fail-fast. The
+deep tools (eslint, stylelint, tsfmt, tsec, the AST checkers in
 `build/checker/`) stay where they are. `npm run precommit` keeps
 running for the AST-aware `formatting` stage and the per-line
 `allow-any-unicode-next-line` escape semantics.
 
 To benchmark wall-clock against the live tree:
 `time npm run precommit` (after a warm cache) vs `time alint check`
-against the same tree. Deferred to the per-repo measurement pass; we
-expect alint to be 2-5× faster on the structural subset (Rust + zero
+against the same tree. Deferred to the per-repo measurement pass;
+expectation is 2-5× faster on the structural subset (Rust + zero
 process spawn) and roughly equivalent on the shell-out subset (the
 eslint invocation dominates).
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the flagship-visibility data point** for the
-launch:
-
-- vscode is the most-watched OSS desktop application on GitHub
-  (~160k stars). Naming it as a target gives alint instant
-  credibility with the JS/TS *and* general developer-tooling audience.
-- The `build/hygiene.ts` script is the **most direct
-  apples-to-apples target alint has competed against** in any P2
-  study. 6 of 8 hygiene checks (75 %) covered cleanly. The launch
-  claim **"alint is what `build/hygiene.ts` would look like as a
-  tool, not a per-repo script"** is concrete + verifiable.
-- The 45 in-tree custom eslint rules under `.eslint-plugin-local/`
-  are a **textbook demonstration** of the "alint and eslint are
-  non-overlapping by design" boundary — every single one is in the
-  right place. The vscode case study **strengthens** the
-  "complementary, not competing" framing rather than confusing it.
-- The vscode-dts/ public-API surface adds a **NEW positioning
-  narrative** beyond the four crystallised in P2a: "alint adds a
-  static structural floor under your most-consumed API surface" —
-  the proposed-API filename grammar is one of the highest-impact
-  load-bearing conventions in OSS (millions of marketplace extensions
-  depend on it) and is enforced statically by exactly nothing
-  upstream.
-
-Position it as the **flagship tile on alint.org/examples** (above
-microsoft-typescript and nodejs-node), with the angle: **"if alint
-can replace 75 % of what the most-watched developer-tools repo on
-GitHub maintains as a 335-line custom hygiene script — it can
-replace most of yours too."**
-
-The fifth positioning narrative crystallised here:
-
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| **NEW: "Replaces a custom in-tree hygiene script"** | **vscode (`build/hygiene.ts` 75 % covered)** | **Repos with a hand-rolled lint/hygiene script that's outgrown its bash/JS/Python origin** |
-| "Replaces N hand-rolled validation scripts" | kubernetes (50 → 17), airflow (109 hooks → 40 %), cpython (12 surfaces consolidated) | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 scripts), uv (67-crate workspace), pnpm (`meta-updater`), react (`ReactVersion.js`), node (test-discovery grammar + per-major-changelog grammar), **vscode (vscode-dts/ proposed-API filename grammar)** | Repos that rely on convention without explicit checks |
-| "Adds a structural floor on top of mature tooling" | typescript (eslint+dprint+knip), prettier (5 net-new gates), node (eslint + cpplint + clang-format + ruff + yamllint + lint-md), **vscode (45 custom eslint rules + tsfmt + stylelint + tsec all coexist; alint adds the hygiene-script half)** | Repos with mature tooling but missing structural layer |
-| "Maturity is the hard test" | node (44 surfaces, 15 years) | Repos so old that the conventions have always worked |
-
-Followup feature work surfaced (priority order):
+## Followup feature work surfaced (priority order)
 
 - **`cross_file_value_equals`** — now **v0.10 ship-target** (10 sources
   past saturation). vscode's `checkCopilotEnginesVersion` is the most
@@ -737,15 +678,14 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 - **Apples-to-apples target:** `build/hygiene.ts` — **6 of 8 hygiene
   pipeline stages (75 %) covered declaratively** by alint primitives;
   the remaining 2 are AST-aware (`formatting`) or stay in the script
-  (`unicode` per-line escape-hatch). This is the strongest "alint
-  replaces a hand-rolled script" data point in the case-study catalogue.
+  (`unicode` per-line escape-hatch).
 - **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here (no
   tracked-but-gitignored files; no `root_only: true` + multi-component
   literal entries beyond the single `AGENTS.md` / `tsfmt.json` cases
   which are at root)
 - **Open gaps (status changes):** `cross_file_value_equals` promoted to
-  **v0.10 ship-target** (10 sources past saturation; vscode is the
-  flagship-visibility consumer of the 10);
+  **v0.10 ship-target** (10 sources past saturation; vscode's
+  `checkCopilotEnginesVersion` is one of the 10);
   `indent_style.skip_block_comment_continuation` +
   `file_is_ascii.{allow,skip_per_line_marker}` (low-priority knobs on
   existing rules, vscode is the only source);

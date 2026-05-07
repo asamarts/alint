@@ -1,5 +1,7 @@
 # Case study: `astral-sh/uv`
 
+> Marketing/positioning writeup at https://alint.org/examples/astral-sh-uv/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `astral-sh/uv` and an alint
 config that replaces the rules alint can express today, plus a catalogue of the
 rules that need new alint primitives.
@@ -15,23 +17,21 @@ uv ships **~20 distinct structural-validation surfaces** — 8 GitHub Actions
 `check-*.yml` workflows, ~15 Python helper scripts under `scripts/`, plus
 manifest-shape conventions enforced informally by code review (e.g. "every
 `crates/uv-*` opts into `[workspace.lints]`"). About **40 % map directly to
-existing alint rules**, **30 % need new alint primitives** (most non-trivial:
-codegen drift detection, cross-lockfile equality, built-wheel manifest
-comparison), and **30 % are out of alint's scope** (the build-system,
-dist-plan, and Python wheel-content checks alint deliberately doesn't try to
-do).
+existing alint rules**, **30 % need new alint primitives** (codegen drift
+detection, cross-lockfile equality, built-wheel manifest comparison), and
+**30 % are out of alint's scope** (the build-system, dist-plan, and Python
+wheel-content checks alint deliberately doesn't try to do).
 
 The 40 % that *do* fit translate cleanly to a 13-rule alint config (below)
 plus 6 `command` rules that shell out to `shellcheck`, `ruff`, `typos`,
-`cargo-shear`, `cargo fmt`, and `cargo clippy`. **Headline finding:** uv has a
-near-perfect convention pattern across its 67 published crates
-(`[lints] workspace = true` + `edition.workspace = true` +
-`license.workspace = true`) that nothing in CI today *enforces* —
+`cargo-shear`, `cargo fmt`, and `cargo clippy`. uv's convention pattern across
+its 67 published crates (`[lints] workspace = true` + `edition.workspace = true`
++ `license.workspace = true`) is enforced nowhere in CI today —
 violations would only surface on the next `cargo metadata` run by a
-contributor. The alint rule `uv-crate-inherits-workspace-lints` reduces the
-67-crate manual review to one declarative line. Same shape for
-`uv-crate-edition-from-workspace` / `uv-crate-license-from-workspace`. Both
-correctly flag exactly the documented-as-exceptional crates (uv-trampoline,
+contributor. The alint rule `uv-crate-inherits-workspace-lints` collapses the
+67-crate convention check to one declarative rule. Same shape for
+`uv-crate-edition-from-workspace` / `uv-crate-license-from-workspace`. All
+three flag exactly the documented-as-exceptional crates (uv-trampoline,
 uv-performance-memory-allocator, uv-pep440, uv-pep508).
 
 ---
@@ -191,31 +191,22 @@ pass.
 
 ---
 
-## Recommendation for the launch story
-
-uv is the **strongest case study so far for the cross-language monorepo
-positioning**: a single declarative file enforcing conventions that span
-69 Rust crates AND a Python distribution AND a maturin build pipeline.
-The `uv-crate-inherits-workspace-lints` rule alone is a strong example of
-"alint catches what code review misses" — uv's contributor docs say to
-inherit workspace lints, and contributors mostly do, but the only thing
-stopping a slow drift is reviewer attention.
-
-Followup feature work surfaced:
+## Followup feature work surfaced
 
 - **`cross_file_field_equals` rule kind** — covers the trampoline
   cross-lockfile sync check; same primitive shows up in every monorepo
-  with split workspaces or vendored packages
+  with split workspaces or vendored packages. Now absorbed into the
+  broader `cross_file_value_equals` v0.10 ship-target.
 - **`python/pep-621-shape@v1` bundled ruleset** — wraps the published
   PEP 621 + tool.* schemas, replaces the `validate-pyproject` shell-out
-  in CI for any Python project
+  in CI for any Python project. Formal v0.10 design candidate.
 - **`archive_contents_matches` rule kind** — narrower (built-wheel
-  shapes), but every Python package on PyPI could use it
+  shapes); every Python package on PyPI could use it. Remains a
+  uv-unique candidate.
 
 Surface coverage: 16/20 (80%) of uv's structural checks moved to declarative
 config. The 20 % that don't move are deliberately out of scope (codegen,
-build, release artefact patching) — exactly the boundary alint's design
-draws.
+build, release artefact patching).
 
 ---
 

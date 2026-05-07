@@ -1,5 +1,11 @@
 # Case study: `microsoft/TypeScript`
 
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/microsoft-typescript/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> validation status. Same facts, different language.
+
 Inventory of the structural-validation tooling in `microsoft/TypeScript`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives.
@@ -15,9 +21,8 @@ TypeScript is a stable, conventional JS-tooling repo that funnels every
 quality gate through **Hereby** (the in-house gulp-replacement task
 runner) and a small set of `scripts/*.mjs` files. As of 2026-05 the repo
 is in **maintenance mode**: TS 6.0 is the last JS-based release; future
-development moved to `microsoft/typescript-go`. That makes the existing
-structural-validation surface a *frozen snapshot* — exactly the kind of
-target the launch-prep validation pass wants to lint against.
+development moved to `microsoft/typescript-go`. The existing
+structural-validation surface is therefore a *frozen snapshot*.
 
 Concrete count: **6 CI quality gates** wired through `Herebyfile.mjs` +
 `package.json` (`lint`, `format`/`check-format`, `knip`, `baselines`,
@@ -32,15 +37,12 @@ that perform structural / runtime checks. Of those 14 surfaces:
   module-format probes, and the `git diff --staged` baseline accept
   loop. None of these are alint targets.
 
-The headline outcome is *not* "alint replaces N shell scripts" — TS
-doesn't have many. The headline is **alint adds structural checks
-TypeScript doesn't enforce today** (header consistency, baseline
-pairing, dprint plugin pinning, action-SHA pinning at PR time) while
-still standing in as the entry point for the existing eslint / dprint
-/ knip triple. **For the launch story, this is the "stable, famously
-meticulous repo" data point** — alongside the kubernetes one
-(massive, script-heavy) and the apache/airflow one (109-hook
-pre-commit pipeline).
+The full config loads **68 rules** (~22 custom + 6 bundled rulesets) and
+covers the structural surface declaratively while shelling out to the
+existing eslint / dprint / knip triple via `command:` rules. The new
+structural gates beyond what the existing tooling enforces today: header
+consistency on `src/` and `scripts/`, baseline pairing, dprint-plugin
+pinning, action-SHA pinning at PR time.
 
 ---
 
@@ -259,38 +261,14 @@ sits between S3 and S9 (the polyglot monorepo bench, 100k+ files).
 Expected: 1-3 s for `alint check` on the full TS tree, vs. 30-60 s
 for the eslint cold cache and another 30 s for knip + dprint.
 
-Where alint shines on TS specifically: the **baseline file-size
-guard** runs against 53k files in tens of milliseconds (sequential
-shell would be ~30 s of `wc -c` calls). The cross-cutting structural
-checks pay back the most when the repo size is dominated by a single
-homogeneous directory like `tests/baselines/reference/`.
+The **baseline file-size guard** runs against 53k files in tens of
+milliseconds (sequential shell would be ~30 s of `wc -c` calls).
+Cross-cutting structural checks dominate cost on a homogeneous
+directory like `tests/baselines/reference/`.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the "famous, frozen, meticulously curated" data
-point** for the launch:
-
-- TypeScript is the most-watched JS-tooling repo on GitHub. Naming
-  it as a target gives alint instant credibility with the JS audience.
-- The maintenance-mode posture means the structural-validation
-  surface is stable — what alint enforces today will still be the
-  right check 12 months from now.
-- The header / pairing / file-size rules add genuinely new
-  enforcement (TS doesn't have these today). Easy "alint caught X
-  the existing tooling missed" anecdote.
-- The `pair_count` primitive surfaced here is the same shape as
-  patterns in airflow (`check-no-new-airflow-exceptions`,
-  `check-template-fields-valid`) — a genuine v0.10+ feature
-  request, not a one-off.
-
-Position it as the third tile on alint.org/examples (after
-kubernetes + airflow), with the angle: "for repos that already have
-their lint house in order, alint adds the structural floor under
-their existing tools."
-
-Followup feature work surfaced (consolidated):
+## Followup feature work surfaced (consolidated)
 
 - **`pair_count` rule kind** (assert ≥1 partner files match a
   registry entry) — would cover `errorCheck.mjs` here, plus the

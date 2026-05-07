@@ -1,5 +1,11 @@
 # Case study: `nodejs/node`
 
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/nodejs-node/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> validation status. Same facts, different language.
+
 Inventory of the structural-validation tooling in `nodejs/node` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -13,24 +19,23 @@ material to the structural inventory).
 
 ## Summary
 
-`nodejs/node` is the canonical mature C++/JS hybrid mega-repo —
-**~15 years of accumulated convention discipline**, with structural
-validation scattered across the broadest surface of any P2a-Wave 3 case
-study. Concrete count: **44 distinct structural-validation surfaces**
-inventoried, including a 1700-line `Makefile` (~12 `lint-*` /
-`format-*` / `tidy-*` / `check-*` targets), the Linters workflow
-(`linters.yml`) dispatching the lint matrix across 25 GitHub Actions
-files, **27 in-tree custom eslint rules** under `tools/eslint-rules/`,
-**7 per-tier `eslint.config_partial.mjs` files** composed by the root
-`eslint.config.mjs`, a vendored `tools/cpplint.py` (a fork of upstream
-Google cpplint, configured via `.cpplint`), `tools/checkimports.py`
-(parses `using <ns>::<name>;` for freshness), `tools/lint-md/lint-md.mjs`
-(remark-preset-lint-node pipeline with ~50 markdown AST rules),
-`tools/lint-{pr-url,readme-lists,sh}.mjs` (PR-time and tree-state lint
-helpers), `tools/find-inactive-{collaborators,tsc}.mjs` (cron-driven
-inactivity detectors), `tools/test.py` (test discovery via filename
-glob), `pyproject.toml` (ruff config + ~25 lint families), `.editorconfig`,
-`.gitattributes`, `.clang-format`, **27 per-major-version
+`nodejs/node` is a mature C++/JS hybrid repo with ~15 years of accumulated
+convention discipline and structural validation scattered across the
+broadest surface in the catalogue. Concrete count: **44 distinct
+structural-validation surfaces** inventoried, including a 1700-line
+`Makefile` (~12 `lint-*` / `format-*` / `tidy-*` / `check-*` targets), the
+Linters workflow (`linters.yml`) dispatching the lint matrix across 25
+GitHub Actions files, **27 in-tree custom eslint rules** under
+`tools/eslint-rules/`, **7 per-tier `eslint.config_partial.mjs` files**
+composed by the root `eslint.config.mjs`, a vendored `tools/cpplint.py` (a
+fork of upstream Google cpplint, configured via `.cpplint`),
+`tools/checkimports.py` (parses `using <ns>::<name>;` for freshness),
+`tools/lint-md/lint-md.mjs` (remark-preset-lint-node pipeline with ~50
+markdown AST rules), `tools/lint-{pr-url,readme-lists,sh}.mjs` (PR-time
+and tree-state lint helpers), `tools/find-inactive-{collaborators,tsc}.mjs`
+(cron-driven inactivity detectors), `tools/test.py` (test discovery via
+filename glob), `pyproject.toml` (ruff config + ~25 lint families),
+`.editorconfig`, `.gitattributes`, `.clang-format`, **27 per-major-version
 `CHANGELOG_V*.md` files** under `doc/changelogs/`, and an unwritten
 `test/parallel/test-*.{js,mjs,cjs}` discovery convention enforced
 nowhere statically.
@@ -57,17 +62,17 @@ Of the 44 distinct structural-validation surfaces inventoried:
   test execution, etc.)
 
 The 43 % that *do* fit translate to the **40-rule alint config** in
-[`/.alint.yml`](.alint.yml), bundled-rulesets-included. The two single
-most alint-shaped surfaces are:
+[`/.alint.yml`](.alint.yml), bundled-rulesets-included. Two surfaces
+fit alint particularly cleanly because they are enforced statically
+nowhere today:
 
 1. **`test/parallel/test-*.{js,mjs,cjs}` discovery filename grammar**
    — `tools/test.py` GLOBS for `test-*.{js,mjs,cjs}` to discover tests;
    a misnamed file (`tst-foo.js`, `text-foo.js`, `Test-Foo.js`) silently
-   drops out of the test run. **Enforced nowhere statically today** —
-   the only feedback is a missing test failing to fire when an
-   intentionally-broken regression test goes silent. alint encodes the
-   grammar as a 6-line `filename_regex` rule covering ~15 test
-   sub-directories.
+   drops out of the test run. The only feedback is a missing test
+   failing to fire when an intentionally-broken regression test goes
+   silent. alint encodes the grammar as a 6-line `filename_regex` rule
+   covering ~15 test sub-directories.
 
 2. **`doc/changelogs/CHANGELOG_V<MAJOR>.md` per-major-version
    convention** — 27 changelog files at clone time, each named
@@ -396,72 +401,22 @@ operation on a stock CI runner — eslint dominates (~3 minutes for
 ~30 s, ruff ~5 s. The pre-commit pipeline runs each in sequence over
 the staged files only.
 
-The alint pitch here is **not** speed — it's **inventory legibility**. A
-new contributor staring at node's structural-validation surface today
-has to read the 1700-line Makefile, 25 GitHub Actions workflows, 27
-custom eslint rules, 7 per-tier eslint partials, the `.gitattributes`
-table, the `.editorconfig`, the `tools/lint-*.mjs` helpers, the
-vendored `tools/cpplint.py` + `tools/checkimports.py`, the
-`tools/lint-md/` remark pipeline, and `pyproject.toml` to understand
-what rules apply where. The alint config in this directory is **one
-file**, declarative, with each rule's scope, severity, and rationale
-visible in 5-10 lines.
-
-For the 43 % of checks that fit alint's grammar today, the pitch is:
-**"adopt alint to consolidate the orchestration layer so contributors
-can read the structural contract in one file."** The deep tools
-(`tools/cpplint.py`, `tools/eslint-rules/*`, `tools/lint-md/lint-md.mjs`,
-`tools/checkimports.py`) stay where they are.
+For the 43 % of checks that fit alint's grammar today, the alint
+config consolidates the orchestration layer into one file. The deep
+tools (`tools/cpplint.py`, `tools/eslint-rules/*`,
+`tools/lint-md/lint-md.mjs`, `tools/checkimports.py`) stay where they
+are.
 
 To benchmark wall-clock: `time make lint-ci` (after a warm tools/
 build) vs `time alint check` against the same tree, then compare the
-unique-violation overlap. Deferred to the per-repo measurement pass; we
-expect alint to be faster on the orchestration subset (parallel walks,
-no per-tool process spawn) and roughly equivalent on the
+unique-violation overlap. Deferred to the per-repo measurement pass;
+expectation is faster on the orchestration subset (parallel walks, no
+per-tool process spawn) and roughly equivalent on the
 shell-out-to-eslint subset (the eslint invocation dominates).
 
 ---
 
-## Recommendation for the launch story
-
-**Headline launch quote:** "node's structural validation is the
-broadest surface alint has linted in P2a — 44 distinct surfaces across
-a 1700-line Makefile, 25 workflows, 27 in-tree custom eslint rules, 7
-per-tier eslint partials, a vendored Google cpplint fork, a remark-lint
-pipeline, ruff, yamllint, lint-md, lint-pr-url, lint-readme-lists,
-lint-sh, find-inactive-collaborators, and an unwritten test-discovery
-filename grammar. alint consolidates the 43 % that's declarative
-orchestration into one 40-rule config — and the two most alint-shaped
-surfaces (the `test/parallel/test-*.{js,mjs,cjs}` discovery grammar
-and the `doc/changelogs/CHANGELOG_V<MAJOR>.md` per-major-version
-convention) are enforced nowhere statically today, only by editorial
-review and 'a missing test silently fails to fire'."
-
-This is the **fourth positioning narrative** crystallised in P2a-Wave 3
-— it doubles down on the **maturity** angle that complements typescript
-(stable & meticulous) and cpython (scattered & hand-rolled):
-
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| "Replaces N hand-rolled validation scripts" | kubernetes (50 → 17), airflow (109 hooks → 40 %), cpython (12 surfaces consolidated) | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio (15 conventions, 0 scripts), uv (67-crate workspace), pnpm (`meta-updater`), react (`ReactVersion.js`), **node (test-discovery grammar + per-major-changelog grammar)** | Repos that rely on convention without explicit checks |
-| "Adds a structural floor on top of mature tooling" | typescript (eslint+dprint+knip), prettier (5 net-new gates), **node (eslint + cpplint + clang-format + ruff + yamllint + lint-md all coexist; alint sits BENEATH them as orchestrator)** | Repos with mature tooling but missing structural layer |
-| **NEW: "Maturity is the hard test"** | **node (44 surfaces, 15 years, every conceivable convention pinned somewhere — alint expresses 43 % cleanly without overstepping)** | Repos so old that the conventions have *always* worked, but where a new contributor has no single place to read them |
-
-node sits at the **intersection of all four** — it has scattered
-hand-rolled validation scripts (`tools/checkimports.py`,
-`tools/lint-pr-url.mjs`, `tools/find-inactive-*.mjs`), it has
-unverified conventions (test-discovery grammar, per-major-changelog
-grammar, the C++ EOL banner), it has mature per-language linting
-(eslint + cpplint + ruff + yamllint + lint-md), AND it has accumulated
-15 years of "this just works" institutional knowledge that no single
-file documents. The alint pitch lands as: **"we sit beneath your
-existing linters as the structural-orchestration layer, we collapse the
-hand-rolled scripts you've outgrown, we surface the conventions your
-tooling assumes but never checks, AND we make 15 years of institutional
-discipline legible to a contributor reading the repo for the first time."**
-
-Followup feature work surfaced (priority order):
+## Followup feature work surfaced (priority order)
 
 - **`cross_file_value_equals`** — now **v0.10 ship-target** at 10 sources
   past saturation. node's `tools/eslint-rules/*` ↔ `eslint.config.mjs`

@@ -1,5 +1,9 @@
 # Case study: `rust-lang/rust`
 
+> Marketing/positioning writeup at <https://alint.org/examples/rust-lang-rust/>.
+> This README is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `rust-lang/rust` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -201,23 +205,14 @@ declarative subset (both are I/O-bound at this scale; the rust monorepo has
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (consolidated)
 
-**Headline launch quote:** "rust-lang/rust ships its own ~5kLoC custom linter
-binary because no off-the-shelf tool can express its structural rules. alint
-covers ~30 % of those rules in 18 lines of YAML — and the gap analysis
-points at exactly four new rule kinds that would push that to ~55 %."
+The narrative framing for the "30 % declarative subset" pitch and the
+"project-with-its-own-linter-binary audience" positioning lives in the
+alint.org marketing writeup linked at the top of this README; this
+section is the engineering rule-kind candidate list.
 
-This is the **second-strongest** case study (behind kubernetes) for the
-launch positioning, and uniquely valuable for the "polyglot monorepo /
-project-with-its-own-linter-binary" audience — the readers who already
-*know* generic linters don't fit their needs and have built bespoke tooling.
-The pitch lands as: "we're not asking you to throw away your custom linter,
-we're asking you to push the 30 % of mechanical checks down into a
-declarative layer so you can focus your handwritten Rust on the AST-aware
-domain logic that *actually* needs a custom binary".
-
-Followup feature work surfaced (priority order):
+Priority order:
 
 - **`ordered_block` rule kind** (sortedness between marker pairs) — covers
   `tidy::alphabetical` here, `[dependencies]` ordering in every Cargo

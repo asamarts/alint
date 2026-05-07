@@ -1,5 +1,9 @@
 # Case study: `tensorflow/tensorflow`
 
+> Marketing/positioning writeup at <https://alint.org/examples/tensorflow-tensorflow/>.
+> This README is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `tensorflow/tensorflow`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives — including
@@ -42,16 +46,18 @@ PLUS a separate **TFLite per-device frontend** that itself has 4
 per-language bindings (Python, Java, Swift, ObjC) sharing the same
 core C runtime and the same per-source ↔ per-test naming discipline.
 
-This is the headline launch-pitch for alint on tensorflow:
-
-> **tensorflow has TWO discipline layers stacked: file-shape parity (every
-> source has a paired test, by language convention) AND API-shape parity
-> (every public Python symbol has v1+v2 textproto goldens; every binding
-> mirrors the core API). alint covers Layer 1 cleanly today via
-> `pair`/`for_each_*` primitives. Layer 2 — the cross-language API
-> mirroring — is exactly the v0.11+ `cross_language_implementation_complete`
-> rule kind, and tensorflow is the cleanest single-repo demonstration of
-> the pattern.**
+This case study validates the v0.11+
+`cross_language_implementation_complete` rule kind against the
+canonical core+bindings topology. tensorflow has TWO discipline
+layers stacked: file-shape parity (every source has a paired test,
+by language convention) AND API-shape parity (every public Python
+symbol has v1+v2 textproto goldens; every binding mirrors the core
+API). alint covers Layer 1 cleanly today via `pair`/`for_each_*`
+primitives; Layer 2 — the cross-language API mirroring — is the
+v0.11+ shape this validation was commissioned to surface. The
+narrative framing of *which case study earns flagship positioning
+for the v0.11 release* lives in the alint.org marketing writeup
+linked at the top.
 
 Concrete count at HEAD (after sparse-checkout):
 
@@ -119,19 +125,18 @@ plus several TF doesn't enforce today (TFLite Swift per-source test
 parity, ObjC API ↔ test parity, Python TFLite source ↔ `_test`
 parity, golden-file canonical-marker validation).
 
-**Headline finding:** tensorflow is THE flagship "polyglot at scale
-with API-parity discipline" pitch for alint — the file-shape layer
-(every TFLite Swift source has a paired test; every Java source has a
-paired test; every Python TFLite module has `_test.py`; every public
-Python symbol has v1+v2 textproto goldens) is fully expressible in
-alint's grammar today via `pair` / `for_each_file` / `file_min_size`,
-and that pass alone surfaces **5 known TFLite Swift parity drifts**
+**Live-tree findings (factual):** the file-shape layer (every TFLite
+Swift source has a paired test; every Java source has a paired test;
+every Python TFLite module has `_test.py`; every public Python symbol
+has v1+v2 textproto goldens) is fully expressible in alint's grammar
+today via `pair` / `for_each_file` / `file_min_size`, and that pass
+alone surfaces **5 known TFLite Swift parity drifts**
 (`CoreMLDelegate.swift`, `Delegate.swift`, `InterpreterError.swift`,
 `SignatureRunnerError.swift`, `SignatureRunner.swift` have no matching
 `*Tests.swift`) AND **4 ObjC apis/ headers** without `tests/` partners.
 The deeper API-symbol parity — every symbol in `tools/api/golden/v1/`
 must have a v2 mirror; every public Python `tf.foo()` must have a
-Java/JS/Swift/Go binding — is exactly the v0.11+
+Java/JS/Swift/Go binding — is the v0.11+
 `cross_language_implementation_complete` rule kind shape, and TF
 demonstrates it across **6 binding languages** (the most of any
 single repo in the case-study catalogue).
@@ -215,16 +220,16 @@ TF is the second multi-binding repo in the case-study catalogue (after
 apache/arrow's 6 in-tree languages, where the discipline is
 implementation-completeness across format/Schema.fbs spec types). TF
 adds the "core + bindings" shape on top of arrow's "all-peers" shape —
-**the v0.11+ primitive needs to handle BOTH topologies** (peer-to-peer
+the v0.11+ primitive needs to handle BOTH topologies (peer-to-peer
 parity AND core-to-binding parity). TF's TFLite layer demonstrates a
 nested case (one TFLite C runtime + 4 language frontends), which
-generalises to any plugin-host architecture. **TF + arrow are now joined
-by protobuf + angular + flutter** as the 5 demand-driving repos — past
-saturation; `cross_language_implementation_complete` is the v0.11+
-flagship ship-target. TF's 1,185 textproto API goldens surfaced the
+generalises to any plugin-host architecture. TF + arrow are now joined
+by protobuf + angular + flutter as the 5 demand-driving repos —
+saturated demand. TF's 1,185 textproto API goldens surfaced the
 primitive at TWO topologies in one repo (per-source ↔ per-test within
-one language; core ↔ N bindings across languages), making it the
-single richest demonstration in the catalogue.
+one language; core ↔ N bindings across languages). The narrative
+framing for which case study earns flagship positioning for the v0.11
+release lives in the alint.org marketing writeup.
 
 ---
 
@@ -580,53 +585,13 @@ per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (consolidated)
 
-This case study is the **flagship "polyglot at scale with API-parity
-discipline"** story for the launch:
-
-- **tensorflow is the canonical multi-language ML monorepo on GitHub**
-  (~190k stars, the substrate for every modern deep-learning library:
-  TFX, TensorFlow.js, TensorFlow Lite, TF Hub, JAX-via-XLA). Naming
-  it as a target gives alint instant credibility with the ML +
-  data-engineering audience.
-- **No per-language linter sees the cross-language API parity
-  surface** — pylint only sees Python, buildifier only sees Bazel,
-  clang-format only sees C++. The invariants this case study
-  enforces (TFLite Swift `Sources/<X>.swift` ↔ `Tests/<X>Tests.swift`
-  parity, Python TFLite `<x>.py` ↔ `<x>_test.py` parity, ObjC API
-  headers ↔ tests parity, the 1185 textproto goldens existing AND
-  having the canonical marker, the 5 per-Python-version requirements
-  locks all present and non-empty) are exactly the layer alint owns
-  and nothing else does.
-- **The TWO discipline layers stacked (file-shape parity + API-shape
-  parity)** are unique to the "core + bindings" topology, of which TF
-  is the canonical example. apache/arrow gives us the all-peers
-  topology; TF gives us the core+bindings topology. Together they
-  span the full design space the v0.11+
-  `cross_language_implementation_complete` primitive needs to handle.
-- **The Apache 2.0 compliance bundle** + the GHA hardening bundle +
-  the OSS-baseline bundle apply cleanly with minimal overrides
-  (only one custom rule needed: extending the Apache header check
-  to BUILD/.bzl files, which the bundled rule's default
-  file-extension list doesn't cover).
-
-Position it as the **second polyglot tile** on alint.org/examples
-(after apache/arrow), with the angle: *"tensorflow has 1 core + 6
-language bindings + 1 185 API-parity goldens + 0 tools that see the
-cross-language conventions — alint is the layer that does. The
-v0.11+ `cross_language_implementation_complete` rule kind, validated
-here, generalises beyond TF to every multi-binding spec (TFLite,
-TFX, TF Hub, JAX/XLA bindings)."*
-
-The pitch lands harder when paired with the TFLite Swift finding:
-**5 of 11 Sources/*.swift files have no matching Tests/*Tests.swift**
-(`CoreMLDelegate`, `Delegate`, `InterpreterError`,
-`SignatureRunnerError`, `SignatureRunner`). No Swift tool catches
-this because no Swift tool sees the parity convention from above.
-
-Followup feature work surfaced (consolidated, sorted by strength of
-demand across P2):
+The narrative framing for the "polyglot at scale with API-parity
+discipline" pitch and the "TWO discipline layers stacked"
+positioning lives in the alint.org marketing writeup linked at the
+top of this README. This section is the engineering rule-kind
+candidate list, sorted by strength of demand across P2:
 
 - **`cross_file_value_equals` rule kind** — covers
   `requirements_lock_3_*.txt` cross-Python-version consistency here.

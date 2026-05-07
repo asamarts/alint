@@ -1,5 +1,9 @@
 # Case study: `vercel/next.js`
 
+> Marketing/positioning writeup at <https://alint.org/examples/vercel-next.js/>.
+> This README is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `vercel/next.js`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives.
@@ -57,14 +61,14 @@ structural assertion the existing tooling makes about repo *state*,
 plus several that next.js doesn't enforce today (per-crate license
 uniformity, husky-hook content integrity, gitattributes EOL pin).
 
-**Headline finding:** next.js is the canonical "hybrid pnpm + Cargo
-mega-monorepo" — alint's polyglot bundle composition
-(`monorepo/cargo-workspace@v1` + `monorepo/pnpm-workspace@v1`
-layered together) is the tightest fit in the case-study
-catalogue so far, and surfaces **3 of 19 npm packages missing
-license fields + 4 of 63 crates missing the standard MIT/MPL
-license** — drift no per-language linter catches because each
-linter only sees half the tree.
+**Live-tree findings (factual):** next.js is the first hybrid
+pnpm + Cargo dual-workspace data point in the case-study catalogue.
+alint's polyglot bundle composition (`monorepo/cargo-workspace@v1`
++ `monorepo/pnpm-workspace@v1` layered together) covers both halves
+of the tree and surfaces **3 of 19 npm packages missing license
+fields + 4 of 63 crates missing the standard MIT/MPL license** —
+drift no per-language linter catches because each linter only sees
+half the tree.
 
 ---
 
@@ -322,38 +326,12 @@ vs `time alint check`. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (consolidated)
 
-This case study is **the "hybrid pnpm + Cargo dual-workspace" data
-point** for the launch:
-
-- next.js is the most-watched JS / React framework on GitHub
-  (~140k stars). Naming it as a target gives alint instant
-  credibility with the JS audience.
-- The hybrid pnpm + Cargo workspace shape is alint's tightest
-  fit — no other tool composes ecosystem rules at this layer.
-  Bundled `monorepo/cargo-workspace@v1` + `monorepo/pnpm-workspace@v1`
-  layered together cover both halves of the tree in one
-  declarative file.
-- The findings on the actual repo (3 of 19 packages missing
-  license fields; 4 of 63 crates with non-MIT licenses
-  worth verifying; the gitattributes EOL pin sliding into
-  drift would silently break Windows test runs) are real and
-  actionable.
-- The hand-rolled `scripts/check-*.{js,mjs,sh}` family (7 scripts
-  totalling ~600 LOC) does work alint largely doesn't replace
-  — codegen freshness, git-state mutation, runtime probes — but
-  the structural assertions baked into them (manifest route
-  reachability, externals-doc table sync) are exactly the v0.10+
-  rule-kind candidates this validation pass is surfacing.
-
-Position it as the **fourth tile** on alint.org/examples (after
-kubernetes, airflow, microsoft/typescript), with the angle:
-"for hybrid monorepos that span multiple ecosystems, no
-per-language linter sees the whole tree — alint is the layer
-that does."
-
-Followup feature work surfaced (consolidated):
+The narrative framing for the "hybrid pnpm + Cargo dual-workspace"
+pitch and the alint.org positioning lives in the marketing writeup
+linked at the top of this README. This section is the engineering
+rule-kind candidate list.
 
 - **`cross_file_value_equals` rule kind** — covers
   `validate-externals-doc.js` here, plus the airflow

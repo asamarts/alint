@@ -1,5 +1,7 @@
 # Case study: `denoland/deno`
 
+> Marketing/positioning writeup at https://alint.org/examples/denoland-deno/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `denoland/deno` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -11,7 +13,7 @@ of the rules that need new alint primitives.
 
 ## Summary
 
-Deno has a **Rust core + JavaScript/TypeScript tooling** layout: ~75 Cargo
+Deno has a Rust core + JavaScript/TypeScript tooling layout: ~75 Cargo
 workspace members under `cli/`, `ext/`, `libs/`, `runtime/`, `tests/`, plus a
 ~3,000 LoC orchestrator at `tools/lint.js` and a sibling `tools/format.js`
 that drive every CI gate. The orchestrator runs **9 logical structural checks**
@@ -40,11 +42,9 @@ Of those:
   (`verify_pr_title.js`).
 
 The 50 % that *do* fit translate to a 17-rule alint config (below).
-Replacing `tools/lint.js`'s nine structural sub-checks plus the bundled OSS /
-Rust / Node / GHA / Cargo-workspace baselines with one declarative config +
-one `alint check` invocation in CI is the headline win — fewer moving parts,
-one place to look when CI breaks, and much easier for forks to keep their
-hygiene rules consistent with upstream Deno.
+This replaces `tools/lint.js`'s nine structural sub-checks plus the bundled
+OSS / Rust / Node / GHA / Cargo-workspace baselines with one declarative
+config + one `alint check` invocation in CI.
 
 ---
 
@@ -233,24 +233,24 @@ to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (combining with Kubernetes findings)
 
-This case study reinforces two themes that started in the Kubernetes
-inventory:
+Two cross-cutting themes from this inventory shape the v0.10+ rule-kind
+backlog:
 
-1. **The "language-AST query" boundary is real and worth documenting up
-   front.** Deno hits it twice (Rust short-flag enforcement, TypeScript
-   JSDoc tags). The right messaging: "alint validates *structure*; if you
-   need to reach into the language AST, keep your existing tool and wrap
-   it via a `command` rule. The boundary is deliberate."
-2. **The baselined-drift primitive (`lintNodePolyfillDenoApis`) is the
-   single most-load-bearing missing rule kind for projects mid-migration**
-   (Node-API polyfills here, restricted-imports in Kubernetes, Python
-   type-coverage in the next polyglot case study). Worth a dedicated
-   v0.10+ design pass: a `violation_baseline` rule kind that wraps a
-   child command, parses output, diffs against a per-file snapshot.
+1. **The "language-AST query" boundary** — Deno hits it twice (Rust
+   short-flag enforcement, TypeScript JSDoc tags). alint's deliberate
+   non-goal: AST analysis. The realistic path is to keep
+   `tools/jsdoc_checker.js` and the Rust-flag check as
+   `command`-invoked external tools.
+2. **The baselined-drift primitive (`lintNodePolyfillDenoApis`)** —
+   wraps a child command, parses violation counts from output, diffs
+   against a per-file baseline. Same shape recurs in the Kubernetes
+   restricted-imports pattern and many large-codebase migration efforts
+   (TypeScript strict-mode adoption, Python type-coverage). Worth a
+   dedicated v0.10+ design pass: a `violation_baseline` rule kind.
 
-Followup feature work surfaced (combining with Kubernetes findings):
+Concrete proposals:
 
 - **`disallowed_methods_in_file` rule kind** (per-file content list sourced
   from a registry) — would cover Deno's clippy.toml-per-crate content

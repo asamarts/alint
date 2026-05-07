@@ -1,5 +1,9 @@
 # Case study: `tokio-rs/tokio`
 
+> Marketing/positioning writeup at <https://alint.org/examples/tokio-rs-tokio/>.
+> This README is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `tokio-rs/tokio` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -50,10 +54,13 @@ workspace = true` inheritance, etc.). Net: **27 declarative rules**
 covering ~50 % of the existing pipeline plus a thicker layer of
 defense-in-depth conventions.
 
-The headline is *not* "alint replaces ad-hoc shell scripts" (tokio doesn't
-have any) — it's **"alint catches the conventions tokio's CI pipeline
-relies on but doesn't explicitly verify"**. tokio's CI is matrix-driven
-and assumes the repo state is sane; alint asserts the assumptions.
+tokio's CI is matrix-driven and assumes the repo state is sane;
+alint asserts the assumptions. tokio doesn't have ad-hoc shell scripts
+to replace — the value here is in catching the **15 conventions
+tokio's CI pipeline silently relies on but doesn't explicitly
+verify**. Narrative framing for this case study (and how it slots
+against kubernetes / rust-lang-rust as launch counterpoints) lives
+in the alint.org marketing writeup linked at the top of this README.
 
 ---
 
@@ -232,28 +239,14 @@ job-set. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (consolidated)
 
-This case study is **the canonical "well-curated Rust workspace" example**.
-Use it as the launch counterpoint to kubernetes:
+The narrative framing for the "convention without explicit checks"
+pitch and the launch counterpoint to kubernetes / rust-lang-rust
+lives in the alint.org marketing writeup linked at the top of this
+README. This section is the engineering rule-kind candidate list.
 
-> "Kubernetes has 50 hand-rolled shell scripts; alint replaces 17 of them
-> with one declarative config. tokio has zero hand-rolled shell scripts —
-> all its structural validation lives in matrix-driven CI workflows that
-> *implicitly* rely on the repo being sane. alint catches the 15
-> conventions tokio's pipeline assumes but doesn't explicitly verify."
-
-The pitch lands as **defense-in-depth, not replacement**. Tokio's CI is
-already excellent; alint adds a layer that runs *before* CI — at
-keystroke time in an editor (with the JSON Schema), at pre-commit time
-(the bundled `validate-config` subcommand), or at the front of the
-pipeline. The conventions that previously lived only as oral history
-("internal crates have `publish = false`, the workspace declares
-`unexpected_cfgs` and members must inherit it, the root README mirrors
-the tokio crate's README") become checked, version-controlled, and
-diff-reviewable.
-
-Followup feature work surfaced (priority order):
+Priority order:
 
 - **`cross_file_value_equals` rule kind** — covers tokio's `diff
   README.md tokio/README.md` and the version-grep cross-reference.

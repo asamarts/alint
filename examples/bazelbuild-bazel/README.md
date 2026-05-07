@@ -1,10 +1,12 @@
 # Case study: `bazelbuild/bazel`
 
+> Marketing/positioning writeup at https://alint.org/examples/bazelbuild-bazel/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `bazelbuild/bazel`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives — and
-a clean delineation of the **Starlark-AST surface that is NOT
-alint's job**.
+the delineation of the Starlark-AST surface that stays on
+`buildifier`.
 
 **Repo state captured:** 2026-05-06, sparse-clone of
 `bazelbuild/bazel` excluding `/src/test`, `/third_party`, `/site`,
@@ -95,20 +97,17 @@ below).
   (`.bazelci/presubmit.yml` — 309 lines, 25+ platforms).
 
 The configured **41-rule** [`/.alint.yml`](.alint.yml) plus the
-~30 rules from the four extended bundled rulesets gives
-**71 effective rules** running against this repo. The 38 %
-out-of-scope is the **highest of any P2a + P2b case study to
-date** — and that's the launch-honesty anchor.
+~40 rules from the four extended bundled rulesets gives
+**81 rules** loaded by `validate-config` against this repo. The
+38 % out-of-scope fraction is the highest of any case study in
+the corpus to date.
 
-**Headline finding:** **bazelbuild/bazel is the case where
-alint's "scope is filesystem shape, not language semantics"
-non-goal becomes most visible — the 100 *.bzl files and 322
-BUILD files make Starlark the load-bearing language for build
-declarations, and alint's structured-query rule family
-(`json_path_*`, `yaml_path_*`, `toml_path_*`) does not parse
-Starlark; the right tool for that layer is Google's
-`buildifier` / `buildozer` pair, which alint orchestrates via
-`command:` rules rather than competing with.**
+The 100 *.bzl files and 322 BUILD files make Starlark the
+load-bearing language for build declarations, and alint's
+structured-query rule family (`json_path_*`, `yaml_path_*`,
+`toml_path_*`) does not parse Starlark. The right tool for that
+layer is Google's `buildifier` / `buildozer` pair, which alint
+orchestrates via `command:` rules rather than re-implementing.
 
 ---
 
@@ -570,9 +569,8 @@ The remaining inventoried surfaces:
 + 100-bzl tree takes ~5s on a warm tree. The actual
 `bazel build //src:bazel` self-build is multi-minute.
 
-The alint pitch here is **not** speed — it's **inventory
-legibility**. A new contributor staring at bazelbuild/bazel's
-structural-validation surface today has to read:
+The structural-validation surface a new contributor reads today
+to understand bazel's repo conventions:
 
 - 309 lines of `.bazelci/presubmit.yml` (Buildkite tasks)
 - 117 lines of `.bazelrc` (build flags)
@@ -586,56 +584,14 @@ structural-validation surface today has to read:
 - the implicit BUILD-file-naming convention
 - the implicit `*.bzl` license header convention
 
-That's ~1,000+ lines of structural-validation surface, half of
-which is enforced only by code-review etiquette. The alint
-config in this directory is **one file**, declarative, with
-each rule's scope, severity, and rationale visible in 5-10
-lines.
-
-For the 46 % of checks that fit alint's grammar today, the
-pitch is: **"adopt alint to consolidate the file-structure
-layer so contributors can read the structural contract in
-one file. Keep `buildifier` for the Starlark AST layer."**
+~1,000+ lines of structural-validation surface, half of which is
+enforced only by code-review etiquette. The 41-rule alint config
+in this directory plus the 4 extended bundled rulesets covers the
+46 % subset that fits the structured-query grammar today.
 
 ---
 
-## Recommendation for the launch story
-
-**Headline launch quote:** "bazelbuild/bazel is THE polyglot
-build-system case study — 322 BUILD files, 100 *.bzl files,
-482-line MODULE.bazel, plus Java + C++ + Python + shell + .bat
-source trees, all driven by Bazel itself with no Maven / Gradle
-/ Cargo / go.mod / package.json. ~46 % of bazel's structural
-contract maps to alint declaratively; the other 38 % is
-Starlark AST work that lives on `buildifier` (which alint
-orchestrates via `command:` rather than competing with). This
-is the case study that demonstrates alint's non-goal: scope is
-filesystem shape, not language semantics. The 38 % that's out
-of scope is fine — `buildifier` is excellent at it. alint
-sits beneath as the file-structure layer, surfacing
-conventions like the *.bzl Apache header that is enforced
-NOWHERE STATICALLY today."
-
-This is the **fourth positioning narrative** crystallised in
-P2b Wave 1 (and the launch-honesty anchor):
-
-| Narrative | Strongest data point | Use case |
-|---|---|---|
-| "Replaces N hand-rolled validation scripts" | kubernetes, airflow, cpython | Repos with verify-script sprawl |
-| "Catches conventions your pipeline assumes but doesn't verify" | tokio, uv, cpython | Repos that rely on convention without explicit checks |
-| "Adds structural floor on top of mature tooling" | typescript, ruff, prettier, helm | Repos with mature tooling but missing structural layer |
-| "**Cleanly delineates where alint stops and the language-AST tools begin**" | **bazel** | **Repos heavy in domain-specific DSLs (Starlark, HCL, Rego, Lean, ...) where the AST tier has a dominant existing tool** |
-
-bazel is uniquely valuable as a case study because it's where
-this delineation is **most visible**. A Python-only repo can
-plausibly delegate everything to ruff; a Java-only repo can
-plausibly delegate everything to checkstyle + spotbugs. But
-bazel's repo has **no AST tool that owns the cross-language
-structural conventions** (the per-language tools each see only
-their own slice; `buildifier` sees only Starlark; `clang-tidy`
-sees only C++; etc.) — and that's the gap alint fills.
-
-Followup feature work surfaced (priority order):
+## Followup feature work surfaced (priority order)
 
 - **`generated_file_fresh`** — fourth confirmation across
   cpython, uv, arrow, bazel. Should land in v0.10+.

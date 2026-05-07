@@ -1,5 +1,11 @@
 # Case study: `kubernetes/kubernetes`
 
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/kubernetes-kubernetes/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> validation status. Same facts, different language.
+
 Inventory of the structural-validation tooling in `kubernetes/kubernetes` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -20,11 +26,10 @@ Go-toolchain-aware checks alint isn't trying to do).
 The 40 % that *do* fit translate cleanly to a 12-rule custom set in
 [`./.alint.yml`](.alint.yml) (the full config loads **49 rules** with the
 4 bundled rulesets — `oss-baseline + go + ci/github-actions + hygiene/
-no-tracked-artifacts` — folded in). Replacing those 20 shell scripts with
-one declarative config + one `alint check` invocation in CI is the
-headline win — fewer moving parts, one place to look when CI breaks,
-~5× faster than running 20 shell scripts in sequence (alint runs rules
-in parallel; the shell pipeline doesn't).
+no-tracked-artifacts` — folded in). Combined with `command:` shell-outs to
+shellcheck, spelling, gofmt, golangci-lint, and govulncheck, **17 of the 50
+verify scripts** move into the declarative config. Rules dispatch in parallel
+against a single filesystem walk.
 
 ---
 
@@ -133,18 +138,11 @@ same checkout. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is the **strongest single piece of evidence** for the launch
-positioning: "alint replaces 17 ad-hoc shell scripts in Kubernetes' verify
-pipeline with one declarative config." Use it as the headline example on
-alint.org/examples and in the HN/Reddit launch posts.
-
-Followup feature work surfaced:
+## Followup feature work surfaced
 
 - **`import_gate` rule kind** (allowlist / denylist / alias modes) — would
   cover ~6 more verify scripts here; same primitive shows up in nearly every
-  Go monorepo we've inventoried. **v0.10 ship-target** at 4 sources
+  Go monorepo inventoried. **v0.10 ship-target** at 4 sources
   (k8s + airflow + golang/go + pytorch).
 - **`pair_hash` rule kind** (extension of `file_hash` to "hash matches a
   registry entry") — narrower use case but Kubernetes uses it for

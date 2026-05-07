@@ -1,5 +1,10 @@
 # Case study: `facebook/react`
 
+> Marketing writeup (narrative, headline catch, competitive framing)
+> lives at <https://alint.org/examples/facebook-react/>. This README
+> is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `facebook/react`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives.
@@ -64,22 +69,16 @@ Maps-to-alint percentage: **~50%** (10/20). Needs-new-primitive: **~10%**
 for codes.json). Out-of-scope: **~40%** (8/20 — all AST or
 build/runtime-aware).
 
-**Headline finding:** react relies on a ~600-entry, append-only JSON
-**registry** (`scripts/error-codes/codes.json`) plus a **single source
-of truth** (`packages/shared/ReactVersion.js`) that propagates across
-3 per-package `version` fields — both patterns extant in production
-JS monorepos and both currently enforced by hand-rolled node scripts
-that alint can replace structurally TODAY (codes.json shape) and
-that surface the same `cross_file_value_equals` (now `v0.10
-ship-target`, 10 sources per
-`docs/development/launch-evidence.md`) + `registry_append_only`
-(still single-source, react-only — `v0.10 design candidate`)
-rule kinds first identified in the airflow / typescript /
-clap case studies. **The position: "alint replaces the structural
-floor under react's well-evolved tooling, surfacing real drift
-(1 wrong `repository.directory`, 19 non-canonical `bugs` URLs,
-345 source files missing the canonical Meta copyright header)
-that no existing tool catches."**
+**Key finding:** react carries a ~600-entry, append-only JSON
+**registry** (`scripts/error-codes/codes.json`) plus a **single
+source of truth** (`packages/shared/ReactVersion.js`) that
+propagates across 3 per-package `version` fields. Both are
+currently enforced by hand-rolled node scripts. alint replaces
+the codes.json shape declaratively today and adds two rule-kind
+candidates: `cross_file_value_equals` (now `v0.10 ship-target`,
+10 sources per `docs/development/launch-evidence.md`) and
+`registry_append_only` (still single-source / react-only —
+`v0.10 design candidate`).
 
 ---
 
@@ -355,37 +354,7 @@ status quo.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the canonical "evolved JS monorepo" data
-point** for the launch:
-
-- react is the most-watched JS UI library on GitHub (>240k stars, ~1k
-  contributors). Naming it as a target gives alint instant credibility
-  with the JS audience.
-- The findings are real and actionable: 1 wrong `repository.directory`,
-  19 non-canonical `bugs` URLs, 345 source files missing the
-  canonical Meta copyright header, 39 packages without per-package
-  `LICENSE` files. None of these would surface from running eslint /
-  prettier / flow.
-- The `cross_file_value_equals` and `registry_append_only` primitives
-  surfaced here are both load-bearing for the v0.10+ rule-kind
-  pipeline. react adds a **second-language data point** for
-  `cross_file_value_equals` (after the Rust workspaces in airflow,
-  tokio, clap, uv) — now at 10 sources / `v0.10 ship-target`. react
-  remains the **first-of-kind (and still only) data point** for
-  `registry_append_only` (no other case study has surfaced this).
-- The contrast with kubernetes (50 hand-rolled scripts → alint
-  replaces 17) and turbo (zero hand-rolled scripts → alint adds 22
-  new gates) lands cleanly: react sits in the middle (~8 hand-rolled
-  scripts → alint replaces ~5 declaratively + shells out the rest).
-
-Use as evidence on alint.org/examples that **structural drift
-exists even at the most evolved end of the JS monorepo spectrum**
-— and that the cross-file value-equality + registry-shape
-primitives are recurring patterns, not one-off concerns.
-
-Followup feature work surfaced (consolidated):
+## Followup feature work surfaced (consolidated)
 
 1. **`cross_file_value_equals` rule kind** — covers
    `version-check.js` here, plus the airflow/tokio/clap/uv

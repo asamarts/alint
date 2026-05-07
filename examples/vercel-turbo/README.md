@@ -1,5 +1,9 @@
 # Case study: `vercel/turbo`
 
+> Marketing/positioning writeup at <https://alint.org/examples/vercel-turbo/>.
+> This README is the engineering reference: tooling inventory, mapping table,
+> gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `vercel/turbo` (Turborepo)
 and an alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
@@ -34,16 +38,17 @@ entirely about **monorepo conventions** rather than language semantics:
   `rust-toolchain.toml`, `version.txt`, `.husky/pre-push`) and that they
   carry the expected gates
 
-**Headline finding:** Turborepo's Rust workspace has **drift in 60 of 61
-crates** on the `publish = false` guard, **9 of 52 crates** are missing
-READMEs, **7 crates have a directory name that doesn't match the crate's
-published name** (`crates/turborepo-globwalk` is published as `globwalk`,
-`crates/turborepo-paths` as `turbopath`, etc.), and on the JS side **8 of 17
-packages** lack a per-package LICENSE (problematic for `npm pack` since the
-repo-root LICENSE doesn't auto-include in tarballs). One example
-(`with-microfrontends`) is silently skipped from the `check-examples.ts`
-sandbox runs because it lacks `meta.json`, and `with-nextjs` is missing
-`turbo.json`.
+**Live-tree findings (factual):** Turborepo's Rust workspace has
+**drift in 60 of 61 crates** on the `publish = false` guard, **9 of 52
+crates** are missing READMEs, **7 crates have a directory name that
+doesn't match the crate's published name**
+(`crates/turborepo-globwalk` is published as `globwalk`,
+`crates/turborepo-paths` as `turbopath`, etc.), and on the JS side
+**8 of 17 packages** lack a per-package LICENSE (problematic for
+`npm pack` since the repo-root LICENSE doesn't auto-include in
+tarballs). One example (`with-microfrontends`) is silently skipped
+from the `check-examples.ts` sandbox runs because it lacks
+`meta.json`, and `with-nextjs` is missing `turbo.json`.
 
 The full alint config replaces ~22 of these structural checks declaratively
 and absorbs ~7 more via the `command` rule kind (one shell-out to each of
@@ -213,27 +218,13 @@ check` on the same checkout. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work surfaced (consolidated)
 
-This case study is the **strongest evidence for monorepo-tier positioning**:
-Turborepo is the canonical "modern, well-tooled, dual-language Rust+TS
-monorepo" — exactly the audience alint's monorepo bundles target. The
-findings (60/61 crates missing `publish = false`, 8/17 packages missing
-LICENSE, 1 example silently skipped from CI, 1 example missing
-`turbo.json`) are real and actionable; even a project with Vercel-grade
-tooling has structural drift that no per-language linter catches.
-
-The *contrast* with Kubernetes is the launch hook:
-
-- Kubernetes: 50 hand-rolled verify scripts → alint replaces 17.
-- Turborepo: zero hand-rolled verify scripts (everything delegated to
-  per-language tools) → alint adds ~22 structural gates that **don't exist
-  today** at all.
-
-Use this as evidence on alint.org/examples that monorepo conventions are
-under-checked even at top-tier-tooling repos.
-
-Followup feature work surfaced (in priority order):
+The narrative framing for the "structural floor under Vercel-grade
+tooling" pitch and the kubernetes-vs-turbo launch hook lives in the
+alint.org marketing writeup linked at the top of this README. This
+section is the engineering rule-kind candidate list, in priority
+order:
 
 1. **`dir_name_matches_field` rule kind** — covers crate-name and
    package-name drift across both Cargo and npm; surfaces in every

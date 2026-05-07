@@ -1,5 +1,7 @@
 # Case study: `dotnet/runtime`
 
+> Marketing/positioning writeup at https://alint.org/examples/dotnet-runtime/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `dotnet/runtime`
 and an alint config that replaces the rules alint can express today,
 plus a catalogue of the rules that need new alint primitives.
@@ -14,23 +16,21 @@ language top-level dirs and the `eng/`, `.github/`, `.config/`,
 
 ## Summary
 
-`dotnet/runtime` is **the canonical XML-shape monorepo at scale** —
-Microsoft's CLR + Mono + NativeAOT runtime, the BCL (Base Class
-Library: every `System.*` and `Microsoft.Extensions.*`), the per-OS
-native libs, and the cross-arch installer. Built on the **MSBuild +
-Arcade SDK** stack (`Microsoft.DotNet.Arcade.Sdk`, pinned in
-`global.json::msbuild-sdks`), with the actual build matrix
-orchestrated from **186 yml files under `eng/pipelines/`** (Azure
-DevOps), and only **20 yml under `.github/workflows/`** for
-GitHub-side automation (markdownlint, JIT-format, labeler, backport,
-copilot agents, branch-merge-flow).
+`dotnet/runtime` is Microsoft's CLR + Mono + NativeAOT runtime, the
+BCL (Base Class Library: every `System.*` and
+`Microsoft.Extensions.*`), the per-OS native libs, and the cross-arch
+installer. Built on the **MSBuild + Arcade SDK** stack
+(`Microsoft.DotNet.Arcade.Sdk`, pinned in `global.json::msbuild-sdks`),
+with the actual build matrix orchestrated from **186 yml files under
+`eng/pipelines/`** (Azure DevOps), and only **20 yml under
+`.github/workflows/`** for GitHub-side automation (markdownlint,
+JIT-format, labeler, backport, copilot agents, branch-merge-flow).
 
-Where apache/spark surfaced the `xml_path_*` candidate via 49
-`pom.xml` files (Maven), `dotnet/runtime` **stress-tests it at one
-order of magnitude bigger scale** with 1,091 `.csproj` files plus
+apache/spark surfaced the `xml_path_*` rule-kind candidate via 49
+`pom.xml` files (Maven). `dotnet/runtime` exercises the same pattern
+at one order of magnitude bigger scale: 1,091 `.csproj` files plus
 234 solution files (231 .slnx + 3 vendored .sln) plus ~520
-`.props`/`.targets` and 257 `Directory.Build.{props,targets}`. **The
-single most XML-heavy repo in the launch evidence list.**
+`.props`/`.targets` and 257 `Directory.Build.{props,targets}`.
 
 Concrete count at HEAD (post-sparse-checkout):
 
@@ -116,10 +116,9 @@ Concrete count at HEAD (post-sparse-checkout):
 - **`.github/CODEOWNERS`** (112 lines) — per-area ownership; consumed by
   the GitHub PR-reviewer auto-assignment + the labeler models
 
-**The headline structural shape this case study validates:** every
-csproj is Sdk-style + has a TargetFramework(s) declaration. ~10
-invariants per csproj could be expressed as XML-path queries if alint
-had `xml_path_*`; today the config falls back to
+Every csproj is Sdk-style + has a TargetFramework(s) declaration.
+~10 invariants per csproj could be expressed as XML-path queries if
+alint had `xml_path_*`; today the config falls back to
 `file_content_matches` regex against the XML text.
 
 The configured **60-rule** [`/.alint.yml`](.alint.yml) covers every
@@ -128,32 +127,25 @@ plus several dotnet/runtime doesn't enforce today (per-area
 `Directory.Build.props` presence, `eng/Versions.props` numeric-shape
 discipline, `NuGet.config` fallback-folders clearing).
 
-**Headline finding:** dotnet/runtime is the **second repo (after
-spark)** to surface the **`xml_path_*` rule-kind candidate** at
-production scale. spark made the case for XML-aware structured
-queries via 49 pom.xml files; dotnet/runtime stresses it via 1,091
-csprojs + 231 .slnx + 257 Directory.Build.* + 467 .props/.targets +
-76 eng/ build-glue files = **~2,300 distinct XML manifests** where
-the headline structural assertions ("Sdk attribute is one of
-{NET.Sdk, NET.Sdk.Web, …}", "TargetFrameworks references only known
-TFM properties from Versions.props", "every `<ItemGroup>` subset
-entry resolves to a csproj that exists") are bottlenecked by alint's
-lack of XML-aware path queries. **`xml_path_*` moves from "spark
-single-source" to "two-source, both at scale, both surfacing the
-same structural pattern" — promotes from v0.11+ to v0.10
-ship-target.**
+dotnet/runtime is the second repo (after spark) to surface the
+`xml_path_*` rule-kind candidate at production scale. The cumulative
+inventory across the sparse-checkout: 1,091 csprojs + 231 .slnx +
+257 Directory.Build.* + 467 .props/.targets + 76 eng/ build-glue
+files = **~2,300 distinct XML manifests** where structural assertions
+("Sdk attribute is one of {NET.Sdk, NET.Sdk.Web, …}",
+"TargetFrameworks references only known TFM properties from
+Versions.props", "every `<ItemGroup>` subset entry resolves to a
+csproj that exists") are bottlenecked by alint's lack of XML-aware
+path queries. spark + dotnet/runtime = 2 sources, both at production
+scale, both surfacing the same structural pattern.
 
-A second headline: **no `csharp@v1` / `dotnet@v1` bundled ruleset
-exists today.** alint ships rust@v1, java@v1, python@v1, node@v1,
-go@v1 — but no .NET equivalent. dotnet/runtime is the first P2b
-case study where this gap is the dominant story (P2a's
-microsoft/typescript and microsoft/vscode are TS-tier projects;
-neither ships a single `.csproj`). A bundled `dotnet@v1` ruleset
-covering the per-csproj XML-shape uniformity, the global.json /
-NuGet.config / Directory.Build.* triad, and the bin/obj/artifacts/
-hygiene set would consolidate ~12 of the 14 dotnet-specific rules
-in this config into one extends: line. **Strong v0.10
-ship-target alongside `apache/governance@v1`.**
+No `csharp@v1` / `dotnet@v1` bundled ruleset exists today. alint
+ships rust@v1, java@v1, python@v1, node@v1, go@v1 — but no .NET
+equivalent. A bundled `dotnet@v1` ruleset covering the per-csproj
+XML-shape uniformity, the global.json / NuGet.config /
+Directory.Build.* triad, and the bin/obj/artifacts/ hygiene set
+would consolidate ~12 of the 14 dotnet-specific rules in this
+config into one `extends:` line.
 
 ---
 
@@ -297,12 +289,12 @@ The 60-rule [`/.alint.yml`](.alint.yml) breaks down as:
 Five patterns specific to dotnet/runtime that don't fit any current
 rule (most re-confirm gaps from earlier case studies):
 
-### 1. `xml_path_matches` / `xml_path_equals` (RE-CONFIRMS spark; PROMOTES to v0.10 ship-target)
+### 1. `xml_path_matches` / `xml_path_equals` (re-confirms spark; v0.10 ship-target)
 
-dotnet/runtime is the **second repo** to surface the `xml_path_*`
-gap, and the first to stress it at full scale: 1,091 csprojs +
+dotnet/runtime is the second repo to surface the `xml_path_*`
+gap, and the first to exercise it at full scale: 1,091 csprojs +
 231 .slnx + 257 Directory.Build.* + ~520 .props/.targets +
-76 eng/ build-glue files = **~2,300 distinct XML manifests** in
+76 eng/ build-glue files = ~2,300 distinct XML manifests in
 the sparse-checkout. The current config falls back to
 `file_content_matches` regex against the XML text, which works for
 the canonical Sdk-attribute pattern but misses:
@@ -318,14 +310,11 @@ the canonical Sdk-attribute pattern but misses:
 - `<PackageReference Version="..." />` ↔ `eng/Versions.props` value
   consistency
 
-**Demand: spark + dotnet/runtime = 2 sources, both at production
-scale, both surfacing the same structural pattern.** Promotes
-`xml_path_*` from "v0.11+ candidate" to **"v0.10 ship-target"** —
-the structured-query family becomes complete (json/yaml/toml/xml)
-and the two demand-driving repos are both flagship-visibility
-launches (Apache TLP + Microsoft CLR).
+Two demand sources (spark + dotnet/runtime); the structured-query
+family becomes complete (json/yaml/toml/xml) when `xml_path_*` ships.
+Per launch-evidence.md, `xml_path_*` is now a v0.10 ship-target.
 
-### 2. Bundled `dotnet@v1` (or `csharp@v1`) ruleset (NET-NEW)
+### 2. Bundled `dotnet@v1` (or `csharp@v1`) ruleset (net-new)
 
 alint ships **`rust@v1`, `java@v1`, `python@v1`, `node@v1`, `go@v1`**
 — but no C#/.NET equivalent. dotnet/runtime is the first P2b case
@@ -353,12 +342,11 @@ extends:
 ```
 
 …and pick up the entire .NET/MSBuild discipline check set without
-restating it. **Strong v0.10 ship-target.** Same shape rationale
-as the spark-promoted `apache/governance@v1`: enough commercial-
-scale .NET projects exist (every dotnet/aspnetcore, dotnet/sdk,
-dotnet/maui, dotnet/efcore, microsoft/orleans, **microsoft/dapr**,
-**every Azure SDK repo**) that the ruleset would land in dozens of
-adopter repos with zero per-repo customisation.
+restating it. v0.10 ship-target. Adopter surface includes every
+dotnet/aspnetcore, dotnet/sdk, dotnet/maui, dotnet/efcore,
+microsoft/orleans, microsoft/dapr, and every Azure SDK repo — the
+ruleset would land in dozens of adopter repos with zero per-repo
+customisation.
 
 A `csharp@v1` companion ruleset focusing on Roslyn-driven facts
 (public-API XML doc presence, `Pure` attribute discipline,
@@ -366,7 +354,7 @@ A `csharp@v1` companion ruleset focusing on Roslyn-driven facts
 shape is closer to AST analysis than file-shape checks, so it
 likely belongs as a dotnet-format wrapper.
 
-### 3. `eng/Subsets.props` `<ItemGroup>` ↔ on-disk csproj resolution (RE-CONFIRMS spark + extends `registry_paths_resolve`)
+### 3. `eng/Subsets.props` `<ItemGroup>` ↔ on-disk csproj resolution (re-confirms spark + extends `registry_paths_resolve`)
 
 `eng/Subsets.props` (796 lines at HEAD) is the canonical "what to
 build" dispatch table. Every alias in `./build.sh <subset>` maps
@@ -378,12 +366,11 @@ just produces an empty subset).
 
 Same shape as spark's Maven `<modules>` ↔ on-disk dir resolution
 + rust-lang `triagebot.toml` glob-resolution + 5 other repos
-already on the `registry_paths_resolve` candidate list. **Adds
-dotnet/runtime as the 8th demand source for `registry_paths_resolve`,
-specifically extending it to XML-extracted (rather than text-line)
-registries.**
+already on the `registry_paths_resolve` candidate list.
+dotnet/runtime adds an 8th demand source, extending the shape to
+XML-extracted (rather than text-line) registries.
 
-### 4. .slnx ↔ csproj cross-reference (NET-NEW shape; same v0.10 family as #1)
+### 4. .slnx ↔ csproj cross-reference (net-new shape; same v0.10 family as #1)
 
 231 `.slnx` files at HEAD; each declares a list of projects via
 `<Project Path="..." />` elements. Today: nothing checks that
@@ -396,7 +383,7 @@ Same family as #3 (XML-extracted registry) and conceptually
 identical to spark's pom.xml `<modules>` shape. Defers to the
 v0.10 `xml_path_*` + `registry_paths_resolve` combination.
 
-### 5. `dotnet-tools.json` ↔ `global.json` Arcade SDK version coherence (RE-CONFIRMS `cross_file_value_equals`)
+### 5. `dotnet-tools.json` ↔ `global.json` Arcade SDK version coherence (re-confirms `cross_file_value_equals`)
 
 The `.config/dotnet-tools.json` `tools.<tool>.version` strings AND
 the `global.json` `msbuild-sdks.<sdk>` versions should be coherent:
@@ -413,15 +400,11 @@ source. Already-funded for v0.10 design.
 
 ## Gap (no bundled `csharp@v1` / `dotnet@v1` ruleset today)
 
-**This is the single most prominent gap surfaced by this case
-study.** Of the 5 bundled per-language rulesets alint ships
-(rust@v1, java@v1, python@v1, node@v1, go@v1), none cover the .NET
-ecosystem. The .NET runtime is among the world's most widely-used
-language runtimes (every Azure SDK, every dotnet/* repo,
-microsoft/dapr, microsoft/orleans, the Unity scripting layer, and a
-substantial fraction of enterprise codebases) — the absence of a
-bundled ruleset means every .NET adopter has to restate the same
-~12 rules in their own config.
+The most prominent gap surfaced by this case study. Of the 5
+bundled per-language rulesets alint ships (rust@v1, java@v1,
+python@v1, node@v1, go@v1), none cover the .NET ecosystem. The
+absence means every .NET adopter has to restate the same ~12 rules
+in their own config.
 
 Recommended composition for `dotnet@v1`:
 
@@ -442,8 +425,8 @@ Recommended composition for `dotnet@v1`:
 
 12 rules; would consolidate every rule in this case study's
 "build-system anchors" + "per-csproj XML-shape" + "hygiene"
-sections into one `extends:` line. **Top-priority v0.10 bundled-
-ruleset ship-target.**
+sections into one `extends:` line. v0.10 bundled-ruleset
+ship-target.
 
 A complementary `aspnet@v1` (for ASP.NET Core projects) and
 `maui@v1` (for cross-platform apps) could ship later as composition
@@ -508,55 +491,7 @@ Listed by category for clarity:
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the** flagship "XML-shape monorepo at scale"
-story for the launch:
-
-- **dotnet/runtime is Microsoft's CLR + BCL** (~16k stars, but
-  importance-weighted larger than its star count — it's the runtime
-  for every Azure SDK, every dotnet/* repo, microsoft/dapr, every
-  enterprise .NET deployment, the Unity scripting backend). Naming
-  it as a target gives alint instant credibility with the
-  Microsoft + Windows-server + enterprise-.NET audience.
-- **No per-language linter sees the cross-csproj XML-shape** —
-  dotnet/format only sees C# AST; markdownlint only sees Markdown;
-  the Azure DevOps build matrix evaluates the MSBuild graph but
-  doesn't enforce shape conventions on the manifests themselves.
-  The invariants this case study enforces (every csproj is
-  Sdk-style + has TargetFramework{s}, every area has its own
-  Directory.Build.props, global.json + NuGet.config + Versions.props
-  triad integrity, the bin/obj/artifacts/.vs hygiene set) are
-  exactly the layer alint owns.
-- **The `xml_path_*` candidate** moves from "spark single-source"
-  to **"two-source, both at scale"** — promotes from v0.11+ to
-  v0.10 ship-target. spark proved the shape via 49 pom.xml; dotnet/
-  runtime proves the scale via ~2,300 distinct XML manifests.
-- **The `dotnet@v1` bundled ruleset** is a **strong v0.10 ship-
-  target** — every other major language ecosystem has a bundled
-  ruleset; .NET is the conspicuous gap. Composition is mechanical
-  (12 rules, all already authored in this case study), and adopter
-  surface is large (every dotnet/* repo + every Azure SDK + every
-  microsoft/* .NET project).
-
-Position it as the **sixth tile** on alint.org/examples (after
-kubernetes, airflow, microsoft/typescript, next.js, arrow,
-apache/spark), with the angle: *"dotnet/runtime has 1,091 csprojs,
-231 .slnx solution files, 257 Directory.Build.\* parent-config
-files, and 76 eng/ build-glue .props/.targets — alint is the layer
-that sees the structural shape that no per-language linter does —
-and the `dotnet@v1` bundled ruleset ships in v0.10."*
-
-The pitch lands harder when paired with the polyglot finding: the
-.NET runtime is itself polyglot (C# + C++ + native per-OS C +
-managed CMake glue), and the per-area conventions
-(`src/{coreclr,libraries,mono,installer,tasks,tools,samples}` each
-with its own Directory.Build.props anchoring its own discipline)
-are exactly the cross-cutting structural layer alint exists to
-validate.
-
-Followup feature work surfaced (consolidated, sorted by strength
-of demand across P2a + P2b including this case study):
+## Followup feature work surfaced (consolidated, sorted by strength of demand)
 
 - **`xml_path_matches` / `xml_path_equals` rule kinds** — was v0.11+
   single-source (spark); dotnet/runtime confirmed at scale. **Now a
@@ -653,18 +588,15 @@ of demand across P2a + P2b including this case study):
   v0.9.16+ candidate fix to `oss-baseline@v1`; status check pending —
   not addressed by the v0.9.16/v0.9.17 release cycle, still open as
   v0.10 housekeeping.
-- The **single most important finding** in this case study is the
-  validation of the `xml_path_*` v0.10 candidate at production scale.
-  spark established the shape; dotnet/runtime stresses it via ~2,300
-  distinct XML manifests across one repo. The cumulative drift
-  exposure (8 distinct per-csproj invariants × 1,091 csprojs ≈ 8,700
-  invariant-instances that today are checked via regex fallback or
-  not at all) is large enough to warrant the primitive's design cost
-  without further demand-source accumulation. **Per launch-evidence.md
-  as of 2026-05-07, `xml_path_*` is now formally a v0.10 ship-target
-  with 2 sources (spark + dotnet/runtime), and `dotnet@v1` is also a
-  v0.10 ship-target bundled ruleset — both promotions confirm the
-  case study's central recommendation.**
+- The headline gap-catalogue finding is the validation of the
+  `xml_path_*` v0.10 candidate at production scale. spark established
+  the shape; dotnet/runtime exercises it via ~2,300 distinct XML
+  manifests across one repo. Cumulative drift exposure: 8 distinct
+  per-csproj invariants × 1,091 csprojs ≈ 8,700 invariant-instances
+  checked today via regex fallback or not at all. Per launch-evidence.md
+  as of 2026-05-07, `xml_path_*` is now a v0.10 ship-target with 2
+  sources (spark + dotnet/runtime), and `dotnet@v1` is a v0.10
+  ship-target bundled ruleset.
 
 ---
 

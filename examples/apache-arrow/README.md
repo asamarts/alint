@@ -1,5 +1,7 @@
 # Case study: `apache/arrow`
 
+> Marketing/positioning writeup at https://alint.org/examples/apache-arrow/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `apache/arrow`
 and an alint config that replaces the rules alint can express
 today, plus a catalogue of the rules that need new alint
@@ -96,25 +98,21 @@ repo *state*, plus several arrow doesn't enforce today
 (per-language subdir README, per-Ruby-gem layout uniformity,
 .asf.yaml schema integrity).
 
-**Headline finding:** apache/arrow is **the flagship
-"language-agnostic polyglot monorepo" pitch for alint** — a
-single declarative config replaces the cross-language
-structural conventions (every per-language subdir has a
-README; every Ruby gem subdir ships LICENSE+NOTICE+README+
-Rakefile+Gemfile+gemspec; every GLib sub-library has
-meson.build; every C++/Python/Cython/Ruby source file carries
-the longer Apache ASF-preamble header) that **no per-language
-linter sees** because each per-language linter only sees its
-own subtree. clang-format never sees the Ruby gems, rubocop
-never sees the C++ tree, flake8 never sees the GLib sub-
-libraries, lintr never sees the Python package — but
-alint's `for_each_dir` + `for_each_file` over the canonical
-language-subtree list catches drift across the whole polyglot
-tree at once. **Surfaces 16 source files missing the
-Apache header** (all of which are listed in
-`dev/release/rat_exclude_files.txt` — confirming the canonical
-v0.10 ship-target `registry_paths_resolve` rule kind would fold
-the exclude list directly into alint's scope).
+**Live-tree findings (factual):** a single declarative config covers
+the cross-language structural conventions (every per-language subdir
+has a README; every Ruby gem subdir ships LICENSE+NOTICE+README+
+Rakefile+Gemfile+gemspec; every GLib sub-library has meson.build;
+every C++/Python/Cython/Ruby source file carries the longer Apache
+ASF-preamble header). Each per-language linter only sees its own
+subtree — clang-format does not see the Ruby gems, rubocop does not
+see the C++ tree, flake8 does not see the GLib sub-libraries, lintr
+does not see the Python package. alint's `for_each_dir` +
+`for_each_file` over the language-subtree list iterates across the
+polyglot tree at once. Surfaces **16 source files missing the Apache
+header** — all listed in `dev/release/rat_exclude_files.txt`,
+mapping directly to the v0.10 ship-target `registry_paths_resolve`
+candidate (which would resolve exclude-list pointers from
+header-missing-finding to known-exempt).
 
 ---
 
@@ -171,8 +169,6 @@ flags.
 
 ### Per-language subtree — the polyglot conventions
 
-This is where alint earns its keep on apache/arrow.
-
 | Subdir | Manifest at root | Per-package shape | alint disposition |
 |---|---|---|---|
 | `cpp/` | `CMakeLists.txt`, `meson.build`, `vcpkg.json`, `Brewfile`, `README.md` | (the C++ side is a single CMake project, no per-package iteration) | 4× `file_exists` for the manifest set |
@@ -210,11 +206,9 @@ AND the per-gem `gemspec` filename convention.
 
 ### `format/` — the cross-language schema spec
 
-This is the **most distinctive structural feature of
-apache/arrow**: a single directory of FlatBuffers + Protobuf
-files that EVERY language implementation must conform to. No
-per-language linter sees this — it's the cross-language
-contract.
+A single directory of FlatBuffers + Protobuf files that every
+language implementation conforms to. No per-language linter sees
+this — it is the cross-language contract.
 
 ```
 format/
@@ -238,9 +232,8 @@ cross-language interop (and the integration test under
 
 ### Pre-commit hooks (21 distinct hook ids across 14 + 2 hook repos)
 
-`.pre-commit-config.yaml` is the canonical alint-shaped
-surface for this repo: it's the cross-language tool registry
-that fans out to every per-language linter.
+`.pre-commit-config.yaml` is the cross-language tool registry that
+fans out to every per-language linter.
 
 | Hook id | Repo | Scope (files: glob) | alint disposition |
 |---|---|---|---|
@@ -346,14 +339,13 @@ list can't drift to dead patterns). alint has the file
 present; what's missing is the cross-validation that every
 pattern in the registry file maps to ≥1 real file.
 
-This is **one of 8 demand sources** for this need per
+This is one of 8 demand sources for this need per
 `launch-evidence.md` (rust + clap + cpython×2 + next.js + arrow +
-pytorch + nodejs/node + NixOS×3). The candidate is now a **v0.10
-ship-target** — the highest-leverage gap in P2a. The apache/arrow
-finding translates directly: "16 source files flagged as missing the
-Apache header are all listed in rat_exclude_files.txt — alint can't
-resolve the exclude-list pointers from header-missing-finding to
-known-exempt".
+pytorch + nodejs/node + NixOS×3). The candidate is a v0.10
+ship-target. The apache/arrow finding translates directly: 16 source
+files flagged as missing the Apache header are all listed in
+rat_exclude_files.txt — alint cannot resolve the exclude-list
+pointers from header-missing-finding to known-exempt.
 
 ### 2. `cross_language_implementation_complete` — every type in `format/Schema.fbs` has a per-language test fixture
 
@@ -375,12 +367,10 @@ files exist matching template B per language scope". The
 multi-implementation specs (Substrait, Apache Iceberg, Apache
 Beam SDKs).
 
-**Strong v0.11+ signal**: this is the **canonical "alint is
-the layer that catches drift across the polyglot tree"** rule
-shape. arrow stress-tests it harder than any other repo in
-P2a; per `launch-evidence.md`, `cross_language_implementation_complete`
-is now a **v0.11+ ship-target** with **5 saturated demand sources**
-(arrow + tensorflow + protobuf + angular + flutter).
+Per `launch-evidence.md`, `cross_language_implementation_complete`
+is a v0.11+ ship-target with 5 saturated demand sources (arrow +
+tensorflow + protobuf + angular + flutter). arrow exercises the
+shape across the broadest polyglot surface in the corpus.
 
 ### 3. `ordered_block` for `rat_exclude_files.txt` + the long shell file: lists in `.pre-commit-config.yaml`
 
@@ -389,11 +379,9 @@ is now a **v0.11+ ship-target** with **5 saturated demand sources**
 exits 0 today). The `.pre-commit-config.yaml` `shellcheck`
 and `shfmt` `files:` patterns (each ~50 lines of
 alternation) follow the same convention. Both are
-unenforced. Per `launch-evidence.md`, `ordered_block` is now a
-**v0.10 ship-target** with **7 saturated demand sources** (rust +
-airflow + tokio + cpython + arrow + golang/go + protobuf
-failure_lists), tied with `registry_paths_resolve` at the top of
-the v0.10 backlog.
+unenforced. Per `launch-evidence.md`, `ordered_block` is a
+v0.10 ship-target with 7 saturated demand sources (rust + airflow
++ tokio + cpython + arrow + golang/go + protobuf failure_lists).
 
 ### 4. `pre-commit fan-out` mode (extension of existing `command:` rule)
 
@@ -487,14 +475,13 @@ on a stock CI runner. The full apache/arrow tree (with
 `pre-commit run --all-files` (which serially fans through
 21 per-language hooks).
 
-Where alint shines on apache/arrow specifically: the
-**cross-language conventions** — every per-language subdir
-has README, every Ruby gem subdir has 6 files + 2 dirs, every
-GLib sub-library has meson.build, every .fbs/.proto exists in
-format/ — run against the entire polyglot tree in tens of
-milliseconds. Sequential `find . -name README.md -path "*/cpp"`
-+ same for python/r/ruby/matlab/format would be ~5 s on a
-hot cache.
+Coverage on apache/arrow specifically: the cross-language
+conventions — every per-language subdir has README, every Ruby gem
+subdir has 6 files + 2 dirs, every GLib sub-library has meson.build,
+every .fbs/.proto exists in format/ — run against the entire polyglot
+tree in tens of milliseconds. Sequential `find . -name README.md -path
+"*/cpp"` + same for python/r/ruby/matlab/format would be ~5 s on a hot
+cache.
 
 To benchmark wall-clock for real:
 `time pre-commit run --all-files` vs `time alint check`.
@@ -502,79 +489,28 @@ Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the** flagship "language-agnostic
-polyglot monorepo" story for the launch:
-
-- **apache/arrow is the canonical multi-language project on
-  GitHub** (~14k stars, widely deployed, the basis for every
-  modern columnar data library: Pandas 2.0, Polars, DuckDB,
-  Snowflake's external table format). Naming it as a target
-  gives alint instant credibility with the data-engineering
-  audience.
-- **No per-language linter sees the cross-language structural
-  conventions** — clang-format only sees C++, rubocop only
-  sees Ruby, flake8 only sees Python, lintr only sees R. The
-  invariants this case study enforces (per-language subdir
-  README, per-Ruby-gem layout, per-GLib-sublibrary meson.build,
-  format-spec file integrity, Apache governance triad,
-  per-language tool-config presence) are exactly the layer
-  alint owns and nothing else does.
-- **The Apache compliance bundle** (`compliance/apache-2@v1`)
-  is alint's tightest fit anywhere in the case-study
-  catalogue. Applying it to apache/arrow surfaces the
-  longer-vs-shorter header form distinction, which the
-  configured override resolves cleanly. The header rule's 16
-  findings are ALL legitimate (LLVM-licensed third-party
-  files + auto-generated bindings, all listed in
-  `dev/release/rat_exclude_files.txt`) — confirming both that
-  the rule fires correctly AND that the v0.10 ship-target
-  `registry_paths_resolve` rule kind would close the loop.
-- **The Apache release tooling** (`dev/release/`,
-  `.pre-commit-config.yaml`'s rat hook,
-  `verify-release-candidate.sh`) is unique among OSS repos:
-  the ASF community ships ~250+ projects following this
-  exact discipline, and **NONE of them have a structural
-  linter that enforces the dance**. This case study is a
-  ready-made template for every Apache project.
-
-Position it as the **fifth tile** on alint.org/examples
-(after kubernetes, airflow, microsoft/typescript, next.js),
-with the angle: *"apache/arrow has 6 languages in one tree,
-21 lint hooks across 14 tool repos, and 0 tools that see the
-cross-language conventions — alint is the layer that does."*
-
-The pitch lands harder when paired with the per-Ruby-gem
-finding: 8 gem subdirs × 6 required files each = 48
-file-existence assertions wrapped in a single
-`for_each_file` rule. No Ruby tool checks the layout
-because no Ruby tool sees the layout from above.
-
-Followup feature work surfaced (consolidated, sorted by
-strength of demand across P2a):
+## Followup primitive demand (consolidated, sorted by demand across P2a)
 
 - **`registry_paths_resolve` rule kind** — covers
   `rat_exclude_files.txt` here, plus the rust-lang
   triagebot.toml + clap pre-release-replacements + cpython
   .gitattributes generated markers + check-c-api-docs +
   check-manifests.js + NixOS×3 + pytorch + nodejs/node.
-  **Demand: 8 distinct sources** per `launch-evidence.md`
-  — strongest demand signal in P2a; **v0.10 ship-target**.
+  Demand: 8 distinct sources per `launch-evidence.md` —
+  v0.10 ship-target.
 - **`cross_language_implementation_complete` rule kind** —
   covers the format/Schema.fbs ↔ per-language test-fixture
   coverage gap; the shape generalises to every
   multi-implementation spec (Substrait, Iceberg, Beam SDKs,
-  protobuf bindings). Per `launch-evidence.md`, now a
-  **v0.11+ ship-target** with 5 saturated demand sources
-  (arrow + tensorflow + protobuf + angular + flutter).
+  protobuf bindings). Per `launch-evidence.md`, a v0.11+
+  ship-target with 5 saturated demand sources (arrow +
+  tensorflow + protobuf + angular + flutter).
 - **`ordered_block` rule kind** — re-confirmed by
   `rat_exclude_files.txt` + the long file: alternation lists
-  in `.pre-commit-config.yaml`. **Demand: 7 distinct sources**
+  in `.pre-commit-config.yaml`. Demand: 7 distinct sources
   per `launch-evidence.md` (rust + airflow + tokio + cpython
-  + arrow + golang/go + protobuf failure_lists) — joins
-  `registry_paths_resolve` at the top of the v0.10 priority
-  list (**v0.10 ship-target**).
+  + arrow + golang/go + protobuf failure_lists). v0.10
+  ship-target.
 - **`command_per_scope` mode** for the existing `command:`
   rule — covers the pre-commit per-scope hook repetition
   here. Demand: arrow only at this scale; defer.

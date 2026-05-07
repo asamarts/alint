@@ -1,5 +1,10 @@
 # Case study: `flutter/flutter`
 
+> Marketing writeup (narrative, headline catch, competitive framing)
+> lives at <https://alint.org/examples/flutter-flutter/>. This
+> README is the engineering reference: tooling inventory, mapping
+> table, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `flutter/flutter`
 and an alint config that replaces the rules alint can express
 today, plus a catalogue of the rules that need new alint
@@ -181,18 +186,16 @@ the Flutter-Authors BSD header on every file across the entire
 polyglot tree — currently enforced by the engine subtree's
 `format.sh` only).
 
-**Headline finding:** flutter/flutter is **the** flagship
-"platform-driven polyglot monorepo" pitch for alint — every
-native-OS embedder under
-`engine/src/flutter/shell/platform/` is a peer of every other
-embedder, with the **same engine ABI implemented in 5
-different native languages (Java, Kotlin, Swift, ObjC, C++)**.
-No per-language linter sees this cross-platform consistency:
-Android Studio only knows about `android/`, Xcode only knows
-about `darwin/{ios,macos}/`, MSVC only knows about `windows/`,
-and `clang-format` runs per-file without cross-platform parity
-awareness. alint catches the platform-driven invariants once,
-across the entire polyglot tree.
+**Key finding:** flutter/flutter is the canonical
+**platform-driven polyglot monorepo** — every native-OS embedder
+under `engine/src/flutter/shell/platform/` is a peer of every
+other embedder, with the same engine ABI implemented in 5
+different native languages (Java, Kotlin, Swift, ObjC, C++).
+This is the fifth independent demand signal for the
+`cross_language_implementation_complete` rule kind (`v0.11+
+ship-target`) and the first **platform-driven** source. The
+configured rules cover the cross-platform structural invariants
+once, across the entire polyglot tree.
 
 ---
 
@@ -587,63 +590,7 @@ Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the** flagship "platform-driven polyglot
-monorepo" story for the launch:
-
-- **flutter/flutter is the second-most-starred Google OSS
-  project on GitHub** (~170k stars, behind only
-  `tensorflow/tensorflow`). Naming it as a target gives alint
-  instant credibility with the mobile-app-development
-  audience that the data-engineering crowd doesn't reach.
-- **No per-platform IDE / linter sees the cross-platform
-  conventions**: Android Studio sees `android/`, Xcode sees
-  `darwin/{ios,macos}/`, MSVC sees `windows/`, but no one
-  tool sees them as peers. The invariants this case study
-  enforces (per-platform engine `BUILD.gn` presence, Apple
-  framework four-file layout, `flutter create` template
-  parity, Flutter-Authors BSD header across all 5 native
-  langs + Dart) are exactly the layer alint owns and nothing
-  else does.
-- **The Flutter-Authors BSD-style header rule** is the
-  cleanest "single rule sweeps the entire polyglot tree"
-  demo in the catalogue — one regex, ~9 000 source files
-  across 6 languages (Dart + Java + Kotlin + Swift + ObjC +
-  C/C++), one alint pass. The engine subtree's `format.sh`
-  enforces this on `engine/src/flutter/` only; alint extends
-  the same gate to the framework subtree (`packages/`,
-  `dev/`, `examples/`) where it's currently enforced only by
-  review discipline.
-- **The Apple framework four-file layout rule** (`Headers/`,
-  `Source/`, `Info.plist`, `module.modulemap` per
-  `engine/src/flutter/shell/platform/darwin/{ios,macos}/framework/`)
-  is the cleanest "Apple-platform invariant no Linux/Windows
-  developer would notice was broken" demo. Drift here
-  silently breaks `xcodebuild` framework targets that
-  external Flutter apps consume.
-
-Position it as **the first Wave-2 polyglot tile** on
-alint.org/examples (alongside arrow as Wave-1 polyglot
-flagship), with the angle: *"flutter has 5 native-platform
-languages + Dart, 6 per-OS engine embedders implementing the
-same ABI, 0 tools that see the platform-driven conventions —
-alint is the layer that does."*
-
-The pitch lands harder when paired with the
-`cross_language_implementation_complete` polyglot-variant
-finding: arrow demonstrates the **data-format-driven** variant
-(one schema, six per-language readers), tensorflow
-demonstrates the **data-format-driven variant at API-surface
-scale** (one Python frontend, six per-language bindings),
-flutter demonstrates the **platform-driven** variant (one
-engine ABI, six per-OS embedders). **Three independent demand
-signals, two distinct variants — `cross_language_implementation_complete`
-is now demand-validated as the v0.11+ flagship polyglot
-primitive across both variants.**
-
-Followup feature work surfaced (consolidated, sorted by
-strength of demand across P2):
+## Followup feature work surfaced (consolidated, sorted by strength of demand across P2)
 
 - **`registry_paths_resolve` rule kind** — covers `.ci.yaml`
   ↔ `dev/bots/test.dart` shard cross-validation here, plus
@@ -759,10 +706,9 @@ strength of demand across P2):
   first **platform-driven** source. The shape generalises
   to every cross-platform UI framework with per-OS native
   embedders (React Native, Xamarin/MAUI, Qt, Tauri).
-- The Flutter-Authors BSD-style header rule across 5 native
-  languages + Dart is the cleanest single-rule polyglot demo
-  in the case-study catalogue. Apply it to the live tree and
-  the `command:` shell-out to `engine/src/flutter/ci/format.sh`
+- The Flutter-Authors BSD-style header rule covers 5 native
+  languages + Dart in one regex (~9,000 source files in scope).
+  The `command:` shell-out to `engine/src/flutter/ci/format.sh`
   is the per-engine-subtree analogue alint already coordinates.
 
 ---

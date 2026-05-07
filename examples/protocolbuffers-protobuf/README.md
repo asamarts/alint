@@ -1,5 +1,7 @@
 # Case study: `protocolbuffers/protobuf`
 
+> Marketing/positioning writeup at https://alint.org/examples/protocolbuffers-protobuf/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in
 `protocolbuffers/protobuf` and an alint config that replaces the
 rules alint can express today, plus a catalogue of the gap items
@@ -16,13 +18,13 @@ subtrees excluded (`/src/google/protobuf/compiler`, `/third_party`,
 
 ## Summary
 
-protocolbuffers/protobuf is **the densest polyglot binding repo in
-the OSS evidence catalogue** — a single tree shipping the protoc
-compiler (C++) plus runtime + codegen for ~10 in-tree language
-bindings, glued together by `conformance/` (the cross-language
-wire-format test suite that EVERY binding must pass) and the
-canonical version manifests `version.json` + `protobuf_version.bzl`
-(which pin every binding's released version in lock-step).
+protocolbuffers/protobuf is a polyglot binding repo — a single tree
+shipping the protoc compiler (C++) plus runtime + codegen for ~10
+in-tree language bindings, glued together by `conformance/` (the
+cross-language wire-format test suite that EVERY binding must pass)
+and the canonical version manifests `version.json` +
+`protobuf_version.bzl` (which pin every binding's released version
+in lock-step).
 
 Concrete count at HEAD:
 
@@ -86,11 +88,11 @@ every structural assertion the existing tooling makes about repo
 linter sees because each per-language linter only sees its own
 binding subtree.
 
-**Headline finding for the v0.11+ design phase:** every one of
-the **10 in-tree language bindings has parity discipline** that
-the v0.11+ `cross_language_implementation_complete` ship-target
-(now 5 sources: arrow + TF + protobuf + angular + flutter)
-would express — quantitatively:
+**Cross-cutting finding for the v0.11+ design phase:** every one of
+the **10 in-tree language bindings has parity discipline** that the
+v0.11+ `cross_language_implementation_complete` ship-target (5
+sources: arrow + TF + protobuf + angular + flutter) would express —
+quantitatively:
 
 | Parity surface | Coverage |
 |---|---|
@@ -103,13 +105,12 @@ would express — quantitatively:
 
 **Net: every language binding has at least 3 parity surfaces
 (failure_list + version pin + test workflow), and the canonical
-ones (cpp, java, python, ruby, php, rust) have all 5.** This is
-the densest cross-language parity discipline in the OSS catalogue
-and **the strongest test case for the v0.11+
-`cross_language_implementation_complete` rule-kind ship-target**:
-**5 demand-driving sources** (apache/arrow + tensorflow/tensorflow
-+ protocolbuffers/protobuf + angular/angular + google/flutter),
-making the v0.11 design phase ship-ready.
+ones (cpp, java, python, ruby, php, rust) have all 5.** This
+saturates the v0.11+ `cross_language_implementation_complete`
+rule-kind ship-target with **5 demand-driving sources**
+(apache/arrow + tensorflow/tensorflow + protocolbuffers/protobuf +
+angular/angular + google/flutter), making the v0.11 design phase
+ship-ready.
 
 Total **structural-validation surfaces** counted: **45** discrete
 checks across the inventory.
@@ -224,11 +225,12 @@ This is where alint earns its keep on protocolbuffers/protobuf.
 | `upb/` | `BUILD`, sub-tree of `base/`, `cmake/`, `conformance/`, `hash/`, `json/`, `lex/`, `mem/`, etc. | Small C runtime that backs the Rust + Python upb backends + the Dart binding's runtime | `file_exists` for the test_upb.yml workflow |
 | `hpb/` | `BUILD`, `arena.h`, `backend/`, `bazel/`, `extension.cc`, `extension.h`, `hpb.h`, `internal/`, `multibackend.h`, `options.h` | Hpb (a C++ binding experiment using upb under the hood) | `file_exists` for the test_hpb.yml workflow |
 
-### Per-binding conformance discipline (the densest parity surface)
+### Per-binding conformance discipline
 
-The conformance suite is **the canonical "every language implements
-the same wire-format spec" check**. The discipline is enforced
-through 4 stacked gates, each per-binding:
+The conformance suite is the cross-language wire-format gate: every
+language binding implements a tester for the shared
+`conformance.proto` contract. The discipline is enforced through 4
+stacked gates, each per-binding:
 
 ```
 conformance/conformance.proto                  ← shared contract (1 file)
@@ -351,10 +353,10 @@ any current rule:
 
 ### 1. `cross_language_implementation_complete` — version drift across version.json + protobuf_version.bzl + per-binding manifests
 
-This is the **canonical demand-driver** in this repo, and the
-**densest of 5 sources** (apache/arrow + tensorflow/tensorflow +
-protocolbuffers/protobuf + angular/angular + google/flutter) for
-the v0.11+ ship-target rule shape. Concrete shape:
+This is the canonical shape in this repo and one of 5 sources
+(apache/arrow + tensorflow/tensorflow + protocolbuffers/protobuf +
+angular/angular + google/flutter) for the v0.11+ ship-target rule
+shape. Concrete shape:
 
 > For every language `L` in `version.json.main.languages.*`:
 >   - assert that `protobuf_version.bzl::PROTOBUF_<L>_VERSION` (where
@@ -375,13 +377,14 @@ either the v0.10+ `cross_file_value_equals` candidate (per-pair) or
 the broader v0.11+ `cross_language_implementation_complete` primitive
 (per-language-family fanout).
 
-**Demand reconfirmed:** this is now the **5th of 5 repos** to surface
+**Demand reconfirmed:** this is the **5th of 5 repos** to surface
 the same shape (apache/arrow + tensorflow/tensorflow + protocolbuffers/
 protobuf + angular/angular + google/flutter), promoting the v0.11+
-candidate to **ship-target for the v0.11 design phase**. With protobuf
-as the densest source (10 bindings × 4-5 parity surfaces each =
-**~45 cross-language assertions** the rule would express in one config
-block), the design phase has concrete guidance for the fanout DSL.
+candidate to **ship-target for the v0.11 design phase**. The
+quantitative shape in this repo — **10 bindings × 4-5 parity surfaces
+each = ~45 cross-language assertions** the rule would express in one
+config block — gives the design phase concrete guidance for the
+fanout DSL.
 
 ### 2. `cross_language_implementation_complete` — conformance/failure_list_<lang>.txt ↔ binding presence
 
@@ -494,46 +497,21 @@ deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work
 
-This case study is **the densest polyglot binding repo on the
-evidence list** — 10 in-tree language bindings, 19 conformance
-failure_lists, 11 per-binding CI workflows, 9 per-language version
-pins. Position it as:
-
-- **Headline angle:** *"Protocol Buffers ships the same wire-format
-  test suite to 10 language bindings — and no per-language linter
-  sees the parity discipline. alint surfaces it in 108 rules across
-  one declarative config."*
-- **Audience:** Google's protobuf team is the canonical reference
-  audience; broader appeal is to every multi-language binding repo
-  (gRPC, Thrift, Avro, Cap'n Proto, Substrait, Apache Iceberg,
-  Apache Beam SDKs).
-- **Differentiator vs. arrow:** arrow has a single-direction parity
-  shape (every per-language implementation conforms to the
-  `format/` schema spec). protobuf is **denser**: per-binding
-  conformance runner + per-binding failure_list + per-binding
-  text-format failure_list + per-binding test workflow + per-binding
-  version pin in 2 manifests. Arrow stress-tests one parity surface
-  (`format/Schema.fbs` ↔ per-language test fixtures); protobuf
-  stress-tests **5 parity surfaces simultaneously**.
-- **The Bazel angle:** protobuf is a Bazel-built repo with both
-  MODULE.bazel + WORKSPACE at root. alint complements
-  `buildifier` at the file-structure layer (137 BUILD.bazel + 117
-  *.bzl files); same "alint owns file-shape, buildifier owns
-  Starlark AST" division of labour as bazelbuild/bazel.
-
-Followup feature work surfaced (consolidated, sorted by strength
-of demand across P2a + P2b):
+Marketing/positioning context for this case study lives at
+https://alint.org/examples/protocolbuffers-protobuf/. The
+engineering follow-up work surfaced (consolidated, sorted by
+strength of demand across P2a + P2b) is below.
 
 - **`cross_language_implementation_complete` rule kind** — v0.11+
   ship-target. Covers both the version-drift case (`version.json` ↔
   `protobuf_version.bzl` ↔ per-binding manifests) AND the
   conformance-discipline case (`failure_list_<lang>.txt` ↔ binding
-  presence ↔ test workflow). protobuf is the **densest of 5 sources**
-  (apache/arrow + tensorflow/tensorflow + protobuf + angular +
-  flutter) — 10 bindings × 4-5 parity surfaces = ~45 cross-language
-  assertions in one rule. **The v0.11 design phase is ship-ready.**
+  presence ↔ test workflow). 5 sources (apache/arrow +
+  tensorflow/tensorflow + protobuf + angular + flutter) — 10 bindings
+  × 4-5 parity surfaces = ~45 cross-language assertions in one rule.
+  **The v0.11 design phase is ship-ready.**
 - **`ordered_block` rule kind** — v0.10 ship-target. Re-confirmed by
   19 `failure_list_<lang>.txt` files + 8 `text_format_failure_list_*.txt`
   files. **7 sources** (rust + airflow + tokio + cpython + arrow +
@@ -598,9 +576,9 @@ the bracket-notation key access. See
 - **The v0.11+ `cross_language_implementation_complete` ship-target
   is now demand-validated by 5 distinct repos** (apache/arrow +
   tensorflow/tensorflow + protocolbuffers/protobuf + angular/angular
-  + google/flutter), with protobuf as the **densest single-repo
-  source** (10 bindings × 4-5 parity surfaces = ~45 cross-language
-  assertions). The v0.11 design phase is ship-ready.
+  + google/flutter). Quantitatively in this repo: 10 bindings × 4-5
+  parity surfaces = ~45 cross-language assertions. The v0.11 design
+  phase is ship-ready.
 
 ---
 

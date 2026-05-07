@@ -1,5 +1,7 @@
 # Case study: `astral-sh/ruff`
 
+> Marketing/positioning writeup at https://alint.org/examples/astral-sh-ruff/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `astral-sh/ruff` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -23,18 +25,19 @@ checks, snapshot freshness), and **~35 % are out of alint's scope** (codegen
 drift in `crates/ruff_dev/`, ecosystem regression diff against a baseline
 binary).
 
-The 40 % that *do* fit translate cleanly to a 22-rule alint config (below).
-**Headline finding:** ruff's own `crates/ruff_dev/` is exclusively a
+The 40 % that *do* fit translate cleanly to a 22-rule alint config
+(below). ruff's own `crates/ruff_dev/` is exclusively a
 **code-generation** binary (it's the equivalent of running `cargo dev
-generate-all` to refresh `ruff.schema.json` + `docs/configuration.md` + the
-rules table) — **NOT a tidy-style structural validator**. Ruff's structural
-gates live entirely in `prek` hooks calling third-party tools (typos,
-zizmor, actionlint, mdformat, shellcheck, prettier, ruff itself). This is a
-legitimately different shape from rust-lang/rust's tidy: ruff has chosen the
-"compose existing tools via prek" path rather than building its own
-structural linter. **Alint is exactly the missing piece** — one declarative
-file replaces the prek wrapper, plus the per-prek-hook YAML, plus the
-priority-order metadata, plus the per-hook exclusion patterns.
+generate-all` to refresh `ruff.schema.json` + `docs/configuration.md`
++ the rules table) — not a tidy-style structural validator. Ruff's
+structural gates live entirely in `prek` hooks calling third-party
+tools (typos, zizmor, actionlint, mdformat, shellcheck, prettier,
+ruff itself). This is a legitimately different shape from
+rust-lang/rust's tidy: ruff has chosen the "compose existing tools
+via prek" path rather than building its own structural linter. One
+alint declarative file consolidates the prek wrapper, the per-hook
+YAML, the priority-order metadata, and the per-hook exclusion
+patterns.
 
 ---
 
@@ -85,9 +88,9 @@ ecosystem diff against baseline) are out of scope.
 
 ### `crates/ruff_dev/` — Rust dev-tooling crate (NOT a tidy)
 
-**Headline finding for the launch story.** Unlike rust-lang/rust's
-`src/tools/tidy/` (which IS structural validation), `crates/ruff_dev/` is
-exclusively a **codegen + introspection binary**:
+Unlike rust-lang/rust's `src/tools/tidy/` (which IS structural
+validation), `crates/ruff_dev/` is exclusively a **codegen +
+introspection binary**:
 
 ```
 crates/ruff_dev/src/
@@ -105,14 +108,14 @@ crates/ruff_dev/src/
 └── round_trip.rs              # parser dogfood
 ```
 
-There is **no per-crate convention enforcement** in `ruff_dev` — the things
-tidy would check (lints inheritance, README presence, manifest fields,
-license headers) are simply not enforced anywhere in ruff's tree at all.
-The conventions exist (every internal crate is `version = "0.0.0", publish =
-false`; only `ruff` and `ruff_linter` and `ruff_wasm` get versioned), but
-their enforcement is entirely social. **This is a direct alint opportunity:**
-the rule `ruff-internal-crates-unpublished` in this config is something ruff
-literally does not check today and would benefit from on day one.
+There is no per-crate convention enforcement in `ruff_dev` — the
+things tidy would check (lints inheritance, README presence, manifest
+fields, license headers) are not enforced anywhere in ruff's tree.
+The conventions exist (every internal crate is `version = "0.0.0",
+publish = false`; only `ruff` and `ruff_linter` and `ruff_wasm` get
+versioned), but their enforcement is entirely social. The rule
+`ruff-internal-crates-unpublished` in this config is something ruff
+does not check today.
 
 ### Ad-hoc CI gates worth knowing about
 
@@ -214,33 +217,15 @@ measurement pass.
 
 ---
 
-## Recommendation for the launch story
-
-This case study has **two distinct angles** worth featuring:
-
-1. **The "prek replacement" angle** — "alint replaces 15 of ruff's 16
-   pre-commit hooks with one declarative config." The `prek` framework is
-   itself an Astral product (the modern pre-commit replacement); pitching
-   alint as "the next layer up — the rule-config side, not the hook-runner
-   side" positions alint orthogonally rather than competitively. There's
-   no overlap: prek runs hooks, alint declares rules.
-
-2. **The "ruff is a linter that can't lint its own structure" angle** —
-   ruff has 900+ rules for Python, but **zero rules for its own per-crate
-   manifest discipline**. The `ruff-internal-crates-unpublished` rule in
-   this config is something ruff doesn't enforce today and would benefit
-   from on day one. Same shape applies to most "linter for X language X"
-   projects across the inventory.
-
-Followup feature work surfaced (in priority order):
+## Followup primitive demand (consolidated, priority order)
 
 - **`pair_inverse` rule kind** (every partner traces back to a primary) —
   unlocks `cargo insta` `--unreferenced=reject`-style gates for any
-  project with generated artefacts. Per `launch-evidence.md`, now a
-  **v0.10 design candidate** with 2 sources (ruff + angular goldens).
+  project with generated artefacts. Per `launch-evidence.md`, a v0.10
+  design candidate with 2 sources (ruff + angular goldens).
 - **`command_idempotent` mode** — generalises the "fixer in --check mode"
-  pattern. Per `launch-evidence.md`, now a **v0.10 design candidate**
-  with 2 sources (ruff + prettier).
+  pattern. Per `launch-evidence.md`, a v0.10 design candidate with 2
+  sources (ruff + prettier).
 - **Vendoring published schemas under `.alint/schemas/`** as a first-class
   workflow — the GitHub workflow schema, the PEP 621 schema, and others
   recur across configs and would benefit from a documented pattern.

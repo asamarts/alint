@@ -1,5 +1,11 @@
 # Case study: `NixOS/nixpkgs` (SCALE STRESS)
 
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/nixos-nixpkgs/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> validation status. Same facts, different language.
+
 Inventory of the structural-validation tooling in `NixOS/nixpkgs`
 and an alint config that replaces the rules alint can express
 today, plus a catalogue of the rules that need new alint
@@ -18,12 +24,11 @@ sparse-checkout preserves.
 
 ## Summary
 
-NixOS/nixpkgs is **the SCALE-STRESS data point** in alint's
-case-study catalogue: ~150k+ files at full checkout (~500 GB
-expanded), ~20 678 package directories under `pkgs/by-name/`
-alone (each its own sub-tree with its own `package.nix`). The
-20 P2a case studies all sat below ~80k files (pytorch was the
-largest at ~80k). nixpkgs answers two launch-relevant questions:
+`NixOS/nixpkgs` is the **scale-stress data point** in the catalogue:
+~150-180k files at full checkout, ~20 678 package directories under
+`pkgs/by-name/` alone (each with its own `package.nix`). The other 20
+case studies all sat below ~80k files (pytorch was the largest at
+~80k). nixpkgs exists in this catalogue to answer two questions:
 
 1. **Does `for_each_dir` over thousands of directories scale
    gracefully?**
@@ -100,23 +105,19 @@ repo *state*, plus several nixpkgs doesn't enforce today
 `for_each_dir` instead of relying on `nixpkgs-vet` to surface
 the gap).
 
-**Headline finding:** at 39 101 files and 20 678 by-name
+**Headline measurement:** at 39 101 files and 20 678 by-name
 package directories, alint's `for_each_dir` over
 `pkgs/by-name/*/*` completes the entire 79-rule check pass in
 **273 ms wall-clock** — *under half the wall-clock budget of a
-single Nix evaluation* — confirming alint scales gracefully to
-the largest non-trivial OSS monorepo on GitHub. nixpkgs is
-**the case where alint's "any size repo" pitch becomes
-defensible by measurement**: the `for_each_dir` primitive is
-not the bottleneck adopters at this scale need to fear.
+single Nix evaluation*. The `for_each_dir` primitive is not the
+bottleneck at this scale.
 
 ---
 
 ## Scale notes
 
-This is the section the entire P2b SCALE-STRESS exercise
-exists to populate. Each candidate concern from the original
-prompt was tested empirically:
+Each candidate concern from the SCALE-STRESS exercise was
+tested empirically:
 
 ### 1. `for_each_dir` over 20 678 package directories — VERIFIED OK
 
@@ -543,56 +544,7 @@ canonical CI runner with all four tools available.
 
 ---
 
-## Recommendation for the launch story
-
-This case study is **the launch-pitch's "scales to any size
-repo" anchor**:
-
-- **NixOS/nixpkgs is the largest non-trivial OSS monorepo on
-  GitHub** (~150-180k files at full checkout, ~80 000
-  package builds, 20 678 by-name package directories,
-  ~30 800-line maintainer registry). Naming it as a target
-  gives alint instant credibility as a tool that handles
-  scale.
-- **alint completes its 79-rule check pass in 273 ms wall-
-  clock** on the full sparse tree — confirmation that the
-  `for_each_dir` primitive scales gracefully even at the
-  20k-iteration mark. The "any size repo" pitch on alint.org
-  is now empirically backed: the largest reasonable-shape OSS
-  monorepo runs in well under a second.
-- **The bundled rulesets work without modification** at this
-  scale — `oss-baseline + ci/github-actions +
-  hygiene/no-tracked-artifacts + tooling/editorconfig` need
-  no `scope_filter` discipline at nixpkgs's tree size, and
-  surface 2 legitimate violations (Ruby bundler caches under
-  `pkgs/by-name/{pt,re}/{pt,redis-dump}/.bundle/`) with 0
-  false positives.
-- **alint complements rather than replaces nixpkgs's
-  existing tooling** — the in-tree `ci/` Nix-evaluation
-  framework owns the attribute-set side (Nix evaluation,
-  by-name attribute resolution, hash verification, lib unit
-  tests); alint owns the file-shape side and acts as a
-  fast-fail PR-time signal beneath the slower Nix-eval
-  passes.
-
-Position it as the **scale-stress tile** on
-alint.org/examples (after kubernetes, pytorch, apache/arrow,
-microsoft/typescript), with the angle: *"NixOS/nixpkgs has
-20 678 by-name package directories and a 30 841-line
-maintainer registry; alint's full 79-rule structural check
-pass over the entire tree completes in 273 ms — proof that
-the language-agnostic linter scales to the largest reasonable
-OSS monorepo without per-repo perf tuning."*
-
-The pitch lands harder when paired with the by-name finding:
-a single `for_each_dir` rule asserts the file-shape invariant
-across 20 678 package directories with one require — a
-declarative one-liner that replaces a hand-rolled walk in
-`nixpkgs-vet` (file side; the attribute side stays on
-nixpkgs-vet).
-
-Followup feature work surfaced (consolidated, sorted by
-strength of demand across P2a + P2b):
+## Followup feature work surfaced (consolidated, sorted by strength of demand across P2a + P2b)
 
 - **`registry_paths_resolve` rule kind** — covers
   `maintainers/maintainer-list.nix` ↔ per-package
@@ -652,9 +604,7 @@ neither workaround is needed in this config.
   scoped to fire if drift were to occur.
 - **Wall-clock benchmark on the actual sparse tree**:
   `time alint check` = 0.273 s (real) — 39 101 files,
-  20 678 by-name package directories, 79 rules. This is the
-  load-bearing data point for the launch-pitch
-  "alint scales to any size repo" claim.
+  20 678 by-name package directories, 79 rules.
 
 ---
 
@@ -696,10 +646,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   15, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
   `tooling/editorconfig` 3; rule IDs may overlap)
 - **`validate-config`:** ✓ Config valid: 79 rule(s) loaded
-- **Live-tree headline (load-bearing):** **39 101 files, 273 ms
-  wall-clock**, full 79-rule pass over the sparse-checkout, including
-  the 20 678-iteration `for_each_dir` over `pkgs/by-name/*/*`. This is
-  the empirical anchor for alint's "any size repo" pitch.
+- **Live-tree measurement:** **39 101 files, 273 ms wall-clock**,
+  full 79-rule pass over the sparse-checkout, including the
+  20 678-iteration `for_each_dir` over `pkgs/by-name/*/*`.
 - **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here.
   No tracked-but-gitignored files; the only `root_only: true` rules
   use single-segment literals (`flake.nix`, `default.nix`, etc.).

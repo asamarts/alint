@@ -1,5 +1,7 @@
 # Case study: `prettier/prettier`
 
+> Marketing/positioning writeup at https://alint.org/examples/prettier-prettier/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `prettier/prettier` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -31,22 +33,16 @@ The 70 % that *do* fit (declaratively + via shellouts) translate to a
 **68-rule alint config** (22 prettier-specific + 46 from 6 bundled
 rulesets — see Validation status footer for the breakdown).
 
-**Headline finding:** prettier's per-language-plugin convention discipline
-(every `src/language-{js,css,html,markdown,...}/` plugin must export
-`index.js` + `languages.evaluate.js`; every plugin maps 1:1 to a
-`changelog_unreleased/<lang>/` category dir) is **maintained socially
-today — there is zero on-disk enforcement.** None of the 11 `lint:*`
-scripts, none of the 16 `.github/workflows/lint.yml` steps, and none of
-the 5 custom validation node scripts checks the per-plugin layout.
-**Alint's `for_each_dir` over `src/language-*` is the missing structural
-floor** — it adds 5 net-new gates that prettier's existing
-ESLint+prettier-itself+cspell+knip+tsc stack does not provide today.
-
-This is the cleanest "structural floor on top" win in the Wave 1+2
-inventory so far: prettier is itself a code-formatter (it dogfoods),
-its existing tooling is mature and tightly curated, and yet the
-plugin-shape conventions that the entire codebase architecture rests on
-are encoded only in code review and folder-name memory.
+**Cross-cutting finding:** prettier's per-language-plugin convention
+discipline (every `src/language-{js,css,html,markdown,...}/` plugin
+must export `index.js` + `languages.evaluate.js`; every plugin maps
+1:1 to a `changelog_unreleased/<lang>/` category dir) is maintained
+socially today — there is zero on-disk enforcement. None of the 11
+`lint:*` scripts, none of the 16 `.github/workflows/lint.yml` steps,
+and none of the 5 custom validation node scripts checks the per-
+plugin layout. Alint's `for_each_dir` over `src/language-*` adds 5
+net-new gates that prettier's existing ESLint + prettier-itself +
+cspell + knip + tsc stack does not provide today.
 
 ---
 
@@ -102,7 +98,7 @@ hand-rolled node scripts to encode them:
 
 ### Per-language-plugin convention (NOT enforced anywhere on disk)
 
-The headline finding. Eight plugins under `src/language-*/` (js, css, html,
+Eight plugins under `src/language-*/` (js, css, html,
 markdown, yaml, json, graphql, handlebars). Each one must export:
 - `index.js` — parser/printer/options entry point
 - `languages.evaluate.js` — linguist-languages lookup table consumed at
@@ -161,7 +157,7 @@ structural floor. Single declarative gate; catches both directions.
 | `lint:eslint` `prettier-internal-rules/*` | 9 internal eslint rules covering AST patterns specific to prettier's printer architecture | Out of scope (JS AST); stays on eslint |
 | `lint:knip` | Unused exports + dep-graph analysis | Out of scope (JS dep-graph); stays on knip |
 
-**Three concrete launch-prep proposals surfaced from this case study:**
+**Three concrete v0.10+ rule-kind proposals surfaced from this case study:**
 
 1. **`json_key_value_forbidden` rule kind** (or a JSON-aware mode on
    `file_content_forbidden`). The current `file_content_forbidden` regex
@@ -258,35 +254,11 @@ same checkout. Deferred to the per-repo measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work
 
-This case study has **two distinct angles** worth featuring:
-
-1. **The "structural floor on top" angle** — prettier has mature tooling
-   (eslint flat-config + dogfooded prettier + cspell + knip + tsc + 5
-   custom node validation scripts) and yet the per-language-plugin
-   architectural invariants — every plugin exports `index.js` +
-   `languages.evaluate.js`; every plugin maps to a changelog category dir
-   — are encoded **only in code review and folder-name convention**.
-   alint adds 5 net-new gates that ship from the first `alint check`
-   and would have caught a missing `languages.evaluate.js` on day one.
-   Same shape applies to most plugin-architecture projects: webpack,
-   rollup, vite, babel, postcss — the "every plugin has shape X" rule
-   is universal and rarely enforced.
-
-2. **The "alint as the script consolidation point" angle** — prettier
-   has 5 custom node scripts (lint-changelog.js, check-deps.js,
-   format-test-lint.js, ensure-no-files-changed.js, clean-cspell.js)
-   totalling ~330 LoC, plus 8 yarn lint scripts, plus a 16-step
-   GitHub workflow. **5 of 6 invariants in `lint-changelog.js` and
-   1 of 2 in `check-deps.js` collapse to declarative alint rules.**
-   That's ~80 LoC of bespoke JS replaced by ~50 lines of declarative
-   YAML — easier to read in PR review, easier to extend, schema-validated
-   at config-load time. The remaining 4-5 shape rules surface clean
-   v0.10+ primitive candidates (`json_key_value_forbidden`,
-   `for_each_leaf_dir`, `command_idempotent`).
-
-Followup feature work surfaced (in priority order):
+Marketing/positioning context for this case study lives at
+https://alint.org/examples/prettier-prettier/. The engineering
+follow-up work surfaced (in priority order) is consolidated below.
 
 - **`json_key_value_forbidden` rule kind** — the structured equivalent
   of `file_content_forbidden`. Demand: prettier (pinning), turbo

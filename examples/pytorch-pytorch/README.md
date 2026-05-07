@@ -1,5 +1,7 @@
 # Case study: `pytorch/pytorch`
 
+> Marketing/positioning writeup at https://alint.org/examples/pytorch-pytorch/. This README is the engineering reference: tooling inventory, mapping, gap catalogue, validation status.
+
 Inventory of the structural-validation tooling in `pytorch/pytorch` and an
 alint config that replaces the rules alint can express today, plus a catalogue
 of the rules that need new alint primitives.
@@ -26,11 +28,6 @@ orchestration needs (multi-language scopes, init-then-lint two-phase
 adapters, S3-vendored binary fetch, partial-file lint via `@PATHSFILE`
 fanout).
 
-This is the launch-pitch story for alint on pytorch:
-
-> **alint isn't trying to replace `lintrunner` — but the structural subset
-> of `.lintrunner.toml` is exactly what alint specialises in.**
-
 Of the 57 lintrunner adapters:
 
 - **~28 are pure STRUCTURAL/regex** (24 `grep_linter.py` shims + EXEC + NEWLINE
@@ -43,12 +40,12 @@ Of the 57 lintrunner adapters:
   pyproject_linter, no_workflows_on_fork, stable_shim_*) — these stay on
   lintrunner
 
-So the headline is: **~49 of 57 adapters (≈86 %) are within alint's grammar
-today**; the AST-aware tail (~8/57 ≈ 14 %) stays on lintrunner. The
-`.alint.yml` in this directory ships **40 pytorch-specific rules** plus 6
-bundled rulesets totalling **47 bundled rules** (oss-baseline 15 +
-python 9 + ci/github-actions 3 + hygiene/no-tracked-artifacts 11 +
-agent-hygiene 6 + tooling/editorconfig 3) — **87 rules total**.
+**~49 of 57 adapters (≈86 %) are within alint's grammar today**; the
+AST-aware tail (~8/57 ≈ 14 %) stays on lintrunner. The `.alint.yml`
+in this directory ships **40 pytorch-specific rules** plus 6 bundled
+rulesets totalling **47 bundled rules** (oss-baseline 15 + python 9 +
+ci/github-actions 3 + hygiene/no-tracked-artifacts 11 + agent-hygiene
+6 + tooling/editorconfig 3) — **87 rules total**.
 
 Beyond `.lintrunner.toml`, pytorch ships:
 
@@ -291,9 +288,10 @@ non-goals are deliberate.
 - **shellcheck** — alint shells out (SHELLCHECK)
 - **actionlint** — alint shells out (ACTIONLINT)
 - **cmakelint** — alint shells out (CMAKE)
-- **lintrunner** — alint sits BENEATH; CI runs both. lintrunner handles the
-  AST-aware tail; alint handles the structural floor (faster fail signal,
-  parallel walks, no per-adapter Python-venv spawn)
+- **lintrunner** — division of labour: lintrunner handles the
+  AST-aware tail (the 8 adapters listed above); alint handles the
+  structural floor (the remaining ~49 adapters mapped or partially
+  mapped above). CI can run both.
 
 ---
 
@@ -362,24 +360,23 @@ batch of files). On a warm laptop checkout it takes ~30-60 seconds for
 the S3-vendored binary fetches). The pre-fetch dance (`lintrunner init`)
 adds ~30 seconds the first time.
 
-The alint pitch here is **inventory legibility AND fail-fast latency**:
+Two operational characteristics distinguish alint from lintrunner here:
 
-1. **Legibility** — A new pytorch contributor staring at the structural-
-   validation surface today has to read a 1876-line `.lintrunner.toml`,
-   30 Python adapter files in `tools/linter/adapters/`, the `.editorconfig`,
-   `.clang-format` (3.4 KB), `.clang-tidy` (3 KB), `.cmakelintrc`,
-   `pyrefly.toml`, `mypy.ini` (×2), and `pytest.ini` to understand what
-   rules apply where. The alint config in this directory is **one file**,
-   declarative, with each rule's scope, severity, and rationale visible
-   in 5-10 lines.
+1. **Config legibility** — pytorch's structural-validation surface today
+   spans a 1876-line `.lintrunner.toml`, 30 Python adapter files in
+   `tools/linter/adapters/`, the `.editorconfig`, `.clang-format` (3.4
+   KB), `.clang-tidy` (3 KB), `.cmakelintrc`, `pyrefly.toml`, `mypy.ini`
+   (×2), and `pytest.ini`. The alint config in this directory is one
+   file, declarative, with each rule's scope, severity, and rationale
+   visible in 5-10 lines.
 
-2. **Fail-fast latency** — alint has zero adapter-spawn cost: it walks the
-   tree once and runs every rule in parallel against the in-memory file
-   bytes. lintrunner spawns one Python process per code per file batch.
-   For the 28 structural-only adapters, alint should be 10-100× faster.
-   For the 21 command-shellout adapters, the wall-clock delta is dominated
-   by the upstream tool — both runners are roughly equivalent (same `ruff`,
-   same `clang-format`, same `actionlint`).
+2. **Fail-fast latency** — alint has zero adapter-spawn cost: it walks
+   the tree once and runs every rule in parallel against the in-memory
+   file bytes. lintrunner spawns one Python process per code per file
+   batch. For the 28 structural-only adapters, alint is expected to be
+   10-100× faster. For the 21 command-shellout adapters, the wall-clock
+   delta is dominated by the upstream tool — both runners are roughly
+   equivalent (same `ruff`, same `clang-format`, same `actionlint`).
 
 To benchmark for real: `time lintrunner --all-files --take CLANGFORMAT` vs
 `time alint check --rules pytorch-clang-format` against the same tree;
@@ -388,37 +385,15 @@ measurement pass.
 
 ---
 
-## Recommendation for the launch story
+## Followup feature work
 
-**Headline launch quote:** "pytorch built `lintrunner` because no
-existing tool handled their orchestration needs — but ~49 of its 57
-adapters (≈86 %) are pure structural checks (24 grep shims + 21 mature
-external-tool shellouts + 4 simple bespoke). alint expresses every one
-of these as a 5-10 line declarative rule. lintrunner stays where it
-provably wins (the 8 AST-aware adapters); alint sits beneath as the
-structural floor: faster fail signal, no per-adapter Python-venv spawn,
-one-file-readable contract."
-
-This is a **fourth positioning narrative** — pytorch fits into all three
-existing P2a narratives but with an extra twist:
-
-| Narrative | pytorch data point |
-|---|---|
-| "Replaces N hand-rolled validation scripts" | 28 structural lintrunner adapters consolidated to one config |
-| "Catches conventions your pipeline assumes but doesn't verify" | callable-workflow naming convention (`_*.yml`), generated-workflow `# @generated` marker, `.ci/docker/` content-hash trap |
-| "Adds structural floor on top of mature tooling" | 21 command shellouts mirror lintrunner's clang-format / clang-tidy / ruff / mypy / pyrefly / actionlint orchestration |
-| **NEW (pytorch-specific):** "Replaces the structural subset of YOUR custom orchestration layer" | lintrunner's 24 grep_linter shims + 4 simple bespoke adapters become 28 alint rules; lintrunner keeps the 8 AST-aware adapters |
-
-The fourth narrative is the launch-pitch differentiator: **alint is what
-you would have built instead of `lintrunner` if `lintrunner` had existed
-and you'd realised you only needed 86 % of its expressivity.** For repos
-that already have a custom orchestrator (pytorch's lintrunner; tensorflow's
-`buildifier`/`yapf`-driven CI; bazel's own `buildifier`), alint is the
-"don't build your own orchestrator next time" pitch — adopt alint for the
-structural floor, keep the AST tail on whatever AST-aware tool you needed
-in the first place.
-
-Followup feature work surfaced (priority order):
+Marketing/positioning context for this case study lives at
+https://alint.org/examples/pytorch-pytorch/. Quantitatively: 49 of
+pytorch's 57 lintrunner adapters (≈86%) are structural (24
+`grep_linter.py` shims + 21 external-tool shellouts + 4 simple
+bespoke); the AST-aware tail (8/57 ≈ 14%) stays on lintrunner. The
+engineering follow-up work surfaced (priority order) is consolidated
+below.
 
 - **`cross_file_value_equals`** — **v0.10 ship-target with 10 sources
   past saturation**. Strongest demand signal in P2a + P2b; pytorch's
