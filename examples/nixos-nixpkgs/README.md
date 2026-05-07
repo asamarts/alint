@@ -609,7 +609,7 @@ strength of demand across P2a + P2b):
   "v0.10 if-cheap".
 
 No NEW rule-kind candidates surfaced — consistent with the
-P2b saturation hypothesis from launch-prep.md.
+P2b saturation hypothesis from launch-evidence.md.
 
 No NEW schema/language pitfalls beyond the 17 in
 CONFIG-AUTHORING.md — the config drafted cleanly first-pass

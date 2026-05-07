@@ -284,7 +284,7 @@ rules:
   # `yaml_path_*` against a fixed JSONPath doesn't fit. We use
   # `file_content_matches` against the YAML text, which side-steps
   # the structure mismatch. The v0.10+ `cross_file_value_equals`
-  # primitive (proposed in launch-prep.md) would let one declarative
+  # primitive (proposed in launch-evidence.md) would let one declarative
   # rule replace this whole block: "every chart's `hub:` value
   # equals the same literal across charts."
   - id: istio-chart-hub-pins-testing-registry

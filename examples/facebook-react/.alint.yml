@@ -74,7 +74,7 @@
 #     `packages/{react,react-dom,react-test-renderer}/package.json`'s
 #     `version` field). This needs the `cross_file_value_equals`
 #     primitive (already on the v0.10+ candidate list — see
-#     `docs/launch-prep.md` § "Rule-kind candidates surfaced by P2a").
+#     `docs/development/launch-evidence.md` § "Rule-kind candidates surfaced by P2a").
 #   - `print-warnings.js` (parses every JS source with hermes-parser
 #     to enumerate every `console.warn(...)` / `console.error(...)`
 #     call). AST analysis; out of scope.
@@ -844,7 +844,7 @@ rules:
     # The cross-source-of-truth equality check from
     # `scripts/tasks/version-check.js`. We can't replicate
     # this in alint until the `cross_file_value_equals` primitive
-    # ships (see this directory's README + docs/launch-prep.md
+    # ships (see this directory's README + docs/development/launch-evidence.md
     # § rule-kind candidates).
     when: facts.is_yarn_v1 and facts.has_react_package
     kind: command
