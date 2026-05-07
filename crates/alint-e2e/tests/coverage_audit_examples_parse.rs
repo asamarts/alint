@@ -1,7 +1,7 @@
 //! Hard audit: every `.alint.yml` shipped under `/examples/` MUST
 //! load + build cleanly via `alint_dsl::load` + `RuleRegistry::build`.
 //!
-//! The launch-prep validation pass (`docs/launch-prep.md`) ships a
+//! The launch-prep validation pass (`docs/development/launch-evidence.md`) ships a
 //! growing set of real-repo case studies under `examples/<owner>-<repo>/`.
 //! Each case study includes a working `.alint.yml`. The first batch
 //! (kubernetes, rust, deno, airflow, turbo) surfaced 12 distinct
