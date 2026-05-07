@@ -11,49 +11,9 @@
 - 🧰 **Powerful + extensible.** 60 rule kinds across 13 families, 19 bundled ecosystem rulesets, 12 auto-fix ops, 8 output formats, structured-query rules with full RFC 9535 JSONPath, cross-file relational rules, conditional `when:` gates over per-run facts, and `extends:` composition with SRI-pinned URLs.
 - 📦 **One static Rust binary.** Any language, any repo. No plugin install, no Node/JVM/Python runtime needed.
 
-## Proven on 30 real OSS repos
-
-alint configs covering the structural-validation surfaces of:
-
-**Single-language workspaces** (P2a) —
-[kubernetes](examples/kubernetes-kubernetes/),
-[rust-lang/rust](examples/rust-lang-rust/),
-[golang/go](examples/golang-go/),
-[python/cpython](examples/python-cpython/),
-[nodejs/node](examples/nodejs-node/),
-[apache/airflow](examples/apache-airflow/),
-[denoland/deno](examples/denoland-deno/),
-[tokio-rs/tokio](examples/tokio-rs-tokio/),
-[astral-sh/uv](examples/astral-sh-uv/),
-[astral-sh/ruff](examples/astral-sh-ruff/),
-[clap-rs/clap](examples/clap-rs-clap/),
-[microsoft/typescript](examples/microsoft-typescript/),
-[facebook/react](examples/facebook-react/),
-[prettier/prettier](examples/prettier-prettier/),
-[pnpm/pnpm](examples/pnpm-pnpm/),
-[helm/helm](examples/helm-helm/),
-[pytorch/pytorch](examples/pytorch-pytorch/),
-[vercel/turbo](examples/vercel-turbo/).
-
-**Polyglot monorepos** (P2b) —
-[apache/arrow](examples/apache-arrow/) (6 languages: C++/Java/Python/Rust/Go/JS),
-[vercel/next.js](examples/vercel-next.js/) (TS + Rust hybrid),
-[NixOS/nixpkgs](examples/nixos-nixpkgs/) (39,101 files / 20,678 by-name dirs — full 79-rule pass in 273 ms wall-clock),
-[bazelbuild/bazel](examples/bazelbuild-bazel/),
-[tensorflow/tensorflow](examples/tensorflow-tensorflow/) (1,185 textproto API goldens; cross-language implementation parity),
-[apache/spark](examples/apache-spark/) (49 pom.xml files; XML-path structural query),
-[microsoft/vscode](examples/microsoft-vscode/) (apples-to-apples vs `build/hygiene.ts` — covers ~75% of 8 hygiene checks declaratively, 222 violations on the live tree),
-[angular/angular](examples/angular-angular/) (TypeScript framework — 16 packages, public-API goldens locking 13 of them),
-[istio/istio](examples/istio-istio/) (Go monorepo + 9 Helm charts; surfaces v0.10 cross-file value-equality candidate),
-[dotnet/runtime](examples/dotnet-runtime/) (1,091 .csproj files + 234 solutions + 257 Directory.Build.* + 520 .props/.targets ≈ 2,300 XML manifests),
-[protocolbuffers/protobuf](examples/protocolbuffers-protobuf/) (10 in-tree language bindings + 1 spun-out — densest source for v0.11 cross-language-implementation-complete),
-[flutter/flutter](examples/flutter-flutter/) (platform-driven polyglot variant — Dart framework + 6 native-OS embedders).
-
-**Headline catch:** alint surfaces **5 real Trojan-Source / [CVE-2021-42574](https://nvd.nist.gov/vuln/detail/CVE-2021-42574)** bidirectional-control-character files in flutter's `docs/releases/archive/` via the bundled `oss-baseline` ruleset's `no_bidi_controls` rule. Flutter's existing tooling (analyzer, dart format, per-package pre-commits) doesn't catch this class.
-
-Each case study includes a working `.alint.yml` you can copy as a starting point + a markdown writeup explaining what alint catches that the repo's existing tooling misses. See [`examples/`](examples/) for the full gallery.
-
 alint fills the active-maintenance gap left when [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026, with a superset of its rule catalogue plus first-class cross-file, conditional-rule, structured-query, and agent-aware primitives.
+
+Working `.alint.yml` configs for 30 OSS repos — single-language workspaces, polyglot monorepos, scale stress-tests — live under [`examples/`](examples/README.md), each with a writeup of what alint catches that the repo's existing tooling misses.
 
 ## 60-second quickstart
 
@@ -82,27 +42,16 @@ Bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_pyth
 
 ## Core capabilities
 
-- **60 rule kinds** across thirteen families (full reference: [docs/rules.md](docs/rules.md)):
-  - *Existence* — `file_exists`, `file_absent`, `dir_exists`, `dir_absent`.
-  - *Content* — `file_content_matches`, `file_content_forbidden`, `file_header`, `file_footer`, `file_shebang`, `file_starts_with`, `file_ends_with`, `file_hash`, `file_max_size`, `file_min_size`, `file_max_lines`, `file_min_lines`, `file_is_text`, `file_is_ascii`.
-  - *Structured query* — `json_path_equals`, `json_path_matches`, `yaml_path_equals`, `yaml_path_matches`, `toml_path_equals`, `toml_path_matches`, `json_schema_passes`. JSONPath (RFC 9535) queries over JSON / YAML / TOML.
-  - *Naming* — `filename_case`, `filename_regex`.
-  - *Text hygiene* — `no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines`.
-  - *Security / Unicode* — `no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars`.
-  - *Encoding* — `no_bom`.
-  - *Structure* — `max_directory_depth`, `max_files_per_directory`, `no_empty_files`.
-  - *Portable metadata* — `no_case_conflicts`, `no_illegal_windows_names`.
-  - *Unix metadata + git* — `no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`, `no_submodules`.
-  - *Git hygiene* — `commented_out_code`, `markdown_paths_resolve`, `git_no_denied_paths`, `git_commit_message`, `git_blame_age`.
-  - *Cross-file* — `pair`, `for_each_dir`, `for_each_file`, `dir_contains`, `dir_only_contains`, `unique_by`, `every_matching_has`.
-  - *Plugin (tier 1)* — `command` (shell out to an external CLI per matched file; trust-gated to the user's top-level config).
-- **Auto-fix** — 12 file ops covering content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append). Preview with `alint fix --dry-run`. Content-editing ops honour a configurable `fix_size_limit` (default 1 MiB) that skips oversize files rather than rewriting them.
-- **Conditional rules** — a bounded `when:` expression language (boolean logic, comparisons, `matches` regex, `in` list membership) gates rules on *facts* evaluated once per run: `any_file_exists`, `all_files_exist`, `count_files`.
-- **Composition** — `extends:` pulls in other configs by local path, HTTPS URL (with SRI pinning), or `alint://bundled/<name>@<rev>`. Children override inherited rules field-by-field. Monorepos can opt into `nested_configs: true` to auto-discover `.alint.yml` files in subdirectories and scope their rules to each subtree.
-- **Nineteen bundled rulesets** — `oss-baseline`, `rust`, `node`, `python`, `go`, `java`, `ci/github-actions`, `monorepo`, `monorepo/cargo-workspace`, `monorepo/pnpm-workspace`, `monorepo/yarn-workspace`, `hygiene/no-tracked-artifacts`, `hygiene/lockfiles`, `tooling/editorconfig`, `docs/adr`, `compliance/reuse`, `compliance/apache-2`, `agent-hygiene`, `agent-context`. Built into the binary — no network round-trip.
-- **Eight output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
+- **60 rule kinds** across 13 families — existence, content, naming, structured query (RFC 9535 JSONPath over JSON/YAML/TOML), text hygiene, security/unicode, encoding, structure, portable metadata, Unix metadata, git hygiene, cross-file relations, plugin (`command` shellout). Full reference: [`docs/rules.md`](docs/rules.md).
+- **19 bundled rulesets** — `oss-baseline`, language sets (`rust`, `node`, `python`, `go`, `java`), `ci/github-actions`, monorepo overlays (`cargo-workspace`, `pnpm-workspace`, `yarn-workspace`), hygiene (`no-tracked-artifacts`, `lockfiles`), tooling (`editorconfig`), docs (`adr`), compliance (`reuse`, `apache-2`), agent (`hygiene`, `context`). Built into the binary — no network round-trip; ecosystem-gated, so listing one for an absent ecosystem is a silent no-op.
+- **Auto-fix** — 12 ops covering content edits (whitespace, newlines, line endings, BOM/bidi/zero-width strip, blank-line collapse) and path ops (create/remove/rename/prepend/append). Preview with `alint fix --dry-run`. Configurable `fix_size_limit` (default 1 MiB) skips oversize files rather than rewriting them.
+- **Conditional rules** — bounded `when:` expression language (boolean logic, comparisons, `matches`, `in`) gates rules on *facts* evaluated once per run (`any_file_exists`, `all_files_exist`, `count_files`).
+- **Composition** — `extends:` pulls in other configs by local path, HTTPS URL (SRI-pinned), or `alint://bundled/<name>@<rev>`. Children override field-by-field. Monorepos can opt into `nested_configs: true` for auto-discovered subtree-scoped `.alint.yml` files.
+- **9 subcommands** — `check` (default; supports `--changed` for PR-fast-path linting), `fix`, `init` (auto-detect ecosystem + scaffold), `validate-config` (parse-only; for editor LSP / pre-commit / fail-fast CI), `explain <rule>`, `list`, `suggest` (scan for antipatterns and propose rules), `facts` (debug `when:` clauses), `export-agents-md` (sync `AGENTS.md` from active rules).
+- **8 output formats** — `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
 - **JSON Schemas** — config at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete; report shapes at [`schemas/v1/check-report.json`](schemas/v1/check-report.json) and [`schemas/v1/fix-report.json`](schemas/v1/fix-report.json) for downstream tooling.
-- **Official GitHub Action** — `asamarts/alint@v0.9.17`.
+- **Telemetry-free.** No network access at runtime — only the user-explicit `extends: https://...` URLs (SRI-pinned). Reproducible builds (`Cargo.lock` committed, pinned toolchain). See [SECURITY.md](SECURITY.md) for the threat model.
+- **Official GitHub Action** — [`asamarts/alint@v0.9.17`](https://github.com/asamarts/alint).
 
 ## Where alint shines
 
@@ -149,26 +98,6 @@ curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bas
 
 Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases).
 
-### Docker
-
-A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghcr.io on each release:
-
-```bash
-# Lint the current directory:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
-
-# Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.9.17 check
-```
-
-The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
-
-```bash
-docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
-```
-
-Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.9.17`).
-
 ### From crates.io
 
 ```bash
@@ -197,6 +126,26 @@ cd alint
 cargo build --release -p alint
 ./target/release/alint --help
 ```
+
+### Docker
+
+A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghcr.io on each release:
+
+```bash
+# Lint the current directory:
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
+
+# Pin to an exact version:
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.9.17 check
+```
+
+The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
+
+```bash
+docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
+```
+
+Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.9.17`).
 
 ## Quick start
 
@@ -265,412 +214,9 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 
 ## Cookbook
 
-The patterns below are copy-pasteable. Each one targets a real repo-maintenance problem that has cost somebody time in production.
+Copy-pasteable recipes — composing bundled rulesets, structured-query rules over `package.json` / `Cargo.toml` / GitHub workflows, monorepo overlays + nested `.alint.yml`, conditional rules gated on per-run facts, custom `command` shellouts, fast PR-mode linting with `--changed`, auto-fix on commit, cross-file relationships, per-iteration `when_iter:` filters.
 
-### 1. One-line baseline from a bundled ruleset
-
-The shortest useful `.alint.yml` — adopt the OSS-hygiene baseline and nothing else. Good for "we just want README / LICENSE / no merge markers" rigour on a fresh repo.
-
-```yaml
-version: 1
-extends:
-  - alint://bundled/oss-baseline@v1
-```
-
-### 2. Compose several bundled rulesets for a specific stack
-
-A Rust monorepo wants OSS docs + Rust-idiomatic structure + layout checks + no tracked build artefacts:
-
-```yaml
-version: 1
-extends:
-  - alint://bundled/oss-baseline@v1
-  - alint://bundled/rust@v1                              # Cargo.toml, target/ ban, snake_case
-  - alint://bundled/monorepo@v1                          # every crate has README
-  - alint://bundled/hygiene/no-tracked-artifacts@v1      # node_modules, target/, .DS_Store…
-  - alint://bundled/hygiene/lockfiles@v1                 # Cargo.lock only at root
-```
-
-The Rust and Node rulesets are gated by facts (`when: facts.has_rust` / `facts.has_node`) and silently no-op in projects where they don't apply, so layering them is cheap. In **polyglot monorepos** (Rust under `crates/`, Node under `packages/`, Python under `apps/`, …), the bundled ecosystem rulesets additionally use `scope_filter: { has_ancestor: <manifest> }` (v0.9.6+) on their per-file content rules to narrow each rule to files inside its own ecosystem's package subtree — a `**/*.py` rule from `python@v1` won't fire on stray `.py` helpers committed under a Rust crate, and vice versa.
-
-### 3. Override a bundled rule without restating its body
-
-Children in an `extends:` chain only need to declare the fields that change. The inherited `kind`, `paths`, `pattern`, etc. carry over:
-
-```yaml
-version: 1
-extends:
-  - alint://bundled/oss-baseline@v1
-
-rules:
-  # Turn a warning into a blocking error for our repo:
-  - id: oss-license-exists
-    level: error
-
-  # Silence a rule we've deliberately opted out of:
-  - id: oss-code-of-conduct-exists
-    level: off
-```
-
-Unknown-id overrides are flagged at config load, so typos don't silently pass.
-
-### 3b. Adopt only part of a bundled ruleset
-
-When you want most of a bundled ruleset but not all of it, filter at the `extends:` entry with `only:` or `except:` (mutually exclusive). Unknown rule ids in either list are flagged at load time.
-
-```yaml
-version: 1
-extends:
-  # Most of oss-baseline, minus the CoC nag:
-  - url: alint://bundled/oss-baseline@v1
-    except: [oss-code-of-conduct-exists]
-
-  # Just the pinning check from the CI ruleset, nothing else:
-  - url: alint://bundled/ci/github-actions@v1
-    only: [gha-pin-actions-to-sha]
-```
-
-### 4. Enforce values inside `package.json` with structured queries
-
-`json_path_equals` applies a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) query and checks the value. Missing fields are treated as violations (conservative default — scope narrowly if a field is truly optional).
-
-```yaml
-version: 1
-rules:
-  - id: require-mit-license
-    kind: json_path_equals
-    paths: "packages/*/package.json"
-    path: "$.license"
-    equals: "MIT"
-    level: error
-
-  - id: semver-package-version
-    kind: json_path_matches
-    paths: "packages/*/package.json"
-    path: "$.version"
-    matches: '^\d+\.\d+\.\d+$'
-    level: error
-```
-
-### 5. Lock down GitHub Actions workflows
-
-`yaml_path_equals` for workflow-wide permissions; `yaml_path_matches` for action-SHA pinning. Both use the same JSONPath engine — YAML is coerced through serde into a JSON value first, so array and wildcard expressions work the same way. If you want the full set without typing them, `extends: [alint://bundled/ci/github-actions@v1]` ships these rules plus a `name:` presence check.
-
-`if_present: true` on the pinning rule means workflows with only `run:` steps (no `uses:` at all) are silently OK — the rule only fires on actual matches that fail the regex.
-
-```yaml
-version: 1
-rules:
-  # OpenSSF: workflows should declare `permissions.contents: read` explicitly.
-  - id: workflow-contents-read
-    kind: yaml_path_equals
-    paths: ".github/workflows/*.yml"
-    path: "$.permissions.contents"
-    equals: "read"
-    level: error
-
-  # Security practice: pin third-party actions to a full commit SHA,
-  # not a mutable @v4-style tag. `$.jobs.*.steps[*].uses` iterates
-  # every step across every job. `if_present: true` skips workflows
-  # that have no `uses:` at all.
-  - id: pin-actions-to-sha
-    kind: yaml_path_matches
-    paths: ".github/workflows/*.yml"
-    path: "$.jobs.*.steps[*].uses"
-    matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
-    if_present: true
-    level: warning
-```
-
-### 6. Enforce Cargo manifest shape across a workspace
-
-`toml_path_equals` / `toml_path_matches` round out the structured-query family for Rust and Python (`pyproject.toml`) projects.
-
-```yaml
-version: 1
-rules:
-  - id: rust-edition-2024
-    kind: toml_path_equals
-    paths: "crates/*/Cargo.toml"
-    path: "$.package.edition"
-    equals: "2024"
-    level: error
-
-  - id: crate-version-follows-semver
-    kind: toml_path_matches
-    paths: "crates/*/Cargo.toml"
-    path: "$.package.version"
-    matches: '^\d+\.\d+\.\d+(-[\w.-]+)?$'
-    level: error
-```
-
-### 7. Monorepo: every package has README + license + non-stub docs
-
-`for_each_dir` iterates every directory matching `select:` and evaluates the nested `require:` block against each, substituting `{path}` with the iterated directory. `file_min_lines` catches the "README is a title plus `TODO`" case without being pedantic about word count.
-
-```yaml
-version: 1
-rules:
-  - id: every-package-is-documented
-    kind: for_each_dir
-    select: "packages/*"
-    level: error
-    require:
-      - kind: file_exists
-        paths: "{path}/README.md"
-
-      - kind: file_min_lines
-        paths: "{path}/README.md"
-        min_lines: 5
-        level: warning
-
-      - kind: file_exists
-        paths: ["{path}/LICENSE", "{path}/LICENSE.md"]
-        level: warning
-```
-
-### 8. Nested `.alint.yml` for subtree-specific rules
-
-Large repos rarely have a single policy. `nested_configs: true` auto-discovers `.alint.yml` files in subdirectories and scopes each nested rule's `paths` / `select` / `primary` to the subtree it lives in. The frontend team can own `packages/frontend/.alint.yml` without waiting on root-config review:
-
-```yaml
-# .alint.yml (repo root)
-version: 1
-nested_configs: true
-extends:
-  - alint://bundled/oss-baseline@v1
-```
-
-```yaml
-# packages/frontend/.alint.yml
-version: 1
-rules:
-  - id: components-are-pascal-case
-    kind: filename_case
-    paths: "components/**/*.{tsx,jsx}"   # auto-scoped to packages/frontend/**
-    case: pascal
-    level: error
-```
-
-MVP guardrails: nested rules must declare at least one scope field; absolute paths and `..`-prefixed globs are rejected; duplicate rule ids across configs surface with a clear message.
-
-### 9. Auto-fix hygiene on commit
-
-Pair a low-severity rule with a fixer and let `alint fix` do the boring part. Ideal for pre-commit or editor-save hooks.
-
-```yaml
-version: 1
-rules:
-  - id: trim-trailing-whitespace
-    kind: no_trailing_whitespace
-    paths: ["**/*.md", "**/*.rs", "**/*.yml"]
-    level: info
-    fix:
-      file_trim_trailing_whitespace: {}
-
-  - id: final-newline
-    kind: final_newline
-    paths: ["**/*.md", "**/*.rs", "**/*.yml"]
-    level: info
-    fix:
-      file_append_final_newline: {}
-
-  - id: no-bak-files
-    kind: file_absent
-    paths: "**/*.{bak,swp,orig}"
-    level: warning
-    fix:
-      file_remove: {}
-```
-
-Preview with `alint fix --dry-run`; apply with `alint fix`. Content-editing fixers honour `fix_size_limit` (default 1 MiB) and skip oversize files rather than rewriting them.
-
-### 10. Conditional rules gated on repo facts
-
-Facts are evaluated once per run and referenced in `when:`. Here: only enforce snake_case Rust filenames when the repo actually *is* a Rust project.
-
-```yaml
-version: 1
-
-facts:
-  - id: has_rust
-    any_file_exists: [Cargo.toml]
-  - id: has_typescript
-    any_file_exists: ["tsconfig.json", "packages/*/tsconfig.json"]
-
-rules:
-  - id: rust-snake-case
-    when: facts.has_rust
-    kind: filename_case
-    paths: "src/**/*.rs"
-    case: snake
-    level: error
-
-  - id: ts-kebab-case
-    when: facts.has_typescript and not (facts.has_rust)
-    kind: filename_case
-    paths: "src/**/*.ts"
-    case: kebab
-    level: warning
-```
-
-### 11. Cross-file relationships
-
-`pair` and `unique_by` cover the "every X has a matching Y" and "no two files share a derived key" cases — the ones that ad-hoc shell pipelines usually get wrong on the edges. Template tokens are `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, `{parent_name}`.
-
-```yaml
-version: 1
-rules:
-  # Every `*.c` source file has a same-directory `*.h` header:
-  - id: every-c-has-a-header
-    kind: pair
-    primary: "src/**/*.c"
-    partner: "{dir}/{stem}.h"
-    level: error
-
-  # No two Rust source files share a stem anywhere in the repo — a
-  # frequent mod-path surprise in larger workspaces:
-  - id: unique-rs-stems
-    kind: unique_by
-    select: "**/*.rs"
-    key: "{stem}"
-    level: warning
-```
-
-### 12. Ban risky characters / files outright
-
-The security-family rules catch categories that are almost never intentional. Trojan-Source (CVE-2021-42574), zero-width tricks, and stray merge markers all lead to "I didn't write that" incidents.
-
-```yaml
-version: 1
-rules:
-  - id: no-merge-markers
-    kind: no_merge_conflict_markers
-    paths: ["**/*"]
-    level: error
-
-  - id: no-bidi
-    kind: no_bidi_controls
-    paths: ["**/*"]
-    level: error
-    fix:
-      file_strip_bidi_controls: {}
-
-  - id: no-zero-width
-    kind: no_zero_width_chars
-    paths: ["**/*"]
-    level: error
-    fix:
-      file_strip_zero_width: {}
-
-  - id: no-committed-env
-    kind: file_absent
-    paths: [".env", ".env.*.local"]
-    level: error
-```
-
-### 13. Lint only what changed (pre-commit / PR-fast-path)
-
-`--changed` restricts the check to files in the working-tree
-diff (or `<base>...HEAD`'s merge-base diff). Per-file rules
-evaluate only against changed files in scope; cross-file
-rules (`pair`, `for_each_dir`, `every_matching_has`,
-`unique_by`, `dir_contains`, `dir_only_contains`) and
-existence rules (`file_exists`, `file_absent`, …) keep
-full-tree semantics so an unchanged-but-broken state still
-surfaces. Empty diffs short-circuit to an empty report.
-
-```bash
-# Pre-commit: lint the working-tree diff
-# (`git ls-files --modified --others --exclude-standard`).
-alint check --changed
-
-# PR check: lint everything that diverged from main
-# (`git diff --name-only --relative main...HEAD`).
-alint check --changed --base=main --format=sarif
-```
-
-Pairs with the pre-commit hook (the hook can pass
-`--changed` via `args:`) and with `git_tracked_only: true`
-on absence rules so locally-built artefacts never fire.
-
-### 14. Wrap external linters with `command`
-
-`command` shells out to any CLI on `PATH` per matched file. Exit `0` passes; non-zero produces a violation whose message is the tool's stdout+stderr. Argv tokens take the same `{path}` / `{dir}` / `{stem}` substitutions as cross-file rules. Pairs naturally with `--changed` — the expensive check only spawns for changed files.
-
-```yaml
-version: 1
-rules:
-  # actionlint over every workflow.
-  - id: workflows-clean
-    kind: command
-    paths: ".github/workflows/*.{yml,yaml}"
-    command: ["actionlint", "{path}"]
-    level: error
-
-  # shellcheck every committed shell script.
-  - id: shell-clean
-    kind: command
-    paths: "scripts/**/*.sh"
-    command: ["shellcheck", "-S", "warning", "{path}"]
-    level: warning
-
-  # In-repo policy script.
-  - id: cargo-license-check
-    kind: command
-    paths: "**/Cargo.toml"
-    command: ["./ci/check-cargo-license.sh", "{path}"]
-    level: error
-    timeout: 10
-```
-
-`command` rules are only allowed in your own top-level `.alint.yml`. A `kind: command` rule that arrives via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — adopting someone else's ruleset never grants it arbitrary process execution. Same trust model as `custom:` facts.
-
-### 15. Per-iteration filter with `when_iter:`
-
-`for_each_dir` / `for_each_file` / `every_matching_has` accept an optional `when_iter:` expression that filters iterations. Inside it, `iter.*` references the entry currently being iterated — useful for "iterate only the dirs that look like a workspace member."
-
-```yaml
-version: 1
-rules:
-  # Only iterate `crates/*` dirs that contain a Cargo.toml.
-  # `crates/notes/` (no Cargo.toml) is skipped silently —
-  # without when_iter:, the missing-README rule would have
-  # fired on it.
-  - id: workspace-member-has-readme
-    kind: for_each_dir
-    select: "crates/*"
-    when_iter: 'iter.has_file("Cargo.toml")'
-    require:
-      - kind: file_exists
-        paths: "{path}/README.md"
-    level: error
-
-  # Bazel-style dirs: anything under services/* with at least
-  # one .proto under it.
-  - id: proto-pkg-has-readme
-    kind: for_each_dir
-    select: "services/*"
-    when_iter: 'iter.has_file("**/*.proto")'
-    require:
-      - kind: file_exists
-        paths: "{path}/README.md"
-    level: error
-
-  # Compose with facts.*:
-  - id: rust-pkg-license-set
-    kind: for_each_dir
-    select: "crates/*"
-    when_iter: 'facts.has_rust and iter.has_file("Cargo.toml")'
-    require:
-      - kind: toml_path_matches
-        paths: "{path}/Cargo.toml"
-        path: "$.package.license"
-        matches: "^Apache-2\\.0|MIT$"
-    level: warning
-```
-
-`iter.*` exposes `path`, `basename`, `parent_name`, `stem`, `ext`, `is_dir`, and `has_file(pattern)`. The full `when:` grammar applies — boolean logic, comparisons, `matches`, `in`. See [docs/rules.md](docs/rules.md#for_each_dir--for_each_file) for the full reference.
+Read at [alint.org/docs/cookbook/](https://alint.org/docs/cookbook/) (source: [`docs/site/cookbook/`](docs/site/cookbook/)).
 
 ## Bundled rulesets
 
