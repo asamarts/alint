@@ -46,6 +46,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-fmt
       - run: ci/scripts/fmt.sh
 
   clippy:
@@ -57,6 +61,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-clippy
       - run: ci/scripts/clippy.sh
 
   test:
@@ -68,6 +76,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test
       - run: ci/scripts/test.sh
 
   audit:
@@ -79,6 +91,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-audit
       - run: ci/scripts/audit.sh
 
   build:
@@ -90,6 +106,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-build
       - run: ci/scripts/build.sh
 
   docs:
@@ -102,6 +122,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-docs
       - run: ci/scripts/docs.sh
 
   dogfood:
@@ -113,6 +137,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-dogfood
       - run: ci/scripts/dogfood.sh
 
   # ── Bench smoke ───────────────────────────────────────────────────
@@ -125,6 +153,10 @@ jobs:
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-bench-smoke
       - run: ci/scripts/bench-smoke.sh
 
   # ── Summary report ───────────────────────────────────────────────

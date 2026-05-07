@@ -64,7 +64,18 @@ fn walk_yaml(base: &Path, dir: &Path, out: &mut BTreeMap<String, BTreeSet<String
             continue;
         }
         let rel = path.strip_prefix(base).unwrap().with_extension("");
-        let uri = format!("alint://bundled/{}@v1", rel.display());
+        // The URI scheme uses `/` as the path separator; on Windows
+        // `Path::display()` would emit `\` and the audit would
+        // mismatch every nested ruleset (`monorepo\cargo-workspace`
+        // vs the canonical `monorepo/cargo-workspace`). Iterate the
+        // components and join with `/` explicitly so the comparison
+        // is platform-independent.
+        let rel_uri = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let uri = format!("alint://bundled/{rel_uri}@v1");
         let text = fs::read_to_string(&path).expect("read ruleset yml");
         out.insert(uri, extract_yaml_rule_ids(&text));
     }

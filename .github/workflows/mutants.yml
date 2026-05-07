@@ -33,6 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mutants
+
       - name: Pick crate (manual override or daily rotation)
         id: pick
         env:
