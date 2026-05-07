@@ -16,7 +16,7 @@ from publishing artifacts (preflight failed at clippy; nothing
 shipped to crates.io / Homebrew / Docker / npm). v0.9.16 the tag
 exists; v0.9.16 the release does not. No engine changes; bench
 corpus unchanged from v0.9.14. See [CHANGELOG.md](../../CHANGELOG.md)
-and [`docs/launch-prep.md`](../launch-prep.md) for the full sweep.
+and [`docs/development/launch-evidence.md`](../development/launch-evidence.md) for the full sweep.
 
 **v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs
