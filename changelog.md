@@ -8,7 +8,89 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.9.16] — 2026-05-06
+## [0.9.17] — 2026-05-06
+
+Corrective release that re-publishes v0.9.16's content + the
+build.rs/main.rs lint fixes that prevented v0.9.16's Release
+workflow from publishing artifacts. Same scope as v0.9.16 (Config
+DX hardening + 21-pitfall catalogue + 30 OSS case studies + P2b
+Wave 2 evidence + per-rule `respect_gitignore: false` knob +
+operator-polish), plus the small set of corrections enumerated
+below. **v0.9.16 the tag exists; v0.9.16 the release does not** —
+crates.io / Homebrew / Docker / npm never received a v0.9.16
+artifact (the Release workflow's preflight failed at clippy
+because the workspace's `[lints.clippy]` enables `pedantic = warn`
++ `-D warnings`, which caught 7 cast lints in `crates/alint/build.rs`
+and 2 lints in `crates/alint/src/main.rs` — both new files added in
+v0.9.16. Local `cargo clippy --workspace --all-targets -- -D warnings`
+runs against a warm cache hadn't surfaced them; running
+`ci/scripts/clippy.sh` from a clean state would have).
+
+### Fixed
+
+- **`crates/alint/build.rs` pedantic-clippy compliance.** Casts in
+  the days-to-ymd astronomical algorithm get a function-level
+  `#[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss,
+  clippy::cast_possible_truncation)]` with a comment explaining
+  that the algorithm's invariants (`doe` ∈ `[0, 146_097)`, `yoe`
+  ∈ `[0, 400)`, `m` ∈ `[1, 12]`, `d` ∈ `[1, 31]`, `y` ∈
+  `[1970, ~25_000]`) make the lints fire on shapes that never
+  occur. Plus `unwrap_or` → `map_or` and three doc-comment
+  backtick fixes.
+- **`crates/alint/src/main.rs` panic-hook lints.** `map(...)
+  .unwrap_or_else(...)` → `map_or_else(...)` on `info.location()`;
+  `out.push_str(&format!(...))` → `write!(out, ...)` on the
+  `url_encode` percent-encoder.
+- **`examples/flutter-flutter/.alint.yml` two real false-positives.**
+  - BSD-header rule excludes `packages/flutter_tools/templates/**`
+    (those are user-app templates created by `flutter create`,
+    not flutter source — they don't carry the Flutter Authors
+    header by design).
+  - `resolution: workspace` rule excludes
+    `packages/flutter_tools/pubspec.yaml` (flutter_tools historically
+    stands outside the root pub workspace, alongside flutter_goldens
+    which was already excluded — the rule was producing a FP on a
+    legitimate exception).
+- **`docs/launch-prep.md` cross_language_implementation_complete
+  source count corrected from 4 to 5.** flutter is the 5th source
+  AND a genuinely distinct topology — *platform-driven* polyglot
+  variant (engine ABI surfaces ↔ per-OS native implementations
+  under `engine/src/flutter/shell/platform/{android,darwin/ios,
+  darwin/macos,linux,windows,fuchsia}/`) versus the data-format-
+  driven variant (arrow + tensorflow + protobuf) and the within-
+  language source↔golden variant (angular). Generalises to every
+  cross-platform UI framework (React Native, MAUI, Qt, Tauri).
+- **`docs/development/CONFIG-AUTHORING.md` pitfall #18 demand-signal
+  count.** flutter ships `pubspec.lock` tracked-AND-gitignored
+  (same shape as bazel's `.bazelversion`) — second independent
+  demand signal for the per-rule `respect_gitignore: false` knob
+  that v0.9.16 shipped. The note added at the bottom of the
+  pitfall #18 source attribution.
+
+### Added
+
+- **Headline launch-evidence catch — Trojan-Source CVE-2021-42574.**
+  alint catches **5 real CVE-2021-42574 (Trojan Source)** bidirectional-
+  control-character errors in flutter/flutter's `docs/releases/archive/`,
+  via the bundled `oss-baseline` ruleset's `no_bidi_control_characters`
+  rule. This is the strongest single piece of "alint catches things
+  other tools miss" evidence in the case-study corpus — flutter's
+  existing tooling (analyzer, dart format, the per-package
+  pre-commits) doesn't catch this class. Worked into the launch-
+  evidence drafts under `docs/marketing/drafts/`.
+
+### Note on v0.9.16
+
+The v0.9.16 git tag (`bc507b17` annotated tag → commit `764c817f`)
+remains on the remote pointing at the broken commit. It is not
+moved: option A1 ("force-recreate the tag at the corrected
+commit") was considered and rejected in favour of A3 ("cut v0.9.17
+as the corrective release") for orthodox-semver reasons. Adopters
+who pulled the v0.9.16 tag will see no published artifacts at any
+of the usual channels (crates.io / Homebrew / Docker / npm); v0.9.17
+is the first publishable tag in the 0.9.16 content lineage.
+
+## [0.9.16] — 2026-05-06 (tag-only — never published, see v0.9.17)
 
 Config DX hardening release. Closes the launch-prep validation pass
 with seven-phase coverage of the 17 schema + runtime pitfalls
