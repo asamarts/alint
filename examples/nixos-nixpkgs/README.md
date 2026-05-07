@@ -403,7 +403,7 @@ Three patterns specific to nixpkgs that don't fit any current
 rule. All three reconfirm existing v0.10+ candidates rather
 than surfacing new ones — consistent with the "P2b reconfirms
 existing candidates with deeper data" hypothesis from
-[`docs/launch-prep.md`](../../docs/launch-prep.md)'s saturation
+[`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md)'s saturation
 analysis.
 
 ### 1. `registry_paths_resolve` for `maintainers/maintainer-list.nix` ↔ per-package `meta.maintainers` references

@@ -1,7 +1,7 @@
 # Examples
 
 Real-world `.alint.yml` configurations from the launch-prep validation pass
-(see [`docs/launch-prep.md`](../docs/launch-prep.md)). Each subdirectory is one
+(see [`docs/development/launch-evidence.md`](../docs/development/launch-evidence.md)). Each subdirectory is one
 case study — a popular OSS repo's existing structural-validation tooling
 inventoried, rebuilt as an alint config, and compared.
 
@@ -112,4 +112,4 @@ deliberately written to be readable + adaptable, not minimal.
 If you've adopted alint for a public repo, consider contributing the case
 study back — it helps other users with similar repo shapes.
 
-The per-repo workflow ([`docs/launch-prep.md`](../docs/launch-prep.md#per-repo-workflow-2-4-hr-per-repo)) describes the steps.
+The per-repo workflow ([`docs/development/launch-evidence.md`](../docs/development/launch-evidence.md#per-repo-case-study-contribution-workflow)) describes the steps.

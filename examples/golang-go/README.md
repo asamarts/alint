@@ -241,7 +241,7 @@ working baseline.
 | `api/go1*.txt` golden file ordering ("entries are sorted, no duplicate symbols, every entry has a `pkg <pkg>` namespace prefix") | Enforced by `src/cmd/api/main_test.go`'s `set()` + sort + diff logic | **`ordered_block` rule kind** — already on the v0.10+ list (rust-lang `tidy::alphabetical` + airflow + tokio + cpython). golang/go's API golden files are the **fifth confirmation**. |
 
 **Cross-reference with the existing v0.10+ candidate list in
-[`docs/launch-prep.md`](../../docs/launch-prep.md):**
+[`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 - `import_gate` — confirmed by golang/go (3rd source). Stays
   v0.10 high-priority.
 - `pair_hash` — confirmed by golang/go (3rd source). Highest-stakes

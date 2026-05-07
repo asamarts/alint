@@ -614,7 +614,7 @@ multiple matches, ask "is the intent *all* or *any*?":
   single literal that every element must equal (rare).
 - *Any* (one element must satisfy a constraint) → `file_content_matches`
   on the raw text, OR wait for the v0.10+ `*_path_contains` primitive
-  (proposed in `docs/launch-prep.md`'s rule-kind candidate table).
+  (proposed in `docs/development/launch-evidence.md`'s rule-kind candidate table).
 
 ### 18. `.gitignore` masks tracked-file presence checks
 

@@ -260,7 +260,7 @@ flow documented in `CONTRIBUTING.md`.
 | `tools/find-inactive-{collaborators,tsc}.mjs` | Walks `git log` for collaborator activity | OUT OF SCOPE (git-history aware). STAYS as the cron workflow. |
 
 **Cross-reference with the existing v0.10+ candidate list in
-[`docs/launch-prep.md`](../../docs/launch-prep.md):**
+[`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 
 - `cross_file_value_equals` — confirmed by node (`tools/eslint-rules/*`
   ↔ `eslint.config.mjs`). Already the single strongest demand signal in

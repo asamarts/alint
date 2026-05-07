@@ -28,7 +28,7 @@ the tree shape).
 
 The bar: a rule kind ships when it covers a use case at least 3 real
 production repos need. The launch-prep validation pass
-([`docs/launch-prep.md`](docs/launch-prep.md)) catalogues real-repo use cases
+([`docs/development/launch-evidence.md`](docs/development/launch-evidence.md)) catalogues real-repo use cases
 that don't have alint coverage today; new rule kinds usually surface from there.
 
 If you have a use case that isn't on that list, open an issue with the

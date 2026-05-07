@@ -231,7 +231,7 @@ covers ALL 12 subdirs:
 | pep8-naming for module filenames | `ruff` lint rules | Already maps via the existing `filename_case: snake` rule from `bundled/python@v1`. NOT a gap — listed for completeness. |
 
 **Cross-reference with the existing v0.10+ candidate list in
-[`docs/launch-prep.md`](../../docs/launch-prep.md):**
+[`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 - `balanced_delimiters` — confirmed by cpython (Argument Clinic). Already
   on the list (from `rustdoc_templates`).
 - `file_pair_block_match` — confirmed by cpython (Argument Clinic body ↔

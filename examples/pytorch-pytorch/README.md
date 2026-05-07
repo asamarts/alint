@@ -226,7 +226,7 @@ load-bearing ones exist (`pytorch-grep-linter-shim-present`,
 | `.ci/docker/` content-hash drives Docker rebuilds | informal — CLAUDE.md only | `directory_hash` / `pair_hash` rule kind: "compute content hash of glob X, compare to value Y in file Z". Pytorch has no formal check today (CLAUDE.md flags as foot-gun); could be added if the primitive existed. **NEW candidate**, single-source; defer. |
 
 **Cross-reference with the existing v0.10+ candidate list in
-[`docs/launch-prep.md`](../../docs/launch-prep.md):**
+[`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 
 - `cross_file_value_equals` — confirmed by pytorch (WORKFLOWSYNC). **7th
   confirmation** — moves past saturation; this is unambiguously the
