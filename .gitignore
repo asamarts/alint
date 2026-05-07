@@ -18,6 +18,10 @@ target-baseline*/
 # The public-facing design docs live in docs/design/.
 /PROPOSAL.md
 /PROPOSAL-AGENTS.md
+# Marketing tracking + drafts moved to private asamarts/alint.org repo
+# at marketing/. Do not re-track here — strategy isn't appropriate to
+# publicly expose.
+/docs/marketing/
 
 # Self-hosted runner credentials (copied from ci/env.example and filled in).
 /ci/.env
