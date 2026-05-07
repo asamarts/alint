@@ -223,41 +223,56 @@ rules:
   # ===================================================================
 
   # NOTE on .bazelversion: bazelbuild/bazel ships `.bazelversion` at
-  # the repo root AND lists it in `.gitignore` (line 34). The file is
-  # tracked (precedence wins for tracked files), but the `ignore`
-  # crate that alint's walker uses respects `.gitignore` for
-  # discovery — `.bazelversion` is therefore SKIPPED by the walk
-  # even though it's tracked. This is a quirk of bazel's own
-  # repository setup: contributors are expected to override
-  # `.bazelversion` LOCALLY (different installed Bazel version),
-  # so the file is gitignored so local edits don't drift back into
-  # commits. The trade-off: alint's `file_exists` against a
-  # path-pattern that matches a gitignored file silently returns
-  # "no match" even when the file is on disk and tracked.
+  # the repo root AND lists it in `.gitignore` (line 34) — the
+  # tracked-AND-gitignored pattern (file is committed upstream so
+  # `bazelisk` reads a canonical version, AND gitignored so a
+  # contributor's locally-installed-Bazel-pinned override doesn't
+  # accidentally land in a commit). alint's walker honours
+  # `.gitignore` by default, so `file_exists`/`file_content_matches`
+  # rules against `.bazelversion` would silently return "no match"
+  # despite the file being on disk and in `git ls-files`.
   #
-  # Workaround: if you need this rule to fire, run `alint check`
-  # with `--no-respect-gitignore` (planned for v0.10) or use a
-  # `command:` rule that shells out to `[ -f .bazelversion ]` to
-  # bypass the walker. For this case study we drop the
-  # `bazel-version-file-exists` rule and document the gap rather
-  # than ship a broken rule. This is a NEW pitfall not previously
-  # in the 17 catalogued in CONFIG-AUTHORING.md — `.gitignore`
-  # masks tracked-file presence checks.
+  # This is pitfall #18 in `docs/development/CONFIG-AUTHORING.md`;
+  # **v0.9.17 ships the fix for `file_exists`**: the per-rule
+  # `respect_gitignore: false` knob lets a single rule bypass the
+  # workspace gitignore setting without flipping it for every other
+  # rule. The `bazel-version-file-exists` rule below opts in.
   #
-  # The same applies to: `.bazelci/postsubmit.yml` (also gitignored
-  # in some forks), and to ANY config file that contributors
-  # routinely override locally.
+  # `bazel-version-file-shape` (`file_content_matches`) cannot use
+  # the knob yet — v0.9.17 implements `respect_gitignore: false`
+  # for `file_exists` literal-path patterns only; broader coverage
+  # is on the v0.10 backlog. So that rule still silently no-matches
+  # against bazelbuild/bazel's tree (file is gitignored, walker
+  # hides it). Adopters whose `.bazelversion` is NOT in `.gitignore`
+  # (the more common pattern) get the rule's full benefit.
+  #
+  # The same tracked-AND-gitignored shape applies to flutter's
+  # `pubspec.lock` (2nd demand source for the fix) and any other
+  # tracked-but-locally-overridden config file.
+
+  - id: bazel-version-file-exists
+    # `.bazelversion` is the canonical Bazel-version pin. Without it,
+    # `bazelisk` falls through to a non-deterministic default. This
+    # rule and `bazel-version-file-shape` below both rely on the
+    # v0.9.17 per-rule `respect_gitignore: false` knob to see the
+    # file despite its `.gitignore` listing.
+    kind: file_exists
+    paths: ".bazelversion"
+    root_only: true
+    respect_gitignore: false
+    level: error
+    message: >-
+      `.bazelversion` is required at the repo root so `bazelisk`
+      pins to a deterministic Bazel version. Without it, the
+      installed Bazel decides — different contributors get
+      different builds.
+    policy_url: "https://bazel.build/install/bazelisk"
 
   - id: bazel-version-file-shape
     # `.bazelversion` is a single line: a semver-shaped Bazel
     # version (`9.1.0`) or a full release identifier
     # (`8.4.1rc2`). `last_green` is also a magic Bazelisk
     # token that's legitimate but discouraged in repo roots.
-    #
-    # NOTE: Same gitignore caveat as above — this rule will silently
-    # match-zero against bazelbuild/bazel's tree because the file is
-    # gitignored. Listed here for adopters whose `.bazelversion` is
-    # NOT in `.gitignore` (the more common pattern).
     kind: file_content_matches
     paths: ".bazelversion"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+|-[a-zA-Z0-9.-]+)?\s*$'

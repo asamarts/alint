@@ -936,11 +936,17 @@ rules:
   # ──────────────────────────────────────────────────────────────────
 
   - id: pytorch-lintrunner-adapter-dir-present
+    # `root_only:` deliberately omitted — these are multi-component
+    # literal paths (tools/linter/adapters, .lintrunner.toml). v0.9.17's
+    # literal_is_nested guard means root_only:true would silently
+    # filter both out (every literal != single-segment), so the rule
+    # would always fire "missing." Without the flag, file_exists
+    # matches them by exact-path lookup as intended. Pitfall #19 in
+    # docs/development/CONFIG-AUTHORING.md.
     kind: file_exists
     paths:
       - "tools/linter/adapters"
       - ".lintrunner.toml"
-    root_only: true
     level: error
     message: |
       The lintrunner adapter directory or .lintrunner.toml is missing.
@@ -948,6 +954,7 @@ rules:
       lintrunner — without these files NO structural check runs in CI.
 
   - id: pytorch-grep-linter-shim-present
+    # `root_only:` deliberately omitted — see pitfall #19 note above.
     kind: file_exists
     paths:
       - "tools/linter/adapters/grep_linter.py"
@@ -960,7 +967,6 @@ rules:
       - "tools/linter/adapters/shellcheck_linter.py"
       - "tools/linter/adapters/cmake_linter.py"
       - "tools/linter/adapters/pyrefly_linter.py"
-    root_only: true
     level: error
     message: |
       A core lintrunner adapter is missing. The matching .lintrunner.toml
@@ -973,11 +979,12 @@ rules:
   # ──────────────────────────────────────────────────────────────────
 
   - id: pytorch-ci-pytorch-tree-present
+    # `root_only:` deliberately omitted — see pitfall #19 note on
+    # `pytorch-lintrunner-adapter-dir-present` above.
     kind: file_exists
     paths:
       - ".ci/pytorch"
       - ".ci/docker"
-    root_only: true
     level: error
     message: |
       The .ci/{pytorch,docker} directories drive every CI image build.
