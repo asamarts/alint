@@ -274,3 +274,53 @@ Followup feature work surfaced (combining with Kubernetes findings):
   catches new files but not new subdirs. A `check_subdirs: true` flag
   (or a sibling `dir_contents_match_allowlist`) would close the gap
   with a one-line schema addition.
+
+---
+
+## Future analysis
+
+Concrete analyses to follow up on the live tree (when one becomes
+available):
+
+- **`alint suggest` against a fresh `denoland/deno` clone** — predict the
+  heuristic will surface `oss-baseline@v1`, `rust@v1`, and `node@v1`
+  given the polyglot Rust+JS/TS shape; cross-reference against the
+  manually configured 8-extends list.
+- **`*_path_contains` v0.10 design progress** — the
+  `deno-dlint-includes-camelcase` rule currently uses a
+  `file_content_matches` workaround per pitfall #17. Track when the
+  v0.10 `*_path_contains` ships; the rule rewrite is mechanical.
+- **`nested_configs: true` for the `ext/*` and `libs/*` subtrees** —
+  Deno's per-crate `clippy.toml` content checks could move into per-crate
+  `.alint.yml` files (one per `ext/<crate>/` and one per `libs/<crate>/`)
+  to scope the `disallowed_methods_in_file` candidate's per-crate
+  registries cleanly. Same shape as the upcoming `dir_contents_match_allowlist`
+  primitive.
+
+## Validation status (2026-05-07)
+
+- alint version: v0.9.17
+- Config validation: `validate-config` reports **76 rules loaded**.
+  Reconciliation: 20 explicit rules in `.alint.yml` (15 + 5 the README
+  understated) + 61 entries from extends (oss-baseline 15 + rust 11 +
+  node 9 + ci/github-actions 3 + monorepo/cargo-workspace 4 +
+  tooling/editorconfig 3 + hygiene/no-tracked-artifacts 11 +
+  agent-context 5) − 5 facts (`has_rust`, `has_node`,
+  `has_agent_context`, `is_cargo_workspace` from the bundled
+  rulesets, plus `has_dlint_config` declared inline in this config) = 76.
+- Live-tree status: pending — `/tmp/deno/` not present at revalidation
+  time.
+- Pitfall fixes shipped in v0.9.17: pitfall #18 (per-rule
+  `respect_gitignore: false`), pitfall #19 (literal_is_nested runtime
+  guard) — neither directly affects this config.
+- Pitfall #17 (already-documented since P2a Wave 3) is the
+  load-bearing one for the `deno-dlint-includes-camelcase` rule; the
+  `file_content_matches` regex workaround stays until the v0.10 design
+  candidate `*_path_contains` ships (3 sources: helm, deno, bazel).
+- Open gaps: `disallowed_methods_in_file` (per-file content list sourced
+  from a registry; deno + Kubernetes), `violation_baseline` (deno's
+  `lintNodePolyfillDenoApis`), `referenced_files_match_filesystem`
+  (deno's `ensureNoUnusedOutFiles`), and the
+  `monorepo/cargo-workspace` member-discovery refinement (deno's
+  `ext/*` + `libs/*` + `runtime` + `cli/*` layout doesn't fit the
+  hardcoded `crates/*` selector).

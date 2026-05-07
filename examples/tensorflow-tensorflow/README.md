@@ -218,9 +218,13 @@ adds the "core + bindings" shape on top of arrow's "all-peers" shape —
 **the v0.11+ primitive needs to handle BOTH topologies** (peer-to-peer
 parity AND core-to-binding parity). TF's TFLite layer demonstrates a
 nested case (one TFLite C runtime + 4 language frontends), which
-generalises to any plugin-host architecture. **Strongly confirms the
-v0.11+ priority** — TF + arrow are now the two canonical demand-driving
-repos for the primitive.
+generalises to any plugin-host architecture. **TF + arrow are now joined
+by protobuf + angular + flutter** as the 5 demand-driving repos — past
+saturation; `cross_language_implementation_complete` is the v0.11+
+flagship ship-target. TF's 1,185 textproto API goldens surfaced the
+primitive at TWO topologies in one repo (per-source ↔ per-test within
+one language; core ↔ N bindings across languages), making it the
+single richest demonstration in the catalogue.
 
 ---
 
@@ -431,7 +435,7 @@ The 30-rule [`/.alint.yml`](.alint.yml) breaks down as:
 
 Five patterns specific to tensorflow that don't fit any current rule:
 
-### 1. `cross_language_implementation_complete` for the API-parity layer (v0.11+)
+### 1. `cross_language_implementation_complete` for the API-parity layer (v0.11+ ship-target)
 
 The headline gap. tensorflow's `tools/api/golden/v{1,2}/` is the cleanest
 demonstration of the pattern in any single repo:
@@ -445,10 +449,13 @@ demonstration of the pattern in any single repo:
   the symbol)
 
 **This is the v0.11+ `cross_language_implementation_complete` rule
-kind shape.** TF + apache/arrow are the two flagship demand-driving
-case studies (arrow has the same shape across 6 in-tree language
-implementations; TF has the same shape across 1 core + 6 bindings).
-The v0.11+ primitive needs to handle BOTH topologies.
+kind shape.** Now a v0.11+ ship-target with **5 confirmed sources**
+(`cross_language_implementation_complete = 5 sources`):
+apache/arrow's all-peers topology, tensorflow's core+bindings
+topology (textproto goldens were the 2nd source after arrow),
+protobuf, angular, and flutter. The v0.11+ primitive needs to
+handle BOTH topologies and is now scoped for the v0.11 polyglot
+flagship release.
 
 ### 2. `cross_file_value_equals` for `requirements_lock_3_*.txt` cross-Python-version consistency
 
@@ -623,21 +630,19 @@ demand across P2):
 
 - **`cross_file_value_equals` rule kind** — covers
   `requirements_lock_3_*.txt` cross-Python-version consistency here.
-  **Demand: 8 of 8** (airflow + tokio + clap + uv + react + pnpm +
-  pytorch + tensorflow). Strongest demand signal in P2 now;
-  v0.10 must-ship.
+  **v0.10 ship-target** (8+ confirmations, past saturation).
 - **`registry_paths_resolve` rule kind** — covers
-  `tensorflow/opensource_only.files` here. **Demand: 6 of 6**
-  (rust + clap + cpython + arrow + pytorch + tensorflow). Joins
-  `cross_file_value_equals` at the top of the v0.10 priority list.
+  `tensorflow/opensource_only.files` here. **v0.10 ship-target**
+  (6+ confirmations: rust + clap + cpython + arrow + pytorch +
+  tensorflow).
 - **`generated_file_fresh` rule kind** — covers the API goldens
-  regen-and-diff here. **Demand: 5 of 5** (uv + cpython + pytorch
-  ×2 + tensorflow). v0.10 priority.
+  regen-and-diff here. **v0.10 ship-target** (5+ confirmations:
+  uv + cpython + pytorch ×2 + tensorflow).
 - **`cross_language_implementation_complete` rule kind** — the
-  v0.11+ headline primitive. **Demand: 2 of 2 confirmed**
-  (apache/arrow's all-peers topology + tensorflow's core-and-bindings
-  topology). Generalises to every multi-binding spec; defer to v0.11+
-  as the polyglot headline (after the v0.10 set ships).
+  v0.11+ headline primitive. **v0.11+ ship-target** with **5
+  confirmed sources** (arrow + tensorflow + protobuf + angular +
+  flutter). Generalises to every multi-binding spec; the v0.10
+  set ships first, this leads v0.11.
 - **`markdown_template_match` rule kind** — surfaced uniquely by
   TF's `tensorflow/security/advisory/*.md` template. NEW candidate;
   single-source; defer.
@@ -675,23 +680,96 @@ demand across P2):
   against the tracked TFLite tree where parity is met, AND surface
   the known drift cases noted above when run with `--changed false
   --include-info` against the full Swift/ObjC trees.
-- No NEW pitfalls beyond the documented 17 in
-  `docs/development/CONFIG-AUTHORING.md`. One LATENT pitfall
-  surfaced and resolved: **`file_exists` with `root_only: true` on
-  multi-component literal paths silently treats every entry as
-  "not at root" via `literal_is_nested(p)` and thus reports
-  every rule as failing.** This is documented behaviour
-  (`literal_is_nested` returns true for any path with > 1
-  component), but the failure mode is opaque — the rule fires
-  with a generic "expected a file matching [...] at the repo
-  root" message even when the literal paths obviously aren't
-  at the root. The fix in this config: drop `root_only: true`
-  whenever the path list contains multi-component entries
-  (the explicit literal paths are inherently root-anchored
-  anyway). This is a candidate for either better diagnostics
-  in `file_exists::build` (warn at build time when `root_only:
-  true` is set on multi-component paths) or a CONFIG-AUTHORING.md
-  pitfall #18 entry. **Calling out as a possible follow-up
-  for v0.9.16 phase 8 / v0.10 — single-source so far, but the
-  shape is clean enough to warrant either a parse-time warning
-  or a doc entry.**
+- One LATENT pitfall surfaced and resolved during the original P2b
+  pass: **`file_exists` with `root_only: true` on multi-component
+  literal paths silently treats every entry as "not at root" via
+  `literal_is_nested(p)` and thus reports every rule as failing.**
+  This was documented as pitfall #19 in CONFIG-AUTHORING.md and
+  **FIXED IN ENGINE v0.9.17** — the runtime guard now emits a clear
+  diagnostic distinguishing "path is not at root" from "file does
+  not exist" instead of the previous generic message. The fix in
+  this config (drop `root_only: true` whenever the path list
+  contains multi-component entries) remains valid; the new
+  diagnostic just means future authors will see the misuse called
+  out at parse time instead of debugging blind. The catalogue has
+  also grown to 21 pitfalls (#13-#21 added across P2a + P2b
+  waves); pitfall #18 (per-rule `respect_gitignore: false`) also
+  shipped its fix in v0.9.17 and doesn't surface in this config.
+
+---
+
+## Future analysis
+
+Suggestions for the next revalidation pass (now that v0.9.17 ships
+the per-rule `respect_gitignore: false` knob, the `literal_is_nested`
+runtime guard, and the `scope_filter` evolution + `has_*` predicate
+renames):
+
+- **`scope_filter` for the `tensorflow/lite/<lang>/` per-binding
+  subtrees.** Today the four parity rules
+  (`tensorflow-lite-swift-source-has-test`,
+  `tensorflow-lite-objc-api-has-test`,
+  `tensorflow-lite-python-source-has-test`, `tensorflow-lite-java-...`)
+  hard-code globs against `tensorflow/lite/{swift,objc,python,java}/`.
+  v0.9.17's `scope_filter` evolution lets each binding be a named
+  filter with its own per-language file conventions, and the parity
+  check becomes a single `for_each_dir` against `tensorflow/lite/*/`
+  with the per-binding pair pattern declared once. Refactor saves
+  ~80 lines and makes "how does TF organise per-language bindings"
+  one declarative source of truth; serves as the design template for
+  the v0.11+ `cross_language_implementation_complete` rule kind.
+- **A `bazel-monorepo@v1` bundled ruleset draft.** TF's BUILD-file
+  presence + `*.bzl` Apache-header + `MODULE.bazel`/`WORKSPACE`/
+  `BUILD` triad checks recur in any Bazel monorepo (TF + grpc +
+  envoy + many internal Google + Pinterest + Lyft repos). Packaging
+  these as a bundled ruleset would let alint claim the
+  "Bazel-tier polyglot monorepo" niche before pytorch + grpc +
+  envoy case studies land — TF is the canonical example to author
+  it against.
+- **`alint suggest` against a fresh `/tmp/tensorflow/` tree**
+  surfaced only `oss-baseline@v1` + `agent-hygiene@v1` (medium) —
+  the bundled-ruleset detector doesn't yet recognise the Bazel
+  monorepo shape (no `Cargo.toml` / `package.json` / `go.mod`),
+  which is exactly the suggester gap a `bazel-monorepo@v1` bundle
+  would close. File as a v0.10+ suggester-improvement candidate
+  alongside the bundled ruleset.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
+- **`validate-config`:** ✓ 83 rules loaded from `.alint.yml`.
+- **README rule-count claim:** "30 tensorflow-specific rules" + "6
+  bundled rulesets" understates the actual count of 40
+  tensorflow-specific rules (counted via `grep -c '^  - id:'`); the
+  config has grown ~10 rules during P2b polish (extra TFLite
+  per-language parity rules, additional Apache header coverage). The
+  83-rule `validate-config` total = 40 tensorflow-specific + 43
+  inherited from the 6 bundled rulesets (oss-baseline=15 +
+  compliance/apache-2=3 + python=9 + ci/github-actions=3 +
+  hygiene/no-tracked-artifacts=11 + tooling/editorconfig=3 = 44
+  declared; the 1-rule slack reflects bundled-overlap dedup).
+  **README update recommendation:** bump the "30 tensorflow-specific
+  rules" framing to "~40" in a future polish pass — not surgical
+  enough to chase down every reference today.
+- **Pitfall catalogue:** v0.9.17 ships fixes for #18 + #19 (the
+  latter discovered while authoring this very config). Catalogue
+  now at 21 entries (P2a + P2b expansion). The TF-discovered #19
+  (`file_exists` + `root_only: true` opacity) is now both
+  documented AND has clearer diagnostics in the engine.
+- **Rule-kind candidate status:**
+  `cross_file_value_equals` and `registry_paths_resolve` now v0.10
+  ship-targets. `generated_file_fresh` now v0.10 ship-target (5+
+  confirmations). `cross_language_implementation_complete` now
+  v0.11+ ship-target with **5 confirmed sources** (arrow +
+  tensorflow + protobuf + angular + flutter); TF's 1,185 textproto
+  goldens were the 2nd source after arrow.
+- **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
+  oss-baseline=15, compliance/apache-2=3, python=9,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11,
+  tooling/editorconfig=3.
+- **Live-tree spot-check:** Config still parses cleanly; `alint
+  suggest` against `/tmp/tensorflow/` surfaces only the
+  `oss-baseline` and `agent-hygiene` bundled rulesets (the
+  Bazel-monorepo shape has no detector yet — see Future analysis).

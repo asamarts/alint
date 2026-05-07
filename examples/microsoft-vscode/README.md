@@ -115,7 +115,7 @@ stages plus 1 cross-file check. Direct alint coverage:
 | **`formatting`** — `formatter.verifyFormatting()` runs the TypeScript printer; flags files that round-trip differently | hygiene.ts:136-150 | None — TS-AST-aware formatter | **OUT OF SCOPE** — shelled out via `vscode-precommit-hygiene` command rule |
 | `eslint` (delegated) — runs the 45-rule local eslint plugin | hygiene.ts:188-199 | None — TSESTree visitors | **OUT OF SCOPE** — shelled out via `vscode-eslint` command rule |
 | `gulpstylelint` (delegated) — runs CSS AST analysis | hygiene.ts:201-210 | None — CSS AST | **OUT OF SCOPE** — shelled out via `vscode-stylelint` command rule |
-| **`checkCopilotEnginesVersion`** — asserts `engines.vscode` in `extensions/copilot/package.json` literally equals `^${rootPkg.version}` from the root | hygiene.ts:34-43 | None — see "Needs new primitive" #1 below | **NEEDS NEW PRIMITIVE** — this is the canonical `cross_file_value_equals` shape (already top of v0.10+ candidate list at 8 sources) |
+| **`checkCopilotEnginesVersion`** — asserts `engines.vscode` in `extensions/copilot/package.json` literally equals `^${rootPkg.version}` from the root | hygiene.ts:34-43 | None — see "Needs new primitive" #1 below | **NEEDS NEW PRIMITIVE** — this is the canonical `cross_file_value_equals` shape (now **v0.10 ship-target** at 10 sources past saturation) |
 
 **Quantified overlap: 6 of 8 hygiene-script checks (75 %) covered
 directly by alint primitives; 2 of 8 (25 %) need either new
@@ -442,18 +442,17 @@ at JSONPath `$.engines.vscode` in file
 (prepend `^`) of the value at JSONPath `$.version` in file
 `package.json`.
 
-**Already on the v0.10+ candidate list** as the highest-demand rule
-kind in P2a (8 sources before this case study; **vscode confirms a
-9th source**). The candidate's existing motivating cases:
-split-workspace lockfile sync (uv, tokio), root README ↔ per-crate
-README (clap), version-in-CHANGELOG (clap, react), pnpm
-`meta-updater`'s 13 cross-package invariants, react's
-`ReactVersion.js` propagated to 3 per-package fields, nodejs
-`tools/eslint-rules/*` ↔ `eslint.config.mjs`, pytorch
-WORKFLOWSYNC. **vscode adds a 9th: extension-engine version pinning
-to the host editor's published version** — the most consumer-facing
-of the 9, since failures here cause downstream extensions to fail to
-install.
+**`cross_file_value_equals` is now a v0.10 ship-target** at 10 sources
+past saturation (airflow, tokio, clap, uv, react, pnpm, nodejs/node,
+pytorch, vscode, istio per `docs/development/launch-evidence.md`).
+vscode's `checkCopilotEnginesVersion` is the most consumer-facing of
+the 10 (downstream extension installs break on version mismatch). The
+candidate's existing motivating cases: split-workspace lockfile sync
+(uv, tokio), root README ↔ per-crate README (clap), version-in-CHANGELOG
+(clap, react), pnpm `meta-updater`'s 13 cross-package invariants,
+react's `ReactVersion.js` propagated to 3 per-package fields, nodejs
+`tools/eslint-rules/*` ↔ `eslint.config.mjs`, pytorch WORKFLOWSYNC,
+istio's per-chart `value_extractor:` refinement (pitfall #20).
 
 ### 2. `indent_style.skip_block_comment_continuation` + `file_is_ascii.allow` + `file_is_ascii.skip_per_line_marker`
 
@@ -644,10 +643,11 @@ The fifth positioning narrative crystallised here:
 
 Followup feature work surfaced (priority order):
 
-- **`cross_file_value_equals`** — **9th confirmation**. vscode's
-  `checkCopilotEnginesVersion` is the most consumer-facing of the 9
-  cases (downstream extension installs break on version mismatch).
-  Reaffirms this as the v0.10+'s single highest-leverage gap.
+- **`cross_file_value_equals`** — now **v0.10 ship-target** (10 sources
+  past saturation). vscode's `checkCopilotEnginesVersion` is the most
+  consumer-facing of the 10 cases (downstream extension installs break
+  on version mismatch). Reaffirms this as v0.10's single
+  highest-leverage gap.
 - **`indent_style.skip_block_comment_continuation`** + **`file_is_ascii.{allow,skip_per_line_marker}`**
   — NEW knobs on existing rules (not new kinds). Niche; vscode is the
   single source. Recommended path is to keep these in
@@ -661,9 +661,11 @@ Followup feature work surfaced (priority order):
 
 ## No NEW schema/language pitfalls hit
 
-The 17 documented in `docs/development/CONFIG-AUTHORING.md` cover
-everything that came up while authoring this config. Specific
-near-misses navigated:
+The 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
+everything that came up while authoring this config. Pitfalls #18 + #19
+were both fixed in engine v0.9.17 (per-rule `respect_gitignore: false`
+knob; literal-path runtime guard) — neither workaround is needed in this
+config. Specific near-misses navigated:
 
 - **§13 (regex anchoring)** — every `^` / `$` in this config is `(?m)`
   prefixed (the workflow-permissions check) because the workflow
@@ -693,3 +695,58 @@ near-misses navigated:
 The `coverage_audit_examples_parse.rs` audit passes with this config
 in place (run from the repo root: `cargo test --release -p alint-e2e
 --test coverage_audit_examples_parse`).
+
+---
+
+## Future analysis
+
+Three candidate refinements worth evaluating in subsequent sweeps:
+
+1. **`compliance/reuse@v1` for the Component Governance trio.** Microsoft
+   Component Governance ships `cgmanifest.json` + `cglicenses.json` +
+   `ThirdPartyNotices.txt`; the bundled `compliance/reuse@v1` ruleset
+   (3 rules) layers REUSE-spec-style license-discipline checks that may
+   substitute for some of the bespoke `vscode-component-governance-files`
+   + `vscode-third-party-notices-non-trivial` invariants. Worth a side-by-
+   side comparison.
+2. **`hygiene/lockfiles@v1` overlay.** vscode ships `package-lock.json` +
+   per-extension lockfiles under `extensions/*/package-lock.json`; the
+   bundled `hygiene/lockfiles@v1` (7 rules) would catch nested-lockfile
+   drift across the extension tree without adding repo-specific rules.
+3. **`nested_configs: true` for `extensions/`.** vscode's `extensions/`
+   subtree is effectively a polyglot mini-monorepo (each extension has
+   its own `package.json`, lint config, and contribution metadata).
+   Adopting `nested_configs: true` would let per-extension `.alint.yml`
+   files layer extension-specific assertions on top of the root config
+   without bloating the root file. The vscode-dts/ stable surface is
+   already fronted by `vscode-dts-declare-module-shape` at the root;
+   per-extension rules (e.g. extension-manifest shape, contributes/
+   conventions) would benefit most from the nested-config treatment.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (1dbd9b218a0e, built 2026-05-07)
+- **Rule count:** 67 (~37 custom + 6 bundled rulesets — `oss-baseline`
+  15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
+  `tooling/editorconfig` 3, `agent-context` 5; rule IDs may overlap)
+- **`validate-config`:** ✓ Config valid: 67 rule(s) loaded
+- **Live-tree recheck:** not performed in this batch (vscode
+  sparse-checkout not present in `/tmp/`)
+- **Apples-to-apples target:** `build/hygiene.ts` — **6 of 8 hygiene
+  pipeline stages (75 %) covered declaratively** by alint primitives;
+  the remaining 2 are AST-aware (`formatting`) or stay in the script
+  (`unicode` per-line escape-hatch). This is the strongest "alint
+  replaces a hand-rolled script" data point in the case-study catalogue.
+- **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here (no
+  tracked-but-gitignored files; no `root_only: true` + multi-component
+  literal entries beyond the single `AGENTS.md` / `tsfmt.json` cases
+  which are at root)
+- **Open gaps (status changes):** `cross_file_value_equals` promoted to
+  **v0.10 ship-target** (10 sources past saturation; vscode is the
+  flagship-visibility consumer of the 10);
+  `indent_style.skip_block_comment_continuation` +
+  `file_is_ascii.{allow,skip_per_line_marker}` (low-priority knobs on
+  existing rules, vscode is the only source);
+  `file_content_matches_or_marker` (low-priority, vscode-only)

@@ -302,9 +302,51 @@ Followup feature work surfaced (consolidated):
   reading the rule kind name would assume strict JSON.
 
 No new schema or language pitfalls hit while writing this config —
-the 12 documented in `docs/development/CONFIG-AUTHORING.md` cover
+the 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
 everything that came up. The closest near-miss was the JSONPath
 match-function form for the workflow-pinning rule (`?match(@.uses,
 '^...')`), which is documented as the "honourable mention" at the
 end of the pitfalls doc — needed to read it twice to get the
 nesting right, but the doc carries the canonical form.
+
+---
+
+## Future analysis
+
+Three candidate refinements worth evaluating in subsequent sweeps:
+
+1. **`agent-context@v1` adoption.** TypeScript ships a load-bearing
+   `AGENTS.md` (the maintenance-mode marker is enforced by
+   `ts-agents-md-maintenance-marker`); the bundled `agent-context@v1`
+   ruleset (5 rules) would absorb the `ts-agents-md-present` rule and
+   assert the broader canonical agent-context shape (CLAUDE.md, .cursor/,
+   etc.) without per-repo restatement.
+2. **`pair_count` (≥1 partner files match a registry entry).** Surfaced
+   here as the canonical example of `errorCheck.mjs` — every diagnostic
+   in `src/compiler/diagnosticMessages.json` appears in at least one
+   `tests/baselines/reference/*.errors.txt`. Same shape arose in airflow
+   (`check-no-new-airflow-exceptions`); 2 sources, design candidate for
+   v0.10+ once the `cross_file_value_equals` ship-target lands.
+3. **`hygiene/lockfiles@v1` overlay.** TypeScript ships `package-lock.json`
+   + `package.json`; the bundled `hygiene/lockfiles@v1` ruleset (7 rules)
+   would catch nested-lockfile drift, mismatched lockfile-versions, and
+   the orphan-lockfile pattern (a lockfile with no sibling `package.json`)
+   that the existing CI doesn't gate today.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (1dbd9b218a0e, built 2026-05-07)
+- **Rule count:** 68 (~22 custom + 6 bundled rulesets — `oss-baseline` 15,
+  `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
+  `tooling/editorconfig` 3, `agent-context` 5; rule IDs may overlap)
+- **`validate-config`:** ✓ Config valid: 68 rule(s) loaded
+- **Live-tree recheck:** not performed in this batch (typescript
+  sparse-checkout not present in `/tmp/`)
+- **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here (no
+  tracked-but-gitignored files, no `root_only: true` + multi-component
+  literal entries)
+- **Open gaps (unchanged):** `pair_count` (v0.10+ design candidate),
+  `bundled_size_diff` / `cross_ref_diff` (out of scope; PR-diff aware).
+  No new rule-kind gaps surfaced in this revalidation

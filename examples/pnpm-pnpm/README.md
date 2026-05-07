@@ -53,18 +53,20 @@ surfaces:
 
 **Headline finding:** pnpm's `meta-updater` plugin enforces 13
 cross-package field invariants on every install — exactly the
-`cross_file_value_equals` shape already on alint's v0.10+ candidate
-list. Until that ships, alint covers 11 of the 13 invariants by
-asserting against the *expected literal value* rather than against
-"whatever the workspace root declares" — close enough that catching
-drift on a new package is a one-line PR for alint vs. requiring
-contributors to install + run the meta-updater plugin locally.
+`cross_file_value_equals` shape now a v0.10 ship-target on alint's
+roadmap (10 sources past saturation). Until it ships, alint covers 11
+of the 13 invariants by asserting against the *expected literal value*
+rather than against "whatever the workspace root declares" — close
+enough that catching drift on a new package is a one-line PR for alint
+vs. requiring contributors to install + run the meta-updater plugin
+locally.
 
 For the launch story, **this is the "hand-rolled cross-package
 field-sync plugin" data point** — alongside microsoft/typescript
 (famously frozen, meticulously curated) and apache/airflow (109-hook
-pre-commit pipeline). pnpm proves the `cross_file_value_equals`
-v0.10+ candidate has demand from a Tier-1 npm-ecosystem repo.
+pre-commit pipeline). pnpm pushed `cross_file_value_equals` past
+saturation: it was the 8th of 10 confirmed sources (airflow, tokio,
+clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio).
 
 ---
 
@@ -267,7 +269,7 @@ Headline rules:
 
 Three patterns specific to pnpm that don't fit any current rule:
 
-### 1. `cross_file_value_equals` — the meta-updater shape (already on v0.10+ list)
+### 1. `cross_file_value_equals` — the meta-updater shape (now v0.10 ship-target, 10 sources)
 
 Eight of meta-updater's invariants are shaped "value at JSONPath X
 in file A must equal value at JSONPath Y in file B" or "the value at
@@ -288,12 +290,13 @@ X in file A must equal a literal derived from A's own path":
   in *some* workspace member's package.json), the value MUST be
   `workspace:*`.
 
-This is the **same `cross_file_value_equals` candidate already on
-the v0.10+ list (surfaced first by airflow + tokio + clap + uv)**.
-pnpm pushes it from "useful" to "critical": it's the dominant
-shape of meta-updater's enforcement and it's how every downstream
-pnpm-workspace monorepo will want to express the same conventions
-at lower cost than rolling their own meta-updater plugin.
+This is **`cross_file_value_equals`, now a v0.10 ship-target with 10
+sources past saturation** (airflow + tokio + clap + uv + react + pnpm
++ nodejs/node + pytorch + vscode + istio). pnpm pushes it from
+"useful" to "critical": it's the dominant shape of meta-updater's
+enforcement and it's how every downstream pnpm-workspace monorepo
+will want to express the same conventions at lower cost than rolling
+their own meta-updater plugin.
 
 **Catalog completeness sub-shape (potential new rule kind variant):**
 "every dep value not equal to `workspace:*`/`link:` MUST appear as
@@ -316,9 +319,10 @@ Three different uses, same primitive:
 - Every changeset `<pkg-name>:` LHS must match a `name:` field in
   some workspace member's `package.json`.
 
-All three already on the v0.10+ list (originally surfaced by rust
-+ clap, then microsoft/typescript). pnpm reinforces the demand and
-adds the patched-deps + tsconfig-refs sub-cases.
+All three covered by `registry_paths_resolve`, **now a v0.10
+ship-target with 8 sources** (rust, clap, cpython×2, next.js, arrow,
+pytorch, nodejs/node, NixOS×3). pnpm reinforces the demand and adds
+the patched-deps + tsconfig-refs sub-cases.
 
 ### 3. `json_key_sort_order` — alphabetical dependencies
 
@@ -408,11 +412,11 @@ plugin" data point** for the launch:
   itself* gives instant credibility with the JS/TS audience —
   and makes `examples/pnpm-pnpm/.alint.yml` a literal copy-paste
   starter for any downstream pnpm-workspace user.
-- The `meta-updater` story is the v0.10+ pitch: alint covers 11
-  of 13 invariants today *without* requiring contributors to
-  install + run a per-repo plugin; once `cross_file_value_equals`
-  ships, the remaining 2 (catalog completeness, internal/external
-  dep remap) close.
+- The `meta-updater` story is the v0.10 ship-target pitch: alint
+  covers 11 of 13 invariants today *without* requiring contributors
+  to install + run a per-repo plugin; once `cross_file_value_equals`
+  ships in v0.10, the remaining 2 (catalog completeness,
+  internal/external dep remap) close.
 - The agent-guardrail rules (`prepare-commit-msg-blocks-claude-amend`,
   `pre-commit-blocks-claude-on-main-branch`) are the only multi-hook
   agentic-aware setup we've found across 10 P2a repos so far —
@@ -426,13 +430,13 @@ no install step, runs the same on every contributor machine."
 
 Followup feature work surfaced (consolidated):
 
-- **`cross_file_value_equals` rule kind** — already on the v0.10+
-  list. pnpm reinforces the demand from a Tier-1 npm-ecosystem
-  repo and adds the **catalog-completeness sub-shape** (value at
-  X must appear in the *key set* under Y in file B) as a
+- **`cross_file_value_equals` rule kind** — v0.10 ship-target (10
+  sources past saturation). pnpm reinforces the demand from a Tier-1
+  npm-ecosystem repo and adds the **catalog-completeness sub-shape**
+  (value at X must appear in the *key set* under Y in file B) as a
   variant worth scoping into the design.
-- **`registry_paths_resolve` rule kind** — already on the v0.10+
-  list. pnpm adds three new use cases:
+- **`registry_paths_resolve` rule kind** — v0.10 ship-target (8
+  sources). pnpm adds three new use cases:
   patchedDependencies → `__patches__/` files,
   tsconfig.json#references → composite-tsconfig-having dirs,
   changeset frontmatter → workspace package names.
@@ -442,7 +446,7 @@ Followup feature work surfaced (consolidated):
   gap.
 
 No new schema or language pitfalls hit while writing this config —
-the 15 documented in `docs/development/CONFIG-AUTHORING.md` cover
+the 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
 everything that came up. Notable confirmations:
 
 - The brace-alternation glob `{cache,cli,config,core,…}/*` worked
@@ -459,3 +463,36 @@ everything that came up. Notable confirmations:
   hygiene rules correctly scoped to "files inside a Node package"
   in the polyrepo layout — the bundled `node@v1` overlay's
   pattern carries through.
+
+---
+
+## Future analysis
+
+- **Per-binding `nested_configs:` split.** The 9 bundled rulesets +
+  ~40 pnpm-specific rules sit in one 913-line `.alint.yml`. Splitting
+  the per-package-shape rules (per-functional-root brace-alternation
+  globs) into per-directory `.alint.yml` files via `nested_configs:
+  true` would let each functional area (`cache/`, `cli/`,
+  `engine/pm/`, etc.) evolve independently. Worth considering as the
+  config grows.
+- **Pre-commit fastpath.** pnpm's husky chain runs `pn run
+  compile-only && pn run lint --quiet` on pre-commit. Layering
+  `alint check --changed` (uses `git ls-files --modified --others
+  --exclude-standard` — exactly the pre-commit shape) would give a
+  fast structural-floor check at the same hook point.
+- **`hygiene/lockfiles@v1` (7 rules)** — already extended; covers
+  the pnpm-lock.yaml presence shape but not deep schema. When a
+  pnpm-aware rule kind ships, revisit.
+
+## Validation status (2026-05-07)
+
+- alint binary: v0.9.17 (built 2026-05-07).
+- `validate-config` reports **112 rules** loaded from `.alint.yml`
+  (51 pnpm-specific + 61 from 9 bundled rulesets: oss-baseline 15 +
+  node 9 + monorepo 4 + monorepo/pnpm-workspace 4 + ci/github-actions
+  3 + hygiene/no-tracked-artifacts 11 + hygiene/lockfiles 7 +
+  tooling/editorconfig 3 + agent-context 5).
+- No `respect_gitignore: false` or `root_only: true` patterns in this
+  config. Pitfalls #18 (FIXED v0.9.17) and #19 (FIXED v0.9.17) do
+  not apply.
+- Live-tree recheck not performed (no /tmp/pnpm checkout available).

@@ -611,10 +611,13 @@ strength of demand across P2a + P2b):
 No NEW rule-kind candidates surfaced — consistent with the
 P2b saturation hypothesis from launch-evidence.md.
 
-No NEW schema/language pitfalls beyond the 17 in
+No NEW schema/language pitfalls beyond the 21 in
 CONFIG-AUTHORING.md — the config drafted cleanly first-pass
 (after applying the canonical patterns from § "Canonical
-patterns").
+patterns"). Pitfall #18 (per-rule `respect_gitignore: false`)
+and #19 (literal-path runtime guard for `root_only: true` +
+multi-component literals) both fixed in engine v0.9.17;
+neither workaround is needed in this config.
 
 ---
 
@@ -648,6 +651,59 @@ patterns").
   fully consistent — and confirming the rule is correctly
   scoped to fire if drift were to occur.
 - **Wall-clock benchmark on the actual sparse tree**:
-  `time alint check` = 0.273 s (real). This is the
+  `time alint check` = 0.273 s (real) — 39 101 files,
+  20 678 by-name package directories, 79 rules. This is the
   load-bearing data point for the launch-pitch
   "alint scales to any size repo" claim.
+
+---
+
+## Future analysis
+
+Three candidate refinements worth evaluating in subsequent sweeps:
+
+1. **`nested_configs: true` for `pkgs/by-name/<2-letter>/<pkg>/`.**
+   Each by-name package directory is effectively its own subtree; the
+   v0.9.17 `nested_configs: true` knob would let per-package
+   `.alint.yml` files layer package-level assertions (e.g. `meta.broken`
+   guards once the cross_language primitive ships, license-attribution
+   parity, patch-naming conventions) without bloating the root config.
+   At 20 678 packages the LSP-server cache-invalidation story (already
+   flagged in § "Real concerns flagged for the v0.10 LSP-server design")
+   becomes much cleaner because invalidation maps to one file's nested
+   config rather than the whole repo.
+2. **`scope_filter` for the by-name fan-out.** The current
+   `nixpkgs-by-name-prefix-dirs-have-package` rule iterates 20 678
+   directories with one `file_exists` require each. A `scope_filter:
+   {has_ancestor: by-name}` on a future per-package rule could narrow
+   the walker's emit set to that subtree only, reducing the
+   constant-factor cost when adding more by-name-scoped rules. Not a
+   bottleneck at 273 ms wall-clock, but worth profiling once 5+ rules
+   stack on the same iteration.
+3. **`compliance/reuse@v1` overlay.** nixpkgs's `lib/licenses/licenses.nix`
+   is the master SPDX registry; the bundled `compliance/reuse@v1` ruleset
+   (3 rules) would assert top-level REUSE-spec discipline (LICENSES/
+   directory presence, per-file SPDX identifiers in source) that
+   complement the existing `nixpkgs-licenses-*` rules without overlapping
+   them.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (1dbd9b218a0e, built 2026-05-07)
+- **Rule count:** 79 (~46 custom + 4 bundled rulesets — `oss-baseline`
+  15, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
+  `tooling/editorconfig` 3; rule IDs may overlap)
+- **`validate-config`:** ✓ Config valid: 79 rule(s) loaded
+- **Live-tree headline (load-bearing):** **39 101 files, 273 ms
+  wall-clock**, full 79-rule pass over the sparse-checkout, including
+  the 20 678-iteration `for_each_dir` over `pkgs/by-name/*/*`. This is
+  the empirical anchor for alint's "any size repo" pitch.
+- **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here.
+  No tracked-but-gitignored files; the only `root_only: true` rules
+  use single-segment literals (`flake.nix`, `default.nix`, etc.).
+- **Open gaps (status changes):** `registry_paths_resolve` remains the
+  strongest demand signal (8 distinct sources past saturation; v0.10
+  must-ship); `dir_name_matches_field` at 3 sources (turbo + next.js +
+  nixpkgs); both unchanged from prior P2b Wave 1 surfacing

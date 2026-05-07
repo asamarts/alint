@@ -251,8 +251,8 @@ flow documented in `CONTRIBUTING.md`.
 
 | Gap | Existing node tooling | What alint needs |
 |---|---|---|
-| `tools/eslint-rules/*` ↔ `eslint.config.mjs` registration | `eslint.config.mjs` imports each custom rule by path | `cross_file_value_equals` rule kind: "every `.js` file under directory X is referenced from a string literal in file Y". **Already on the v0.10+ candidate list** as the single highest-demand item (6 sources). node confirms a 7th. |
-| `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔ `deps/<libname>/` | Ad-hoc per-script convention | `registry_paths_resolve` rule kind: "every path/key in a registry directory resolves to an on-disk artefact in a partner directory". **Already on the v0.10+ candidate list** (4 sources). node confirms a 5th. |
+| `tools/eslint-rules/*` ↔ `eslint.config.mjs` registration | `eslint.config.mjs` imports each custom rule by path | `cross_file_value_equals` rule kind: "every `.js` file under directory X is referenced from a string literal in file Y". **Now v0.10 ship-target** at 10 sources past saturation (airflow, tokio, clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio per `docs/development/launch-evidence.md`). |
+| `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔ `deps/<libname>/` | Ad-hoc per-script convention | `registry_paths_resolve` rule kind: "every path/key in a registry directory resolves to an on-disk artefact in a partner directory". **Now v0.10 ship-target** at 8 sources (rust, clap, cpython×2, next.js, arrow, pytorch, nodejs/node, NixOS×3). |
 | C++ EOL banner consistency in `src/**/*.{cc,h}` | Historically every file started with the Joyent BSD/MIT banner; ~21 % of files at HEAD still do, ~79 % don't (verified: 56 of 268 src/*.{cc,h} carry the banner). The convention drifted silently — newer files just include a header guard. | **NEW candidate**: `file_header_consistency` — assert every file in scope X *either* matches the canonical header *or* matches a "newer convention" header. Niche; the cleaner outcome here is a one-time editorial sweep that picks one convention and `file_header` enforces it. Logged as a v0.10+ candidate but rated low priority. |
 | `lib/<module>.js` ↔ `doc/api/<module>.md` cross-reference | The `node test/doctool/*.js` test suite cross-references | `pair` rule kind already covers this — but the actual node convention is more nuanced (`lib/internal/<module>.js` doesn't need a doc page; `lib/<module>.js` does). Documented in the config as a `pair` rule scoped to top-level `lib/*.js` — confirms `pair` works for the simple case; the nuance can be expressed via `paths.exclude`. **Not a gap; included for completeness.** |
 | `make format-cpp` clang-format diff scoping | `git merge-base HEAD origin/$BASE` then `clang-format --diff` | OUT OF SCOPE (git-diff aware). alint's `--changed` mode informs WHICH files to check, not what the check is. STAYS in CI. |
@@ -263,10 +263,12 @@ flow documented in `CONTRIBUTING.md`.
 [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 
 - `cross_file_value_equals` — confirmed by node (`tools/eslint-rules/*`
-  ↔ `eslint.config.mjs`). Already the single strongest demand signal in
-  P2a (now 7 sources after node).
+  ↔ `eslint.config.mjs`). **Now v0.10 ship-target** at 10 sources past
+  saturation (one of the densest demand signals in P2a+P2b combined).
 - `registry_paths_resolve` — confirmed by node (`tools/dep_updaters/`
-  ↔ `deps/`). Already the second-strongest demand (5 sources after node).
+  ↔ `deps/`). **Now v0.10 ship-target** at 8 sources (one of the
+  highest-leverage gaps; pairs structurally with `cross_file_value_equals`
+  for the registry-cross-reference shape).
 
 **NEW candidate not previously inventoried:**
 
@@ -461,13 +463,14 @@ discipline legible to a contributor reading the repo for the first time."**
 
 Followup feature work surfaced (priority order):
 
-- **`cross_file_value_equals`** — seventh confirmation. node's
-  `tools/eslint-rules/*` ↔ `eslint.config.mjs` registration adds to the
-  existing 6-source mandate; this remains v0.10+'s single
-  highest-leverage gap.
-- **`registry_paths_resolve`** — fifth confirmation. node's
-  `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔ `deps/<libname>/`
-  cross-reference adds to the rust + clap + cpython×2 mandate.
+- **`cross_file_value_equals`** — now **v0.10 ship-target** at 10 sources
+  past saturation. node's `tools/eslint-rules/*` ↔ `eslint.config.mjs`
+  registration is one of the most adopter-visible patterns; this remains
+  one of v0.10's two highest-leverage gaps.
+- **`registry_paths_resolve`** — now **v0.10 ship-target** at 8 sources.
+  node's `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔
+  `deps/<libname>/` cross-reference adds to the rust + clap + cpython×2
+  + next.js + arrow + pytorch + NixOS×3 mandate.
 - **`file_header_consistency` (NEW; low priority)** — surfaced uniquely
   by node's drifted C++ EOL-banner convention. Niche; the cleaner
   outcome is a one-time editorial sweep that picks one convention.
@@ -477,9 +480,12 @@ Followup feature work surfaced (priority order):
 
 ## No NEW schema/language pitfalls hit
 
-The 16 documented in `docs/development/CONFIG-AUTHORING.md` cover
-everything that came up while authoring this config. Specific near-
-misses navigated:
+The 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
+everything that came up while authoring this config. Pitfalls #18 + #19
+were both fixed in engine v0.9.17 (per-rule `respect_gitignore: false`
+knob; literal-path runtime guard for `root_only: true` + multi-component
+literals) — neither workaround is needed in this config. Specific
+near-misses navigated:
 
 - **§13 (regex anchoring)** — every `^` / `$` in this config is `(?m)`
   prefixed (the `node_version.h` macro check, the workflow-permissions
@@ -500,3 +506,64 @@ misses navigated:
 
 The `coverage_audit_examples_parse.rs` audit passes with this config
 in place (run from the repo root).
+
+---
+
+## Future analysis
+
+Three candidate refinements worth evaluating in subsequent sweeps:
+
+1. **`agent-context@v1` adoption.** node ships a load-bearing AGENTS.md
+   pattern (`tools/eslint-rules/` registers AI-coding-agent helpers) and
+   the broader project has converged on agent-instruction discipline
+   across `CONTRIBUTING.md`, `doc/contributing/`, and the multiple
+   onboarding docs. The bundled `agent-context@v1` ruleset (5 rules)
+   would absorb the existing top-level governance assertions without
+   adding repo-specific rules — worth a side-by-side comparison against
+   the current `node-governance-files-present` + `node-doc-contributing-
+   substantive` block.
+2. **`hygiene/lockfiles@v1` overlay.** node's `tools/eslint/` and
+   `tools/lint-md/` ship pinned `package.json` + `package-lock.json`
+   pairs; the bundled `hygiene/lockfiles@v1` ruleset (7 rules) would
+   catch nested-lockfile drift, mismatched `lockfileVersion`, and the
+   orphan-lockfile pattern across the `tools/` subtree without per-tier
+   restatement.
+3. **`tools/eslint-rules/*` ↔ `eslint.config.mjs` registry pattern as
+   a future rule kind.** This is the canonical 27-source instance of
+   `cross_file_value_equals`'s "every file in directory X is referenced
+   from file Y" shape — but the cross-file is *registry-flavoured*
+   (every file in the dir must appear at some path in the registry,
+   not at a specific path). Worth flagging as a candidate refinement
+   of `cross_file_value_equals` once that primitive ships in v0.10:
+   the registry-direction-only mode (`cross_file_files_match_registry:
+   true`?) would express this without the per-key value comparison.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (1dbd9b218a0e, built 2026-05-07)
+- **Rule count:** 86 (~40 custom + 5 bundled rulesets — `oss-baseline`
+  15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
+  11, `tooling/editorconfig` 3; rule IDs may overlap)
+- **`validate-config`:** ✓ Config valid: 86 rule(s) loaded
+- **Live-tree recheck:** sparse-checkout present at `/tmp/nodejs-node`
+  (subset under `/tmp/nodejs-node-subset`). Spot-check via
+  `alint suggest`: surfaces `oss-baseline@v1` (high) + `python@v1` (high)
+  + `agent-hygiene@v1` (medium) — confirms the suggest engine identifies
+  the same overlays this config already adopts (oss-baseline, plus an
+  `agent-hygiene@v1` candidate not yet adopted).
+- **Pitfall fixes (v0.9.17):** Pitfalls #18 + #19 do not apply here.
+  The `node-governance-files-present` and `node-build-files-present`
+  rules use `root_only: true` only with single-segment literals
+  (`Makefile`, `BUILDING.md`, etc.) — pitfall #19's "`root_only: true`
+  + multi-component literal silently misses" failure mode is not
+  triggered.
+- **Open gaps (status changes):** `cross_file_value_equals` promoted to
+  **v0.10 ship-target** at 10 sources past saturation; node's
+  `tools/eslint-rules/*` ↔ `eslint.config.mjs` registration is one of
+  the most-adopter-visible instances of the pattern.
+  `registry_paths_resolve` promoted to **v0.10 ship-target** at 8
+  sources; node's `tools/dep_updaters/update-<libname>.{sh,mjs}` ↔
+  `deps/<libname>/` cross-reference is one of the canonical sources.
+  `file_header_consistency` (low-priority, node-only) unchanged

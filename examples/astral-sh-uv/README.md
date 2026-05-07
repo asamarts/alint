@@ -216,3 +216,48 @@ Surface coverage: 16/20 (80%) of uv's structural checks moved to declarative
 config. The 20 % that don't move are deliberately out of scope (codegen,
 build, release artefact patching) — exactly the boundary alint's design
 draws.
+
+---
+
+## Future analysis
+
+Concrete analyses to follow up with on the live tree:
+
+- **`alint suggest` against the live `astral-sh/uv` tree** — capture which
+  bundled rulesets the heuristic auto-detects (expect at minimum
+  `oss-baseline@v1`, `python@v1`, and likely `rust@v1` given the polyglot
+  shape), and compare against the rulesets manually adopted in this config.
+  Will surface any unintentional ruleset omissions.
+- **JSON-output slow-rule scan** — run
+  `alint check --format json --config .alint.yml /tmp/uv` and bucket the
+  per-rule wall-times to identify the heaviest `command:` shellouts; the
+  ruff/clippy/cargo-shear shellouts dominate today and are candidates for
+  consolidation under a `command_idempotent` v0.10 rule kind once it lands.
+- **Per-crate `nested_configs: true` opportunity** — uv's 67 published
+  crates each ship their own `Cargo.toml`; a per-crate `.alint.yml` could
+  carry crate-specific overrides (e.g. `uv-trampoline`'s exception from
+  `[lints] workspace = true`) without polluting the workspace-root config.
+
+## Validation status (2026-05-07)
+
+- alint version: v0.9.17
+- Config validation: `validate-config` reports **73 rules loaded**.
+  Reconciliation: 19 explicit rules in `.alint.yml` + 57 entries from
+  extends (oss-baseline 15 + rust 11 + python 9 + monorepo 4 +
+  monorepo/cargo-workspace 4 + ci/github-actions 3 +
+  hygiene/no-tracked-artifacts 11) − 3 facts (`has_rust`, `has_python`,
+  `is_cargo_workspace` are `- id:` entries but not loadable rules) = 73.
+  Matches the README's narrative breakdown of the alint subset, after
+  the facts subtraction.
+- Live-tree status: pending — `/tmp/uv/` not present at revalidation time
+  (only stale lock files `/tmp/uv-*.lock` remain).
+- Pitfall fixes shipped in v0.9.17: pitfall #18 (per-rule
+  `respect_gitignore: false`), pitfall #19 (literal_is_nested runtime
+  guard) — neither directly affects this config.
+- v0.10 ship-target candidates referenced here that have firmed up:
+  `python/pep-621-shape@v1` is now a v0.10 design (per launch-evidence.md);
+  `cross_file_value_equals` is past-saturation (10 sources, including uv).
+- Open gaps: `archive_contents_matches` remains a uv-unique candidate;
+  `cross_file_field_equals` is partially absorbed by the broader
+  `cross_file_value_equals` design but the templated-substitution variant
+  (uv's `check_uv_wheel_contents.py`) needs further design pass.

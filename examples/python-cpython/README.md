@@ -43,9 +43,10 @@ Of the 56 distinct structural-validation surfaces inventoried:
   patchcheck.py is git-diff-aware, the entire `Tools/cases_generator/`
   is a code generator, etc.)
 
-The 38 % that *do* fit translate to the **39-rule alint config** in
-[`/.alint.yml`](.alint.yml), bundled-rulesets-included. The single most
-alint-shaped surface here is **`Misc/NEWS.d/next/<Section>/`** — a strict
+The 38 % that *do* fit translate to the **72-rule alint config** in
+[`/.alint.yml`](.alint.yml) (34 cpython-specific + 38 from 4 bundled
+rulesets). The single most alint-shaped surface here is
+**`Misc/NEWS.d/next/<Section>/`** — a strict
 filename grammar (`YYYY-MM-DD-HH-MM-SS.gh-issue-NUMBER.NONCE.rst`)
 enforced today by two LOCAL pre-commit hooks that only encode the WEAKER
 "no spaces in path" invariant. alint encodes the full filename grammar
@@ -230,20 +231,22 @@ covers ALL 12 subdirs:
 | Sortedness guards | `Tools/build/freeze_modules.py` (sorts the FROZEN_MODULES list); historically `update-spelling-wordlist-to-be-sorted` in airflow | `ordered_block` rule kind: "items between `<start_marker>`/`<end_marker>` are sorted (case-insensitive, indent-aware)". **Already on the v0.10+ candidate list** from rust-lang/rust (`tidy::alphabetical` gap). cpython confirms demand. |
 | pep8-naming for module filenames | `ruff` lint rules | Already maps via the existing `filename_case: snake` rule from `bundled/python@v1`. NOT a gap — listed for completeness. |
 
-**Cross-reference with the existing v0.10+ candidate list in
+**Cross-reference with the v0.10 ship-target / design-candidate list in
 [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
-- `balanced_delimiters` — confirmed by cpython (Argument Clinic). Already
-  on the list (from `rustdoc_templates`).
-- `file_pair_block_match` — confirmed by cpython (Argument Clinic body ↔
-  generated header). Already on the list (from `rustdoc_css_themes`).
-- `generated_file_fresh` — confirmed by cpython (cases_generator). Already
-  on the list (from uv `cargo dev generate-all`).
+- `balanced_delimiters` + `file_pair_block_match` — confirmed by cpython
+  (Argument Clinic block markers + body ↔ generated header). **v0.10
+  design candidate** (3 sources: rust + cpython×2).
+- `generated_file_fresh` — confirmed by cpython (cases_generator).
+  **v0.10 ship-target** (6 sources: uv, cpython, pytorch, bazel, TF,
+  spark).
 - `registry_paths_resolve` — confirmed twice by cpython (`.gitattributes`
-  generated markers + `check-c-api-docs`). Already on the list (from
-  `triagebot`).
+  generated markers + `check-c-api-docs`). **v0.10 ship-target — top
+  of backlog with 8 sources** (rust, clap, cpython×2, next.js, arrow,
+  pytorch, nodejs/node, NixOS×3).
 - `ordered_block` — confirmed by cpython (`Modules/Setup` sortedness;
-  historically `update-spelling-wordlist-to-be-sorted` patterns). Already
-  on the list.
+  historically `update-spelling-wordlist-to-be-sorted` patterns).
+  **v0.10 ship-target — top of backlog with 7 sources** (rust,
+  airflow, tokio, cpython, arrow, golang/go, protobuf failure_lists).
 
 **NEW candidate not previously inventoried:**
 - `column_alignment` rule kind — surfaced uniquely by cpython's CODEOWNERS
@@ -371,11 +374,12 @@ shell-out-to-ruff subset (the ruff invocation dominates).
 across 12 distinct surfaces — 122 Make targets, 35 pre-commit hooks, 9
 ruff configs, 7 Tools/build/* check scripts, .gitattributes, .editorconfig,
 and 25 GitHub Actions workflows. alint consolidates the 38 % that's
-declarative orchestration into one 39-rule config — and the most
-alint-shaped surface (`Misc/NEWS.d/next/*` filename grammar) is enforced
-nowhere statically today, only by a downstream tool (`blurb`) that must
-generate the right shape at write time. alint encodes the full grammar
-as a single 6-line `filename_regex` rule."
+declarative orchestration into one 72-rule config (34 cpython-specific +
+38 from 4 bundled rulesets) — and the most alint-shaped surface
+(`Misc/NEWS.d/next/*` filename grammar) is enforced nowhere statically
+today, only by a downstream tool (`blurb`) that must generate the right
+shape at write time. alint encodes the full grammar as a single 6-line
+`filename_regex` rule."
 
 This is the **third positioning narrative** crystallised in P2a-Wave 2:
 
@@ -396,16 +400,66 @@ tooling assumes but never checks."
 
 Followup feature work surfaced (priority order):
 
-- **`balanced_delimiters` + `file_pair_block_match`** — third confirmation
-  this combination matters. cpython adds Argument Clinic to the
-  rustdoc_css_themes + rustdoc_templates use cases. Should land together
-  in v0.10+.
-- **`registry_paths_resolve`** — fourth confirmation (cpython twice:
-  `.gitattributes` generated markers + `check-c-api-docs` symbol ↔ docs
-  cross-ref). Single highest-leverage gap, now spanning Rust, Go,
-  Python+C ecosystems.
-- **`generated_file_fresh`** — second confirmation. uv + cpython both
-  have codegen pipelines whose output should match a deterministic regen.
+- **`balanced_delimiters` + `file_pair_block_match`** — v0.10 design
+  candidate (3 sources: rust + cpython×2). cpython adds Argument Clinic
+  to the rustdoc_css_themes + rustdoc_templates use cases. Should land
+  together in v0.10.
+- **`registry_paths_resolve`** — **v0.10 ship-target with 8 sources**.
+  cpython contributes two of the eight (`.gitattributes` generated
+  markers + `check-c-api-docs` symbol ↔ docs cross-ref). Tied with
+  `ordered_block` at the top of the v0.10 backlog.
+- **`generated_file_fresh`** — **v0.10 ship-target with 6 sources**
+  (uv, cpython, pytorch, bazel, TF, spark). cpython's `cases_generator`
+  + `generate_sbom.py --check` are canonical examples.
+- **`ordered_block`** — **v0.10 ship-target with 7 sources** (rust,
+  airflow, tokio, cpython, arrow, golang/go, protobuf failure_lists).
+  Tied with `registry_paths_resolve` at top of v0.10 backlog.
 - **`column_alignment` rule kind (NEW)** — surfaced only by cpython
-  (CODEOWNERS column-31 alignment). Niche; rated low priority but logged
-  for v0.10+ review.
+  (CODEOWNERS column-31 alignment). Niche; rated low priority,
+  single-source.
+
+---
+
+## Future analysis
+
+- **`registry_paths_resolve` + `ordered_block` + `generated_file_fresh`
+  ship together in v0.10.** When they land, cpython's gap inventory
+  shrinks meaningfully:
+  - `.gitattributes` generated markers → `registry_paths_resolve`
+    (one rule for ~50 paths)
+  - `check-c-api-docs` symbol ↔ docs cross-ref →
+    `registry_paths_resolve` (regex extraction variant)
+  - `cases_generator` codegen freshness → `generated_file_fresh`
+  - `Modules/Setup` sortedness → `ordered_block`
+  Two of cpython's 9 "needs new primitive" surfaces close in v0.10
+  (the registry pair); the codegen freshness + sortedness close as
+  well. Only Argument Clinic's `balanced_delimiters` +
+  `file_pair_block_match` pair stays v0.10 design-phase.
+- **`docs/adr@v1` (4 rules)** — cpython has no ADR convention; PEPs
+  serve a similar role but live elsewhere. Doesn't apply.
+- **`compliance/reuse@v1` (3 rules)** — cpython uses PSF licence;
+  doesn't apply.
+- **`agent-context` / `agent-hygiene`** — cpython has no CLAUDE.md or
+  agent-friendly docs convention. If/when one lands, extend
+  `agent-context@v1` (5 rules).
+- **Per-tree `nested_configs:`.** The 9 ruff configs hint at a
+  per-tree contract; alint could mirror this with per-tree
+  `.alint.yml` via `nested_configs: true`, scoping rules to
+  `Doc/`, `Lib/test/`, `Tools/build/`, etc.
+
+## Validation status (2026-05-07)
+
+- alint binary: v0.9.17 (built 2026-05-07).
+- `validate-config` reports **72 rules** loaded from `.alint.yml** (34
+  cpython-specific + 38 from 4 bundled rulesets: oss-baseline 15 +
+  python 9 + ci/github-actions 3 + hygiene/no-tracked-artifacts 11).
+- 1 rule uses `root_only: true` (line 563, autotools files block) —
+  all 5 paths are single-segment literals at root (`configure`,
+  `configure.ac`, `pyconfig.h.in`, `aclocal.m4`, `Makefile.pre.in`).
+  **Pitfall #19 does not fire** (the runtime guard targets multi-
+  component literals).
+- No `respect_gitignore: false` patterns. Pitfall #18 does not apply.
+- 12 validation surfaces (per task brief) consolidated into 1 alint
+  config — confirmed; the 38% that fits maps cleanly.
+- Live-tree recheck not performed (no /tmp/cpython checkout
+  available).

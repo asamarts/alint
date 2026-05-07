@@ -251,9 +251,57 @@ case-study gap lists):
   priority than the `registry_paths_resolve` rule kind from the
   rust-lang case study, but the shape is the same family
 
-No NEW schema/language pitfalls hit beyond the existing 12 (the
-dashed-key bracket-notation pitfall #10 fired once on
+No NEW schema/language pitfalls hit beyond the existing 21-pitfall
+catalogue (the dashed-key bracket-notation pitfall #10 fired once on
 `$.workspace.package.rust-version`, fixed to
 `$.workspace.package['rust-version']` per the canonical pattern;
 this is a rediscovery of an already-documented pitfall, not a new
 one).
+
+---
+
+## Future analysis
+
+Concrete analyses to follow up on the live tree (when one becomes
+available):
+
+- **`alint suggest` against a fresh `clap-rs/clap` clone** — predict the
+  heuristic will surface `oss-baseline@v1`, `rust@v1`, and
+  `monorepo/cargo-workspace@v1`; cross-reference against the manually
+  configured extends list.
+- **`for_each_dir` over each `clap_*` workspace member** — the current
+  config uses an explicit `select: "{clap_builder,clap_derive,...}"`
+  bracket expansion. With the v0.10 candidate `monorepo/cargo-workspace`
+  member-discovery refinement, a single `select: "{members}"` (where
+  `{members}` derives from the `[workspace] members` array in the root
+  `Cargo.toml`) would survive future crate additions without manual edits.
+  Same shape demand as the deno case study.
+- **JSON-output rule timing** — clap is small enough that the structural
+  rules complete in well under a second. Worth running
+  `alint check --format json --config .alint.yml` and confirming the
+  three `command:` shellouts (typos, cffconvert, cargo deny) dominate the
+  wall-clock; if so, narrow each one's `paths:` glob.
+
+## Validation status (2026-05-07)
+
+- alint version: v0.9.17
+- Config validation: `validate-config` reports **70 rules loaded**.
+  Reconciliation: 28 explicit rules in `.alint.yml` + 44 entries from
+  extends (oss-baseline 15 + rust 11 + monorepo/cargo-workspace 4 +
+  ci/github-actions 3 + hygiene/no-tracked-artifacts 11) − 2 facts
+  (`has_rust`, `is_cargo_workspace` are `- id:` entries but not
+  loadable rules) = 70. The README's narrative "24 rules" is the
+  count after stripping the 4 `command:` shellouts; the precise total
+  declared is 28 explicit, 70 loaded.
+- Live-tree status: pending — `/tmp/clap/` not present at revalidation
+  time.
+- Pitfall fixes shipped in v0.9.17: pitfall #18 (per-rule
+  `respect_gitignore: false`), pitfall #19 (literal_is_nested runtime
+  guard) — neither directly affects this config (clap doesn't ship
+  tracked-but-gitignored files or use `root_only:` with multi-component
+  literals).
+- Open gaps: `cross_file_field_equals` (the per-crate metadata identity
+  variant) is now absorbed into the broader `cross_file_value_equals`
+  candidate (10 sources, past-saturation, v0.10 ship-target);
+  `regex_resolves_in_file` (the `pre-release-replacements` shape) remains
+  cargo-release-niche and stays on the v0.10 design candidate list.

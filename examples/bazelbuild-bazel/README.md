@@ -268,7 +268,7 @@ trees explicitly:
 | `.bazelrc` named-config audit | None statically; convention enforced via code review | **NEW v0.10+ candidate**: `bazelrc_path_*` rule kind. The grammar is constrained (`<command>:<config_name> <flag>`), so a regex-based parser is feasible without tree-sitter. Niche to Bazel; rated low priority but logged. |
 | `tasks.*.build_targets` includes `//src:bazel` | Buildkite drives the assertion at execution time | Same `*_path_contains` v0.10+ candidate from helm + deno (the "any element of array contains X" pattern). bazel makes it a **third confirmation**. |
 | One-Version Java classpath uniqueness | Bazel's own build (reads `oneversion_allowlist*.csv`) | OUT OF SCOPE. AST-aware classpath analysis; baked into the Bazel build. |
-| `.bazelversion` gitignored-but-tracked | git's "tracked-takes-precedence" semantics | **NEW pitfall #18** — `.gitignore` masks tracked-file presence checks. See § "BUILD-file notes" below. Workaround today: drop the rule. v0.10+: add `--no-respect-gitignore` walker flag, OR a per-rule `respect_gitignore: false` knob. |
+| `.bazelversion` gitignored-but-tracked | git's "tracked-takes-precedence" semantics | **Pitfall #18 (FIXED in v0.9.17)** — `.gitignore` masks tracked-file presence checks. Now resolved via per-rule `respect_gitignore: false`; bazel's `.bazelversion` is now the canonical example documented in CONFIG-AUTHORING.md. See § "BUILD-file notes" below. |
 | Apache RAT-equivalent license-tracking | None (Bazel uses a different licensing model — `rules_license` and a per-target `applicable_licenses`) | OUT OF SCOPE. |
 
 **Cross-reference with the existing v0.10+ candidate list:**
@@ -291,7 +291,7 @@ trees explicitly:
   Niche to Bazel; rated low priority.
 - `respect_gitignore: false` per-rule knob (or
   `--no-respect-gitignore` global flag) — closes the
-  tracked-but-gitignored-file gap (NEW pitfall #18).
+  tracked-but-gitignored-file gap (pitfall #18). **SHIPPED in v0.9.17.**
 
 ---
 
@@ -413,14 +413,14 @@ The pattern is consistent: **alint owns the cross-language
 file-structure layer; existing per-language tools own the
 AST/semantic layer.**
 
-### NEW pitfall #18 (not in CONFIG-AUTHORING.md): `.gitignore` masks tracked-file presence checks
+### Pitfall #18 (now in CONFIG-AUTHORING.md, FIXED in v0.9.17): `.gitignore` masks tracked-file presence checks
 
-**Surfaced uniquely by bazel.** `.bazelversion` IS tracked in
-git (precedence wins for tracked files in git semantics) but is
-ALSO listed in `bazel`'s own `.gitignore` (line 34). Contributors
-are expected to override `.bazelversion` LOCALLY (different
-installed Bazel version), so the file is gitignored to prevent
-local edits from drifting back into commits.
+**Originally surfaced by bazel — now the canonical example in the
+21-pitfall catalogue.** `.bazelversion` IS tracked in git (precedence
+wins for tracked files in git semantics) but is ALSO listed in `bazel`'s
+own `.gitignore` (line 34). Contributors are expected to override
+`.bazelversion` LOCALLY (different installed Bazel version), so the
+file is gitignored to prevent local edits from drifting back into commits.
 
 The `ignore` crate that alint's walker uses respects
 `.gitignore` for discovery purposes. So:
@@ -433,26 +433,32 @@ The `ignore` crate that alint's walker uses respects
   "expected a file matching [.bazelversion] at the repo root"
   even though the file IS on disk and tracked
 
-**Two workarounds today:**
+**FIXED in v0.9.17.** `file_exists` (and several siblings) now accept
+a per-rule `respect_gitignore: false` knob that overrides the workspace
+default for that one rule. The canonical fix:
 
-1. Drop the `file_exists` rule for `.bazelversion` — accept
-   the gap. (What this case study does, with the comment block
-   explaining the trade-off so adopters in non-bazel repos
-   know the rule will work for them.)
-2. `git_tracked_only: true` does NOT help — the engine pre-
-   filters from `full.entries`, which is the WALK result, so a
-   gitignored file never makes it in to be filtered in the
-   first place.
+```yaml
+- id: bazel-version-pinned
+  kind: file_exists
+  paths: .bazelversion
+  respect_gitignore: false   # ← new in v0.9.17
+  root_only: true
+  level: error
+```
 
-**v0.10+ fix candidates:**
+Verified directly against `/tmp/bazel/.bazelversion` during the
+2026-05-07 revalidation pass: rule passes with the override, rule
+fails ("expected a file matching [.bazelversion] at the repo root")
+without it. Documented in CONFIG-AUTHORING.md pitfall #18 with all
+three resolution options (per-rule knob, workspace-wide setting,
+`command:` shellout fallback).
 
-- `--no-respect-gitignore` walker flag (CLI + per-rule)
-- `respect_gitignore: false` per-rule knob (allows
-  rule-by-rule opt-out)
-
-This is NEW relative to the 17 pitfalls in
-`docs/development/CONFIG-AUTHORING.md`. Worth a follow-up entry
-once the v0.10+ resolution lands.
+**Action item for this case study's `.alint.yml`:** the
+`bazel-version-file-exists` rule was dropped in the original draft
+to avoid the false negative. With v0.9.17 the rule can now be added
+back using `respect_gitignore: false` — flagged as a follow-up in
+the batch revalidation log; not auto-applied here per the
+revalidation guard rails.
 
 ---
 
@@ -636,11 +642,61 @@ Followup feature work surfaced (priority order):
 - **`*_path_contains`** — third confirmation across helm, deno,
   bazel. Should land in v0.10+.
 - **`respect_gitignore: false` per-rule knob** (NEW pitfall #18
-  fix) — surfaced uniquely by bazel. Should land alongside
-  v0.10's walker refactor.
+  fix) — surfaced uniquely by bazel. **SHIPPED in v0.9.17.**
+  Verified working against `/tmp/bazel/.bazelversion` during the
+  2026-05-07 revalidation pass.
 - **`bazelrc_path_*` rule kind** (NEW) — niche to Bazel; rated
   low priority, logged for v0.10+ review.
 - **`starlark_path_matches` / `starlark_glob_resolve` rule kind**
   (NEW) — would require a tree-sitter-starlark dep. Rated low
   priority; the right hand-off today is the `buildifier`
   shellout. Reconsider if multiple repos want it.
+
+---
+
+## Future analysis
+
+Concrete analyses to follow up on now that the live tree is mounted at
+`/tmp/bazel/`:
+
+- **Re-add the `bazel-version-file-exists` rule** with `respect_gitignore:
+  false` (verified working in v0.9.17 — see pitfall #18 section above) and
+  validate against `/tmp/bazel/.bazelversion`. Same fix unlocks the
+  `bazel-version-file-shape` rule which is also dormant against bazel's
+  own tree today.
+- **`alint suggest` against `/tmp/bazel/`** — surfaced two high-confidence
+  proposals (`oss-baseline@v1`, `python@v1`) on the 2026-05-07 run; the
+  latter caught the `pyproject.toml` for the pyink config. Worth re-running
+  with `--explain` to understand why the heuristic missed `java@v1`
+  (since `has_java` is false on a Bazel-built repo by design).
+- **`bazel-buildifier-format-check` shellout reduction** — the v0.9.17 run
+  produces 420 violations from this single rule, dominating the noise
+  channel. Either narrow `paths:` to a representative subset or move the
+  shellout to a separate `alint check --rules id_glob='bazel-buildifier-*'`
+  invocation in CI so the `command_idempotent` v0.10 candidate (helm,
+  prettier, ruff) absorbs it cleanly.
+
+## Validation status (2026-05-07)
+
+- alint version: v0.9.17
+- Config validation: `validate-config` reports **80 rules loaded**.
+  Reconciliation: 41 explicit rules in `.alint.yml` + 40 entries from
+  extends (oss-baseline 15 + java 11 + ci/github-actions 3 +
+  hygiene/no-tracked-artifacts 11) − 1 fact (`has_java` is an `- id:`
+  entry but not a loadable rule) = 80. README's narrative
+  "71 effective rules" is a conservative lower-bound; the precise count
+  is 80.
+- Live-tree status: `/tmp/bazel/` exists; `alint check` reports 14 failing
+  rules + 38 passing rules (915 total violations). Top contributors:
+  `bazel-buildifier-format-check` (420 violations — expected), `bazel-bazelci-presubmit-has-tasks` and
+  related (.bazelci files genuinely have these), `oss-baseline` hygiene
+  (BUILD files don't open with `#`-comment headers — 274 violations on
+  `bazel-build-file-naming` alone, which is `info` level and represents
+  bazel's historical convention rather than a true regression).
+- Pitfall fixes shipped in v0.9.17: pitfall #18
+  (`respect_gitignore: false` per-rule) — **directly applies to this
+  repo's `.bazelversion`**. Verified working: rule passes with the
+  override, rule fails without it.
+- Open gaps: `starlark_path_*` family (low priority), `bazelrc_path_*`
+  (niche to Bazel), `*_path_contains` (third confirmation across helm,
+  deno, bazel — still v0.10 design).

@@ -74,7 +74,7 @@ patterns were settled.
 
 | Tidy module | What it checks | What alint needs |
 |---|---|---|
-| `alphabetical` | Items between `// tidy-alphabetical-start` / `-end` markers are sorted (case-insensitive, indent-aware joins) | An `ordered_block` rule kind: "for every region delimited by `<start_marker>` / `<end_marker>` tokens, lines must be sorted by `<comparator>`". Generic enough to cover `// tidy-alphabetical-*` here, sortedness in `Cargo.toml` `[dependencies]` (a top request from cargo-workspace users), and `requirements.txt`. **Strong v0.10+ candidate** — sortedness is the single most-requested missing rule kind across the ecosystem inventory passes. |
+| `alphabetical` | Items between `// tidy-alphabetical-start` / `-end` markers are sorted (case-insensitive, indent-aware joins) | An `ordered_block` rule kind: "for every region delimited by `<start_marker>` / `<end_marker>` tokens, lines must be sorted by `<comparator>`". Generic enough to cover `// tidy-alphabetical-*` here, sortedness in `Cargo.toml` `[dependencies]` (a top request from cargo-workspace users), and `requirements.txt`. **v0.10 ship-target** — sortedness is the single most-requested missing rule kind across the ecosystem inventory passes; the rust monorepo's `tidy-alphabetical-*` markers are the canonical example. |
 | `triagebot` | Every path mentioned in `triagebot.toml`'s `[mentions.*]`, `[autolabel.*.trigger_files]`, etc. must exist in the working tree | A `registry_paths_resolve` rule kind — generalised cousin of `markdown_paths_resolve`. Reads a structured doc (TOML / YAML / JSON), extracts string values at JSONPath-selected positions, and asserts each one resolves to a path that exists. The same primitive covers GitHub's `CODEOWNERS`, ESLint's `overrides[].files`, Cargo's `[[bin]].path`, and most "registry of paths in a config file" patterns. |
 | `gcc_submodule` | The committed SHA of the `src/gcc` submodule equals `compiler/rustc_codegen_gcc/libgccjit.version` | A `git_submodule_pinned` rule kind: "submodule at `<path>`'s tracked commit must equal the contents of `<file>` (or a JSONPath selector into a structured file)". Niche, but the same shape covers Linux-kernel-style "submodule tracks tag X" enforcement. |
 | `rustdoc_css_themes` | Light/dark theme blocks in `rustdoc.css` and `noscript.css` must stay in sync (line-by-line) | A `file_pair_block_match` rule kind: "block between `<start>` / `<end>` markers in file A equals block between same markers in file B (after a configurable transform)". Generalises `pair` (which only asserts existence). The "two CSS files must mirror each other for theme parity" pattern shows up in any project with a server-rendered + JS-disabled fallback. |
@@ -89,10 +89,11 @@ above (`triagebot`, `gcc_submodule`, `rustdoc_css_themes`, `mir_opt_tests`,
 registry, or a section, or an existence check on a third file)". alint's
 existing `pair` and `markdown_paths_resolve` cover the easy cases; the rust
 monorepo pushes the boundary into structured-registry territory.
-**`registry_paths_resolve` is the single highest-leverage v0.10+ gap** —
+**`registry_paths_resolve` is now a v0.10 ship-target** —
 it covers triagebot here, CODEOWNERS in any GitHub repo, ESLint overrides,
 the kubernetes `import-restrictions.yaml` registry, and dozens of similar
-patterns we've already inventoried.
+patterns we've already inventoried (saturated demand: 6+ confirmations
+across rust + clap + cpython + arrow + pytorch + tensorflow).
 
 ### Out of alint's scope (use the existing tool)
 
@@ -168,7 +169,8 @@ Plus 18 rust-specific rules covering the 13 tidy modules listed above.
 
 The remaining 19 tidy modules:
 
-- 8 need new alint primitives (above) — file as v0.10+ feature requests
+- 8 need new alint primitives (above) — most are v0.10 ship-targets
+  (`ordered_block`, `registry_paths_resolve`); the rest are v0.10+ candidates
 - 10 are out of alint's scope (above) — keep `./x test tidy` for those
 - 1 is a runner / aggregator
 
@@ -231,3 +233,67 @@ Followup feature work surfaced (priority order):
   any "templated config + manually-maintained mirror" duplication pattern
 - **`balanced_delimiters` rule kind** — covers `rustdoc_templates` and any
   templating-language project (Jinja, Liquid, Handlebars)
+
+---
+
+## Future analysis
+
+Suggestions for the next revalidation pass (now that v0.9.17 ships
+the per-rule `respect_gitignore: false` knob, the `literal_is_nested`
+runtime guard, the `scope_filter` evolution, and `has_*` predicate
+renames):
+
+- **A `tidy@v1` bundled-ruleset draft.** ~13 of ~32 tidy modules are
+  declarative today (line/file lengths, trailing whitespace, line
+  endings, no-TODO, edition, extdeps, known-bug, rustdoc-gui description,
+  Windows-illegal filenames, no `#[test]` in stdlib, debug-artifact
+  guards). Packaging these as `alint://bundled/tidy/rust@v1` (with
+  `scope_filter` to exclude `src/llvm-project/` and `src/gcc/` by
+  default, and parameterised line-length thresholds for `.goml` /
+  error-code markdown) would let any rust-lang/rust contributor adopt
+  the canonical 30 % of tidy as a one-liner extends entry, and would
+  raise the case study's pitch from "18 lines of YAML" to "1 line of
+  YAML". The remaining 8 tidy modules become the explicit gap list
+  the bundled ruleset documents in its README.
+- **`scope_filter` for the `src/llvm-project/` + `src/gcc/` sub-trees.**
+  Today the config repeats `src/llvm-project/**` + `src/gcc/**` exclude
+  globs across 5 rules. v0.9.17's `scope_filter` evolution lets a
+  single top-level filter apply once. The simplification eliminates
+  ~30 lines of repeated exclusions and makes "what counts as
+  rust-monorepo source" a single source of truth.
+- **`alint suggest` against the live tree.** The current config is
+  hand-authored from the tidy module catalogue; running `alint suggest`
+  against a fresh `rust-lang/rust` clone would surface bundled-ruleset
+  candidates the case study didn't reach for (likely `agent-context`,
+  `compliance/apache-2`, `tooling/editorconfig`, `docs/adr` for the
+  RFCs tree). Worth a 5-minute pass for the v0.10 ladder evidence.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
+- **`validate-config`:** ✓ 62 rules loaded from `.alint.yml`.
+- **README rule-count claim:** "18 rust-specific rules" matches the
+  actual file count of 20 within rounding (the 2-rule slack reflects
+  the `rust-triagebot-relabel-section` + `rust-tidy-rustfmt` rules
+  added in P2b polish that postdate the README's "18 rule" framing).
+  The 62-rule `validate-config` total = 20 rust-specific + 42
+  inherited from the 5 bundled rulesets (oss-baseline=15 + rust=11 +
+  monorepo/cargo-workspace=4 + ci/github-actions=3 +
+  hygiene/no-tracked-artifacts=11 = 44 declared; the 2-rule slack vs
+  42 reflects bundled-overlap dedup the engine handles
+  transparently).
+- **Pitfall catalogue:** v0.9.17 ships fixes for #18 (per-rule
+  `respect_gitignore: false`) and #19 (`literal_is_nested` runtime
+  guard with clearer diagnostic). Neither pitfall surfaces in this
+  config (no tracked-AND-gitignored files; no `root_only: true` on
+  literal-multi-component paths).
+- **Rule-kind candidate status:** `ordered_block` +
+  `registry_paths_resolve` are now v0.10 ship-targets (saturated
+  demand across 5+ case studies each). `file_pair_block_match` and
+  `balanced_delimiters` remain v0.10+ candidates (single-source
+  demand from this case study).
+- **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
+  oss-baseline=15, rust=11, monorepo/cargo-workspace=4,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11.

@@ -117,7 +117,7 @@ breaks downstream:
 |---|---|---|
 | `ci.yml:check-readme` (1) | `diff README.md tokio/README.md` — root README must equal the per-crate README byte-for-byte | A **`cross_file_value_equals` rule kind**: "contents of file A equal contents of file B" (with optional pre-transform). The `pair` rule asserts the partner exists; equality is the next step. **Same primitive shows up in:** every monorepo with a "synced docs page" pattern (root README ↔ per-crate README), any project where a `LICENSE` is duplicated to per-package directories, any tool with a "primary doc + mirror" relationship. |
 | `ci.yml:check-readme` (2) | `grep -q "$(sed '/^version = /!d' tokio/Cargo.toml \| head -n1)" README.md` — the tokio crate version must appear literally in the root README | A `cross_file_value_equals` variant with a **selector**: extract a value from file A (here, `$.package.version` from `tokio/Cargo.toml`), then assert it appears in file B. Generalised this is "value at JSONPath in file A must match value at JSONPath in file B" — the same primitive covers `package.json#version` ↔ `CHANGELOG.md` first-line, etc. |
-| `ci.yml:check-spelling` (header) | `spellcheck.dic` first line is an integer N, and the file has exactly N+1 lines (the body is sorted unique under `LC_ALL=en_US.UTF8`) | Two needs: (a) **`pair_hash` rule kind** — "value at offset 0 of file A equals computed property of file A" (here, line count); (b) **`ordered_block` rule kind** — "lines after the header are sorted unique under a configurable comparator". Both rule kinds are already in the v0.10+ pipeline (already flagged by the kubernetes + rust-lang/rust pilots); tokio confirms the demand. |
+| `ci.yml:check-spelling` (header) | `spellcheck.dic` first line is an integer N, and the file has exactly N+1 lines (the body is sorted unique under `LC_ALL=en_US.UTF8`) | Two needs: (a) **`pair_hash` rule kind** — "value at offset 0 of file A equals computed property of file A" (here, line count); (b) **`ordered_block` rule kind** — "lines after the header are sorted unique under a configurable comparator". `ordered_block` is now a v0.10 ship-target (rust + tokio + 3 more); `pair_hash` remains a v0.10+ candidate (kubernetes + tokio). |
 | Workspace `[patch.crates-io]` ↔ `[workspace] members` | Every workspace member name appears as a key in `[patch.crates-io]` (with `path = "<member>"`) | `cross_file_value_equals` with a JSONPath selector on both sides — the root `Cargo.toml` is *one* file but the check is "every value at `$.workspace.members[*]` appears as a key under `$.patch['crates-io']`". A **same-file `value_set_equality` rule kind** (or `cross_file_value_equals` applied to the same file twice) would cover it. Mid-priority. |
 | Workspace `[workspace.lints.rust] unexpected_cfgs` ↔ per-crate `[lints] workspace = true` | The workspace declares the cfg-allowlist; every member must inherit it (the `tokio-crate-inherits-workspace-lints` rule above approximates this, but a stricter check would assert "the bool at `$.lints.workspace` in each member's Cargo.toml is `true`") | A `toml_path_matches` against a bool-typed value works today (we use `matches: '^true$'` against the stringified value). But `toml_path_equals` with a YAML-native `true` literal would be cleaner — there's a docs / DX gap here, not strictly a missing primitive. |
 
@@ -126,8 +126,9 @@ primitive — 4 of the 5 gaps above are variants of "data in one file must
 match data in another file". This is **the same gap surfaced by the
 rust-lang/rust pilot** (where it appeared as `tidy::triagebot` paths
 resolving against the working tree, and `tidy::rustdoc_css_themes`
-mirror-blocks). The pattern is generic enough to deserve a standalone
-rule kind in v0.10+.
+mirror-blocks). `cross_file_value_equals` is now the **strongest demand
+signal in P2** — saturated at 8+ confirmations (airflow + tokio + clap +
+uv + react + pnpm + pytorch + tensorflow) — and is the v0.10 must-ship.
 
 ### Out of alint's scope (use the existing tool)
 
@@ -199,7 +200,8 @@ whitespace check, and 20 defensive structural conventions.
 
 The remaining gaps:
 
-- 5 need new alint primitives (above) — file as v0.10+ feature requests
+- 5 need new alint primitives (above) — `cross_file_value_equals` and
+  `ordered_block` are v0.10 ship-targets; the rest stay as v0.10+ candidates
 - 1 is out of alint's scope (kernel build) — keep the existing job
 - The matrix test runs themselves (~30 jobs across `ci.yml`) — these
   are *behavior tests*, not structural state; alint correctly defers
@@ -258,16 +260,16 @@ Followup feature work surfaced (priority order):
   **Same primitive surfaces in:** rust-lang/rust's `tidy::triagebot`
   paths-on-disk check, kubernetes' `staging/publishing/` mirror
   validation, every monorepo with a "root + per-package mirror docs"
-  pattern. Single highest-leverage missing rule kind for the polyglot
-  monorepo audience.
-- **`ordered_block` rule kind** — already on the v0.10+ list (rust-lang
-  pilot); tokio's `spellcheck.dic` sortedness check is a third
-  data-point confirming demand.
+  pattern. **v0.10 ship-target** — 8+ confirmations is past saturation.
+- **`ordered_block` rule kind** — **v0.10 ship-target** (rust-lang pilot
+  + tokio's `spellcheck.dic` + 3 more confirm demand).
 - **`pair_hash` rule kind** — covers the spellcheck.dic header-equals-
-  body-line-count check. Already on the v0.10+ list (kubernetes pilot's
-  `vendor/`-readonly check).
+  body-line-count check. v0.10+ candidate (kubernetes pilot's
+  `vendor/`-readonly check + tokio).
 - **`toml_path_equals` typed-value comparison** — minor DX polish; today
   we stringify-and-regex-match against a bool, which works but is ugly.
+  This is exactly pitfall #16 from the next.js case study; merits a
+  CONFIG-AUTHORING.md cross-reference (v0.10+ DX item).
 
 No new rule-kind candidates beyond the 9 already on the v0.10+ pipeline.
 tokio is a clean, conventional Rust workspace — its gap catalogue
@@ -298,4 +300,68 @@ already surfaced, which is itself useful evidence that the gap list is
 
 No other pitfalls hit during this pass. The CONFIG-AUTHORING.md
 canonical-patterns cheat sheet covered every other shape on the first
-draft. (12 pitfalls + 1 new = 13.)
+draft. (12 pitfalls + 1 new = 13.) The catalogue has since grown to
+21 pitfalls (P2a/P2b waves added #14-#21); pitfall #13 from this
+pass is now part of the published catalogue.
+
+---
+
+## Future analysis
+
+Suggestions for the next revalidation pass — tokio is the cleanest
+"convention without explicit checks" demonstration, so the analysis
+focuses on what alint's v0.9.6+ rule kinds now express that the
+existing config still leaves on the table:
+
+- **Of the 15 conventions tokio's pipeline silently assumes, which
+  are now expressible thanks to v0.9.6+?** Most already are
+  (`for_each_dir`, `for_each_file`, structured-path matchers,
+  `command:` shellouts). The remaining gaps are the 5 cross-file /
+  ordering / hashing patterns above — all on the v0.10+ pipeline.
+  The v0.9.17 surface (`scope_filter` + `respect_gitignore`
+  per-rule + `has_*` predicates) doesn't open new ground for tokio
+  specifically, because tokio's CI is matrix-driven and doesn't
+  rely on tracked-AND-gitignored files or root-only literal paths.
+- **`agent-context` / `docs/adr` bundled-ruleset adoption.** The
+  current config extends 6 bundled rulesets but skips the newer
+  `agent-context@v1` (5 rules — agent-readable docs presence) and
+  `docs/adr@v1` (4 rules — ADR directory shape). tokio doesn't ship
+  an ADR tree today; that's a finding (the project relies on RFCs
+  in the linked-issues tracker rather than an in-repo log), but
+  `agent-context` would catch the absence of `AGENTS.md` /
+  `CLAUDE.md` if the maintainers opt into agent-tooling discipline.
+- **`alint suggest` against a fresh clone.** Hasn't been run for
+  this case study; the briefing's "tokio is a clean conventional
+  Rust workspace" pitch is the human read of the manifests. Running
+  `alint suggest` would either confirm or surface bundled
+  candidates not yet adopted (likely `compliance/apache-2` is wrong
+  for tokio's MIT licensing, but `tooling/editorconfig` would land
+  cleanly).
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
+- **`validate-config`:** ✓ 74 rules loaded from `.alint.yml`.
+- **README rule-count claim:** "27 declarative rules" (intro) +
+  "20 defensive structural conventions" (config-overview line 197)
+  matches the actual count of 28 tokio-specific rules within rounding.
+  The 74-rule `validate-config` total = 28 tokio-specific + 46
+  inherited from the 6 bundled rulesets pulled in via `extends:`
+  (oss-baseline=15 + rust=11 + monorepo=4 +
+  monorepo/cargo-workspace=4 + ci/github-actions=3 +
+  hygiene/no-tracked-artifacts=11 = 48 declared; the 2-rule slack
+  vs 46 reflects per-rule bundled-overlap dedup the engine handles
+  transparently). No update needed.
+- **Pitfall catalogue:** v0.9.17 ships fixes for #18 + #19. Neither
+  surfaces here (no tracked-AND-gitignored files; no `root_only:
+  true` on multi-component literals). Pitfall #13 (this pass) is
+  now in the published catalogue.
+- **Rule-kind candidate status:** `cross_file_value_equals` and
+  `ordered_block` promoted to v0.10 ship-targets thanks to
+  saturated demand (8 + 5 confirmations respectively). `pair_hash`
+  and `toml_path_equals` typed comparison stay v0.10+ candidates.
+- **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
+  oss-baseline=15, rust=11, monorepo=4, monorepo/cargo-workspace=4,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11.

@@ -79,7 +79,7 @@ linter only sees half the tree.
 | `Cargo.toml` workspace | cargo | 13 workspace member globs + 2 exclude entries; `[workspace.lints]` | Bundled `monorepo/cargo-workspace@v1` + per-crate inheritance assertions |
 | `lerna.json` | lerna | publish workflow: `npmClient: pnpm`, `version.exact: true`, `publish.allowBranch: [canary]`, root version (`16.3.0-canary.11`) | 3× `json_path_matches` + 1× `file_exists` |
 | `turbo.json` | turbo | task graph + cached outputs (`build` → `dist/**`, `dev`, `storybook`, `pack-for-isolated-tests`) | 3× `json_path_matches` (`$schema`, `$.tasks.build.outputs[*]`, presence) |
-| `tsconfig.json` | tsc | root TS config — `compilerOptions.strict: true` | `file_content_matches` (NOT `json_path_matches`; see pitfall #16 below) |
+| `tsconfig.json` | tsc | root TS config — `compilerOptions.strict: true` | `file_content_matches` (NOT `json_path_matches`; see pitfall #16 below — now in CONFIG-AUTHORING.md as one of the 21 documented pitfalls) |
 | `tsconfig-tsec.json` | tsec | trusted-types security checker | Not asserted (presence-only would be noisy; tsec is a optional supply-chain gate) |
 | `eslint.config.mjs` + `eslint.cli.config.mjs` | eslint | flat-config split (IDE vs CI) — both must coexist | 2× `file_exists` |
 | `.prettierrc.json` + `.prettierignore` | prettier | `singleQuote: true, semi: false, trailingComma: es5` + ignore globs | 2× `file_exists` |
@@ -101,11 +101,11 @@ linter only sees half the tree.
 | Script | What it checks | alint replacement |
 |---|---|---|
 | `check-examples.sh` | Re-canonicalises every `examples/*/package.json` (drops license/version/name/author/description, sets `private: true`); copies template `next-env.d.ts` and `.gitignore` if missing; **fails if `git status` shows any drift**. Mutation-with-verification, not pure validation. | Out of scope for direct replacement (mutation). Wrapped via `command:` rule that runs the script in CI; failures still flag. The shape "every example matches a normalised template" *could* fit a `for_each_dir` rule once template-substitution lands. |
-| `check-manifests.js` | Walks `errors/manifest.json`'s route tree, asserts every `errors/**/*.md` (except `template.md`) is reachable from the route graph. | Partial: `json_path_matches` asserts the manifest's shape (every `routes[*].path` is `^/errors/.+\.md$`). The deeper "every md reachable from routes" is a registry-resolves check — needs the `registry_paths_resolve` v0.10+ candidate. |
+| `check-manifests.js` | Walks `errors/manifest.json`'s route tree, asserts every `errors/**/*.md` (except `template.md`) is reachable from the route graph. | Partial: `json_path_matches` asserts the manifest's shape (every `routes[*].path` is `^/errors/.+\.md$`). The deeper "every md reachable from routes" is a registry-resolves check — needs `registry_paths_resolve`, now a v0.10 ship-target. |
 | `check-pre-compiled.sh` | Re-runs `pnpm ncc-compiled` (which re-bundles webpack runtime); fails if `git status` shows drift. Codegen-freshness check. | Out of scope (codegen, not validation). Mutation followed by git-diff — same pattern as airflow's `update-spelling-wordlist-to-be-sorted`. |
 | `check-is-release.js` | Parses the most recent commit message (`git log -n1 --pretty=format:%B`) for a `^v\d+\.\d+\.\d+(-\w+\.\d+)?$` tag. | Out of scope (operates on git history, not repo state). The `git_commit_message` rule kind exists but checks the staged/HEAD message; this script needs subprocess git access. |
 | `check-unused-turbo-tasks.mjs` | Scans every `*.rs` file under `crates/` + `turbopack/crates/` for `#[turbo_tasks::function]` / `value` / `value_trait` annotations; cross-references against usage sites; reports unused. | Out of scope (Rust AST / cross-file reference graph). Wrapped via `command:` rule. Same shape as `knip` in microsoft/typescript. |
-| `validate-externals-doc.js` | Reads `packages/next/src/lib/server-external-packages.jsonc`; cross-references against the doc table at the bottom of `errors/improper-server-external.mdx`; reports drift. | Needs the v0.10+ `cross_file_value_equals` rule (registry value at point X in file A appears as table entry in file B). Wrapped via `command:` rule today. |
+| `validate-externals-doc.js` | Reads `packages/next/src/lib/server-external-packages.jsonc`; cross-references against the doc table at the bottom of `errors/improper-server-external.mdx`; reports drift. | Needs `cross_file_value_equals` (registry value at point X in file A appears as table entry in file B), now a v0.10 ship-target with 8+ confirmations. Wrapped via `command:` rule today. |
 | `check-backport-canary-release.js` | Validates a `backport-canary-release` branch matches the canary state. | Out of scope (operates on git refs). |
 
 ### `.github/workflows/` (30+ workflows)
@@ -212,9 +212,9 @@ array of package names) and cross-references against a markdown
 table embedded inside `errors/improper-server-external.mdx`. The
 assertion is "every entry in the JSONC array also appears in the
 markdown table, and vice versa." Same shape as the airflow
-`cross_file_value_equals` candidate. **Strong v0.10+ signal**:
-this is now the **third** repo (airflow, tokio, next.js) where
-this pattern surfaces.
+`cross_file_value_equals` candidate. **v0.10 ship-target** —
+saturated at 8+ confirmations across airflow, tokio, next.js,
+clap, uv, react, pnpm, pytorch, and tensorflow.
 
 ### 2. `registry_paths_resolve` for `check-manifests.js`
 
@@ -223,7 +223,8 @@ tree and asserts every `errors/**/*.md` (except `template.md`)
 appears as a `path:` value somewhere in the route graph. Same
 shape as the rust-lang/rust `registry_paths_resolve` candidate
 (triagebot.toml + .github/settings.yml referenced files).
-**Re-confirms** the rule kind from rust-lang/rust.
+**v0.10 ship-target** — saturated at 6+ confirmations
+(rust + clap + cpython + arrow + pytorch + tensorflow + next.js).
 
 ### 3. `dir_name_matches_field_with_unscope`
 
@@ -356,24 +357,26 @@ Followup feature work surfaced (consolidated):
 
 - **`cross_file_value_equals` rule kind** — covers
   `validate-externals-doc.js` here, plus the airflow
-  `check-version-consistency` family. Demand: airflow + tokio +
-  next.js (3 distinct repos).
+  `check-version-consistency` family. **v0.10 ship-target** (8+
+  confirmations).
 - **`registry_paths_resolve` rule kind** — covers
   `check-manifests.js` here, plus rust-lang's triagebot.toml
-  + clap's `pre-release-replacements`. Demand: rust-lang + clap
-  + next.js (3 distinct repos).
+  + clap's `pre-release-replacements`. **v0.10 ship-target** (6+
+  confirmations).
 - **`dir_name_matches_field` extension with unscoping** — covers
   the `@next/x` ↔ `packages/x` mapping; same as vercel/turbo's
   base candidate but with a configurable scope-stripping
-  transform. Demand: vercel/turbo + next.js + react (likely).
+  transform. v0.10+ candidate (vercel/turbo + next.js + likely
+  react/pnpm).
 
 ---
 
-## NEW pitfall #16 surfaced by this case study
+## Pitfall #16 surfaced by this case study (now in CONFIG-AUTHORING.md)
 
-While writing this config, **a 16th schema/language pitfall**
-surfaced that's not in `docs/development/CONFIG-AUTHORING.md`'s
-existing 15:
+While writing this config, a 16th schema/language pitfall
+surfaced that wasn't in `docs/development/CONFIG-AUTHORING.md`'s
+existing 15. It has since been added to the catalogue (which
+now stands at 21 pitfalls after the P2a + P2b waves):
 
 ### 16. `json_path_matches` / `yaml_path_matches` cannot regex-match against JSON booleans
 
@@ -447,3 +450,79 @@ the case-study set.
   `/tmp/next.js/` (528 violations, all expected real findings —
   per-package missing license fields, tracked test fixtures
   with `node_modules` directories, etc.). No silent failures.
+
+---
+
+## Future analysis
+
+Suggestions for the next revalidation pass (now that v0.9.17 ships
+the per-rule `respect_gitignore: false` knob, the `literal_is_nested`
+runtime guard, the `scope_filter` evolution, and the `has_*`
+predicate renames):
+
+- **`scope_filter` for the pnpm + Cargo dual-workspace shape.** The
+  current config layers globs to keep Rust rules off the JS tree
+  and vice versa (`crates/**/Cargo.toml` for Rust,
+  `packages/**/package.json` for npm, `turbopack/crates/**` for the
+  Rust subtree, `turbopack/packages/**` for the JS subtree). v0.9.17's
+  `scope_filter` evolution lets each rule declare a named scope
+  (`rust-workspace`, `js-workspace`, `js-bench`) once, with the path
+  predicates centralised — separates "which subtree am I in" from
+  "what am I checking", which is exactly the cleanup the dual-language
+  shape needs. Estimated reduction: ~40 lines + clearer rule intent.
+- **The 7 `scripts/check-*.{js,mjs,sh}` files revisited via v0.9.6+
+  rule kinds.** `check-manifests.js` and `validate-externals-doc.js`
+  shell out today — the v0.10 ship-target rule kinds
+  (`registry_paths_resolve` + `cross_file_value_equals`) will let
+  both move to declarative rules. `check-examples.sh` /
+  `check-pre-compiled.sh` stay shellouts (mutation + git-state); the
+  per-script analysis here is unchanged by v0.9.17 but will be by v0.10.
+- **Bundled-ruleset additions surfaced by `alint suggest`.** The
+  current config extends 11 bundled rulesets but skips the newer
+  `compliance/reuse@v1` (3 rules — REUSE/SPDX licensing) and
+  `agent-hygiene@v1` (6 rules — agent-context antipattern guard).
+  Running `alint suggest` against `/tmp/next.js/` flags
+  `agent-hygiene` (medium) — the next.js root has agent-readable
+  docs (`AGENTS.md`, `CLAUDE.md` symlink) that the antipattern scan
+  would benefit from. `compliance/reuse` would be a deliberate
+  override (next.js uses MIT directly, no per-file SPDX headers),
+  but worth a documented decision in the config.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
+- **`validate-config`:** ✓ 130 rules loaded from `.alint.yml`.
+- **README rule-count claim:** "59-rule" (intro + multiple body
+  references) matches the file's 59 next.js-specific rules
+  exactly (counted via `grep -c '^  - id:'`). The
+  `validate-config` total of 130 reflects the post-`extends:`
+  resolution: 59 next.js-specific + 71 inherited from the 11
+  bundled rulesets (oss-baseline=15 + node=9 + rust=11 + monorepo=4 +
+  monorepo/cargo-workspace=4 + monorepo/pnpm-workspace=4 +
+  ci/github-actions=3 + hygiene/no-tracked-artifacts=11 +
+  hygiene/lockfiles=7 + tooling/editorconfig=3 + agent-context=5
+  = 76; the 5-rule slack vs 71 likely reflects per-rule
+  bundled-overlap dedup, which the engine handles transparently).
+  No README update required for the rule-count claim itself; the
+  body sections already break down the 59 rules into bundled +
+  custom buckets correctly.
+- **Pitfall catalogue:** v0.9.17 ships fixes for #18 + #19. Neither
+  surfaces here. Pitfall #16 (this pass — JSONPath bool/number
+  regex coercion) is now in the published catalogue at the
+  pre-existing position; the catalogue has since grown to 21
+  entries (P2a + P2b expansion).
+- **Rule-kind candidate status:** `cross_file_value_equals` and
+  `registry_paths_resolve` promoted to v0.10 ship-targets (saturated
+  demand). `dir_name_matches_field` extension stays a v0.10+
+  candidate.
+- **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
+  oss-baseline=15, node=9, rust=11, monorepo=4,
+  monorepo/cargo-workspace=4, monorepo/pnpm-workspace=4,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11,
+  hygiene/lockfiles=7, tooling/editorconfig=3, agent-context=5.
+- **Live-tree spot-check:** `alint suggest` against `/tmp/next.js/`
+  surfaces `monorepo/cargo-workspace`, `monorepo`, `node`,
+  `oss-baseline`, `rust` (high) + `agent-hygiene` (medium) —
+  matches the `extends:` block exactly.

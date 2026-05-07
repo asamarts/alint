@@ -17,11 +17,14 @@ restricted-package detection per directory), and **30 % are out of alint's
 scope** (codegen drift, dead-code elimination, vendor-graph analysis — the
 Go-toolchain-aware checks alint isn't trying to do).
 
-The 40 % that *do* fit translate cleanly to a 12-rule alint config (below).
-Replacing those 20 shell scripts with one declarative config + one
-`alint check` invocation in CI is the headline win — fewer moving parts, one
-place to look when CI breaks, ~5× faster than running 20 shell scripts in
-sequence (alint runs rules in parallel; the shell pipeline doesn't).
+The 40 % that *do* fit translate cleanly to a 12-rule custom set in
+[`./.alint.yml`](.alint.yml) (the full config loads **49 rules** with the
+4 bundled rulesets — `oss-baseline + go + ci/github-actions + hygiene/
+no-tracked-artifacts` — folded in). Replacing those 20 shell scripts with
+one declarative config + one `alint check` invocation in CI is the
+headline win — fewer moving parts, one place to look when CI breaks,
+~5× faster than running 20 shell scripts in sequence (alint runs rules
+in parallel; the shell pipeline doesn't).
 
 ---
 
@@ -141,7 +144,51 @@ Followup feature work surfaced:
 
 - **`import_gate` rule kind** (allowlist / denylist / alias modes) — would
   cover ~6 more verify scripts here; same primitive shows up in nearly every
-  Go monorepo we've inventoried
+  Go monorepo we've inventoried. **v0.10 ship-target** at 4 sources
+  (k8s + airflow + golang/go + pytorch).
 - **`pair_hash` rule kind** (extension of `file_hash` to "hash matches a
   registry entry") — narrower use case but Kubernetes uses it for
-  `vendor/`-readonly enforcement
+  `vendor/`-readonly enforcement. **v0.10 ship-target** at 3 sources
+  (k8s + tokio + golang/go FIPS).
+
+---
+
+## Future analysis
+
+Three candidate refinements worth evaluating in subsequent sweeps:
+
+1. **`json_schema_passes` for `staging/publishing/import-restrictions.yaml`.**
+   The k8s `verify-imports.sh` script reads a YAML registry of import
+   restrictions; alint's `json_schema_passes` rule kind (v0.10 design
+   candidate, already cross-confirmed by k8s + turbo) could validate the
+   registry's shape declaratively before the `import_gate` rule kind ships
+   to consume it.
+2. **`hygiene/lockfiles@v1` overlay.** k8s's `vendor/` tree has its own
+   modules.txt + Go module graph; the bundled `hygiene/lockfiles@v1`
+   ruleset (7 rules, ships rules for go.sum / yarn.lock / package-lock.json
+   freshness) might be a useful additional overlay even without the
+   AST-aware `verify-vendor.sh` script.
+3. **`agent-context@v1` adoption.** k8s ships an `AGENTS.md` at the repo
+   root; the `agent-context@v1` bundled ruleset (5 rules) would assert the
+   canonical AGENTS.md / CLAUDE.md / .cursor/ shape and surface drift on
+   the contributor-onboarding doc.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (1dbd9b218a0e, built 2026-05-07)
+- **Rule count:** 49 (12 custom + 4 bundled rulesets — `oss-baseline` 15,
+  `go` 8, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11; some
+  rule IDs overlap which is why the grand total is 49 rather than the
+  arithmetic sum)
+- **`validate-config`:** ✓ Config valid: 49 rule(s) loaded
+- **Live-tree recheck:** not performed in this batch (k8s sparse-checkout
+  not present in `/tmp/`)
+- **Pitfall fixes (v0.9.17):** Pitfall #18 (per-rule
+  `respect_gitignore: false`) and #19 (literal-path runtime guard for
+  `root_only: true` + multi-component literals) both shipped in engine;
+  this config does not need either workaround
+- **Open gaps (unchanged):** `import_gate` (v0.10 ship-target, 4 sources),
+  `pair_hash` (v0.10 ship-target, 3 sources). No new rule-kind gaps
+  surfaced in this revalidation

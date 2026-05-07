@@ -28,7 +28,8 @@ scope** (eslint AST rules, knip JS dep-graph analysis, actionlint
 workflow grammar — though the latter is shellable).
 
 The 70 % that *do* fit (declaratively + via shellouts) translate to a
-**24-rule alint config** (below).
+**68-rule alint config** (22 prettier-specific + 46 from 6 bundled
+rulesets — see Validation status footer for the breakdown).
 
 **Headline finding:** prettier's per-language-plugin convention discipline
 (every `src/language-{js,css,html,markdown,...}/` plugin must export
@@ -199,8 +200,11 @@ structural floor. Single declarative gate; catches both directions.
 
 ## Starter alint config (drop-in)
 
-[`.alint.yml`](.alint.yml) in this directory. **24 rules total** (after
-extending 6 bundled rulesets). Replaces directly:
+[`.alint.yml`](.alint.yml) in this directory. **68 rules total**: 22
+prettier-specific rules + 46 rules from 6 bundled rulesets
+(oss-baseline 15 + node 9 + ci/github-actions 3 +
+hygiene/no-tracked-artifacts 11 + agent-context 5 +
+tooling/editorconfig 3). Replaces directly:
 
 - 5 of the 8 `lint:*` scripts via `command` shellouts (so `alint check`
   is the single entry point for the whole gate)
@@ -300,3 +304,39 @@ Followup feature work surfaced (in priority order):
   dirs) — generalises the existing `unique_by` from "within one dir" to
   "across a set of dirs". Demand: prettier (PR-number uniqueness across
   changelog categories); narrow but clean.
+
+---
+
+## Future analysis
+
+- **PR-number uniqueness across changesets via `unique_by` cross-dir.**
+  The existing `unique_by` rule operates within a single dir/file scope
+  — for `changelog_unreleased/<lang>/*.md` the PR-number basename
+  uniqueness check across all category dirs is a single-source v0.10
+  candidate. Today this stays in `lint-changelog.js`. If a second
+  cross-dir-uniqueness demand surfaces, promote.
+- **`hygiene/lockfiles@v1` (7 rules) NOT extended.** prettier ships
+  `yarn.lock`; the bundled lockfile-hygiene ruleset would tighten the
+  yarn.lock discipline. Worth considering.
+- **`docs/adr@v1` (4 rules)** — prettier has no ADR convention; doesn't
+  apply.
+- **`compliance/reuse@v1` (3 rules)** — prettier uses MIT, not REUSE;
+  doesn't apply.
+
+## Validation status (2026-05-07)
+
+- alint binary: v0.9.17 (built 2026-05-07).
+- `validate-config` reports **68 rules** loaded from `.alint.yml** (22
+  prettier-specific + 46 from 6 bundled rulesets: oss-baseline 15 +
+  node 9 + ci/github-actions 3 + hygiene/no-tracked-artifacts 11 +
+  agent-context 5 + tooling/editorconfig 3).
+- 5 rules use `root_only: true` (lines 334, 412, 422, 432, 442) — all
+  with single-segment literal paths (`prettier.config.js`,
+  `eslint.config.js`, etc.). **Pitfall #19 does not fire** (the runtime
+  guard targets multi-component literals).
+- No `respect_gitignore: false` patterns. Pitfall #18 does not apply.
+- `command_idempotent`, `for_each_leaf_dir`, `json_key_value_forbidden`
+  remain v0.10 design candidates per launch-evidence.md (no promotion
+  to ship-target since the case-study draft).
+- Live-tree recheck not performed (no /tmp/prettier checkout
+  available).

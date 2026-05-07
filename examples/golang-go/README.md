@@ -235,27 +235,27 @@ working baseline.
 
 | Gap | Existing golang/go behavior | What alint needs |
 |---|---|---|
-| Per-package import gates ("no `testing` import in non-test source", "no `unsafe` outside `runtime` / `internal/runtime`", "no direct `golang.org/x/*` imports outside `src/vendor/`") | Enforced by `go vet`'s `unsafeptr` checker + code-review etiquette. The kubernetes inventory surfaced the same need (`hack/verify-testing-import.sh`, `hack/verify-prometheus-imports.sh`, `hack/verify-internal-modules.sh`). | **`import_gate` rule kind** — already on the v0.10+ list (k8s + airflow surfaced it). golang/go is the **third confirmation**. |
-| `doc/next/6-stdlib/99-minor/<pkg>/<issue>.md` ↔ live GitHub issue cross-reference | Enforced at release-build time when the release-notes generator fetches GitHub issue titles | **`registry_paths_resolve` variant** with HTTP/API-aware resolution (or a `command:` shellout to `gh issue view <number>`). The bundled candidate already covers on-disk-file resolution; the API variant would be a stretch. |
-| `lib/fips140/fips140.sum` ↔ on-disk zip hash freshness ("the hash recorded in `fips140.sum` for `v1.0.0-c2097c7c.zip` matches the actual SHA256 of the file") | Enforced by `lib/fips140/Makefile`'s `go run cmd/internal/fips140` regeneration step | **`pair_hash` rule kind** — already on the v0.10+ list (k8s vendor-readonly + tokio spellcheck.dic header). golang/go's FIPS use case is the **third confirmation** and the highest-stakes one (CMVP submission references the file format). |
-| `api/go1*.txt` golden file ordering ("entries are sorted, no duplicate symbols, every entry has a `pkg <pkg>` namespace prefix") | Enforced by `src/cmd/api/main_test.go`'s `set()` + sort + diff logic | **`ordered_block` rule kind** — already on the v0.10+ list (rust-lang `tidy::alphabetical` + airflow + tokio + cpython). golang/go's API golden files are the **fifth confirmation**. |
+| Per-package import gates ("no `testing` import in non-test source", "no `unsafe` outside `runtime` / `internal/runtime`", "no direct `golang.org/x/*` imports outside `src/vendor/`") | Enforced by `go vet`'s `unsafeptr` checker + code-review etiquette. The kubernetes inventory surfaced the same need (`hack/verify-testing-import.sh`, `hack/verify-prometheus-imports.sh`, `hack/verify-internal-modules.sh`). | **`import_gate` rule kind** — now `v0.10 ship-target` per launch-evidence.md (4 sources: k8s, airflow, golang/go, pytorch). |
+| `doc/next/6-stdlib/99-minor/<pkg>/<issue>.md` ↔ live GitHub issue cross-reference | Enforced at release-build time when the release-notes generator fetches GitHub issue titles | **`registry_paths_resolve` variant** with HTTP/API-aware resolution (or a `command:` shellout to `gh issue view <number>`). The on-disk variant of `registry_paths_resolve` is now `v0.10 ship-target` (8 sources); the GitHub-issue API sub-variant is single-source (golang/go-only) and remains v0.11+ design. |
+| `lib/fips140/fips140.sum` ↔ on-disk zip hash freshness ("the hash recorded in `fips140.sum` for `v1.0.0-c2097c7c.zip` matches the actual SHA256 of the file") | Enforced by `lib/fips140/Makefile`'s `go run cmd/internal/fips140` regeneration step | **`pair_hash` rule kind** — now `v0.10 ship-target` per launch-evidence.md (3 sources: k8s vendor-readonly + tokio spellcheck.dic header + golang/go FIPS — the highest-stakes use case; CMVP submission references the file format). |
+| `api/go1*.txt` golden file ordering ("entries are sorted, no duplicate symbols, every entry has a `pkg <pkg>` namespace prefix") | Enforced by `src/cmd/api/main_test.go`'s `set()` + sort + diff logic | **`ordered_block` rule kind** — now `v0.10 ship-target` per launch-evidence.md (7 sources: rust, airflow, tokio, cpython, arrow, golang/go, protobuf). |
 
 **Cross-reference with the existing v0.10+ candidate list in
 [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
-- `import_gate` — confirmed by golang/go (3rd source). Stays
-  v0.10 high-priority.
-- `pair_hash` — confirmed by golang/go (3rd source). Highest-stakes
-  use case to date (CMVP FIPS submission). Promote priority for
-  v0.10.
-- `ordered_block` — confirmed by golang/go (5th source). Stays
-  v0.10 high-priority.
-- `registry_paths_resolve` (HTTP variant) — golang/go is the FIRST
-  source where the registry resolution targets GitHub issue numbers
-  rather than on-disk paths. **NEW SUB-CANDIDATE**: a
-  `registry_paths_resolve.mode: github_issues` extension where the
-  rule shells out to `gh api repos/<owner>/<repo>/issues/<n>` (or
-  alint owns the GitHub API client) to resolve issue numbers. Lower
-  priority than the on-disk variant; flag for v0.11+.
+- `import_gate` — `v0.10 ship-target` (4 sources per
+  launch-evidence.md). Saturated.
+- `pair_hash` — `v0.10 ship-target` (3 sources per
+  launch-evidence.md). golang/go FIPS is the highest-stakes
+  use case; CMVP submission references the file format.
+- `ordered_block` — `v0.10 ship-target` (7 sources per
+  launch-evidence.md). Saturated.
+- `registry_paths_resolve` (HTTP variant) — the on-disk variant
+  is now `v0.10 ship-target` (8 sources); golang/go is the FIRST
+  source where the registry resolution targets GitHub issue
+  numbers rather than on-disk paths. **SUB-CANDIDATE**: a
+  `registry_paths_resolve.mode: github_issues` extension where
+  the rule shells out to `gh api repos/<owner>/<repo>/issues/<n>`.
+  Single-source so far; remains v0.11+ design.
 
 **No NEW rule-kind candidates beyond the existing v0.10+ list.**
 golang/go's gap catalogue overlaps cleanly with what k8s, tokio,
@@ -317,7 +317,10 @@ reader doesn't expect alint to encroach.
 - `hygiene/no-tracked-artifacts@v1` (no `.DS_Store`, build
   outputs, etc.)
 
-Plus 31 golang/go-specific rules covering:
+Plus 31 golang/go-specific rules covering (**64 rules total** as
+loaded by the v0.9.17 binary; 31 golang/go-specific + 33 from 3
+bundled rulesets `oss-baseline=15` + `go=8` +
+`hygiene/no-tracked-artifacts=11`, with one rule deduplicated):
 
 - 5 license-header rules (one per comment-syntax: `.go`/`.s`,
   `.bash`/`.rc`/`.sh`, `.bat`, `Makefile*`/`.mk`, and an info-level
@@ -407,19 +410,16 @@ them in one file instead of inferring them from the corpus."
 Followup feature work surfaced (priority order, all confirmations
 of existing v0.10+ candidates):
 
-- **`pair_hash` rule kind** — third confirmation (k8s, tokio,
-  golang/go's FIPS). Highest-stakes use case so far (CMVP submission).
-  Promote v0.10 priority.
-- **`import_gate` rule kind** — third confirmation (k8s, airflow,
-  golang/go). Stays v0.10 high-priority.
-- **`ordered_block` rule kind** — fifth confirmation (rust, airflow,
-  tokio, cpython, golang/go's `api/go1*.txt`). Saturating signal —
-  v0.10 ship-it.
-- **`registry_paths_resolve.mode: github_issues`** (NEW
-  sub-candidate, low priority) — golang/go is the first source
-  with a GitHub-issue-number registry-resolution use case. Could
-  also be a `command:` shell-out to `gh issue view`. Defer to
-  v0.11+.
+- **`pair_hash` rule kind** — `v0.10 ship-target` (3 sources;
+  highest-stakes use case CMVP-FIPS-submission).
+- **`import_gate` rule kind** — `v0.10 ship-target` (4 sources;
+  saturated).
+- **`ordered_block` rule kind** — `v0.10 ship-target` (7 sources;
+  saturated).
+- **`registry_paths_resolve.mode: github_issues`** —
+  sub-candidate, single-source (golang/go-only); remains
+  v0.11+ design. Could also be a `command:` shell-out to
+  `gh issue view`.
 
 ---
 
@@ -444,7 +444,7 @@ of existing v0.10+ candidates):
   encode it. Future "Go-flavored" bundled rulesets
   (`bundled/go-bsd-licensed@v1`?) could absorb it.
 - **No new pitfalls** — every rule shape used here is documented
-  in CONFIG-AUTHORING.md. The license-header regex is the first
+  in CONFIG-AUTHORING.md (21 pitfalls catalogued as of v0.9.17). The license-header regex is the first
   case study to lean heavily on the `lines:` window (default 20;
   set to 8 here so the BSD header check doesn't accidentally
   match a copyright comment in the body of a file). One DX
@@ -453,3 +453,52 @@ of existing v0.10+ candidates):
   list-of-patterns field would be more readable than the
   alternation soup. Logging as a low-priority DX polish (not a
   pitfall — works correctly today).
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
+- `validate-config`: **64 rules loaded cleanly** (31 golang/go-
+  specific + 33 from 3 bundled rulesets — `oss-baseline=15`,
+  `go=8`, `hygiene/no-tracked-artifacts=11`, with one rule
+  deduplicated across rulesets).
+- Live-tree recheck: **pending** — `/tmp/golang-go/` not present
+  in this validation env.
+- Pitfalls fixed in v0.9.17 that touch this config: none
+  (golang/go config doesn't surface pitfalls #18/#19).
+- Open gaps (rule-kind candidates referenced but not yet
+  shipped):
+  - `pair_hash` (v0.10 ship-target, 3 sources) — golang/go
+    FIPS is the highest-stakes use case.
+  - `import_gate` (v0.10 ship-target, 4 sources).
+  - `ordered_block` (v0.10 ship-target, 7 sources).
+  - `registry_paths_resolve.mode: github_issues` (v0.11+
+    design, single-source — golang/go's release-notes ↔
+    GitHub-issue cross-reference).
+
+## Future analysis
+
+Three concrete unanalyzed angles for a future revalidation pass:
+
+1. **Add the `agent-context@v1` overlay (5 rules).**
+   golang/go ships `.github/PULL_REQUEST_TEMPLATE` with the
+   load-bearing "+ No Markdown" instruction; the
+   agent-context bundled ruleset would gate AI-generated
+   contribution discipline (no markdown in PR descriptions,
+   AGENTS.md present, AI-context structure). golang/go is
+   exactly the kind of repo where AI-generated PR-description
+   noise would get rejected by Russ Cox's review etiquette;
+   a structural enforcer would catch it pre-PR.
+2. **Replace the 4 defensive `command:` shellouts.** Of
+   `go-gofmt-check`, `go-vet-std`, `go-vet-cmd`,
+   `go-shellcheck`, only `go-shellcheck` is replaceable by a
+   future bundled `tooling/shellcheck@v1` overlay (none ships
+   yet). The other three are inherently shellouts because
+   alint deliberately doesn't ship Go AST awareness.
+3. **`alint suggest` against the live tree.** Pending
+   `/tmp/golang-go/`. Likely candidate: a generalised
+   "every file under `doc/next/6-stdlib/99-minor/<pkg>/`
+   matches `^\d+\.md$`" rule the suggester auto-discovers,
+   replacing the hand-rolled
+   `go-doc-next-stdlib-minor-issue-filenames` rule.

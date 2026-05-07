@@ -559,10 +559,10 @@ Followup feature work surfaced (consolidated, sorted by strength
 of demand across P2a + P2b including this case study):
 
 - **`xml_path_matches` / `xml_path_equals` rule kinds** — was v0.11+
-  single-source (spark); dotnet/runtime confirms at scale. **Promoted
-  to v0.10 ship-target.** Generalises to every XML-shaped manifest
-  (Maven pom.xml, MSBuild csproj/.props/.targets/.slnx, Ant build.xml,
-  Gradle XML, NPM .nuspec).
+  single-source (spark); dotnet/runtime confirmed at scale. **Now a
+  v0.10 ship-target per launch-evidence.md (2 sources).** Generalises
+  to every XML-shaped manifest (Maven pom.xml, MSBuild
+  csproj/.props/.targets/.slnx, Ant build.xml, Gradle XML, NPM .nuspec).
 - **`dotnet@v1` (or `csharp@v1`) bundled ruleset** — net-new, surfaced
   uniquely by this case study. **Strong v0.10 ship-target** alongside
   `apache/governance@v1`. Adopter surface is large (every Microsoft
@@ -643,13 +643,16 @@ of demand across P2a + P2b including this case study):
   target-framework` warnings are mostly "shim stub" csprojs under
   `src/libraries/shims/stubs/` that inherit their TargetFramework from
   the parent Directory.Build.props (legitimate pattern); ditto.
-- **Config size:** 60 rules (15 bundled-via-extends + 45 custom)
-  declared; total rule count loaded by the engine including all
-  bundled-ruleset rules is higher (oss-baseline pulls in ~25,
-  ci/github-actions pulls in 3, hygiene pulls in ~17 — total ~105
-  loaded rules). Live tree run: 5 errors + 2,259 warnings + 584
-  info; **all expected** for an alint pass against an unconverted
-  repo.
+- **Config size:** 60 rules total reported by `validate-config` (31
+  custom + 29 from extends: oss-baseline 15 + ci/github-actions 3 +
+  hygiene/no-tracked-artifacts 11). The README narrative breakdown
+  correctly cites 60 as the headline; earlier estimates of ~105
+  conflated declared rules with engine-internal facts.
+- One of the bundled-rule false-positives surfaced here
+  (`oss-license-exists` not recognising `LICENSE.TXT`) was tracked as a
+  v0.9.16+ candidate fix to `oss-baseline@v1`; status check pending —
+  not addressed by the v0.9.16/v0.9.17 release cycle, still open as
+  v0.10 housekeeping.
 - The **single most important finding** in this case study is the
   validation of the `xml_path_*` v0.10 candidate at production scale.
   spark established the shape; dotnet/runtime stresses it via ~2,300
@@ -657,4 +660,64 @@ of demand across P2a + P2b including this case study):
   exposure (8 distinct per-csproj invariants × 1,091 csprojs ≈ 8,700
   invariant-instances that today are checked via regex fallback or
   not at all) is large enough to warrant the primitive's design cost
-  without further demand-source accumulation.
+  without further demand-source accumulation. **Per launch-evidence.md
+  as of 2026-05-07, `xml_path_*` is now formally a v0.10 ship-target
+  with 2 sources (spark + dotnet/runtime), and `dotnet@v1` is also a
+  v0.10 ship-target bundled ruleset — both promotions confirm the
+  case study's central recommendation.**
+
+---
+
+## Future analysis
+
+Concrete analyses to follow up on the live tree (when one becomes
+available):
+
+- **`alint suggest` against a fresh `dotnet/runtime` clone** — the
+  heuristic does not have a dotnet detector today (no `dotnet@v1`
+  ruleset in the bundled set yet); confirms the case study's main
+  recommendation. Run `--explain` to verify which heuristics the
+  per-csproj XML-shape pattern would trigger if `dotnet@v1` shipped.
+- **Per-csproj `nested_configs: true` opportunity** — every
+  `src/libraries/<name>/` ships its own `Directory.Build.props` and
+  effectively scopes a per-library `.alint.yml` boundary. Once
+  `xml_path_*` ships in v0.10, per-library configs could express
+  per-library invariants (e.g. `System.Text.Json`'s `<Nullable>enable`
+  vs `System.Reflection.Emit`'s `<Nullable>annotations`) without
+  bloating the workspace-root config.
+- **`registry_paths_resolve` against `eng/Subsets.props`** — the 796-line
+  XML dispatch table is the canonical demand source; once both
+  `xml_path_*` and `registry_paths_resolve` ship in v0.10, the
+  "every subset entry resolves to an on-disk csproj" check becomes
+  one rule instead of zero rules (currently unenforced statically).
+
+## Validation status (2026-05-07)
+
+- alint version: v0.9.17
+- Config validation: `validate-config` reports **60 rules loaded**.
+  Reconciliation: 31 explicit rules in `.alint.yml` + 29 entries from
+  extends (oss-baseline 15 + ci/github-actions 3 +
+  hygiene/no-tracked-artifacts 11) = 60. None of the three extended
+  rulesets ships a fact, so no fact-subtraction needed. Matches the
+  README's headline of "60-rule config".
+- Live-tree status: pending — not re-run during the 2026-05-07
+  revalidation pass; the original snapshot's 5 errors / 2,259 warnings
+  / 584 info is documented above.
+- Pitfall fixes shipped in v0.9.17: pitfall #18 (per-rule
+  `respect_gitignore: false`), pitfall #19 (literal_is_nested runtime
+  guard) — neither directly affects this config (no
+  tracked-but-gitignored files; no `root_only:` with multi-component
+  literals).
+- v0.10 ship-target candidates referenced here that are now firm:
+  `xml_path_matches` / `xml_path_equals` (v0.10 ship-target via
+  spark + dotnet/runtime; this case study was the second source);
+  `dotnet@v1` bundled ruleset (v0.10 ship-target uniquely surfaced
+  here); `registry_paths_resolve` (8 sources including dotnet/runtime's
+  `eng/Subsets.props` and .slnx project lists);
+  `cross_file_value_equals` (10 sources, past-saturation, includes
+  dotnet/runtime's `dotnet-tools.json` ↔ `global.json` Arcade pattern).
+- Open gaps:
+  - `oss-license-exists` not recognising `LICENSE.TXT` (still open;
+    oss-baseline housekeeping for v0.10);
+  - `azure-pipelines@v1` bundled ruleset (single-source today; defer
+    to v0.11+).

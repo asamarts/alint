@@ -88,8 +88,9 @@ binding subtree.
 
 **Headline finding for the v0.11+ design phase:** every one of
 the **10 in-tree language bindings has parity discipline** that
-the v0.11+ `cross_language_implementation_complete` candidate would
-express — quantitatively:
+the v0.11+ `cross_language_implementation_complete` ship-target
+(now 5 sources: arrow + TF + protobuf + angular + flutter)
+would express — quantitatively:
 
 | Parity surface | Coverage |
 |---|---|
@@ -105,10 +106,10 @@ express — quantitatively:
 ones (cpp, java, python, ruby, php, rust) have all 5.** This is
 the densest cross-language parity discipline in the OSS catalogue
 and **the strongest test case for the v0.11+
-`cross_language_implementation_complete` rule-kind candidate**:
-4 demand-driving sources now (apache/arrow + tensorflow/tensorflow
-+ google/flutter + protocolbuffers/protobuf), making the v0.11
-design phase ship-ready.
+`cross_language_implementation_complete` rule-kind ship-target**:
+**5 demand-driving sources** (apache/arrow + tensorflow/tensorflow
++ protocolbuffers/protobuf + angular/angular + google/flutter),
+making the v0.11 design phase ship-ready.
 
 Total **structural-validation surfaces** counted: **45** discrete
 checks across the inventory.
@@ -301,9 +302,8 @@ java/bom/pom.xml) **needs the v0.11+
 
 The 108-rule [`/.alint.yml`](.alint.yml) breaks down as:
 
-- **3 bundled rulesets** (`oss-baseline`, `ci/github-actions`,
-  `hygiene/no-tracked-artifacts`) — pull in roughly 12 rules
-  between them
+- **3 bundled rulesets** (`oss-baseline` 15 + `ci/github-actions` 3 +
+  `hygiene/no-tracked-artifacts` 11) — **29 rules** between them
 - **1 cross-language structural rule** —
   `protobuf-binding-subdir-has-readme` (`for_each_file` over
   `{src,java,python,ruby,go,objectivec,csharp,php,rust,upb,hpb,lua}/README.md`)
@@ -352,8 +352,9 @@ any current rule:
 ### 1. `cross_language_implementation_complete` — version drift across version.json + protobuf_version.bzl + per-binding manifests
 
 This is the **canonical demand-driver** in this repo, and the
-**fourth source** (after apache/arrow + tensorflow/tensorflow +
-google/flutter) of the same rule shape. Concrete shape:
+**densest of 5 sources** (apache/arrow + tensorflow/tensorflow +
+protocolbuffers/protobuf + angular/angular + google/flutter) for
+the v0.11+ ship-target rule shape. Concrete shape:
 
 > For every language `L` in `version.json.main.languages.*`:
 >   - assert that `protobuf_version.bzl::PROTOBUF_<L>_VERSION` (where
@@ -374,14 +375,13 @@ either the v0.10+ `cross_file_value_equals` candidate (per-pair) or
 the broader v0.11+ `cross_language_implementation_complete` primitive
 (per-language-family fanout).
 
-**Demand reconfirmed:** this is now the **4th repo** to surface
-the same shape (apache/arrow + tensorflow/tensorflow +
-google/flutter + protobuf), making the v0.11+ candidate
-**ship-ready for the v0.11 design phase**. With protobuf as the
-densest source (10 bindings × 4-5 parity surfaces each =
-**~45 cross-language assertions** the rule would express in one
-config block), the design phase has concrete guidance for the
-fanout DSL.
+**Demand reconfirmed:** this is now the **5th of 5 repos** to surface
+the same shape (apache/arrow + tensorflow/tensorflow + protocolbuffers/
+protobuf + angular/angular + google/flutter), promoting the v0.11+
+candidate to **ship-target for the v0.11 design phase**. With protobuf
+as the densest source (10 bindings × 4-5 parity surfaces each =
+**~45 cross-language assertions** the rule would express in one config
+block), the design phase has concrete guidance for the fanout DSL.
 
 ### 2. `cross_language_implementation_complete` — conformance/failure_list_<lang>.txt ↔ binding presence
 
@@ -411,10 +411,10 @@ Each `conformance/failure_list_<lang>.txt` is conventionally
 one-test-per-line and could be sort-checked. Currently NOT
 alphabetised (verified via
 `LC_ALL=C sort -c conformance/failure_list_cpp.txt` → exits
-non-zero). v0.10+ `ordered_block` candidate joining the same rule
-kind across rust + airflow + tokio + cpython + arrow + tensorflow +
-**protobuf** (now **7 sources**, joining `registry_paths_resolve`
-at the top of v0.10).
+non-zero). `ordered_block` is now a **v0.10 ship-target with 7
+sources** (rust + airflow + tokio + cpython + arrow + golang/go +
+**protobuf failure_lists**), tied with `registry_paths_resolve` at
+the top of the v0.10 backlog.
 
 The same shape applies to the **8** `text_format_failure_list_*.txt`
 files — same convention, same enforcement gap, same one-line fix
@@ -526,28 +526,30 @@ pins. Position it as:
 Followup feature work surfaced (consolidated, sorted by strength
 of demand across P2a + P2b):
 
-- **`cross_language_implementation_complete` rule kind** — net new,
-  covers both the version-drift case (`version.json` ↔
+- **`cross_language_implementation_complete` rule kind** — v0.11+
+  ship-target. Covers both the version-drift case (`version.json` ↔
   `protobuf_version.bzl` ↔ per-binding manifests) AND the
   conformance-discipline case (`failure_list_<lang>.txt` ↔ binding
-  presence ↔ test workflow). protobuf is the **fourth source**
-  (apache/arrow + tensorflow/tensorflow + google/flutter +
-  protobuf) and the **densest** — 10 bindings × 4-5 parity surfaces
-  = ~45 cross-language assertions in one rule. **The v0.11 design
-  phase becomes ship-ready** with this 4th source committed.
-- **`ordered_block` rule kind** — re-confirmed by 19
-  `failure_list_<lang>.txt` files + 8 `text_format_failure_list_*.txt`
-  files. **Demand: rust + airflow + tokio + cpython + arrow +
-  tensorflow + protobuf (7 distinct repos)** — strongest demand
-  signal in P2a + P2b combined; should ship in v0.10.
-- **`registry_paths_resolve` rule kind** — protobuf doesn't
-  surface this gap directly (no equivalent of arrow's
-  rat_exclude_files.txt), but the per-binding failure_list_<lang>.txt
-  files are a **second-order instance**: each file lists
+  presence ↔ test workflow). protobuf is the **densest of 5 sources**
+  (apache/arrow + tensorflow/tensorflow + protobuf + angular +
+  flutter) — 10 bindings × 4-5 parity surfaces = ~45 cross-language
+  assertions in one rule. **The v0.11 design phase is ship-ready.**
+- **`ordered_block` rule kind** — v0.10 ship-target. Re-confirmed by
+  19 `failure_list_<lang>.txt` files + 8 `text_format_failure_list_*.txt`
+  files. **7 sources** (rust + airflow + tokio + cpython + arrow +
+  golang/go + protobuf), tied with `registry_paths_resolve` at top of
+  v0.10 backlog.
+- **`registry_paths_resolve` rule kind** — v0.10 ship-target (8
+  sources). protobuf doesn't surface this gap directly (no equivalent
+  of arrow's rat_exclude_files.txt), but the per-binding failure_list_
+  <lang>.txt files are a **second-order instance**: each file lists
   conformance test names that should resolve to known-existing tests
   in `conformance.proto` (drift here = a stale entry that hides a
-  regression). Defer to v0.10+ once the basic `registry_paths_resolve`
-  ships.
+  regression). Worth modelling once `registry_paths_resolve` ships.
+- **`generated_file_fresh` rule kind** — v0.10 ship-target (6
+  sources: uv, cpython, pytorch, bazel, TF, spark). protobuf's
+  `staleness_check.yml` workflow is a candidate use case; deferred
+  to the per-tool integration design phase.
 
 ---
 
@@ -593,9 +595,53 @@ the bracket-notation key access. See
   confirming protobuf's polyglot layout is fully consistent —
   and the rules are correctly scoped to fire if drift were to
   occur.
-- **The v0.11+ `cross_language_implementation_complete` candidate
-  is now demand-validated by 4 distinct repos** (apache/arrow +
-  tensorflow/tensorflow + google/flutter + protocolbuffers/
-  protobuf), with protobuf as the **densest single-repo source**
-  (10 bindings × 4-5 parity surfaces = ~45 cross-language
+- **The v0.11+ `cross_language_implementation_complete` ship-target
+  is now demand-validated by 5 distinct repos** (apache/arrow +
+  tensorflow/tensorflow + protocolbuffers/protobuf + angular/angular
+  + google/flutter), with protobuf as the **densest single-repo
+  source** (10 bindings × 4-5 parity surfaces = ~45 cross-language
   assertions). The v0.11 design phase is ship-ready.
+
+---
+
+## Future analysis
+
+- **`nested_configs: true` per language binding directory.** Each of
+  `src/`, `java/`, `python/`, `ruby/`, `go/`, `objectivec/`,
+  `csharp/`, `php/`, `rust/`, `lua/`, `upb/`, `hpb/` could ship a
+  per-binding `.alint.yml` with the language-specific rules (per-
+  manifest shape, per-conformance-runner presence, etc.). The
+  current 108-rule monolithic config has all 79 own rules collapsed
+  into one file; splitting per-binding via `nested_configs` would
+  let each binding evolve independently and read like a
+  per-language structural contract.
+- **`ordered_block` for failure_list_<lang>.txt + text_format_
+  failure_list_<lang>.txt files.** With `ordered_block` at v0.10
+  ship-target, protobuf is the **canonical demand-driver** — 19
+  failure_list files + 8 text_format_failure_list files = 27 file
+  targets in one repo, all currently un-sorted.
+- **`compliance/apache-2@v1`** doesn't apply (protobuf uses BSD-3-
+  Clause not Apache-2).
+- **Pre-existing bundled-rule false positive at csharp/README.md.**
+  The `oss-no-merge-conflict-markers` rule fires on the `=======`
+  markdown-section underline. Verified still present at v0.9.17;
+  pre-existing bundled-rule issue, not from this case study.
+
+## Validation status (2026-05-07)
+
+- alint binary: v0.9.17 (built 2026-05-07).
+- `validate-config` reports **108 rules** loaded from `.alint.yml**
+  (79 protobuf-specific + 29 from 3 bundled rulesets: oss-baseline 15
+  + ci/github-actions 3 + hygiene/no-tracked-artifacts 11).
+- Live-tree recheck against `/tmp/protobuf` reproduces the README
+  finding exactly: **150 violations across 14 failing files**, 72
+  rules pass silently. ~50 GHA SHA-pin warnings on unpinned third-
+  party actions, expected "tool not on PATH" warnings for `bazel` /
+  `buildifier` / `clang-format` / `flake8` / `rubocop`, ~21
+  OSS-baseline final-newline / trailing-whitespace info-level
+  findings, 1 pre-existing false-positive `oss-no-merge-conflict-
+  markers` error on `csharp/README.md`. Engine behaviour stable
+  v0.9.16 → v0.9.17.
+- No `respect_gitignore: false` or `root_only: true` patterns in this
+  config. Pitfalls #18 (FIXED v0.9.17) and #19 (FIXED v0.9.17) do
+  not apply.

@@ -314,10 +314,11 @@ build entry), `BUGS-AND-FEATURE-REQUESTS.md`, `RELEASE_BRANCHES.md`,
 65 rules in [`/.alint.yml`](.alint.yml), broken down:
 
 - **4 bundled rulesets** (`oss-baseline`, `go`, `ci/github-actions`,
-  `hygiene/no-tracked-artifacts`) — pull in roughly 30 rules between
-  them, including the trojan-source / zero-width / final-newline /
-  trailing-whitespace floor and the gha hardening (no-ops here since
-  istio uses Prow)
+  `hygiene/no-tracked-artifacts`) — pull in 37 rules between
+  them (`oss-baseline=15` + `go=8` + `ci/github-actions=3` +
+  `hygiene/no-tracked-artifacts=11`), including the trojan-
+  source / zero-width / final-newline / trailing-whitespace
+  floor and the GHA hardening (no-ops here since istio uses Prow)
 - **2 license-header rules** (`istio-go-license-header`,
   `istio-shell-license-header`) — stricter replacement for
   `common/scripts/lint_copyright_banner.sh`, with regex tolerance for
@@ -430,33 +431,35 @@ studies) all increment their demand signal here:
 
 | Need | What it would check | What alint needs |
 |---|---|---|
-| **`.golangci.yml` `depguard.AllGoFiles.deny` import bans** (16+ packages including `gomodules.xyz/jsonpatch/v3`, `k8s.io/utils/sets`, `gopkg.in/yaml.v2`, `golang.org/x/exp/maps`, the stdlib `maps`/`slices` packages — replace with istio.io/istio/pkg/* equivalents) | per-package import-allowlist gates | The `import_gate` rule kind already on the v0.10 high-priority list (kubernetes + airflow + helm as prior sources). istio adds a fourth source — saturating the demand signal. |
+| **`.golangci.yml` `depguard.AllGoFiles.deny` import bans** (16+ packages including `gomodules.xyz/jsonpatch/v3`, `k8s.io/utils/sets`, `gopkg.in/yaml.v2`, `golang.org/x/exp/maps`, the stdlib `maps`/`slices` packages — replace with istio.io/istio/pkg/* equivalents) | per-package import-allowlist gates | The `import_gate` rule kind — now `v0.10 ship-target` per launch-evidence.md (4 sources: k8s, airflow, golang/go, pytorch). istio surfaces the same depguard shape as a saturating signal. |
 | **`.golangci.yml` `depguard.DenyOperatorAndIstioctl`** ("operator/ and istioctl/ packages may not be imported from outside themselves except a small allowlist") | per-directory Go-import-boundary | Same `import_gate` rule kind, with the per-directory mode. |
-| **`make check-clean-repo` after `make gen`** ("running `make gen` would not change the working tree") | The `command_idempotent` rule kind already on the v0.10 candidate list (ruff + prettier + helm). istio adds a fourth source. |
-| **Cross-chart `global.hub` value equality** ("every chart that declares `_internal_defaults_do_not_set.global.hub` uses the same literal across charts") | `cross_file_value_equals` rule kind — the strongest-demand v0.10 candidate (airflow + tokio + clap + uv + react + pnpm + helm prior, istio increments to eighth source) |
-| **YAML multi-document support in `*_path_*` rules** | "yaml_path_equals against `releasenotes/notes/50328.yaml` — a multi-doc file separated by `---`" | The `serde_yaml::from_str::<Value>` engine call rejects multi-doc YAML with "deserializing from YAML containing more than one document is not supported". A `multi_doc_mode: { each | first }` knob on the `yaml_path_*` rules would surface the right semantics. **Surfaced first by istio.** |
+| **`make check-clean-repo` after `make gen`** ("running `make gen` would not change the working tree") | The `command_idempotent` rule kind — `v0.10 design candidate` per launch-evidence.md (2 sources in the table; istio is the 4th surface in the wild). |
+| **Cross-chart `global.hub` value equality** ("every chart that declares `_internal_defaults_do_not_set.global.hub` uses the same literal across charts") | `cross_file_value_equals` rule kind — `v0.10 ship-target` per launch-evidence.md (10 sources). istio is the **named source** for the per-file `value_extractor:` design refinement (`v0.10 design candidate`); see launch-evidence.md table. |
+| **YAML multi-document support in `*_path_*` rules** | "yaml_path_equals against `releasenotes/notes/50328.yaml` — a multi-doc file separated by `---`" | The `serde_yaml::from_str::<Value>` engine call rejects multi-doc YAML with "deserializing from YAML containing more than one document is not supported". The `multi_doc_mode: { error | first | every }` knob on `yaml_path_*` rules is now a `v0.10 design candidate` per launch-evidence.md (istio is the named source). **Surfaced first by istio.** |
 
 The first three are duplicates of needs already filed from earlier
 case studies — istio increments their demand signal but doesn't
 introduce new rule-kind candidates.
 
 The fourth — `cross_file_value_equals` for chart hub/tag pinning —
-already had the strongest demand signal of any v0.10 candidate;
-istio is the eighth source and the **first one where the cross-
-file values live in different JSONPath positions per file** (some
-charts have `$._internal_defaults_do_not_set.hub`, others have
-`$._internal_defaults_do_not_set.global.hub`). The v0.10 design
-should account for that — perhaps a `value_extractor:` block per
-file pattern.
+already has the strongest demand signal of any v0.10 candidate
+(now `v0.10 ship-target`, 10 sources per launch-evidence.md);
+istio is the **named source for the per-file `value_extractor:`
+refinement** because some charts have
+`$._internal_defaults_do_not_set.hub` while others have
+`$._internal_defaults_do_not_set.global.hub`. The v0.10 design
+slot for `value_extractor:` is captured in launch-evidence.md
+under the "v0.10 design candidates" table.
 
-The fifth — multi-document YAML support in `*_path_*` rules — IS
-new. **Surfaced first by istio.** The `serde_yaml::from_str::<Value>`
+The fifth — multi-document YAML support in `*_path_*` rules — was
+new at istio's original-write time. **Surfaced first by istio**;
+now a `v0.10 design candidate` per launch-evidence.md
+(`multi_doc_mode:` knob on `yaml_path_*` with values
+`error | first | every`). The `serde_yaml::from_str::<Value>`
 single-document engine call surfaces "deserializing from YAML
 containing more than one document is not supported" as a runtime
-violation per match. Two paths forward: (1) a `multi_doc_mode:`
-knob on the rules (each / first / all-must-match), or (2) the
-runtime auto-splits on `---` and re-runs the rule per sub-doc. See
-pitfall #21 below for the user-facing surface.
+violation per match. See pitfall #21 below for the user-facing
+surface; the engine fix is targeted for v0.10.
 
 ---
 
@@ -608,29 +611,32 @@ that no earlier case study has covered.
 Followup feature work surfaced (de-duplicated against earlier
 case-study gap lists):
 
-- **`cross_file_value_equals` rule kind** with per-file
-  `value_extractor:` block (NEW from istio — earlier sources
-  assumed the same JSONPath across files; istio's per-chart hub:
-  lives at different paths per chart). Strongest demand signal of
-  any v0.10 candidate; istio increments to eighth source.
-- **`import_gate` rule kind** (already on v0.10 high-priority list
-  — istio is the fourth Go-monorepo source after kubernetes +
-  airflow + helm; saturates demand)
-- **`command_idempotent` mode** (already on v0.10 candidate list —
-  istio increments to fourth source)
-- **YAML multi-document support in `*_path_*` rules** — NEW from
-  istio. The `serde_yaml::from_str::<Value>` engine call rejects
-  multi-doc YAML; surface a `multi_doc_mode:` knob or auto-split
-  on `---`. See pitfall #21.
+- **`cross_file_value_equals` rule kind** — `v0.10 ship-target`
+  (10 sources per launch-evidence.md). istio is the named source
+  for the per-file `value_extractor:` refinement (`v0.10 design
+  candidate`).
+- **`import_gate` rule kind** — `v0.10 ship-target` (4 sources
+  per launch-evidence.md; saturated). istio surfaces the same
+  depguard shape.
+- **`command_idempotent` mode** — `v0.10 design candidate` (2
+  sources in launch-evidence.md table; istio is the 4th surface
+  in the wild).
+- **YAML multi-document support in `*_path_*` rules** —
+  `v0.10 design candidate` per launch-evidence.md
+  (`multi_doc_mode:` knob; istio is the named source). See
+  pitfall #21 in CONFIG-AUTHORING.md.
 
 ---
 
 ## Pitfalls catalogued during config authoring
 
-No NEW schema/language pitfalls hit beyond the existing 19
-catalogued in `docs/development/CONFIG-AUTHORING.md`. **Two pitfalls
+No NEW schema/language pitfalls hit beyond the existing 21
+catalogued in `docs/development/CONFIG-AUTHORING.md` (the catalogue
+was at 19 entries when this case study was originally written;
+istio's two newly-surfaced pitfalls became #20 and #21 in the
+v0.9.16/v0.9.17 catalogue update). **Two pitfalls
 were rediscovered firsthand** and **two genuinely new pitfalls
-surfaced**:
+surfaced** (now formalised as #20 and #21):
 
 ### Rediscovered
 
@@ -653,7 +659,7 @@ surfaced**:
    `cross_file_value_equals` primitive together would close this
    gap declaratively.
 
-### NEW pitfalls (proposed for the next CONFIG-AUTHORING sweep)
+### NEW pitfalls (now formalised as #20 and #21 in the catalogue)
 
 20. **Cross-file value-equality across structurally-different files
     requires per-file value extraction** — istio's per-chart
@@ -664,10 +670,13 @@ surfaced**:
     `_internal_defaults_do_not_set.global`). A future
     `cross_file_value_equals` primitive can't assume one JSONPath
     across all files; it needs a per-file-pattern `value_extractor:`
-    block. Captured in the v0.10 design notes; not yet a writer-
-    facing pitfall (no rule of this kind exists today). Workaround
-    used in this config: 5 separate `file_content_matches` rules
-    asserting the literal text appears in each chart's values.yaml.
+    block. **Now formally documented as pitfall #20 in
+    CONFIG-AUTHORING.md**, with the `value_extractor:` refinement
+    captured as a `v0.10 design candidate` in launch-evidence.md
+    (istio is the named source). Workaround used in this config:
+    5 separate `file_content_matches` rules asserting the literal
+    text appears in each chart's values.yaml. **NOT YET FIXED IN
+    ENGINE**; v0.10 ship target.
 
 21. **`yaml_path_*` rules emit "more than one document is not
     supported" runtime error per multi-document YAML file** — the
@@ -675,17 +684,18 @@ surfaced**:
     rejects YAML files with `---` document separators. The error
     surfaces as one per-file violation regardless of which sub-
     document the rule's path would have matched. **Surfaced first
-    by istio.** Hit at runtime against
+    by istio**; **now formally documented as pitfall #21 in
+    CONFIG-AUTHORING.md**, with the `multi_doc_mode:` knob
+    captured as a `v0.10 design candidate` in launch-evidence.md
+    (istio is the named source). Hit at runtime against
     `releasenotes/notes/50328.yaml` (a legitimate two-document
     file collapsing two related changes into one PR-numbered
-    release-note entry). Mitigations: (a) treat as a known
-    benign violation and `# noqa`-style suppress per-file (not
-    yet supported); (b) wait for the v0.10+ `multi_doc_mode:`
-    knob on the `yaml_path_*` rules; (c) workaround — pre-split
-    the file into single-doc form before alint runs (defeats the
-    purpose). Worth adding to the next CONFIG-AUTHORING sweep
-    as **pitfall #20** (or higher, depending on the
-    `cross_file_value_equals` slot ordering).
+    release-note entry). **NOT YET FIXED IN ENGINE**; v0.10 ship
+    target. Mitigations: (a) treat as a known benign violation
+    and `# noqa`-style suppress per-file (not yet supported);
+    (b) wait for the v0.10 `multi_doc_mode:` knob; (c) workaround
+    — pre-split the file into single-doc form before alint runs
+    (defeats the purpose).
 
 The `coverage_audit_examples_parse.rs` audit catches neither: both
 are runtime-semantic, not parse-build, errors. The
@@ -694,3 +704,70 @@ are runtime-semantic, not parse-build, errors. The
 representative multi-doc YAML file + an `expected.toml` declaring
 the canonical violation count would catch any future regression in
 the engine's multi-doc handling.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
+- `validate-config`: **65 rules loaded cleanly** (28 istio-
+  specific + 37 from 4 bundled rulesets — `oss-baseline=15`,
+  `go=8`, `ci/github-actions=3`, `hygiene/no-tracked-artifacts=11`).
+- Live-tree recheck: **pending** — `/tmp/istio-istio/` not
+  present in this validation env.
+- Pitfalls fixed in v0.9.17 that touch this config:
+  - **Pitfall #18** (per-rule `respect_gitignore: false`)
+    — DELIVERED but not used in this config.
+  - **Pitfall #19** (literal_is_nested runtime guard) —
+    DELIVERED but not used.
+- **Open gaps with active workarounds (NOT YET FIXED in
+  v0.9.17):**
+  - **Pitfall #20** — cross-file value-equality across
+    structurally-different files. Workaround: 5 separate
+    `file_content_matches` rules. Engine fix targeted for
+    v0.10 via `value_extractor:` block on
+    `cross_file_value_equals` (see launch-evidence.md
+    "v0.10 design candidates"; istio is the named source).
+  - **Pitfall #21** — `yaml_path_*` multi-document YAML
+    failure. Workaround: pre-split or accept per-file
+    runtime violation. Engine fix targeted for v0.10 via
+    `multi_doc_mode:` knob (see launch-evidence.md "v0.10
+    design candidates"; istio is the named source).
+
+## Future analysis
+
+Three concrete unanalyzed angles for a future revalidation pass:
+
+1. **`nested_configs: true` for the per-component subtree.**
+   istio's per-component subdirs (pilot/, cni/, istioctl/,
+   operator/, security/, tools/) are effectively peer
+   subprojects under one root go.mod. A subtree-scoped
+   `.alint.yml` under `manifests/charts/` (for the chart
+   discipline) and `releasenotes/notes/` (for the release-note
+   schema) would let those rules live next to their domain
+   instead of in the root config — particularly relevant
+   because the chart-shape rules currently repeat per chart,
+   and a single subtree config under `manifests/charts/`
+   would express the contract once and apply it to all 9
+   charts.
+2. **`compliance/apache-2@v1` overlay** — istio is Apache
+   2.0 licensed and ships a `licenses/` tree (the
+   `lint-licenses` Make target points at it). The bundled
+   `compliance/apache-2@v1` ruleset (3 rules — LICENSE
+   present + NOTICE present + per-file SPDX header) would
+   partially replace `istio-go-license-header` +
+   `istio-shell-license-header` with declarative shape
+   coverage. The year-extractor istio adds (`Copyright
+   (?:\d{4} )?Istio Authors`) is istio-specific and the
+   bundled ruleset doesn't carry it; a future
+   `compliance/apache-2-istio` derivative could fold it in.
+3. **v0.9.6+ rule kinds replacing `command:` shellouts.**
+   Of istio's 7 `command:` shellouts (`golangci-lint`,
+   `gofmt`, `go mod tidy`, `helm lint`, `hadolint`,
+   `shellcheck`, `yamllint`, `license-lint`), `helm lint`
+   is the most interesting candidate for a future bundled
+   replacement: launch-evidence.md lists `cncf/owners@v1`
+   on the v0.10 design table (helm is the source); a
+   sibling `helm/chart-structure@v1` overlay would fold
+   the per-chart shape pinning that this case study
+   currently does inline. Worth proposing for v0.10/v0.11.

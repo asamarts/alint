@@ -207,7 +207,7 @@ total to about **40 of 109**.
 
 | Pre-commit hook | What it checks | What alint needs |
 |---|---|---|
-| `check-version-consistency` | airflow `__version__` constant in `airflow/__init__.py` matches `pyproject.toml`'s `[project].version` matches `task-sdk/src/airflow/sdk/__init__.py` | A **`cross_file_value_equals`** rule kind — pulls a value via Python AST / TOML path / regex from one file, asserts equality with the same shape in N other files. **Generalised use case:** "the canonical version / app name / API endpoint must agree across N specific files." Strong candidate for v0.10+. |
+| `check-version-consistency` | airflow `__version__` constant in `airflow/__init__.py` matches `pyproject.toml`'s `[project].version` matches `task-sdk/src/airflow/sdk/__init__.py` | A **`cross_file_value_equals`** rule kind — pulls a value via Python AST / TOML path / regex from one file, asserts equality with the same shape in N other files. **Generalised use case:** "the canonical version / app name / API endpoint must agree across N specific files." Per `launch-evidence.md`, this is now a **v0.10 ship-target** with **10 demand sources** (airflow + tokio + clap + uv + react + pnpm + nodejs/node + pytorch + vscode + istio); istio's surfacing of the per-file-extractor refinement (pitfall #20) shows the value-extractor block as the design refinement to ship alongside it. |
 | `check-secrets-search-path-sync` | Two specific Python files have identical search-path lists | Same primitive as above. |
 | `check-template-context-variable-in-sync` | `airflow.models.taskinstance` context vars match `templates-ref.rst` and `task-sdk/.../context.py` | Same primitive. |
 | `check-template-fields-valid` | Every `BaseOperator` subclass declares `templated_fields` containing only valid attribute names | Python AST. **Out of scope** (alint's "no AST" non-goal). Keep the existing script. |
@@ -229,13 +229,16 @@ total to about **40 of 109**.
 E)". This is the biggest single missing primitive for monorepo-shaped
 Python codebases — Airflow has 11 of these, kubernetes has 4 (in different
 guises), Rust ecosystem repos use it for `Cargo.toml` workspace versions.
-Worth a dedicated v0.10+ design pass: `cross_file_value_equals` with
-`source: { path, kind: { regex|toml_path|yaml_path|json_path }, value }` +
-`mirrors: [...]` shape.
+Now a **v0.10 ship-target** per `launch-evidence.md` with 10 saturated
+demand sources; the design surfaced by istio's case study adds a
+per-file `value_extractor:` block (pitfall #20 refinement) so each
+mirror can declare its own extractor.
 
 **Gap pattern: import gates.** Same as kubernetes — `import_gate` with
 allowlist / denylist modes is doubly-load-bearing now (Go and Python
-monorepos both want it). Filing this as the primary v0.10 ask.
+monorepos both want it). Now a **v0.10 ship-target** per
+`launch-evidence.md` with 4 demand sources (k8s + airflow +
+golang/go + pytorch).
 
 **Gap pattern: file-content sortedness.** A genuinely small primitive
 (`file_lines_sorted`, `no_duplicate_lines`) that covers 5+ pre-commit
@@ -328,7 +331,9 @@ The remaining ~70:
 - ~30 are **Python-AST gates** (template-fields, import gates, deprecation
   detection, etc.) — out of alint's scope per the no-AST non-goal; could
   collapse into one breeze command if desired.
-- ~10 need new alint primitives (above) — file as v0.10+ feature requests.
+- ~10 need new alint primitives (above) — most are now **v0.10
+  ship-targets** per `launch-evidence.md` (`cross_file_value_equals`,
+  `import_gate`, `ordered_block`).
 - ~5 are domain-specific Airflow checks (Alembic migration validation,
   Kubernetes schema vendoring) — out of scope.
 
@@ -393,7 +398,10 @@ Followup feature work surfaced (priority order):
    second-highest payoff; ~6 airflow hooks + ~6 kubernetes hooks; same
    primitive shows up in nearly every multi-package monorepo.
 3. **`file_lines_sorted` + `no_duplicate_lines`** — cheap, narrow, covers
-   5+ airflow hooks. Easy v0.10 add.
+   5+ airflow hooks. Subsumed by the broader `ordered_block` candidate
+   per `launch-evidence.md` — now a **v0.10 ship-target** with 7
+   demand sources (rust + airflow + tokio + cpython + arrow + golang/go
+   + protobuf failure_lists).
 4. **`file_in_allowlist` rule kind** — generalises `file_absent` to "no new
    files outside the side-file allowlist". Niche but airflow uses it 2
    places.
@@ -401,3 +409,48 @@ Followup feature work surfaced (priority order):
    ships today; auto-insertion (the `insert-license` hook's job, ×11
    variants in airflow) would let alint absorb 11 more hooks with zero new
    rule kinds.
+
+---
+
+## Future analysis
+
+Surfaced during the 2026-05-07 revalidation pass; not yet executed
+against a live tree:
+
+1. **`scope_filter.has_ancestor: pyproject.toml` for the per-distribution
+   rules** — airflow has 100+ pyproject.toml files (1 root + 4 core +
+   101 providers + N shared). Several rules in this config use
+   `paths: "**/.gitignore"` as the iteration shape; rebuilding around
+   `for_each_file: pyproject.toml` + nested `require:` for the
+   distribution-discipline checks would let one rule express the
+   "every distro has matching .gitignore" check without per-rule
+   path duplication. Reduces 5+ rules to 1.
+2. **`compliance/reuse@v1` (3-rule bundled ruleset) trial** — airflow
+   uses Apache 2 headers, but the REUSE-spec form would let the
+   per-language `insert-license` hooks (×11 variants) collapse into
+   one bundled overlay. Surface: ~15k Python + YAML + JS source files.
+3. **`docs/adr@v1` (4-rule bundled ruleset) overlay** — airflow has
+   `docs/apache-airflow/installation/`, `docs/apache-airflow/best-practices/`,
+   and several other long-form decision-doc surfaces. Worth checking
+   whether any subset matches the ADR template shape and would
+   benefit from the bundled overlay.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version validated: 0.9.17 (built 2026-05-07)
+- `validate-config` rule count: **75 rules loaded** (28 in-config +
+  6 bundled overlays: oss-baseline=15, python=9, ci/github-actions=3,
+  compliance/apache-2=3, hygiene/no-tracked-artifacts=11,
+  hygiene/lockfiles=7 = 48 bundled, with overlap deduped at load)
+- Live-tree recheck: **pending — `/tmp/airflow/` not present** at
+  revalidation time.
+- Pitfalls noted in this README that are now fixed in the engine:
+  none directly cited.
+- Open gaps after this revalidation: the v0.10+ rule-kind candidate
+  status drifted (`cross_file_value_equals` and `import_gate` are now
+  v0.10 ship-targets; `ordered_block` subsumes the
+  `file_lines_sorted` + `no_duplicate_lines` framing). The 21-pitfall
+  catalogue was 17 at the time of the original capture; this README
+  doesn't cite specific pitfall numbers, so no renumbering was needed.

@@ -45,9 +45,10 @@ Of the 57 lintrunner adapters:
 
 So the headline is: **~49 of 57 adapters (≈86 %) are within alint's grammar
 today**; the AST-aware tail (~8/57 ≈ 14 %) stays on lintrunner. The
-`.alint.yml` in this directory ships **35 pytorch-specific rules** plus 6
-bundled rulesets covering oss-baseline, python, ci/github-actions,
-hygiene/no-tracked-artifacts, agent-hygiene, and tooling/editorconfig.
+`.alint.yml` in this directory ships **40 pytorch-specific rules** plus 6
+bundled rulesets totalling **47 bundled rules** (oss-baseline 15 +
+python 9 + ci/github-actions 3 + hygiene/no-tracked-artifacts 11 +
+agent-hygiene 6 + tooling/editorconfig 3) — **87 rules total**.
 
 Beyond `.lintrunner.toml`, pytorch ships:
 
@@ -132,15 +133,15 @@ The full breakdown:
 | SCOPED_LIBRARY | scoped_library_linter.py | Python AST: forbid `torch.library.Library()`, require `_scoped_library` | OUT OF SCOPE (Python AST) |
 | SET_LINTER | set_linter.py | Python AST: forbid built-in `set` under `_inductor` | OUT OF SCOPE (Python AST) |
 | DOCSTRING_LINTER | docstring_linter.py | Python AST: every long class/function has substantive docstring | OUT OF SCOPE (Python AST) |
-| IMPORT_LINTER | import_linter.py | Python AST: banned-third-party imports per directory | NEEDS NEW PRIMITIVE — `import_gate` (already on v0.10+ list from k8s, airflow, helm) |
+| IMPORT_LINTER | import_linter.py | Python AST: banned-third-party imports per directory | NEEDS NEW PRIMITIVE — `import_gate` (v0.10 ship-target with 4 sources: k8s, airflow, golang/go, pytorch) |
 | GB_REGISTRY | gb_registry_linter.py | Python AST: `unimplemented_v2(...)` calls cross-referenced against `tools/dynamo/graph_break_registry.json` | OUT OF SCOPE (AST + cross-file registry); partial via `cross_file_value_equals` once that lands |
-| HEADER_ONLY_LINTER | header_only_linter.py | reads `torch/header_only_apis.txt`, asserts each symbol appears in at least one .cpp test file | NEEDS NEW PRIMITIVE — `registry_paths_resolve` (5th confirmation) |
+| HEADER_ONLY_LINTER | header_only_linter.py | reads `torch/header_only_apis.txt`, asserts each symbol appears in at least one .cpp test file | NEEDS NEW PRIMITIVE — `registry_paths_resolve` (v0.10 ship-target, 8 sources) |
 | TEST_DEVICE_BIAS | test_device_bias_linter.py | Python AST: tests must not hard-code `cuda:0` etc. | OUT OF SCOPE (Python AST) |
-| NATIVEFUNCTIONS | nativefunctions_linter.py | regenerates `aten/src/ATen/native/native_functions.yaml` via torchgen, asserts no diff | NEEDS NEW PRIMITIVE — `generated_file_fresh` (3rd confirmation: cpython, uv, pytorch) |
+| NATIVEFUNCTIONS | nativefunctions_linter.py | regenerates `aten/src/ATen/native/native_functions.yaml` via torchgen, asserts no diff | NEEDS NEW PRIMITIVE — `generated_file_fresh` (v0.10 ship-target, 6 sources: uv, cpython, pytorch, bazel, TF, spark) |
 | GENERATED_SHIMS_VERSION | generated_shims_version_linter.py | parse C `shim.h`, assert all functions in `torchgen/aoti/fallback_ops.py` appear with correct version macro | OUT OF SCOPE (C AST + cross-file) |
 | STABLE_SHIM_VERSION | stable_shim_version_linter.py | git-diff-aware: new declarations in `stable/c/shim.h` must be wrapped in `TORCH_FEATURE_VERSION` | OUT OF SCOPE (git-diff aware + C AST) |
 | STABLE_SHIM_USAGE | stable_shim_usage_linter.py | maintains `shim_function_versions.txt`; assert usages of shim API match | OUT OF SCOPE (cross-file registry + C AST) |
-| WORKFLOWSYNC | workflow_consistency_linter.py | every job under `sync-tag: foo` matches every other across `.github/workflows/*.yml` | NEEDS NEW PRIMITIVE — `cross_file_value_equals` (7th confirmation) |
+| WORKFLOWSYNC | workflow_consistency_linter.py | every job under `sync-tag: foo` matches every other across `.github/workflows/*.yml` | NEEDS NEW PRIMITIVE — `cross_file_value_equals` (v0.10 ship-target, 10 sources past saturation) |
 | NO_WORKFLOWS_ON_FORK | no_workflows_on_fork.py | every workflow with `push`/`pull_request` triggers must guard `if: github.repository_owner == 'pytorch'` | NEEDS NEW PRIMITIVE — `yaml_path_matches` with implication shape (X→Y); single-source candidate |
 | PYPROJECT | pyproject_linter.py | parse pyproject.toml, assert version pins match a per-package SpecifierSet | OUT OF SCOPE (deep TOML semantics + version arithmetic) |
 
@@ -216,28 +217,30 @@ load-bearing ones exist (`pytorch-grep-linter-shim-present`,
 
 | Gap | Existing pytorch tooling | What alint needs |
 |---|---|---|
-| Cross-workflow `sync-tag` consistency | WORKFLOWSYNC | `cross_file_value_equals` rule kind: "value at JSONPath X across all files matching glob Y must be identical (or vary only along an allowed dimension)". **7th confirmation** of the strongest demand signal in P2a (after airflow + tokio + clap + uv + react + pnpm). |
-| Symbol registry resolves to test fixture (`torch/header_only_apis.txt`) | HEADER_ONLY_LINTER | `registry_paths_resolve` rule kind: "every line in registry file X resolves to a path/symbol present in glob Y". **5th confirmation** (rust + clap + cpython×2 + pytorch). cpython subagent flagged as the single highest-leverage gap; pytorch confirms. |
-| Banned-third-party imports per-directory | IMPORT_LINTER | `import_gate` rule kind: "forbid imports of pattern X in path scope Y". **3rd confirmation** (k8s + airflow + helm + pytorch). |
-| Generated YAML/header freshness (`native_functions.yaml`, `generated_shims_version`) | NATIVEFUNCTIONS, GENERATED_SHIMS_VERSION | `generated_file_fresh` rule kind: "regenerate via command, diff against on-disk". **4th confirmation** (uv + cpython + pytorch). |
+| Cross-workflow `sync-tag` consistency | WORKFLOWSYNC | `cross_file_value_equals` rule kind: "value at JSONPath X across all files matching glob Y must be identical (or vary only along an allowed dimension)". **v0.10 ship-target — 10 sources past saturation** (airflow, tokio, clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio). |
+| Symbol registry resolves to test fixture (`torch/header_only_apis.txt`) | HEADER_ONLY_LINTER | `registry_paths_resolve` rule kind: "every line in registry file X resolves to a path/symbol present in glob Y". **v0.10 ship-target — 8 sources** (rust, clap, cpython×2, next.js, arrow, pytorch, nodejs/node, NixOS×3). pytorch's symbol-list-→-test-coverage shape is the cleanest example of the pattern. |
+| Banned-third-party imports per-directory | IMPORT_LINTER | `import_gate` rule kind: "forbid imports of pattern X in path scope Y". **v0.10 ship-target — 4 sources** (k8s, airflow, golang/go, pytorch). |
+| Generated YAML/header freshness (`native_functions.yaml`, `generated_shims_version`) | NATIVEFUNCTIONS, GENERATED_SHIMS_VERSION | `generated_file_fresh` rule kind: "regenerate via command, diff against on-disk". **v0.10 ship-target — 6 sources** (uv, cpython, pytorch, bazel, TF, spark). |
 | Cross-workflow `if: github.repository_owner == 'pytorch'` guard | NO_WORKFLOWS_ON_FORK | `yaml_path_implication` rule kind: "if YAML path X has value V₁, then path Y must have value V₂". Single-source so far; deferred unless a second confirmation arrives. |
 | CSV with non-blank rows separated by N blank lines | MERGE_CONFLICTLESS_CSV | `line_spacing` rule kind: "every non-empty line followed by exactly N blank lines". **NEW candidate** — narrow to merge-conflict-resistant data files. Niche; logged as a v0.10+ candidate. |
 | Source files must not be executable | EXEC | `not_executable` rule kind: shorthand for `command: ["test", "!", "-x", "{path}"]` but cross-platform. **NEW candidate** — could ship as a tiny convenience rule. Single-source; defer unless a second confirmation arrives. |
 | `.ci/docker/` content-hash drives Docker rebuilds | informal — CLAUDE.md only | `directory_hash` / `pair_hash` rule kind: "compute content hash of glob X, compare to value Y in file Z". Pytorch has no formal check today (CLAUDE.md flags as foot-gun); could be added if the primitive existed. **NEW candidate**, single-source; defer. |
 
-**Cross-reference with the existing v0.10+ candidate list in
+**Cross-reference with the v0.10 ship-target list in
 [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md):**
 
-- `cross_file_value_equals` — confirmed by pytorch (WORKFLOWSYNC). **7th
-  confirmation** — moves past saturation; this is unambiguously the
-  highest-priority new primitive across P2a.
-- `registry_paths_resolve` — confirmed by pytorch (HEADER_ONLY_LINTER). **5th
-  confirmation** — strong saturation; pytorch's symbol-list-→-test-coverage
-  shape is the cleanest example of the pattern.
-- `import_gate` — confirmed by pytorch (IMPORT_LINTER). **3rd confirmation**
-  (already on v0.10 list from k8s + airflow; helm flagged a fourth).
+- `cross_file_value_equals` — confirmed by pytorch (WORKFLOWSYNC).
+  **v0.10 ship-target with 10 sources past saturation** — unambiguously
+  the highest-priority new primitive across P2a + P2b.
+- `registry_paths_resolve` — confirmed by pytorch (HEADER_ONLY_LINTER).
+  **v0.10 ship-target with 8 sources** — strong saturation; pytorch's
+  symbol-list-→-test-coverage shape is the cleanest example of the
+  pattern.
+- `import_gate` — confirmed by pytorch (IMPORT_LINTER). **v0.10
+  ship-target with 4 sources** (k8s + airflow + golang/go + pytorch).
 - `generated_file_fresh` — confirmed by pytorch (NATIVEFUNCTIONS,
-  GENERATED_SHIMS_VERSION). **4th confirmation** (uv + cpython + pytorch).
+  GENERATED_SHIMS_VERSION). **v0.10 ship-target with 6 sources** (uv +
+  cpython + pytorch + bazel + TF + spark).
 
 **NEW candidates not previously inventoried:**
 
@@ -417,18 +420,83 @@ in the first place.
 
 Followup feature work surfaced (priority order):
 
-- **`cross_file_value_equals`** — **7th confirmation**, well past
-  saturation. Strongest demand signal in P2a; pytorch's WORKFLOWSYNC is the
-  cleanest example of the pattern (every `sync-tag` block across 144
-  workflow files must be identical).
-- **`registry_paths_resolve`** — **5th confirmation**. pytorch's
-  `torch/header_only_apis.txt` registry is the canonical example: a flat
-  text file lists symbols, each must appear in a .cpp test file.
-- **`import_gate`** — **3rd-4th confirmation** (k8s + airflow + helm + pytorch
-  IMPORT_LINTER). pytorch's per-directory `_imports.toml`-style configs are
-  the most polished example.
-- **`generated_file_fresh`** — **3rd confirmation**. pytorch has TWO
-  freshness gates (NATIVEFUNCTIONS + GENERATED_SHIMS_VERSION); pinning down
-  the alint primitive's API is overdue.
+- **`cross_file_value_equals`** — **v0.10 ship-target with 10 sources
+  past saturation**. Strongest demand signal in P2a + P2b; pytorch's
+  WORKFLOWSYNC is the cleanest example of the pattern (every `sync-tag`
+  block across 144 workflow files must be identical).
+- **`registry_paths_resolve`** — **v0.10 ship-target with 8 sources**.
+  pytorch's `torch/header_only_apis.txt` registry is the canonical
+  example: a flat text file lists symbols, each must appear in a .cpp
+  test file.
+- **`import_gate`** — **v0.10 ship-target with 4 sources** (k8s,
+  airflow, golang/go, pytorch IMPORT_LINTER). pytorch's per-directory
+  `_imports.toml`-style configs are the most polished example.
+- **`generated_file_fresh`** — **v0.10 ship-target with 6 sources**.
+  pytorch has TWO freshness gates (NATIVEFUNCTIONS +
+  GENERATED_SHIMS_VERSION); pinning down the alint primitive's API is
+  overdue.
 - **`line_spacing`, `not_executable`, `directory_hash`** — **NEW** but
   single-source; defer.
+
+---
+
+## Future analysis
+
+- **`alint check --changed --base origin/main` meshes naturally with
+  pytorch's lintrunner PR fastpath.** lintrunner's `--paths-cmd` mode
+  feeds only changed files to per-adapter checks. alint's `--changed`
+  mode (without `--base`: `git ls-files --modified --others
+  --exclude-standard`, the right shape for pre-commit; with `--base`:
+  `git diff --name-only <base>...HEAD`, the right shape for PR
+  checks) gives a fast structural-floor pass at the same hook point.
+  Cross-file rules (`pair`, `for_each_dir`, `every_matching_has`,
+  `unique_by`, `dir_contains`, `dir_only_contains`) and existence
+  rules still consult the full tree by definition — this matches
+  lintrunner's "init then per-file lint" two-phase shape.
+- **Pitfall #19 .alint.yml cleanup.** Three rules use `root_only:
+  true` with multi-segment literal paths
+  (`pytorch-lintrunner-adapter-dir-present`,
+  `pytorch-grep-linter-shim-present`,
+  `pytorch-ci-pytorch-tree-present`). Engine v0.9.17 produces
+  correct "no match" errors when files don't exist (verified against
+  /tmp/protobuf), but the `root_only:` flag adds no value for
+  multi-segment literals and could mislead. Consider dropping
+  `root_only: true` from these three rules — no behaviour change for
+  the existence check itself; just removes the misleading flag.
+- **Per-adapter `nested_configs:` split.** The 1003-line
+  monolithic `.alint.yml` could be split per-tooling-area
+  (`.lintrunner.toml` shape rules under `tools/linter/`, GHA
+  shape rules under `.github/workflows/`, etc.) via
+  `nested_configs: true`. Worth considering as the config grows.
+- **The 12 "additive" grep adapters** (RAWTHROW, ERROR_PRONE_ISINSTANCE,
+  CUBINCLUDE, RAWCUDA, RAWCUDADEVICE, ROOT_LOGGING, DEPLOY_DETECTION,
+  CONTEXT_DECORATOR, META_NO_CREATE_UNBACKED, ATEN_CPU_GPU_AGNOSTIC,
+  EXEC, NEWLINE) — these are documented as "same template" at lines
+  340-344 but not in the .alint.yml. Adding them would close the
+  alint↔lintrunner structural-coverage gap fully. Worth doing
+  alongside a per-tree `nested_configs:` split.
+
+## Validation status (2026-05-07)
+
+- alint binary: v0.9.17 (built 2026-05-07).
+- `validate-config` reports **87 rules** loaded from `.alint.yml**
+  (40 pytorch-specific + 47 from 6 bundled rulesets: oss-baseline 15
+  + python 9 + ci/github-actions 3 + hygiene/no-tracked-artifacts 11
+  + agent-hygiene 6 + tooling/editorconfig 3).
+- 8 rules use `root_only: true`. **3 rules use multi-segment literal
+  paths** with `root_only: true` — pitfall #19 shape:
+  `pytorch-lintrunner-adapter-dir-present` (line 938),
+  `pytorch-grep-linter-shim-present` (line 950),
+  `pytorch-ci-pytorch-tree-present` (line 975). **Pitfall #19 was
+  FIXED in v0.9.17 engine** (the literal_is_nested runtime guard
+  produces "no-match-for-this-pattern" rather than silently passing).
+  Verified: the rules fire correctly today (run against
+  /tmp/protobuf where files don't exist → produces "no match"
+  errors). The `root_only:` flag is no-op for multi-segment literals
+  and could be dropped for clarity.
+- No `respect_gitignore: false` patterns. Pitfall #18 (FIXED v0.9.17)
+  does not apply.
+- 86% structural coverage figure (per task brief) confirmed: 49 of
+  57 lintrunner adapters within alint's grammar.
+- Live-tree recheck not performed (no /tmp/pytorch checkout
+  available; tree is too large for sparse-clone in test env).

@@ -65,7 +65,10 @@ inventory" below).
 - **20 of 34 (59 %) map to existing alint rules** — the
   bundled `oss-baseline + compliance/apache-2 + python +
   ci/github-actions + hygiene/no-tracked-artifacts +
-  tooling/editorconfig` ship roughly **35 rules** between them,
+  tooling/editorconfig` ship roughly **44 rules** between them
+  (oss-baseline=15, compliance/apache-2=3, python=9,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11,
+  tooling/editorconfig=3),
   plus the **65 arrow-specific rules** in [`/.alint.yml`](.alint.yml)
   (cross-language conventions, per-language manifests, Apache
   release tooling, per-Ruby-gem layout, GLib sub-library
@@ -86,8 +89,9 @@ inventory" below).
   and four operational workflows (release-orchestration / cron
   / triage / issue-bot).
 
-The configured **65-rule** [`/.alint.yml`](.alint.yml) covers
-every structural assertion the existing tooling makes about
+The configured **65-in-config-rule** [`/.alint.yml`](.alint.yml)
+(107 rules total post-extends resolution per `alint validate-config`)
+covers every structural assertion the existing tooling makes about
 repo *state*, plus several arrow doesn't enforce today
 (per-language subdir README, per-Ruby-gem layout uniformity,
 .asf.yaml schema integrity).
@@ -109,8 +113,8 @@ language-subtree list catches drift across the whole polyglot
 tree at once. **Surfaces 16 source files missing the
 Apache header** (all of which are listed in
 `dev/release/rat_exclude_files.txt` — confirming the canonical
-v0.10+ `registry_paths_resolve` rule kind would fold the
-exclude list directly into alint's scope).
+v0.10 ship-target `registry_paths_resolve` rule kind would fold
+the exclude list directly into alint's scope).
 
 ---
 
@@ -141,9 +145,9 @@ exclude list directly into alint's scope).
 |---|---|---|
 | `dev/release/run-rat.sh` | Downloads `apache-rat-${VERSION}.jar` from Maven Central; runs RAT against an archive of HEAD; passes the report to `check-rat-report.py`. The `pre-commit` `rat` hook calls this on every commit. | `file_exists` + `command:` wrapping `pre-commit run rat` (the alint config gates the script's existence; the actual RAT run is shelled out) |
 | `dev/release/check-rat-report.py` | Filters the RAT report against `rat_exclude_files.txt`; exits non-zero if any unapproved file remains. | `file_exists` |
-| `dev/release/rat_exclude_files.txt` | 102 path patterns RAT must skip (binary fixtures, vendored code, generated files). | `file_exists`. **The deeper "every pattern resolves to ≥1 file" check needs the v0.10+ `registry_paths_resolve` rule kind** — this case study's #1 gap. |
+| `dev/release/rat_exclude_files.txt` | 102 path patterns RAT must skip (binary fixtures, vendored code, generated files). | `file_exists`. **The deeper "every pattern resolves to ≥1 file" check needs the v0.10 ship-target `registry_paths_resolve` rule kind** — this case study's #1 gap (now 8 demand sources per `launch-evidence.md`). |
 | `dev/release/verify-release-candidate.sh` | The script a PMC member runs against the unfreezed RC tarball during the Apache 72-hour vote window. | `file_exists` (warning) |
-| `dev/release/01-prepare.sh` through `10-vote-email.sh` (and `post-01-tag.sh` through `post-14-conan.sh`) | The numbered scripts that drive the entire release dance | Out of alint scope (operational, run by the release manager). The numbered convention itself is alint-shaped (every `NN-name.sh` should have a matching test or post-step) but defers to v0.10+ for the cross-file pairing semantics. |
+| `dev/release/01-prepare.sh` through `10-vote-email.sh` (and `post-01-tag.sh` through `post-14-conan.sh`) | The numbered scripts that drive the entire release dance | Out of alint scope (operational, run by the release manager). The numbered convention itself is alint-shaped (every `NN-name.sh` should have a matching test or post-step) but defers to a future cross-file pairing primitive. |
 | `dev/merge_arrow_pr.{py,sh}` | The canonical PR-merge script (squashes commits, formats the merge message, links the JIRA issue if present) | `file_exists` (info) |
 
 ### `.github/workflows/` (28 workflows)
@@ -265,12 +269,13 @@ express the per-scope fan-out declaratively.
 
 ## What maps to existing alint rules
 
-The 65-rule [`/.alint.yml`](.alint.yml) breaks down as:
+The 65-in-config-rule [`/.alint.yml`](.alint.yml) (107 total
+post-extends) breaks down as:
 
 - **6 bundled rulesets** (`oss-baseline`, `compliance/apache-2`,
   `python`, `ci/github-actions`,
   `hygiene/no-tracked-artifacts`, `tooling/editorconfig`) —
-  pull in roughly **35 rules** between them
+  pull in roughly **44 rules** between them
 - **1 cross-language structural rule** —
   `arrow-language-subdir-has-readme` (`for_each_file` over
   `{cpp,c_glib,python,r,ruby,matlab,format}/README.{md,rst}`)
@@ -341,15 +346,14 @@ list can't drift to dead patterns). alint has the file
 present; what's missing is the cross-validation that every
 pattern in the registry file maps to ≥1 real file.
 
-This is the **fourth repo** to surface this need (rust-lang +
-clap + cpython + apache/arrow). Going from "v0.10
-high-priority candidate" to "v0.10 must-ship": **demand 4 of 4
-candidates** for the same shape, and the apache/arrow
-finding directly translates ("16 source files flagged as
-missing the Apache header are all listed in
-rat_exclude_files.txt — alint can't resolve the
-exclude-list pointers from header-missing-finding to known-
-exempt").
+This is **one of 8 demand sources** for this need per
+`launch-evidence.md` (rust + clap + cpython×2 + next.js + arrow +
+pytorch + nodejs/node + NixOS×3). The candidate is now a **v0.10
+ship-target** — the highest-leverage gap in P2a. The apache/arrow
+finding translates directly: "16 source files flagged as missing the
+Apache header are all listed in rat_exclude_files.txt — alint can't
+resolve the exclude-list pointers from header-missing-finding to
+known-exempt".
 
 ### 2. `cross_language_implementation_complete` — every type in `format/Schema.fbs` has a per-language test fixture
 
@@ -371,10 +375,12 @@ files exist matching template B per language scope". The
 multi-implementation specs (Substrait, Apache Iceberg, Apache
 Beam SDKs).
 
-**Strong v0.10+ signal**: this is the **canonical "alint is
+**Strong v0.11+ signal**: this is the **canonical "alint is
 the layer that catches drift across the polyglot tree"** rule
 shape. arrow stress-tests it harder than any other repo in
-P2a — defer to v0.10+ as the headline polyglot primitive.
+P2a; per `launch-evidence.md`, `cross_language_implementation_complete`
+is now a **v0.11+ ship-target** with **5 saturated demand sources**
+(arrow + tensorflow + protobuf + angular + flutter).
 
 ### 3. `ordered_block` for `rat_exclude_files.txt` + the long shell file: lists in `.pre-commit-config.yaml`
 
@@ -383,8 +389,11 @@ P2a — defer to v0.10+ as the headline polyglot primitive.
 exits 0 today). The `.pre-commit-config.yaml` `shellcheck`
 and `shfmt` `files:` patterns (each ~50 lines of
 alternation) follow the same convention. Both are
-unenforced. **Re-confirms** the rule-kind from rust-lang +
-airflow + tokio + cpython (5 sources now).
+unenforced. Per `launch-evidence.md`, `ordered_block` is now a
+**v0.10 ship-target** with **7 saturated demand sources** (rust +
+airflow + tokio + cpython + arrow + golang/go + protobuf
+failure_lists), tied with `registry_paths_resolve` at the top of
+the v0.10 backlog.
 
 ### 4. `pre-commit fan-out` mode (extension of existing `command:` rule)
 
@@ -392,7 +401,7 @@ apache/arrow's pre-commit config repeats the `clang-format`
 hook 4× (one per language scope: cpp/, c_glib/, matlab/src/cpp/,
 python/pyarrow/src/) and `cpplint` 2× (cpp/ and matlab/src/cpp/)
 because pre-commit demands one hook entry per `files:` pattern.
-A v0.10+ `command_per_scope` rule could express the same
+A future `command_per_scope` rule could express the same
 intent declaratively — one `command:` definition + N scope
 filters → N rule instances at registry-build time.
 
@@ -400,9 +409,9 @@ Lower demand than candidates 1-3 (single-source: only arrow
 has this repetition pattern at this scale), but resurfaces
 the broader question: **alint's `command:` rule shape
 sometimes wraps a tool that already has its own scope DSL**
-(pre-commit, husky-style hooks, `lint-staged`). At v0.10+ the
-conversation is "should `command:` learn fan-out, or should
-alint integrate directly with pre-commit's hook discovery?".
+(pre-commit, husky-style hooks, `lint-staged`). The conversation
+is "should `command:` learn fan-out, or should alint integrate
+directly with pre-commit's hook discovery?".
 
 ---
 
@@ -520,7 +529,7 @@ polyglot monorepo" story for the launch:
   findings are ALL legitimate (LLVM-licensed third-party
   files + auto-generated bindings, all listed in
   `dev/release/rat_exclude_files.txt`) — confirming both that
-  the rule fires correctly AND that the v0.10+
+  the rule fires correctly AND that the v0.10 ship-target
   `registry_paths_resolve` rule kind would close the loop.
 - **The Apache release tooling** (`dev/release/`,
   `.pre-commit-config.yaml`'s rat hook,
@@ -549,23 +558,23 @@ strength of demand across P2a):
   `rat_exclude_files.txt` here, plus the rust-lang
   triagebot.toml + clap pre-release-replacements + cpython
   .gitattributes generated markers + check-c-api-docs +
-  check-manifests.js. **Demand: rust + clap + cpython + arrow
-  + next.js (5 distinct repos)** — strongest demand signal
-  in P2a now, displacing `cross_file_value_equals` for the
-  v0.10 #1 priority slot.
+  check-manifests.js + NixOS×3 + pytorch + nodejs/node.
+  **Demand: 8 distinct sources** per `launch-evidence.md`
+  — strongest demand signal in P2a; **v0.10 ship-target**.
 - **`cross_language_implementation_complete` rule kind** —
-  net new, covers the format/Schema.fbs ↔ per-language
-  test-fixture coverage gap. arrow is the only single-repo
-  source today, but the shape generalises to every
+  covers the format/Schema.fbs ↔ per-language test-fixture
+  coverage gap; the shape generalises to every
   multi-implementation spec (Substrait, Iceberg, Beam SDKs,
-  protobuf bindings). File as v0.11+ (after the polyglot
-  positioning has more supporting data).
+  protobuf bindings). Per `launch-evidence.md`, now a
+  **v0.11+ ship-target** with 5 saturated demand sources
+  (arrow + tensorflow + protobuf + angular + flutter).
 - **`ordered_block` rule kind** — re-confirmed by
   `rat_exclude_files.txt` + the long file: alternation lists
-  in `.pre-commit-config.yaml`. **Demand: rust + airflow +
-  tokio + cpython + arrow (5 distinct repos)** — joins
+  in `.pre-commit-config.yaml`. **Demand: 7 distinct sources**
+  per `launch-evidence.md` (rust + airflow + tokio + cpython
+  + arrow + golang/go + protobuf failure_lists) — joins
   `registry_paths_resolve` at the top of the v0.10 priority
-  list.
+  list (**v0.10 ship-target**).
 - **`command_per_scope` mode** for the existing `command:`
   rule — covers the pre-commit per-scope hook repetition
   here. Demand: arrow only at this scale; defer.
@@ -575,9 +584,10 @@ strength of demand across P2a):
 ## Filter-expression pitfall: see CONFIG-AUTHORING.md § 10
 
 The original write-up of this case study claimed a NEW pitfall
-(#17) — *"JSONPath filter expressions `?(@.foo == 'bar')` are
-parser-rejected"*. Investigation during v0.9.15 Phase 4
-disproved that:
+("#18" at the time of capture, since reused for the
+gitignore-masking case in v0.9.17) — *"JSONPath filter
+expressions `?(@.foo == 'bar')` are parser-rejected"*.
+Investigation during v0.9.15 Phase 4 disproved that:
 
 - `serde_json_path` 0.7.x **accepts** outer-parens filter
   predicates (`?(@.foo == 'bar')`).
@@ -624,11 +634,11 @@ present.)
   files: 149 GHA SHA-pin warnings + 24 arrow-specific GHA
   warnings + 16 source-header warnings — all 16 are
   RAT-excluded files in `dev/release/rat_exclude_files.txt`,
-  confirming the v0.10+ `registry_paths_resolve` gap — plus
-  the expected `command:`-rule "tool not on PATH" errors
-  for `pre-commit` not being installed in the alint test
-  environment). No silent failures. No false positives in
-  the structural rule set.
+  confirming the v0.10 ship-target `registry_paths_resolve`
+  gap — plus the expected `command:`-rule "tool not on PATH"
+  errors for `pre-commit` not being installed in the alint
+  test environment). No silent failures. No false positives
+  in the structural rule set.
 - The cross-language structural rules
   (`arrow-language-subdir-has-readme`,
   `arrow-format-spec-files-present`,
@@ -638,3 +648,57 @@ present.)
   pass on the live tree, confirming arrow's polyglot layout
   is fully consistent — and the rules are correctly
   scoped to fire if drift were to occur.
+
+---
+
+## Future analysis
+
+Surfaced during the 2026-05-07 revalidation pass; not yet executed
+against a live tree:
+
+1. **`compliance/reuse@v1` (3-rule bundled ruleset) trial** — arrow
+   carries the longer ASF preamble on every source file and uses
+   per-language license headers (C++/Python/Cython/Ruby variants).
+   The REUSE-spec form would let the per-language header rules
+   collapse into one bundled overlay. Surface: ~10k source files
+   across 6 languages.
+2. **`apache/governance@v1` bundled-ruleset adoption** — arrow is one
+   of 3 saturated demand sources for this v0.10 ship-target bundle
+   (alongside spark + airflow). Once the bundle ships, this config
+   should `extends:` it and drop the per-asf-yaml + RAT-runner +
+   release-dance restated rules (currently 8 `arrow-asf-*` /
+   `arrow-rat-*` / `arrow-check-rat-*` rules collapse to one
+   bundled extension).
+3. **`scope_filter` ancestor-manifest narrowing for the per-language
+   rules** — the arrow-language-subdir-has-readme rule iterates over
+   a hard-coded `{cpp,c_glib,python,r,ruby,matlab,format}` list. A
+   refactor to use `for_each_dir` + `scope_filter.has_ancestor` of
+   a per-language manifest (`CMakeLists.txt` for cpp/matlab,
+   `meson.build` for c_glib, etc.) would make the rule
+   self-discovering and resilient to future per-language subdir
+   additions.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version validated: 0.9.17 (built 2026-05-07)
+- `validate-config` rule count: **107 rules loaded** (65 in-config +
+  6 bundled overlays summing to ~44 rules with overlap deduped)
+- Live-tree recheck: **pending — `/tmp/apache-arrow/` not present**
+  at revalidation time; the README's 243-violation claim from the
+  original capture (2026-05-06) has not been re-confirmed against a
+  current sparse-clone.
+- Pitfalls noted in this README that are now fixed in the engine:
+  none directly cited; the historical "#17/#18" outer-parens
+  filter-expression claim was disproved during v0.9.15 Phase 4 and
+  attributed to pitfall #10 (dashed-key bracket-notation), which
+  remains documented-with-canonical-form. The "#18" slot was
+  subsequently reused for the gitignore-masking case (now fixed in
+  v0.9.17 via `respect_gitignore: false`).
+- Open gaps after this revalidation: rule-kind candidate status drift
+  was the principal stale claim — `registry_paths_resolve` is now
+  v0.10 ship-target (8 sources), `cross_language_implementation_complete`
+  is v0.11+ ship-target (5 sources), `ordered_block` is v0.10
+  ship-target (7 sources). Bundled rule-count claim ("roughly 35
+  rules") corrected to 44.

@@ -39,7 +39,10 @@ design** (depguard / gomodguard / revive / modernize / sloglint —
 the Go-AST-aware checks alint isn't trying to do, mirroring the
 kubernetes / golang-go non-goals catalogues).
 
-The 23-rule starter config in [`/.alint.yml`](.alint.yml) replaces
+The 58-rule starter config (24 helm-specific + 34 from 4 bundled
+rulesets — `oss-baseline=15` + `go=8` + `ci/github-actions=3` +
+`hygiene/no-tracked-artifacts=11`, with a few rules deduplicated)
+in [`/.alint.yml`](.alint.yml) replaces
 **every structural assertion helm makes about its own tree** that
 isn't a Go-AST analysis. Net: one declarative file replaces the
 Makefile's `test-style` orchestration plus the
@@ -172,11 +175,14 @@ are conventions, not blockers.
 
 ## Maps to existing alint rules (what the starter config covers)
 
-23 rules in [`/.alint.yml`](.alint.yml), broken down:
+58 rules total in [`/.alint.yml`](.alint.yml) (24 helm-specific +
+34 from bundled rulesets), broken down:
 
 - **4 bundled rulesets** (`oss-baseline`, `go`, `ci/github-actions`,
-  `hygiene/no-tracked-artifacts`) — pull in roughly 30 rules between
-  them, including the trojan-source / zero-width / final-newline /
+  `hygiene/no-tracked-artifacts`) — pull in 34 rules between
+  them (`oss-baseline=15` + `go=8` + `ci/github-actions=3` +
+  `hygiene/no-tracked-artifacts=11` = 37 raw, deduplicated to 34),
+  including the trojan-source / zero-width / final-newline /
   trailing-whitespace floor and the workflow-permissions / SHA-pin /
   name hardening
 - **2 license-header rules** (`helm-go-license-header`,
@@ -245,23 +251,25 @@ from earlier case studies:
 
 | Need | What it would check | What alint needs |
 |---|---|---|
-| **`.golangci.yml` `depguard` / `gomodguard` import bans** | "no file under `pkg/**/*.go` may import `github.com/hashicorp/go-multierror` or `github.com/pkg/errors`" + "no file may import `github.com/evanphx/json-patch` (use v5)" | The `import_gate` rule kind already on the v0.10 high-priority list (kubernetes + airflow as prior sources). helm adds a third source — saturating the demand signal. |
-| **`gen-test-golden` freshness** | "running `make gen-test-golden` would not change the working tree" | The `command_idempotent` rule kind already on the v0.10 candidate list (ruff + prettier). helm adds a third source. |
-| **`.github/env` ↔ `go.mod` go-version cross-reference** | "the `GOLANG_VERSION` value in `.github/env` is the same `<major>.<minor>` as the `go <version>` directive in `go.mod`" | The `cross_file_value_equals` rule kind already on the v0.10 high-priority list (airflow + tokio + clap + uv + react + pnpm). helm adds a seventh source. |
-| **YAML array set-membership** | "`$.formatters.enable` contains `gofmt` AND `goimports`" — without the per-element `equals:` semantics that flag the *other* elements | A `*_path_contains` set-membership shorthand — narrower than `*_path_equals` (which is "every match equals X") and `*_path_matches` (which is regex on string-typed values only). Workaround used in this config: `file_content_matches` against the YAML text. |
+| **`.golangci.yml` `depguard` / `gomodguard` import bans** | "no file under `pkg/**/*.go` may import `github.com/hashicorp/go-multierror` or `github.com/pkg/errors`" + "no file may import `github.com/evanphx/json-patch` (use v5)" | The `import_gate` rule kind — now `v0.10 ship-target` per launch-evidence.md (4 sources: k8s, airflow, golang/go, pytorch). helm surfaces the same depguard shape but is not yet a named source in the launch-evidence.md table. |
+| **`gen-test-golden` freshness** | "running `make gen-test-golden` would not change the working tree" | The `command_idempotent` rule kind — `v0.10 design candidate` per launch-evidence.md (2 sources: ruff + prettier). helm is the 3rd surface in the wild. |
+| **`.github/env` ↔ `go.mod` go-version cross-reference** | "the `GOLANG_VERSION` value in `.github/env` is the same `<major>.<minor>` as the `go <version>` directive in `go.mod`" | The `cross_file_value_equals` rule kind — now `v0.10 ship-target` per launch-evidence.md (10 sources). helm increments the demand signal. |
+| **YAML array set-membership** | "`$.formatters.enable` contains `gofmt` AND `goimports`" — without the per-element `equals:` semantics that flag the *other* elements | A `*_path_contains` set-membership shorthand — narrower than `*_path_equals` (which is "every match equals X") and `*_path_matches` (which is regex on string-typed values only). Now `v0.10 design candidate` per launch-evidence.md (3 sources: helm, deno, bazel). Workaround used in this config: `file_content_matches` against the YAML text. |
 
 The first three are duplicates of needs already filed from earlier
 case studies — helm increments their demand signal but doesn't
 introduce new rule-kind candidates.
 
-The fourth — `*_path_contains` for set-membership — IS new.
-**Surfaced first by helm.** Pattern: pinning the *presence* of a
-specific value in an array without making per-element equality
-assertions about the rest. Common in YAML config files
-(`enabled-linters`, `allow-list`, `tags`, etc.). The
-`file_content_matches` workaround is robust but loses
-JSON/YAML-aware key resolution; a `*_path_contains` primitive
-would express the intent cleanly.
+The fourth — `*_path_contains` for set-membership — was new at
+helm's original-write time. **Surfaced first by helm**, since
+saturated to 3 sources (helm + deno + bazel per
+launch-evidence.md) and now `v0.10 design candidate`. Pattern:
+pinning the *presence* of a specific value in an array without
+making per-element equality assertions about the rest. Common in
+YAML config files (`enabled-linters`, `allow-list`, `tags`,
+etc.). The `file_content_matches` workaround is robust but
+loses JSON/YAML-aware key resolution; the `*_path_contains`
+primitive would express the intent cleanly.
 
 ---
 
@@ -372,21 +380,20 @@ anchors the centre — the population alint actually needs to win.
 Followup feature work surfaced (de-duplicated against earlier
 case-study gap lists):
 
-- **`*_path_contains` set-membership shorthand** (NEW from helm —
-  pinning the presence of a value in a YAML/JSON/TOML array
-  without per-element equality assertions on the rest). Cleanest
-  abstraction over "yaml_path_equals against an array element"
-  pitfall this case study hit firsthand.
-- **`import_gate` rule kind** (already on v0.10 high-priority list
-  — helm is the third Go-monorepo source after kubernetes +
-  airflow; saturates the demand signal)
-- **`cross_file_value_equals` rule kind** (already the
-  strongest-demand v0.10 candidate — helm increments to seventh
-  source)
-- **`command_idempotent` mode** (already on v0.10 candidate list —
-  helm increments to third source after ruff + prettier)
+- **`*_path_contains` set-membership shorthand** — `v0.10
+  design candidate` per launch-evidence.md (3 sources: helm,
+  deno, bazel). Cleanest abstraction over the "yaml_path_equals
+  against an array element" pitfall this case study hit
+  firsthand.
+- **`import_gate` rule kind** — `v0.10 ship-target` (4 sources
+  per launch-evidence.md; saturated).
+- **`cross_file_value_equals` rule kind** — `v0.10 ship-target`
+  (10 sources; strongest demand).
+- **`command_idempotent` mode** — `v0.10 design candidate` (2
+  sources in launch-evidence.md table; helm is the 3rd surface
+  in the wild).
 
-No NEW schema/language pitfalls hit beyond the existing 16
+No NEW schema/language pitfalls hit beyond the existing 21
 catalogued in `docs/development/CONFIG-AUTHORING.md`. Two pitfalls
 were rediscovered firsthand during config authoring:
 
@@ -394,14 +401,62 @@ were rediscovered firsthand during config authoring:
    `yaml_path_equals` against `$.formatters.enable[*]` returns one
    match per array element, and EVERY match must equal the target.
    For `[gofmt, goimports]`, asserting `equals: gofmt` flags the
-   `goimports` element as a violation. This is **not** in the
-   16-pitfall catalogue — it's adjacent to pitfall #16 (which
-   covers bool/number/null fields under `*_path_matches`) but the
-   array-element-each-must-equal failure mode is a distinct shape.
-   Worth adding as **pitfall #17** in the next CONFIG-AUTHORING
-   sweep, with the workaround captured.
+   `goimports` element as a violation. **Already documented as
+   pitfall #17 in the catalogue** (the P2a Wave 3 promotion);
+   helm rediscovered it firsthand. Workaround captured in the
+   pitfall entry.
 2. **License-header regex tolerance for multiple comment styles** —
    the rediscovery confirms pitfall #13 (file-level vs line-level
    anchoring) — `(?s)` + non-greedy `.{0,N}?` between anchor
    strings is the canonical pattern when multiple comment shapes
    coexist. Already documented; no schema gap.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
+- `validate-config`: **58 rules loaded cleanly** (24 helm-
+  specific + 34 from 4 bundled rulesets — `oss-baseline=15`,
+  `go=8`, `ci/github-actions=3`, `hygiene/no-tracked-artifacts=11`,
+  with rule-id deduplication across overlapping rulesets).
+- Live-tree recheck: **pending** — `/tmp/helm-helm/` not present
+  in this validation env.
+- Pitfalls fixed in v0.9.17 that touch this config: none
+  (helm config doesn't surface pitfalls #18/#19).
+- Open gaps (rule-kind candidates referenced but not yet
+  shipped):
+  - `*_path_contains` (v0.10 design candidate, 3 sources;
+    helm is the first source).
+  - `import_gate` (v0.10 ship-target, 4 sources).
+  - `cross_file_value_equals` (v0.10 ship-target, 10 sources).
+  - `command_idempotent` (v0.10 design candidate; helm is the
+    3rd surface in the wild).
+
+## Future analysis
+
+Three concrete unanalyzed angles for a future revalidation pass:
+
+1. **Helm-chart structural invariants for `pkg/chart/testdata/`.**
+   helm/helm itself ships zero deployable charts (it's the helm
+   CLI source, not a chart consumer), so the `manifests/charts/`
+   polyglot pattern doesn't apply. But helm/helm DOES ship
+   reference test chart trees under `pkg/chart/testdata/`
+   (~80 fixture charts). A `for_each_dir` over those plus
+   `helm-chart-yaml-shape` (apiVersion/version/appVersion
+   present + valid semver) would gate the test-fixture
+   discipline that `helm lint` currently doesn't cover (the
+   fixtures are deliberate corner cases, some intentionally
+   malformed; the rule would carry a `scope_filter` excluding
+   the malformed fixtures).
+2. **Add `agent-context@v1` overlay (5 rules).** helm ships
+   `AGENTS.md` (line 30, 165) but doesn't enforce its shape.
+   The `agent-context@v1` ruleset gates AGENTS.md presence +
+   tour-of-codebase content + AI-context-window-friendly
+   structure declaratively.
+3. **`alint suggest` against the live tree.** Pending
+   `/tmp/helm-helm/`. The repo is small enough (~530 .go
+   files) that the suggester would terminate quickly; likely
+   surface candidates: per-`pkg/*/` test-coverage thresholds,
+   `cmd/helm/` subcommand-package conventions, `internal/`
+   visibility discipline.

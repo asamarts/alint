@@ -50,8 +50,12 @@ discipline.
 - **17 of 27 (~63 %) map to existing alint rules** — bundled
   `oss-baseline + node + monorepo + monorepo/pnpm-workspace +
   ci/github-actions + hygiene/no-tracked-artifacts + hygiene/lockfiles
-  + tooling/editorconfig + agent-context` cover ~40 rules between
-  them, plus the 50 angular-specific rules in [`/.alint.yml`](.alint.yml)
+  + tooling/editorconfig + agent-context` cover ~58 rules between
+  them (oss-baseline=15, node=9, monorepo=4, pnpm-workspace=4,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11,
+  hygiene/lockfiles=7, tooling/editorconfig=3, agent-context=5,
+  with overlap deduped at load), plus the 73 angular-specific rules in
+  [`/.alint.yml`](.alint.yml)
   (per-package conventions, license-header invariants, ng-dev
   config integrity, Bazel workspace shape, husky hook integrity,
   goldens directory structure, etc.).
@@ -67,8 +71,10 @@ discipline.
   + git mutation), `pnpm benchmarks` (perf orchestration), and the
   `pnpm ng-dev caretaker` GitHub-API-based queue browser.
 
-The configured 50-rule + 9-bundled-ruleset [`/.alint.yml`](.alint.yml)
-covers every structural assertion the existing tooling makes about
+The configured 73-rule + 9-bundled-ruleset
+[`/.alint.yml`](.alint.yml) (131 rules total post-extends resolution
+per `alint validate-config`) covers every structural assertion the
+existing tooling makes about
 repo *state*, plus several that angular doesn't explicitly enforce
 today (per-package PACKAGE.md presence, per-package public-API
 golden parity, source-side license-header consistency).
@@ -255,8 +261,9 @@ ngbot verify + ai skills validate + check-tooling-setup).
 [`/.alint.yml`](.alint.yml) in this directory. Adopts the bundled
 `oss-baseline + node + monorepo + monorepo/pnpm-workspace +
 ci/github-actions + hygiene/no-tracked-artifacts + hygiene/lockfiles
-+ tooling/editorconfig + agent-context` overlays, then layers ~50
-angular-specific rules on top.
++ tooling/editorconfig + agent-context` overlays, then layers 73
+angular-specific rules on top — 131 rules total after extends
+resolution.
 
 The headline rules:
 
@@ -350,15 +357,17 @@ direction (package → golden); the inverse direction (every golden
 traces back to a package) needs `pair_inverse` (ruff's
 snapshot-freshness candidate).
 
-**Strong v0.11+ signal** — angular is the **3rd-of-3 demand-saturation
-data point** for `cross_language_implementation_complete` (after
-arrow's `format/Schema.fbs` ↔ per-language test fixtures and TF's
-1,185 textproto goldens locking the public Python surface). All
-three repos express the same shape: a manifest-style "registry of
-things that should exist" file/dir tree that needs to stay in sync
-with another manifest-style file/dir tree, with explicit
-allowlisting for known exceptions. **Promotes from "v0.11+
-flagship" to "v0.11+ ship-target".**
+**Strong v0.11+ signal** — angular is one of **5 saturated demand
+sources** for `cross_language_implementation_complete` (alongside
+arrow's `format/Schema.fbs` ↔ per-language test fixtures, TF's
+1,185 textproto goldens locking the public Python surface,
+protobuf's 10 in-tree language bindings, and flutter's 6 native-OS
+embedders). All five repos express the same shape: a manifest-style
+"registry of things that should exist" file/dir tree that needs to
+stay in sync with another manifest-style file/dir tree, with
+explicit allowlisting for known exceptions. Per
+`docs/development/launch-evidence.md`, the candidate is now
+**"v0.11+ ship-target"** with 5 sources.
 
 ### 2. `cross_file_value_equals` for the commit-scope ↔ package-tree drift
 
@@ -493,10 +502,11 @@ the launch:
 - The `goldens/public-api/<pkg>/` discipline is **THE canonical
   example** of the v0.11+
   `cross_language_implementation_complete` shape applied within a
-  single language. angular adds the **3rd-of-3 demand-saturation
-  data point** alongside arrow's per-language schema parity and
-  TF's textproto goldens — which **promotes the candidate from
-  "v0.11+ flagship" to "v0.11+ ship-target"**.
+  single language. angular is one of **5 saturated demand sources**
+  alongside arrow's per-language schema parity, TF's textproto
+  goldens, protobuf's 10 in-tree language bindings, and flutter's
+  6 native-OS embedders — confirming the candidate is now
+  **"v0.11+ ship-target"** per `launch-evidence.md`.
 - The `.ng-dev/` in-house CLI is a fascinating contrast to the
   more-typical husky+lint-staged+changesets stack — angular built
   its own toolchain (`@angular/ng-dev` package) and the structural
@@ -523,9 +533,10 @@ Followup feature work surfaced (consolidated):
 
 1. **`cross_language_implementation_complete` rule kind** — covers
    the `packages/<name>/` ↔ `goldens/public-api/<name>/index.api.md`
-   parity here, plus arrow's per-language schema parity and TF's
-   textproto goldens. Demand: **3 sources confirmed** —
-   **promotes from "v0.11+ flagship" to "v0.11+ ship-target"**.
+   parity here, plus arrow's per-language schema parity, TF's
+   textproto goldens, protobuf's 10 in-tree bindings, and flutter's
+   6 native-OS embedders. Demand: **5 sources confirmed** —
+   **v0.11+ ship-target** per `launch-evidence.md`.
 2. **`cross_file_value_equals` rule kind** — covers the
    `.ng-dev/commit-message.mjs` `scopes:` ↔ `packages/<name>/` drift
    here, plus the airflow/tokio/clap/uv/react/pnpm/nodejs/pytorch
@@ -539,10 +550,10 @@ Followup feature work surfaced (consolidated):
 
 ## Pitfalls hit while writing this config (against CONFIG-AUTHORING.md)
 
-While writing this config, **2 of the 19 documented pitfalls
-fired** during iteration; **no new pitfalls surfaced beyond the
-existing 19** (saturation continues — Wave 1 of P2b surfaced #18 +
-#19, Wave 2 first repo here adds zero new ones).
+While writing this config, **2 of the (then) 19 documented pitfalls
+fired** during iteration; **no new pitfalls surfaced** at the time
+(the catalogue subsequently grew to 21 in P2b Wave 2 — istio added
+#20 + #21; this case study did not surface either).
 
 1. **Pitfall #16** — `*_path_equals` can't parse JSONC files with
    leading block-comments. The first-draft
@@ -580,14 +591,13 @@ existing 19** (saturation continues — Wave 1 of P2b surfaced #18 +
 ## Notes for the parent agent
 
 - Audit (`cargo test -p alint-e2e --test coverage_audit_examples_parse`)
-  passes with this config in place (verified by temporarily
-  stashing unrelated WIP in `crates/alint-rules/src/file_exists.rs`
-  that depends on an in-progress `RuleSpec.respect_gitignore` field
-  in `crates/alint-core/src/config.rs`). The release binary used
-  for parse-validation was built before the WIP changes, so it
-  works directly; the audit's compile failure is pre-existing local
-  WIP, not introduced by this config.
-- No new schema/language pitfalls beyond the documented 19 — the
+  passes with this config in place. (The historical WIP note about
+  an in-progress `RuleSpec.respect_gitignore` field is now resolved
+  — that knob shipped in v0.9.17 as the per-rule
+  `respect_gitignore: false` option, the direct fix for pitfall #18.)
+- No new schema/language pitfalls beyond the documented (then) 19;
+  the catalogue subsequently grew to 21 in P2b Wave 2 (istio's
+  `cross_file_value_equals` extractor + multi-doc YAML cases). The
   closest near-miss is the `dir_contains` field-name shape noted
   above, which the schema-error was clear enough to self-correct
   on first attempt.
@@ -600,3 +610,54 @@ existing 19** (saturation continues — Wave 1 of P2b surfaced #18 +
   No silent failures.
 - Run the config locally:
   `alint check --config examples/angular-angular/.alint.yml /path/to/angular/`
+
+---
+
+## Future analysis
+
+Surfaced during the 2026-05-07 revalidation pass; not yet executed
+against a live tree:
+
+1. **`pair_inverse` against goldens/ once the rule kind ships** —
+   the inverse direction (every `goldens/public-api/<name>/index.api.md`
+   traces back to an existing `packages/<name>/`) is the headline
+   gap this case study cites; once `pair_inverse` lands (v0.10
+   design candidate, 2 sources confirmed: angular + ruff), this
+   config should restate it as a direct rule rather than the
+   `for_each_dir` workaround.
+2. **`compliance/reuse@v1` (3-rule bundled ruleset) trial** — angular
+   is MIT-licensed with a canonical `@license` block on every TS
+   source file; the REUSE-spec form (SPDX header + per-file
+   metadata) would let this case study compare its hand-rolled
+   `angular-source-license-header` rule against the bundled
+   alternative. Surface: 1k+ TS sources under `packages/*/`.
+3. **`agent-hygiene@v1` (6-rule bundled ruleset) overlay** — the
+   adopted `agent-context@v1` ruleset covers context.md presence
+   but the related `agent-hygiene` ruleset (canonical AGENTS.md,
+   no agent self-edits, etc.) hasn't been trialed here. angular's
+   `.ng-dev/` directory + `tools/tslint/` are exactly the kind of
+   in-house tooling stack that benefits from explicit agent
+   guardrails.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version validated: 0.9.17 (built 2026-05-07)
+- `validate-config` rule count: **131 rules loaded** (matches the
+  73-in-config + 9 bundled-overlay shape after extends resolution)
+- Live-tree recheck: **pending — `/tmp/angular/` not present** at
+  revalidation time; the README's 122-violation claim from the
+  original capture (2026-05-06) has not been re-confirmed against
+  a current sparse-clone.
+- Pitfalls noted in this README that are now fixed in the engine:
+  none directly cited — the README's only pitfall reference is #16
+  (JSONC + `*_path_*`), which remains documented-with-workaround.
+  The historical WIP note about an in-progress
+  `RuleSpec.respect_gitignore` field is now resolved (shipped as
+  pitfall #18's direct fix in v0.9.17).
+- Open gaps after this revalidation: rule-count drift in the prose
+  (50 → 73 in-config rules; the README header was written before
+  several iteration passes added per-package-discipline rules) was
+  the principal stale claim. The `cross_language_implementation_complete`
+  saturation count (3 → 5 sources) was also corrected.

@@ -70,8 +70,11 @@ of truth** (`packages/shared/ReactVersion.js`) that propagates across
 3 per-package `version` fields — both patterns extant in production
 JS monorepos and both currently enforced by hand-rolled node scripts
 that alint can replace structurally TODAY (codes.json shape) and
-that surface the same `cross_file_value_equals` + `registry_append_only`
-v0.10+ rule kinds first identified in the airflow / typescript /
+that surface the same `cross_file_value_equals` (now `v0.10
+ship-target`, 10 sources per
+`docs/development/launch-evidence.md`) + `registry_append_only`
+(still single-source, react-only — `v0.10 design candidate`)
+rule kinds first identified in the airflow / typescript /
 clap case studies. **The position: "alint replaces the structural
 floor under react's well-evolved tooling, surfacing real drift
 (1 wrong `repository.directory`, 19 non-canonical `bugs` URLs,
@@ -213,7 +216,12 @@ Plus the bundled rules surface:
 [`/.alint.yml`](.alint.yml) in this directory. Adopts the bundled
 `oss-baseline + node + monorepo + monorepo/yarn-workspace + ci/github-actions
 + hygiene/no-tracked-artifacts + tooling/editorconfig + agent-context`
-overlays, then layers ~36 react-specific rules on top.
+overlays, then layers ~33 react-specific rules on top. **87 rules
+total** as loaded by the v0.9.17 binary (54 from the 8 bundled
+rulesets — `oss-baseline=15`, `node=9`, `monorepo=4`,
+`monorepo/yarn-workspace=4`, `ci/github-actions=3`,
+`hygiene/no-tracked-artifacts=11`, `tooling/editorconfig=3`,
+`agent-context=5` — plus 33 react-specific).
 
 The headline rules:
 
@@ -270,8 +278,10 @@ The headline rules:
 ## What needs new alint primitives
 
 Two patterns specific to react that don't fit any current rule kind
-— both already on the v0.10+ candidate list, with react adding
-demand-saturation evidence:
+— `cross_file_value_equals` is now `v0.10 ship-target` (10 sources
+per `docs/development/launch-evidence.md`); `registry_append_only`
+is still single-source (react-only) and sits at `v0.10 design
+candidate` until a second source surfaces:
 
 ### 1. `cross_file_value_equals` — version-check.js shape
 
@@ -299,9 +309,12 @@ HEAD~1's blob contents), which is in scope for alint's existing
 git-aware rule kinds (`git_blame_age`, `git_no_denied_paths`,
 `git_commit_message`).
 
-NEW pattern not previously surfaced — first appearance in P2a.
+NEW pattern not previously surfaced — first appearance in P2a;
+still single-source as of v0.9.17.
 Generalises to: i18n string registries, feature-flag registries,
-API endpoint maps, error-code maps. Strong v0.10+ candidate.
+API endpoint maps, error-code maps. Currently a `v0.10 design
+candidate`; promote to `v0.10 ship-target` once a second source
+surfaces.
 
 ### Out of alint's scope (use the existing tool)
 
@@ -359,7 +372,8 @@ point** for the launch:
   surfaced here are both load-bearing for the v0.10+ rule-kind
   pipeline. react adds a **second-language data point** for
   `cross_file_value_equals` (after the Rust workspaces in airflow,
-  tokio, clap, uv) and a **first-of-kind data point** for
+  tokio, clap, uv) — now at 10 sources / `v0.10 ship-target`. react
+  remains the **first-of-kind (and still only) data point** for
   `registry_append_only` (no other case study has surfaced this).
 - The contrast with kubernetes (50 hand-rolled scripts → alint
   replaces 17) and turbo (zero hand-rolled scripts → alint adds 22
@@ -390,7 +404,7 @@ Followup feature work surfaced (consolidated):
    subsumes this.
 
 No new schema or language pitfalls hit while writing this config.
-The 15 documented in `docs/development/CONFIG-AUTHORING.md` cover
+The 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
 everything that came up. ONE process near-miss surfaced: the JSON
 output's "passing per-file rules omit `RuleResult` entirely"
 behaviour caused initial confusion (16 of 36 react-* rules in the
@@ -404,3 +418,45 @@ note under "Parse-validation is necessary but not sufficient"
 explaining that `--format json` filters out passing per-file rules,
 and to use `alint list --config <path>` (which lists every rule
 the engine WOULD run) for the authoritative view.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
+- `validate-config`: **87 rules loaded cleanly** (54 from 8
+  bundled rulesets + 33 react-specific).
+- Live-tree recheck: **pending** — `/tmp/facebook-react/` not
+  present in this validation env.
+- Pitfalls fixed in v0.9.17 that touch this config: none
+  (react config doesn't use `respect_gitignore` or
+  `literal_is_nested` patterns).
+- Open gaps with active workarounds: `cross_file_value_equals`
+  (v0.10 ship-target — react's `version-check.js` shape;
+  current workaround: `command:` shellout); `registry_append_only`
+  (v0.10 design candidate, react sole source — current
+  workaround: human review of `git diff codes.json`).
+
+## Future analysis
+
+Three concrete unanalyzed angles for a future revalidation pass:
+
+1. **Add the `agent-hygiene@v1` overlay (6 rules).** react ships
+   `dangerfile.js` and 5 in-tree custom eslint rules under
+   `scripts/eslint-rules/`. The agent-hygiene ruleset would gate
+   AI-generated contribution patterns (no rolling commits to
+   tracked artefacts, no tracked credentials, no agent-context
+   leakage) — natural sixth bundled overlay alongside the
+   existing `agent-context@v1`.
+2. **Adopt `compliance/reuse@v1` (3 rules) for the per-package
+   LICENSE story.** `react-published-package-has-source-license`
+   is a per-rule react construct; the bundled `compliance/reuse@v1`
+   overlay (REUSE-spec compliance: `LICENSES/` dir + per-file
+   SPDX headers + `.reuse/dep5`) would express the same intent
+   declaratively across all 22 published packages AND the 17
+   internal packages without per-rule duplication.
+3. **`alint suggest` against the live tree.** Pending
+   `/tmp/facebook-react/`. Would surface candidate rules from
+   the ~140k-file compiler subtree (heavy on `.expect.md` test
+   fixtures that have repeating shapes the suggester would
+   generalise).

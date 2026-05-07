@@ -122,7 +122,7 @@ Kubernetes case study.
 | Convention from `package.json` reviews | The `name` field's scope follows project convention (private first-party = `@turbo/...`, public = `turbo` / `eslint-config-turbo` / `create-turbo` / `turbo-ignore`) | A `json_path_matches_named_capture` rule kind that lets you assert one field matches a regex *and* captures groups can be referenced from the rule message. Workaround today: a `json_path_matches` per allow-list pattern. |
 | `examples/check-examples.ts` | Every example successfully runs `turbo run <task>` for every non-persistent task in its `turbo.json`, then re-runs and gets a cache hit | Out of alint's scope (live execution). The TypeScript runner is the right tool. |
 | Convention via `clippy.toml` | Forbid `std::collections::hash_map::DefaultHasher` and `VecDeque::new` workspace-wide | Already covered by clippy itself; `command` rule shells out. The interesting alint generalisation is `forbidden_substrings` — "no `*.rs` file in `crates/**` may contain `DefaultHasher`" — but in this case clippy is the right level (it understands paths / aliases / re-exports). Don't try to replicate. |
-| `turbo.json` schema check | `turbo.json` validates against `https://turborepo.dev/schema.json` | A `json_schema_passes` rule kind. We have `json_path_matches` for spot-checks, but no full-schema validation. Strong candidate for v0.10+ given how many `*.json` config files (turbo.json, tsconfig.json, .oxlintrc.json) ship with published JSON Schemas. |
+| `turbo.json` schema check | `turbo.json` validates against `https://turborepo.dev/schema.json` | A `json_schema_passes` rule kind. We have `json_path_matches` for spot-checks, but no full-schema validation. v0.10+ candidate — turbo.json, tsconfig.json, .oxlintrc.json all ship with published JSON Schemas, so the demand is broad even if the per-repo confirmations remain modest. |
 | `.github/workflows/test-js-packages.yml` / `turborepo-test.yml` | "Release PRs may only touch version.txt / package.json / Cargo.toml / Cargo.lock / CHANGELOG / pnpm-lock.yaml" — enforced by `gh api repos/.../pulls/N/files` against an allow-list regex | Out of repo-state scope. This is a CI-time diff against the PR's *file list*, not the repo at HEAD. Could be a sibling tool (`alint pr-diff-check`?) but doesn't fit the `alint check` model. |
 | `.github/workflows/lint-pr-title.yml` | PR title follows Conventional Commits with subject starting uppercase | Same — a property of the PR, not the repo. |
 
@@ -181,9 +181,10 @@ sequential `pre-push` chain today).
 
 The remaining items:
 
-- 3 need new alint primitives (above) — file as v0.10+ feature requests:
-  `dir_name_matches_field`, `json_schema_passes`, plus a sibling
-  `pr-diff-check` mode for the release-PR content guard.
+- 3 need new alint primitives (above) — `dir_name_matches_field`
+  and `json_schema_passes` are v0.10+ candidates; the `pr-diff-check`
+  sibling mode is a separate-binary candidate that doesn't fit the
+  `alint check` model.
 - 5 are out of alint's scope (above) — keep the existing scripts /
   TypeScript runner.
 - The Conventional-Commit PR-title check stays in `lint-pr-title.yml`
@@ -243,3 +244,77 @@ Followup feature work surfaced (in priority order):
 3. **`alint pr-diff-check` sibling mode** — operate on a PR's changed-file
    list rather than the repo at HEAD; covers the release-PR content-guard
    pattern (Turborepo, plus most monorepos with auto-release bots).
+
+---
+
+## Future analysis
+
+Suggestions for the next revalidation pass — turbo is the canonical
+"Rust monorepo orchestrator with zero hand-rolled verify scripts"
+demonstration, and the v0.9.6+ surface plus v0.9.17 polish opens
+several refactor opportunities:
+
+- **What `alint suggest` would propose for the 22 gates that don't
+  exist in turbo's tooling.** A live `alint suggest` against a fresh
+  turbo clone would surface most of the bundled rulesets the config
+  already extends (oss-baseline, rust, node, monorepo,
+  monorepo/cargo-workspace, monorepo/pnpm-workspace,
+  ci/github-actions, hygiene/no-tracked-artifacts,
+  tooling/editorconfig — currently 9 in the extends:) plus probably
+  `agent-hygiene@v1` (medium — turbo's `crates/turborepo-*` tree
+  has a non-trivial number of `// TODO(scope-name)` markers worth a
+  blame-driven scan) and `compliance/reuse@v1` if Vercel adopts
+  REUSE/SPDX headers (currently they don't; would be a deliberate
+  override). The suggest-pass run is a quick (~2-minute) confirmation
+  that the case study's 22-gate count is still complete.
+- **`scope_filter` for the `crates/` vs `packages/` vs `examples/`
+  triad.** Today the per-tree rules glob each subtree
+  individually. v0.9.17's `scope_filter` evolution lets each subtree
+  be a named scope (`rust-crates`, `js-packages`, `examples-tree`)
+  declared once at the top and referenced by name in each rule —
+  cuts ~20 lines and makes "which subtree am I checking" one source
+  of truth, particularly helpful for the per-example
+  `meta.json`/`turbo.json`/`.gitignore` triad rules.
+- **The `dir_name_matches_field` v0.10+ candidate revisited.** The
+  case study notes 7 crates whose directory name doesn't match the
+  published crate name (intentional namespacing drift). When
+  `dir_name_matches_field` lands, turbo becomes the canonical
+  "expected drift, allowlist 7" demonstration — the v0.10+ design
+  needs a `paths.exclude:` or `allow_drift:` knob to make
+  intentional drift expressible without disabling the rule
+  workspace-wide. File this as a v0.10+ design note.
+
+---
+
+## Validation status (2026-05-07)
+
+- **alint version:** 0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
+- **`validate-config`:** ✓ 88 rules loaded from `.alint.yml`.
+- **README rule-count claim:** "~29 structural checks" /
+  "22 rules — direct replacements + 7 `command`-rule shell-outs"
+  (Summary + table footer) match the actual 28 turbo-specific
+  rules (counted via `grep -c '^  - id:'`) within rounding. The
+  88-rule `validate-config` total = 28 turbo-specific + 60
+  inherited from the 9 bundled rulesets (oss-baseline=15 +
+  rust=11 + node=9 + monorepo=4 + monorepo/cargo-workspace=4 +
+  monorepo/pnpm-workspace=4 + ci/github-actions=3 +
+  hygiene/no-tracked-artifacts=11 + tooling/editorconfig=3 = 64
+  declared; the 4-rule slack vs 60 reflects bundled-overlap dedup
+  the engine handles transparently).
+- **Pitfall catalogue:** v0.9.17 ships fixes for #18 + #19. Neither
+  surfaces here. Pitfall #16 (cross-referenced from the next.js case
+  study — JSONPath bool/number regex coercion) was originally a
+  latent risk in `turbo-example-meta-declares-maintenance`; the
+  config already uses `file_content_matches` against the JSON text
+  (with an in-line comment citing pitfall #16) — fix applied during
+  the original P2b pass. Catalogue is now at 21 pitfalls.
+- **Rule-kind candidate status:** `dir_name_matches_field` and
+  `json_schema_passes` remain v0.10+ candidates (this case study is
+  the headline demand-driver for both, but the per-repo
+  confirmation count is modest). The `alint pr-diff-check` sibling
+  mode is unchanged.
+- **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
+  oss-baseline=15, rust=11, node=9, monorepo=4,
+  monorepo/cargo-workspace=4, monorepo/pnpm-workspace=4,
+  ci/github-actions=3, hygiene/no-tracked-artifacts=11,
+  tooling/editorconfig=3.

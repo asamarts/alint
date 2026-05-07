@@ -118,7 +118,9 @@ inventory" below).
 - **23 of 38 (61 %) map to existing alint rules** — the
   bundled `oss-baseline + compliance/apache-2 + java + python +
   ci/github-actions + hygiene/no-tracked-artifacts` ship
-  roughly **49 rules** between them, plus the **61
+  roughly **52 rules** between them (oss-baseline=15,
+  compliance/apache-2=3, java=11, python=9, ci/github-actions=3,
+  hygiene/no-tracked-artifacts=11), plus the **61
   spark-specific rules** in [`/.alint.yml`](.alint.yml)
   (Maven multi-module integrity, per-language-module
   conventions, Apache governance, two-tier license discipline,
@@ -156,10 +158,11 @@ discipline / `.asf.yaml` / per-language lint-script
 orchestration / Maven or per-language module registry as the
 source of truth for `<modules>`/test-selection) — promoting
 the proposed **`apache/governance@v1` bundled ruleset** from
-"v0.10+ idea" to **"v0.10 ship-target"**. The same
-~12-rule bundle would land in every Apache TLP `extends:` list,
-consolidating today's 3 case-study restatements (arrow + spark
-+ airflow) into one canonical declaration.
+"v0.10+ idea" to **"v0.10 ship-target"** (now confirmed in
+`launch-evidence.md`). The same ~12-rule bundle would land in
+every Apache TLP `extends:` list, consolidating today's 3
+case-study restatements (arrow + spark + airflow) into one
+canonical declaration.
 
 ---
 
@@ -176,8 +179,8 @@ consolidating today's 3 case-study restatements (arrow + spark
 | `.gitattributes` | git | Per-extension EOL policy (LF for `*.java/*.scala/*.py/*.R/*.xml`, CRLF for `*.bat/*.cmd`) | `file_exists` |
 | `.pre-commit-config.yaml` | pre-commit | 2 hooks: `format-python` + `ruff` (both LOCAL, calling into `dev/reformat-python` + `dev/lint-python --ruff`) | `file_exists` (covered by `oss-baseline`); the actual lint shell-out is via `dev/lint-python` rather than via pre-commit |
 | `LICENSE` (267 lines) + `NOTICE` (40 lines) | Apache | Apache 2.0 source license + project NOTICE | bundled `compliance/apache-2@v1` covers both |
-| `LICENSE-binary` (548 lines) + `NOTICE-binary` (1171 lines) | Apache | The two-tier binary-distribution license discipline — required by Apache release policy for any binary tarball | 2× `file_exists` (NEW — not in any bundled ruleset; v0.10+ candidate for `apache/governance@v1`) |
-| `licenses/` + `licenses-binary/` | Apache | Per-library license files referenced by source LICENSE (in-tree vendored) and LICENSE-binary (bundled deps) | 2× `dir_exists` (NEW — same v0.10+ candidate) |
+| `LICENSE-binary` (548 lines) + `NOTICE-binary` (1171 lines) | Apache | The two-tier binary-distribution license discipline — required by Apache release policy for any binary tarball | 2× `file_exists` (NEW — not in any bundled ruleset; **v0.10 ship-target** for `apache/governance@v1`) |
+| `licenses/` + `licenses-binary/` | Apache | Per-library license files referenced by source LICENSE (in-tree vendored) and LICENSE-binary (bundled deps) | 2× `dir_exists` (NEW — same **v0.10 ship-target**) |
 | `.sbtopts` | SBT | SBT JVM options pinning | (info-level — no alint rule) |
 | `.mvn/jvm.config` + `.mvn/maven.config` | Maven | JVM options + Maven CLI defaults pinning | (info-level — no alint rule) |
 
@@ -186,7 +189,7 @@ consolidating today's 3 case-study restatements (arrow + spark
 | Surface | What it does | alint disposition |
 |---|---|---|
 | `dev/check-license` | Downloads `apache-rat-${RAT_VERSION}.jar` (RAT_VERSION=0.16.1) from Maven Central; runs RAT against an archive of HEAD; greps the report for `??` (unapproved file markers); reads `dev/.rat-excludes` for the allowlist. | `file_exists` + `command:` wrapping the script |
-| `dev/.rat-excludes` (145 patterns) | Path patterns RAT must skip (binary fixtures, vendored code, generated files, `*.txt`, `*.json`, `*.data`, license files themselves). | `file_exists` + `file_min_lines: 10`. The deeper "every pattern resolves to ≥1 file" check needs the v0.10+ `registry_paths_resolve` rule kind. **6th demand source** for that primitive (after rust-lang/rust + clap + cpython + arrow + next.js). |
+| `dev/.rat-excludes` (145 patterns) | Path patterns RAT must skip (binary fixtures, vendored code, generated files, `*.txt`, `*.json`, `*.data`, license files themselves). | `file_exists` + `file_min_lines: 10`. The deeper "every pattern resolves to ≥1 file" check needs the **v0.10 ship-target** `registry_paths_resolve` rule kind. **One of 8 demand sources** per `launch-evidence.md` (rust + clap + cpython×2 + next.js + arrow + pytorch + nodejs/node + NixOS×3). |
 | `dev/create-release/{do-release,release-build,release-tag,release-util,generate-contributors,generate-llms-txt,announce.tmpl,vote.tmpl,do-release-docker}.sh` | The Apache release dance: source tarball, binary submit/upload/verify, vote email, post-release cleanup. | `dir_exists` (warning); the per-script discipline is operational + out of alint scope. |
 | `dev/merge_spark_pr.py` | Canonical PR-merge script (squashes commits, formats merge message, links JIRA `SPARK-NNNNN` issue if present). | `file_exists` (info) |
 | `dev/lint-scala` | Wraps `dev/scalastyle` + `mvn scalafmt:format -Dscalafmt.validateOnly=true -pl sql/api -pl sql/connect/...` | `file_exists` + `command:` wrapping the script |
@@ -199,7 +202,7 @@ consolidating today's 3 case-study restatements (arrow + spark
 | `dev/.scalafmt.conf` | scalafmt config — version, dialect (scala213), maxColumn=98 — pinned for the sql/connect modules only | `file_exists` |
 | `dev/eslint.js` | eslint config exported as a module (CommonJS) | `file_exists` |
 | `dev/tox.ini` | flake8 config (the legacy Python linter Spark runs in addition to ruff) | `file_exists` |
-| `dev/check-protos.py` | Regenerates Spark Connect protos under tmpdir, byte-compares to committed outputs (codegen freshness check) | `command:` wrapping (out of alint structural scope; same shape as cpython's cases_generator + uv's `cargo dev generate-all`; needs v0.10+ `generated_file_fresh`) |
+| `dev/check-protos.py` | Regenerates Spark Connect protos under tmpdir, byte-compares to committed outputs (codegen freshness check) | `command:` wrapping (out of alint structural scope; same shape as cpython's cases_generator + uv's `cargo dev generate-all`; needs the v0.10 ship-target `generated_file_fresh` rule kind — 6 demand sources per `launch-evidence.md`) |
 | `dev/test-dependencies.sh` | Regenerates `dev/deps/spark-deps-*` and asserts no diff vs. committed | `file_exists` + `command:` wrapping. The freshness check itself is the Maven-equivalent of cargo lockfile freshness. |
 | `dev/deps/spark-deps-hadoop-3-hive-2.3` | Pinned Maven dependency manifest (one line per `<groupId>/<artifactId>/<version>//<artifactId>-<version>.jar`) | `file_exists` (treated like a lockfile) |
 | `dev/sparktestsupport/{__init__,modules,shellutils,toposort,utils}.py` | Python source-of-truth registry mapping Maven modules to dependent Python test modules; drives `dev/run-tests.py` for changed-files-aware test selection | OUT OF SCOPE (runtime registry consulted by `dev/run-tests.py`; no static structural assertion alint can express today). The cross-language registry consistency (`dev/sparktestsupport/modules.py` ↔ root `pom.xml` `<modules>`) is the **headline polyglot-shaped gap** — same spirit as arrow's `cross_language_implementation_complete`. |
@@ -339,10 +342,10 @@ resolve** to at least one on-disk file. alint has the file
 present; what's missing is the cross-validation that every
 pattern in the registry file maps to ≥1 real file.
 
-This is the **sixth repo** to surface this need (rust-lang +
-clap + cpython + arrow + next.js + spark). **Demand: 6 sources
-for the same primitive.** Going from "v0.10 must-ship" to
-"top-priority v0.10 ship".
+Per `launch-evidence.md`, this is now an **8-source v0.10
+ship-target** (rust-lang + clap + cpython×2 + next.js + arrow +
+pytorch + nodejs/node + NixOS×3 — spark joins the saturation
+cohort). The highest-leverage gap in P2a.
 
 ### 2. Maven `<modules>` registry resolution
 
@@ -390,8 +393,11 @@ values in registry B".
 **Strong v0.11+ signal**: this is the spark-shaped polyglot
 primitive — pattern shows up wherever a polyglot project has
 two registries (one per language) that must stay in sync.
-Defer to v0.11+ as the "polyglot registry consistency"
-headline rule kind.
+Same family as `cross_language_implementation_complete` (now a
+**v0.11+ ship-target** with 5 saturated demand sources per
+`launch-evidence.md`); spark's modules.py ↔ pom.xml registry
+shape is a refinement worth folding into the spec at design
+time.
 
 ### 4. LICENSE-binary ↔ licenses-binary/ cross-reference (proposed `apache/governance@v1`)
 
@@ -425,12 +431,11 @@ falls back to `file_content_matches` regex against the raw XML
 text, which is fragile (catches whitespace drift, breaks on
 attribute reordering).
 
-**Demand source: spark only** at this scale, but the gap
-generalises to every Maven / Ant / Gradle (XML build files) /
-NPM .nuspec / SVG / .csproj-shaped tree. File as v0.11+
-candidate; recommend an `xml_path_matches` + `xml_path_equals`
-primitive backed by the `quick-xml` crate (already a Rust
-ecosystem standard).
+Per `launch-evidence.md`, `xml_path_matches` / `xml_path_equals`
+are now a **v0.10 ship-target** (promoted via dotnet/runtime's
+~2,300 XML manifests at scale, alongside spark's 49 pom.xml
+files). Recommend backing it with the `quick-xml` crate (already
+a Rust ecosystem standard).
 
 ---
 
@@ -620,20 +625,21 @@ polyglot Apache TLP" story for the launch:
   discipline, `.asf.yaml` ASF-infra config, RAT exclude
   registry presence) are exactly the layer alint owns.
 - **The `apache/governance@v1` bundle** is now a **v0.10
-  ship-target** (not a v0.10+ idea) because spark + arrow +
-  airflow converge on 9 of 12 governance artefacts. Three
-  Apache TLPs is enough to crystallise the bundle. Position
-  the bundle as "drop one line in your `extends:` and inherit
-  the Apache TLP discipline that the ASF Incubator graduation
-  process requires".
+  ship-target** (confirmed in `launch-evidence.md`) because
+  spark + arrow + airflow converge on 9 of 12 governance
+  artefacts. Three Apache TLPs is enough to crystallise the
+  bundle. Position it as "drop one line in your `extends:` and
+  inherit the Apache TLP discipline that the ASF Incubator
+  graduation process requires".
 - **The Maven multi-module shape** (49 pom.xml files, 48
   declared `<module>` entries) gives alint a structural
   primitive that pnpm + yarn + cargo workspaces also need
   but currently express via hard-coded `for_each_dir` lists.
-  Add the `xml_path_*` primitive (v0.11+) and the
-  `registry_paths_resolve` primitive (v0.10) and the workspace-
-  registry consistency story lands in one shape across all
-  build systems.
+  Add the `xml_path_*` primitive (now **v0.10 ship-target**
+  per `launch-evidence.md` — promoted via dotnet/runtime's
+  scale) and the `registry_paths_resolve` primitive (v0.10
+  ship-target) and the workspace-registry consistency story
+  lands in one shape across all build systems.
 
 Position it as the **fifth tile** on alint.org/examples
 (after kubernetes, airflow, microsoft/typescript, next.js, arrow),
@@ -656,29 +662,30 @@ strength of demand across P2a + P2b):
   `dev/.rat-excludes` here, plus the rust-lang triagebot.toml +
   clap pre-release-replacements + cpython .gitattributes
   generated markers + check-c-api-docs + arrow
-  rat_exclude_files.txt + next.js check-manifests.js. **Demand:
-  rust + clap + cpython + arrow + next.js + spark = 6 distinct
-  repos** — strongest demand signal in P2a + P2b. **Top-priority
-  v0.10 ship**.
-- **`apache/governance@v1` bundled ruleset** — promoted from
-  "v0.10+ idea" to **"v0.10 ship-target"** by the spark
-  case study. arrow + spark + airflow = 3 Apache TLPs converging
-  on 9 of 12 governance artefacts. Ship in v0.10.
-- **`generated_file_fresh` rule kind** — third confirmation
-  (cpython cases_generator + uv `cargo dev generate-all` +
-  spark `dev/check-protos.py` + spark `dev/test-dependencies.sh`).
-  Move from v0.11+ to v0.10.
-- **`xml_path_matches` / `xml_path_equals` rule kinds** —
-  surfaced uniquely by spark (Maven `pom.xml` is XML; current
-  fallback is regex). Generalises to every XML-shaped manifest
-  (Ant, Gradle .xml, NPM .nuspec, SVG, .csproj). **Single-source
-  demand at this scale**, but the shape gap is wide. v0.11+.
+  rat_exclude_files.txt + next.js check-manifests.js + pytorch
+  + nodejs/node + NixOS×3. **Demand: 8 distinct sources** per
+  `launch-evidence.md` — strongest demand signal in P2a + P2b.
+  **v0.10 ship-target**.
+- **`apache/governance@v1` bundled ruleset** — confirmed
+  **v0.10 ship-target** by the spark case study. arrow + spark
+  + airflow = 3 Apache TLPs converging on 9 of 12 governance
+  artefacts.
+- **`generated_file_fresh` rule kind** — now a **v0.10
+  ship-target** per `launch-evidence.md` with 6 demand sources
+  (uv + cpython + pytorch + bazel + TF + spark). Tension
+  flagged: alint's deliberate non-goal is running codegen —
+  proposed as opt-in primitive.
+- **`xml_path_matches` / `xml_path_equals` rule kinds** — now
+  a **v0.10 ship-target** per `launch-evidence.md` (promoted
+  via dotnet/runtime's ~2,300 XML manifests at one OOM bigger
+  scale, alongside spark's 49 pom.xml files). Completes the
+  structured-query family (JSON/YAML/TOML/XML).
 - **`cross_language_registry_consistency` rule kind** —
   surfaced by spark (`dev/sparktestsupport/modules.py` ↔ root
-  pom.xml `<modules>`) + arrow (Schema.fbs ↔ per-language
-  fixtures). Same spirit as the
-  `cross_language_implementation_complete` v0.11+ candidate.
-  v0.11+.
+  pom.xml `<modules>`). Same family as
+  `cross_language_implementation_complete` (now **v0.11+
+  ship-target** with 5 sources); spark's modules.py ↔ pom.xml
+  shape is a refinement of the same primitive.
 
 ---
 
@@ -696,7 +703,8 @@ strength of demand across P2a + P2b):
   keys (RFC 9535). For dashed keys, use bracket notation:
   `$['line-length']`..."). Fixed in one iteration; the
   diagnostic landed exactly the right pointer. **No new schema
-  pitfalls** surfaced.
+  pitfalls** surfaced. (The enriched diagnostic ships in the
+  v0.9.17 release.)
 - Initial config included `sql` and `common` in the top-level
   `for_each_dir` Maven module list — but those are *namespacing
   dirs* without their own pom.xml. The rule fired correctly
@@ -710,7 +718,7 @@ strength of demand across P2a + P2b):
   multi-module gotcha**: parent dirs of submodules don't
   themselves have pom.xml; the source-of-truth is the root
   pom.xml's `<modules>` section, which alint can't parse today
-  (motivates the v0.11+ `xml_path_*` primitive).
+  (motivates the **v0.10 ship-target** `xml_path_*` primitive).
 - Config runs cleanly against the actual cloned repo at
   `/tmp/spark/` (593 violations across the tree: ~24 errors
   including `dev/lint-java`/`dev/lint-scala`/etc.
@@ -722,3 +730,56 @@ strength of demand across P2a + P2b):
   unconverted repo). No silent failures. No false positives in
   the structural rule set after the `sql/`/`common/`
   namespacing-dir fix.
+
+---
+
+## Future analysis
+
+Surfaced during the 2026-05-07 revalidation pass; not yet executed
+against a live tree:
+
+1. **`apache/governance@v1` bundled-ruleset adoption (when shipped)**
+   — spark is the **headline driver** for promoting this bundle
+   from idea → v0.10 ship-target. Once shipped, this config should
+   `extends:` it and drop the 11 `spark-asf-*` / `spark-license-*` /
+   `spark-rat-*` / `spark-check-license-*` / `spark-create-release-*`
+   / `spark-merge-script-*` rules. Net: one `extends:` line replaces
+   ~11 hand-rolled per-rule entries.
+2. **`scope_filter.has_ancestor: pom.xml` for the per-Maven-module
+   rules** — rather than hand-listing the 10 top-level modules + 6
+   sql modules + 5 connect modules + 10 common modules, a single
+   rule with `for_each_file: pom.xml` + nested `require:` could
+   self-discover modules. Removes the brittleness around
+   namespacing dirs (sql/, common/) that bit the original draft.
+3. **`xml_path_*` primitive once it ships (v0.10 ship-target)** —
+   the headline followup. The current config falls back to
+   `file_content_matches` regex against the raw pom.xml text for
+   `groupId`/`artifactId` checks, which is fragile. Once
+   `xml_path_*` lands, the spark-root-pom-* rules collapse to the
+   structured form (`xml_path_equals: $.project.groupId equals:
+   org.apache.spark`).
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version validated: 0.9.17 (built 2026-05-07)
+- `validate-config` rule count: **110 rules loaded** (61 in-config +
+  6 bundled overlays summing to ~52 rules with overlap deduped) —
+  matches the README's 110-total claim
+- Live-tree recheck: **pending — `/tmp/spark/` not present** at
+  revalidation time; the README's 593-violation claim from the
+  original capture (2026-05-06) has not been re-confirmed against a
+  current sparse-clone.
+- Pitfalls noted in this README that are now fixed in the engine:
+  none directly cited — pitfall #10 is documented-with-canonical-form
+  (the v0.9.15 Phase 4 enriched diagnostic ships in v0.9.17 and
+  caught spark's draft-error in one iteration).
+- Open gaps after this revalidation: rule-kind candidate status
+  drift was the principal stale claim — `xml_path_*` promoted from
+  v0.11+ to v0.10 ship-target (via dotnet/runtime), `generated_file_fresh`
+  promoted from v0.11+ to v0.10 ship-target (6 sources),
+  `apache/governance@v1` confirmed v0.10 ship-target,
+  `registry_paths_resolve` confirmed v0.10 ship-target with 8
+  sources. Bundled rule-count claim ("roughly 49 rules") corrected
+  to 52.

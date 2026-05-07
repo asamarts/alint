@@ -133,9 +133,9 @@ literally does not check today and would benefit from on day one.
 | `cargo dev generate-all` drift | Source ↔ generated `ruff.schema.json` / `docs/rules/` / `docs/configuration.md` are in sync | A `command` rule already covers running the generator; what's missing is a `command_idempotent` mode — "running this command MUST leave the working tree clean" — generalising the prek pattern. |
 | `clippy.toml::disallowed-methods` | Specific `std::*` calls banned in ty crates | Rust-AST scope check; out of scope for alint per the no-AST non-goal. Stays on clippy. |
 | `cargo shear` | Workspace deps not used by any source | Cargo dep-graph analysis; out of scope for alint. Stays on the existing tool (already integrated as a `command:` rule above). |
-| `--unreferenced=reject` (`cargo insta test`) | Snapshot files have a corresponding source rule | A **`pair_inverse`** rule kind — given a `partner` glob (the snapshot), every match must pair back to a primary (the rule source). The existing `pair` rule goes the other direction. Strong launch-prep candidate; same shape is wanted by Rust monorepos with `tests/snapshots/` next to source. |
+| `--unreferenced=reject` (`cargo insta test`) | Snapshot files have a corresponding source rule | A **`pair_inverse`** rule kind — given a `partner` glob (the snapshot), every match must pair back to a primary (the rule source). The existing `pair` rule goes the other direction. Per `launch-evidence.md`, now a **v0.10 design candidate** with 2 demand sources (ruff + angular's goldens parity). |
 | `python/ruff-ecosystem` regression | Diff lint output against a baseline ruff binary | Out of scope (would need to run a build of the project under test). |
-| Per-prek priority chain (0 → 1 → 2) | Hook order matters when both modify the same file | Alint runs all rules in parallel; if two `fix:` ops conflict, the engine picks one (current semantics). The prek priority pattern is **not yet expressible** — file as v0.10+ if multi-fix conflict resolution becomes a real ask. |
+| Per-prek priority chain (0 → 1 → 2) | Hook order matters when both modify the same file | Alint runs all rules in parallel; if two `fix:` ops conflict, the engine picks one (current semantics). The prek priority pattern is **not yet expressible** — defer until multi-fix conflict resolution becomes a saturated cross-repo ask. |
 | `validate-pyproject` deep schema | Full PEP 621 metadata-block check | Vendor the published JSON Schema and use `json_schema_passes`. Same pattern as the GitHub workflow JSON Schema gate above; works today, just needs the schema file. |
 
 **Two concrete launch-prep proposals surfaced from this case study:**
@@ -147,16 +147,17 @@ literally does not check today and would benefit from on day one.
    inverse — "does every partner trace back to a primary?" — is what
    `cargo insta test --unreferenced=reject` does, and the same shape is
    wanted in any project with generated artefacts (codegen outputs,
-   committed `.snap` files, golden files). Single new rule kind.
+   committed `.snap` files, golden files). Per `launch-evidence.md`, now
+   a **v0.10 design candidate** with 2 sources (ruff + angular goldens).
 
 2. **`command_idempotent` mode for the `command` rule kind**. Many of
    ruff's prek hooks (mdformat, markdownlint-fix, ruff-format, prettier)
    are **fixers** that the validation pass invokes in `--check` mode.
    What would actually compose better: run the fixer, snapshot the
-   working tree before and after, fail if they differ. This pattern is
-   common enough across the inventoried repos
-   (kubernetes/airflow/turbo/deno/rust-lang) to justify a first-class mode
-   on the existing `command` rule rather than adding a new kind.
+   working tree before and after, fail if they differ. Per
+   `launch-evidence.md`, now a **v0.10 design candidate** with 2 sources
+   (ruff + prettier — covers mdformat, markdownlint, prettier, ruff-format,
+   dprint-check, all of which share this shape).
 
 ### Out of alint's scope (use the existing tool)
 
@@ -235,9 +236,60 @@ Followup feature work surfaced (in priority order):
 
 - **`pair_inverse` rule kind** (every partner traces back to a primary) —
   unlocks `cargo insta` `--unreferenced=reject`-style gates for any
-  project with generated artefacts. Cross-cutting.
+  project with generated artefacts. Per `launch-evidence.md`, now a
+  **v0.10 design candidate** with 2 sources (ruff + angular goldens).
 - **`command_idempotent` mode** — generalises the "fixer in --check mode"
-  pattern that shows up across all five inventoried repos.
+  pattern. Per `launch-evidence.md`, now a **v0.10 design candidate**
+  with 2 sources (ruff + prettier).
 - **Vendoring published schemas under `.alint/schemas/`** as a first-class
   workflow — the GitHub workflow schema, the PEP 621 schema, and others
   recur across configs and would benefit from a documented pattern.
+
+---
+
+## Future analysis
+
+Surfaced during the 2026-05-07 revalidation pass; not yet executed
+against a live tree:
+
+1. **`for_each_leaf_dir` / `iter.is_leaf` accessor** for the
+   per-snapshot-dir gates — ruff has hundreds of
+   `crates/ruff_linter/src/rules/<linter>/snapshots/` subdirs, each
+   leaf containing only `.snap` files. Per `launch-evidence.md`,
+   this is now a **v0.10 design candidate** with 3 sources
+   (prettier + rust + ruff). Once shipped, the ruff config could
+   restate the snapshot-discipline check more precisely.
+2. **`scope_filter.has_ancestor: Cargo.toml` in `crates/` rules** —
+   the `monorepo/cargo-workspace@v1` overlay covers the per-crate
+   manifest discipline; ruff-specific rules (license, edition,
+   publish=false) could use `scope_filter` to narrow them to
+   crates that ARE leaf-published, which would cleanly express
+   the "only `ruff`/`ruff_linter`/`ruff_wasm` are versioned" rule
+   without listing them by name.
+3. **`agent-context@v1` is already adopted; `agent-hygiene@v1` not
+   yet** — ruff has `CLAUDE.md`/`AGENTS.md`-style instructions
+   under `crates/ruff_linter/`; trial the bundled `agent-hygiene`
+   ruleset (6 rules: AGENTS.md canonical name, no agent self-edits,
+   etc.) to see what surfaces.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version validated: 0.9.17 (built 2026-05-07)
+- `validate-config` rule count: **75 rules loaded** (21 in-config +
+  7 bundled overlays summing to ~58 rules with overlap deduped:
+  oss-baseline=15, rust=11, python=9, monorepo/cargo-workspace=4,
+  ci/github-actions=3, agent-context=5, hygiene/no-tracked-artifacts=11)
+- Live-tree recheck: **pending — `/tmp/ruff/` not present** at
+  revalidation time.
+- Pitfalls noted in this README that are now fixed in the engine:
+  none directly cited — the README pre-dates the v0.9.17 pitfall
+  catalogue and references no specific pitfall numbers.
+- Open gaps after this revalidation: rule-kind candidate status
+  drift was the principal stale claim — `pair_inverse` and
+  `command_idempotent` are now v0.10 design candidates (2 sources
+  each) per `launch-evidence.md`, no longer "v0.10+" without a
+  clearer status. README rule-count claim ("22-rule alint config")
+  is off by 1 (actual 21) — too small a delta to fix in prose;
+  flagged in the batch findings file.

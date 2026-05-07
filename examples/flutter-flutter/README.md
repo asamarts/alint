@@ -3,10 +3,13 @@
 Inventory of the structural-validation tooling in `flutter/flutter`
 and an alint config that replaces the rules alint can express
 today, plus a catalogue of the rules that need new alint
-primitives — particularly the v0.11+
-`cross_language_implementation_complete` candidate, here in its
-**platform-driven** variant rather than the data-format-driven
-variant that arrow + tensorflow demonstrate.
+primitives — particularly the
+`cross_language_implementation_complete` rule kind (now
+`v0.11+ ship-target`, 5 sources per
+`docs/development/launch-evidence.md`: arrow + TF + protobuf
++ angular + flutter), here in its **platform-driven** variant
+rather than the data-format-driven variant that arrow +
+tensorflow demonstrate.
 
 **Repo state captured:** 2026-05-06, sparse-clone of
 `flutter/flutter@240c85cf` (rev =
@@ -137,9 +140,10 @@ inventory" below).
 
 - **17 of 31 (55 %)** map to existing alint rules — the
   bundled `oss-baseline + ci/github-actions +
-  hygiene/no-tracked-artifacts` ship roughly **15 rules**
-  between them, plus the **53 flutter-specific rules** in
-  [`/.alint.yml`](.alint.yml) (per-platform engine BUILD.gn
+  hygiene/no-tracked-artifacts` ship **29 rules**
+  between them (`oss-baseline=15` + `ci/github-actions=3` +
+  `hygiene/no-tracked-artifacts=11`), plus the **39
+  flutter-specific rules** in [`/.alint.yml`](.alint.yml) (per-platform engine BUILD.gn
   parity, per-package pubspec discipline, framework-wide
   Flutter-Authors BSD header across 5 native langs +
   Dart, Apple framework four-file layout, `flutter create`
@@ -167,7 +171,8 @@ inventory" below).
   `every-libflutter-symbol-starts-with-Flutter` check is out
   of scope as binary parsing).
 
-The configured **53-rule** [`/.alint.yml`](.alint.yml) covers
+The configured **68-rule** (39 flutter-specific + 29 from 3
+bundled rulesets) [`/.alint.yml`](.alint.yml) covers
 every structural assertion the existing tooling makes about
 repo *state*, plus several flutter doesn't enforce today
 (per-package `resolution: workspace` declaration, per-platform
@@ -315,11 +320,13 @@ platform.
 
 ## What maps to existing alint rules
 
-The 53-rule [`/.alint.yml`](.alint.yml) breaks down as:
+The 68-rule [`/.alint.yml`](.alint.yml) breaks down as:
 
 - **3 bundled rulesets** (`oss-baseline`,
   `ci/github-actions`, `hygiene/no-tracked-artifacts`) —
-  pull in roughly **15 rules** between them
+  pull in **29 rules** between them
+  (`oss-baseline=15` + `ci/github-actions=3` +
+  `hygiene/no-tracked-artifacts=11`)
 - **2 cross-language Flutter Authors BSD-header rules** —
   one for `//`-style comment languages (Dart, Java, Kotlin,
   Swift, ObjC, C++, Gradle), one for `#`-style comment
@@ -398,10 +405,11 @@ present on the others. Today this is enforced by code-review
 discipline + the engine LUCI runners that build all 5 platforms
 and integration-test each.
 
-The shape is **EXACTLY** the v0.11+
-`cross_language_implementation_complete` candidate, in its
-**platform-driven** variant rather than the **data-format-driven**
-variant arrow + tensorflow demonstrate:
+The shape is **EXACTLY** the
+`cross_language_implementation_complete` rule kind (now
+`v0.11+ ship-target` per launch-evidence.md, with 5 sources
+saturated), in its **platform-driven** variant rather than the
+**data-format-driven** variant arrow + tensorflow demonstrate:
 
 | Repo | Variant | Registry | Per-implementation entry |
 |---|---|---|---|
@@ -409,22 +417,24 @@ variant arrow + tensorflow demonstrate:
 | tensorflow | data-format-driven | Python public symbols (1185 v1+v2 textproto goldens under `tensorflow/tools/api/golden/`) | per-language binding under `tensorflow/lite/{java,swift,objc,python}/` |
 | **flutter** | **platform-driven** | **engine ABI surfaces (PlatformView, ExternalTexture, KeyEventHandler, VsyncWaiter, PlatformMessageHandler, AccessibilityBridge)** | **per-platform implementation under `engine/src/flutter/shell/platform/{android,darwin/ios,darwin/macos,linux,windows}/`** |
 
-This is the **third independent demand signal** for
-`cross_language_implementation_complete`, and the FIRST
+This is the **fifth independent demand signal** for
+`cross_language_implementation_complete` (arrow + TF + protobuf +
+angular + flutter per launch-evidence.md), and the FIRST
 **platform-driven** source. The arrow + tensorflow shape is
 "every entry in registry A has a corresponding test fixture per
 language under root B"; the flutter shape is "every ABI surface
 at registry A has a corresponding native implementation under
 the per-platform directory tree B" — same primitive, different
-registry source. **Going from "v0.11+ candidate" to "v0.11+
-must-ship" — demand 3 of 3 candidates so far for the rule kind,
-and now 2 distinct variants (data-format + platform).**
+registry source. **Already promoted from `v0.11+ candidate` to
+`v0.11+ ship-target` per launch-evidence.md — saturated at 5
+sources, with 3 distinct topologies (data-format-driven, within-
+language source↔golden, platform-driven).**
 
 The proposed primitive shape (sketch):
 
 ```yaml
 - id: flutter-engine-abi-platform-parity
-  kind: cross_language_implementation_complete  # v0.11+
+  kind: cross_language_implementation_complete  # v0.11+ ship-target
   registry:
     paths: engine/src/flutter/shell/platform/embedder/embedder.h
     extract_symbols: 'FlutterEngine[A-Z]\w+'
@@ -453,14 +463,15 @@ every `shard:` value resolves to a known case branch is enforced
 only by manual review + by failing at run-time when the dispatch
 falls through to the default branch.
 
-This is the **fifth repo** to surface this shape (rust-lang +
-clap + cpython + apache/arrow + flutter). Same `registry_paths_resolve`
-primitive, different registry (here, switch-case branches in a
-Dart source file rather than glob patterns in a text file).
+This is the **sixth repo** to surface this shape (rust-lang +
+clap + cpython + apache/arrow + next.js + flutter). Same
+`registry_paths_resolve` primitive, different registry (here,
+switch-case branches in a Dart source file rather than glob
+patterns in a text file).
 
-**Demand: rust + clap + cpython + arrow + next.js + flutter
-(6 distinct repos)** — strongest demand signal in P2 now,
-clearly the v0.10 #1 priority.
+**Demand: 8 sources per launch-evidence.md** (rust, clap,
+cpython×2, next.js, arrow, pytorch, nodejs/node, NixOS×3) —
+already promoted to **`v0.10 ship-target`**.
 
 ### 3. `ordered_block` for `.ci.yaml` target alphabetisation
 
@@ -469,7 +480,8 @@ clearly the v0.10 #1 priority.
 The convention is unenforced; drift would still parse and run
 but make the file unreadable. **Same `ordered_block` shape as
 arrow's `rat_exclude_files.txt` + rust + airflow + tokio +
-cpython** — re-confirms the rule kind from a sixth source.
+cpython** — re-confirms the rule kind. Per launch-evidence.md
+this is now at 7 sources / **`v0.10 ship-target`**.
 
 ---
 
@@ -506,10 +518,15 @@ Listed by category for clarity:
   binary parsing, out of scope; engine CI runs a separate
   pass via `clang -nm`-style tooling.
 - **`.gitignore`-tracked-but-on-disk file detection** — same
-  `respect_gitignore: false` v0.10+ candidate as bazel's
-  `.bazelversion` (CONFIG-AUTHORING.md pitfall #18); flutter's
-  `pubspec.lock` ships tracked-but-gitignored at
-  `pubspec.lock` (`!/pubspec.lock` in `.gitignore`).
+  shape as bazel's `.bazelversion` (CONFIG-AUTHORING.md
+  pitfall #18). flutter's `pubspec.lock` ships tracked-but-
+  gitignored at `pubspec.lock` (`!/pubspec.lock` in
+  `.gitignore`). **FIXED in v0.9.17** — the per-rule
+  `respect_gitignore: false` knob shipped with v0.9.17 (see
+  CONFIG-AUTHORING.md pitfall #18 for the canonical pattern);
+  flutter is the second demand source after bazel that the
+  fix unblocks. A future config edit can drop the workaround
+  and set `respect_gitignore: false` directly.
 
 ---
 
@@ -631,36 +648,35 @@ strength of demand across P2):
 - **`registry_paths_resolve` rule kind** — covers `.ci.yaml`
   ↔ `dev/bots/test.dart` shard cross-validation here, plus
   the rust-lang + clap + cpython + arrow + next.js sources.
-  **Demand: rust + clap + cpython + arrow + next.js + flutter
-  (6 distinct repos)** — clearly the v0.10 #1 priority slot.
+  **Demand: 8 sources per launch-evidence.md** — already
+  promoted to **`v0.10 ship-target`**.
 - **`cross_language_implementation_complete` rule kind** —
   arrow + tensorflow demonstrate the data-format-driven
   variant; flutter demonstrates the **platform-driven** variant
-  (engine ABI ↔ per-OS embedders). **Demand: arrow + tensorflow
-  + flutter (3 distinct repos, 2 distinct variants)** — now
-  demand-validated as the v0.11+ flagship polyglot primitive.
+  (engine ABI ↔ per-OS embedders). **Demand: 5 sources per
+  launch-evidence.md** (arrow + TF + protobuf + angular +
+  flutter; 3 distinct topologies) — already promoted to
+  **`v0.11+ ship-target`**.
 - **`ordered_block` rule kind** — re-confirmed by `.ci.yaml`
-  target alphabetisation. **Demand: rust + airflow + tokio +
-  cpython + arrow + flutter (6 distinct repos)** — joins
-  `registry_paths_resolve` at the top of the v0.10 priority
-  list.
-- **`respect_gitignore: false` per-rule knob** —
-  `pubspec.lock` is tracked-but-gitignored
-  (`!/pubspec.lock` in `.gitignore`); same shape as bazel's
-  `.bazelversion` (CONFIG-AUTHORING.md pitfall #18).
+  target alphabetisation. **Demand: 7 sources per
+  launch-evidence.md** — already promoted to **`v0.10
+  ship-target`**.
+- **`respect_gitignore: false` per-rule knob** — **DELIVERED
+  in v0.9.17** (per-rule knob ships in the engine).
+  `pubspec.lock` (tracked-but-gitignored via `!/pubspec.lock`
+  in `.gitignore`) is now addressable with a one-line config
+  edit; flutter is the second demand source after bazel that
+  the fix unblocks.
 
 ---
 
 ## Notes for the parent agent
 
 - Audit (`alint validate-config examples/flutter-flutter/.alint.yml`)
-  **passes**: 68 rule(s) loaded cleanly. (The
-  `coverage_audit_examples_parse` test target in
-  `crates/alint-e2e/` currently fails to compile due to an
-  unrelated in-progress edit to `crates/alint-rules/src/file_exists.rs`
-  adding the `respect_gitignore` field — pitfall #18 follow-up.
-  The validation run via the released binary at
-  `target/release/alint` is the equivalent gate.)
+  **passes**: 68 rule(s) loaded cleanly via the v0.9.17
+  release binary. (The `respect_gitignore` field that was
+  in-progress at original-write time has shipped in v0.9.17;
+  pitfall #18 is now FIXED in the engine.)
 - Config runs cleanly against the actual cloned repo at
   `/tmp/flutter/` (358 violations across 20 failing rules —
   39 passing, 149 auto-fixable):
@@ -735,16 +751,75 @@ strength of demand across P2):
     positives in the structural rule set.
 - Particular interest from the prompt: **Yes — the
   per-platform parity discipline is exactly the
-  `cross_language_implementation_complete` v0.11+ candidate
-  in its platform-driven variant**, distinct from the
-  data-format-driven variant arrow + tensorflow demonstrate.
-  This case study is the third independent demand signal for
-  the rule kind, and the first **platform-driven** source.
-  The shape generalises to every cross-platform UI framework
-  with per-OS native embedders (React Native, Xamarin/MAUI,
-  Qt, Tauri).
+  `cross_language_implementation_complete` rule kind (now
+  `v0.11+ ship-target`) in its platform-driven variant**,
+  distinct from the data-format-driven variant arrow +
+  tensorflow demonstrate. This case study is the fifth
+  independent demand signal for the rule kind, and the
+  first **platform-driven** source. The shape generalises
+  to every cross-platform UI framework with per-OS native
+  embedders (React Native, Xamarin/MAUI, Qt, Tauri).
 - The Flutter-Authors BSD-style header rule across 5 native
   languages + Dart is the cleanest single-rule polyglot demo
   in the case-study catalogue. Apply it to the live tree and
   the `command:` shell-out to `engine/src/flutter/ci/format.sh`
   is the per-engine-subtree analogue alint already coordinates.
+
+---
+
+## Validation status (2026-05-07)
+
+- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
+- `validate-config`: **68 rules loaded cleanly** (39 flutter-
+  specific + 29 from 3 bundled rulesets — `oss-baseline=15`,
+  `ci/github-actions=3`, `hygiene/no-tracked-artifacts=11`).
+- Live-tree recheck: **present at `/tmp/flutter/`**; existing
+  live-tree finding inventory (line 666 region) remains
+  representative of the snapshot.
+- Pitfalls fixed in v0.9.17 that touch this config:
+  - **Pitfall #18** (per-rule `respect_gitignore: false`)
+    — DELIVERED. flutter is the second demand source after
+    bazel; once the README's `pubspec.lock` rule is added
+    using the new knob, the hand-rolled workaround drops
+    out.
+  - **Pitfall #19** (literal_is_nested runtime guard) —
+    DELIVERED; no impact on this config.
+- Open gaps (rule-kind candidates referenced but not yet
+  shipped):
+  - `cross_language_implementation_complete` (v0.11+
+    ship-target, 5 sources) — flutter is the
+    platform-driven variant.
+  - `registry_paths_resolve` (v0.10 ship-target, 8 sources).
+  - `ordered_block` (v0.10 ship-target, 7 sources).
+
+## Future analysis
+
+Three concrete unanalyzed angles for a future revalidation pass:
+
+1. **Add `flutter-engine-embedder-c-abi-presence` rule** —
+   the load-bearing
+   `engine/src/flutter/shell/platform/embedder/embedder.h`
+   is the C ABI every external embedder consumes (e.g.
+   `sony/flutter-embedded-linux`,
+   `meta-flutter/flutter-pi`). Silent removal would silently
+   break out-of-tree embedders. Currently covered indirectly
+   by `flutter-engine-platform-has-build-gn`'s embedder/
+   directory check; a direct file-existence assertion would
+   tighten the gate without ambiguity.
+2. **`compliance/reuse@v1` overlay derivative.** The
+   `compliance/reuse@v1` ruleset (3 rules — `LICENSES/` dir
+   + per-file SPDX headers + `.reuse/dep5`) doesn't drop in
+   as-is (Flutter-Authors BSD-style header isn't
+   SPDX-compliant), but a future derivative
+   `compliance/bsd-flutter@v1` is an obvious bundled-ruleset
+   extraction once the pattern stabilises across 2+ adopting
+   projects.
+3. **`nested_configs: true` for the engine subtree.** The
+   `engine/src/flutter/` subtree is effectively a separate
+   Dart workspace with its own `pubspec.yaml` and
+   `analysis_options.yaml`. A subtree-scoped `.alint.yml`
+   under `engine/src/flutter/` would scope the Apple
+   framework four-file layout rule and the
+   `engine/src/build_overrides/` `.gni` rule next to their
+   domain instead of the root config — natural fit once
+   v0.10 lands the subtree-config feature.
