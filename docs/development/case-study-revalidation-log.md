@@ -106,15 +106,15 @@ frequency:
    pass include the `validate-config` rule count as the
    authoritative reconciler.
 
-3. **Pitfall #18 fix is the load-bearing "demand → fix shipped"
-   story.** v0.9.17 ships per-rule `respect_gitignore: false`.
-   - Bazel agent verified end-to-end on `/tmp/bazel/.bazelversion`
-     (passes with the override, fails without). Bazel `.alint.yml`
-     was flagged for a follow-up edit to re-add the dropped
+3. **Pitfall #18 fix verified end-to-end.** v0.9.17 ships per-rule
+   `respect_gitignore: false`.
+   - Bazel agent verified on `/tmp/bazel/.bazelversion` (passes
+     with the override, fails without). Bazel `.alint.yml` was
+     flagged for a follow-up edit to re-add the dropped
      `bazel-version-file-exists` rule using the new override.
-   - Flutter README updated to reframe pitfall #18 as ✅ FIXED in
-     v0.9.17, with flutter as 2nd demand source after bazel
-     (pubspec.lock tracked-AND-gitignored shape).
+   - Flutter README updated to reflect that pitfall #18 is fixed
+     in v0.9.17. Flutter is the 2nd source for the underlying
+     pattern (`pubspec.lock` tracked-AND-gitignored).
 
 4. **Pitfall #19 fix has zero relevance to existing case
    studies** — none of the 30 .alint.yml configs currently use
@@ -167,9 +167,10 @@ frequency:
     misses).
 
 13. **No new pitfalls or new ≥3-source rule-kind candidates
-    surfaced from this revalidation pass** — consistent with the
-    saturation hypothesis in `launch-evidence.md`. The candidate
-    backlog is stable.
+    surfaced from this revalidation pass.** Matches the
+    saturation observation documented in `launch-evidence.md`.
+    The candidate backlog is stable at the counts recorded
+    there.
 
 ## Open issues / gaps / inconsistencies / opportunities
 
