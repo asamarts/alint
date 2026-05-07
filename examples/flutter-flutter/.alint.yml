@@ -216,6 +216,7 @@ rules:
         - "packages/flutter/test_release/**"
         - "packages/flutter/test_private/**"
         - "packages/flutter_localizations/lib/src/l10n/**" # auto-generated translations
+        - "packages/flutter_tools/templates/**" # `flutter create` user-app templates
     lines: 6
     pattern: 'Copyright [0-9]{4}(-[0-9]{4})? The Flutter Authors\. All rights reserved\.'
     level: warning
@@ -406,17 +407,23 @@ rules:
     kind: file_content_matches
     paths:
       include: ["packages/*/pubspec.yaml"]
-      exclude: ["packages/flutter_goldens/pubspec.yaml"] # historical exception
+      exclude:
+        # flutter_goldens + flutter_tools historically stand outside the
+        # root pub workspace (root pubspec.yaml's `workspace:` list does
+        # NOT list them) — they have their own dep-resolution path.
+        - "packages/flutter_goldens/pubspec.yaml"
+        - "packages/flutter_tools/pubspec.yaml"
     pattern: '(?m)^resolution:\s*workspace'
     level: warning
     message: >-
-      Every per-package pubspec.yaml under packages/ MUST declare
-      `resolution: workspace` so the root workspace
-      (pubspec.yaml's `workspace:` list with 77 members) lifts the
-      per-package deps into the unified resolution graph. Missing
-      this line means `flutter pub get` resolves the package
-      independently — drift across versions, broken cross-package
-      refs at runtime.
+      Every per-package pubspec.yaml under packages/ (except
+      flutter_goldens + flutter_tools, which historically stand
+      outside the root workspace) MUST declare `resolution: workspace`
+      so the root workspace (pubspec.yaml's `workspace:` list with
+      77 members) lifts the per-package deps into the unified
+      resolution graph. Missing this line means `flutter pub get`
+      resolves the package independently — drift across versions,
+      broken cross-package refs at runtime.
 
   - id: flutter-package-has-analysis-options
     kind: for_each_dir

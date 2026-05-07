@@ -679,7 +679,12 @@ setting; broader coverage is on the v0.10 backlog.
 
 Source: surfaced by `examples/bazelbuild-bazel/.alint.yml` while
 authoring the `gha-pin-actions-to-sha` companion check for
-`.bazelversion`. Regression-locked by
+`.bazelversion`. Second independent demand signal landed in
+`examples/flutter-flutter/.alint.yml`: flutter ships `pubspec.lock`
+tracked-AND-gitignored (the `flutter pub get` workflow regenerates
+locally; the upstream-committed copy is the canonical reproducible
+build, but contributors don't commit their own resolution).
+Regression-locked by
 `crates/alint-e2e/scenarios/check/git/file_exists_per_rule_respect_gitignore_finds_tracked_and_ignored.yml`
 (positive direction) and the matching `_misses_*` companion (negative
 direction — proves the workspace-default behaviour without the override).

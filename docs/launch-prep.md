@@ -479,22 +479,24 @@ v0.10+ candidates. Net-new additions:
 | `cross_language_implementation_complete` | 1 (arrow) | **2** (arrow + TF) — now demand-validated; v0.11+ flagship |
 | `*_path_contains` | 2 | **3** (helm + deno + bazel) |
 
-### P2b Wave 2 — 5 more polyglot repos (4 of 5 done; flutter in flight)
+### P2b Wave 2 — 5 more polyglot repos (all 5 audits landed)
 
 5 monorepos curated for *platform-driven* polyglot density —
 distinct from the *data-format-driven* polyglot density of Wave 1.
-At time of writing (4 of 5 audits landed):
 
-| Repo | Rules | Headline |
+| Repo | Rules loaded | Headline |
 |---|---|---|
-| `angular/angular` | 50 | TypeScript framework with 16 packages; `goldens/public-api/<pkg>/index.api.md` discipline locks the TS API surface of 13/16 packages — canonical single-language `cross_language_implementation_complete` instance |
+| `angular/angular` | 131 | TypeScript framework with 16 packages; `goldens/public-api/<pkg>/index.api.md` discipline locks the TS API surface of 13/16 packages — canonical single-language `cross_language_implementation_complete` instance |
 | `istio/istio` | 65 | Single-module Go monorepo with 9 Helm charts, Prow CI (no GHA), CODEOWNERS not k8s-OWNERS; per-chart image-hub at *different* JSONPath positions per file — surfaces pitfall #20 + a `value_extractor:` design candidate |
 | `dotnet/runtime` | 60 | **1,091 .csproj files** (sparse checkout, src/libraries alone is 902); **234 solution files** + **257 Directory.Build.{props,targets}** + **520 .props/.targets** = ~2,300 distinct XML manifests stress-testing the v0.10 `xml_path_*` candidate at one order of magnitude bigger scale than spark |
 | `protocolbuffers/protobuf` | 108 | **10 in-tree language bindings** (cpp, java, python, csharp, ruby, php, objc, hpb, upb, rust) + 1 spun-out (dart) with per-binding wire-format failure-allowlist files (failure_list_<lang>.txt) and per-binding GHA test workflow — densest single-repo source for `cross_language_implementation_complete`, ~45 cross-language assertions one rule would express |
-| `flutter/flutter` | 39 | **Platform-driven** polyglot variant — single Dart framework, native-OS embedders (Android/iOS/macOS/Linux/Windows/Fuchsia/GLFW + ABI) as peer subdirs under `engine/src/flutter/shell/platform/`, each implementing the same surface (audit pending final aggregation) |
+| `flutter/flutter` | 68 | **Platform-driven** polyglot variant — single Dart framework, native-OS embedders (Android/iOS/macOS/Linux/Windows/Fuchsia/GLFW + ABI) as peer subdirs under `engine/src/flutter/shell/platform/`, each implementing the same surface. Live tree run catches **5 real Trojan-Source / CVE-2021-42574 errors** in `docs/releases/archive/` (via `oss-baseline`'s `no_bidi_control_characters`) — strongest single piece of "alint catches things other tools miss" evidence |
 
-Wave 2 totals so far: **322 rules across 4 case studies** (flutter
-adds 39 once aggregated).
+Wave 2 totals: **432 rules across 5 case studies** (rule count is
+`alint validate-config`-loaded — top-level entries + bundled-ruleset
+expansions; consistent metric across the corpus). Note: an earlier
+draft of this section reported `flutter (39)` as a top-level-only
+count; the validate-config-loaded number is what adopters see.
 
 ### P2b Wave 2 — 2 new pitfalls (#20, #21)
 
@@ -529,7 +531,7 @@ Both documented in CONFIG-AUTHORING.md as pitfalls #20 and #21.
 | Candidate | Pre-Wave-2 status | Post-Wave-2 |
 |---|---|---|
 | `xml_path_matches` / `xml_path_equals` | v0.10 candidate (1 source: spark) | **v0.10 ship-target** (2 sources: spark + dotnet/runtime; dotnet stress-tests at ~2,300 manifests vs spark's 49 pom.xml) |
-| `cross_language_implementation_complete` | v0.11+ flagship (2 sources) | **v0.11+ ship-target** (4 sources: arrow + TF + protobuf + angular; protobuf is the densest with ~45 cross-language assertions, angular gives the within-language source↔golden variant) |
+| `cross_language_implementation_complete` | v0.11+ flagship (2 sources) | **v0.11+ ship-target** (5 sources: arrow + TF + protobuf + angular + flutter; protobuf is the densest with ~45 cross-language assertions; angular gives the within-language source↔golden variant; **flutter gives the platform-driven variant** — engine ABI surfaces ↔ per-OS native implementations under `engine/src/flutter/shell/platform/{android,darwin/ios,darwin/macos,linux,windows,fuchsia}/`) |
 | `ordered_block` | v0.10 candidate (6 sources) | **v0.10 ship-target** (7 sources: protobuf failure_list files; ties with `registry_paths_resolve` at the top of the v0.10 backlog) |
 | `cross_file_value_equals` | 9 sources | **10 sources** (istio per-chart image-hub joins; istio also surfaces the per-file extractor variant — pitfall #20 design candidate) |
 

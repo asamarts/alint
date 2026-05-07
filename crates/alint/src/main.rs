@@ -310,10 +310,10 @@ fn init_panic_hook() {
         return;
     }
     std::panic::set_hook(Box::new(|info| {
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}", l.file(), l.line()))
-            .unwrap_or_else(|| "(unknown)".to_string());
+        let location = info.location().map_or_else(
+            || "(unknown)".to_string(),
+            |l| format!("{}:{}", l.file(), l.line()),
+        );
         let payload = info
             .payload()
             .downcast_ref::<&str>()
@@ -354,13 +354,16 @@ fn init_panic_hook() {
 /// blast radius on a code path that runs only when alint is
 /// already in trouble.
 fn url_encode(s: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
         let c = *b;
         if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.' | b'~') {
             out.push(c as char);
         } else {
-            out.push_str(&format!("%{c:02X}"));
+            // Writing into a `String` via `write!` cannot fail — the
+            // io::Write impl on String is infallible.
+            let _ = write!(out, "%{c:02X}");
         }
     }
     out

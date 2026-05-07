@@ -662,17 +662,77 @@ strength of demand across P2):
   The validation run via the released binary at
   `target/release/alint` is the equivalent gate.)
 - Config runs cleanly against the actual cloned repo at
-  `/tmp/flutter/`; full cross-tree pass surfaces a mix of GHA
-  SHA-pin warnings on the 16 public workflows + the expected
-  `command:`-rule "tool not on PATH" errors for `dart` and
-  the engine CI scripts (which require the engine's
-  `gclient sync` to be run before the scripts are runnable).
-  The structural rules (engine platform parity, framework
-  layout, `flutter create` template parity, per-package
-  workspace markers) all pass cleanly on the live tree —
-  confirming flutter's polyglot layout is fully consistent
-  AND the rules are correctly scoped to fire if drift were
-  to occur.
+  `/tmp/flutter/` (358 violations across 20 failing rules —
+  39 passing, 149 auto-fixable):
+  - **72 warnings on `flutter-bsd-source-header`** — all
+    legitimate findings; integration-test apps under
+    `dev/integration_tests/{pure_android_host_apps,
+    record_use_test_app, spell_check}/` and a few engine
+    test files under
+    `engine/src/flutter/shell/platform/android/test/` ship
+    Kotlin / Java / `.gradle.kts` files without the
+    Flutter Authors BSD header (the kind of cross-language
+    drift no per-language linter catches).
+  - **99 warnings on `flutter-bsd-source-header-shell-comment`**
+    — auto-generated `CMakeLists.txt` files under
+    `dev/integration_tests/*/{linux,windows}/` from
+    `flutter create` templates (real findings; the engine's
+    `BUILD.gn` carries the header but the desktop CMakeLists
+    templates don't propagate it).
+  - **5 errors on `oss-no-bidi-controls`** — **real
+    Trojan-Source / CVE-2021-42574 findings** in
+    `docs/about/Values.md` and 4 archived release-notes
+    files under `docs/releases/archive/`. Flutter ships
+    these with embedded bidi controls in contributor names
+    / commit messages; alint surfaces them at PR time.
+  - **2 warnings on `flutter-published-package-has-homepage`**
+    — `packages/flutter_localizations/pubspec.yaml` and
+    `packages/flutter_test/pubspec.yaml` don't carry the
+    `homepage: https://flutter.dev` line that pub.dev
+    surfaces in the package landing page sidebar.
+  - **1 warning on `flutter-package-resolution-workspace`**
+    — `packages/flutter_tools/pubspec.yaml` historically
+    stands outside the root pub workspace (the rule's
+    exclude list documents this — confirmed against
+    `pubspec.yaml`'s `workspace:` member list).
+  - 13 + 2 GHA-related warnings on the 16 public workflows
+    (`gha-workflow-contents-read`,
+    `flutter-workflow-actions-pinned-by-sha`,
+    `gha-pin-actions-to-sha`) — the standard
+    supply-chain hardening findings; flutter's public
+    workflow surface uses floating action tags
+    (`actions/checkout@v4`-style) the bundled
+    `ci/github-actions@v1` ruleset flags.
+  - 4 hygiene warnings (`hygiene-no-js-build-outputs`).
+  - Plus the expected `command:`-rule errors for `dart
+    analyze` (which times out scanning the entire flutter
+    SDK without the conductor env set up) and the 4 engine
+    CI scripts (`clang_tidy.sh`, `format.sh`, `pylint.sh`,
+    `licenses_cpp.sh` — each fails fast on missing
+    `vpython3` / `pylint-2.7` / unbuilt `licenses_cpp`
+    binary, which is the correct diagnostic in the alint
+    test environment without `gclient sync` having been
+    run).
+  - **All cross-platform structural rules pass cleanly on
+    the live tree** — `flutter-engine-platform-has-build-gn`,
+    `flutter-engine-darwin-platforms-have-build-gn`,
+    `flutter-darwin-framework-layout`,
+    `flutter-create-templates-platform-coverage`,
+    `flutter-engine-build-overrides-present`,
+    `flutter-package-has-pubspec`,
+    `flutter-package-has-analysis-options`,
+    `flutter-internal-package-publish-to-none`,
+    `flutter-engine-has-pubspec`,
+    `flutter-engine-has-analysis-options`,
+    `flutter-analysis-options-strict-{casts,inference,raw-types}`,
+    `flutter-{patent-grant,authors,codeowners,testowners,
+    ci-config,test-orchestrator,dartdoc-options,
+    analysis-options}-present`,
+    `flutter-gitattributes-{windows-crlf,flutter-bin-lf}-pin`
+    — confirming flutter's polyglot layout is fully
+    consistent AND the rules are correctly scoped to fire
+    if drift were to occur. No silent failures. No false
+    positives in the structural rule set.
 - Particular interest from the prompt: **Yes — the
   per-platform parity discipline is exactly the
   `cross_language_implementation_complete` v0.11+ candidate

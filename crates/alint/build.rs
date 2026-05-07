@@ -38,15 +38,30 @@ fn build_date_utc() -> String {
     // computation from epoch seconds is good enough.
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
+    // 86_400 seconds/day — `now / 86_400` is bounded by the
+    // current epoch-day, well below i64::MAX even centuries from
+    // now. Wrapping is structurally impossible.
+    #[allow(clippy::cast_possible_wrap)]
     let days_since_epoch = (now / 86_400) as i64;
     let (year, month, day) = days_to_ymd(days_since_epoch);
     format!("{year:04}-{month:02}-{day:02}")
 }
 
 /// Convert days-since-epoch (1970-01-01) to (year, month, day).
-/// Standard astronomical algorithm; valid for any year ≥ 1970.
+/// Standard astronomical algorithm; valid for any year in
+/// `[1970, ~25_000]`. The `as` casts below are bounded by the
+/// algorithm's invariants (`doe` ∈ `[0, 146_097)`, `yoe` ∈ `[0, 400)`,
+/// `m` ∈ `[1, 12]`, `d` ∈ `[1, 31]`, `y` ∈ `[1970, ~25_000]`) so the
+/// truncation/wrap/sign-loss lints fire on shapes that never
+/// actually occur. Suppressing at the function level keeps the
+/// astronomical algorithm readable; spelling each one out as
+/// `try_from(...).expect(...)` would obscure the math.
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 fn days_to_ymd(days: i64) -> (i32, u32, u32) {
     // Shift so day 0 = 1970-03-01 (start of leap-year cycle).
     let z = days + 719_468;
