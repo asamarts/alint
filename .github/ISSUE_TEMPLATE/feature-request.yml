@@ -12,7 +12,7 @@ body:
 
         The bar for new rule kinds: a rule kind ships when it covers a use
         case at least 3 real production repos need. The
-        [launch-prep validation pass](https://github.com/asamarts/alint/blob/main/docs/launch-prep.md)
+        [launch-evidence audit](https://github.com/asamarts/alint/blob/main/docs/development/launch-evidence.md)
         catalogues real-repo use cases that don't have alint coverage today.
 
   - type: dropdown
