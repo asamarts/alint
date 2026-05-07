@@ -8,6 +8,301 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.16] — 2026-05-06
+
+Config DX hardening release. Closes the launch-prep validation pass
+with seven-phase coverage of the 17 schema + runtime pitfalls
+surfaced during the P2a 20-repo case-study sweep, plus the
+`deny_unknown_fields` uniformity audit that makes that coverage
+hold uniformly across all 60 rule kinds. A config that hits any of
+the catalogued pitfalls is now caught somewhere in the toolchain
+(schema at edit time, parse error at load time, runtime audit at
+PR time) — for *every* rule kind, not just the half that already
+had `deny_unknown_fields` declared.
+
+(Note: there is no v0.9.15 tag. The seven-phase work landed locally
+under that label on 2026-05-06 but was rolled into v0.9.16 alongside
+the uniformity audit before the public release. The version sequence
+is v0.9.14 → v0.9.16 by design — the `git log` entries between
+them are the seven phases plus the uniformity work.)
+
+The headline numbers:
+
+- **21 distinct pitfalls** catalogued in `docs/development/CONFIG-AUTHORING.md`
+  with canonical-correct YAML for each (17 from P2a; 2 from P2b Wave 1
+  — `.gitignore` masks tracked-file presence checks; `root_only: true`
+  silently no-matches multi-component literals; **2 from P2b Wave 2** —
+  cross-file value-equality across structurally-different files
+  needing per-file value extraction; `yaml_path_*` rules erroring on
+  multi-document YAML files). Pitfalls #18 and #19 are now *fixed in
+  the engine* (#18 ships the per-rule `respect_gitignore: false` knob;
+  #19 ships the literal_is_nested runtime guard so misconfigurations
+  no longer fire on unrelated files); pitfalls #20 and #21 stay
+  documented with a workaround until the v0.10 design candidates ship.
+- **7 silently-broken structured-path rules** in committed pilot +
+  Wave 1 configs (6 bool-match + 1 array-semantics) caught by the
+  validation pass and fixed in-flight.
+- **30 production OSS repos** with working `.alint.yml` configs +
+  case-study writeups under `examples/<owner>-<repo>/` — 20 from P2a
+  (single-language + diverse-ecosystem) + 5 from P2b Wave 1 (curated
+  pre-launch polyglot subset: NixOS/nixpkgs, bazelbuild/bazel,
+  tensorflow/tensorflow, apache/spark, microsoft/vscode) + 5 from
+  P2b Wave 2 (platform-driven polyglot subset: angular/angular,
+  istio/istio, dotnet/runtime, protocolbuffers/protobuf,
+  flutter/flutter — total 322 polyglot rules across the Wave 2 set,
+  zero new rule-kind candidates beyond the v0.10/v0.11 backlogs,
+  validating the saturation analysis). Five positioning narratives
+  crystallised across the corpus.
+- **Scale validation:** the 5-repo P2b Wave 1 wasn't expected to
+  surface new pitfalls (saturation analysis from P2a's Wave 3 had
+  predicted reconfirmation, not new candidates) but was commissioned
+  to test unknown-unknowns: scale stress, build-system shape, per-
+  language API parity, polyglot-discipline convergence, and flagship-
+  visibility apples-to-apples comparison. Headline results:
+  - **NixOS/nixpkgs at 39,101 files + 20,678 `pkgs/by-name/*/*/`
+    package directories: alint's full 79-rule pass — including the
+    headline `for_each_dir` over the by-name tree — completes in
+    273 ms wall-clock.** "Any size repo" is now empirically
+    defensible.
+  - **microsoft/vscode `build/hygiene.ts` apples-to-apples:** alint
+    covers ~75 % of the 8 distinct hygiene checks (6 of 8)
+    declaratively in one config. "alint is what `build/hygiene.ts`
+    would look like as a tool, not a per-repo script" — verified
+    against the live tree (222 violations, zero false positives).
+  - **3 Apache TLPs converge:** arrow + spark + airflow share 9 of
+    12 governance artefacts; `apache/governance@v1` bundled ruleset
+    promotes from "v0.10+ idea" to "v0.10 ship-target."
+  - **`cross_language_implementation_complete` v0.11+ candidate now
+    demand-validated AND saturated:** 4 sources after Wave 2 (arrow
+    + tensorflow + protobuf + angular). protobuf is the densest with
+    ~45 cross-language assertions one rule would express; angular
+    contributes the within-language source↔golden variant. Promotes
+    from "v0.11+ flagship" to "v0.11+ ship-target."
+  - **New v0.10 rule-kind candidate: `xml_path_matches` /
+    `xml_path_equals`** (spark — completes the structured-query
+    family; generalises to Maven, Ant, Gradle XML, .nuspec, .csproj).
+    **Promoted to v0.10 ship-target by Wave 2** — dotnet/runtime
+    stress-tests at ~2,300 distinct XML manifests (1,091 .csproj +
+    234 solution files + 257 Directory.Build.* + 520 .props/.targets),
+    one order of magnitude bigger than spark.
+  - **New bundled ruleset added to v0.10 ship-list: `dotnet@v1`** —
+    surfaced by dotnet/runtime; 12 of 14 dotnet-specific rules in
+    the case study consolidate into one `extends:` line. Adopter
+    surface is large (every dotnet/* + every Azure SDK + every
+    microsoft/* .NET project).
+- **Every example config** ships with `# yaml-language-server:
+  $schema=…` so opening it in any LSP-aware editor (vscode-yaml /
+  JetBrains / coc-yaml) gets autocomplete + validation for free.
+- **`alint validate-config <path>`** is the new entry point for
+  editor LSP / pre-commit / fail-fast CI integrations.
+- **`#[serde(deny_unknown_fields)]` is now uniform across all 60 rule
+  kinds** — 13 rule Options structs that previously silently
+  accepted unknown fields now reject them, surfacing the Phase 3
+  did-you-mean enrichment for those kinds. 13 unit-style integration
+  tests (one per kind) continuously verify uniformity at PR time.
+- **Per-rule `respect_gitignore: false` (pitfall #18 fix).** Closes
+  the bazel-style "tracked AND gitignored" pattern surfaced by Wave 1.
+  `file_exists` rules can now bypass the workspace-level gitignore
+  setting at single-rule granularity; the literal-path fast path also
+  checks the filesystem directly so a `.bazelversion`-style file is
+  found even when the walker pre-filters it out. Two regression
+  scenarios (positive + negative) lock the behaviour in
+  `crates/alint-e2e/scenarios/check/git/`.
+- **Operator polish — `alint --version` includes commit SHA + build
+  date,** baked at compile time via a new `crates/alint/build.rs`.
+  Bug reports can paste the full version string and a maintainer can
+  pinpoint the exact commit. Falls back gracefully to "unknown" when
+  built from a published tarball without a git tree.
+- **Operator polish — pre-filled GitHub-issue URL on panic.** A
+  custom panic hook prints a `https://github.com/asamarts/alint/issues/new?title=…&body=…`
+  link with version + OS + location + payload pre-populated. Skipped
+  when `RUST_BACKTRACE` is set so the standard backtrace path stays
+  unchanged for developers.
+- **`SECURITY.md` adds an explicit "Telemetry-free" guarantee** —
+  `alint sends nothing over the network at runtime`, with a
+  verifiable `strace -e trace=network` command. Closes the
+  trust-on-first-run gap for security-team adopters.
+
+No engine changes; all bench-relevant code paths unchanged. The
+release exists to make alint configs obviously-correct at write
+time, parse time, and run time — the P2a pass proved that without
+this layer of DX, real adopters silently drift into broken-but-
+parseable rules (we found seven such drifts in our own evidence
+configs before they shipped to launch readers).
+
+### Added
+
+- **`docs/development/CONFIG-AUTHORING.md` — 17-pitfall catalogue
+  (Phase 1).** Every pitfall the P2a validation pass surfaced, with
+  the canonical-correct YAML alongside. Authors writing a new
+  `.alint.yml` are pointed here as the cheat sheet, with explicit
+  notes for AI agents drafting configs against rule-source memory
+  rather than the doc.
+- **`crates/alint-e2e/tests/coverage_audit_examples_parse.rs` —
+  examples-parse audit (Phase 2).** Every shipped
+  `examples/*/.alint.yml` MUST load + build cleanly via
+  `alint_dsl::load` + `RuleRegistry::build`. Schema drift surfaces
+  at PR time. Catches the 12 schema-rename-class pitfalls
+  transitively. New companion check
+  (`every_example_carries_the_yaml_language_server_directive`)
+  enforces the LSP-magic-comment line on every example.
+- **`crates/alint-e2e/tests/coverage_audit_rules_md_drift.rs` —
+  per-ruleset table drift audit.** Walks every YAML under
+  `crates/alint-dsl/rulesets/v1/`, parses every `### `alint://bundled/...@v1``
+  section in `docs/rules.md`, asserts identical rule-id sets per
+  ruleset. Caught the same drift class on 3 more rulesets the day
+  it landed (ci/github-actions, agent-hygiene, agent-context); all
+  fixed in the same commit. Closes the audit gap that let the
+  oss-baseline 8/9/11/15 drift slip through during P2a.
+- **Did-you-mean parse errors (Phase 3).** New
+  `crates/alint-core/src/did_you_mean.rs` module with two-tier
+  resolution: curated overrides for the highest-drift renames
+  (`argv→command`, `secondary→partner`, `style→target`,
+  `pattern→prefix|suffix`, `matches↔equals` for the structured-path
+  family) plus a Levenshtein fallback (distance ≤ 2) for the long
+  tail. Hooked at `RuleRegistry::build` — no per-rule edits.
+  18 unit tests + 9 integration tests covering 6 pitfalls
+  end-to-end. Side-effect: added `#[serde(deny_unknown_fields)]` to
+  `EqualsOptions` and `MatchesOptions` in `structured_path.rs` so
+  pitfall #16 (`matches:` ↔ `equals:` rename) surfaces as
+  unknown-field rather than missing-required.
+- **Domain-specific error messages (Phase 4).** Five pitfalls now
+  produce hint-bearing errors instead of generic parser output:
+  - **#10 — JSONPath dashed-key access.** New
+    `crates/alint-core/src/jsonpath_diagnostics.rs` inspects path
+    sources for `.<dashed-ident>` patterns (top-level OR inside
+    filter expressions) and suggests bracket notation.
+  - **#11 — `scope_filter.has_ancestor` with path separator.** The
+    error now points at `paths:` glob as the alternative for
+    directory scoping.
+  - **#12a — `&&`/`||`/`!` in `when:`.** Parse-error wrapper
+    detects symbolic operators and suggests the
+    `and`/`or`/`not` keyword.
+  - **#12b — `iter.foo.bar(...)` method-call shape.** Global
+    regex catches the double-dot chain and points at the
+    `matches` operator.
+  - **#15 — `file_starts_with.prefix: ""`.** Build-time error
+    now points at `file_min_lines: 1` / `file_min_size: <bytes>`
+    as the right tool for non-emptiness checks.
+- **JSON Schema editor-LSP wiring (Phase 5).** New audit at
+  `crates/alint-e2e/tests/coverage_audit_schema_drift.rs` walks
+  the `rule_kind_dispatch` oneOf, extracts every kind name
+  (handles both single-`const` and multi-name `enum`
+  discriminators for legacy aliases), and verifies registry ↔
+  schema parity. Five spot-check tests exercise pitfalls
+  #1/#4/#9/#15/#16 against the live schema via the `jsonschema`
+  crate, asserting they're rejected at edit-time. Plus the
+  `# yaml-language-server: $schema=…` magic comment was added to
+  all 20 example configs and a companion audit keeps it there.
+- **`alint validate-config <path>` subcommand (Phase 6).**
+  Parse-only command (no tree walk) that runs the full load +
+  build + when-parse path and reports pass/fail. Accepts a file
+  or directory. Two output formats: `human` (one-liner stdout +
+  error chain on stderr) and `json` (stable
+  `{valid, rule_count, config_path, error}` envelope). Exit
+  codes: 0 valid / 1 invalid / 2 invocation error. Did-you-mean
+  hints from Phases 3 + 4 flow through transparently — covered
+  by a trycmd test that exhibits an `argv` typo and asserts the
+  canonical-correct hint appears.
+- **Smoke-test fixture audit (Phase 7).** New audit at
+  `crates/alint-e2e/tests/coverage_audit_smoke_fixtures.rs`
+  closes the runtime-semantic gap left by Phases 1-6. Walks
+  `crates/alint-e2e/fixtures/smoke/<scenario>/` directories;
+  each scenario is a self-contained config + file tree +
+  `expected.toml` with canonical violation counts. The audit
+  runs the engine over each tree and asserts actuals match —
+  a refactor that silently re-introduces pitfalls #13 (regex
+  anchoring), #14 (YAML `\n` in regex), #16 (`*_path_matches`
+  + bool), or #17 (`*_path_equals` + `[*]`) changes the count
+  and fails. Initial coverage: 4 fixtures targeting the four
+  classes. Sanity-verified by deliberately removing `(?m)`
+  from a fixture rule (audit failed) and restoring it (audit
+  green).
+- **20 P2a case studies** under `examples/<owner>-<repo>/`:
+  kubernetes/kubernetes, rust-lang/rust, golang/go,
+  python/cpython, nodejs/node, apache/airflow, denoland/deno,
+  tokio-rs/tokio, astral-sh/uv, astral-sh/ruff, clap-rs/clap,
+  microsoft/typescript, facebook/react, prettier/prettier,
+  pnpm/pnpm, helm/helm, pytorch/pytorch, vercel/turbo, plus
+  two polyglot wins (vercel/next.js, apache/arrow). Each is a
+  working `.alint.yml` + a markdown writeup of what alint
+  catches that the repo's existing tooling doesn't. The
+  `examples/README.md` gallery organises them by the five
+  positioning narratives surfaced.
+
+### Fixed
+
+- **6 bool-match rules** in committed `examples/*/.alint.yml`
+  configs that were silently broken by pitfall #16
+  (`*_path_matches` against bool fields produces a runtime
+  "not a string" error on every match). Switched to
+  `*_path_equals` with native YAML bool literals: typescript
+  ×2 (`compilerOptions.strict`, `compilerOptions.checkJs`),
+  vercel/turbo (replaced with `file_content_matches` for the
+  either-of-many-bools case), tokio (`package.publish`),
+  ruff (`package.publish`), pnpm (`engineStrict`).
+- **deno's `deno-dlint-includes-camelcase` rule** was silently
+  broken by pitfall #17 (`*_path_equals` against `[*]` flips
+  intent from "any" to "every"). Switched to
+  `file_content_matches` against the JSON text.
+- **`oss-baseline@v1` ruleset count drift.** The bundled YAML
+  has 15 rules; `docs/rules.md` claimed "Nine rules" but
+  listed 11; the alint.org compare-page draft said 8. All
+  three reconciled to 15.
+- **JSONPath outer-parens filter wasn't a real pitfall.** A
+  reported "pitfall #18" (the apache/arrow case study originally
+  claimed `?(...)` was rejected) was investigated against
+  `serde_json_path` 0.7.x and proven valid — the original
+  failure was a dashed-key inside the filter (an instance of
+  pitfall #10 in filter context), not the parens. Catalogue
+  dropped 18 → 17; the arrow case study now points at #10.
+
+### Changed
+
+- **`#[serde(deny_unknown_fields)]` is now uniform across the rule
+  catalogue.** Added to `EqualsOptions` + `MatchesOptions` in
+  `structured_path.rs` (Phase 3 dependency for pitfall #16's
+  `matches:` ↔ `equals:` rename to surface as unknown-field
+  rather than missing-required), and as a v0.9.16 sweep to 13
+  more rule Options structs that previously silently accepted
+  unknown fields: `file_content_matches`, `file_content_forbidden`,
+  `file_header`, `file_footer`, `file_max_lines`, `file_max_size`,
+  `file_min_lines`, `file_min_size`, `file_shebang`, `filename_case`,
+  `filename_regex`, `commented_out_code`, `markdown_paths_resolve`.
+  This is the behaviour change the original v0.9.15 plan flagged
+  for "v0.9.16+" — the launch-prep deliberation chose to roll it
+  into the same release rather than ship a half-cooked uniformity
+  story. Adopters whose configs had stray fields on these rule
+  kinds will now see clean unknown-field errors with did-you-mean
+  hints instead of silent acceptance.
+- **`crates/alint-e2e/fixtures/smoke/content_matches_yaml_newline_canonical/`**
+  — additional smoke fixture covering pitfall #14 (YAML `\n`
+  in regex patterns). Phase 7 shipped 4 fixtures; v0.9.16 adds
+  this 5th to bring per-pitfall regression coverage uniform.
+
+### Marketing drafts (not yet published)
+
+`docs/marketing/STATE.md` is the new single source of truth for
+what's live, stale, and drafting across the README + alint.org
+surfaces. Seven drafts under `docs/marketing/drafts/` are queued
+for publish coordinated with this release's docs roll:
+
+- `readme-hero.md` — incremental polish on the README hero adding
+  the case-study social proof + 5-narrative section.
+- `alint-org-hero.md` — content brief for the alint.org landing
+  with version badge, speed claim in the hero bullets,
+  Repolinter-archived-2026 framing, and the 20-case-study link.
+- `alint-org-examples-gallery.md` — content brief for the new
+  `/examples/` route + auto-synced per-case-study sub-pages.
+- `alint-org-compare.md` — direct comparison table vs Repolinter,
+  ls-lint, Megalinter, EditorConfig, and custom shell scripts.
+- `migrate-from-repolinter.md`, `migrate-from-ls-lint.md`,
+  `migrate-from-custom-bash.md` — three step-by-step migration
+  guides. Repolinter is the highest-intent SEO target.
+
+The drafts are not part of the v0.9.15 binary release; they ship
+when the alint.org site repo is updated next.
+
 ## [0.9.14] — 2026-05-05
 
 CI automation release. The `bench-record.yml` workflow that

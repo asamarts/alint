@@ -19,6 +19,7 @@ Commands:
   init              Scaffold a starter `.alint.yml` based on the repo's detected ecosystem (and optionally workspace shape). Refuses to overwrite an existing config — delete the existing one first if you really mean it
   export-agents-md  Generate (or maintain a section of) `AGENTS.md` from the active rule set, so the agent's pre-prompt directives stay in sync with the lint config. Outputs to stdout by default; use `--output PATH` to write a file or `--inline --output PATH` to splice between `<!-- alint:start -->` / `<!-- alint:end -->` markers
   suggest           Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
+  validate-config   Parse-validate an `.alint.yml` (resolves `extends:`, builds every rule, parses every `when:`) and report any errors — without walking the tree. For editor LSP, pre-commit hooks, and fail-fast CI steps that just want to know "is the config loadable?". Exit 0 on success; exit 1 on validation failure
   help              Print this message or the help of the given subcommand(s)
 
 Options:
