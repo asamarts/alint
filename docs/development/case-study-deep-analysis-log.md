@@ -449,6 +449,43 @@ Plus a seventh (single-source, low priority):
 
 A concrete to-do list of what's flagged but not yet done.
 
+### Version-tier assignment (decided 2026-05-06)
+
+The findings below are tiered into release windows:
+
+- **v0.9.18 (pre-launch, all in one tier):** All 6 bundled-ruleset
+  fixes (refinements 1-5 + the missing TF tensorflow rule-premise
+  scope) PLUS the 3 case-study config bugs (TypeScript pitfall #22
+  + level lower; deno defensive `|-`; tensorflow drop-or-scope rule).
+  PLUS the cross-cutting revalidation pass (re-run alint against
+  all 30 trees + update README §4/§5/§6 with post-fix counts).
+  PLUS audit extension (`coverage_audit_smoke_fixtures` regression
+  fixtures for A1/A3/A4/A6).
+- **v0.10 (next major):** 8 ship-target rule kinds incl. promoted
+  `command_idempotent`. 2 ship-target bundled rulesets
+  (`apache/governance@v1`, `dotnet@v1`). 4 v0.10 design candidates
+  (`command_per_repo` mode, `*_path_contains`, `pair_inverse`,
+  `json_schema_passes` config-shape mode). LSP server (per existing
+  roadmap). The `monorepo/cargo-workspace@v1` `{members}` selector
+  refinement folds into A4.
+- **v0.11+:** WASM plugins, `cross_language_implementation_complete`,
+  Bazel-licensing-declaration-aware rule kind,
+  `walk_error_policy:` engine knob. Single-source design candidates
+  (`json_key_sort_order`, `column_alignment`, `line_spacing`,
+  `not_executable`, `directory_hash`, `pair {stem_all}`,
+  `Format::Jsonc`) — most won't survive demand-validation as the
+  case-study corpus grows; that's expected.
+- **P5 post-launch:** ~20 real upstream findings (flutter
+  Trojan-Source, spark GHA permissions, react/turbo/next.js
+  publish=false drift, bazel Apache header gaps, tensorflow
+  TFLite test-coverage gaps, etc.). File one issue or PR per
+  upstream repo as time and relationship allow.
+
+The remainder of this section enumerates the items by category;
+the tier mapping above is authoritative.
+
+### Items by category
+
 **Pitfall #22 instances:**
 - **scope: TypeScript** | 2 confirmed pitfall #22 instances pending
   fix decision — `ts-copyright-header-src` (line 104) and

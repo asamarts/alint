@@ -54,16 +54,84 @@ rust + node + python over `crates/` + `packages/` + `apps/`)
 captures the dispatch shape this primitive was designed for.
 Full design: [`docs/design/v0.9/scope-filter.md`](./v0.9/scope-filter.md).
 
-**Next: v0.10 — LSP server.** Inline diagnostics, hover
-with rule documentation, code actions for "add to ignore"
-and "apply fix", VS Code extension. The per-file dispatch
-shape from v0.9.3 directly powers the per-file-edit
-re-evaluation hot path; v0.9.4 broadens its applicability
-across the rule catalogue; v0.9.5's `FileIndex::contains_file`
-is itself useful for v0.10 (a single-file edit only needs
-to re-test rules whose `path_scope` matches that path —
-existing contains-checks become O(1)). WASM plugins shift
-to v0.11.
+**Next: v0.9.18 — pre-launch fixes (single tier, ship before P4
+announcement).** The v0.9.17 deep-analysis pass (30 case studies,
+`docs/development/case-study-deep-analysis-log.md`) surfaced 6
+bundled-ruleset bugs + 3 case-study config bugs that need fixing
+before public launch. Zero engine bugs surfaced — these are all
+rule-scope or pattern issues. Concrete items:
+
+- 6 bundled-ruleset fixes (A1-A6 in the deep-analysis log):
+  `hygiene-no-js-build-outputs` requires sibling `package.json`;
+  `apache-2-source-has-license-header` bundles long-form pattern;
+  `python@v1` default-excludes test-fixture paths;
+  `monorepo/cargo-workspace@v1` parses `[workspace] members:`;
+  `oss-license-exists` recognises LICENSE.TXT + LICENSE.md;
+  `rust@v1`'s `rust-sources-snake-case` gets `allow_compiler_naming`.
+- 3 case-study config fixes: TypeScript pitfall #22 + level
+  lower; Deno defensive `|-`; TensorFlow drop the rule-premise
+  mismatch.
+- Cross-cutting revalidation: re-run alint against all 30 trees
+  + update READMEs to reflect post-fix violation counts.
+- Audit extension: `coverage_audit_smoke_fixtures` covers
+  bundled-ruleset regression scenarios.
+
+**Next major: v0.10 — LSP server + 8 ship-target rule kinds + 2
+ship-target bundled rulesets.** Inline diagnostics, hover with
+rule documentation, code actions for "add to ignore" and "apply
+fix", VS Code extension. The per-file dispatch shape from v0.9.3
+directly powers the per-file-edit re-evaluation hot path;
+v0.9.4 broadens its applicability across the rule catalogue;
+v0.9.5's `FileIndex::contains_file` is itself useful for v0.10
+(a single-file edit only needs to re-test rules whose
+`path_scope` matches that path — existing contains-checks
+become O(1)).
+
+v0.10 also ships the 8 rule kinds the case-study corpus has
+demand-saturated:
+
+- `cross_file_value_equals` (11 sources, past saturation)
+- `xml_path_matches` / `xml_path_equals` (2 sources at scale —
+  spark + dotnet/runtime ~7,100 manifests)
+- `registry_paths_resolve` (8 sources)
+- `ordered_block` (7 sources)
+- `generated_file_fresh` (6 sources)
+- `import_gate` (4 sources)
+- `pair_hash` (3 sources, golang FIPS canonical)
+- `command_idempotent` (5+ sources — promoted from design
+  candidate via deep-analysis aggregation)
+
+Plus 2 ship-target bundled rulesets:
+
+- `apache/governance@v1` — 3 Apache TLPs converge (arrow + spark
+  + airflow) on 9 of 12 governance artefacts; A2 fix is a
+  prerequisite
+- `dotnet@v1` — large adopter surface (every dotnet/* + Azure
+  SDK + microsoft/* .NET project)
+
+Plus 4-5 v0.10 design candidates (lower demand, opportunistic):
+`command_per_repo` mode, `*_path_contains`, `pair_inverse`,
+`json_schema_passes` config-shape mode, `pair {stem_all}` token
+if a 2nd source surfaces.
+
+**v0.11+: WASM plugins + cross_language_implementation_complete
++ design-candidate ship + Bazel-licensing-declaration-aware
+rule kind.**
+
+- WASM plugins (per existing v0.11 scope)
+- `cross_language_implementation_complete` (5 sources:
+  arrow + tensorflow + protobuf + angular + flutter)
+- Bazel-licensing-declaration-aware rule kind (1 source:
+  tensorflow's `licenses(["notice"])` discipline)
+- `walk_error_policy:` engine knob (1 source: pnpm broken-symlink
+  fixtures)
+- Single-source design candidates: `json_key_sort_order`,
+  `column_alignment`, `line_spacing`, `not_executable`,
+  `directory_hash` (most won't survive demand-validation; that's
+  fine).
+
+Full cross-cutting analysis + per-repo coverage table lives in
+[`docs/development/case-study-deep-analysis-log.md`](../development/case-study-deep-analysis-log.md).
 
 ## Positioning
 

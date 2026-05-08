@@ -6,6 +6,75 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.18] — TBD (pre-launch fixes)
+
+Findings from the v0.9.17 deep-analysis pass (30 case studies — see
+[`docs/development/case-study-deep-analysis-log.md`](docs/development/case-study-deep-analysis-log.md))
+surfaced 6 bundled-ruleset bugs + 3 case-study config issues. None
+were engine bugs; all are rule-scope, pattern, or default-exclude
+issues. v0.9.18 closes them before P4 launch.
+
+### Fixed (bundled rulesets — A1–A6)
+
+- **A1 — `hygiene-no-js-build-outputs` requires sibling
+  `package.json` ancestor.** Currently fires on any `dist/` or
+  `build/` directory, including non-JS contexts (e.g., k8s
+  shell-build outputs). Adding `scope_filter.has_ancestor:
+  package.json` constrains the rule to JS-package contexts where
+  the premise holds.
+- **A2 — `apache-2-source-has-license-header` ships a long-form
+  pattern as a bundled fact.** Apache TLPs (arrow, spark, airflow)
+  all require the long-form license header (~12 lines), but the
+  current rule only matches the short SPDX-Identifier form. Bundle
+  the long-form regex as a default opt-in.
+- **A3 — `python@v1` rules default-exclude test-fixture paths.**
+  Currently fire on `tests/fixtures/**`, `**/testdata/**`, and
+  `Lib/test/**` (cpython convention) — these legitimately contain
+  intentionally-malformed Python. Add to the ruleset's default
+  `paths.exclude:`.
+- **A4 — `monorepo/cargo-workspace@v1` selector parses
+  `[workspace] members:`.** Currently uses `for_each_dir
+  select: '**/Cargo.toml'`, which over-fires on non-workspace
+  Cargo.toml files. Switch to a `toml_path_array_iter` source
+  (`$.workspace.members`).
+- **A5 — `oss-license-exists` recognises `LICENSE.TXT` and
+  `LICENSE.md`.** Currently requires `LICENSE` exactly. Some
+  repos (notably ML/research projects) carry the file as
+  `LICENSE.txt` or `LICENSE.md`. Broaden to a `paths:` glob.
+- **A6 — `rust@v1`'s `rust-sources-snake-case` adds an
+  `allow_compiler_naming` knob (default false).** rust-lang/rust
+  itself has dozens of `compiler/**` files using deliberately
+  non-snake-case identifiers (e.g., `Inherent_*`, `Param_*`).
+  Knob defaults off; rust-lang/rust opts in.
+
+### Fixed (case-study configs — B1–B3)
+
+- **B1 — `examples/microsoft-typescript/.alint.yml`** —
+  pitfall #22 (`|` → `|-`) on the long-form license header
+  pattern; also lower the rule level from `error` to `info`
+  (TypeScript ships with `tsc.js` and other generated files
+  carrying their own headers; the rule is informational, not
+  blocking).
+- **B2 — `examples/denoland-deno/.alint.yml`** — defensive
+  pitfall #22 fixes on all `pattern: |` regex blocks.
+- **B3 — `examples/tensorflow-tensorflow/.alint.yml`** — drop
+  `tensorflow-bazel-files-have-apache-header` (or scope to
+  `BUILD.bazel` only — the rule's premise as written assumes
+  every file carries the header, but tensorflow's Bazel BUILD
+  files instead carry `licenses(["notice"])` declarations).
+
+### Validation
+
+- **Cross-cutting revalidation pass.** Re-run alint against all
+  30 case-study trees with the bundled-ruleset fixes applied,
+  update each `examples/<repo>/README.md` Section 4 (post-fix
+  violation counts) and Section 6 (gap discovery refinements
+  from the new behaviour).
+- **`coverage_audit_smoke_fixtures` extended.** Adds regression
+  fixtures for A1 (k8s no-build-output FP), A3 (cpython
+  test-fixture FP), A4 (rust-lang/rust workspace member parsing),
+  and A6 (compiler/** snake-case knob).
+
 ## [0.9.17] — 2026-05-06
 
 Corrective release that re-publishes v0.9.16's content + the

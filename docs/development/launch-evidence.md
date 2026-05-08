@@ -69,18 +69,21 @@ infra-validation):
 | Candidate | Demand | Notes |
 |---|---|---|
 | `registry_paths_resolve` (every path/key in a registry file resolves to an on-disk artefact) | 8 sources (rust, clap, cpython×2, next.js, arrow, pytorch, nodejs/node, NixOS×3) | Highest-leverage gap in P2a |
-| `cross_file_value_equals` (incl. `cross_file_field_equals` variant) | 10 sources (airflow, tokio, clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio) | Past-saturation demand. istio surfaces the per-file-extractor refinement (pitfall #20) |
+| `cross_file_value_equals` (incl. `cross_file_field_equals` variant) | 11 sources (airflow, tokio, clap, uv, react, pnpm, nodejs/node, pytorch, vscode, istio, dotnet/runtime) | Past-saturation demand. istio surfaces the per-file-extractor refinement (pitfall #20). dotnet/runtime SDK band coherence raises the count further |
 | `ordered_block` (lines between marker pairs sorted unique under configurable comparator) | 7 sources (rust, airflow, tokio, cpython, arrow, golang/go, protobuf failure_lists) | Ties with `registry_paths_resolve` at top of v0.10 backlog |
 | `xml_path_matches` / `xml_path_equals` | 2 sources (spark 49 pom.xml, dotnet/runtime ~2,300 XML manifests at one OOM bigger scale) | Completes the structured-query family (JSON/YAML/TOML/XML) |
 | `import_gate` (forbid imports of pattern X in path scope Y) | 4 sources (k8s, airflow, golang/go, pytorch) | Recurring shape |
 | `generated_file_fresh` (run a generator, diff output against on-disk file) | 6 sources (uv, cpython, pytorch, bazel, TF, spark) | Tension: alint's deliberate non-goal is running codegen — propose as opt-in primitive |
 | `pair_hash` (computed property of file A appears at offset Y in file A) | 3 sources (k8s, tokio, golang/go FIPS) | golang/go FIPS is the highest-stakes use case (CMVP submission references the file format) |
+| `command_idempotent` mode (run tool in --check mode, fail if working-tree would change) | 5+ sources (ruff, prettier, microsoft/typescript, deno, vscode) | **Promoted from v0.10 design via deep-analysis aggregation** (2026-05-06). mdformat, markdownlint, prettier, ruff-format, dprint-check, deno fmt --check, eslint --no-fix all share this shape. The ESLint/TypeScript surface alone makes this near-saturation across the JS/TS corpus |
 
-**v0.11+ ship-target:**
+**v0.11+ ship-targets:**
 
 | Candidate | Demand | Notes |
 |---|---|---|
 | `cross_language_implementation_complete` (every type in a schema spec has a per-language test fixture) | 5 sources (arrow, TF, protobuf, angular, flutter) | Densest source: protobuf (10 in-tree language bindings + 1 spun-out, ~45 cross-language assertions one rule would express). 3 distinct topologies — data-format-driven (arrow, TF, protobuf), within-language source↔golden (angular), platform-driven (flutter's 6 native-OS embedders) |
+| Bazel-licensing-declaration-aware rule kind (`licenses(["notice"])` BUILD-file discipline) | 1 source (tensorflow) | Tensorflow's pervasive `licenses(["notice"])` BUILD declaration discipline is unique enough to deserve a dedicated kind — Bazel itself doesn't use it the same way. Single-source, but the source is a 100k+ file tree with high alignment cost |
+| `walk_error_policy:` engine knob (`strict` / `skip-broken-symlinks` / `permissive`) | 1 source (pnpm) | pnpm's `tests/fixtures/has-broken-symlinks/` requires alint to walk past broken symlinks without erroring. Currently a `paths.exclude:` workaround. Engine knob is the principled fix |
 
 **v0.10 design candidates** (≥2 sources, or shape clarity):
 
@@ -88,7 +91,6 @@ infra-validation):
 |---|---|---|
 | `*_path_contains` (set-membership shorthand for "value X is present in array at JSONPath Y") | helm, deno, bazel | Resolves pitfall #17 directly |
 | `pair_inverse` (every partner traces back to a primary; reverse of `pair`) | ruff, angular | Snapshot freshness; covers `cargo insta --unreferenced=reject` and angular goldens parity |
-| `command_idempotent` mode (run tool in --check mode, fail if working-tree would change) | ruff, prettier | mdformat, markdownlint, prettier, ruff-format, dprint-check all share this shape |
 | `for_each_leaf_dir` / `iter.is_leaf` accessor | prettier, rust, ruff | Leaf-walk variant of `for_each_dir`. Extends existing rather than new kind |
 | `balanced_delimiters` + `file_pair_block_match` | rust, cpython×2 | tidy::rustdoc_css_themes + cpython Argument Clinic block markers |
 | `json_schema_passes` config-shape mode (validate config file against inline JSON Schema) | k8s, turbo | Replaces hand-rolled `argv:`-shape checks |
