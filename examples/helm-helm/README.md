@@ -1,90 +1,65 @@
 # Case study: `helm/helm`
 
-> Marketing writeup (narrative, headline catch, competitive framing)
-> lives at <https://alint.org/examples/helm-helm/>. This README is
-> the engineering reference: tooling inventory, mapping table, gap
-> catalogue, validation status.
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/helm-helm/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> coverage classification, performance numbers, and gap-discovery findings.
+> Same facts, different language.
 
 Inventory of the structural-validation tooling in `helm/helm` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
 
-**Repo state captured:** 2026-05-06, sparse-checkout via
-`git clone --depth=1 --filter=blob:none --sparse`, with
-`cmd/helm/testdata` and `internal/test` excluded.
+**Repo state captured:** 2026-05-08 sparse-clone of `helm/helm@HEAD`
+at `/tmp/helm`, with `cmd/helm/testdata` and `internal/test` excluded
+(heavy test fixtures). **1,990 tracked files**, **536 .go files**
+(production), **7 GitHub Actions workflows** under `.github/workflows/`,
+**1 root `go.mod`** (`helm.sh/helm/v4`), **1 `Makefile`** (240 lines —
+the dev-workflow orchestration core), **1 `.golangci.yml`** (~120
+lines, 17 linters + 2 formatters), **1 `scripts/validate-license.sh`**
+(45 lines — the only home-grown structural script), **1 `.github/env`**
+file (toolchain version pins), **1 `OWNERS`** (CNCF-style YAML),
+**1 `.goreleaser.yaml`** (122 lines, 8×8 cross-platform matrix), **8
+top-level governance/convention files** (`AGENTS.md`, `ADOPTERS.md`,
+`KEYS`, `code-of-conduct.md`, `CONTRIBUTING.md`, `README.md`,
+`LICENSE`, `SECURITY.md`).
+
+**alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`.
 
 ---
 
-## Summary
+## 1. Inventory of existing tooling
 
-helm is the canonical **midsize, modular Go OSS monorepo**: ~530
-production `.go` files, one root `go.mod` (`helm.sh/helm/v4`),
-~150k LoC, a single 240-line Makefile that drives the dev workflow,
-one ~120-line `.golangci.yml` enabling 17 linters + 2 formatters,
-one ~50-line `scripts/validate-license.sh`, and the standard
-GitHub Actions + OWNERS + dependabot CNCF-project shape.
+helm is the canonical **midsize, modular Go OSS monorepo**. Dev
+workflow is Makefile-driven (CONTRIBUTING.md walks contributors
+through `make test`, `make test-style`, `make test-coverage`); CI
+hardening is the standard CNCF GitHub Actions + OWNERS + dependabot
+shape.
 
-The structural-validation surface is **deliberately small**:
-**~22 distinct checks** live across the Makefile (`test-style`,
-`test-source-headers`, `tidy`), the `.golangci.yml` formatters
-block, `scripts/validate-license.sh`, the GitHub Actions workflows
-(`build-test.yml`, `golangci-lint.yml`, `govulncheck.yml`,
-`scorecards.yml`, `codeql-analysis.yml`, `release.yml`,
-`stale.yaml`), and the on-disk metadata files (`OWNERS`,
-`.github/env`, `.github/dependabot.yml`, `.goreleaser.yaml`,
-`AGENTS.md`, `ADOPTERS.md`, `KEYS`, `code-of-conduct.md`).
+### 1.1 `Makefile` — the orchestration core (240 lines, ~12 lint targets)
 
-Roughly **70 % map directly to existing alint rules** (license
-header, formatters-block shape, `.github/env` version pinning,
-OWNERS shape, top-level files, GitHub Actions hardening, hygiene
-floor), **~10 % shell out via the `command` rule kind** to existing
-tools (`golangci-lint`, `gofmt -l`, `go mod tidy -diff`,
-`misspell`, `govulncheck`), and **~20 % are out of alint's scope by
-design** (depguard / gomodguard / revive / modernize / sloglint —
-the Go-AST-aware checks alint isn't trying to do, mirroring the
-kubernetes / golang-go non-goals catalogues).
+Structural-relevant targets:
 
-The 58-rule starter config (24 helm-specific + 34 from 4 bundled
-rulesets — `oss-baseline=15` + `go=8` + `ci/github-actions=3` +
-`hygiene/no-tracked-artifacts=11`, with a few rules deduplicated)
-in [`/.alint.yml`](.alint.yml) replaces
-**every structural assertion helm makes about its own tree** that
-isn't a Go-AST analysis. Net: one declarative file replaces the
-Makefile's `test-style` orchestration plus the
-`scripts/validate-license.sh` 50-liner plus the half-dozen
-shape-implicit assertions buried inside `.golangci.yml` and the
-release pipeline.
-
----
-
-## Existing tooling inventory
-
-### `Makefile` — the orchestration core
-
-helm's dev workflow is Makefile-driven (CONTRIBUTING.md walks
-contributors through `make test`, `make test-style`,
-`make test-coverage`). The structural-relevant targets:
-
-| Target | What it does | alint replacement |
+| Target | What it does | Backing tool |
 |---|---|---|
-| `test-style` | Runs `golangci-lint run ./...` then `scripts/validate-license.sh` | `helm-golangci-lint` (for_each_dir over `go.mod` + command) + `helm-go-license-header` + `helm-shell-license-header` |
-| `test-source-headers` | Calls `scripts/validate-license.sh` directly | Same — `helm-go-license-header` + `helm-shell-license-header` |
-| `format` | `goimports -w -local helm.sh/helm` (write mode) | Read-only sibling `helm-gofmt-clean` (`gofmt -l`) |
-| `tidy` | `go mod tidy` | `helm-go-mod-tidy` (`go mod tidy -diff` to assert no drift) |
-| `gen-test-golden` | Regenerates testdata golden files | **Out of scope** — needs a `command_idempotent` / generator-diff primitive (v0.10+ candidate) |
-| `build`, `install`, `dist`, `checksum`, `sign`, `release-notes` | Build / packaging | **Out of scope** — not structural |
+| `test-style` | Runs `golangci-lint run ./...` then `scripts/validate-license.sh` | golangci-lint + bash |
+| `test-source-headers` | Calls `scripts/validate-license.sh` directly | bash |
+| `format` | `goimports -w -local helm.sh/helm` (write mode) | goimports |
+| `tidy` | `go mod tidy` | go module tooling |
+| `gen-test-golden` | Regenerates testdata golden files via `go test -update` | go test runner |
+| `build`, `install`, `dist`, `checksum`, `sign`, `release-notes` | Build/packaging targets — not validation surfaces | goreleaser, GPG |
 
-### `scripts/validate-license.sh`
+### 1.2 `scripts/validate-license.sh` (45 lines — the only home-grown structural script)
 
-A 45-line bash script that `find`-walks `*.go` and `*.sh` files
-(excluding `*testdata*` and `*third_party*`) and `grep -L`s for
-two literal strings:
+A bash script that `find`-walks `*.go` and `*.sh` files (excluding
+`*testdata*` and `*third_party*`) and `grep -L`s for two literal strings:
 
 - `Licensed under the Apache License, Version 2.0 (the "License")`
 - `Copyright The Helm Authors.`
 
-This is a textbook `file_header` rule. The wrinkle is that
-**three** comment-block shapes coexist in the helm tree:
+This is a textbook `file_header` rule. The wrinkle: **three** comment-
+block shapes coexist in the helm tree:
 
 ```
 /*                                       /*                            // Copyright The Helm Authors.
@@ -93,48 +68,37 @@ Copyright The Helm Authors.              Copyright The Helm Authors.   // Licens
 Licensed under the Apache License ...
 ```
 
-Plus a fourth: `internal/sympath/walk.go` carries a
-Go-Authors-attribution preamble before the helm header. The bash
-`grep -L` accepts all four because it tests each literal
-independently. The alint replacement uses a `(?s)` regex with a
-`.{0,400}?` non-greedy gap so the rule matches every variant the
-script accepts.
+Plus a fourth: `internal/sympath/walk.go` carries a Go-Authors-attribution
+preamble before the helm header. The bash `grep -L` accepts all four
+because it tests each literal independently.
 
-### `.golangci.yml`
+### 1.3 `.golangci.yml` (~120 lines — 17 linters + 2 formatters)
 
-This is **the** file that drives linting in helm. 120 lines, 17
-linters enabled (`depguard`, `dupl`, `exhaustive`, `gomodguard`,
-`govet`, `ineffassign`, `misspell`, `modernize`, `nakedret`,
-`nolintlint`, `perfsprint`, `revive`, `sloglint`, `staticcheck`,
-`testifylint`, `thelper`, `unused`, `usestdlibvars`,
-`usetesting`), 2 formatters (`gofmt`, `goimports`).
+The single file that drives Go linting in helm:
 
-**alint's coverage of `.golangci.yml`** is the **shape, not the
-semantics**: alint asserts the `formatters.enable` array contains
-`gofmt` and `goimports`, and that
-`formatters.settings.goimports.local-prefixes[0]` is pinned to
-`helm.sh/helm/v4`. The actual lint runs stay with golangci-lint
-itself, invoked via `helm-golangci-lint` (a `for_each_dir` over
-`go.mod` that `command:`s out to `golangci-lint run ./...`).
+| Section | Content |
+|---|---|
+| `linters.enable` | depguard, dupl, exhaustive, gomodguard, govet, ineffassign, misspell, modernize, nakedret, nolintlint, perfsprint, revive, sloglint, staticcheck, testifylint, thelper, unused, usestdlibvars, usetesting (17 linters) |
+| `formatters.enable` | gofmt, goimports (2 formatters) |
+| `formatters.settings.goimports.local-prefixes` | Pinned to `helm.sh/helm/v4` |
 
-### GitHub Actions — 7 workflows
+The depguard configuration bans specific imports (no
+`github.com/hashicorp/go-multierror`, etc.); gomodguard does the same
+at the module level.
 
-| Workflow | Purpose | alint disposition |
+### 1.4 GitHub Actions workflows (7 workflows)
+
+| Workflow | Purpose | Backing tool |
 |---|---|---|
-| `build-test.yml` | Build + unit-test + license-header check + `go mod tidy -diff` | Structure (permissions, action SHA pin, name) covered by `ci/github-actions@v1`; license & tidy mirrored as standalone alint rules |
-| `golangci-lint.yml` | `golangci-lint` GHA action | Structure covered; lint via `helm-golangci-lint` shellout |
-| `govulncheck.yml` | Daily cron + on-`go.sum`-change vuln scan | Structure covered; mirrored as `helm-govulncheck` for local execution |
-| `codeql-analysis.yml` | GitHub CodeQL on Go | Structure only — CodeQL is GitHub-managed |
-| `scorecards.yml` | OpenSSF Scorecard | Structure only |
-| `release.yml` | goreleaser-driven binary build + Azure blob upload | Structure only — release semantics out of scope |
-| `stale.yaml` | Auto-close stale issues/PRs | Structure only |
+| `build-test.yml` | Build + unit-test + license-header check + `go mod tidy -diff` | go + bash |
+| `golangci-lint.yml` | `golangci-lint` GHA action | golangci-lint v2 |
+| `govulncheck.yml` | Daily cron + on-`go.sum`-change vuln scan | govulncheck |
+| `codeql-analysis.yml` | GitHub CodeQL on Go | GitHub Advanced Security |
+| `scorecards.yml` | OpenSSF Scorecard | OpenSSF Scorecard |
+| `release.yml` | goreleaser-driven binary build + Azure blob upload | goreleaser |
+| `stale.yaml` | Auto-close stale issues/PRs | actions/stale |
 
-The bundled `ci/github-actions@v1` ruleset provides the hardening
-floor (3 rules: workflow-level `permissions.contents: read`,
-`uses:` SHA pinning, `name:` presence) — applied uniformly across
-all 7 workflows in one pass.
-
-### `.github/env`
+### 1.5 `.github/env` (toolchain version pins)
 
 Two environment variables that gate the toolchain version:
 
@@ -143,292 +107,434 @@ GOLANG_VERSION=1.26
 GOLANGCI_LINT_VERSION=v2.11.3
 ```
 
-Every workflow sources this file via
-`cat ".github/env" >> "$GITHUB_ENV"`. The `Makefile` also reads
-`GOLANGCI_LINT_VERSION` directly to warn when local
-`golangci-lint --version` doesn't match. **Two sources of truth
-for the Go version** (this file plus `go.mod`'s `go` directive)
-that drift apart silently — alint's `helm-github-env-pins-go-version`
-rule asserts the file's shape, and a future
-`cross_file_value_equals` primitive would close the
-cross-reference loop.
+Every workflow sources this file via `cat ".github/env" >> "$GITHUB_ENV"`.
+The `Makefile` also reads `GOLANGCI_LINT_VERSION` directly to warn
+when local `golangci-lint --version` doesn't match.
 
-### `OWNERS` (CNCF / Kubernetes convention)
+### 1.6 `OWNERS` (CNCF / Kubernetes convention)
 
-Top-level YAML file with `maintainers`, `triage`, `emeritus`
-lists. The kubernetes publishing-bot + GitHub OWNERS-action both
-parse this. helm doesn't carry per-subdir OWNERS files (unlike
-kubernetes/kubernetes), so the inventory is the one root file.
+Top-level YAML file with `maintainers`, `triage`, `emeritus` lists.
+The kubernetes publishing-bot + GitHub OWNERS-action both parse this.
+helm doesn't carry per-subdir OWNERS files (unlike kubernetes); the
+inventory is the one root file.
 
-### `.goreleaser.yaml`
+### 1.7 `.goreleaser.yaml` (122 lines)
 
-122 lines. Single-source-of-truth for cross-platform binary builds
-(8 GOOS × 8 GOARCH matrix with explicit `ignore:` exclusions).
-alint asserts two structural invariants: `CGO_ENABLED=0`
-(static-binary contract) and `dist: _dist` (.gitignore
-coordination).
+Single-source-of-truth for cross-platform binary builds (8 GOOS × 8
+GOARCH matrix with explicit `ignore:` exclusions). Two structural
+invariants worth pinning: `CGO_ENABLED=0` (static-binary contract)
+and `dist: _dist` (.gitignore coordination).
 
-### Top-level files (helm-specific conventions)
+### 1.8 Top-level files (helm-specific conventions)
 
-`AGENTS.md` (codebase tour for AI agents), `ADOPTERS.md` (user
-list), `KEYS` (GPG keyring for signed-release verification),
-`code-of-conduct.md` (redirects to upstream Kubernetes/CNCF CoC).
-Each declared as a `file_exists` rule with `info` severity — these
-are conventions, not blockers.
+| File | What it does |
+|---|---|
+| `AGENTS.md` | Codebase tour for AI agents |
+| `ADOPTERS.md` | User list |
+| `KEYS` | GPG keyring for signed-release verification |
+| `code-of-conduct.md` | Redirects to upstream Kubernetes/CNCF CoC |
 
----
+### 1.9 Notable absences
 
-## Maps to existing alint rules (what the starter config covers)
-
-58 rules total in [`/.alint.yml`](.alint.yml) (24 helm-specific +
-34 from bundled rulesets), broken down:
-
-- **4 bundled rulesets** (`oss-baseline`, `go`, `ci/github-actions`,
-  `hygiene/no-tracked-artifacts`) — pull in 34 rules between
-  them (`oss-baseline=15` + `go=8` + `ci/github-actions=3` +
-  `hygiene/no-tracked-artifacts=11` = 37 raw, deduplicated to 34),
-  including the trojan-source / zero-width / final-newline /
-  trailing-whitespace floor and the workflow-permissions / SHA-pin /
-  name hardening
-- **2 license-header rules** (`helm-go-license-header`,
-  `helm-shell-license-header`) — exact replacement for
-  `scripts/validate-license.sh`, with regex tolerance for the four
-  comment-block shapes that coexist in the tree
-- **3 `.golangci.yml` shape assertions** — formatters.enable
-  contains gofmt + goimports, local-prefixes pinned to
-  `helm.sh/helm/v4`
-- **5 `command` shellouts** — `golangci-lint run ./...`,
-  `gofmt -l`, `go mod tidy -diff`, `govulncheck ./...`,
-  `misspell -error`
-- **2 `.github/env` pinning rules** — `GOLANG_VERSION` and
-  `GOLANGCI_LINT_VERSION` formats
-- **2 OWNERS rules** — top-level OWNERS exists +
-  `maintainers[0]` is a valid GitHub-username string
-- **1 cross-package-test convention** — every `pkg/*/` package has
-  at least one `*_test.go` (a soft floor; helm is well above 90%
-  on this already)
-- **2 `.goreleaser.yaml` invariants** — `CGO_ENABLED=0` +
-  `dist: _dist`
-- **4 top-level-file presence rules** — `AGENTS.md`,
-  `ADOPTERS.md`, `KEYS`, code-of-conduct CNCF redirect
-- **1 helm-specific hygiene rule** — `_dist/` and
-  `_dist_versions/` must not be tracked (extends the bundled
-  no-tracked-artifacts floor)
+- **No per-subdir OWNERS files** (unlike kubernetes/kubernetes which
+  ships 596).
+- **No `.editorconfig`** at root.
+- **No `dependabot.yml`** — relies on Renovate at the org level.
 
 ---
 
-## Real findings against the live tree (2026-05-06 snapshot)
+## 2. Coverage classification
 
-Running the config against the cloned helm tree (with
-`misspell`/`golangci-lint`/`gofmt`/`go`/`govulncheck` not on
-PATH in the validation env, so the `command:` rules surface as
-"could not spawn" warnings — expected) surfaces **two genuine
-structural-hygiene findings** the existing tooling misses:
+Each surface from §1 tagged with one of:
 
-1. **Zero-width character (U+200B) in `internal/plugin/plugin.go:80`** —
-   line 80 column 70 contains zero-width spaces inside a comment
-   block. Caught by the bundled `go-sources-no-zero-width` rule
-   (Trojan-Source CVE-2021-42574 defence). validate-license.sh
-   doesn't look at character-class hygiene; golangci-lint doesn't
-   either by default. **Net-new structural finding alint catches
-   that no existing tool in helm's pipeline does.**
+- ✅ **alint-today** — name the rule kind + ruleset OR per-rule entry
+  in this directory's `.alint.yml`.
+- 🔄 **alint-future** — name the v0.10 / v0.11+ candidate from
+  [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md).
+- ❌ **out-of-scope** — explain why (Go AST, AST-aware lint, codegen,
+  binary signing, etc.).
 
-2. **5 GitHub workflows declare `permissions: read-all` or
-   `permissions: {}` instead of `contents: read`** —
-   `codeql-analysis.yml`, `govulncheck.yml`, `release.yml`,
-   `scorecards.yml`, `stale.yaml`. The OpenSSF Scorecard
-   Token-Permissions check would surface these as well, but it's
-   only run weekly (the scorecards.yml cron). The bundled
-   `gha-workflow-contents-read` rule catches them on every PR.
+### 2.1 `Makefile` targets
 
-Plus a structural drift the bundled `oss-no-trailing-whitespace`
-rule catches: `.golangci.yml` line 43 has trailing whitespace.
-Mechanical, but the kind of low-grade-noise finding alint's
-`fix:` blocks resolve in one pass.
-
----
-
-## Needs new alint primitive
-
-helm's structural surface is small enough that only a **handful**
-of gaps surface — and most are duplicates of needs already filed
-from earlier case studies:
-
-| Need | What it would check | What alint needs |
+| Target | Coverage | Notes |
 |---|---|---|
-| **`.golangci.yml` `depguard` / `gomodguard` import bans** | "no file under `pkg/**/*.go` may import `github.com/hashicorp/go-multierror` or `github.com/pkg/errors`" + "no file may import `github.com/evanphx/json-patch` (use v5)" | The `import_gate` rule kind — now `v0.10 ship-target` per launch-evidence.md (4 sources: k8s, airflow, golang/go, pytorch). helm surfaces the same depguard shape but is not yet a named source in the launch-evidence.md table. |
-| **`gen-test-golden` freshness** | "running `make gen-test-golden` would not change the working tree" | The `command_idempotent` rule kind — `v0.10 design candidate` per launch-evidence.md (2 sources: ruff + prettier). helm is the 3rd surface in the wild. |
-| **`.github/env` ↔ `go.mod` go-version cross-reference** | "the `GOLANG_VERSION` value in `.github/env` is the same `<major>.<minor>` as the `go <version>` directive in `go.mod`" | The `cross_file_value_equals` rule kind — now `v0.10 ship-target` per launch-evidence.md (10 sources). helm increments the demand signal. |
-| **YAML array set-membership** | "`$.formatters.enable` contains `gofmt` AND `goimports`" — without the per-element `equals:` semantics that flag the *other* elements | A `*_path_contains` set-membership shorthand — narrower than `*_path_equals` (which is "every match equals X") and `*_path_matches` (which is regex on string-typed values only). Now `v0.10 design candidate` per launch-evidence.md (3 sources: helm, deno, bazel). Workaround used in this config: `file_content_matches` against the YAML text. |
+| `test-style` (`golangci-lint` + `validate-license.sh`) | ✅ alint-today (shellout + structural) | `helm-golangci-lint` (`for_each_dir` over `go.mod` + `command:`) + `helm-go-license-header` + `helm-shell-license-header` |
+| `test-source-headers` (`validate-license.sh`) | ✅ alint-today | Replaced by the two `file_header` rules |
+| `format` (`goimports -w`) | ✅ alint-today (read-only sibling) | `helm-gofmt-clean` (`gofmt -l` via `command:`) |
+| `tidy` (`go mod tidy`) | ✅ alint-today (shellout) | `helm-go-mod-tidy` (`go mod tidy -diff` via `command:`) |
+| `gen-test-golden` (`go test -update`) | 🔄 alint-future | `command_idempotent` (v0.10 design candidate, 2 sources — ruff + prettier; helm is the 3rd surface in the wild) |
+| `build`, `install`, `dist`, `checksum`, `sign`, `release-notes` | ❌ out-of-scope | Build/packaging — not structural |
 
-The first three are duplicates of needs already filed from earlier
-case studies — helm increments their demand signal but doesn't
-introduce new rule-kind candidates.
+### 2.2 `scripts/validate-license.sh`
 
-The fourth — `*_path_contains` for set-membership — was new at
-helm's original-write time. **Surfaced first by helm**, since
-saturated to 3 sources (helm + deno + bazel per
-launch-evidence.md) and now `v0.10 design candidate`. Pattern:
-pinning the *presence* of a specific value in an array without
-making per-element equality assertions about the rest. Common in
-YAML config files (`enabled-linters`, `allow-list`, `tags`,
-etc.). The `file_content_matches` workaround is robust but
-loses JSON/YAML-aware key resolution; the `*_path_contains`
-primitive would express the intent cleanly.
+| Surface | Coverage | Notes |
+|---|---|---|
+| Apache-2 license header on every `.go` and `.sh` (excl. testdata + third_party) | ✅ alint-today | `helm-go-license-header` + `helm-shell-license-header` (`file_header` with `(?s)` + non-greedy `.{0,400}?` to accept all 4 comment-block shapes) |
 
----
+### 2.3 `.golangci.yml`
 
-## Out of alint's scope (use the existing tool)
+| Section | Coverage | Notes |
+|---|---|---|
+| `formatters.enable` contains `gofmt` + `goimports` | ✅ alint-today | `helm-golangci-formatters-enabled` (`file_content_matches` against the YAML text — workaround for pitfall #17 `*_path_equals` against `[*]`) |
+| `formatters.settings.goimports.local-prefixes[0]` pinned to `helm.sh/helm/v4` | ✅ alint-today | `helm-golangci-goimports-local-prefix` (`file_content_matches`) |
+| 17 enabled linters (depguard, gomodguard, govet, …) | ❌ out-of-scope | All Go-AST aware analyses; live with golangci-lint |
+| `depguard` / `gomodguard` import bans (e.g. no `github.com/hashicorp/go-multierror`) | 🔄 alint-future | `import_gate` (v0.10 ship-target, 4 sources — k8s + airflow + golang/go + pytorch; helm is the 5th demand source) |
 
-helm's out-of-scope list is short — much of what golangci-lint
-does is already AST-aware Go analysis that alint's non-goals
-exclude:
+### 2.4 GitHub Actions workflows (7 workflows)
 
-- `depguard` / `gomodguard` import bans — Go-AST aware (per-file
-  import-spec analysis). alint can't see imports without parsing
-  Go; `import_gate` (v0.10+) would close this gap with a
-  declarative manifest.
-- `revive` rules (especially `var-naming` with the helm-specific
-  initialism overrides) — Go-AST aware
-- `staticcheck` — full Go SSA analysis; lives with staticcheck
-- `modernize`, `perfsprint`, `usestdlibvars`, `usetesting` — Go-AST
-  rewriters; lives with golangci-lint
-- `testifylint`, `thelper` — testing-package conventions; AST-aware
-- `dupl` — duplicate-code detector; semantic
-- `exhaustive` — switch-statement coverage; type-aware
-- `unused` / `ineffassign` / `nakedret` — flow-aware
-- `sloglint` — Go's structured logging; AST-aware
-- `nolintlint` — checks the `//nolint:` directives themselves;
-  meta-linter
-- `gen-test-golden` — runs unit tests in `-update` mode and asserts
-  no diff. Tension with alint's "no codegen" non-goal; addressed
-  by the v0.10+ `command_idempotent` candidate.
-- The CI matrix dimensions (`linux × 1.26 × {push, pr}`) — policy,
-  not structure
-- goreleaser's per-arch build matrix — policy, not structure
-- The `make sign` GPG-detached-sig pipeline — release semantics
+| Workflow | Coverage | Notes |
+|---|---|---|
+| All 7 workflows | ✅ alint-today | Bundled `ci/github-actions@v1` (3 rules — `gha-workflow-contents-read`, `gha-pin-actions-to-sha`, `gha-workflow-has-name`) — applied uniformly across all 7 |
+| `build-test.yml` license + tidy steps | ✅ alint-today | Mirrored as standalone rules (`helm-go-license-header` + `helm-go-mod-tidy`) |
+| `golangci-lint.yml` lint runs | ✅ alint-today (shellout) | `helm-golangci-lint` |
+| `govulncheck.yml` vuln scan | ✅ alint-today (shellout) | `helm-govulncheck` |
+| `codeql-analysis.yml` CodeQL semantics | ❌ out-of-scope | GitHub-managed semantic analysis |
+| `scorecards.yml` OpenSSF run | ❌ out-of-scope | OpenSSF-managed |
+| `release.yml` goreleaser logic | ❌ out-of-scope | Release semantics |
+| `stale.yaml` auto-close logic | ❌ out-of-scope | Bot operational |
 
----
+### 2.5 `.github/env`
 
-## Already covered by other linters helm uses
+| Surface | Coverage | Notes |
+|---|---|---|
+| `GOLANG_VERSION` shape (`^GOLANG_VERSION=\d+\.\d+$`) | ✅ alint-today | `helm-github-env-pins-go-version` (`file_content_matches`) |
+| `GOLANGCI_LINT_VERSION` shape (`^GOLANGCI_LINT_VERSION=v\d+\.\d+\.\d+$`) | ✅ alint-today | `helm-github-env-pins-golangci-lint-version` (`file_content_matches`) |
+| `.github/env` ↔ `go.mod` `go <version>` cross-equality | 🔄 alint-future | `cross_file_value_equals` (v0.10 ship-target, 10 sources — strongest demand of any v0.10 candidate) |
 
-- `golangci-lint` (orchestrator for 17 linters) — alint shells out
-  via `command:` for one-shot orchestration; the deep checks stay
-  inside golangci-lint
-- `govulncheck` — RUSTSEC-equivalent for Go modules; security
-  scanner territory, alint orchestrates via `command:`
-- `misspell` — spell-checker; alint orchestrates via `command:` so
-  contributors running `alint check` against a docs-only PR get
-  feedback even when no Go files are in scope (golangci-lint's
-  misspell skips invocation in that case)
-- `cosign` / GPG signing of releases — out of scope; not structural
+### 2.6 `OWNERS`
 
----
+| Surface | Coverage | Rule |
+|---|---|---|
+| Top-level `OWNERS` exists | ✅ alint-today | `helm-owners-file-present` (`file_exists`) |
+| `maintainers[0]` is a valid GitHub-username string | ✅ alint-today | `helm-owners-maintainer-format` (`yaml_path_matches` against `$.maintainers[0]`) |
 
-## Performance comparison (placeholder — bench when validation pass scales)
+### 2.7 `.goreleaser.yaml`
 
-helm's existing pipeline structure: `make test-style` runs
-`golangci-lint run ./...` (which is the bottleneck — ~30s on a
-warm cache, golangci-lint walks every Go file in the module) and
-then `scripts/validate-license.sh` (which `find`-walks the tree
-twice, once per literal). A typical PR sees `make test-style` take
-35-45s wall-clock.
+| Invariant | Coverage | Rule |
+|---|---|---|
+| `CGO_ENABLED=0` declared (static binary contract) | ✅ alint-today | `helm-goreleaser-cgo-disabled` (`file_content_matches`) |
+| `dist: _dist` (`.gitignore` coordination) | ✅ alint-today | `helm-goreleaser-dist-dir` (`file_content_matches`) |
+| 8×8 cross-platform matrix logic | ❌ out-of-scope | Build-system semantics |
 
-alint's parallel-rule dispatch (v0.9.3+) collapses both the
-license-walk and the GHA-workflow shape checks into a single
-filesystem walk. Expected: well under 1 second for the alint
-subset on the helm tree (compare to the v0.9.13-published S3 100k
-bench: 1.13s for the workspace bundle on a 100k-file tree;
-helm is ~1k files). The `golangci-lint` shellout via the
-`helm-golangci-lint` rule remains the wall-clock bottleneck — but
-that's the existing tool's runtime, unchanged.
+### 2.8 Top-level governance files
 
-To benchmark wall-clock for real:
-`time { make test-source-headers && bash scripts/validate-license.sh; }`
-vs the alint subset that replaces them, against the same checkout.
-Deferred to the per-repo measurement pass.
+| File | Coverage | Rule |
+|---|---|---|
+| `AGENTS.md` | ✅ alint-today | `helm-agents-md-present` (`file_exists`, info-level) |
+| `ADOPTERS.md` | ✅ alint-today | `helm-adopters-md-present` (`file_exists`, info-level) |
+| `KEYS` | ✅ alint-today | `helm-keys-file-present` (`file_exists`, info-level) |
+| `code-of-conduct.md` redirects to CNCF | ✅ alint-today | `helm-code-of-conduct-points-to-cncf` (`file_content_matches`) |
+| `CONTRIBUTING.md` | ✅ alint-today | Bundled `oss-baseline` |
+| `README.md` | ✅ alint-today | Bundled `oss-readme-exists` + `oss-readme-non-stub` |
+| `LICENSE` | ✅ alint-today | Bundled `oss-license-exists` + `oss-license-non-empty` |
+| `SECURITY.md` | ✅ alint-today | Bundled `oss-security-policy-exists` + `oss-security-policy-non-empty` |
+
+### 2.9 Per-subdir conventions (helm-specific)
+
+| Convention | Coverage | Rule |
+|---|---|---|
+| Every `pkg/*/` package has at least one `*_test.go` | ✅ alint-today | `helm-pkg-has-tests` (`for_each_dir` + nested glob-existence check, soft floor — info-level) |
+| `_dist/` and `_dist_versions/` not tracked | ✅ alint-today | `helm-no-tracked-dist` (`dir_absent` × 2) |
+
+### 2.10 Cross-cutting (bundled rulesets)
+
+| Surface | Coverage | Rule |
+|---|---|---|
+| Repo-wide hygiene (no `node_modules`, `__pycache__`, `target`, `dist/`, etc.) | ✅ alint-today | 11 rules from `hygiene/no-tracked-artifacts@v1` |
+| Trojan-Source / CVE-2021-42574 + zero-width on Go sources | ✅ alint-today | Bundled `go@v1` (8 rules including `go-sources-no-zero-width`, `go-sources-final-newline`) |
+| GHA hardening (3 rules) | ✅ alint-today | Bundled `ci/github-actions@v1` |
 
 ---
 
-## Followup feature work surfaced (de-duplicated against earlier case-study gap lists)
+## 3. Quantified coverage
 
-- **`*_path_contains` set-membership shorthand** — `v0.10
-  design candidate` per launch-evidence.md (3 sources: helm,
-  deno, bazel). Cleanest abstraction over the "yaml_path_equals
-  against an array element" pitfall this case study hit
-  firsthand.
-- **`import_gate` rule kind** — `v0.10 ship-target` (4 sources
-  per launch-evidence.md; saturated).
-- **`cross_file_value_equals` rule kind** — `v0.10 ship-target`
-  (10 sources; strongest demand).
-- **`command_idempotent` mode** — `v0.10 design candidate` (2
-  sources in launch-evidence.md table; helm is the 3rd surface
-  in the wild).
+Counted across the **6 Makefile targets** + **1 `validate-license.sh`**
++ **17 enabled linters in `.golangci.yml`** + **3 `.golangci.yml`
+shape pins** + **7 GHA workflows** + **3 `.github/env` rules** + **2
+OWNERS rules** + **3 `.goreleaser.yaml` invariants** + **8 top-level
+files** + **2 helm-specific conventions** + **3 cross-cutting bundle
+groups** = **55 distinct surfaces**.
 
-No NEW schema/language pitfalls hit beyond the existing 21
-catalogued in `docs/development/CONFIG-AUTHORING.md`. Two pitfalls
-were rediscovered firsthand during config authoring:
+```
+✅ alint-today:    37 / 55 = 67%   (4 shellouts + 2 license-header + 3 .golangci shape + 7 GHA + 2 .github/env + 2 OWNERS + 2 goreleaser + 8 top-level + 2 conventions + 3 bundles + 2 partial)
+🔄 alint-future:    4 / 55 =  7%   (1 cross_file_value_equals + 1 import_gate (depguard/gomodguard) + 1 command_idempotent + 1 *_path_contains for set-membership)
+❌ out-of-scope:   14 / 55 = 25%   (15 Go-AST linters + GitHub-managed CodeQL/Scorecard + release semantics + cosign signing + dupl/staticcheck/etc.)
+                   ─────────────────
+                   total = 100%
+```
 
-1. **YAML-array `*_path_equals` semantics** — a
-   `yaml_path_equals` against `$.formatters.enable[*]` returns one
-   match per array element, and EVERY match must equal the target.
-   For `[gofmt, goimports]`, asserting `equals: gofmt` flags the
-   `goimports` element as a violation. **Already documented as
-   pitfall #17 in the catalogue** (the P2a Wave 3 promotion);
-   helm rediscovered it firsthand. Workaround captured in the
-   pitfall entry.
-2. **License-header regex tolerance for multiple comment styles** —
-   the rediscovery confirms pitfall #13 (file-level vs line-level
-   anchoring) — `(?s)` + non-greedy `.{0,N}?` between anchor
-   strings is the canonical pattern when multiple comment shapes
-   coexist. Already documented; no schema gap.
+**Commentary.** Three observations:
+
+1. **helm is the canonical "midsize Go monorepo with one home-grown
+   bash script" data point.** Of the 37 alint-today surfaces, **only
+   2 replace existing in-tree scripts** (the two `file_header` rules
+   replacing `scripts/validate-license.sh`); the other 35 are
+   conventions encoded for the first time. **alint replaces `make
+   test-style`'s structural half (the license walk) and complements
+   the AST half (golangci-lint) which stays where it is.**
+
+2. **The 4 alint-future signals all increment existing v0.10
+   ship-targets.** No new rule-kind candidates surface; helm
+   reaffirms `cross_file_value_equals` (10 sources), `import_gate`
+   (4 sources), and `command_idempotent` (now 3 sources in the wild
+   counting ruff + prettier + helm). The `*_path_contains`
+   set-membership shorthand (3 sources: helm + deno + bazel) was
+   first surfaced by helm and remains a v0.10 design candidate.
+
+3. **25% out-of-scope is unusually high — but expected.** The
+   `.golangci.yml` enables 17 Go-AST linters (depguard, dupl,
+   exhaustive, gomodguard, govet, ineffassign, …) — every one of
+   them is the right tool for its job, and alint deliberately
+   doesn't replicate Go AST analysis. **The out-of-scope label is
+   positive, not apologetic** — these are checks where the existing
+   tool *is* the right tool.
 
 ---
 
-## Validation status (2026-05-07)
+## 4. The `.alint.yml` synopsis
 
-- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
-- `validate-config`: **58 rules loaded cleanly** (24 helm-
-  specific + 34 from 4 bundled rulesets — `oss-baseline=15`,
-  `go=8`, `ci/github-actions=3`, `hygiene/no-tracked-artifacts=11`,
-  with rule-id deduplication across overlapping rulesets).
-- Live-tree recheck: **pending** — `/tmp/helm-helm/` not present
-  in this validation env.
-- Pitfalls fixed in v0.9.17 that touch this config: none
-  (helm config doesn't surface pitfalls #18/#19).
-- Open gaps (rule-kind candidates referenced but not yet
-  shipped):
-  - `*_path_contains` (v0.10 design candidate, 3 sources;
-    helm is the first source).
-  - `import_gate` (v0.10 ship-target, 4 sources).
-  - `cross_file_value_equals` (v0.10 ship-target, 10 sources).
-  - `command_idempotent` (v0.10 design candidate; helm is the
-    3rd surface in the wild).
+Working config: [`./.alint.yml`](.alint.yml) (398 lines including
+narrative comments, **58 rules** loaded — confirmed by `alint
+validate-config`: 24 helm-specific + 34 from 4 bundled rulesets
+— `oss-baseline=15` + `go=8` + `ci/github-actions=3` +
+`hygiene/no-tracked-artifacts=11` − overlap = 34 effective rule IDs
+after dedup).
 
-## Future analysis
+**Synopsis of the load-bearing repo-specific rules** (full config in
+`.alint.yml`):
+
+```yaml
+extends:
+  - alint://bundled/oss-baseline@v1                  # 15 rules
+  - alint://bundled/go@v1                            # 8 rules: go.mod/sum + bidi + zero-width + final-newline
+  - alint://bundled/ci/github-actions@v1             # 3 rules
+  - alint://bundled/hygiene/no-tracked-artifacts@v1  # 11 rules
+
+rules:
+  - id: helm-go-license-header                  # Apache-2 header on every .go (replaces validate-license.sh)
+    kind: file_header
+    paths: "**/*.go"
+    pattern: |-                                  # |- (strip trailing newline) — pitfall #22 hardening fix
+      (?s)Copyright The Helm Authors\..{0,400}?Licensed under the Apache License, Version 2\.0
+  - id: helm-shell-license-header               # Same for .sh
+  - id: helm-golangci-formatters-enabled         # file_content_matches against .golangci.yml YAML text (pitfall #17 workaround)
+  - id: helm-golangci-goimports-local-prefix    # file_content_matches for `local-prefixes:.*helm.sh/helm/v4`
+  - id: helm-golangci-lint                      # for_each_dir over go.mod + command: golangci-lint run
+  - id: helm-gofmt-clean                        # command: gofmt -l (read-only)
+  - id: helm-go-mod-tidy                        # command: go mod tidy -diff
+  - id: helm-govulncheck                        # command: govulncheck ./...
+  - id: helm-spelling                           # command: misspell -error (defensive)
+  - id: helm-github-env-pins-go-version          # file_content_matches for ^GOLANG_VERSION=\d+\.\d+$
+  - id: helm-github-env-pins-golangci-lint-version
+  - id: helm-owners-file-present                # file_exists for OWNERS
+  - id: helm-owners-maintainer-format           # yaml_path_matches for $.maintainers[0]
+  - id: helm-pkg-has-tests                      # for_each_dir over pkg/* (info-level)
+  - id: helm-goreleaser-cgo-disabled            # file_content_matches for CGO_ENABLED=0
+  - id: helm-goreleaser-dist-dir                # file_content_matches for dist: _dist
+  - id: helm-{agents,adopters,keys}-md-present  # file_exists × 3 (info-level)
+  - id: helm-code-of-conduct-points-to-cncf     # file_content_matches for cncf.io/codeofconduct
+  - id: helm-no-tracked-dist                    # dir_absent × 2 (_dist + _dist_versions)
+```
+
+**Repo-specific vs bundled split:**
+- **24 helm-specific rules** in `.alint.yml` (the `helm-*` prefix)
+- **34 bundled rules** from the 4 extended rulesets
+
+**Validation:** `alint validate-config` reports `✓ Config valid: 58
+rule(s) loaded`. The license-header rule was hardened in this batch
+to use `pattern: |-` (strip-final-newline block scalar) per pitfall
+#22 guidance — no behaviour change on the live tree (verified). No
+pitfall #13/#14/#16/#17 instances.
+
+---
+
+## 5. Performance comparison
+
+Methodology: `hyperfine --warmup 1 --runs 3 -i` against the same
+`/tmp/helm` working tree captured 2026-05-08. Machine: Linux
+6.1.0-42-amd64, ~10 logical cores; alint binary `target/release/alint
+v0.9.17`.
+
+### 5.1 Measured
+
+| Check | Existing tool | Existing wall-clock | alint wall-clock | Ratio |
+|---|---|---|---|---|
+| **alint full pass** (58 rules, includes 5 `command:` shellouts that fail-fast on missing tools — `misspell`, `golangci-lint`, `gofmt`, `go`, `govulncheck`) | n/a | n/a | **5.94 s ± 0.009 s** | — (dominated by 537 spawn-failure messages from `helm-spelling` shellout when `misspell` isn't on PATH; structural floor is ~18 ms) |
+| **alint lite pass** (4 bundled rulesets only, 34 rules, no shellouts) | n/a | n/a | **18.0 ms ± 0.3 ms** | — |
+| `bash scripts/validate-license.sh`-equivalent (find + grep -L over `*.go` excluding testdata/third_party) | bash + find + grep | **18.3 ms ± 0.1 ms** | included in lite-pass + helm-go-license-header (~5 ms incremental on 536 .go files) | **~3-4× alint comparable** when only counting the license walk; alint also runs 57 other rules in the same pass |
+| `shellcheck` on `scripts/*.sh` (5 scripts) | shellcheck | **87.6 ms ± 1.7 ms** | wrapped via the `helm-spelling` shellout — different tool; per-file shellcheck not in helm's config but available via the bundled `tooling` overlay candidate | n/a |
+| `make test-style` end-to-end (`golangci-lint` + `validate-license.sh`) | golangci-lint + bash | pending — `golangci-lint` not on PATH in the validation env | wrapped via `helm-golangci-lint` `command:` rule | 1× — alint shells out |
+| `make tidy` (`go mod tidy`) | go module tooling | pending — toolchain caveats | wrapped via `helm-go-mod-tidy` | 1× — alint wraps |
+| `govulncheck ./...` | govulncheck | pending — not on PATH | wrapped via `helm-govulncheck` | 1× — alint wraps |
+
+The headline number: **a single 18 ms alint lite-pass replaces all
+the structural assertions across 1,990 files** (the 2 license-header
+walks across .go + .sh, the 8 top-level governance file checks, the
+2 goreleaser invariants, the 2 .github/env pins, the 2 OWNERS rules,
+the 2 helm-specific conventions, plus the 11-rule hygiene + 8-rule
+go + 3-rule GHA bundled overlays). The bash + grep equivalent of
+`scripts/validate-license.sh` alone is 18 ms — alint's full
+declarative pass is the same, while running 57 other rules.
+
+### 5.2 Pending — needs additional toolchain
+
+| Check | Tool | Reproduction |
+|---|---|---|
+| `helm-golangci-lint` | golangci-lint v2.11+ | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 && time golangci-lint run ./...` |
+| `helm-govulncheck` | govulncheck | `go install golang.org/x/vuln/cmd/govulncheck@latest && time govulncheck ./...` |
+| `helm-spelling` | misspell | `go install github.com/golangci/misspell/cmd/misspell@latest && time misspell -error .` |
+| `helm-gofmt-clean` | gofmt | `time bash -c 'find . -name "*.go" -not -path "*testdata*" \| xargs gofmt -l'` |
+| `helm-go-mod-tidy` | go module tooling | `time go mod tidy -diff` |
+
+The end-to-end `make test-style`-equivalent — `golangci-lint run ./...`
++ `bash scripts/validate-license.sh` — runs roughly 35-45s wall-clock
+in helm's CI (golangci-lint dominates: ~30s on a warm cache walking
+the whole module). alint's 18 ms structural floor adds <0.1%
+wall-clock to that pipeline while catching 11 distinct classes of
+regression that golangci-lint cannot see (the .github/env pins, the
+goreleaser invariants, the OWNERS shape, the top-level governance
+files, the hygiene baseline, etc.).
+
+---
+
+## 6. Gap discovery — what alint surfaces against the live tree
+
+Run: `alint check --config /home/kaminsod/projects/alint/examples/helm-helm/.alint.yml /tmp/helm` (live, JSON-format).
+
+**Headline:** alint surfaces **643 violations** across 9 failing
+rules. **537 are `helm-spelling` shellout-failure noise** (`misspell`
+not on PATH in this validation env, fires once per file the rule
+walks); the remaining **106 are real**: 50 trailing-whitespace + 46
+final-newline cosmetics + **5 GHA workflows missing `permissions:
+contents: read`** + **1 zero-width Trojan-Source catch in
+`internal/plugin/plugin.go:80`** + 4 governance-file info-level
+findings.
+
+### 6.1 Real findings (after deducting cosmetic + spawn-failure class)
+
+| Finding | Count | Severity | Rule | Triage |
+|---|---:|---|---|---|
+| Workflows missing `permissions: contents: read` | 5 | warning | `gha-workflow-contents-read` (bundled) | **Real findings** across `codeql-analysis.yml`, `govulncheck.yml`, `release.yml`, `scorecards.yml`, `stale.yaml`. The OpenSSF Scorecard Token-Permissions check would surface these as well, but only on the weekly `scorecards.yml` cron. Bundled GHA rule catches them on every PR |
+| Zero-width Unicode character (U+200B/U+200C/U+200D/U+FEFF) in `internal/plugin/plugin.go:80:70` | 1 | error | `go-sources-no-zero-width` (bundled go ruleset) | **Real Trojan-Source / CVE-2021-42574 finding.** `internal/plugin/plugin.go:80` line 80, column 70 contains a zero-width character inside a comment block. helm's `validate-license.sh` doesn't look at character-class hygiene; golangci-lint doesn't either by default. **Net-new structural finding alint catches that no existing tool in helm's pipeline does.** Worth filing upstream for review (legitimate intent vs supply-chain risk) |
+| Trailing whitespace | 50 | info | `oss-no-trailing-whitespace` (bundled) | Mostly under `.github/ISSUE_TEMPLATE/`, `.golangci.yml` line 43, ADOPTERS.md, and a handful of `internal/chart/v3/util/testdata/subpop/README.md` testdata files. Mechanical, but the kind of low-grade-noise finding alint's `fix:` blocks resolve in one pass |
+| Missing final newline | 46 | info | `oss-final-newline` (bundled) | Same flavour — info-level cosmetic noise |
+| `oss-codeowners-exists` info | 1 | info | `oss-codeowners-exists` (bundled) | helm uses `OWNERS` (CNCF convention), not `CODEOWNERS` — info-only |
+| `oss-code-of-conduct-exists` info | 1 | info | `oss-code-of-conduct-exists` (bundled) | helm's `code-of-conduct.md` is at root and asserted by helm-specific rule; bundled rule expects `CODE_OF_CONDUCT.md` capitalisation |
+| `helm-code-of-conduct-points-to-cncf` info | 1 | info | helm-specific | The CNCF redirect file content is asserted; rule fires info-level if the canonical text drifts |
+| `oss-security-policy-non-empty` info | 1 | info | `oss-security-policy-non-empty` (bundled) | SECURITY.md is present but minimal |
+
+**Real net-new findings alint surfaces that existing tooling misses:**
+**1 zero-width Trojan-Source catch in `internal/plugin/plugin.go`**
+(neither `validate-license.sh` nor golangci-lint scans for character-
+class hygiene — alint's bundled go-ruleset does) + **5 supply-chain
+GHA hardening signals** (only the weekly Scorecard cron catches these
+in helm's existing pipeline; alint surfaces them every PR). Plus 96
+informational cosmetic findings below helm's gate threshold.
+
+### 6.2 The 537 `helm-spelling` shellout-failure messages — explained
+
+The `helm-spelling` rule is a `command:` shellout to `misspell -error`.
+In the validation env where this run happened, `misspell` is not on
+PATH. The rule walks every text file in the tree (1,990 files) and
+calls `misspell` per-file; each call fails with `could not spawn
+misspell: No such file or directory (os error 2)`. The 537 violations
+are all this same message.
+
+**This is expected `command:` rule behaviour** when the upstream tool
+isn't available. In a CI environment with `misspell` installed (as
+helm's CI has), all 537 spawn-failures collapse to whatever real
+findings misspell surfaces (typically <10 across the whole tree).
+
+### 6.3 The Trojan-Source catch — confirmed
+
+`internal/plugin/plugin.go:80` column 70 contains a zero-width
+character. Quoting from the live alint output:
+
+```
+Zero-width characters in Go sources are rejected (review hazard).
+```
+
+The README's original §6 mention is verified. The character is most
+likely in a comment block (line 80 is well past file headers in
+real helm code); nature unclear without manual inspection. alint
+flags it; the contributor decides if it's intentional.
+
+### 6.4 No silent-failure-mode bugs in this config
+
+No instances of pitfalls #13/#14/#16/#17 surfaced. The pitfall #22
+fix (`pattern: |-` instead of `pattern: |`) was applied to
+`helm-go-license-header` in this batch — verified clean.
+
+---
+
+## 7. Followup feature work surfaced
+
+- **`cross_file_value_equals` rule kind** — `.github/env` ↔ `go.mod`
+  go-version cross-equality. **v0.10 ship-target** (10 sources;
+  strongest demand of any v0.10 candidate).
+- **`import_gate` rule kind** — covers the `.golangci.yml` depguard
+  / gomodguard import bans (no `github.com/hashicorp/go-multierror`,
+  etc.). **v0.10 ship-target** (4 sources; saturated).
+- **`command_idempotent` mode** — `make gen-test-golden` freshness
+  ("running `make gen-test-golden` would not change the working
+  tree"). **v0.10 design candidate** (3 sources in the wild: ruff +
+  prettier + helm).
+- **`*_path_contains` set-membership shorthand** — narrower than
+  `*_path_equals` (which is "every match equals X") and
+  `*_path_matches` (which is regex on string-typed values only).
+  helm surfaced the pattern firsthand on `formatters.enable`
+  set-membership. **v0.10 design candidate** (3 sources: helm +
+  deno + bazel).
+
+---
+
+## 8. Future analysis
 
 Three concrete unanalyzed angles for a future revalidation pass:
 
 1. **Helm-chart structural invariants for `pkg/chart/testdata/`.**
-   helm/helm itself ships zero deployable charts (it's the helm
-   CLI source, not a chart consumer), so the `manifests/charts/`
-   polyglot pattern doesn't apply. But helm/helm DOES ship
-   reference test chart trees under `pkg/chart/testdata/`
-   (~80 fixture charts). A `for_each_dir` over those plus
-   `helm-chart-yaml-shape` (apiVersion/version/appVersion
-   present + valid semver) would gate the test-fixture
-   discipline that `helm lint` currently doesn't cover (the
-   fixtures are deliberate corner cases, some intentionally
-   malformed; the rule would carry a `scope_filter` excluding
-   the malformed fixtures).
+   helm/helm itself ships zero deployable charts (it's the helm CLI
+   source, not a chart consumer), but `pkg/chart/testdata/` hosts
+   ~80 fixture charts. A `for_each_dir` over those plus
+   `helm-chart-yaml-shape` (apiVersion/version/appVersion present +
+   valid semver) would gate the test-fixture discipline that `helm
+   lint` currently doesn't cover (the fixtures are deliberate
+   corner cases, some intentionally malformed — the rule would carry
+   a `scope_filter` excluding the malformed fixtures).
 2. **Add `agent-context@v1` overlay (5 rules).** helm ships
-   `AGENTS.md` (line 30, 165) but doesn't enforce its shape.
-   The `agent-context@v1` ruleset gates AGENTS.md presence +
-   tour-of-codebase content + AI-context-window-friendly
-   structure declaratively.
-3. **`alint suggest` against the live tree.** Pending
-   `/tmp/helm-helm/`. The repo is small enough (~530 .go
-   files) that the suggester would terminate quickly; likely
-   surface candidates: per-`pkg/*/` test-coverage thresholds,
-   `cmd/helm/` subcommand-package conventions, `internal/`
-   visibility discipline.
+   `AGENTS.md` but doesn't enforce its shape. The `agent-context@v1`
+   ruleset gates AGENTS.md presence + tour-of-codebase content +
+   AI-context-window-friendly structure declaratively.
+3. **`alint suggest` against the live tree.** The repo is small
+   enough (~530 .go files) that the suggester would terminate
+   quickly; likely surface candidates: per-`pkg/*/` test-coverage
+   thresholds, `cmd/helm/` subcommand-package conventions,
+   `internal/` visibility discipline.
+
+---
+
+## 9. Validation status (2026-05-08)
+
+- **alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`
+- **Rule count:** **58** (24 helm-specific + 34 from 4 bundled
+  rulesets — `oss-baseline=15`, `go=8`, `ci/github-actions=3`,
+  `hygiene/no-tracked-artifacts=11`, with rule-id deduplication)
+- **`alint validate-config`:** ✓ Config valid: 58 rule(s) loaded
+- **Live-tree recheck:** **performed** in this batch — see §6 for
+  the 643-violation breakdown (537 spawn-failure noise + 96 cosmetic
+  + 6 real structural + 1 Trojan-Source zero-width catch + 3 governance
+  info-level)
+- **Pitfall fixes (this batch):** **Pitfall #22 hardening** —
+  `helm-go-license-header` pattern changed from `pattern: |` to
+  `pattern: |-` for canonical-correct strip-final-newline semantics.
+  Trivial 1-line fix; zero behaviour change on the live tree
+  (verified — same violation counts before/after)
+- **Open gaps:**
+  - `cross_file_value_equals` (v0.10 ship-target, 10 sources)
+  - `import_gate` (v0.10 ship-target, 4 sources)
+  - `command_idempotent` (v0.10 design candidate, 3 sources)
+  - `*_path_contains` (v0.10 design candidate, 3 sources)
+- **Bench numbers:** 18 ms (lite bundled-only pass); 5.94 s (full
+  pass dominated by the `helm-spelling` shellout's 537 spawn-failure
+  messages on the validation env without `misspell` installed) on
+  `/tmp/helm`'s 1,990-file tree

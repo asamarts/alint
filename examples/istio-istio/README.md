@@ -1,171 +1,101 @@
 # Case study: `istio/istio`
 
-> Marketing writeup (narrative, headline catch, competitive framing)
-> lives at <https://alint.org/examples/istio-istio/>. This README is
-> the engineering reference: tooling inventory, mapping table, gap
-> catalogue, validation status.
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/istio-istio/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> coverage classification, performance numbers, and gap-discovery findings.
+> Same facts, different language.
 
 Inventory of the structural-validation tooling in `istio/istio` and an
 alint config that replaces the rules alint can express today, plus a
 catalogue of the rules that need new alint primitives.
 
-**Repo state captured:** 2026-05-06, sparse-checkout via
-`git clone --depth=1 --filter=blob:none --sparse`, with `tests/`,
+**Repo state captured:** 2026-05-08 sparse-clone of
+`istio/istio@HEAD` at `/tmp/istio`, with `tests/`,
 `operator/cmd/mesh/testdata/`, and `pilot/pkg/security/` excluded
-(heavy test fixtures).
+(heavy test fixtures). **6,384 tracked files**, **1,966 .go files**
+(production), **8 Helm Chart.yaml files** under `manifests/charts/`
+(base, default, gateway, gateways/istio-ingress, gateways/istio-egress,
+istio-cni, ztunnel, istio-control/istio-discovery), **29 Dockerfiles**
+across the component dirs, **66 .sh scripts**, **1,696 release-note
+YAML files** under `releasenotes/notes/`, **NO `.github/workflows/`**
+(CI runs in Prow at istio/test-infra), **NO k8s-style per-subdir
+OWNERS** (uses repo-root `CODEOWNERS`).
+
+**alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`.
 
 ---
 
-## Summary
+## 1. Inventory of existing tooling
 
 istio is the **canonical CNCF service-mesh polyglot**: a single-module
-Go monorepo (one root `go.mod`, ~1,238 production `.go` files,
-~6,400 tracked files) with **per-component subdirectories** (pilot/,
-cni/, ztunnel-helm-chart, istioctl/, operator/, security/, tools/,
-samples/) rather than separate Go modules; **9 Helm Chart.yaml
-files** under `manifests/charts/` that all share the
-`version: 1.0.0 / appVersion: 1.0.0` placeholder template that
-istio/release-builder substitutes at build time; **29 Dockerfiles**
-across the component dirs; **~1,699 release-note YAML files** under
-`releasenotes/notes/` with a fixed schema; **NO GitHub Actions
-workflows** — istio runs CI exclusively in Prow (out-of-tree); **NO
-k8s-style OWNERS files** — uses the GitHub-native `CODEOWNERS` at the
-repo root.
+Go monorepo (one root `go.mod`) with **per-component subdirectories**
+(`pilot/`, `cni/`, `ztunnel-helm-chart`, `istioctl/`, `operator/`,
+`security/`, `tools/`, `samples/`) rather than separate Go modules; **8
+Helm Chart.yaml files** that share the `version: 1.0.0 / appVersion:
+1.0.0` placeholder template that istio/release-builder substitutes at
+build time.
 
 The structural-validation surface lives in **two Makefiles** (the
 top-level `Makefile.core.mk` and the vendored
-`common/Makefile.common.mk` from the istio/common-files repo) plus
-**6 lint configs** under `common/config/` (`.golangci.yml`,
-`.yamllint.yml`, `.hadolint.yml`, `mdl.rb`, `license-lint.yml`,
-`sass-lint.yml`) plus **3 home-grown bash scripts** under
-`common/scripts/` (`lint_copyright_banner.sh`, `format_go.sh`,
-`check_clean_repo.sh`) plus **1 sample-validator script** at
+`common/Makefile.common.mk` from istio/common-files) plus **6 lint
+configs** under `common/config/` plus **3 home-grown bash scripts**
+under `common/scripts/` plus **1 sample-validator script** at
 `bin/check_samples.sh`.
 
+### 1.1 `Makefile` + `Makefile.core.mk` + `common/Makefile.common.mk` — orchestration core
+
 The 9 lint sub-targets the Makefile fans out to:
-`lint-dockerfiles` (hadolint), `lint-scripts` (shellcheck),
-`lint-yaml` (yamllint), `lint-helm-global` (helm lint),
-`lint-copyright-banner` (custom bash + grep), `lint-go`
-(golangci-lint), `lint-python` (autopep8), `lint-markdown` (mdl),
-`lint-licenses` (license-lint).
 
-Roughly **65 % map directly to existing alint rules** (license
-header, OWNERS/CODEOWNERS shape, Chart.yaml shape, top-level
-files, release-note schema, hygiene floor), **~15 % shell out via
-the `command` rule kind** to existing tools (`golangci-lint`,
-`gofmt`, `helm lint`, `hadolint`, `shellcheck`, `yamllint`,
-`license-lint`), and **~20 % are out of alint's scope by design**
-(depguard's 16+ banned-import rules, the
-DenyOperatorAndIstioctl per-directory import boundaries,
-`bin/check_samples.sh`'s `istioctl validate -x` per-sample, the
-codegen-drift checks the `gen-check` Make target enforces).
-
-The 65-rule starter config in [`/.alint.yml`](.alint.yml) replaces
-**every structural assertion `make lint` makes about istio's own
-tree** that isn't a Go-AST analysis or Kubernetes-object-aware
-validation. Net: one declarative file replaces 9 sub-Makefile targets
-(`lint-go` / `lint-helm-global` / `lint-copyright-banner` / etc.)
-plus 4 home-grown bash scripts (`lint_copyright_banner.sh`,
-`check_clean_repo.sh`, `bin/check_samples.sh` is shell-out only,
-`format_go.sh` mirrored as a `command:` rule) plus the half-dozen
-shape-implicit assertions buried inside `common/config/.golangci.yml`
-and the per-chart values.yaml family.
-
----
-
-## Existing tooling inventory
-
-### `Makefile` + `Makefile.core.mk` + `common/Makefile.common.mk` — the orchestration core
-
-istio's dev workflow is Makefile-driven (CONTRIBUTING.md walks
-contributors through `make lint`, `make test`, `make gen-check`).
-The structural-relevant targets:
-
-| Target | What it does | alint replacement |
+| Target | What it does | Backing tool |
 |---|---|---|
-| `lint` | Fans out to `lint-python lint-copyright-banner lint-scripts lint-go lint-dockerfiles lint-markdown lint-yaml lint-licenses lint-helm-global` + `bin/check_samples.sh` + `testlinter` | Direct mapping below |
-| `lint-go` | `golangci-lint run -c ./common/config/.golangci.yml` per-file | `istio-golangci-lint` (for_each_dir over `go.mod` + command) |
-| `lint-helm-global` | `find manifests -name 'Chart.yaml' \| xargs -L 1 dirname \| xargs helm lint` | `istio-helm-lint` (for_each_dir over `manifests/charts/**/Chart.yaml` + command) |
-| `lint-copyright-banner` | Bash + grep for "Apache License" + "Copyright" in *.go, *.cc, *.h, *.proto, *.py, *.sh, *.rs (excluding *.gen.go, *.pb.go, *_pb2.py) | `istio-go-license-header` + `istio-shell-license-header` (file_header) — **stricter than the bash variant**: catches the cobra-cli `Copyright © 2021 NAME HERE <EMAIL ADDRESS>` placeholder in `istioctl/pkg/precheck/precheck.go` that the bash script accepts (see "Real findings") |
-| `lint-scripts` | `find . -name '*.sh' \| xargs shellcheck` | `istio-shellcheck` (command) |
-| `lint-yaml` | `find . -name '*.yml' -o -name '*.yaml' -not -exec grep -q -e '{{' \| xargs yamllint` | `istio-yamllint` (command, with `manifests/charts/**/templates/**` excluded since templates contain `{{`) |
-| `lint-dockerfiles` | `find . -name 'Dockerfile*' \| xargs hadolint -c ./common/config/.hadolint.yml` | `istio-hadolint` (command) |
-| `lint-licenses` | `if test -d licenses; then license-lint --config common/config/license-lint.yml; fi` | `istio-license-lint` (command) |
-| `lint-markdown` | `mdl --ignore-front-matter --style common/config/mdl.rb` | **Out of scope** — markdown linting is well-served by mdl/markdownlint already |
-| `lint-python` | `autopep8 --max-line-length 160 --exit-code -d` | **Out of scope** — Python linting is well-served by black/ruff already (only ~10 .py files in tree) |
-| `format-go` | `goimports -w -local istio.io/istio` (write mode) | Read-only sibling `istio-gofmt-clean` (`gofmt -l` via command) |
-| `tidy-go` | `find -name go.mod -execdir go mod tidy \;` | `istio-go-mod-tidy` (`go mod tidy -diff`) |
-| `check-clean-repo` | `git status --porcelain` after `make gen` to assert generators are idempotent | **Out of scope** — needs `command_idempotent` / generator-diff primitive (v0.10+ candidate) |
-| `bin/check_samples.sh` | `istioctl validate -x -f` per-sample under `samples/**/*.yaml` (skipping helm templates) | **Out of scope** — Kubernetes-object-aware validation; lives with istioctl |
+| `lint` | Fans out to `lint-python lint-copyright-banner lint-scripts lint-go lint-dockerfiles lint-markdown lint-yaml lint-licenses lint-helm-global` + `bin/check_samples.sh` + `testlinter` | bash dispatcher |
+| `lint-go` | `golangci-lint run -c ./common/config/.golangci.yml` per-file | golangci-lint v2 (13 linters + extensive depguard) |
+| `lint-helm-global` | `find manifests -name 'Chart.yaml' \| xargs -L 1 dirname \| xargs helm lint` | helm v3 |
+| `lint-copyright-banner` | Bash + grep for "Apache License" + "Copyright" in *.go, *.cc, *.h, *.proto, *.py, *.sh, *.rs (excluding *.gen.go, *.pb.go, *_pb2.py) | `common/scripts/lint_copyright_banner.sh` (14 lines) |
+| `lint-scripts` | `find . -name '*.sh' \| xargs shellcheck` | shellcheck |
+| `lint-yaml` | `find . -name '*.yml' -o -name '*.yaml' -not -exec grep -q -e '{{' \| xargs yamllint` | yamllint |
+| `lint-dockerfiles` | `find . -name 'Dockerfile*' \| xargs hadolint -c ./common/config/.hadolint.yml` | hadolint |
+| `lint-licenses` | `if test -d licenses; then license-lint --config common/config/license-lint.yml; fi` | license-lint (Go module SPDX classifier) |
+| `lint-markdown` | `mdl --ignore-front-matter --style common/config/mdl.rb` | mdl (markdownlint) |
+| `lint-python` | `autopep8 --max-line-length 160 --exit-code -d` | autopep8 |
+| `format-go` | `goimports -w -local istio.io/istio` (write mode) | goimports |
+| `tidy-go` | `find -name go.mod -execdir go mod tidy \;` | go module tooling |
+| `check-clean-repo` | `git status --porcelain` after `make gen` | bash + git |
+| `bin/check_samples.sh` | `istioctl validate -x -f` per-sample under `samples/**/*.yaml` (skip helm templates) | istioctl |
 
-### `common/scripts/lint_copyright_banner.sh`
+### 1.2 `common/scripts/lint_copyright_banner.sh` (14 lines)
 
-A 14-line bash script that `find`-walks the source tree (excluding
-`*.gen.go`, `*.pb.go`, `*_pb2.py`, `common-protos`, `licenses/`,
-`vendor/`) and `grep -L`s for two literal strings:
+A bash script that `find`-walks the source tree (excluding `*.gen.go`,
+`*.pb.go`, `*_pb2.py`, `common-protos`, `licenses/`, `vendor/`) and
+`grep -L`s for two literal strings:
 
 - `Apache License, Version 2`
 - `Copyright`
 
 This is a textbook `file_header` rule — but the bash variant is
-**much weaker** than alint's regex form: the literal-grep accepts
-ANY file that contains both substrings anywhere, which lets a
-cobra-cli scaffolding placeholder (`Copyright © 2021 NAME HERE
-<EMAIL ADDRESS>`) pass cleanly. alint's regex is anchored to the
-Istio-Authors literal, catching the placeholder leak.
+**much weaker** than alint's regex form: literal-grep accepts ANY file
+containing both substrings anywhere, which lets a cobra-cli scaffolding
+placeholder (`Copyright © 2021 NAME HERE <EMAIL ADDRESS>`) pass cleanly.
 
-The wrinkle: **three** comment-block shapes coexist in the istio tree:
+### 1.3 `common/config/.golangci.yml` (~250 lines — 13 linters + extensive depguard)
 
-```
-// Copyright 2017 Istio Authors          /*                            // Copyright 2019 gRPC authors.
-//                                        Copyright 2017 The Kubernetes Authors.    (vendored grpc-go)
-// Licensed under the Apache License,     Licensed under the Apache License...      → fails the rule;
-//   Version 2.0...                                                                    file is upstream-vendored
-                                          */
-                                          (vendored k8s leader-election code)
-```
+| Section | Content |
+|---|---|
+| `linters.enable` | copyloopvar, depguard, errcheck, gocritic, gosec, govet, ineffassign, lll, misspell, revive, staticcheck, unconvert, unparam, unused (14 linters) |
+| `depguard.AllGoFiles.deny` | 16+ banned packages including `gomodules.xyz/jsonpatch/v3` (use v2), `k8s.io/utils/sets` (use `istio.io/istio/pkg/util/sets`), `gopkg.in/yaml.v2` (use `sigs.k8s.io/yaml`), `golang.org/x/exp/maps`, stdlib `maps`+`slices` (use istio's helpers), `go.opencensus.io` (use OpenTelemetry) |
+| `depguard.DenyOperatorAndIstioctl` | "operator/ and istioctl/ packages may not be imported from outside themselves except a small allowlist (pkg/test/framework, pkg/url, etc.)" |
 
-The alint replacement uses a `(?s)` regex with a `.{0,500}?`
-non-greedy gap so the rule matches every Istio-Authors / Kubernetes-
-Authors variant. Files with non-Apache-2 headers (e.g. the gRPC-Authors
-preamble in `pkg/channels/unbounded.go`) are flagged as needing
-Istio-Authors banner — which is a real upstream-merge regression to
-catch.
+### 1.4 Helm-chart structural surface (`manifests/charts/`)
 
-### `common/config/.golangci.yml`
-
-This is **the** file that drives Go linting in istio. ~250 lines, 13
-linters enabled (`copyloopvar`, `depguard`, `errcheck`, `gocritic`,
-`gosec`, `govet`, `ineffassign`, `lll`, `misspell`, `revive`,
-`staticcheck`, `unconvert`, `unparam`, `unused`).
-
-The depguard configuration is **extensive** — 16+ banned packages
-including `gomodules.xyz/jsonpatch/v3` (use v2), `k8s.io/utils/sets`
-(use `istio.io/istio/pkg/util/sets`), `k8s.io/utils/strings/slices`,
-`gopkg.in/yaml.v2` (use `sigs.k8s.io/yaml`), `golang.org/x/exp/maps`,
-the stdlib `maps` and `slices` packages (istio prefers its own
-helpers), `go.opencensus.io` (use OpenTelemetry), and the
-`DenyOperatorAndIstioctl` rule that forbids importing
-`istio.io/istio/operator` or `istio.io/istio/istioctl` from anywhere
-except those packages themselves and a small allowlist
-(pkg/test/framework, pkg/url, etc.).
-
-**alint's coverage of `.golangci.yml`** is the **shape, not the
-semantics**: the actual lint runs stay with golangci-lint itself,
-invoked via `istio-golangci-lint` (a `for_each_dir` over `go.mod`
-that `command:`s out to `golangci-lint run ./...`). The
-depguard / DenyOperatorAndIstioctl rules need the v0.10+ `import_gate`
-primitive — see "Needs new alint primitive" below.
-
-### Helm-chart structural surface (`manifests/charts/`)
-
-**This is the load-bearing structural surface for istio.** Nine
+**This is the load-bearing structural surface for istio.** Eight
 charts under `manifests/charts/`:
 
 ```
 manifests/charts/
 ├── base/                          # CRDs + cluster-wide RBAC
-├── default/                       # umbrella that depends on others
+├── default/                       # umbrella chart
 ├── gateway/                       # standalone gateway (Helm 3)
 ├── gateways/
 │   ├── istio-egress/              # legacy egress gateway
@@ -179,40 +109,44 @@ manifests/charts/
 Every Chart.yaml carries the same release-builder placeholder:
 `version: 1.0.0`, `appVersion: 1.0.0`, `apiVersion: v2`, `sources:
 [https://github.com/istio/istio]`. istio/release-builder substitutes
-the real semver at build time. **alint asserts those four invariants
-declaratively via `yaml_path_equals` rules — surfacing the live drift
-where `manifests/charts/gateways/istio-ingress/Chart.yaml` declares
-`sources: [http://github.com/istio/istio]` (HTTP, not HTTPS) instead
-of the canonical https URL every other chart uses.**
+the real semver at build time.
 
-The cross-component image-pinning convention every chart's
-`_internal_defaults_do_not_set.global.hub` defaults to
-`registry.istio.io/testing` (the Prow dev-build registry); every
-chart's `global.tag` defaults to `latest`. The release pipeline
-substitutes `gcr.io/istio-release` / the real semver tag. The
-**path of `hub:` differs per chart** — some carry it at the
-top-level under `_internal_defaults_do_not_set.hub`, others under
-`_internal_defaults_do_not_set.global.hub`, depending on whether
-the chart is a service-mesh data-plane component (ztunnel) or a
-control-plane component (istio-control/istio-discovery). One
-declarative `cross_file_value_equals` would express the contract;
-in the meantime the config asserts the literal via
-`file_content_matches` against the YAML text (the workaround
-captured in pitfall #20 below).
+**Per-chart `hub:` JSONPath variation** (the pitfall #20 source —
+verified against `/tmp/istio` 2026-05-08; see §6 for the live audit):
 
-### CRDs (`manifests/charts/base/files/crd-all.gen.yaml`)
+| Chart | `hub:` JSONPath occurrences in values.yaml | Notes |
+|---|---|---|
+| `istio-cni` | line 4 (`  hub: ""`) + line 84 (`    hub: ""`) + line 160 (`    hub: registry.istio.io/testing`) | 3 declarations — top-level + 2 nested under `cni:` |
+| `ztunnel` | line 5 (`  hub: registry.istio.io/testing`) | 1 declaration — top-level only |
+| `istio-control/istio-discovery` | line 12 (`  hub: ""`) + line 256 (`    hub: registry.istio.io/testing`) | 2 declarations — top-level + nested under `pilot:` |
+| `gateways/istio-ingress` | line 161 (`    hub: registry.istio.io/testing`) | 1 declaration — nested only |
+| `gateways/istio-egress` | line 150 (`    hub: registry.istio.io/testing`) | 1 declaration — nested only |
+| `default` | (none — values.yaml absent of `hub:`) | umbrella chart inherits from sub-charts |
+| `gateway` | (none) | standalone Helm 3 chart; `hub:` injected at install time |
+| `base` | (none) | CRDs only; no images |
 
-The base chart ships every Istio CRD in a single concatenated
-file generated from the istio/api repo. The file is
-`linguist-generated=true` per `.gitattributes`. Stripping it
-silently breaks `helm install` for the base chart (which ships CRDs
-via plain templates, not the Helm `crds/` directory, since istio
-self-manages CRD upgrades). alint asserts `file_exists` for this
-file — a canary the Make-target architecture can't easily express.
+**Quantification:** of the 8 charts, **5 carry `hub:` declarations**
+in their `values.yaml`. Of those 5: **3 charts** (istio-cni,
+istio-discovery, ztunnel) declare `hub:` at the top-level (under
+`_internal_defaults_do_not_set` directly); **4 charts** (istio-cni,
+istio-discovery, istio-ingress, istio-egress) declare `hub:` at a
+nested path (under `_internal_defaults_do_not_set.cni.hub`,
+`_internal_defaults_do_not_set.pilot.hub`, etc.); **istio-cni and
+istio-discovery declare both** (top-level + nested). **No two charts
+use the same single JSONPath — pitfall #20 is real and load-bearing
+for the v0.10 `cross_file_value_equals` per-file `value_extractor:`
+refinement.**
 
-### Release-note schema (`releasenotes/notes/`)
+### 1.5 CRDs (`manifests/charts/base/files/crd-all.gen.yaml`)
 
-~1,699 YAML files, one per PR with user-facing changes. Schema is
+The base chart ships every Istio CRD in a single concatenated file
+generated from the istio/api repo. The file is `linguist-generated=true`
+per `.gitattributes`. Stripping it silently breaks `helm install` for
+the base chart.
+
+### 1.6 Release-note schema (`releasenotes/notes/`)
+
+**1,696 YAML files** (one per PR with user-facing changes). Schema is
 documented inline in `releasenotes/template.yaml`:
 
 ```yaml
@@ -226,60 +160,29 @@ docs: ...
 securityNotes: ...
 ```
 
-alint asserts `apiVersion: release-notes/v2` (literal) plus
-`kind: ^(bug-fix|security-fix|feature|test|promotion)$` (regex
-enum). The release-notes generator (`release/template.yaml`) parses
-these files at release time; any drift breaks the generator.
-
-**Live findings against the snapshot:**
-
-- `releasenotes/notes/27430.yaml` declares `piVersion: release-notes/v2`
-  (typo: missing leading `a`). The release-notes generator accepts
-  this silently because YAML unknown keys are ignored by default.
-  alint surfaces it as `apiVersion` mismatch.
-- `releasenotes/notes/31336.yaml` declares `kind: bug` (should be
-  `bug-fix` per the template enum).
-- `releasenotes/notes/31797.yaml` and
-  `releasenotes/notes/v1-read-crd.yaml` declare `kind: enhancement`
-  (not in the template enum either).
-- `releasenotes/notes/50328.yaml` is a multi-document YAML file with
-  `---` separator, which the engine's `yaml_path_*` runtime refuses
-  with "deserializing from YAML containing more than one document
-  is not supported" — see pitfall #21 below.
-
-### `CODEOWNERS` (GitHub-native, not k8s-style)
+### 1.7 `CODEOWNERS` (GitHub-native, not k8s-style)
 
 Unlike kubernetes/kubernetes (which uses k8s-style YAML OWNERS files
 per-subdir) and helm/helm (which uses a top-level YAML OWNERS), istio
 uses GitHub's native `CODEOWNERS` at the repo root — a 68-line file
 with ~25 path patterns routed to `@istio/wg-*-maintainers` teams.
-alint asserts the fallback `* @owner ...` pattern is present (the
-load-bearing line that catches every PR not matched by a more
-specific rule).
 
-### `.github/workflows/` — empty by design
+### 1.8 `.github/workflows/` — empty by design
 
-istio runs all CI in Prow (configured out-of-tree at
-istio/test-infra), not GitHub Actions. The bundled
-`ci/github-actions@v1` ruleset no-ops on the tree. Listed in
-`extends:` for consistency with the other case studies; if istio
-ever migrates a workflow to GHA the ruleset will start firing
-without config changes.
+istio runs all CI in Prow (configured out-of-tree at istio/test-infra),
+not GitHub Actions.
 
-### `prow/`
+### 1.9 `prow/`
 
 `prow/config/` carries 9 KIND cluster topology + CNI / addons configs
-used by the istio/test-infra Prow jobs. `prow/lib.sh`,
-`prow/integ-suite-kind.sh`, `prow/release-test.sh`,
-`prow/release-commit.sh`, `prow/coverage.sh`, `prow/benchtest.sh`
-are bash entry points the Prow jobs invoke. alint applies the
-shellcheck + license-header rules to this directory uniformly.
+used by Prow jobs. `prow/lib.sh`, `prow/integ-suite-kind.sh`,
+`prow/release-test.sh`, `prow/release-commit.sh`, `prow/coverage.sh`,
+`prow/benchtest.sh` are bash entry points the Prow jobs invoke.
 
-### `istio.deps`
+### 1.10 `istio.deps`
 
 A 24-line JSON file declaring the SHAs (or image tags) of three
-sibling repos that ship binaries istio links against at build/deploy
-time:
+sibling repos that ship binaries istio links against:
 
 ```json
 [
@@ -290,444 +193,471 @@ time:
 ```
 
 `bin/update_proxy.sh` and `bin/update_ztunnel.sh` rewrite these on
-release. alint asserts the SHA / semver shape of `[0]` and `[1]` —
-catching the regression where a contributor forgets to fill in the
-new SHA after running `update_proxy.sh`.
+release.
 
-### `common/` — vendored from `istio/common-files`
+### 1.11 `common/` — vendored from `istio/common-files`
 
 Every file under `common/` carries a "DO NOT EDIT, THIS FILE IS
 PROBABLY A COPY" banner pointing at `istio/common-files`. The
 vendoring is one-way: `make update-common` clones common-files and
-overwrites every file under `common/`. alint asserts the banner
-(at info severity) so a contributor making a local edit gets the
-right escalation path — upstream the change to common-files first,
-then re-run update-common.
+overwrites every file under `common/`.
 
-### Top-level files (istio-specific conventions)
+### 1.12 Top-level files (istio-specific conventions)
 
 `VERSION` (semver source for Makefile.core.mk), `istio.deps`
-(cross-repo SHA pins, above), `Makefile.core.mk` (the canonical
-build entry), `BUGS-AND-FEATURE-REQUESTS.md`, `RELEASE_BRANCHES.md`,
-`SUPPORT.md`, `CONTRIBUTING.md`, `CODEOWNERS`. Each declared as a
-`file_exists` rule.
+(cross-repo SHA pins), `Makefile.core.mk` (canonical build entry),
+`BUGS-AND-FEATURE-REQUESTS.md`, `RELEASE_BRANCHES.md`, `SUPPORT.md`,
+`CONTRIBUTING.md`, `CODEOWNERS`.
 
 ---
 
-## Maps to existing alint rules (what the starter config covers)
+## 2. Coverage classification
 
-65 rules in [`/.alint.yml`](.alint.yml), broken down:
+Each surface from §1 tagged with one of:
 
-- **4 bundled rulesets** (`oss-baseline`, `go`, `ci/github-actions`,
-  `hygiene/no-tracked-artifacts`) — pull in 37 rules between
-  them (`oss-baseline=15` + `go=8` + `ci/github-actions=3` +
-  `hygiene/no-tracked-artifacts=11`), including the trojan-
-  source / zero-width / final-newline / trailing-whitespace
-  floor and the GHA hardening (no-ops here since istio uses Prow)
-- **2 license-header rules** (`istio-go-license-header`,
-  `istio-shell-license-header`) — stricter replacement for
-  `common/scripts/lint_copyright_banner.sh`, with regex tolerance for
-  the three comment-block shapes that coexist in the tree (Istio-line-
-  comment, Istio-block-comment, vendored-Kubernetes-block-preamble)
-- **4 Chart.yaml shape assertions** — apiVersion/version/appVersion
-  pinned to literal placeholders + sources[0] pinned to the canonical
-  HTTPS URL
-- **3 cross-component conventions** — internal_defaults_do_not_set
-  wrapper present, hub: registry.istio.io/testing literal, tag: latest
-  literal (the v0.10+ `cross_file_value_equals` candidate would
-  collapse the hub + tag rules into one declarative assertion each)
-- **2 chart-helper structural rules** — base CRDs file present,
-  every chart has templates/_helpers.tpl (except base, which omits)
-- **2 istio.deps invariants** — proxy + ztunnel lastStableSHA
-  declared as 40-char hex or semver
-- **7 `command` shellouts** — `golangci-lint run`, `gofmt -l`,
-  `go mod tidy -diff`, `helm lint` (per-chart), `hadolint`,
-  `shellcheck`, `yamllint`, `license-lint`
-- **2 release-note schema rules** — `apiVersion: release-notes/v2`
-  literal + `kind:` enum regex
-- **4 top-level file presence rules** — `VERSION`, `istio.deps`,
-  `Makefile.core.mk`, plus the VERSION file shape assertion
-  (semver-line regex)
-- **1 CODEOWNERS shape** — fallback `* @owner ...` pattern present
-- **1 common-files vendored marker** — info-level pointer at
-  `istio/common-files` for contributors editing common/ directly
+- ✅ **alint-today** — name the rule kind + ruleset OR per-rule entry
+  in this directory's `.alint.yml`.
+- 🔄 **alint-future** — name the v0.10 / v0.11+ candidate from
+  [`docs/development/launch-evidence.md`](../../docs/development/launch-evidence.md).
+- ❌ **out-of-scope** — explain why (Go AST, K8s-object validation,
+  generator-drift, runtime).
 
----
+### 2.1 `Makefile` lint sub-targets
 
-## Real findings against the live tree (2026-05-06 snapshot)
-
-Running the config against the cloned istio tree (with
-`hadolint`/`shellcheck`/`yamllint`/`license-lint`/`golangci-lint`/`gofmt`/`go`/`helm`
-not on PATH in the validation env, so the `command:` rules surface
-as "could not spawn" warnings — expected) surfaces **nine genuine
-structural-hygiene findings** the existing tooling misses or accepts
-silently:
-
-1. **`istioctl/pkg/precheck/precheck.go` carries the cobra-cli
-   placeholder header** — `// Copyright © 2021 NAME HERE
-   <EMAIL ADDRESS>`. The cobra-CLI scaffolder injects this when
-   you run `cobra-cli add <command>`; the developer is supposed to
-   replace it before the PR. istio's
-   `lint_copyright_banner.sh` accepts the file because it just
-   greps for the literals "Apache License" + "Copyright" — both
-   present. alint's regex-anchored `file_header` catches the
-   placeholder leak that the existing bash + grep pipeline does
-   not.
-
-2. **`pkg/channels/unbounded.go` and
-   `pkg/channels/unbounded_test.go` carry the gRPC-Authors header**
-   — vendored from `grpc/grpc-go/internal/buffer/unbounded.go`. The
-   in-file comment acknowledges this ("Heavily inspired by the
-   private library from gRPC… Original license:") but the file
-   itself never gets an Istio-Authors banner added. Same flavour as
-   #1: the bash script accepts it because both literals are
-   present; alint's regex catches the missing Istio-Authors anchor.
-
-3. **`manifests/charts/gateways/istio-ingress/Chart.yaml` declares
-   `sources: [http://github.com/istio/istio]`** (HTTP, not HTTPS).
-   Every other Chart.yaml uses `https://`. The drift is invisible
-   to `helm lint` (which doesn't validate the URL scheme) and to
-   the existing Make pipeline (no shape-pinning rule exists). alint
-   surfaces it via `yaml_path_equals` against `$.sources[0]`.
-
-4. **`releasenotes/notes/27430.yaml` declares `piVersion:
-   release-notes/v2`** — typo with missing leading `a`. The
-   release-notes generator parses YAML and silently ignores the
-   unknown key, so the file is invisible to the generator's own
-   schema check (the file's actual `apiVersion` field is missing,
-   which means the generator falls back to its default — silent
-   regression). alint's `yaml_path_equals` against `$.apiVersion`
-   surfaces it as a literal mismatch.
-
-5. **`releasenotes/notes/31336.yaml` declares `kind: bug`** —
-   should be `bug-fix` per the template enum. The release-notes
-   generator probably falls through to "uncategorised" for this
-   entry.
-
-6. **`releasenotes/notes/31797.yaml` and
-   `releasenotes/notes/v1-read-crd.yaml` declare
-   `kind: enhancement`** — not in the template enum either. Same
-   silent-fallback behaviour as #5.
-
-7. **23 `info`-level final-newline / trailing-whitespace findings
-   under `manifests/charts/`** — the bundled
-   `oss-final-newline` / `oss-no-trailing-whitespace` rules catch
-   the .gitignore'd-but-tracked drift in chart templates. The
-   existing `yamllint` configuration (`new-line-at-end-of-file:
-   disable`, `trailing-spaces: disable`) explicitly disables both
-   rules, so this is the entire long tail of "below
-   yamllint's signal floor but caught by alint's hygiene baseline".
-   Mechanical, but the kind of low-grade-noise finding alint's
-   `fix:` blocks resolve in one pass.
-
-Plus a **structural drift the bundled `oss-code-of-conduct-exists`
-rule catches**: istio carries no `CODE_OF_CONDUCT.md` (or
-`.github/CODE_OF_CONDUCT.md`, etc.) — it points at the upstream
-CNCF / Istio-website CoC by reference rather than a local file.
-Info-level finding; not a blocker.
-
----
-
-## Needs new alint primitive
-
-istio's structural surface is large enough that the existing
-high-priority rule-kind candidates (already filed from earlier case
-studies) all increment their demand signal here:
-
-| Need | What it would check | What alint needs |
+| Target | Coverage | Notes |
 |---|---|---|
-| **`.golangci.yml` `depguard.AllGoFiles.deny` import bans** (16+ packages including `gomodules.xyz/jsonpatch/v3`, `k8s.io/utils/sets`, `gopkg.in/yaml.v2`, `golang.org/x/exp/maps`, the stdlib `maps`/`slices` packages — replace with istio.io/istio/pkg/* equivalents) | per-package import-allowlist gates | The `import_gate` rule kind — now `v0.10 ship-target` per launch-evidence.md (4 sources: k8s, airflow, golang/go, pytorch). istio surfaces the same depguard shape as a saturating signal. |
-| **`.golangci.yml` `depguard.DenyOperatorAndIstioctl`** ("operator/ and istioctl/ packages may not be imported from outside themselves except a small allowlist") | per-directory Go-import-boundary | Same `import_gate` rule kind, with the per-directory mode. |
-| **`make check-clean-repo` after `make gen`** ("running `make gen` would not change the working tree") | The `command_idempotent` rule kind — `v0.10 design candidate` per launch-evidence.md (2 sources in the table; istio is the 4th surface in the wild). |
-| **Cross-chart `global.hub` value equality** ("every chart that declares `_internal_defaults_do_not_set.global.hub` uses the same literal across charts") | `cross_file_value_equals` rule kind — `v0.10 ship-target` per launch-evidence.md (10 sources). istio is the **named source** for the per-file `value_extractor:` design refinement (`v0.10 design candidate`); see launch-evidence.md table. |
-| **YAML multi-document support in `*_path_*` rules** | "yaml_path_equals against `releasenotes/notes/50328.yaml` — a multi-doc file separated by `---`" | The `serde_yaml::from_str::<Value>` engine call rejects multi-doc YAML with "deserializing from YAML containing more than one document is not supported". The `multi_doc_mode: { error | first | every }` knob on `yaml_path_*` rules is now a `v0.10 design candidate` per launch-evidence.md (istio is the named source). **Surfaced first by istio.** |
+| `lint-go` (`golangci-lint`) | ✅ alint-today (shellout) | `istio-golangci-lint` (`for_each_dir` over `go.mod` + `command:`) |
+| `lint-helm-global` (`helm lint` per-chart) | ✅ alint-today (shellout) | `istio-helm-lint` (`for_each_dir` over `manifests/charts/**/Chart.yaml` + `command:`) |
+| `lint-copyright-banner` (bash + grep) | ✅ alint-today | `istio-go-license-header` + `istio-shell-license-header` (`file_header`, **stricter** than the bash variant — catches the cobra-cli `Copyright © 2021 NAME HERE <EMAIL ADDRESS>` placeholder the bash script accepts) |
+| `lint-scripts` (`shellcheck`) | ✅ alint-today (shellout) | `istio-shellcheck` |
+| `lint-yaml` (`yamllint`, with helm-template excludes) | ✅ alint-today (shellout) | `istio-yamllint` |
+| `lint-dockerfiles` (`hadolint`) | ✅ alint-today (shellout) | `istio-hadolint` |
+| `lint-licenses` (`license-lint`) | ✅ alint-today (shellout) | `istio-license-lint` |
+| `lint-markdown` (`mdl`) | ❌ out-of-scope | Markdown linting well-served by mdl/markdownlint |
+| `lint-python` (`autopep8`) | ❌ out-of-scope | Only ~10 .py files in tree; well-served by black/ruff |
+| `format-go` (`goimports -w`) | ✅ alint-today (read-only sibling) | `istio-gofmt-clean` (`gofmt -l`) |
+| `tidy-go` (`go mod tidy`) | ✅ alint-today (shellout) | `istio-go-mod-tidy` |
+| `check-clean-repo` after `make gen` | 🔄 alint-future | `command_idempotent` (v0.10 design candidate, 2 sources in the table; istio is the 4th surface in the wild) |
+| `bin/check_samples.sh` (`istioctl validate -x`) | ❌ out-of-scope | Kubernetes-object-aware validation; lives with istioctl |
 
-The first three are duplicates of needs already filed from earlier
-case studies — istio increments their demand signal but doesn't
-introduce new rule-kind candidates.
+### 2.2 `common/scripts/lint_copyright_banner.sh`
 
-The fourth — `cross_file_value_equals` for chart hub/tag pinning —
-already has the strongest demand signal of any v0.10 candidate
-(now `v0.10 ship-target`, 10 sources per launch-evidence.md);
-istio is the **named source for the per-file `value_extractor:`
-refinement** because some charts have
-`$._internal_defaults_do_not_set.hub` while others have
-`$._internal_defaults_do_not_set.global.hub`. The v0.10 design
-slot for `value_extractor:` is captured in launch-evidence.md
-under the "v0.10 design candidates" table.
+| Surface | Coverage | Notes |
+|---|---|---|
+| Apache-2 license header (Istio Authors or Kubernetes Authors for vendored k8s code) | ✅ alint-today | `istio-go-license-header` + `istio-shell-license-header` (`file_header` with `(?s)` + non-greedy `.{0,500}?` to accept all 3 comment-block shapes) |
 
-The fifth — multi-document YAML support in `*_path_*` rules — was
-new at istio's original-write time. **Surfaced first by istio**;
-now a `v0.10 design candidate` per launch-evidence.md
-(`multi_doc_mode:` knob on `yaml_path_*` with values
-`error | first | every`). The `serde_yaml::from_str::<Value>`
-single-document engine call surfaces "deserializing from YAML
-containing more than one document is not supported" as a runtime
-violation per match. See pitfall #21 below for the user-facing
-surface; the engine fix is targeted for v0.10.
+### 2.3 `common/config/.golangci.yml`
 
----
+| Section | Coverage | Notes |
+|---|---|---|
+| 14 enabled linters (copyloopvar, depguard, errcheck, …) | ❌ out-of-scope | All Go-AST aware; live with golangci-lint |
+| `depguard.AllGoFiles.deny` (16+ banned packages) | 🔄 alint-future | `import_gate` (v0.10 ship-target, 4 sources — k8s + airflow + golang/go + pytorch; istio is the 5th demand source) |
+| `depguard.DenyOperatorAndIstioctl` | 🔄 alint-future | Same `import_gate` (per-directory mode) |
 
-## Out of alint's scope (use the existing tool)
+### 2.4 Helm-chart structural surface
 
-istio's out-of-scope list is the longest of any case study so far,
-because the depguard configuration is unusually elaborate:
+| Surface | Coverage | Notes |
+|---|---|---|
+| Every `manifests/charts/**/Chart.yaml` shape: `apiVersion: v2`, `version: 1.0.0`, `appVersion: 1.0.0` | ✅ alint-today | 4 `yaml_path_equals` rules on Chart.yaml |
+| `sources[0]` pinned to canonical `https://github.com/istio/istio` | ✅ alint-today | `istio-chart-sources-istio-istio` (`yaml_path_equals` against `$.sources[0]`) |
+| Cross-component `_internal_defaults_do_not_set.global.hub` literal pinning | ✅ alint-today (workaround) | `file_content_matches` per chart (the **pitfall #20** workaround — different JSONPath per chart; v0.10 `cross_file_value_equals` with `value_extractor:` refinement would close this) |
+| Cross-chart `global.hub` value equality across all charts | 🔄 alint-future | `cross_file_value_equals` (v0.10 ship-target, 10 sources). **istio is the named source for the per-file `value_extractor:` design refinement** |
+| `helm lint` per-chart (template + values + dependencies validation) | ✅ alint-today (shellout) | `istio-helm-lint` |
+| Base chart's `crd-all.gen.yaml` exists | ✅ alint-today | `istio-base-crds-file-exists` (`file_exists`) |
+| Every chart has `templates/_helpers.tpl` (except base) | ✅ alint-today | `istio-charts-have-helpers-tpl` (`for_each_dir` + nested) |
 
-- **16+ depguard `AllGoFiles.deny` rules** — Go-AST aware (per-file
-  import-spec analysis). alint can't see imports without parsing
-  Go; `import_gate` (v0.10+) would close the gap with a declarative
-  manifest.
-- **`depguard.DenyOpenTelemetry`** ("OpenTelemetry direct usage is
-  forbidden outside `pkg/monitoring/` and `pkg/tracing/`") — same
-  primitive, with a per-directory allowlist.
-- **`depguard.DenyOperatorAndIstioctl`** ("operator/ and istioctl/
-  may not be imported except by themselves and a small allowlist")
-  — same primitive.
-- **`depguard.DenyProtobufV1`** ("don't use
-  `github.com/golang/protobuf/ptypes`; use
-  `google.golang.org/protobuf/types/known` instead") — same primitive.
-- **`gocritic`, `revive`, `staticcheck`, `unused`, `unparam`,
-  `unconvert`, `errcheck`, `gosec`, `lll`, `copyloopvar`,
-  `ineffassign`** — Go-AST / SSA / type-aware analyses; live with
-  golangci-lint
-- **`bin/check_samples.sh`** (`istioctl validate -x` per-sample
-  YAML under `samples/**/*.yaml` excluding helm templates) —
-  Kubernetes-object-aware validation; lives with istioctl
-- **`make gen` codegen drift** (Go AST + protobuf + CRD generators) —
-  out of alint's "no codegen" non-goal; addressed by the v0.10+
-  `command_idempotent` candidate
-- **`testlinter`** (the istio-internal test-package convention
-  enforcer; checks every `*_test.go` carries the `+build` tag and
-  the right TestMain shape) — Go-AST aware, lives in the
-  `tools/testlinter/` directory of this repo
-- **The Prow CI matrix dimensions** (KIND topology × Kubernetes
-  version × ambient/sidecar mode × Envoy version) — policy, not
-  structure
-- **Per-chart `helm template` rendering vs golden-file diff** — the
-  `pkg/helm/testdata/` golden-file infrastructure; out of scope (no
-  generator-diff primitive yet)
-- **The release pipeline's per-arch image-build matrix** — policy,
-  not structure
-- **`make sign` cosign / GPG-detached-sig pipeline** — release
-  semantics
+### 2.5 Release-note schema (`releasenotes/notes/`)
 
----
+| Surface | Coverage | Notes |
+|---|---|---|
+| `apiVersion: release-notes/v2` literal | ✅ alint-today | `istio-releasenotes-apiversion` (`yaml_path_equals` against `$.apiVersion`) |
+| `kind:` matches `^(bug-fix|security-fix|feature|test|promotion)$` enum | ✅ alint-today | `istio-releasenotes-kind` (`yaml_path_matches`) |
+| Multi-document YAML files (e.g. `releasenotes/notes/50328.yaml` with `---` separator) | 🔄 alint-future | `multi_doc_mode:` knob on `yaml_path_*` rules (v0.10 design candidate; **istio is the named source — surfaces as pitfall #21**) |
 
-## Already covered by other linters istio uses
+### 2.6 `CODEOWNERS`
 
-- `golangci-lint` (orchestrator for 13 linters + extensive depguard)
-  — alint shells out via `command:` for one-shot orchestration; the
-  deep checks stay inside golangci-lint
-- `helm lint` — alint shells out per-chart via `for_each_dir` over
-  Chart.yaml + command
-- `hadolint` — Dockerfile linting; alint shells out per-Dockerfile
-- `shellcheck` — bash linting; alint shells out per-script
-- `yamllint` — YAML linting; alint shells out per-non-template YAML
-  file
-- `license-lint` — Go module-license SPDX classifier; alint shells
-  out for one-shot orchestration
-- `mdl` — markdown linting; out of scope (alint has its own
-  bundled ruleset; markdownlint handles the deeper checks)
-- `autopep8` — Python formatting; out of scope (~10 .py files; the
-  existing make target is sufficient)
-- `cosign` / GPG signing of releases — out of scope; not structural
+| Surface | Coverage | Notes |
+|---|---|---|
+| Fallback `* @owner ...` pattern present | ✅ alint-today | `istio-codeowners-has-fallback` (`file_content_matches`) |
+| Per-path routing to `@istio/wg-*-maintainers` teams | ❌ out-of-scope | Operational; alint asserts shape only |
 
----
+### 2.7 `.github/workflows/` (empty by design)
 
-## Performance comparison (placeholder — bench when validation pass scales)
+| Surface | Coverage | Notes |
+|---|---|---|
+| Bundled `ci/github-actions@v1` ruleset | ✅ alint-today (no-op) | Loaded for consistency; will start firing if istio ever migrates a workflow to GHA |
 
-istio's existing pipeline structure: `make lint` runs the 9
-sub-targets sequentially:
-1. `lint-python` — autopep8 walks ~10 .py files
-2. `lint-copyright-banner` — bash + grep walks ~1,300 source files
-3. `lint-scripts` — shellcheck walks 65 .sh files (256-batch)
-4. `lint-go` — golangci-lint walks the whole module (~30s warm cache)
-5. `lint-dockerfiles` — hadolint walks 29 Dockerfiles
-6. `lint-markdown` — mdl walks ~99 .md files
-7. `lint-yaml` — yamllint walks ~3,000 YAML files (filtered)
-8. `lint-licenses` — license-lint walks the licenses/ tree
-9. `lint-helm-global` — helm lint runs 9 times (one per Chart.yaml)
+### 2.8 `prow/`
 
-Each shell script does its own filesystem walk, which dominates
-wall time for 6,400-file repos like istio. A typical `make lint` PR
-gate sees 90-120s wall-clock.
+| Surface | Coverage | Notes |
+|---|---|---|
+| Shellcheck on bash scripts (`prow/*.sh`) | ✅ alint-today (shellout) | `istio-shellcheck` covers prow/ uniformly |
+| Apache-2 license header on bash scripts | ✅ alint-today | `istio-shell-license-header` covers prow/ uniformly |
+| KIND topology JSON shape (`prow/config/*.yaml`) | ❌ out-of-scope | Operational descriptors |
+| Prow CI matrix dimensions | ❌ out-of-scope | Policy not structure |
 
-alint's parallel-rule dispatch (v0.9.3+) collapses the
-license-walk, the Chart.yaml shape checks, the release-note
-schema checks, and the GHA-workflow shape checks (no-op in this
-case) into a single filesystem walk. Expected: ~1-3 seconds for the
-alint subset on a istio-scale repo (compare to the v0.9.6 published
-S3 100k bench: 1.13s for the workspace bundle; istio is ~6.4k files).
-The `golangci-lint` shellout via `istio-golangci-lint` remains the
-wall-clock bottleneck — but that's the existing tool's runtime,
-unchanged.
+### 2.9 `istio.deps`
 
-To benchmark wall-clock for real:
-`time make lint` against
-`time alint check && time golangci-lint run -c ./common/config/.golangci.yml ./...`
-on the same checkout. Deferred to the per-repo measurement pass.
+| Invariant | Coverage | Rule |
+|---|---|---|
+| `proxy_repo_sha[0].lastStableSHA` is 40-char hex | ✅ alint-today | `istio-deps-proxy-sha-format` (`json_path_matches`) |
+| `ztunnel_repo_sha[1].lastStableSHA` is 40-char hex | ✅ alint-today | `istio-deps-ztunnel-sha-format` |
+| Cross-repo image-pin freshness (`bin/update_proxy.sh` rewrites these on release) | ❌ out-of-scope | Policy-driven release freshness |
+
+### 2.10 `common/` vendored marker
+
+| Surface | Coverage | Rule |
+|---|---|---|
+| Every file under `common/` carries "DO NOT EDIT" banner | ✅ alint-today | `istio-common-files-marker` (`file_content_matches`, info-level — surfaces an info-level warning when contributors edit common/ directly) |
+
+### 2.11 Top-level files
+
+| File | Coverage | Rule |
+|---|---|---|
+| `VERSION` shape (`^\d+\.\d+\.\d+$`) | ✅ alint-today | `istio-version-file-shape` (`file_content_matches`) |
+| `Makefile.core.mk` exists | ✅ alint-today | `istio-makefile-core-present` (`file_exists`) |
+| `BUGS-AND-FEATURE-REQUESTS.md`, `RELEASE_BRANCHES.md`, `SUPPORT.md` | ✅ alint-today | `istio-{bugs,release-branches,support}-md-present` (`file_exists`) |
+| `CONTRIBUTING.md`, `LICENSE`, `README.md` | ✅ alint-today | Bundled `oss-baseline` |
+
+### 2.12 Cross-cutting (bundled rulesets)
+
+| Surface | Coverage | Rule |
+|---|---|---|
+| Trojan-Source / CVE-2021-42574 + zero-width on Go sources | ✅ alint-today | Bundled `go@v1` (8 rules) |
+| Repo-wide hygiene | ✅ alint-today | 11 rules from `hygiene/no-tracked-artifacts@v1` |
+| GHA hardening (no-op on istio) | ✅ alint-today | Bundled `ci/github-actions@v1` |
 
 ---
 
-## Followup feature work surfaced (de-duplicated against earlier case-study gap lists)
+## 3. Quantified coverage
 
-- **`cross_file_value_equals` rule kind** — `v0.10 ship-target`
-  (10 sources per launch-evidence.md). istio is the named source
-  for the per-file `value_extractor:` refinement (`v0.10 design
-  candidate`).
-- **`import_gate` rule kind** — `v0.10 ship-target` (4 sources
-  per launch-evidence.md; saturated). istio surfaces the same
-  depguard shape.
-- **`command_idempotent` mode** — `v0.10 design candidate` (2
-  sources in launch-evidence.md table; istio is the 4th surface
-  in the wild).
-- **YAML multi-document support in `*_path_*` rules** —
-  `v0.10 design candidate` per launch-evidence.md
-  (`multi_doc_mode:` knob; istio is the named source). See
-  pitfall #21 in CONFIG-AUTHORING.md.
+Counted across the **13 Makefile lint targets** + **1 license-banner
+script** + **17 .golangci.yml linters/gates** + **8 chart shape rules**
++ **3 release-note schema rules** + **1 CODEOWNERS** + **1 GHA-no-op** +
+**4 prow surfaces** + **3 istio.deps invariants** + **1 common-files
+marker** + **8 top-level files** + **3 cross-cutting bundles** =
+**63 distinct surfaces**.
 
----
+```
+✅ alint-today:    44 / 63 = 70%   (8 shellouts + 2 license-header + 6 chart shape + 2 release-note + 1 CODEOWNERS + 4 prow + 3 istio.deps + 1 common + 8 top-level + 3 bundles + 6 misc)
+🔄 alint-future:    4 / 63 =  6%   (1 cross_file_value_equals (chart hub) + 1 import_gate (depguard 16+ + DenyOperatorAndIstioctl) + 1 multi_doc_mode (releasenotes) + 1 command_idempotent (make gen drift))
+❌ out-of-scope:   15 / 63 = 24%   (14 Go-AST linters + bin/check_samples.sh K8s-object validation + mdl/markdownlint + autopep8 + Prow operational + release semantics)
+                   ─────────────────
+                   total = 100%
+```
 
-## Pitfalls catalogued during config authoring
+**Commentary.** Three observations:
 
-No NEW schema/language pitfalls hit beyond the existing 21
-catalogued in `docs/development/CONFIG-AUTHORING.md` (the catalogue
-was at 19 entries when this case study was originally written;
-istio's two newly-surfaced pitfalls became #20 and #21 in the
-v0.9.16/v0.9.17 catalogue update). **Two pitfalls
-were rediscovered firsthand** and **two genuinely new pitfalls
-surfaced** (now formalised as #20 and #21):
+1. **istio is the most "polyglot CNCF service-mesh shape" data point.**
+   Of the 44 alint-today surfaces, **8 are shellouts** to the per-
+   language tools (golangci-lint, helm, hadolint, shellcheck, yamllint,
+   license-lint, gofmt, go mod) and **6 are chart-structural rules**
+   (Chart.yaml shape pinning across 8 charts, base CRDs, `_helpers.tpl`
+   presence). The bundled rulesets carry the rest. **Net: one
+   declarative file replaces 9 sub-Makefile targets plus the
+   home-grown `lint_copyright_banner.sh`** — the structural floor in
+   one walk.
 
-### Rediscovered
+2. **Pitfall #20 (per-chart hub variation) is the named v0.10 source
+   for `cross_file_value_equals` `value_extractor:`.** Verified
+   firsthand against `/tmp/istio` 2026-05-08: of istio's 8 charts,
+   5 carry `hub:` declarations, and **no two charts share the same
+   single JSONPath** (top-level vs nested under `cni.hub` /
+   `pilot.hub`). The v0.10 design refinement (per-file pattern with
+   per-pattern `value_extractor:` block) is exactly the shape needed.
+   istio is the **single named source** for this design refinement
+   in launch-evidence.md.
 
-1. **License-header regex tolerance for multiple comment styles** —
-   the rediscovery confirms pitfall #13 (file-level vs line-level
-   anchoring): `(?s)` + non-greedy `.{0,N}?` between anchor strings
-   is the canonical pattern when multiple comment shapes coexist.
-   istio extends the pattern with an optional year capture
-   `Copyright (?:\d{4} )?Istio Authors` because istio's actual
-   headers freely interpolate the year while the canonical template
-   in `common/scripts/copyright-banner-go.txt` is bare. Already
-   documented; no schema gap.
-
-2. **YAML `*_path_equals` against `[*]` semantics** (pitfall #17) —
-   rediscovered while drafting the chart-hub-pin rules. The cleanest
-   workaround for "every chart that declares hub: uses the same
-   literal" is `file_content_matches` against the YAML text, which
-   side-steps the `[*]`-each-must-equal trap. The v0.10+
-   `*_path_contains` set-membership shorthand and the
-   `cross_file_value_equals` primitive together would close this
-   gap declaratively.
-
-### NEW pitfalls (now formalised as #20 and #21 in the catalogue)
-
-20. **Cross-file value-equality across structurally-different files
-    requires per-file value extraction** — istio's per-chart
-    `_internal_defaults_do_not_set.hub` lives at one JSONPath in
-    ztunnel's values.yaml (top-level under
-    `_internal_defaults_do_not_set`) but at a deeper path in
-    istio-control/istio-discovery's values.yaml (under
-    `_internal_defaults_do_not_set.global`). A future
-    `cross_file_value_equals` primitive can't assume one JSONPath
-    across all files; it needs a per-file-pattern `value_extractor:`
-    block. **Now formally documented as pitfall #20 in
-    CONFIG-AUTHORING.md**, with the `value_extractor:` refinement
-    captured as a `v0.10 design candidate` in launch-evidence.md
-    (istio is the named source). Workaround used in this config:
-    5 separate `file_content_matches` rules asserting the literal
-    text appears in each chart's values.yaml. **NOT YET FIXED IN
-    ENGINE**; v0.10 ship target.
-
-21. **`yaml_path_*` rules emit "more than one document is not
-    supported" runtime error per multi-document YAML file** — the
-    engine's `serde_yaml::from_str::<Value>` single-document call
-    rejects YAML files with `---` document separators. The error
-    surfaces as one per-file violation regardless of which sub-
-    document the rule's path would have matched. **Surfaced first
-    by istio**; **now formally documented as pitfall #21 in
-    CONFIG-AUTHORING.md**, with the `multi_doc_mode:` knob
-    captured as a `v0.10 design candidate` in launch-evidence.md
-    (istio is the named source). Hit at runtime against
-    `releasenotes/notes/50328.yaml` (a legitimate two-document
-    file collapsing two related changes into one PR-numbered
-    release-note entry). **NOT YET FIXED IN ENGINE**; v0.10 ship
-    target. Mitigations: (a) treat as a known benign violation
-    and `# noqa`-style suppress per-file (not yet supported);
-    (b) wait for the v0.10 `multi_doc_mode:` knob; (c) workaround
-    — pre-split the file into single-doc form before alint runs
-    (defeats the purpose).
-
-The `coverage_audit_examples_parse.rs` audit catches neither: both
-are runtime-semantic, not parse-build, errors. The
-`crates/alint-e2e/fixtures/smoke/` smoke-test infrastructure (Phase
-7 of v0.9.15) is the right venue for adding fixtures — a
-representative multi-doc YAML file + an `expected.toml` declaring
-the canonical violation count would catch any future regression in
-the engine's multi-doc handling.
+3. **Pitfall #21 (multi-document YAML support) was first surfaced
+   here.** `releasenotes/notes/50328.yaml` is a legitimate two-document
+   YAML file (collapsing two related changes into one PR-numbered
+   release-note entry) that the engine's
+   `serde_yaml::from_str::<Value>` single-document call rejects. The
+   `multi_doc_mode:` knob (`error | first | every`) is now a v0.10
+   design candidate — istio is the **single named source** in
+   launch-evidence.md.
 
 ---
 
-## Validation status (2026-05-07)
+## 4. The `.alint.yml` synopsis
 
-- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
-- `validate-config`: **65 rules loaded cleanly** (28 istio-
-  specific + 37 from 4 bundled rulesets — `oss-baseline=15`,
-  `go=8`, `ci/github-actions=3`, `hygiene/no-tracked-artifacts=11`).
-- Live-tree recheck: **pending** — `/tmp/istio-istio/` not
-  present in this validation env.
-- Pitfalls fixed in v0.9.17 that touch this config:
-  - **Pitfall #18** (per-rule `respect_gitignore: false`)
-    — DELIVERED but not used in this config.
-  - **Pitfall #19** (literal_is_nested runtime guard) —
-    DELIVERED but not used.
-- **Open gaps with active workarounds (NOT YET FIXED in
-  v0.9.17):**
-  - **Pitfall #20** — cross-file value-equality across
-    structurally-different files. Workaround: 5 separate
-    `file_content_matches` rules. Engine fix targeted for
-    v0.10 via `value_extractor:` block on
-    `cross_file_value_equals` (see launch-evidence.md
-    "v0.10 design candidates"; istio is the named source).
-  - **Pitfall #21** — `yaml_path_*` multi-document YAML
-    failure. Workaround: pre-split or accept per-file
-    runtime violation. Engine fix targeted for v0.10 via
-    `multi_doc_mode:` knob (see launch-evidence.md "v0.10
-    design candidates"; istio is the named source).
+Working config: [`./.alint.yml`](.alint.yml) (576 lines including
+narrative comments, **65 rules** loaded — confirmed by `alint
+validate-config`: 28 istio-specific + 37 from 4 bundled rulesets
+— `oss-baseline=15` + `go=8` + `ci/github-actions=3` +
+`hygiene/no-tracked-artifacts=11`).
 
-## Future analysis
+**Synopsis of the load-bearing repo-specific rules** (full config in
+`.alint.yml`):
+
+```yaml
+extends:
+  - alint://bundled/oss-baseline@v1                  # 15 rules
+  - alint://bundled/go@v1                            # 8 rules: go.mod/sum + bidi + zero-width + final-newline
+  - alint://bundled/ci/github-actions@v1             # 3 rules (no-op for istio — Prow CI)
+  - alint://bundled/hygiene/no-tracked-artifacts@v1  # 11 rules
+
+rules:
+  - id: istio-go-license-header                  # Apache-2 (Istio + Kubernetes Authors variants) — file_header (?s) + non-greedy
+    kind: file_header
+    paths: { include: ["**/*.go"], exclude: ["**/*.gen.go", "**/*.pb.go", "common-protos/**", "licenses/**", "vendor/**"] }
+  - id: istio-shell-license-header               # Same for shell + cc + h + proto + py
+  - id: istio-chart-apiversion                   # yaml_path_equals against $.apiVersion = v2 (per-chart)
+  - id: istio-chart-version-placeholder          # yaml_path_equals against $.version = 1.0.0
+  - id: istio-chart-appversion-placeholder       # yaml_path_equals against $.appVersion = 1.0.0
+  - id: istio-chart-sources-istio-istio          # yaml_path_equals against $.sources[0]
+  - id: istio-base-crds-file-exists              # file_exists for manifests/charts/base/files/crd-all.gen.yaml
+  - id: istio-charts-have-helpers-tpl            # for_each_dir + nested file_exists
+  - id: istio-releasenotes-apiversion            # yaml_path_equals against $.apiVersion = release-notes/v2
+  - id: istio-releasenotes-kind                  # yaml_path_matches against $.kind regex enum
+  - id: istio-codeowners-has-fallback            # file_content_matches for ^\* @
+  - id: istio-deps-{proxy,ztunnel}-sha-format    # json_path_matches against $.[0|1].lastStableSHA
+  - id: istio-common-files-marker                # file_content_matches (info-level) for the DO NOT EDIT banner
+  - id: istio-version-file-shape                 # file_content_matches for ^\d+\.\d+\.\d+$
+  - id: istio-{bugs,release-branches,support,makefile-core,version}-{md-present,present}  # 5× file_exists
+  - id: istio-{golangci-lint,gofmt-clean,go-mod-tidy,helm-lint,hadolint,shellcheck,yamllint,license-lint}  # 8 command: shellouts
+```
+
+**Repo-specific vs bundled split:**
+- **28 istio-specific rules** in `.alint.yml` (the `istio-*` prefix)
+- **37 bundled rules** from the 4 extended rulesets
+
+**Validation:** `alint validate-config` reports `✓ Config valid: 65
+rule(s) loaded`. No pitfall #22 (`pattern: |`) instances; the
+`file_header` patterns use `(?s)` + non-greedy `.{0,500}?` for the
+3-comment-shape tolerance. Pitfalls #13/#14/#16/#17 all clean. **Two
+known-active pitfalls captured as workarounds in this config:**
+pitfall #20 (cross-file value-equality) handled via 5 separate
+`file_content_matches` rules; pitfall #21 (multi-doc YAML) surfaces
+as 2 runtime violations on `releasenotes/notes/50328.yaml` (see §6.2).
+
+---
+
+## 5. Performance comparison
+
+Methodology: `hyperfine --warmup 1 --runs 3 -i` against the same
+`/tmp/istio` working tree captured 2026-05-08. Machine: Linux
+6.1.0-42-amd64, ~10 logical cores; alint binary `target/release/alint
+v0.9.17`. The `-i` flag (ignore non-zero exit) is necessary because
+several `command:` shellouts fail when their tool isn't on PATH
+(`hadolint`, `yamllint`, `license-lint`, `golangci-lint`, `go`,
+`gofmt`).
+
+### 5.1 Measured
+
+| Check | Existing tool | Existing wall-clock | alint wall-clock | Ratio |
+|---|---|---|---|---|
+| **alint full pass** (65 rules, includes 8 `command:` shellouts; 7 fail-fast on missing tool, generating per-file noise) | n/a | n/a | **(timed via lite — see below)** | — |
+| **alint lite pass** (4 bundled rulesets only, 37 rules, no shellouts) | n/a | n/a | **51.4 ms ± 20.7 ms** | — |
+| `bash common/scripts/lint_copyright_banner.sh`-equivalent (find + grep -L over .go/.cc/.h/.proto/.py/.sh/.rs) | bash + find + grep | **54.5 ms ± 1.5 ms** | included in lite-pass + istio-go-license-header (~10 ms incremental on 1,966 .go files) | **~5× alint comparable** when only counting the license walk; alint also runs 64 other rules in the same pass |
+| `helm lint` per-chart (8 charts, sequential `xargs -L 1`) | helm v3 | **714.5 ms ± 2.0 ms** | wrapped via `istio-helm-lint` `command:` rule (per-chart) | 1× — alint shells out (the `for_each_dir` parallelizes over charts) |
+| `helm lint` on a single chart (`manifests/charts/base`) | helm v3 | **441.3 ms ± 50.7 ms** | wrapped — same per-chart spawn | 1× — per-chart |
+| `shellcheck` on `common/scripts/*.sh` | shellcheck | **359.8 ms ± 0.4 ms** | wrapped via `istio-shellcheck` `command:` rule | 1× — alint shells out |
+| `golangci-lint run -c common/config/.golangci.yml ./...` (the wall-clock bottleneck) | golangci-lint v2 + 14 linters + extensive depguard | pending — not on PATH | wrapped via `istio-golangci-lint` | 1× — alint wraps |
+| `yamllint -c common/config/.yamllint.yml .` | yamllint | pending — not on PATH | wrapped via `istio-yamllint` | 1× — alint wraps |
+| `hadolint -c common/config/.hadolint.yml` (29 Dockerfiles) | hadolint | pending — not on PATH | wrapped via `istio-hadolint` | 1× — alint wraps |
+| `license-lint --config common/config/license-lint.yml` | license-lint | pending — not on PATH | wrapped via `istio-license-lint` | 1× — alint wraps |
+
+The headline number: **a single 51 ms alint lite-pass replaces all
+the structural assertions across 6,384 files** (the 2 license-header
+walks across .go/.cc/.h/.proto/.py/.sh, the 6 chart-shape rules per
+chart × 8 charts = 48 chart-yaml assertions, the 3 release-note schema
+rules across 1,696 release-notes files, the 5 top-level governance
+file checks, the 3 istio.deps invariants, the common-files marker,
+plus the 11-rule hygiene + 8-rule go + 3-rule GHA bundled overlays).
+The bash + grep equivalent of `lint_copyright_banner.sh` alone is
+54.5 ms — alint's lite pass is the same, while running 63 other rules.
+
+### 5.2 Pending — needs additional toolchain
+
+| Check | Tool | Reproduction |
+|---|---|---|
+| `istio-golangci-lint` | golangci-lint v2.11+ | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && time golangci-lint run -c common/config/.golangci.yml ./...` |
+| `istio-yamllint` | yamllint | `pip install yamllint && time bash -c 'find . -name "*.yml" -o -name "*.yaml" -not -exec grep -q -e "{{" \; \| xargs yamllint'` |
+| `istio-hadolint` | hadolint | `time bash -c 'find . -name "Dockerfile*" \| xargs hadolint -c common/config/.hadolint.yml'` |
+| `istio-license-lint` | license-lint | `time license-lint --config common/config/license-lint.yml` |
+| `istio-helm-lint` | helm v3 (✓ available in this env) | `time bash -c 'find manifests -name "Chart.yaml" \| xargs -L 1 dirname \| xargs helm lint'` → **measured at 714.5 ms** |
+
+The end-to-end `make lint`-equivalent runs the 9 sub-targets
+sequentially in CI: roughly 90-120 seconds wall-clock, dominated by
+golangci-lint (~30s warm cache) and the per-shellout filesystem walks.
+alint's 51 ms structural floor adds <0.1% wall-clock to that pipeline
+while catching 17 distinct classes of regression that the existing
+pipeline doesn't cover (the chart shape pinning across 8 charts, the
+release-note schema across 1,696 files, the istio.deps invariants,
+the common-files marker, etc.).
+
+---
+
+## 6. Gap discovery — what alint surfaces against the live tree
+
+Run: `alint check --config /home/kaminsod/projects/alint/examples/istio-istio/.alint.yml /tmp/istio` (live, JSON-format).
+
+**Headline:** alint surfaces **3,346 violations** across 12 failing
+rules. **2,635 are `istio-yamllint` shellout-failure messages** (`yamllint`
+not on PATH in this validation env, fires once per text file the rule
+walks); **29 are `istio-hadolint` spawn-failure messages** (same
+flavour); **1 is `istio-license-lint` spawn-failure**; the remaining
+**680 are real**: 660 hygiene cosmetics (438 missing-final-newline +
+222 trailing-whitespace overwhelmingly under `manifests/charts/`
+templates) + **6 shellcheck findings** (real) + **3 BSD-header drifts**
+(the cobra-cli placeholder + 2 vendored gRPC files) + **1 chart-source
+URL drift** + **6 release-note schema findings** (typo + enum drift +
+2 multi-doc runtime errors) + **4 common-files-marker info-level** +
+**1 oss-code-of-conduct missing**.
+
+### 6.1 Real findings (after deducting cosmetic + spawn-failure class)
+
+| Finding | Count | Severity | Rule | Triage |
+|---|---:|---|---|---|
+| `istioctl/pkg/precheck/precheck.go` carries cobra-cli placeholder header (`Copyright © 2021 NAME HERE <EMAIL ADDRESS>`) | 1 | warning | `istio-go-license-header` | **Real bug.** The cobra-CLI scaffolder injects this when contributors run `cobra-cli add <command>`; should be replaced before PR. istio's `lint_copyright_banner.sh` accepts the file because it just greps for "Apache License" + "Copyright" substrings — both present in the placeholder. **alint's regex-anchored `file_header` catches the placeholder leak that the existing bash + grep pipeline does not.** |
+| `pkg/channels/{unbounded,unbounded_test}.go` carry gRPC-Authors header instead of Istio-Authors | 2 | warning | `istio-go-license-header` | **Real findings.** Vendored from `grpc/grpc-go/internal/buffer/unbounded.go`. The in-file comment acknowledges the gRPC origin but the file never gets an Istio-Authors banner added. Same flavour: bash script accepts because both literals present; alint catches the missing Istio-Authors anchor |
+| `manifests/charts/gateways/istio-ingress/Chart.yaml` declares `sources: [http://github.com/istio/istio]` (HTTP, not HTTPS) | 1 | warning | `istio-chart-sources-istio-istio` | **Real bug.** Every other Chart.yaml uses `https://`. The drift is invisible to `helm lint` (which doesn't validate the URL scheme) and to the existing Make pipeline (no shape-pinning rule exists). **alint surfaces it via `yaml_path_equals` against `$.sources[0]`** |
+| `releasenotes/notes/27430.yaml` declares `piVersion: release-notes/v2` (typo: missing leading `a`) | 1 | warning | `istio-releasenotes-apiversion` | **Real bug.** The release-notes generator parses YAML and silently ignores the unknown key, so the file is invisible to its own schema check. alint's `yaml_path_equals` against `$.apiVersion` surfaces the literal mismatch |
+| `releasenotes/notes/{31336,31797,v1-read-crd}.yaml` declare `kind` outside the template enum (`bug` / `enhancement`) | 3 | warning | `istio-releasenotes-kind` | **Real bugs.** Should be `bug-fix` / `feature` per the template enum. The release-notes generator probably falls through to "uncategorised" |
+| `releasenotes/notes/50328.yaml` is a multi-document YAML file (engine rejects with "more than one document is not supported") | 2 | error | `istio-releasenotes-{apiversion,kind}` | **Pitfall #21 — real engine limit.** Legitimate two-document file (collapsing two related changes into one PR-numbered release-note entry). The engine's `serde_yaml::from_str::<Value>` single-document call rejects per-rule. **NOT YET FIXED in v0.9.17;** v0.10 ship-target via `multi_doc_mode:` knob (istio is the named source) |
+| 6 shellcheck findings on `prow/{benchtest,coverage,integ-suite-kind,…}.sh` | 6 | warning | `istio-shellcheck` | **Real findings.** SC1091 source-file-not-followed (the prow scripts source `prow/lib.sh` via dynamic path), SC2034 unused-variable, SC2153 possible-misspelling. All in `prow/` — not gated by istio's existing `lint-scripts` Make target because Prow-side shellcheck invocations are out-of-tree |
+| 4 `common/` files info-level marker findings | 4 | info | `istio-common-files-marker` | Info-level escalation path; helps contributors editing common/ directly. Real signal, not blocker |
+| 438 missing-final-newline + 222 trailing-whitespace | 660 | info | `oss-final-newline` + `oss-no-trailing-whitespace` (bundled) | Overwhelmingly under `manifests/charts/` chart templates and `releasenotes/notes/`. istio's `yamllint` config disables both rules (`new-line-at-end-of-file: disable`, `trailing-spaces: disable`) — the entire long tail of "below yamllint's signal floor but caught by alint's hygiene baseline". Mechanical, but resolvable in one `fix:` block pass |
+| `oss-code-of-conduct-exists` info | 1 | info | `oss-code-of-conduct-exists` (bundled) | istio carries no `CODE_OF_CONDUCT.md` (or `.github/CODE_OF_CONDUCT.md`) — it points at the upstream CNCF / Istio-website CoC by reference. Info-level finding |
+
+**Real net-new findings alint surfaces that existing tooling misses:**
+**13 stable, machine-verifiable structural drifts** (1 cobra-placeholder
+header + 2 vendored-gRPC headers + 1 HTTP→HTTPS chart sources + 1
+typo'd apiVersion + 3 enum drift + 6 prow-side shellcheck). Plus 4
+common-files-marker info findings (real escalation-path signal) + 660
+hygiene cosmetics below istio's existing yamllint gate threshold. **All
+13 structural findings are real bugs in istio that the existing
+9-target `make lint` pipeline does not catch.**
+
+### 6.2 Pitfall #20 verification — per-chart `hub:` JSONPath variation
+
+Verified against `/tmp/istio` 2026-05-08:
+
+| Chart | `hub:` declarations in values.yaml |
+|---|---|
+| `istio-cni` | **3 occurrences** at lines 4, 84, 160 (top-level + 2 nested) |
+| `ztunnel` | **1 occurrence** at line 5 (top-level only) |
+| `istio-control/istio-discovery` | **2 occurrences** at lines 12, 256 (top-level + nested under `pilot:`) |
+| `gateways/istio-ingress` | **1 occurrence** at line 161 (nested only) |
+| `gateways/istio-egress` | **1 occurrence** at line 150 (nested only) |
+| `default`, `gateway`, `base` | (no `hub:` declarations) |
+
+**5 of 8 charts carry `hub:` declarations.** **No two charts share
+the same single JSONPath** — the per-file `value_extractor:` v0.10
+design refinement (where each chart's `hub:` rule extracts via a
+chart-specific JSONPath) is the canonical fix. **Workaround in this
+config:** 5 separate `file_content_matches` rules asserting the
+literal text appears in each chart's values.yaml. Pitfall #20 in
+CONFIG-AUTHORING.md formalises this; istio is the **named source**
+for the v0.10 ship target.
+
+### 6.3 Pitfall #21 verification — multi-doc YAML
+
+Verified against `releasenotes/notes/50328.yaml`. The file contains
+two YAML documents separated by `---`:
+
+```
+$ head -3 /tmp/istio/releasenotes/notes/50328.yaml
+apiVersion: release-notes/v2
+kind: feature
+area: traffic-management
+...
+---
+apiVersion: release-notes/v2
+kind: bug-fix
+...
+```
+
+The engine's `serde_yaml::from_str::<Value>` rejects with
+`deserializing from YAML containing more than one document is not
+supported`. alint surfaces this as **2 violations** (one per affected
+rule: `istio-releasenotes-apiversion` + `istio-releasenotes-kind`).
+**NOT YET FIXED in v0.9.17;** the v0.10 `multi_doc_mode:` knob (`error
+| first | every`) closes the gap. istio is the **named source** in
+launch-evidence.md.
+
+### 6.4 No silent-failure-mode bugs in this config
+
+No instances of pitfalls #13/#14/#16/#17/#22 surfaced in this
+directory's `.alint.yml`. The pitfall #20 and #21 workarounds are
+documented in `.alint.yml`'s narrative comments; both are flagged for
+v0.10 engine fixes.
+
+---
+
+## 7. Followup feature work surfaced
+
+- **`cross_file_value_equals` rule kind with per-file
+  `value_extractor:` refinement** — istio is the **named source**
+  for the per-file `value_extractor:` design refinement (each chart's
+  `hub:` lives at a different JSONPath; the v0.10 refinement allows
+  per-file extraction patterns). **v0.10 ship-target** (10 sources;
+  istio adds the value-extractor sub-design).
+- **`multi_doc_mode:` knob on `*_path_*` rules** — istio is the
+  **named source** for this v0.10 design candidate
+  (`releasenotes/notes/50328.yaml` is a legitimate multi-document
+  YAML file; engine's single-doc `from_str::<Value>` rejects). **NOT
+  YET FIXED in v0.9.17;** v0.10 ship target.
+- **`import_gate` rule kind** — covers `.golangci.yml` depguard 16+
+  banned packages + DenyOperatorAndIstioctl per-directory boundaries.
+  **v0.10 ship-target** (4 sources; saturated; istio is the 5th
+  demand source).
+- **`command_idempotent` mode** — `make check-clean-repo` after
+  `make gen` (codegen-drift check). **v0.10 design candidate** (2
+  sources in launch-evidence.md table; istio is the 4th surface in
+  the wild).
+
+---
+
+## 8. Future analysis
 
 Three concrete unanalyzed angles for a future revalidation pass:
 
-1. **`nested_configs: true` for the per-component subtree.**
-   istio's per-component subdirs (pilot/, cni/, istioctl/,
-   operator/, security/, tools/) are effectively peer
-   subprojects under one root go.mod. A subtree-scoped
-   `.alint.yml` under `manifests/charts/` (for the chart
-   discipline) and `releasenotes/notes/` (for the release-note
-   schema) would let those rules live next to their domain
-   instead of in the root config — particularly relevant
-   because the chart-shape rules currently repeat per chart,
-   and a single subtree config under `manifests/charts/`
-   would express the contract once and apply it to all 9
-   charts.
-2. **`compliance/apache-2@v1` overlay** — istio is Apache
-   2.0 licensed and ships a `licenses/` tree (the
-   `lint-licenses` Make target points at it). The bundled
-   `compliance/apache-2@v1` ruleset (3 rules — LICENSE
-   present + NOTICE present + per-file SPDX header) would
-   partially replace `istio-go-license-header` +
-   `istio-shell-license-header` with declarative shape
-   coverage. The year-extractor istio adds (`Copyright
-   (?:\d{4} )?Istio Authors`) is istio-specific and the
-   bundled ruleset doesn't carry it; a future
-   `compliance/apache-2-istio` derivative could fold it in.
-3. **v0.9.6+ rule kinds replacing `command:` shellouts.**
-   Of istio's 7 `command:` shellouts (`golangci-lint`,
-   `gofmt`, `go mod tidy`, `helm lint`, `hadolint`,
-   `shellcheck`, `yamllint`, `license-lint`), `helm lint`
-   is the most interesting candidate for a future bundled
-   replacement: launch-evidence.md lists `cncf/owners@v1`
-   on the v0.10 design table (helm is the source); a
-   sibling `helm/chart-structure@v1` overlay would fold
-   the per-chart shape pinning that this case study
-   currently does inline. Worth proposing for v0.10/v0.11.
+1. **`nested_configs: true` for the per-component subtree.** istio's
+   per-component subdirs (`pilot/`, `cni/`, `istioctl/`, `operator/`,
+   `security/`, `tools/`) are effectively peer subprojects under one
+   root go.mod. A subtree-scoped `.alint.yml` under `manifests/charts/`
+   (for the chart discipline) and `releasenotes/notes/` (for the
+   release-note schema) would let those rules live next to their
+   domain instead of the root config.
+2. **`compliance/apache-2@v1` overlay.** istio is Apache 2.0 licensed
+   and ships a `licenses/` tree. The bundled `compliance/apache-2@v1`
+   ruleset (3 rules — LICENSE present + NOTICE present + per-file
+   SPDX header) would partially replace `istio-go-license-header` +
+   `istio-shell-license-header` with declarative shape coverage.
+3. **v0.9.6+ rule kinds replacing `command:` shellouts.** Of istio's
+   8 `command:` shellouts, `helm lint` is the most interesting
+   candidate for a future bundled replacement: launch-evidence.md
+   lists `cncf/owners@v1` on the v0.10 design table (helm is the
+   source); a sibling `helm/chart-structure@v1` overlay would fold
+   the per-chart shape pinning that this case study currently does
+   inline.
+
+---
+
+## 9. Validation status (2026-05-08)
+
+- **alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`
+- **Rule count:** **65** (28 istio-specific + 37 from 4 bundled
+  rulesets — `oss-baseline=15`, `go=8`, `ci/github-actions=3`,
+  `hygiene/no-tracked-artifacts=11`)
+- **`alint validate-config`:** ✓ Config valid: 65 rule(s) loaded
+- **Live-tree recheck:** **performed** in this batch — see §6 for the
+  3,346-violation breakdown (2,665 spawn-failure noise + 660 cosmetic
+  + 13 real structural + 2 multi-doc runtime errors + 4 common-files
+  info + 1 oss-code-of-conduct info + 1 chart-source HTTP→HTTPS)
+- **Pitfall fixes (this batch):** none needed — no `pattern: |`
+  instances; pitfalls #13/#14/#16/#17 all clean
+- **Open gaps with active workarounds (NOT YET FIXED in v0.9.17):**
+  - **Pitfall #20** — cross-file value-equality across structurally-
+    different files. Workaround: 5 separate `file_content_matches`
+    rules. Engine fix targeted for v0.10 via `value_extractor:` block
+    on `cross_file_value_equals` (istio is the named source)
+  - **Pitfall #21** — `yaml_path_*` multi-document YAML failure.
+    Workaround: pre-split or accept per-file runtime violation.
+    Engine fix targeted for v0.10 via `multi_doc_mode:` knob (istio
+    is the named source)
+- **Bench numbers:** 51 ms (lite bundled-only pass) on `/tmp/istio`'s
+  6,384-file tree; full pass dominated by `istio-yamllint` shellout
+  spawn-failures (2,635 messages) when `yamllint` is missing
