@@ -163,10 +163,43 @@ rules:
     message: "`target/` is Cargo's build dir and must never be committed."
 
   # --- Source-file conventions --------------------------------------
+  # v0.9.18: default-exclude subtrees with deliberately non-snake-case
+  # filenames. Three categories surface in rust-lang/rust:
+  #
+  #   src/doc/**              — doc examples + reference snippets
+  #                             use English-style hyphenation
+  #                             (`rustc-driver-example.rs`,
+  #                             `rust-by-example/...`).
+  #   src/tools/miri/tests/** — Miri test fixtures use CamelCase /
+  #                             intentional naming for litmus tests
+  #                             and concurrency-spec semantics
+  #                             (`abi_mismatch_repr_C.rs`,
+  #                             `libc_pthread_mutex_NULL_reentrant.rs`).
+  #   src/tools/clippy/tests/ui/** — clippy UI test fixtures use
+  #                             curly braces, hyphens, and other
+  #                             non-snake-case markers as part of
+  #                             the test grammar.
+  #   **/*.miri.rs            — `.miri.rs` dot-suffix is a Miri-only
+  #                             override file pattern; the dot in
+  #                             the basename trips snake-case.
+  #
+  # Without these excludes, rust-lang/rust alone surfaced 1,091
+  # false positives — the largest single bundled-rule FP class in
+  # the case-study corpus. The excludes are unique to rust-lang/rust
+  # + similar compiler/test-fixture projects; they're a no-op for
+  # most repos.
   - id: rust-sources-snake-case
     when: facts.has_rust
     kind: filename_case
-    paths: "**/src/**/*.rs"
+    paths:
+      include: ["**/src/**/*.rs"]
+      exclude:
+        - "src/doc/**"
+        - "src/tools/miri/tests/**"
+        - "src/tools/clippy/tests/ui/**"
+        - "src/tools/rustfmt/tests/**"
+        - "tests/rustdoc-gui/**"
+        - "**/*.miri.rs"
     case: snake
     level: error
     message: "Rust module filenames must be snake_case."

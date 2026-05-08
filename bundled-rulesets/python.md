@@ -202,10 +202,31 @@ rules:
     message: "Python module filenames should be snake_case (PEP 8)."
     policy_url: "https://peps.python.org/pep-0008/#package-and-module-names"
 
+  # v0.9.18: the cosmetic-formatting rules (final-newline +
+  # no-trailing-whitespace) default-exclude the canonical
+  # test-fixture trees. Linters and test-suite repos
+  # (cpython `Lib/test/**`, ruff `crates/*/resources/test/fixtures/**`,
+  # pytest-style `tests/fixtures/**`, Go-style `**/testdata/**`)
+  # carry deliberately-malformed Python files; the rules can't
+  # distinguish "real source" from "intentional bad input" so
+  # the exclude defaults narrow the scope. Users with an
+  # unconventional fixture layout can override via per-rule
+  # `paths:` in their config. The Trojan-Source check
+  # (`python-sources-no-bidi`) deliberately keeps the wider
+  # scope — bidi-control chars in fixtures are still a security
+  # concern.
   - id: python-sources-final-newline
     when: facts.has_python
     kind: final_newline
-    paths: "**/*.py"
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "tests/fixtures/**"
+        - "**/tests/fixtures/**"
+        - "**/test/fixtures/**"
+        - "**/testdata/**"
+        - "Lib/test/**"
+        - "crates/**/resources/**"
     scope_filter:
       has_ancestor: [pyproject.toml, setup.py, requirements.txt]
     level: info
@@ -215,7 +236,15 @@ rules:
   - id: python-sources-no-trailing-whitespace
     when: facts.has_python
     kind: no_trailing_whitespace
-    paths: "**/*.py"
+    paths:
+      include: ["**/*.py"]
+      exclude:
+        - "tests/fixtures/**"
+        - "**/tests/fixtures/**"
+        - "**/test/fixtures/**"
+        - "**/testdata/**"
+        - "Lib/test/**"
+        - "crates/**/resources/**"
     scope_filter:
       has_ancestor: [pyproject.toml, setup.py, requirements.txt]
     level: info

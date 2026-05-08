@@ -21,6 +21,39 @@ workspace (e.g. a single-crate repo, or a polyglot tree
 whose Rust portion isn't a workspace), the rules silently
 no-op so the ruleset is safe to extend unconditionally.
 
+v0.9.18 SCOPE NOTE — non-canonical workspace layouts:
+
+The per-member rules below use `select: "crates/*"` — the
+canonical Cargo workspace convention used by rust-lang/rust,
+alint itself, and most published workspaces. Workspaces with
+non-canonical layouts (deno's `ext/*` + `libs/*` + `runtime/`
++ `cli/`; clap's `clap_builder`, `clap_derive`, etc.) will
+see the bundled per-member checks silently no-op against
+their tree.
+
+Non-canonical adopters should redefine the per-member rules
+in their `.alint.yml` with the correct `select:` glob (rule
+IDs reused at the user level OVERRIDE the bundled definition
+while keeping the rule active). For example, deno's config
+carries:
+
+```yaml
+- id: cargo-workspace-member-has-readme
+  kind: for_each_dir
+  select: "{ext/*,libs/*,runtime,cli}"
+  when_iter: 'iter.has_file("Cargo.toml")'
+  require: [{ kind: file_exists, paths: "{path}/README.md" }]
+```
+
+(`for_each_dir.select:` accepts a single glob; brace expansion
+handles multi-pattern intent.)
+
+The principled fix — a `select_from: "$.workspace.members"`
+refinement that derives the iteration set from the root
+Cargo.toml's `[workspace] members` array — ships in v0.10
+alongside the `toml_path_array_iter` rule-kind design.
+Tracking: v0.10 design candidate "*_path_array_iter".
+
 ## Rules
 
 ### `cargo-workspace-members-declared`
@@ -70,6 +103,37 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/monor
 # workspace (e.g. a single-crate repo, or a polyglot tree
 # whose Rust portion isn't a workspace), the rules silently
 # no-op so the ruleset is safe to extend unconditionally.
+#
+# v0.9.18 SCOPE NOTE — non-canonical workspace layouts:
+#
+# The per-member rules below use `select: "crates/*"` — the
+# canonical Cargo workspace convention used by rust-lang/rust,
+# alint itself, and most published workspaces. Workspaces with
+# non-canonical layouts (deno's `ext/*` + `libs/*` + `runtime/`
+# + `cli/`; clap's `clap_builder`, `clap_derive`, etc.) will
+# see the bundled per-member checks silently no-op against
+# their tree.
+#
+# Non-canonical adopters should redefine the per-member rules
+# in their `.alint.yml` with the correct `select:` glob (rule
+# IDs reused at the user level OVERRIDE the bundled definition
+# while keeping the rule active). For example, deno's config
+# carries:
+#
+#     - id: cargo-workspace-member-has-readme
+#       kind: for_each_dir
+#       select: "{ext/*,libs/*,runtime,cli}"
+#       when_iter: 'iter.has_file("Cargo.toml")'
+#       require: [{ kind: file_exists, paths: "{path}/README.md" }]
+#
+# (`for_each_dir.select:` accepts a single glob; brace expansion
+# handles multi-pattern intent.)
+#
+# The principled fix — a `select_from: "$.workspace.members"`
+# refinement that derives the iteration set from the root
+# Cargo.toml's `[workspace] members` array — ships in v0.10
+# alongside the `toml_path_array_iter` rule-kind design.
+# Tracking: v0.10 design candidate "*_path_array_iter".
 
 version: 1
 

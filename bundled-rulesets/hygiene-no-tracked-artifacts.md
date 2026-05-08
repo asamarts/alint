@@ -142,8 +142,20 @@ rules:
     # Common JS/TS bundler output dirs. Some teams legitimately
     # commit `dist/` for published packages — disable this rule
     # on those repos.
+    #
+    # v0.9.18: gated on `has_ancestor: package.json` so the rule
+    # only fires inside JS-package contexts. Without this gate, the
+    # rule produced false positives in 8 polyglot monorepos
+    # (k8s `build/`, golang/go `src/cmd/dist`, dotnet `bin/`,
+    # bazel `tools/build_defs/`, vscode `extensions/*/build/`,
+    # nixpkgs `pkgs/development/python-modules/build`,
+    # deno `tests/testdata/dist/`, angular `dev-infra/.../build/`)
+    # — directories literally named `build`/`dist`/etc. in non-JS
+    # contexts.
     kind: dir_absent
     paths: ["**/dist", "**/build", "**/out", "**/.next", "**/.nuxt", "**/.svelte-kit", "**/.turbo", "**/coverage"]
+    scope_filter:
+      has_ancestor: package.json
     level: warning
 
   - id: hygiene-no-go-build-cache

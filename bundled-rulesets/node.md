@@ -151,8 +151,16 @@ rules:
     # Common build-output directory names. Users with legitimate
     # reasons to ship a built `dist/` (e.g. a typed-package
     # preview) can set this rule's `level: off`.
+    #
+    # v0.9.18: gated on `has_ancestor: package.json` to scope the
+    # check per-JS-package — without this gate the rule fires on
+    # every `dist/` repo-wide once any `package.json` exists, which
+    # causes false positives in polyglot monorepos (Rust crate
+    # source dirs named `dist/`, etc.).
     kind: dir_absent
     paths: ["**/dist", "**/.next", "**/.nuxt", "**/coverage", "**/.turbo"]
+    scope_filter:
+      has_ancestor: package.json
     level: info
     message: >-
       Build output directories are usually generated and shouldn't

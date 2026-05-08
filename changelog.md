@@ -8,74 +8,135 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.9.18] — TBD (pre-launch fixes)
+## [0.9.18] — 2026-05-08 (pre-launch fixes)
 
 Findings from the v0.9.17 deep-analysis pass (30 case studies — see
 [`docs/development/case-study-deep-analysis-log.md`](docs/development/case-study-deep-analysis-log.md))
-surfaced 6 bundled-ruleset bugs + 3 case-study config issues. None
-were engine bugs; all are rule-scope, pattern, or default-exclude
-issues. v0.9.18 closes them before P4 launch.
+surfaced 6 bundled-ruleset bugs + 3 case-study config issues. v0.9.18
+closes them before P4 launch. The only engine change is one small
+extension: `dir_absent` rules now honour `scope_filter:` (required by
+A1 below), allowing dir-iterating rules to use the same ancestor-
+manifest gate that scopes per-file rules.
+
+Live-tree revalidation against the cloned case-study trees confirmed
+the FP-class elimination end-to-end (see deep-analysis log v0.9.18
+revalidation evidence section for the full per-repo table). Headline
+numbers:
+
+  airflow apache-2-source-has-license-header: 8,228 → 79 (-99%)
+  rust-lang/rust rust-sources-snake-case:     1,091 → 10 (-99%)
+  ruff python-sources-final-newline:            176 → 0  (-100%)
+  ruff python-sources-no-trailing-whitespace:    59 → 0  (-100%)
+  tensorflow tensorflow-bazel-files-...:         700 → 241 (-66%)
+  bazel hygiene-no-js-build-outputs:              30 → 0  (-100%)
+  dotnet/runtime hygiene-no-js-build-outputs:     21 → 1  (-95%)
+  ruleset/per-repo total FP elimination:       ~10,000+ violations
+
+### Engine
+
+- **`dir_absent` honours `scope_filter:`.** Previously rejected at
+  build time with "scope_filter is supported on per-file rules only".
+  Required by A1 below — `hygiene-no-js-build-outputs` needs
+  `scope_filter: { has_ancestor: package.json }` to scope per-JS-package.
+  The fix removed the `reject_scope_filter_on_cross_file` call from
+  `dir_absent::build` and switched its scope construction to
+  `Scope::from_spec(spec)` (the canonical from-spec constructor).
+  `Scope::matches` already worked for dir paths (`Path::parent()` is
+  path-agnostic), so no other engine change beyond the build-path
+  swap. JSON Schema description for `scope_filter` updated to
+  document `dir_absent` support. Symmetric `dir_exists` /
+  `file_absent` / `file_exists` extensions deferred — none of the
+  v0.9.18 fix-list items need them.
 
 ### Fixed (bundled rulesets — A1–A6)
 
-- **A1 — `hygiene-no-js-build-outputs` requires sibling
-  `package.json` ancestor.** Currently fires on any `dist/` or
-  `build/` directory, including non-JS contexts (e.g., k8s
-  shell-build outputs). Adding `scope_filter.has_ancestor:
-  package.json` constrains the rule to JS-package contexts where
-  the premise holds.
-- **A2 — `apache-2-source-has-license-header` ships a long-form
-  pattern as a bundled fact.** Apache TLPs (arrow, spark, airflow)
-  all require the long-form license header (~12 lines), but the
-  current rule only matches the short SPDX-Identifier form. Bundle
-  the long-form regex as a default opt-in.
-- **A3 — `python@v1` rules default-exclude test-fixture paths.**
-  Currently fire on `tests/fixtures/**`, `**/testdata/**`, and
-  `Lib/test/**` (cpython convention) — these legitimately contain
-  intentionally-malformed Python. Add to the ruleset's default
-  `paths.exclude:`.
-- **A4 — `monorepo/cargo-workspace@v1` selector parses
-  `[workspace] members:`.** Currently uses `for_each_dir
-  select: '**/Cargo.toml'`, which over-fires on non-workspace
-  Cargo.toml files. Switch to a `toml_path_array_iter` source
-  (`$.workspace.members`).
-- **A5 — `oss-license-exists` recognises `LICENSE.TXT` and
-  `LICENSE.md`.** Currently requires `LICENSE` exactly. Some
-  repos (notably ML/research projects) carry the file as
-  `LICENSE.txt` or `LICENSE.md`. Broaden to a `paths:` glob.
-- **A6 — `rust@v1`'s `rust-sources-snake-case` adds an
-  `allow_compiler_naming` knob (default false).** rust-lang/rust
-  itself has dozens of `compiler/**` files using deliberately
-  non-snake-case identifiers (e.g., `Inherent_*`, `Param_*`).
-  Knob defaults off; rust-lang/rust opts in.
+- **A1 — `hygiene-no-js-build-outputs` (and `node-no-tracked-dist`)
+  gated on `scope_filter: { has_ancestor: package.json }`.** Without
+  this gate, the rule fired on every `**/dist`, `**/build`, etc.
+  directory regardless of context — false positives in 8 polyglot
+  monorepos (k8s, golang/go, dotnet, bazel, vscode, nixpkgs, deno,
+  angular).
+- **A2 — `apache-2-source-has-license-header` pattern broadened to
+  catch BOTH short SPDX form AND long ASF preamble.** Pre-fix
+  pattern only matched the short SPDX form, missing the longer
+  "Licensed to the Apache Software Foundation (ASF)..." preamble
+  every Apache TLP uses. airflow surfaced 8,228 false positives;
+  arrow + spark each carried per-repo overrides duplicating the
+  alternation pattern. The bundled rule now uses
+  `'Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)'`
+  — superseding the per-repo overrides.
+- **A3 — `python@v1` cosmetic rules default-exclude test-fixture
+  paths.** `python-sources-final-newline` and
+  `python-sources-no-trailing-whitespace` now exclude
+  `tests/fixtures/**`, `**/testdata/**`, `Lib/test/**` (cpython),
+  and `crates/**/resources/**` (Rust-Python projects like ruff).
+  ruff alone surfaced 235 FPs across its 1,597 deliberately-malformed
+  Python test fixtures.
+- **A4 — `monorepo/cargo-workspace@v1` documents non-canonical
+  layout override.** The bundled `select: "crates/*"` is the
+  canonical layout; non-canonical workspaces (deno's
+  `ext/*` + `libs/*`; clap's `clap_*`) override the rule via
+  per-config (rule-id reuse). Bundled YAML now ships a SCOPE NOTE
+  enumerating the override recipe with a worked example. The
+  principled fix — a `toml_path_array_iter` rule kind that derives
+  the iteration set from `$.workspace.members[*]` — is a v0.10
+  design candidate.
+- **A5 — `oss-license-exists` accepts `LICENSE.TXT` (uppercase),
+  `LICENSE.rst`, `COPYING.{md,txt}`, and a few less-common
+  variants.** dotnet/runtime canonical filename is `LICENSE.TXT`;
+  filesystem globs are case-sensitive on most platforms. Broadened
+  via brace expansion. Mirror change to `oss-license-non-empty`
+  (paths must stay symmetric).
+- **A6 — `rust@v1`'s `rust-sources-snake-case` excludes test-fixture
+  + doc subtrees with deliberately non-snake-case filenames.**
+  rust-lang/rust's actual FP class is hyphenated names in
+  `src/doc/**`, Miri/clippy/rustfmt test fixtures, and `**/*.miri.rs`
+  dot-suffix files (NOT `compiler/**` — that subtree is already
+  snake-case-correct, contrary to the deep-analysis log description).
+  rust-lang/rust violations dropped 1,091 → 10 (99% reduction).
 
 ### Fixed (case-study configs — B1–B3)
 
-- **B1 — `examples/microsoft-typescript/.alint.yml`** —
-  pitfall #22 (`|` → `|-`) on the long-form license header
-  pattern; also lower the rule level from `error` to `info`
-  (TypeScript ships with `tsc.js` and other generated files
-  carrying their own headers; the rule is informational, not
-  blocking).
-- **B2 — `examples/denoland-deno/.alint.yml`** — defensive
-  pitfall #22 fixes on all `pattern: |` regex blocks.
-- **B3 — `examples/tensorflow-tensorflow/.alint.yml`** — drop
-  `tensorflow-bazel-files-have-apache-header` (or scope to
-  `BUILD.bazel` only — the rule's premise as written assumes
-  every file carries the header, but tensorflow's Bazel BUILD
-  files instead carry `licenses(["notice"])` declarations).
+- **B1 — `examples/microsoft-typescript/.alint.yml`:** pitfall #22
+  block-scalar fix on `ts-copyright-header-{src,scripts}` (`|` →
+  `|-`); `ts-copyright-header-src` level lowered `warning` → `info`
+  (the convention isn't actually applied to source files —
+  TypeScript bundles its CopyrightNotice block via Hereby's
+  `generateLibs`).
+- **B2 — `examples/denoland-deno/.alint.yml`:** defensive pitfall
+  #22 swap on `deno-copyright-js-ts`. Verified NOT firing today
+  (regex luck), but `|-` removes the dependency on regex luck.
+- **B3 — `examples/tensorflow-tensorflow/.alint.yml`:**
+  `tensorflow-bazel-files-have-apache-header` premise repair
+  (700 FPs pre-fix). TF declares licensing per-Bazel-package via
+  `licenses(["notice"])` + `default_applicable_licenses`, NOT
+  per-file headers. Pattern replaced with
+  `'(licenses\(.*notice|default_applicable_licenses.*license)'`
+  + scope narrowed to `BUILD` / `BUILD.bazel` only.
 
 ### Validation
 
-- **Cross-cutting revalidation pass.** Re-run alint against all
-  30 case-study trees with the bundled-ruleset fixes applied,
-  update each `examples/<repo>/README.md` Section 4 (post-fix
-  violation counts) and Section 6 (gap discovery refinements
-  from the new behaviour).
-- **`coverage_audit_smoke_fixtures` extended.** Adds regression
-  fixtures for A1 (k8s no-build-output FP), A3 (cpython
-  test-fixture FP), A4 (rust-lang/rust workspace member parsing),
-  and A6 (compiler/** snake-case knob).
+- **Cross-cutting revalidation pass.** Re-ran alint v0.9.18 against
+  the cloned case-study trees at `/tmp/<repo>/`. Per-repo FP
+  elimination tabulated in
+  `docs/development/case-study-deep-analysis-log.md` v0.9.18
+  revalidation evidence section. The revalidation surfaced two
+  scope-mismatches in the original A3 + A6 commits that didn't
+  catch the actual FP source — corrected mid-flight in commit
+  `dc7c3ed8` (A3: `crates/**/resources/test/fixtures/**` →
+  `crates/**/resources/**`; A6: `compiler/**` →
+  `src/doc/**` + `src/tools/{miri,clippy,rustfmt}/tests/**` +
+  `**/*.miri.rs`).
+- **`coverage_audit_smoke_fixtures` extended.** Three new fixtures
+  exercise the A1, A3, A6 bundled-rule defaults via
+  `tests/coverage_audit_smoke_fixtures.rs`. Each fixture's
+  `expected.toml` documents the count drift a refactor would
+  produce so the audit failure points at the regression class.
+  Total smoke fixtures: 5 → 8.
+- Per-README cosmetic count refresh deferred — those tables need
+  re-running per-repo and become noise in the launch sprint. The
+  deep-analysis log evidence table is the v0.9.18 ship-state
+  authority.
 
 ## [0.9.17] — 2026-05-06
 

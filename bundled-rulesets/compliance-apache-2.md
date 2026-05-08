@@ -48,7 +48,7 @@ strictly.
 - **level**: `warning`
 - **policy**: <https://www.apache.org/licenses/LICENSE-2.0#apply>
 
-> Apache-2.0: source files should carry the canonical Apache header (Copyright + "Licensed under the Apache License, Version 2.0"). The full boilerplate is at https://www.apache.org/licenses/LICENSE-2.0#apply.
+> Apache-2.0: source files should carry the canonical Apache header — either the short form ("Licensed under the Apache License, Version 2.0...") or the long ASF-preamble form ("Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements..."). The full boilerplate is at https://www.apache.org/licenses/LICENSE-2.0#apply.
 
 ## Source
 
@@ -115,11 +115,22 @@ rules:
     policy_url: "https://www.apache.org/licenses/LICENSE-2.0#redistribution"
 
   # Every source file should carry the Apache 2.0 header in
-  # its first ~25 lines. Pattern matches the canonical
-  # "Licensed under the Apache License, Version 2.0" line —
-  # the variants users actually paste from apache.org and
-  # SPDX templates all share that substring. (`{2,2}` style
-  # version pinning would over-fit.)
+  # its first ~25 lines. Pattern matches BOTH canonical forms
+  # users paste from https://www.apache.org/licenses/LICENSE-2.0#apply:
+  #
+  #   1. Short SPDX-template form, opening with "Licensed under
+  #      the Apache License, Version 2.0".
+  #   2. Long ASF-preamble form, opening with "Licensed to the
+  #      Apache Software Foundation (ASF) under one or more
+  #      contributor license agreements...". This is the form
+  #      every Apache TLP (arrow, spark, airflow, etc.) uses.
+  #
+  # v0.9.18: pattern broadened from the short-form-only
+  # `Licensed under the Apache License,?\s*Version 2` (which
+  # produced 8,228 false positives against airflow's tree, the
+  # densest Apache TLP) to the alternation form below. This
+  # supersedes the per-repo overrides arrow + spark previously
+  # carried.
   - id: apache-2-source-has-license-header
     kind: file_header
     paths:
@@ -135,12 +146,15 @@ rules:
         - "**/generated/**"
         - "**/__generated__/**"
     lines: 25
-    pattern: 'Licensed under the Apache License,?\s*Version 2'
+    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)'
     level: warning
     message: >-
       Apache-2.0: source files should carry the canonical
-      Apache header (Copyright + "Licensed under the Apache
-      License, Version 2.0"). The full boilerplate is at
+      Apache header — either the short form ("Licensed under
+      the Apache License, Version 2.0...") or the long
+      ASF-preamble form ("Licensed to the Apache Software
+      Foundation (ASF) under one or more contributor license
+      agreements..."). The full boilerplate is at
       https://www.apache.org/licenses/LICENSE-2.0#apply.
     policy_url: "https://www.apache.org/licenses/LICENSE-2.0#apply"
 ```

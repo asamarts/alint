@@ -159,15 +159,24 @@ rules:
     message: "An open-source repo should have a README at the root."
     policy_url: "https://opensource.guide/starting-a-project/#writing-a-readme"
 
+  # v0.9.18: case-variation broadening — `LICENSE.TXT` (uppercase
+  # extension) is dotnet/runtime's canonical filename and was rejected
+  # before. `LICENSE.rst` covers Python projects that ship the license
+  # in reST. `COPYING.md` / `COPYING.txt` cover less common variants
+  # surfaced across the case-study corpus. Filesystem globs are
+  # case-sensitive on most platforms; the brace expansion enumerates
+  # the case-variants explicitly.
   - id: oss-license-exists
     kind: file_exists
     paths:
       - "LICENSE"
-      - "LICENSE.md"
-      - "LICENSE.txt"
+      - "LICENSE.{md,txt,TXT,rst}"
       - "LICENSE-APACHE"
       - "LICENSE-MIT"
+      - "LICENSE-BSD"
+      - "LICENSE-MPL"
       - "COPYING"
+      - "COPYING.{md,txt}"
     root_only: true
     level: warning
     message: "An open-source repo should declare a license at the root."
@@ -178,9 +187,18 @@ rules:
     # providing zero legal guidance. 200 bytes is a safely
     # permissive floor — the shortest common OSS license
     # (MIT) runs about 1 KiB once you include the copyright
-    # notice.
+    # notice. Path list mirrors `oss-license-exists` so both
+    # rules check the same set.
     kind: file_min_size
-    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENSE-APACHE", "LICENSE-MIT", "COPYING"]
+    paths:
+      - "LICENSE"
+      - "LICENSE.{md,txt,TXT,rst}"
+      - "LICENSE-APACHE"
+      - "LICENSE-MIT"
+      - "LICENSE-BSD"
+      - "LICENSE-MPL"
+      - "COPYING"
+      - "COPYING.{md,txt}"
     min_bytes: 200
     level: info
     message: "LICENSE file is suspiciously short; paste the full license text rather than a stub."
