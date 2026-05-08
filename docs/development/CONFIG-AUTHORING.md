@@ -1,13 +1,15 @@
 # Authoring `.alint.yml` configs — common pitfalls + canonical patterns
 
-Surfaced by the P2a + P2b launch-prep validation passes — **21 distinct
+Surfaced by the P2a + P2b launch-prep validation passes — **22 distinct
 schema / language / runtime pitfalls** hit while writing configs for
 production repos. 12 surfaced in the P2a pilot (kubernetes,
 rust-lang/rust, deno, airflow, turbo); 3 in P2a Wave 1 (clap, tokio,
 ruff, uv, typescript); 1 in P2a Wave 2 (next.js); 1 in P2a Wave 3
-(helm); 2 in P2b Wave 1 (bazel + tensorflow); 2 in P2b Wave 2 (istio).
-All configs ultimately parse + run, but the iteration cost was high.
-This doc captures every one with the canonical correct form.
+(helm); 2 in P2b Wave 1 (bazel + tensorflow); 2 in P2b Wave 2 (istio);
+1 in the deep-analysis pilot pass (kubernetes — YAML `|` block-scalar
+trailing newline in `file_header` patterns). All configs ultimately
+parse + run, but the iteration cost was high. This doc captures every
+one with the canonical correct form.
 
 > **Note on pitfall numbering.** The original *pitfall #18*
 > claim (JSONPath outer-parens filter) was investigated during
@@ -39,7 +41,7 @@ This doc captures every one with the canonical correct form.
 
 ---
 
-## The 21 pitfalls
+## The 22 pitfalls
 
 ### 1. `command` rule: field is `command:` not `argv:`
 
@@ -836,6 +838,73 @@ so no existing config silently changes behaviour.
 Source: surfaced by `examples/istio-istio/.alint.yml` while authoring
 the release-notes `$.kind` enum check against
 `releasenotes/notes/50328.yaml` (multi-doc bundle).
+
+### 22. YAML `|` literal block scalar appends a trailing newline to the regex pattern
+
+`pattern: |` (YAML's literal block scalar) **appends** a trailing
+newline to the resulting string. When that string is used as a regex
+inside `file_header` / `file_content_matches`, the trailing `\n`
+becomes part of the pattern — the engine then requires a literal
+newline immediately after the last visible line of the pattern.
+
+In practice, real source files continue with non-newline content on
+the line where the pattern ends. Result: the rule produces zero
+matches on every file in the tree. Distinct from pitfall #14
+(single-quoted-scalar `\n` non-expansion); this is the opposite
+problem with literal block scalars.
+
+**Wrong:**
+```yaml
+- id: license-header
+  kind: file_header
+  paths: "**/*.go"
+  pattern: |
+    ^/\*
+    Copyright [0-9]{4} The Authors\.
+
+    Licensed under the Apache License, Version 2\.0
+  level: error
+```
+The pattern's last line is `Licensed under the Apache License,
+Version 2\.0`; YAML appends `\n` so the pattern becomes
+`Licensed under the Apache License, Version 2\.0\n`. Every real
+header reads `Licensed under the Apache License, Version 2.0 (the
+"License")` — no `\n` after `2.0` — so the rule matches zero files.
+
+**Right (option A — strip-final-newline scalar `|-`):**
+```yaml
+- id: license-header
+  kind: file_header
+  paths: "**/*.go"
+  pattern: |-
+    ^/\*
+    Copyright [0-9]{4} The Authors\.
+
+    Licensed under the Apache License, Version 2\.0
+  level: error
+```
+`|-` (chomp indicator) strips the final newline. Pattern becomes
+`...Version 2\.0` (no trailing `\n`), which matches `Version 2.0
+(the "License")` correctly.
+
+**Right (option B — single-line `>-` for shorter patterns):**
+```yaml
+pattern: '^/\* Copyright [0-9]{4} The Authors\.'
+```
+
+The same pitfall applies anywhere a YAML block scalar produces a
+regex: `file_content_matches`, `file_content_forbidden`,
+`file_starts_with`, `file_ends_with`. Default to `|-` for any
+multi-line regex that ends mid-content; the visible whitespace
+matches what you wrote.
+
+Source: surfaced by `examples/kubernetes-kubernetes/.alint.yml`
+during the deep-analysis pilot — `k8s-go-license-header` produced
+17,040 false positives against the live tree (every Go file in
+`/tmp/kubernetes`). Confirmed against
+`crates/alint-rules/src/file_header.rs` regex evaluation +
+serde_yaml block-scalar parsing. Fix landed in the same commit
+that added this catalogue entry.
 
 ---
 

@@ -36,23 +36,35 @@ rules:
   # Apache-2 header on every source file. The kubernetes header
   # uses YEAR substitution; matches a contiguous block ending in
   # 'Licensed under the Apache License, Version 2.0'.
+  # Pitfall #22 — YAML `|` literal block scalar appends a trailing
+  # newline to the pattern, which causes file_header to require a
+  # newline immediately after the last header line. Real headers
+  # continue with ` (the "License")` on the same line, producing
+  # 17,040 false positives across this tree. Use `|-` to strip the
+  # trailing newline.
   - id: k8s-go-license-header
     kind: file_header
     paths: "**/*.go"
     scope_filter:
       has_ancestor: go.mod
-    pattern: |
+    pattern: |-
       ^/\*
       Copyright [0-9]{4} The Kubernetes Authors\.
 
       Licensed under the Apache License, Version 2\.0
     level: error
 
+  # Two interacting fixes vs the original:
+  #   1. `|-` (pitfall #22) instead of `|`.
+  #   2. `(?m)` prefix (pitfall #13) so `^` is line-anchor —
+  #      shell scripts open with `#!/usr/bin/env bash` followed by
+  #      a blank line then the copyright, so a file-anchor `^`
+  #      could never match.
   - id: k8s-shell-license-header
     kind: file_header
     paths: "**/*.sh"
-    pattern: |
-      ^# Copyright [0-9]{4} The Kubernetes Authors\.
+    pattern: |-
+      (?m)^# Copyright [0-9]{4} The Kubernetes Authors\.
       #
       # Licensed under the Apache License, Version 2\.0
     level: error
@@ -91,12 +103,16 @@ rules:
   # ── verify-pkg-names.sh ────────────────────────────────────────
   # Go package names follow lowercase, no-underscore convention.
   # The verify script's regex is roughly "lower-case alphanumeric, no _".
+  # Pitfall #13 — `^` and `$` anchor to file start / end by default.
+  # Every real Go file has its `package x` declaration AFTER the
+  # license header, not at byte 0. `(?m)` switches to line-anchor
+  # semantics so the rule fires correctly.
   - id: k8s-go-package-names
     kind: file_content_matches
     paths: "**/*.go"
     scope_filter:
       has_ancestor: go.mod
-    pattern: '^package [a-z][a-z0-9]*$'
+    pattern: '(?m)^package [a-z][a-z0-9]*$'
     level: error
     message: |
       Go package names must be lowercase alphanumeric (no underscores or
