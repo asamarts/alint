@@ -161,7 +161,7 @@ rules:
         - "packages/*/src/**/*.snap"
         # Internal devtools build outputs that get .eslintignore'd.
         - "packages/react-devtools-shared/src/hooks/__tests__/__source__/**"
-    pattern: |
+    pattern: |-
       ^/\*\*
        \* Copyright \(c\) Meta Platforms, Inc\. and affiliates\.
        \*
@@ -186,7 +186,7 @@ rules:
         - "scripts/bench/remote-repo/**"
         - "scripts/release/**"
         - "scripts/rollup/shims/**"
-    pattern: |
+    pattern: |-
       ^/\*\*
        \* Copyright \(c\) Meta Platforms, Inc\. and affiliates\.
        \*

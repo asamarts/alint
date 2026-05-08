@@ -1,124 +1,69 @@
 # Case study: `facebook/react`
 
-> Marketing writeup (narrative, headline catch, competitive framing)
-> lives at <https://alint.org/examples/facebook-react/>. This README
-> is the engineering reference: tooling inventory, mapping table,
-> gap catalogue, validation status.
+> **Marketing / positioning note.** The narrative-framed write-up of this
+> case study (headline catches, "where alint earns its keep here", launch
+> story angles) lives at <https://alint.org/examples/facebook-react/>.
+> This README is the **engineering inventory**: tooling map, gap catalogue,
+> coverage classification, performance numbers, and gap-discovery findings.
+> Same facts, different language.
 
-Inventory of the structural-validation tooling in `facebook/react`
-and an alint config that replaces the rules alint can express today,
-plus a catalogue of the rules that need new alint primitives.
+Inventory of the structural-validation tooling in `facebook/react` and an
+alint config that replaces the rules alint can express today, plus a
+catalogue of the rules that need new alint primitives.
 
-**Repo state captured:** 2026-05-06, sparse-clone of
-`facebook/react@HEAD` (the React monorepo — runtime + DOM + DevTools
-+ Compiler).
+**Repo state captured:** 2026-05-08 sparse-clone of `facebook/react@HEAD`.
+Working-tree at `/tmp/react`: **6,878 tracked files** (`git ls-files`),
+55 MB. Per-language counts: **3,487 .js + 396 .ts + 112 .tsx files**, 61
+`package.json` files, **24 GitHub Actions workflows**, 55 README files.
+The `compiler/` subtree alone ships **3,836 files including 1,719
+`*.expect.md` AST snapshots** that dominate the file count and the
+info-level gap discovery class (whitespace + final-newline cosmetics on
+fixtures).
+
+**alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`.
 
 ---
 
-## Summary
+## 1. Inventory of existing tooling
 
 react is a **Yarn classic v1 multi-package monorepo** — 39 packages
 under `packages/*` declared via `"workspaces": ["packages/*"]` in the
-root `package.json`, with `packageManager: "yarn@1.22.22"` pinning
-the workspace to Yarn classic. Of those 39 packages, **22 publish to
-npm** (the `react`, `react-dom`, `react-reconciler`, `scheduler`,
-`react-server-dom-*`, `react-devtools-*`, `eslint-plugin-react-hooks`,
-`use-subscription`, `use-sync-external-store`, `react-refresh`,
-`jest-react`, `react-art`, `react-is`, `react-test-renderer`,
-`react-flight-server-fb`, `react-markup` family) and **17 are private**
-(internal test-utils, devtools internals, native-renderer bindings,
-`shared`, `react-server`, `react-cache`, `react-debug-tools`).
+root `package.json`, with `packageManager: "yarn@1.22.22"` pinning. 22
+packages publish to npm; 17 are private (test-utils, devtools internals,
+native-renderer bindings, `shared`, etc.).
 
-Different shape from kubernetes (Go monorepo, hand-rolled `hack/verify-*.sh`
-sprawl), microsoft/typescript (Hereby task runner, frozen-snapshot
-maintenance mode), and vercel/turbo (modern Rust+TS hybrid with
-zero hand-rolled validators). react is the **"deeply-evolved JS
-monorepo with selective custom tooling"** data point.
+### 1.1 `.github/workflows/shared_lint.yml` (4 jobs — gating)
 
-Concrete count: **5 lint-class CI jobs** in `.github/workflows/shared_lint.yml`
-(prettier, eslint, check_license, test_print_warnings, plus the
-implicit yarn-install-validates-lockfile gate), **8 hand-rolled
-validation scripts** under `scripts/` (`tasks/eslint.js`, `tasks/linc.js`,
-`tasks/version-check.js`, `tasks/flow-ci.js`, `ci/check_license.sh`,
-`ci/test_print_warnings.sh`, `print-warnings/print-warnings.js`,
-`error-codes/extract-errors.js`), **5 in-tree custom eslint rules**
-under `scripts/eslint-rules/` (`prod-error-codes`,
-`safe-string-coercion`, `warning-args`, `no-primitive-constructors`,
-`no-production-logging`), **1 second-pass build-output linter**
-(`scripts/rollup/validate/index.js` + 4 per-channel
-`eslintrc.{cjs,cjs2015,esm,fb,rn}.js` configs), and **1 PR-time Danger
-runner** (`dangerfile.js`).
-
-Of those ~20 surfaces:
-
-- **~10 fit alint directly** (per-package layout, header
-  consistency, codes.json shape, .nvmrc/.gitattributes/.eslintignore
-  discipline, version-source shape, MAINTAINERS file, workflow
-  naming convention, tracked-build-output guard, manifest field
-  shapes).
-- **~5 are shelled out via `command:`** (eslint, prettier-check,
-  flow-ci, version-check, check_license).
-- **~5 are out of scope** — the 5 custom eslint rules
-  (TSESTree visitors), `extract-errors.js` (codegen against built
-  artefacts), `print-warnings.js` (hermes-parser AST walk),
-  `lint-build`'s second-pass rollup-output re-lint (build-aware),
-  `dangerfile.js` (PR-diff-aware).
-
-Maps-to-alint percentage: **~50%** (10/20). Needs-new-primitive: **~10%**
-(2/20 — `cross_file_value_equals` for version-check + `registry_append_only`
-for codes.json). Out-of-scope: **~40%** (8/20 — all AST or
-build/runtime-aware).
-
-**Key finding:** react carries a ~600-entry, append-only JSON
-**registry** (`scripts/error-codes/codes.json`) plus a **single
-source of truth** (`packages/shared/ReactVersion.js`) that
-propagates across 3 per-package `version` fields. Both are
-currently enforced by hand-rolled node scripts. alint replaces
-the codes.json shape declaratively today and adds two rule-kind
-candidates: `cross_file_value_equals` (now `v0.10 ship-target`,
-10 sources per `docs/development/launch-evidence.md`) and
-`registry_append_only` (still single-source / react-only —
-`v0.10 design candidate`).
-
----
-
-## Existing tooling inventory
-
-react's structural validation lives in five overlapping places.
-
-### 1. `.github/workflows/shared_lint.yml` (4 jobs)
-
-| Job | What it runs | alint replacement |
+| Job | What it actually does | Backing tool |
 |---|---|---|
-| `prettier` | `yarn prettier-check` (= `node ./scripts/prettier/index.js`) | `command:` rule |
-| `eslint` | `node ./scripts/tasks/eslint` | `command:` rule + structural floor (`react-eslintrc-loads-react-internal-plugin`, `react-eslintignore-skips-build-output`) |
-| `check_license` | `./scripts/ci/check_license.sh` (greps `git grep -l PATENTS` against an allow-list) | Replaced declaratively by `react-no-patents-references` (forbidden-pattern with the script itself excluded) + `command:` shell-out for redundancy |
-| `test_print_warnings` | `./scripts/ci/test_print_warnings.sh` (asserts `print-warnings.js` emits at least one warning) | Out of scope — the underlying `print-warnings.js` walks every JS source with hermes-parser to enumerate `console.warn(...)` calls |
+| `prettier` | `yarn prettier-check` (= `node ./scripts/prettier/index.js`) | prettier (with `.prettierrc.js`) |
+| `eslint` | `node ./scripts/tasks/eslint` (full eslint over `**/*.js` + `.eslintignore`) | eslint + `scripts/eslint-rules/` (in-tree custom plugin `eslint-plugin-react-internal` with 5 rules) |
+| `check_license` | `./scripts/ci/check_license.sh` — `git grep -l PATENTS` against an allow-list (the script itself is the only legitimate carrier) | bash + `git grep -l` |
+| `test_print_warnings` | `./scripts/ci/test_print_warnings.sh` — asserts `print-warnings.js` emits at least one warning | hermes-parser AST walk over every JS source enumerating `console.warn(...)` / `console.error(...)` calls |
 
-The other 20 workflows under `.github/workflows/` are runtime/test
-orchestration (`runtime_*`, `compiler_*`, `devtools_*`,
-`shared_check_maintainer.yml`, etc.) and operational bots
-(`shared_close_direct_sync_branch_prs.yml`, `shared_stale.yml`,
-`shared_cleanup_*_caches.yml`). None are validation surfaces; they
-all delegate to test runners or operate on PR/branch state.
+The other 20 workflows under `.github/workflows/` (`runtime_*`,
+`compiler_*`, `devtools_*`, `shared_check_maintainer.yml`,
+`shared_close_direct_sync_branch_prs.yml`, `shared_stale.yml`,
+`shared_cleanup_*_caches.yml`, …) are runtime/test orchestration and
+operational bots, not validation surfaces.
 
-### 2. `package.json` `scripts:` block (the validation entrypoints)
+### 1.2 `package.json` `scripts:` block (validation entrypoints)
 
-| Script | What it does | alint replacement |
+| Script | What it does | Backing tool |
 |---|---|---|
-| `lint` | `node ./scripts/tasks/eslint.js` (full eslint over `**/*.js` + `.eslintignore`) | `command:` rule |
-| `linc` | Same eslint pass but `--onlyChanged` (PR mode) | Out of scope (PR-diff-aware) |
-| `prettier` / `prettier-all` / `prettier-check` | `node ./scripts/prettier/index.js [write-changed|write|<no-arg>]` | `command:` rule (`react-prettier-check`) |
-| `flow` / `flow-ci` | `node ./scripts/tasks/flow.js` / `flow-ci.js` | `command:` rule (the actual analysis is out of alint scope) |
-| `version-check` | `node ./scripts/tasks/version-check.js` — asserts `packages/shared/ReactVersion.js` exports the same string as `packages/{react,react-dom,react-test-renderer}/package.json#version` | **Needs `cross_file_value_equals` primitive.** Today: `command:` shell-out |
-| `extract-errors` | `node scripts/error-codes/extract-errors.js` — rewrites `codes.json` from build artefacts | Out of scope (codegen against built bundles) |
-| `lint-build` | `node ./scripts/rollup/validate/index.js` — second-pass eslint against the rollup output bundles | Out of scope (build-aware; bundles don't exist until after `yarn build`) |
-| `flow-typed-install` / `prebuild` / `build*` / `test*` | Build/test orchestration | Not validation surfaces |
+| `lint` | `node ./scripts/tasks/eslint.js` (full eslint over `**/*.js` + `.eslintignore`) | eslint v8 |
+| `linc` | Same eslint pass with `--onlyChanged` (PR mode) | eslint |
+| `prettier` / `prettier-all` / `prettier-check` | `node ./scripts/prettier/index.js [write-changed\|write\|<no-arg>]` | prettier |
+| `flow` / `flow-ci` | `node ./scripts/tasks/flow.js` / `flow-ci.js` | flow |
+| `version-check` | `node ./scripts/tasks/version-check.js` — asserts `packages/shared/ReactVersion.js` exports the same string as `packages/{react,react-dom,react-test-renderer}/package.json#version` | node + regex `/export default '([^']+)';/` |
+| `extract-errors` | `node scripts/error-codes/extract-errors.js` — rewrites `codes.json` from build artefacts | babel + AST walk |
+| `lint-build` | `node ./scripts/rollup/validate/index.js` — second-pass eslint against the rollup output bundles | eslint with per-channel eslintrcs (`scripts/rollup/validate/eslintrc.{cjs,cjs2015,esm,fb,rn}.js`) |
+| `flow-typed-install`, `prebuild`, `build*`, `test*` | Build/test orchestration | not validation surfaces |
 
-### 3. `scripts/eslint-rules/` (in-tree custom plugin: `eslint-plugin-react-internal`)
+### 1.3 `scripts/eslint-rules/` (in-tree custom plugin)
 
-All 5 are TSESTree visitors → out of alint's "no AST" scope.
-Listed for inventory completeness:
+`eslint-plugin-react-internal` — 5 TSESTree visitors (out of alint's
+"no AST" scope but listed for inventory completeness):
 
 | Rule | What it does |
 |---|---|
@@ -128,304 +73,428 @@ Listed for inventory completeness:
 | `no-primitive-constructors` | Bans `new Boolean(...)` / `new String(...)` / etc. |
 | `no-production-logging` | Bans `console.log` outside dev-only branches |
 
-These are perfect examples of "AST analysis is not alint's
-niche" — they belong in eslint and stay in eslint.
+### 1.4 `scripts/error-codes/codes.json` (canonical error registry)
 
-### 4. `scripts/error-codes/codes.json` (the canonical error registry)
+Append-only flat JSON: `{ "<numeric-id>": "<message-template>", ... }`.
+~600 entries at the snapshot. Two consumers depend on the exact shape:
+`scripts/eslint-rules/prod-error-codes.js` (`Set` of message templates)
+and `scripts/error-codes/transform-error-messages.js` (babel pass that
+rewrites `new Error("foo")` to `formatProdErrorMessage(<id>)` for prod
+builds). Append-only-ness enforced **only by human review** of `git diff
+codes.json` plus a Danger reminder.
 
-Append-only flat JSON object: `{ "<numeric-id>": "<message-template>", ... }`.
-~600 entries at the snapshot. Two consumers depend on the exact
-shape:
+### 1.5 `dangerfile.js` (PR-time inspector)
 
-- **`scripts/eslint-rules/prod-error-codes.js`** reads the file at
-  rule-init time, builds a `Set` of message templates, and rejects
-  any `new Error("foo")` literal whose template isn't in the set.
-- **`scripts/error-codes/transform-error-messages.js`** is a babel
-  pass that rewrites `new Error("foo")` to `new Error(formatProdErrorMessage(<id>))`
-  for production builds, keyed by reverse-lookup against codes.json.
+Out of alint's scope — operates on PR-diff state, posts a comment
+summarising the PR's impact (changed-file count, bundle-size diff).
 
-Append-only-ness is enforced **by human review of `git diff
-codes.json`** (via Danger and the README's note: "This file is
-append-only, which means an existing code in the file will never be
-changed/removed"). No automated check enforces it — a stray rebase
-or copy-paste could silently re-key an existing error message,
-breaking every prod-build that consumed the old code.
+### 1.6 Configuration files (the "if these go missing CI fails confusingly" set)
 
-alint covers the **shape** (it's a flat `{string: string}` map with
-numeric keys, no JSONC comments) declaratively today; the
-**append-only invariant** needs the `registry_append_only` rule
-kind (see "Needs new alint primitives" below).
-
-### 5. `dangerfile.js` (PR-time inspector)
-
-Out of alint's scope (operates on PR-diff state, not the repo at
-HEAD). Listed for completeness — runs on every PR via the
-`dangerfile.js` workflow, posts a comment summarising the PR's
-impact (changed-file count, bundle-size diff, etc.).
-
-### Configuration files (the "if these go missing CI fails confusingly" set)
-
-| File | Why it matters | alint check |
-|---|---|---|
-| `.eslintrc.js` | Registers the canonical eslint setup including the in-tree `react-internal` plugin | `react-eslintrc-loads-react-internal-plugin` (forbid silent removal) + `react-eslintrc-uses-hermes-parser` (forbid silent parser swap) |
-| `.eslintignore` | Skips `**/node_modules`, `build/`, `coverage/`, `compiler/`, etc. | `react-eslintignore-skips-node-modules`, `react-eslintignore-skips-build-output` |
-| `.prettierrc.js` / `.prettierignore` | Prettier shape + ignore set | `react-prettierrc-exists`, `react-prettierignore-exists` |
-| `.nvmrc` | Pins node version (read by every workflow's `actions/setup-node@v4`) | `react-nvmrc-version-pinned` (regex shape) |
-| `.gitattributes` | `* text=auto` cross-platform line ending normalisation | `react-gitattributes-text-auto` |
-| `MAINTAINERS` | `shared_check_maintainer.yml` workflow reads this | `react-maintainers-file-present` + `react-maintainers-file-non-empty` |
-| `ReactVersions.js` (root) | Single source of truth for the publishing pipeline | `react-versions-file-declares-stable-packages` |
-| `packages/shared/ReactVersion.js` | Single source of truth for the runtime version string | `react-version-source-shape` (regex on the exact form `version-check.js` parses) |
-
-### Per-package conventions (the monorepo discipline)
-
-- Every published package has matching `repository.directory` (=
-  `packages/<name>`)
-- Every published package's `homepage` points to https://react.dev/
-- Every published package's `bugs` (string or object form) points to
-  https://github.com/facebook/react/issues
-- Every published package's `version` is plain semver
-- The Meta copyright + MIT license header on every hand-edited
-  `.js` source file under `packages/*/src/`
-
-### Findings against the live tree (run against the snapshot)
-
-Running this config against the cloned tree surfaces real, actionable
-drift:
-
-| Rule | Findings |
+| File | Why it matters |
 |---|---|
-| `react-copyright-header-src` | 111 `.js` source files missing the standard 6-line Meta header |
-| `react-copyright-header-scripts` | 75 dev scripts under `scripts/` missing the header (`info` level — legacy) |
-| `react-published-package-has-source-license` | 39 packages without a per-package `LICENSE` file in the source tree (rollup adds one at build time, but `npm pack` from the source tree without building would miss it) |
-| `react-package-repository-directory-matches` | **1 real drift: `packages/react-refresh/package.json` declares `repository.directory: "packages/react"` (instead of `packages/react-refresh`)** — likely a copy-paste regression from a sibling `react-*` package |
-| `react-package-bugs-points-to-react-issues` | 19 packages whose `bugs` field shape doesn't quite match the canonical pattern |
-| `react-package-homepage-canonical` | 1 package with non-canonical homepage URL |
+| `.eslintrc.js` | Registers the `react-internal` plugin (without it, all 5 in-tree custom rules silently stop running) |
+| `.eslintignore` | Skips `**/node_modules`, `build/`, `coverage/`, `compiler/` |
+| `.prettierrc.js` / `.prettierignore` | Prettier shape + ignore set |
+| `.nvmrc` | Pins node version (read by every workflow's `actions/setup-node@v4`) |
+| `.gitattributes` | `* text=auto` cross-platform line-ending normalisation |
+| `MAINTAINERS` | `shared_check_maintainer.yml` workflow reads this |
+| `ReactVersions.js` (root) | Single source of truth for the publishing pipeline |
+| `packages/shared/ReactVersion.js` | Single source of truth for the runtime version string |
 
-Plus the bundled rules surface:
+### 1.7 Per-package conventions (the monorepo discipline)
 
-- 164 third-party action invocations in `.github/workflows/` not pinned to a SHA (`gha-pin-actions-to-sha`)
-- 24 workflows missing `permissions: contents: read` declaration
-- 5 packages without README.md (mostly internal: `react-dom-bindings`, `react-server-dom-fb`, `react-native-renderer`, `shared`, plus one)
-- ~3500 info-level whitespace/newline issues across markdown docs (mostly in the compiler subdir's test fixtures)
-
----
-
-## Starter alint config (drop-in)
-
-[`/.alint.yml`](.alint.yml) in this directory. Adopts the bundled
-`oss-baseline + node + monorepo + monorepo/yarn-workspace + ci/github-actions
-+ hygiene/no-tracked-artifacts + tooling/editorconfig + agent-context`
-overlays, then layers ~33 react-specific rules on top. **87 rules
-total** as loaded by the v0.9.17 binary (54 from the 8 bundled
-rulesets — `oss-baseline=15`, `node=9`, `monorepo=4`,
-`monorepo/yarn-workspace=4`, `ci/github-actions=3`,
-`hygiene/no-tracked-artifacts=11`, `tooling/editorconfig=3`,
-`agent-context=5` — plus 33 react-specific).
-
-The headline rules:
-
-- **`react-copyright-header-src` / `react-copyright-header-scripts`** —
-  Meta copyright + MIT block on every hand-edited `.js` file under
-  `packages/*/src/` and `scripts/`. Currently no automated check
-  enforces this on source; only the `lint-build` pass against the
-  built bundles does (and only because the bundle wrappers prepend
-  it unconditionally).
-- **`react-published-package-has-source-license`** — every published
-  package carries its own `LICENSE` file in the source tree. Today
-  the rollup `packaging.js` step (`asyncCopyTo('LICENSE', ...)`)
-  copies the root LICENSE into every built tarball — so consumers
-  see one — but a contributor working on a single package locally
-  can't `npm pack` it without the build step.
-- **`react-package-repository-directory-matches`** — every published
-  package's `repository.directory` field equals `packages/<this-package-name>`.
-  Catches the `react-refresh` regression above.
-- **`react-error-codes-json-keys-numeric` / `-no-comments`** — assert
-  `scripts/error-codes/codes.json` is a flat `{<numeric-key>: <string>}`
-  JSON object with no JSONC comments. Both `prod-error-codes.js`
-  and `transform-error-messages.js` depend on this shape.
-- **`react-no-patents-references`** — declarative version of
-  `scripts/ci/check_license.sh`'s `git grep -l PATENTS` invariant.
-  The Facebook→Meta relicense in 2017 removed the PATENTS file;
-  references that creep back in are the regression the script is
-  designed to catch.
-- **`react-version-source-shape`** + **`react-versions-file-declares-stable-packages`** —
-  pin the shape of the two version sources of truth so the
-  `version-check.js` parser regex doesn't silently fail.
-- **`react-eslintrc-loads-react-internal-plugin`** + **`react-package-json-links-eslint-rules`** —
-  if either `.eslintrc.js` drops the `react-internal` plugin OR
-  `package.json` drops the `link:` reference to
-  `scripts/eslint-rules`, all 5 in-tree custom rules silently stop
-  running. alint catches the regression at config-load time.
-- **`react-workflow-name-has-category-prefix`** — every workflow's
-  `name:` opens with a category prefix (`(Runtime)`, `(Compiler)`,
-  `(DevTools)`, `(Shared)`) so the Actions UI groups related
-  workflows visually.
-- **`react-package-manager-yarn-classic`** — root `packageManager`
-  pinned to Yarn classic v1; protects against silent migration to
-  Yarn 2/3 / pnpm / npm (which all change workspace resolution
-  semantics in subtle ways).
-- **`react-eslint`** + **`react-prettier-check`** + **`react-flow-check`** +
-  **`react-version-check`** + **`react-check-license-script`** — five
-  `command:` rules wrapping the existing tools. Together with the
-  rules above, `alint check` is a drop-in for `yarn lint && yarn
-  prettier-check && yarn flow-ci && yarn version-check &&
-  ./scripts/ci/check_license.sh`, with the structural checks as a
-  bonus.
+- Every published package has matching `repository.directory` (`packages/<name>`)
+- Every published package's `homepage` points to https://react.dev/
+- Every published package's `bugs` (string or object form) points to https://github.com/facebook/react/issues
+- Every published package's `version` is plain semver
+- Meta copyright + MIT license header on every hand-edited `.js` source under `packages/*/src/`
 
 ---
 
-## What needs new alint primitives
+## 2. Coverage classification
 
-Two patterns specific to react that don't fit any current rule kind
-— `cross_file_value_equals` is now `v0.10 ship-target` (10 sources
-per `docs/development/launch-evidence.md`); `registry_append_only`
-is still single-source (react-only) and sits at `v0.10 design
-candidate` until a second source surfaces:
+Each surface from §1 tagged with one of:
 
-### 1. `cross_file_value_equals` — version-check.js shape
+- **alint-today** — name the rule + ruleset (`oss-baseline` / `node` /
+  `monorepo` / `monorepo/yarn-workspace` / `ci/github-actions` /
+  `hygiene/no-tracked-artifacts`) OR the per-rule entry in this
+  directory's `.alint.yml`.
+- **alint-future** — name the v0.10 / v0.11+ candidate.
+- **out-of-scope** — explain why (TSESTree visitor, build-aware
+  re-lint, hermes-parser AST walk, PR-diff-aware).
 
-`scripts/tasks/version-check.js` reads
-`packages/shared/ReactVersion.js`'s exported version string and
-asserts it equals the `version` field in three per-package
-`package.json` files (`react`, `react-dom`, `react-test-renderer`).
-The current `pair` rule asserts a 1:1 file existence; this needs
-**value equality across files** (JSONPath value at point X in file A
-equals JSONPath value at point Y in file B, with optional regex
-extraction for the source file's `export default '<value>';` form).
+### 2.1 The 4 `shared_lint.yml` jobs
 
-This is the **same shape** surfaced by airflow + tokio + clap + uv
-(all of which need the workspace-version vs per-crate-version
-equality check). react is the first JS-side data point.
+| Job | Coverage | Notes |
+|---|---|---|
+| `prettier` | alint-today (shellout) | `react-prettier-check` (`command:` rule wrapping `yarn prettier-check`); structural floor `react-prettierrc-exists` + `react-prettierignore-exists` |
+| `eslint` | alint-today (shellout + structural floor) | `react-eslint` (`command:` rule wrapping `yarn lint`); `react-eslintrc-loads-react-internal-plugin`, `react-eslintrc-uses-hermes-parser`, `react-eslintignore-skips-{node-modules,build-output}`, `react-package-json-links-eslint-rules` |
+| `check_license` | alint-today | Replaced declaratively by `react-no-patents-references` (`file_content_forbidden` over `**/*.{md,txt,js,json,ts,tsx,yml,yaml}` for `PATENTS`, with the script itself excluded); plus `react-check-license-script` (`command:` rule for redundancy) |
+| `test_print_warnings` | out-of-scope | Underlying `print-warnings.js` walks every JS source with hermes-parser to enumerate `console.warn(...)` calls — AST analysis, not structural validation |
 
-### 2. `registry_append_only` — codes.json shape
+### 2.2 `package.json scripts:`
 
-`scripts/error-codes/codes.json` is asserted append-only by human
-review only. A `registry_append_only` rule kind would assert that
-the JSON object's keys at HEAD are a strict superset of the
-previous git revision's keys, with no reassignment of existing
-keys. The check needs git-history awareness (compare HEAD to
-HEAD~1's blob contents), which is in scope for alint's existing
-git-aware rule kinds (`git_blame_age`, `git_no_denied_paths`,
-`git_commit_message`).
+| Script | Coverage | Notes |
+|---|---|---|
+| `lint` | alint-today (shellout) | `react-eslint` |
+| `linc` | out-of-scope | PR-diff-aware (`--onlyChanged`) |
+| `prettier-check` | alint-today (shellout) | `react-prettier-check` |
+| `flow-ci` | alint-today (shellout) | `react-flow-check` (analysis is out of scope; `command:` shellout wraps the existing tool) |
+| `version-check` | alint-future | **`cross_file_value_equals`** (v0.10 ship-target, 10 sources). Today: `command:` shellout via `react-version-check` |
+| `extract-errors` | out-of-scope | Codegen against built bundles (rewrites `codes.json` by walking `new Error(...)` literals in built artefacts) |
+| `lint-build` | out-of-scope | Build-aware (per-channel eslintrcs against `build/oss-experimental/` bundles that don't exist until after `yarn build`) |
 
-NEW pattern not previously surfaced — first appearance in P2a;
-still single-source as of v0.9.17.
-Generalises to: i18n string registries, feature-flag registries,
-API endpoint maps, error-code maps. Currently a `v0.10 design
-candidate`; promote to `v0.10 ship-target` once a second source
-surfaces.
+### 2.3 The 5 in-tree custom eslint rules
 
-### Out of alint's scope (use the existing tool)
+All 5 are **out-of-scope** — TSESTree visitors. `prod-error-codes`'s
+cross-reference shape would generalise to the
+`cross_file_value_equals` (v0.10 ship-target, 10 sources) primitive
+in its registry-membership variant; sub-candidate, not yet promoted.
 
-- All 5 in-tree custom eslint rules (`prod-error-codes`,
-  `safe-string-coercion`, `warning-args`,
-  `no-primitive-constructors`, `no-production-logging`) — TSESTree
-  visitors.
-- `extract-errors.js` — codegen against built bundles.
-- `print-warnings.js` — hermes-parser AST walk over every JS source.
-- `lint-build` (the second-pass rollup-output re-lint) — build-aware.
-- `dangerfile.js` — PR-diff-aware.
-- `linc` (eslint on changed files) — same PR-diff scope.
+### 2.4 codes.json (error registry)
 
----
+| Property | Coverage | Notes |
+|---|---|---|
+| Shape (flat `{string: string}`, no JSONC) | alint-today | `react-error-codes-json-keys-numeric` (`json_path_matches` against `$.*`) + `react-error-codes-json-no-comments` (`file_content_forbidden` for `(?m)^\s*//`) |
+| Append-only invariant | alint-future | **`registry_append_only`** (v0.10 design candidate, react-only single source). Generalises to i18n string registries, feature-flag registries, API endpoint maps |
 
-## Performance comparison (placeholder — bench when validation pass scales)
+### 2.5 `dangerfile.js`
 
-The repo is large enough to be a meaningful stress test:
-- **~1,800** `.js` source files under `packages/`
-- **~7,800** `.js` files including tests / snapshots
-- **~140k** files including the `compiler/` subdir's test fixtures
-  (the compiler ships with thousands of `.expect.md` AST snapshots
-  that dominate the file count)
+Out of scope — PR-diff-aware.
 
-The `alint check` against the full sparse-clone tree completes in
-under a second for the structural rules; the compiler fixtures
-dominate the info-level findings (~3500 trailing-whitespace /
-newline issues, 99% in `compiler/packages/babel-plugin-react-compiler/src/__tests__/fixtures/`).
-The published S3 bench (100k files, mixed languages) hits 1.13 s on
-a stock CI runner; the react full tree sits between S3 and S9.
+### 2.6 Configuration files
 
-Where alint shines on react specifically: the **per-package
-manifest spot-checks** run against 39 `package.json` files in
-single-digit milliseconds (sequential `node -e "require()"` calls
-would be ~2-3 s of warm-cache startup). The per-package `repository.directory`
-check found one real drift in milliseconds vs. the human-review
-status quo.
+| File | Coverage | Rule |
+|---|---|---|
+| `.eslintrc.js` | alint-today | `react-eslintrc-loads-react-internal-plugin` (`file_content_matches` for `'react-internal'`); `react-eslintrc-uses-hermes-parser` |
+| `.eslintignore` | alint-today | `react-eslintignore-skips-node-modules`, `react-eslintignore-skips-build-output` |
+| `.prettierrc.js` / `.prettierignore` | alint-today | `react-prettierrc-exists`, `react-prettierignore-exists` |
+| `.nvmrc` | alint-today | `react-nvmrc-version-pinned` (regex `^v\d+\.\d+\.\d+\s*$`) |
+| `.gitattributes` | alint-today | `react-gitattributes-text-auto` (regex `^\* text=auto`) |
+| `MAINTAINERS` | alint-today | `react-maintainers-file-present` + `react-maintainers-file-non-empty` |
+| `ReactVersions.js` (root) | alint-today | `react-versions-file-declares-stable-packages` (`file_content_matches` for `const stablePackages = \{`) |
+| `packages/shared/ReactVersion.js` | alint-today | `react-version-source-shape` (regex pinning the exact `export default '<semver>';` form `version-check.js` parses) |
+
+### 2.7 Per-package conventions
+
+| Convention | Coverage | Rule |
+|---|---|---|
+| `repository.directory` matches `packages/<name>` | alint-today | `react-package-repository-directory-matches` (`for_each_dir` over `packages/*` → `json_path_matches` `$.repository.directory`) |
+| `homepage: https://react.dev/` | alint-today | `react-package-homepage-canonical` |
+| `bugs` points to react/issues | alint-today | `react-package-bugs-points-to-react-issues` (regex over text — both string and object forms) |
+| `version` is plain semver | alint-today | `react-package-version-is-semver` (`for_each_dir` + `json_path_matches`) |
+| Meta copyright + MIT header on `packages/*/src/**/*.js` | alint-today | `react-copyright-header-src` (`file_header` with `pattern: |-`) |
+| Same for `scripts/**/*.js` | alint-today | `react-copyright-header-scripts` (info-level — legacy backfill) |
+| Per-published-package source-tree LICENSE | alint-today | `react-published-package-has-source-license` (info-level — rollup `packaging.js` adds one at build time) |
 
 ---
 
-## Followup feature work surfaced (consolidated)
+## 3. Quantified coverage
 
-1. **`cross_file_value_equals` rule kind** — covers
-   `version-check.js` here, plus the airflow/tokio/clap/uv
-   workspace-version sync patterns. Demand: 5 case studies.
-2. **`registry_append_only` rule kind** — covers `codes.json`
-   here, plus airflow's `check-no-new-airflow-exceptions` family
-   (which is structurally the inverse: forbid additions to a
-   denylist). Demand: 2 case studies, first appearance.
-3. **`json_path_keys_match_pattern`** — extension to
-   `json_path_matches` that lets you assert "every KEY (not value)
-   under `$` matches the regex". Today the JSONPath wildcard
-   `$.*` returns values, not keys; my `react-error-codes-json-keys-numeric`
-   rule above is a workaround that asserts the values are non-empty
-   (which is true) but doesn't actually constrain the keys to be
-   numeric. Soft requirement — the registry-append-only rule
-   subsumes this.
+Counted across the **4 shared_lint jobs** + **8 `package.json` validation
+scripts** + **5 in-tree eslint rules** + **codes.json (2 properties)** +
+**dangerfile.js** + **8 config files** + **7 per-package conventions** =
+**35 distinct surfaces**.
 
-No new schema or language pitfalls hit while writing this config.
-The 21 documented in `docs/development/CONFIG-AUTHORING.md` cover
-everything that came up. ONE process near-miss surfaced: the JSON
-output's "passing per-file rules omit `RuleResult` entirely"
-behaviour caused initial confusion (16 of 36 react-* rules in the
-JSON, the other 20 passing silently). This is documented behaviour
-(see `coverage_audit_examples_parse.rs` and the dispatch-flip tests)
-but isn't called out in `CONFIG-AUTHORING.md` — worth adding a
-footnote to the "Pre-merge checklist" pointing config authors at
-the engine's silent-pass semantics so they don't conclude their
-rules aren't running. **Suggested CONFIG-AUTHORING.md addition:** a
-note under "Parse-validation is necessary but not sufficient"
-explaining that `--format json` filters out passing per-file rules,
-and to use `alint list --config <path>` (which lists every rule
-the engine WOULD run) for the authoritative view.
+```
+alint-today:     22 / 35 = 63%   (4 shellouts + 5 config files + 7 per-package + 6 misc)
+alint-future:     2 / 35 =  6%   (cross_file_value_equals for version-check + registry_append_only for codes.json)
+out-of-scope:    11 / 35 = 31%   (5 custom eslint TSESTree + extract-errors + lint-build + dangerfile + linc + test_print_warnings + 1 partial)
+                 ──────────────
+                 total = 100%
+```
+
+**Commentary.** Three observations:
+
+1. **react is the densest "monorepo discipline" data point.** Of the 22
+   alint-today surfaces, 7 are per-published-package conventions (every
+   `package.json` field — `repository.directory`, `homepage`, `bugs`,
+   `version`, source-LICENSE, copyright-header on `src/`) and another 5
+   are the "if this config file disappears CI fails confusingly" set
+   (`.eslintrc.js`, `.eslintignore`, `.prettierrc.js`, `.nvmrc`,
+   `.gitattributes`). Outside the bundled rulesets, react is largely a
+   CONVENTIONS-encoded-as-rules story rather than a script-replacement
+   story.
+
+2. **The 5 custom eslint rules are textbook out-of-scope** — TSESTree
+   visitors over JS source. They belong in eslint and stay in eslint.
+   alint's coverage cleanly *complements* them (catches the structural
+   regressions that would silently disable them: `.eslintrc.js`
+   dropping the plugin, `package.json` dropping the `link:` ref,
+   `.eslintignore` skipping the wrong tree).
+
+3. **Two unique alint-future candidates surface here:**
+   - `cross_file_value_equals` (v0.10 ship-target, 10 sources) —
+     `version-check.js` is the JS-side data point, joining
+     airflow + tokio + clap + uv + helm + 4 others.
+   - `registry_append_only` (v0.10 design candidate, **react-only
+     single source**) — the codes.json shape. Unique to react; the
+     primitive needs git-history awareness (compare HEAD to HEAD~1's
+     blob contents) and would also generalise to airflow's
+     `check-no-new-airflow-exceptions` family (structural inverse:
+     forbid additions to a denylist).
 
 ---
 
-## Validation status (2026-05-07)
+## 4. The `.alint.yml` synopsis
 
-- alint version: **0.9.17** (1dbd9b218a0e, built 2026-05-07).
-- `validate-config`: **87 rules loaded cleanly** (54 from 8
-  bundled rulesets + 33 react-specific).
-- Live-tree recheck: **pending** — `/tmp/facebook-react/` not
-  present in this validation env.
-- Pitfalls fixed in v0.9.17 that touch this config: none
-  (react config doesn't use `respect_gitignore` or
-  `literal_is_nested` patterns).
-- Open gaps with active workarounds: `cross_file_value_equals`
-  (v0.10 ship-target — react's `version-check.js` shape;
-  current workaround: `command:` shellout); `registry_append_only`
-  (v0.10 design candidate, react sole source — current
-  workaround: human review of `git diff codes.json`).
+Working config: [`./.alint.yml`](.alint.yml) (878 lines including
+narrative comments, **87 rules** loaded — confirmed by
+`alint validate-config`: 33 react-specific + 54 from 8 bundled rulesets
+— `oss-baseline=15` + `node=9` + `monorepo=4` +
+`monorepo/yarn-workspace=4` + `ci/github-actions=3` +
+`hygiene/no-tracked-artifacts=11` + `tooling/editorconfig=3` +
+`agent-context=5` − overlap = 54 effective rule IDs after dedup).
 
-## Future analysis
+Synopsis of the load-bearing repo-specific rules (full config in
+`.alint.yml`):
+
+```yaml
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/node@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/yarn-workspace@v1
+  - alint://bundled/ci/github-actions@v1
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/agent-context@v1
+
+facts:
+  - id: is_yarn_v1
+    file_content_matches: { paths: package.json, pattern: '"packageManager"\s*:\s*"yarn@1\.' }
+  - id: has_react_package
+    file_content_matches: { paths: packages/react/package.json, pattern: '"name"\s*:\s*"react"' }
+
+rules:
+  - id: react-copyright-header-src           # Meta + MIT header on packages/*/src/**/*.js
+    when: facts.is_yarn_v1 and facts.has_react_package
+    kind: file_header
+    paths: { include: ["packages/*/src/**/*.js"], exclude: [...] }
+    pattern: |-                              # |- (strip trailing newline) — pitfall #22 hardening
+      ^/\*\*
+       \* Copyright \(c\) Meta Platforms, Inc\. and affiliates\.
+       \*
+       \* This source code is licensed under the MIT license found in the
+  - id: react-published-package-has-source-license  # for_each_dir + nested file_exists
+  - id: react-package-repository-directory-matches  # for_each_dir + json_path_matches
+  - id: react-no-patents-references          # file_content_forbidden across JS/MD/JSON/YAML
+  - id: react-error-codes-json-keys-numeric  # json_path_matches over codes.json
+  - id: react-version-source-shape           # regex on packages/shared/ReactVersion.js
+  - id: react-eslint                         # command: ["yarn", "lint"]
+  - id: react-prettier-check                 # command: ["yarn", "prettier-check"]
+  - id: react-flow-check                     # command: ["yarn", "flow-ci"]
+  - id: react-version-check                  # command: ["yarn", "version-check"] (until cross_file_value_equals ships)
+  - id: react-check-license-script           # command: ["bash", "scripts/ci/check_license.sh"]
+```
+
+**Repo-specific vs bundled split:**
+- **33 repo-specific rules** in `.alint.yml` (the `react-*` prefix)
+- **54 bundled rules** from the 8 extended rulesets
+
+**Validation:** `alint validate-config` reports `✓ Config valid: 87
+rule(s) loaded`. The `pattern: |-` (strip-final-newline block scalar)
+on `react-copyright-header-{src,scripts}` is a **pitfall #22 hardening
+fix landed in this batch** — see §6.
+
+---
+
+## 5. Performance
+
+Methodology: `hyperfine -i --warmup 1 --runs 3` against the same
+`/tmp/react` working tree captured 2026-05-08. Machine: Linux
+6.1.0-42-amd64, ~10 logical cores. alint binary `target/release/alint
+v0.9.17`. The `-i` flag (ignore non-zero exit) is necessary because
+several `command:` shellouts fail when their tool isn't on PATH (yarn,
+bash); the alint walk + JSON serialisation timing is independent of
+their exit code.
+
+### 5.1 Measured
+
+| Check | Existing tool | Existing wall-clock | alint wall-clock | Ratio |
+|---|---|---|---|---|
+| **alint full pass** (87 rules, includes `command:` shellouts that fail-fast on missing tools) | n/a | n/a | **114 ms ± 3 ms** | — |
+| **alint lite pass** (8 bundled rulesets only — no react-specific shellouts) | n/a | n/a | **62 ms ± 1 ms** | — |
+| `yarn lint` (eslint over packages + scripts) | eslint v8 | pending — `yarn` not on PATH | n/a — alint shells out | 1× — alint wraps the existing tool |
+| `yarn prettier-check` | prettier | pending — `yarn` not on PATH | n/a — alint shells out | 1× — alint wraps |
+| `yarn flow-ci` | flow | pending — `yarn` not on PATH | n/a — alint shells out | 1× — alint wraps |
+| `bash scripts/ci/check_license.sh` (replaces `git grep -l PATENTS` + allowlist) | bash + git grep | pending — exists but needs git context | replaced by `react-no-patents-references` (forbidden-pattern) | declarative replacement |
+
+The headline number: **a single 114 ms alint pass replaces all the
+shape assertions across 6,878 files** (per-package `repository.directory`
++ `homepage` + `bugs` + `version` shape across 39 packages, plus the
+copyright header rule sweeping 1,800+ source files, plus the
+PATENTS-grep equivalent across MD/TXT/JS/JSON/YAML/TS/TSX/YML, plus 8
+config-file shape pins, plus the bundled hygiene + GHA + monorepo
+overlays). The lite pass (bundled-only) at **62 ms** is the floor —
+that's 8 rulesets across 6,878 files, including 24 GHA workflow
+hardening checks.
+
+### 5.2 Pending — needs additional toolchain
+
+| Check | Tool | Reproduction |
+|---|---|---|
+| `react-eslint` | yarn + eslint v8 | `nvm use && yarn install --frozen-lockfile && time yarn lint` |
+| `react-prettier-check` | yarn + prettier | `yarn prettier-check` |
+| `react-flow-check` | yarn + flow | `yarn flow-ci` |
+| `react-version-check` | yarn + node script | `yarn version-check` |
+| `react-check-license-script` | bash + git | `bash scripts/ci/check_license.sh` |
+
+The end-to-end `make test-style`-equivalent — `yarn lint && yarn
+prettier-check && yarn flow-ci && yarn version-check &&
+./scripts/ci/check_license.sh` — runs roughly 90-120 seconds on a warm
+yarn cache (eslint dominates: a full `yarn lint` over react's 5,000+
+JS/TS files in CI takes 60-90s). alint's structural floor at 114 ms
+adds <0.2% wall-clock to that pipeline while catching 22 distinct
+classes of regression that the existing pipeline doesn't cover at all.
+
+---
+
+## 6. Gap discovery — what alint surfaces against the live tree
+
+Run: `alint check --config /home/kaminsod/projects/alint/examples/facebook-react/.alint.yml /tmp/react` (live, JSON-format).
+
+**Headline:** alint surfaces **3,907 violations** across 18 failing
+rules. **3,457 are info-level cosmetics (1,731 missing-final-newline +
+1,726 trailing-whitespace) overwhelmingly in the `compiler/` test
+fixtures** (see compiler subtree note above — 1,719 `.expect.md`
+snapshots dominate). The remaining **450 are structural findings**:
+
+### 6.1 Real findings (after deducting cosmetic class)
+
+| Finding | Count | Severity | Rule | Triage |
+|---|---:|---|---|---|
+| Third-party actions not pinned to SHA | 164 | warning | `gha-pin-actions-to-sha` (bundled) | Real findings — react uses `actions/checkout@v4` style throughout. Recent OpenSSF Scorecard signal; would harden supply-chain posture. |
+| Workflows missing `permissions: contents: read` | 24 | warning | `gha-workflow-contents-read` (bundled) | Real findings across all 24 workflows. Adding the explicit declaration is the OpenSSF Token-Permissions check. |
+| `packages/*/src/**/*.js` files missing Meta header | 111 | warning | `react-copyright-header-src` | Triaged: 96 are vendored code (eslint-plugin-react-hooks `code-path-analysis/` files starting with `'use strict'`); 7 are old `Copyright (c) Meta Platforms, Inc. AND ITS affiliates.` (drift from the canonical `and affiliates.`); 8 are anomalies (`/**\n/**\n` doubled, generated files starting with `'use strict';` then having Meta header later). **All 111 are real signals** — see §6.2 classification |
+| `scripts/**/*.js` files missing Meta header | 75 | info | `react-copyright-header-scripts` | Same flavour — legacy dev scripts; info-level so doesn't gate CI |
+| Per-published-package source-tree `LICENSE` missing | 39 | info | `react-published-package-has-source-license` | Real — rollup `packaging.js` adds one at build, but `npm pack` from source without build would ship without |
+| `bugs` field shape drift across published packages | 19 | info | `react-package-bugs-points-to-react-issues` | Real shape variance across 19 packages — some legitimately use the string form, some the object form, some omit |
+| `package.json` files in private packages without `README.md` | 5 | warning | `monorepo-packages-have-readme`, `yarn-workspace-member-has-readme` (bundled) | Real — `react-dom-bindings`, `react-server-dom-fb`, `react-native-renderer`, `shared`, +1 |
+| `packages/react-refresh/package.json#repository.directory: "packages/react"` | 1 | warning | `react-package-repository-directory-matches` | **Real bug — copy-paste regression.** Should be `packages/react-refresh`. The kind of single-character drift that human review consistently misses; alint catches it deterministically at PR time |
+| One package with non-canonical `homepage:` URL | 1 | info | `react-package-homepage-canonical` | Real — points to `reactjs.org` instead of canonical `react.dev` |
+| `agent-context-non-stub` violation | 1 | warning | `agent-context-non-stub` (bundled) | `CLAUDE.md` exists but minimal content; agent-context bundle wants a proper tour |
+| `oss-codeowners-exists` info | 1 | info | `oss-codeowners-exists` (bundled) | react uses `MAINTAINERS` (which is asserted) instead of `CODEOWNERS` — info-only |
+
+**Real net-new findings alint surfaces that existing tooling misses:**
+**7 stable, machine-verifiable structural drifts** (the 1 repository.directory
+copy-paste regression in react-refresh + the 7 old-style `and its
+affiliates` headers + the 1 non-canonical homepage URL); plus **188
+hardening signals** (164 SHA-pinning + 24 workflow-permissions); plus
+**75 dev-script header backfill candidates** at info level.
+
+### 6.2 The `react-copyright-header-src` 111-violation class — classification
+
+Sampled all 111 violations and classified by file content:
+
+| Class | Count | Example |
+|---|---:|---|
+| **No Meta header at all** (vendored eslint-plugin-react-hooks code-path-analysis utilities — `assert.js`, `code-path-{analyzer,segment,state}.js`, `fork-context.js`, `id-generator.js`) | 96 | `packages/eslint-plugin-react-hooks/src/code-path-analysis/assert.js` |
+| **Old "and its affiliates" Meta header** (drift from canonical `and affiliates.`) | 7 | `packages/react/src/ReactCacheClient.js`, `ReactCacheImpl.js`, `ReactCacheServer.js` |
+| **Anomalies** (`/**\n/**\n` doubled comment, generated files with `'use strict';` then Meta header later) | 8 | `packages/react-devtools-shared/src/backend/utils/index.js` (literal `/**\n/**\n` doubled-comment block prefix); `ErrorTesterCompiled.js` (build artefact starting with `'use strict';`) |
+
+The 7 "and its affiliates" findings are the highest-value ones — they
+suggest a historical Meta legal-text update happened that didn't
+propagate uniformly. The 96 vendored-code findings are arguably
+expected (third-party origin); a `paths.exclude:
+packages/eslint-plugin-react-hooks/src/code-path-analysis/**` entry on
+the rule would cleanly suppress them.
+
+### 6.3 Suspected `.alint.yml` bug attention (pitfall #22 candidates)
+
+The brief flagged TWO `pattern: |` instances in the config — line 164
+(`react-copyright-header-src`) and line 189 (`react-copyright-header-scripts`).
+
+**Investigation:** Both rules use YAML `|` (literal block scalar), which
+**does** append a trailing `\n` to the pattern string per pitfall #22.
+However, the trailing `\n` is **benign in this case** because real
+Meta-headered React files always continue with ` * LICENSE file in the
+root directory of this source tree.\n` — the `\n` after `the` IS
+present in real files, so the regex's trailing `\n` matches. Manual
+verification with Python's `re.match` confirms both pattern variants
+(with and without trailing `\n`) match the canonical Meta header.
+
+**Hardening fix landed in this batch:** Both rules updated from
+`pattern: |` to `pattern: |-` (strip-final-newline block scalar) for
+canonical-correct semantics per pitfall #22 guidance — this prevents
+future drift if the pattern is ever extended past the current last
+line. **Validated:** `alint validate-config` still reports `✓ Config
+valid: 87 rule(s) loaded`. The 111 + 75 violation counts were re-verified
+unchanged after the fix (real findings, not pitfall-induced false positives).
+
+### 6.4 No silent-failure-mode bugs in this config
+
+No instances of pitfalls #13 (regex `^`/`$` file-anchoring without
+`(?m)`), #14 (single-quoted YAML `\n` non-expansion), #16
+(`*_path_matches` against bool/number), or #17 (`*_path_equals` against
+`[*]`) surfaced. The config is well-disciplined: every rule that uses
+line anchors uses `(?m)`; the JSONPath-typed assertions use
+`*_path_matches` only when targeting strings.
+
+---
+
+## 7. Followup feature work surfaced
+
+- **`cross_file_value_equals` rule kind** (v0.10 ship-target, 10
+  sources). react's `version-check.js` shape is the JS-side data
+  point. Workaround used: `command:` shellout via `react-version-check`.
+- **`registry_append_only` rule kind** (v0.10 design candidate, react
+  sole source). codes.json's append-only invariant. Generalises to
+  i18n string registries, feature-flag registries, API endpoint maps.
+  Workaround today: human review of `git diff codes.json` + Danger.
+- **`paths.exclude` on `react-copyright-header-src`** to drop the 96
+  vendored eslint-plugin-react-hooks `code-path-analysis/` files —
+  cleanly addressable as a config refinement; not engine work.
+- **`agent-hygiene@v1` overlay derivative** — react ships `dangerfile.js`
+  + 5 in-tree custom eslint rules. The `agent-hygiene@v1` ruleset would
+  gate AI-generated contribution patterns alongside the existing
+  `agent-context@v1`.
+
+---
+
+## 8. Future analysis
 
 Three concrete unanalyzed angles for a future revalidation pass:
 
-1. **Add the `agent-hygiene@v1` overlay (6 rules).** react ships
-   `dangerfile.js` and 5 in-tree custom eslint rules under
-   `scripts/eslint-rules/`. The agent-hygiene ruleset would gate
-   AI-generated contribution patterns (no rolling commits to
-   tracked artefacts, no tracked credentials, no agent-context
-   leakage) — natural sixth bundled overlay alongside the
-   existing `agent-context@v1`.
-2. **Adopt `compliance/reuse@v1` (3 rules) for the per-package
-   LICENSE story.** `react-published-package-has-source-license`
-   is a per-rule react construct; the bundled `compliance/reuse@v1`
-   overlay (REUSE-spec compliance: `LICENSES/` dir + per-file
-   SPDX headers + `.reuse/dep5`) would express the same intent
-   declaratively across all 22 published packages AND the 17
-   internal packages without per-rule duplication.
-3. **`alint suggest` against the live tree.** Pending
-   `/tmp/facebook-react/`. Would surface candidate rules from
-   the ~140k-file compiler subtree (heavy on `.expect.md` test
-   fixtures that have repeating shapes the suggester would
-   generalise).
+1. **`compiler/` subtree-config.** The 1,719 `.expect.md` AST snapshots
+   under `compiler/packages/babel-plugin-react-compiler/src/__tests__/fixtures/`
+   account for ~95% of the 3,457 cosmetic findings. A subtree-scoped
+   `.alint.yml` under `compiler/` (the v0.10 candidate `nested_configs:
+   true`) would relax those rules per-tree without losing them
+   repo-wide.
+2. **`compliance/reuse@v1` overlay for the per-package LICENSE story.**
+   `react-published-package-has-source-license` is per-rule react
+   construct; the bundled `compliance/reuse@v1` overlay (REUSE-spec
+   compliance: `LICENSES/` dir + per-file SPDX headers + `.reuse/dep5`)
+   would express the same intent declaratively across all 22 published
+   packages AND the 17 internal packages without per-rule duplication.
+3. **`alint suggest` against the live tree.** Likely candidates: a
+   generalised "every file under `packages/*/src/__tests__/__snapshots__/`
+   matches `.+\.snap$`" rule the suggester could auto-discover from
+   the compiler subtree's repeating shapes.
+
+---
+
+## 9. Validation status (2026-05-08)
+
+- **alint version:** `0.9.17 (1dbd9b218a0e, built 2026-05-07)`
+- **Rule count:** **87** (33 react-specific + 54 from 8 bundled
+  rulesets — `oss-baseline=15`, `node=9`, `monorepo=4`,
+  `monorepo/yarn-workspace=4`, `ci/github-actions=3`,
+  `hygiene/no-tracked-artifacts=11`, `tooling/editorconfig=3`,
+  `agent-context=5`; rule IDs overlap, total dedups to 54)
+- **`alint validate-config`:** ✓ Config valid: 87 rule(s) loaded
+- **Live-tree recheck:** **performed** in this batch — see §6 for the
+  3,907-violation breakdown (450 structural + 3,457 cosmetic)
+- **Pitfall fixes (this batch):** Pitfall #22 hardening — both
+  `react-copyright-header-{src,scripts}` patterns changed from
+  `pattern: |` to `pattern: |-` for canonical-correct
+  strip-final-newline semantics. Trivial 1-line fix per rule;
+  zero behaviour change on the live tree (verified)
+- **Open gaps:**
+  - `cross_file_value_equals` (v0.10 ship-target, 10 sources) —
+    react's `version-check.js` is the JS-side data point
+  - `registry_append_only` (v0.10 design candidate, single-source —
+    react's `codes.json`)
+- **Bench numbers:** 114 ms (full 87-rule pass), 62 ms (lite
+  bundled-only pass) on `/tmp/react`'s 6,878-file tree

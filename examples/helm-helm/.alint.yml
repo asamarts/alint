@@ -96,7 +96,7 @@ rules:
       exclude:
         - "**/testdata/**"
         - "internal/third_party/**"
-    pattern: |
+    pattern: |-
       ^#!/usr/bin/env bash
 
       # Copyright The Helm Authors\.
