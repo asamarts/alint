@@ -7,6 +7,14 @@ sidebar:
 
 alint ships as a single static Rust binary — no runtime, no JVM, nothing else to install. Pick whichever path matches your environment.
 
+## install.sh (Linux + macOS + Windows tarballs)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
+```
+
+Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases) directly.
+
 ## Homebrew (macOS + Linuxbrew)
 
 ```bash
@@ -15,14 +23,6 @@ brew install alint
 ```
 
 The [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint) tap is auto-updated on every release. The formula resolves the matching pre-built tarball for your platform, verifies its SHA-256, and installs to the Homebrew cellar.
-
-## install.sh (Linux + macOS + Windows tarballs)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
-```
-
-Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases) directly.
 
 ## Docker
 
