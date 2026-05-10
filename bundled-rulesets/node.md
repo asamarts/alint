@@ -53,7 +53,7 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 - **level**: `info`
 - **when**: `facts.has_node`
 
-> Build output directories are usually generated and shouldn't be tracked. Override with `level: off` if this one is intentionally shipped.
+> Build-output directories shouldn't be tracked. Set `level: off` if this one is intentionally shipped.
 
 ### `node-engine-or-nvmrc`
 
@@ -61,7 +61,7 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 - **level**: `info`
 - **when**: `facts.has_node`
 
-> Pin the Node.js version so local and CI installs match (`.nvmrc`, `.node-version`, or `.tool-versions`). An `engines.node` field in package.json is an alternative but is not detected by this rule.
+> Pin the Node.js version with `.nvmrc`, `.node-version`, or `.tool-versions` so local and CI installs match.
 
 ### `node-sources-final-newline`
 
@@ -163,9 +163,8 @@ rules:
       has_ancestor: package.json
     level: info
     message: >-
-      Build output directories are usually generated and shouldn't
-      be tracked. Override with `level: off` if this one is
-      intentionally shipped.
+      Build-output directories shouldn't be tracked. Set
+      `level: off` if this one is intentionally shipped.
 
   # --- Node version pinning ----------------------------------------
   - id: node-engine-or-nvmrc
@@ -175,10 +174,8 @@ rules:
     root_only: true
     level: info
     message: >-
-      Pin the Node.js version so local and CI installs match
-      (`.nvmrc`, `.node-version`, or `.tool-versions`). An
-      `engines.node` field in package.json is an alternative but
-      is not detected by this rule.
+      Pin the Node.js version with `.nvmrc`, `.node-version`,
+      or `.tool-versions` so local and CI installs match.
 
   # --- Source-file hygiene on JS / TS sources -----------------------
   - id: node-sources-final-newline

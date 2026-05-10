@@ -8,6 +8,132 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.20] — 2026-05-10 (cross-command output polish)
+
+Extends v0.9.19's width-aware-output / `--no-docs` / message-wrap
+treatment from `alint check` to every other human-renderer command
+in the CLI. Surfaced while polishing the alint.org landing-page
+demo: `alint fix`'s output had no width awareness, so the demo
+cast had to bump its frame to 110 cols + accept one wrap to fit
+the bundled-rule messages.
+
+### Engine
+
+- **`wrap_message` promoted to public API** under `alint_output::wrap_message`.
+  Renderers outside the alint-output crate (e.g. `alint suggest`)
+  can now apply the same word-aware wrap with hanging-indent
+  semantics that `alint check` uses.
+- **`alint fix` honours `--width`.** The fix renderer
+  (`write_fix_human` in `human.rs`) wraps each violation's
+  message with a 4-col continuation indent under the `· `/`✓ `
+  glyph. Status-suffix prose (`(no fixer)`, `(skipped: <reason>)`)
+  stays attached to the message text so it never lands on a line
+  by itself looking orphaned. Same `wrap_message` helper as check.
+
+### CLI
+
+- **`alint suggest` honours `--width`** for `--format human` output.
+  Per-proposal `summary` text wraps at 4-col indent (under the
+  proposal glyph); per-proposal `evidence` text wraps at 9-col
+  indent (under the `└─ ` tree marker). New `width: Option<usize>`
+  field on `suggest::RunOptions` (library API).
+- **`alint explain` honours `--no-docs`** by suppressing the
+  `policy_url:` line. URLs remain in machine-readable formats
+  regardless.
+- **`alint explain` drops the `debug: {rule:?}` dump.** That line
+  rendered each rule's internal `Debug` repr — useful for alint
+  developers, noise for end users (24+ KB of regex automaton state
+  for some rule kinds). Use `--format json` on `alint check` for
+  the wire-shape, or read the YAML rule definition directly.
+
+### Tooling
+
+- **`ci/scripts/audit-bundled-message-lengths.sh`** — informational
+  audit that walks every `crates/alint-dsl/rulesets/v1/**/*.yml`,
+  extracts each rule's `message:` text, and reports any whose
+  effective single-line render exceeds the budget (default 66
+  chars = 80-col terminal − 14-col MSG_INDENT). Walked 94 rules
+  on the v0.9.19 corpus; 66 nominally over budget but most are
+  intentionally multi-paragraph and `wrap_message` handles them
+  gracefully. Pass `--fail-over <N>` to make the script a CI gate
+  for messages exceeding a hard limit.
+
+### Tests
+
+- 1 trycmd `explain.toml` snapshot regenerated for the dropped
+  `debug:` line.
+
+### Demo refresh (alint.org)
+
+- Re-record the landing-page cast with v0.9.20: shrinks the cast
+  frame back to 92 cols (vs 110 in v0.9.19's 4-command cast)
+  because `alint fix` now honours `--width=88` cleanly. Same
+  4-command sequence (check → cat .alint.yml → fix → check),
+  same reading beats. Cleaner visual.
+
+## [0.9.19] — 2026-05-09 (output polish)
+
+Quality-of-life patch focused on the human formatter's behaviour
+in narrow terminals, screen recordings, and CI logs — surfaced
+while polishing the alint.org landing-page CLI demo (long
+`docs:` URLs and 200+ char rule messages were wrapping
+unpredictably inside the asciinema-player frame).
+
+### Engine
+
+- **Width-aware message wrapping** in the grouped human formatter.
+  Long violation messages now wrap at `effective_width()` cols
+  with continuation lines re-indented to `MSG_INDENT` (14 cols).
+  Word-aware on whitespace; long unbreakable tokens (URLs,
+  hashed identifiers) get their own line and are allowed to
+  overflow rather than being broken mid-token. Embedded `\n` in
+  message text honoured as paragraph breaks. Width detection
+  unchanged (TTY → kernel-reported cols, non-TTY → DEFAULT_WIDTH
+  = 80, both clamped [40, 120]).
+
+### CLI
+
+- **`--width <COLS>`** (global) — explicit override of the
+  detected width. Required for reproducible captures
+  (asciinema, screencasts) and useful for piping into fixed-width
+  log viewers / narrow CI dashboards.
+- **`--no-docs`** (global) — suppress per-violation `docs:` URL
+  lines in human output. URLs remain in JSON / SARIF / GitHub /
+  markdown formats. Designed for narrow terminals + screen
+  recordings where long URLs disrupt visual alignment.
+- **`HumanOptions::Default::show_docs = true`** (library API).
+  Manual Default impl preserved current behaviour for library
+  callers. The CLI's `--no-docs` flag flips it to `false`.
+
+### Bundled rulesets — verbose-message tightening
+
+Three of the longest-message bundled rules tightened to fit
+within ~80 cols on a single wrapped line at 14-col indent. No
+behavioural change; just tighter copy.
+
+- `oss-baseline@v1::node-engine-or-nvmrc`: 196 → 95 chars.
+  ("Pin the Node.js version with `.nvmrc`, `.node-version`, or
+  `.tool-versions` so local and CI installs match.")
+- `node@v1::node-no-tracked-dist`: 137 → 84 chars.
+  ("Build-output directories shouldn't be tracked. Set `level:
+  off` if this one is intentionally shipped.")
+- `agent-context@v1::agent-context-recommended`: 112 → 78 chars.
+  ("Add AGENTS.md / CLAUDE.md / .cursorrules so coding agents
+  share versioned instructions.")
+
+Quality bar going forward for new bundled-rule messages: aim for
+≤ 80 chars on a single wrapped line. Verbose-but-useful detail
+goes in the policy URL or the rule's docs page.
+
+### Tests
+
+- 6 new `wrap_message` unit tests covering: short text, word-
+  boundary wrap, long unbreakable tokens, embedded newlines,
+  empty input, tiny-width clamp.
+- 9 trycmd `help-*.stdout` snapshots regenerated for the 2 new
+  global flags.
+- 1 `cli_flag_inventory` snapshot regenerated.
+
 ## [0.9.18] — 2026-05-08 (pre-launch fixes)
 
 Findings from the v0.9.17 deep-analysis pass (30 case studies — see

@@ -42,7 +42,7 @@ AGENTS.md" and the ctxlint linter's `max-lines` default).
 - **level**: `info`
 - **policy**: <https://agents.md>
 
-> Consider adding an AGENTS.md (or CLAUDE.md / .cursorrules) so coding agents have shared, versioned instructions.
+> Add AGENTS.md / CLAUDE.md / .cursorrules so coding agents share versioned instructions.
 
 ### `agent-context-non-stub`
 
@@ -130,8 +130,8 @@ rules:
     root_only: true
     level: info
     message: >-
-      Consider adding an AGENTS.md (or CLAUDE.md / .cursorrules)
-      so coding agents have shared, versioned instructions.
+      Add AGENTS.md / CLAUDE.md / .cursorrules so coding
+      agents share versioned instructions.
     policy_url: "https://agents.md"
 
   # --- Stub guard --------------------------------------------------
