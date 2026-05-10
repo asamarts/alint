@@ -5,5 +5,13 @@ sidebar:
   order: 5
 ---
 
-Every directory matching `paths` may contain only files matching `allow:`. Catches stray test data in `src/`.
+Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. Catches stray test data in `src/`.
+
+```yaml
+- id: src-only-rs
+  kind: dir_only_contains
+  select: "src/*"
+  allow: ["*.rs", "README.md"]
+  level: error
+```
 

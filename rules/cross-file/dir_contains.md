@@ -5,5 +5,13 @@ sidebar:
   order: 4
 ---
 
-Every directory matching `paths` must contain files matching `require:`. Sugar for a common `for_each_dir` shape.
+Every directory matching `select:` must contain files matching every glob in `require:`. Sugar for a common `for_each_dir` shape.
+
+```yaml
+- id: packages-have-readme-and-license
+  kind: dir_contains
+  select: "packages/*"
+  require: ["README.md", "LICENSE*"]
+  level: error
+```
 

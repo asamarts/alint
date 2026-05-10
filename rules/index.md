@@ -28,10 +28,10 @@ alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
 - [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). _(Git hygiene)_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
-- [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `paths` must contain files matching `require:`. _(Cross-file)_
+- [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `select:` must contain files matching every glob in `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_
-- [`dir_only_contains`](/docs/rules/cross-file/dir_only_contains/) — Every directory matching `paths` may contain only files matching `allow:`. _(Cross-file)_
-- [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) — For every file matching `paths`, at least one of `require:` must also exist (at a template-derived location). _(Cross-file)_
+- [`dir_only_contains`](/docs/rules/cross-file/dir_only_contains/) — Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. _(Cross-file)_
+- [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) — For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. _(Cross-file)_
 - [`executable_bit`](/docs/rules/unix-metadata/executable_bit/) — Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`). _(Unix metadata)_
 - [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) — Every file with `+x` set must begin with `#!`. _(Unix metadata)_
 - [`file_absent`](/docs/rules/existence/file_absent/) — No file matching `paths` may exist in the walked tree. _(Existence)_
@@ -67,7 +67,7 @@ alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
 - [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max`. _(Structure)_
-- [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max`. _(Structure)_
+- [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max_files`. _(Structure)_
 - [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) — Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). _(Security / Unicode sanity)_
 - [`no_bom`](/docs/rules/encoding/no_bom/) — Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. _(Encoding)_
 - [`no_case_conflicts`](/docs/rules/portable-metadata/no_case_conflicts/) — Flag paths that differ only by case (e.g. _(Portable metadata)_

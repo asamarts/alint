@@ -7,3 +7,10 @@ sidebar:
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
+```yaml
+- id: no-case-colliding-paths
+  kind: no_case_conflicts
+  paths: "**"
+  level: error
+```
+
