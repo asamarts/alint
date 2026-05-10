@@ -42,7 +42,7 @@ rules silently no-op.
 - **level**: `warning`
 - **when**: `facts.is_pnpm_workspace`
 
-> Workspace member's package.json must declare a `name` field — pnpm's filter and graph resolution use it.
+> Workspace member's package.json must declare a `name` field. pnpm's filter and graph resolution use it.
 
 ## Source
 
@@ -116,5 +116,5 @@ rules:
     level: warning
     message: >-
       Workspace member's package.json must declare a `name`
-      field — pnpm's filter and graph resolution use it.
+      field. pnpm's filter and graph resolution use it.
 ```

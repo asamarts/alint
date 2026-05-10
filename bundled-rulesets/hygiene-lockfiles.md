@@ -28,7 +28,7 @@ extends:
 - **kind**: [`file_absent`](/docs/rules/existence/file_absent/)
 - **level**: `warning`
 
-> Nested `yarn.lock` outside the workspace root — usually a tooling mishap. If this is intentional, disable the rule.
+> Nested `yarn.lock` outside the workspace root. This is usually a tooling mishap. If intentional, disable the rule.
 
 ### `lockfiles-no-nested-pnpm`
 
@@ -50,7 +50,7 @@ extends:
 - **kind**: [`file_absent`](/docs/rules/existence/file_absent/)
 - **level**: `warning`
 
-> Nested `Cargo.lock` — only the workspace-root Cargo.lock is honored by Cargo; nested ones drift and confuse contributors.
+> Nested `Cargo.lock`. Only the workspace-root Cargo.lock is honored by Cargo; nested ones drift and confuse contributors.
 
 ### `lockfiles-no-nested-poetry`
 
@@ -91,8 +91,8 @@ rules:
       exclude: "yarn.lock"
     level: warning
     message: >-
-      Nested `yarn.lock` outside the workspace root — usually a
-      tooling mishap. If this is intentional, disable the rule.
+      Nested `yarn.lock` outside the workspace root. This is
+      usually a tooling mishap. If intentional, disable the rule.
 
   - id: lockfiles-no-nested-pnpm
     kind: file_absent
@@ -126,7 +126,7 @@ rules:
       exclude: "Cargo.lock"
     level: warning
     message: >-
-      Nested `Cargo.lock` — only the workspace-root Cargo.lock
+      Nested `Cargo.lock`. Only the workspace-root Cargo.lock
       is honored by Cargo; nested ones drift and confuse
       contributors.
 

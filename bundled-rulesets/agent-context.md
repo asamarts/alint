@@ -50,7 +50,7 @@ AGENTS.md" and the ctxlint linter's `max-lines` default).
 - **level**: `warning`
 - **when**: `facts.has_agent_context`
 
-> Agent-context file is suspiciously short. Either fill it in with real guidance or remove it — empty context files mislead agents that load them.
+> Agent-context file is suspiciously short. Either fill it in with real guidance or remove it. Empty context files mislead agents that load them.
 
 ### `agent-context-not-bloated`
 
@@ -59,7 +59,7 @@ AGENTS.md" and the ctxlint linter's `max-lines` default).
 - **when**: `facts.has_agent_context`
 - **policy**: <https://www.augmentcode.com/blog/how-to-write-good-agents-dot-md-files>
 
-> Agent-context file is large. Consider splitting into focused sub-docs and linking them from the root file — bloated context crowds the agent's prompt budget.
+> Agent-context file is large. Consider splitting into focused sub-docs and linking them from the root file. Bloated context crowds the agent's prompt budget.
 
 ### `agent-context-no-stale-paths`
 
@@ -67,7 +67,7 @@ AGENTS.md" and the ctxlint linter's `max-lines` default).
 - **level**: `info`
 - **when**: `facts.has_agent_context`
 
-> Agent-context file references workspace paths in backticks. Verify each path still resolves — context files commonly outlive the code they describe. (The v0.7 `markdown_paths_resolve` rule kind will validate this precisely.)
+> Agent-context file references workspace paths in backticks. Verify each path still resolves. Context files commonly outlive the code they describe. (The v0.7 `markdown_paths_resolve` rule kind will validate this precisely.)
 
 ## Source
 
@@ -152,7 +152,7 @@ rules:
     level: warning
     message: >-
       Agent-context file is suspiciously short. Either fill it
-      in with real guidance or remove it — empty context files
+      in with real guidance or remove it. Empty context files
       mislead agents that load them.
 
   # --- Bloat guard -------------------------------------------------
@@ -174,8 +174,8 @@ rules:
     level: info
     message: >-
       Agent-context file is large. Consider splitting into
-      focused sub-docs and linking them from the root file —
-      bloated context crowds the agent's prompt budget.
+      focused sub-docs and linking them from the root file.
+      Bloated context crowds the agent's prompt budget.
     policy_url: "https://www.augmentcode.com/blog/how-to-write-good-agents-dot-md-files"
 
   # --- Stale-path heuristic ---------------------------------------
@@ -200,7 +200,7 @@ rules:
     level: info
     message: >-
       Agent-context file references workspace paths in
-      backticks. Verify each path still resolves — context
+      backticks. Verify each path still resolves. Context
       files commonly outlive the code they describe. (The
       v0.7 `markdown_paths_resolve` rule kind will validate
       this precisely.)

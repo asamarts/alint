@@ -68,14 +68,14 @@ config once you're ready to enforce.
 - **kind**: [`file_content_forbidden`](/docs/rules/content/file_content_forbidden/)
 - **level**: `error`
 
-> `debugger;` / `breakpoint()` must not be committed — these halt execution at runtime. Remove before merge.
+> `debugger;` / `breakpoint()` must not be committed. These halt execution at runtime. Remove before merge.
 
 ### `agent-no-model-todos`
 
 - **kind**: [`file_content_forbidden`](/docs/rules/content/file_content_forbidden/)
 - **level**: `warning`
 
-> Agent-attributed TODO marker. Resolve, convert to a tracked issue, or remove the model attribution — these outlive the session that wrote them.
+> Agent-attributed TODO marker. Resolve, convert to a tracked issue, or remove the model attribution. These outlive the session that wrote them.
 
 ## Source
 
@@ -291,8 +291,8 @@ rules:
     pattern: '(?:^|[\s;{(])(debugger\s*;|breakpoint\s*\(\s*\))'
     level: error
     message: >-
-      `debugger;` / `breakpoint()` must not be committed —
-      these halt execution at runtime. Remove before merge.
+      `debugger;` / `breakpoint()` must not be committed.
+      These halt execution at runtime. Remove before merge.
 
   # --- Model-attributed TODOs --------------------------------------
   # `TODO(claude:)`, `FIXME(cursor:)`, `XXX(gpt:)` etc. — TODO
@@ -320,6 +320,6 @@ rules:
     level: warning
     message: >-
       Agent-attributed TODO marker. Resolve, convert to a
-      tracked issue, or remove the model attribution — these
+      tracked issue, or remove the model attribution. These
       outlive the session that wrote them.
 ```

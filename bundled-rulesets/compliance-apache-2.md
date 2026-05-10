@@ -48,7 +48,7 @@ strictly.
 - **level**: `warning`
 - **policy**: <https://www.apache.org/licenses/LICENSE-2.0#apply>
 
-> Apache-2.0: source files should carry the canonical Apache header — either the short form ("Licensed under the Apache License, Version 2.0...") or the long ASF-preamble form ("Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements..."). The full boilerplate is at https://www.apache.org/licenses/LICENSE-2.0#apply.
+> Apache-2.0: source files should carry the canonical Apache header. Use either the short form ("Licensed under the Apache License, Version 2.0...") or the long ASF-preamble form ("Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements..."). The full boilerplate is at https://www.apache.org/licenses/LICENSE-2.0#apply.
 
 ## Source
 
@@ -150,7 +150,7 @@ rules:
     level: warning
     message: >-
       Apache-2.0: source files should carry the canonical
-      Apache header — either the short form ("Licensed under
+      Apache header. Use either the short form ("Licensed under
       the Apache License, Version 2.0...") or the long
       ASF-preamble form ("Licensed to the Apache Software
       Foundation (ASF) under one or more contributor license

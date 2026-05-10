@@ -47,7 +47,7 @@ extends:
   # Bundled ruleset, resolved offline from the binary:
   - alint://bundled/oss-baseline@v1
 
-  # Mapping form — same source kinds, but with filters:
+  # Mapping form, same source kinds, but with filters:
   - url: alint://bundled/ci/github-actions@v1
     only: [gha-pin-actions-to-sha]
 
@@ -57,7 +57,7 @@ extends:
 
 `only:` and `except:` are mutually exclusive on a single entry. Listing an unknown rule id is a load-time error.
 
-Bundled and HTTPS configs cannot themselves declare `extends:` — relative-path resolution in a fetched body has no principled base. Nest extends locally instead.
+Bundled and HTTPS configs cannot themselves declare `extends:`, because relative-path resolution in a fetched body has no principled base. Nest extends locally instead.
 
 ### `ignore`
 
@@ -77,13 +77,13 @@ ignore:
 Whether to honor `.gitignore` files (and `.git/info/exclude`, the global gitignore, and `.ignore` files) during the walk. Default `true`.
 
 ```yaml
-respect_gitignore: true   # default — honor .gitignore
+respect_gitignore: true   # default; honor .gitignore
 # respect_gitignore: false  # lint everything on disk regardless
 ```
 
-Setting it to `false` is rarely useful during normal development because absence-style rules (`dir_absent`, `file_absent`) start firing on every locally-built artefact (`target/`, `node_modules/`, `__pycache__/`, …). It's appropriate for one-off audits or for directories that aren't git repos at all. The CLI's `--no-gitignore` flag overrides this for one invocation.
+Setting it to `false` is rarely useful during normal development because absence-style rules (`dir_absent`, `file_absent`) start firing on every locally-built artefact (`target/`, `node_modules/`, `__pycache__/`, and so on). It's appropriate for one-off audits or for directories that aren't git repos at all. The CLI's `--no-gitignore` flag overrides this for one invocation.
 
-The full implications — including how absence-style rules interpret "tracked" vs "ignored" and where this approximation diverges from git's actual index — live in [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/).
+The full implications (including how absence-style rules interpret "tracked" vs "ignored" and where this approximation diverges from git's actual index) live in [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/).
 
 ### `vars`
 
@@ -152,19 +152,19 @@ rules:
 
 Common per-rule fields:
 
-- **`id`** *(required)* — kebab-case identifier. Stable; used to override or disable the rule from a child config.
-- **`kind`** *(required)* — which built-in implementation to invoke. Required somewhere in the `extends:` chain.
-- **`level`** *(required)* — `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
-- **`paths`** — glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
-- **`when`** — bounded expression gating the rule on facts / vars.
-- **`scope_filter`** — closest-ancestor manifest scoping for per-file rules (see below). Cross-file rules reject this field at build time.
-- **`fix`** — fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
-- **`message`** — override the rule's display message.
-- **`policy_url`** — link surfaced when the rule fires.
+- **`id`** *(required)*: kebab-case identifier. Stable; used to override or disable the rule from a child config.
+- **`kind`** *(required)*: which built-in implementation to invoke. Required somewhere in the `extends:` chain.
+- **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
+- **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
+- **`when`**: bounded expression gating the rule on facts / vars.
+- **`scope_filter`**: closest-ancestor manifest scoping for per-file rules (see below). Cross-file rules reject this field at build time.
+- **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
+- **`message`**: override the rule's display message.
+- **`policy_url`**: link surfaced when the rule fires.
 
 #### `scope_filter` *(per-file rules, v0.9.6+)*
 
-Narrows a per-file rule to files that have a specified manifest somewhere in their ancestor directory chain. The engine walks `Path::parent()` upward from the file (the file's own directory counts as an ancestor) and consults the file index at each step; first-match-wins on the upward walk gates the rule per-file. Combine with the rule's existing `paths:` — both must match for the rule to fire.
+Narrows a per-file rule to files that have a specified manifest somewhere in their ancestor directory chain. The engine walks `Path::parent()` upward from the file (the file's own directory counts as an ancestor) and consults the file index at each step; first-match-wins on the upward walk gates the rule per-file. Combine with the rule's existing `paths:`. Both must match for the rule to fire.
 
 ```yaml
 rules:
@@ -179,7 +179,7 @@ rules:
 
 `has_ancestor:` accepts a literal filename or a list of filenames; path separators and glob metacharacters are rejected at build time. The bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) use this to scope per-file content rules to their ecosystem's package subtrees in polyglot monorepos.
 
-Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field — gate them via the rule's `paths:` glob instead.
+Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field; gate them via the rule's `paths:` glob instead.
 
 ### `fix_size_limit`
 
@@ -190,7 +190,7 @@ fix_size_limit: 1048576   # 1 MiB; the default
 # fix_size_limit: null     # disable the cap entirely (not recommended)
 ```
 
-Path-only fixes (`file_create`, `file_remove`, `file_rename`) ignore the cap — they don't read content.
+Path-only fixes (`file_create`, `file_remove`, `file_rename`) ignore the cap, since they don't read content.
 
 ### `nested_configs`
 
@@ -220,10 +220,10 @@ rules:
 
 Guardrails: nested configs may only declare `version:` and `rules:`; every nested rule must have at least one scope field; absolute paths and `..`-prefixed globs are rejected; rule-id collisions across configs error with a clear message.
 
-Only the user's top-level config may set `nested_configs: true` — nested configs themselves cannot spawn further nested discovery (one level of opt-in, intentionally).
+Only the user's top-level config may set `nested_configs: true`. Nested configs themselves cannot spawn further nested discovery (one level of opt-in, intentionally).
 
 ## See also
 
-- [JSON Schema](https://alint.org/_alint/configuration/schema.json) — authoritative source for option types.
-- [Rules](/docs/rules/) — every rule kind, organised by family, with per-rule options.
-- [Concepts](/docs/concepts/) — the rule model and `when:` expression language explained in depth.
+- [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.
+- [Rules](/docs/rules/): every rule kind, organised by family, with per-rule options.
+- [Concepts](/docs/concepts/): the rule model and `when:` expression language explained in depth.

@@ -36,7 +36,7 @@ quiet. (`has_rust` is declared below; override with your own
 - **when**: `facts.has_rust`
 - **policy**: <https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html>
 
-> Committing Cargo.lock ensures reproducible builds for binary crates. Library-only workspaces may legitimately opt out — set this rule's `level: off` in that case.
+> Committing Cargo.lock ensures reproducible builds for binary crates. Library-only workspaces may legitimately opt out; set this rule's `level: off` in that case.
 
 ### `rust-toolchain-pinned`
 
@@ -142,7 +142,7 @@ rules:
     level: warning
     message: >-
       Committing Cargo.lock ensures reproducible builds for binary
-      crates. Library-only workspaces may legitimately opt out — set
+      crates. Library-only workspaces may legitimately opt out; set
       this rule's `level: off` in that case.
     policy_url: "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
 

@@ -1,6 +1,6 @@
 ---
 title: Cookbook
-description: Real-world alint patterns — copy-pasteable, each targeting a specific repo-maintenance problem.
+description: Real-world alint patterns, copy-pasteable, each targeting a specific repo-maintenance problem.
 sidebar:
   order: 1
 ---
@@ -9,7 +9,7 @@ Each pattern below is meant to be copied into a `.alint.yml` and customized. If 
 
 ## 1. One-line baseline from a bundled ruleset
 
-The shortest useful `.alint.yml` — adopt the OSS-hygiene baseline and nothing else. Good for "we just want README / LICENSE / no merge markers" rigour on a fresh repo.
+The shortest useful `.alint.yml`: adopt the OSS-hygiene baseline and nothing else. Good for "we just want README / LICENSE / no merge markers" rigour on a fresh repo.
 
 ```yaml
 version: 1
@@ -72,7 +72,7 @@ extends:
 
 ## 5. Enforce values inside `package.json` with structured queries
 
-`json_path_equals` applies a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) query and checks the value. Missing fields are treated as violations (conservative default — scope narrowly if a field is truly optional).
+`json_path_equals` applies a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) query and checks the value. Missing fields are treated as violations (conservative default; scope narrowly if a field is truly optional).
 
 ```yaml
 version: 1
@@ -94,9 +94,9 @@ rules:
 
 ## 6. Lock down GitHub Actions workflows
 
-`yaml_path_equals` for workflow-wide permissions; `yaml_path_matches` for action-SHA pinning. Both use the same JSONPath engine — YAML is coerced through serde into a JSON value first, so array and wildcard expressions work the same way. If you want the full set without typing them, `extends: [alint://bundled/ci/github-actions@v1]` ships these rules plus a `name:` presence check.
+`yaml_path_equals` for workflow-wide permissions; `yaml_path_matches` for action-SHA pinning. Both use the same JSONPath engine. YAML is coerced through serde into a JSON value first, so array and wildcard expressions work the same way. If you want the full set without typing them, `extends: [alint://bundled/ci/github-actions@v1]` ships these rules plus a `name:` presence check.
 
-`if_present: true` on the pinning rule means workflows with only `run:` steps (no `uses:` at all) are silently OK — the rule only fires on actual matches that fail the regex.
+`if_present: true` on the pinning rule means workflows with only `run:` steps (no `uses:` at all) are silently OK; the rule only fires on actual matches that fail the regex.
 
 ```yaml
 version: 1
@@ -256,7 +256,7 @@ rules:
 
 ## 11.5. Polyglot monorepo: per-ecosystem rules with closest-ancestor scoping
 
-In a monorepo where Rust packages sit under `crates/`, Node packages under `packages/`, and Python packages under `apps/`, you want each ecosystem's hygiene rules to fire **only on the files inside that ecosystem's package directories** — not on stray `.py` helpers checked into a Rust crate or vice versa. The `scope_filter:` primitive (v0.9.6+) handles this declaratively: extend every ecosystem's bundled ruleset and they auto-scope by ancestor manifest.
+In a monorepo where Rust packages sit under `crates/`, Node packages under `packages/`, and Python packages under `apps/`, you want each ecosystem's hygiene rules to fire **only on the files inside that ecosystem's package directories**, not on stray `.py` helpers checked into a Rust crate or vice versa. The `scope_filter:` primitive (v0.9.6+) handles this declaratively: extend every ecosystem's bundled ruleset and they auto-scope by ancestor manifest.
 
 ```yaml
 version: 1
@@ -268,7 +268,7 @@ extends:
   - alint://bundled/python@v1         # auto-scopes to ancestor-pyproject.toml/setup.py/requirements.txt
 ```
 
-Each bundled ecosystem ruleset since v0.9.6 ships with a `scope_filter:` on its per-file content rules — `rust@v1`'s `rust-sources-no-bidi` only fires on `.rs` files inside an ancestor-`Cargo.toml` directory, `node@v1`'s `node-sources-no-trailing-whitespace` only on JS/TS files inside an ancestor-`package.json`, etc. Tree-wide rules (the existence checks, `oss-baseline@v1`'s LICENSE/README rules) keep their global scope.
+Each bundled ecosystem ruleset since v0.9.6 ships with a `scope_filter:` on its per-file content rules. `rust@v1`'s `rust-sources-no-bidi` only fires on `.rs` files inside an ancestor-`Cargo.toml` directory, `node@v1`'s `node-sources-no-trailing-whitespace` only on JS/TS files inside an ancestor-`package.json`, etc. Tree-wide rules (the existence checks, `oss-baseline@v1`'s LICENSE/README rules) keep their global scope.
 
 To layer a custom rule with the same scoping pattern, declare `scope_filter:` directly on the rule:
 
@@ -285,11 +285,11 @@ rules:
     level: warning
 ```
 
-`scope_filter:` is supported on per-file rules only — cross-file rules (`pair`, `for_each_dir`, `file_exists`, …) reject it at build time and direct you to the `for_each_dir + when_iter:` pattern instead.
+`scope_filter:` is supported on per-file rules only. Cross-file rules (`pair`, `for_each_dir`, `file_exists`, and so on) reject it at build time and direct you to the `for_each_dir + when_iter:` pattern instead.
 
 ## 12. Cross-file relationships
 
-`pair` and `unique_by` cover the "every X has a matching Y" and "no two files share a derived key" cases — the ones that ad-hoc shell pipelines usually get wrong on the edges. Template tokens are `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, `{parent_name}`.
+`pair` and `unique_by` cover the "every X has a matching Y" and "no two files share a derived key" cases, the ones that ad-hoc shell pipelines usually get wrong on the edges. Template tokens are `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, `{parent_name}`.
 
 ```yaml
 version: 1
@@ -344,7 +344,7 @@ rules:
 
 ## 14. Guard an agent-heavy repo
 
-Coding agents (Claude Code, Cursor agent, Copilot agent, Aider, Codex) leave characteristic structural debris — backup-suffix files, scratch / planning docs, debug-print residue, stale `TODO(claude:)` markers, AI-style affirmation prose. The bundled `agent-hygiene@v1` ruleset (shipped in v0.6) catches all of those without overlapping the existing `hygiene/*` set. Pair it with `agent-context@v1` for `AGENTS.md` / `CLAUDE.md` / `.cursorrules` hygiene:
+Coding agents (Claude Code, Cursor agent, Copilot agent, Aider, Codex) leave characteristic structural debris: backup-suffix files, scratch / planning docs, debug-print residue, stale `TODO(claude:)` markers, AI-style affirmation prose. The bundled `agent-hygiene@v1` ruleset (shipped in v0.6) catches all of those without overlapping the existing `hygiene/*` set. Pair it with `agent-context@v1` for `AGENTS.md` / `CLAUDE.md` / `.cursorrules` hygiene:
 
 ```yaml
 version: 1
@@ -361,7 +361,7 @@ extends:
   - alint://bundled/agent-context@v1
 ```
 
-Layer with the language-ecosystem rulesets if your stack matches one — they're all `when: facts.is_<lang>` gated, so extending them costs nothing in projects where they don't apply:
+Layer with the language-ecosystem rulesets if your stack matches one. They're all `when: facts.is_<lang>` gated, so extending them costs nothing in projects where they don't apply:
 
 ```yaml
 version: 1
@@ -376,7 +376,7 @@ extends:
 
 ### Feeding violations back to an agent
 
-`--format=agent` (also accepted as `--format=agentic` or `--format=ai`) emits a flat JSON shape optimised for an LLM to act on. Each violation carries an `agent_instruction` field templated from the rule's message + location + fix availability + policy URL — so an agent loop can read the violation and apply the suggested remediation directly:
+`--format=agent` (also accepted as `--format=agentic` or `--format=ai`) emits a flat JSON shape optimised for an LLM to act on. Each violation carries an `agent_instruction` field templated from the rule's message + location + fix availability + policy URL, so an agent loop can read the violation and apply the suggested remediation directly:
 
 ```bash
 alint check --format=agent
@@ -408,11 +408,11 @@ alint check --format=agent
 }
 ```
 
-A typical agent-harness pattern: after each edit, run `alint check --format=agent`, parse the JSON, address the first violation, repeat until empty. The `agent_instruction` field is intentionally verbose — it's optimised for an LLM to act on without having to re-derive the action from `rule_id` and `human_message` separately.
+A typical agent-harness pattern: after each edit, run `alint check --format=agent`, parse the JSON, address the first violation, repeat until empty. The `agent_instruction` field is intentionally verbose. It's optimised for an LLM to act on without having to re-derive the action from `rule_id` and `human_message` separately.
 
 ### Severity escalation
 
-The bundled defaults are deliberately non-blocking on the heuristic checks (`info` for AI-prose patterns, `warning` for clean-up debt, `error` for unambiguous bugs like `debugger;` in production source). Override per-rule once your team is ready to enforce — field-level override means you only have to declare the field you change:
+The bundled defaults are deliberately non-blocking on the heuristic checks (`info` for AI-prose patterns, `warning` for clean-up debt, `error` for unambiguous bugs like `debugger;` in production source). Override per-rule once your team is ready to enforce; field-level override means you only have to declare the field you change:
 
 ```yaml
 version: 1
@@ -431,7 +431,7 @@ rules:
 
 ### When you're writing about agent patterns
 
-Projects that *document* these patterns (a how-to guide about AI hygiene, an internal style guide that quotes agent stock phrases, etc.) will trip the prose / TODO rules on their own examples. The `agent-hygiene@v1` defaults already exclude `**/CHANGELOG*`, `**/ROADMAP*`, `**/cookbook/**`, `**/*test*/**`, and `**/fixtures/**` for that reason. If your docs live somewhere else, extend the exclude list — `paths.exclude` field-overrides the bundled list, so list everything you want excluded:
+Projects that *document* these patterns (a how-to guide about AI hygiene, an internal style guide that quotes agent stock phrases, etc.) will trip the prose / TODO rules on their own examples. The `agent-hygiene@v1` defaults already exclude `**/CHANGELOG*`, `**/ROADMAP*`, `**/cookbook/**`, `**/*test*/**`, and `**/fixtures/**` for that reason. If your docs live somewhere else, extend the exclude list. `paths.exclude` field-overrides the bundled list, so list everything you want excluded:
 
 ```yaml
 version: 1
