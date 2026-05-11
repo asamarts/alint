@@ -6,17 +6,28 @@ title: Roadmap
 > closed cut — work that doesn't fit moves to a later version. See
 > [ARCHITECTURE.md](./ARCHITECTURE.md) for the design these phases build out.
 
-**Latest release: v0.9.17** (2026-05-06). Corrective release that
-re-publishes v0.9.16's content (Config DX hardening — 21-pitfall
-catalogue with #18+#19 fixed in the engine, 30 OSS case studies,
-P2b Wave 2 aggregation, operator-polish: `alint --version` with
-SHA+date and pre-filled crash-report URL on panic) plus the
-build.rs/main.rs pedantic-clippy fixes that prevented v0.9.16
-from publishing artifacts (preflight failed at clippy; nothing
-shipped to crates.io / Homebrew / Docker / npm). v0.9.16 the tag
-exists; v0.9.16 the release does not. No engine changes; bench
-corpus unchanged from v0.9.14. See [CHANGELOG.md](../../CHANGELOG.md)
-and [`docs/development/launch-evidence.md`](../development/launch-evidence.md) for the full sweep.
+**Latest release: v0.9.20** (2026-05-10). Cross-command
+output-polish capstone for the v0.9 cut: width-aware human
+output across every alint command (`check` / `fix` / `list` /
+`explain` / `facts` / `suggest`), `--no-docs` and `--width N`
+honored uniformly, bundled-rule message audit, em-dash scrub on
+first-impression marketing surfaces, install-snippet pin sweep
+(curl + bash now leads everywhere), polyglot demo rebuilt with
+5 auto-fixable seeds. See [CHANGELOG.md](../../CHANGELOG.md) for
+v0.9.12 - v0.9.20 details and
+[`docs/development/launch-evidence.md`](../development/launch-evidence.md)
+for the case-study corpus + rule-kind demand aggregation.
+
+**Launch readiness: clean.** Pre-flight gates wired:
+`cargo fmt --check` + clippy + test + docs + version-pin
+consistency + dogfood, all bundled into
+`ci/scripts/preflight.sh` and gated by an opt-in pre-push hook
+(`ci/githooks/pre-push`). The `install-snippets-match-workspace
+-version` rule in the dogfood `.alint.yml` flags drift between
+Cargo.toml's workspace version and any user-facing install
+snippet, so a release with stale `v0.9.X` README/Docker/GHA pins
+fails CI before it ships. v0.9.20 is the version we expect to
+launch on.
 
 **v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs
@@ -56,84 +67,58 @@ rust + node + python over `crates/` + `packages/` + `apps/`)
 captures the dispatch shape this primitive was designed for.
 Full design: [`docs/design/v0.9/scope-filter.md`](./v0.9/scope-filter.md).
 
-**Next: v0.9.18 — pre-launch fixes (single tier, ship before P4
-announcement).** The v0.9.17 deep-analysis pass (30 case studies,
-`docs/development/case-study-deep-analysis-log.md`) surfaced 6
-bundled-ruleset bugs + 3 case-study config bugs that need fixing
-before public launch. Zero engine bugs surfaced — these are all
-rule-scope or pattern issues. Concrete items:
+**Forward plan, ordered by user-facing payoff.** The next two
+versions split what was originally one v0.10 release into two
+focused cuts. Rule-kind coverage ships first because the
+case-study aggregation (30 repos under
+[`docs/development/launch-evidence.md`](../development/launch-evidence.md))
+identified 8 primitives with 5-13 demand sources each. LSP +
+editor integration is the second cut because no user is blocked
+on it for adoption — they can lint without it.
 
-- 6 bundled-ruleset fixes (A1-A6 in the deep-analysis log):
-  `hygiene-no-js-build-outputs` requires sibling `package.json`;
-  `apache-2-source-has-license-header` bundles long-form pattern;
-  `python@v1` default-excludes test-fixture paths;
-  `monorepo/cargo-workspace@v1` parses `[workspace] members:`;
-  `oss-license-exists` recognises LICENSE.TXT + LICENSE.md;
-  `rust@v1`'s `rust-sources-snake-case` gets `allow_compiler_naming`.
-- 3 case-study config fixes: TypeScript pitfall #22 + level
-  lower; Deno defensive `|-`; TensorFlow drop the rule-premise
-  mismatch.
-- Cross-cutting revalidation: re-run alint against all 30 trees
-  + update READMEs to reflect post-fix violation counts.
-- Audit extension: `coverage_audit_smoke_fixtures` covers
-  bundled-ruleset regression scenarios.
+- **v0.10 — Case-study coverage push.** 8 case-study-validated
+  rule kinds + 2 bundled rulesets. Closes the gap that today
+  requires `command:` shell-out for what should be declarative
+  rules. Sized 2-4 weeks. Headline primitives:
+  `cross_file_value_equals` (12 sources), `registry_paths_resolve`
+  (13 sources), `ordered_block` (8), `generated_file_fresh` (8),
+  `import_gate` (5), `command_idempotent` (5), `pair_hash` (3),
+  `xml_path_matches` + `xml_path_equals` (2 — completes the
+  structured-query family). Bundled rulesets:
+  `apache/governance@v1` (3 Apache TLPs converge),
+  `dotnet@v1` (Microsoft / Azure SDK adopter surface).
+  Design candidates land opportunistically as a second demand
+  source materialises.
 
-**Next major: v0.10 — LSP server + 8 ship-target rule kinds + 2
-ship-target bundled rulesets.** Inline diagnostics, hover with
-rule documentation, code actions for "add to ignore" and "apply
-fix", VS Code extension. The per-file dispatch shape from v0.9.3
-directly powers the per-file-edit re-evaluation hot path;
-v0.9.4 broadens its applicability across the rule catalogue;
-v0.9.5's `FileIndex::contains_file` is itself useful for v0.10
-(a single-file edit only needs to re-test rules whose
-`path_scope` matches that path — existing contains-checks
-become O(1)).
+- **v0.11 — LSP + developer experience.** LSP server, VS Code
+  extension, ScopeFilter generalisation (`has_sibling`,
+  `has_descendant`), single-file re-eval hot path, and the
+  v0.11+ ship-targets that didn't make v0.10:
+  `cross_language_implementation_complete` (5 sources: arrow,
+  tensorflow, protobuf, angular, flutter),
+  Bazel-licensing-declaration-aware rule kind (tensorflow's
+  `licenses(["notice"])` discipline), `walk_error_policy:`
+  engine knob (pnpm broken-symlink fixtures). LSP design +
+  `tower-lsp` workspace dep already landed in v0.9.7 so the
+  crate scaffold is the only structural lift.
 
-v0.10 also ships the 8 rule kinds the case-study corpus has
-demand-saturated:
+- **v0.12 — WASM plugins.** Per the existing v0.11 scope,
+  bumped one slot. `wasmtime` host, signed plugin registry,
+  blessed examples (mock-ratio checker, near-dup detector,
+  debug-statement stripper).
 
-- `cross_file_value_equals` (11 sources, past saturation)
-- `xml_path_matches` / `xml_path_equals` (2 sources at scale —
-  spark + dotnet/runtime ~7,100 manifests)
-- `registry_paths_resolve` (8 sources)
-- `ordered_block` (7 sources)
-- `generated_file_fresh` (6 sources)
-- `import_gate` (4 sources)
-- `pair_hash` (3 sources, golang FIPS canonical)
-- `command_idempotent` (5+ sources — promoted from design
-  candidate via deep-analysis aggregation)
+- **v1.0 — Stability.** DSL committed, plugin ABI committed,
+  `alint-core` public API frozen, docs site committed.
 
-Plus 2 ship-target bundled rulesets:
-
-- `apache/governance@v1` — 3 Apache TLPs converge (arrow + spark
-  + airflow) on 9 of 12 governance artefacts; A2 fix is a
-  prerequisite
-- `dotnet@v1` — large adopter surface (every dotnet/* + Azure
-  SDK + microsoft/* .NET project)
-
-Plus 4-5 v0.10 design candidates (lower demand, opportunistic):
-`command_per_repo` mode, `*_path_contains`, `pair_inverse`,
-`json_schema_passes` config-shape mode, `pair {stem_all}` token
-if a 2nd source surfaces.
-
-**v0.11+: WASM plugins + cross_language_implementation_complete
-+ design-candidate ship + Bazel-licensing-declaration-aware
-rule kind.**
-
-- WASM plugins (per existing v0.11 scope)
-- `cross_language_implementation_complete` (5 sources:
-  arrow + tensorflow + protobuf + angular + flutter)
-- Bazel-licensing-declaration-aware rule kind (1 source:
-  tensorflow's `licenses(["notice"])` discipline)
-- `walk_error_policy:` engine knob (1 source: pnpm broken-symlink
-  fixtures)
-- Single-source design candidates: `json_key_sort_order`,
-  `column_alignment`, `line_spacing`, `not_executable`,
-  `directory_hash` (most won't survive demand-validation; that's
-  fine).
-
-Full cross-cutting analysis + per-repo coverage table lives in
-[`docs/development/case-study-deep-analysis-log.md`](../development/case-study-deep-analysis-log.md).
+**Single-source design candidates** that surfaced in the
+case-study aggregation but haven't hit a second demand source:
+`*_path_contains`, `pair_inverse`, `command_per_repo`,
+`json_schema_passes` config-shape mode, `*_path_array_iter`,
+`json_key_sort_order`, `column_alignment`, `line_spacing`,
+`not_executable`, `directory_hash`. Most won't survive
+demand-validation; they're tracked under "Emerging gaps" in
+[`examples/README.md`](../../examples/README.md#emerging-gaps-surfaced-this-audit-not-yet-on-roadmap)
+so post-launch users can vote with their adoption.
 
 ## Positioning
 
@@ -874,33 +859,123 @@ expected):
   Different semantics (eval-env, not a path predicate);
   no shared silent-no-op shape.
 
-## v0.10 — LSP
+## v0.9.12 - v0.9.20 (shipped)
 
-(Was v0.6 in the pre-2026-04-27 roadmap; pushed back four
-slots after the agent-era re-prioritisation, the v0.8 test
-foundation, and the v0.9 engine cut.)
+Nine patch releases between the v0.9.11 structural fix and
+the launch-ready cut. Headline contents (full per-version
+detail in [CHANGELOG.md](../../CHANGELOG.md)):
 
-- LSP server (`alint lsp`): inline diagnostics, hover with
-  rule documentation, code actions for "add to ignore" and
-  "apply fix." Design pass landed in v0.9.7
+- **v0.9.12** (2026-05-03) — backlog cleanup of the explicitly-
+  held v0.9 follow-up items.
+- **v0.9.13** (2026-05-04) — dependency refresh (Dependabot PR
+  drainage).
+- **v0.9.14** (2026-05-05) — CI automation: `bench-record.yml`
+  workflow now opens PRs with bench results so post-release
+  backfill is mechanical.
+- **v0.9.15 / v0.9.16** (2026-05-06) — Config DX hardening:
+  21-pitfall catalogue with #18 (`respect_gitignore: false`)
+  and #19 (`literal_is_nested` runtime guard) fixed in the
+  engine; 30 OSS case studies completed; P2b Wave 2
+  aggregation; operator-polish (`alint --version` SHA+date,
+  `alint validate-config` subcommand, JSON Schema generation,
+  did-you-mean parse errors, domain-specific error messages,
+  pre-filled crash-report URL on panic). v0.9.16 is the
+  tag-only release that never published due to a clippy gate
+  failure; **v0.9.17** is the corrective re-publish.
+- **v0.9.18** (2026-05-08) — pre-launch fix wave: 6 bundled-
+  ruleset refinements (A1-A6: hygiene-no-js-build-outputs
+  sibling-package.json gate; long-form Apache-2 preamble;
+  python@v1 test-fixture excludes; cargo-workspace member
+  parsing; LICENSE.TXT/.md recognition; rust-sources-snake-
+  case `allow_compiler_naming` knob), 3 case-study config
+  fixes (B1-B3: TypeScript pitfall #22, deno defensive `|-`,
+  tensorflow header rule scope), B4 cross-cutting revalidation
+  pass, `dir_absent` engine extension (now supports
+  `scope_filter`).
+- **v0.9.19** (2026-05-09) — width-aware human output wrapping
+  + `--no-docs` flag; verbose-message tightening; demo refresh.
+- **v0.9.20** (2026-05-10) — width-aware output extended to
+  every command; `cmd_list` / `cmd_explain` / `cmd_facts` /
+  `cmd_suggest` color parity with `check` / `fix`; new
+  `styling_uniform` integration test enforces the contract
+  uniformly going forward; bundled-rule message length audit;
+  em-dash scrub on first-impression marketing surfaces;
+  install-snippet pin sweep (curl + bash now leads everywhere);
+  polyglot CLI demo with 5 auto-fixable seeds;
+  `install-snippets-match-workspace-version` dogfood rule;
+  preflight + pre-push hook bundle.
+
+## v0.10 — Case-study coverage push
+
+The 8 rule kinds + 2 bundled rulesets the case-study
+aggregation demand-validated. Splits out from the original v0.10
+"LSP" framing because rule-kind coverage is what unblocks early
+adopters; LSP is developer-experience polish that can ship
+separately (now v0.11). Order within the cut by demand × adopter
+surface:
+
+| # | Primitive / ruleset | Demand | Notes |
+|---:|---|---:|---|
+| 1 | `registry_paths_resolve` | 13 | Largest demand surface. Spans rust, clap, cpython, next.js, arrow, pytorch, nodejs/node, NixOS, dotnet, flutter, kubernetes, protobuf, tensorflow. |
+| 2 | `cross_file_value_equals` (incl. `value_extractor:`) | 12 | Past saturation. istio surfaces the per-file extractor refinement (pitfall #20); dotnet/runtime SDK band coherence raises the count. |
+| 3 | `ordered_block` | 8 | Lines between marker pairs sorted unique under configurable comparator. |
+| 4 | `generated_file_fresh` | 8 | Run a generator, diff against on-disk file. Opt-in framing: alint's deliberate non-goal is running codegen. |
+| 5 | `import_gate` | 5 | Forbid imports of pattern X in scope Y. k8s prometheus-imports + airflow + go + helm + pytorch. |
+| 6 | `command_idempotent` mode | 5 | `--check` mode that fails if working tree would change. ruff-format / prettier --check / dprint check / deno fmt --check / eslint --no-fix shape. **Promoted from design candidate** in the deep-analysis aggregation. |
+| 7 | `xml_path_matches` + `xml_path_equals` | 2 | Completes the structured-query family (JSON / YAML / TOML / XML). spark + dotnet/runtime ~7,100 manifests. |
+| 8 | `pair_hash` | 3 | Hash of file A appears at offset Y of file B. golang/go FIPS = highest stakes (CMVP submission references the file format). |
+| 9 | `apache/governance@v1` (bundled ruleset) | 3 | LICENSE + NOTICE + KEYS + RAT discipline. Apache TLPs converge: arrow + spark + airflow on 9 of 12 governance artefacts. v0.9.18 A2 is a prerequisite. |
+| 10 | `dotnet@v1` (bundled ruleset) | 1 | Single demand source but huge adopter surface (every dotnet/* + every Azure SDK + every microsoft/* .NET project). Depends on `xml_path_*`. |
+
+Plus design candidates landing opportunistically when a 2nd
+demand source materialises: `*_path_contains` (3 sources today;
+resolves pitfall #17), `pair_inverse` (2 sources), `command_per_repo`
+(1), `json_schema_passes` config-shape mode (2), `*_path_array_iter`
+(1), `multi_doc_mode:` knob on `yaml_path_*` (1; resolves
+pitfall #21).
+
+Per-repo coverage tables + per-primitive demand citations live
+in [`examples/README.md`](../../examples/README.md#primitive-demand-tracker)
+and [`docs/development/launch-evidence.md`](../development/launch-evidence.md).
+
+## v0.11 — LSP + developer experience
+
+What was originally the v0.10 cut, deferred one slot. Inline
+diagnostics, hover-on-rule docs, code actions, VS Code
+extension. The per-file dispatch shape from v0.9.3 powers the
+per-file-edit re-eval hot path; v0.9.5's
+`FileIndex::contains_file` makes single-file path-scope
+re-tests O(1). Plus the v0.11+ ship-targets the case-study
+aggregation surfaced for the smaller-demand long tail.
+
+- LSP server (`alint lsp`). Design pass landed in v0.9.7
   (`docs/design/v0.10/lsp_server.md`); `tower-lsp = "0.20"`
-  added as a dormant workspace dependency, no
-  `crates/alint-lsp/` crate yet.
-- VS Code extension (bundles the LSP). Design pass landed
-  in v0.9.7 (`docs/design/v0.10/vscode_extension.md`).
-- Per-file dispatch shape from v0.9 directly powers the
-  per-file-edit re-evaluation hot path
-  (`docs/design/v0.10/single_file_reevaluation.md`).
-- **Generalise `ScopeFilter` shape beyond `has_ancestor`**
-  — held from v0.9.6 design as out of scope at the time;
-  candidates include `has_sibling`, `has_descendant`,
-  custom predicates. v0.9.10's `Scope::from_spec` makes
-  the additions purely additive (no API churn).
+  is already in `[workspace.dependencies]` as a dormant dep.
+  Crate scaffold (`crates/alint-lsp/`) is the only structural
+  lift remaining.
+- VS Code extension that bundles the LSP. Design in v0.9.7
+  (`docs/design/v0.10/vscode_extension.md`).
+- **`ScopeFilter` generalisation beyond `has_ancestor`** —
+  candidates include `has_sibling`, `has_descendant`, custom
+  predicates. v0.9.10's `Scope::from_spec` makes additions
+  purely additive (no API churn).
+- **`cross_language_implementation_complete`** (5 sources:
+  arrow, tensorflow, protobuf, angular, flutter). Densest
+  demand: protobuf's 10 in-tree language bindings + 1 spun-out
+  (~45 cross-language assertions one rule would express).
+  Three distinct topologies (data-format-driven, within-
+  language source ↔ golden, platform-driven).
+- **Bazel-licensing-declaration-aware rule kind** (1 source:
+  tensorflow's `licenses(["notice"])` BUILD-file discipline).
+  Single-source but the source is a 100k+ file tree with high
+  alignment cost.
+- **`walk_error_policy:` engine knob** (1 source: pnpm's
+  `tests/fixtures/has-broken-symlinks/`). `strict` /
+  `skip-broken-symlinks` / `permissive` modes.
 
-## v0.11 — WASM plugins
+## v0.12 — WASM plugins
 
-(Was v0.7 in the pre-2026-04-27 roadmap; pushed back four
-slots.)
+Per the previous v0.11 scope, bumped one slot.
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT
   interface.
