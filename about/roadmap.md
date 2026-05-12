@@ -47,7 +47,7 @@ regression from slipping by again:
 - **v0.9.5.7** — 16 coverage scenarios filling the audit punch list
 - **v0.9.5.8** — bench-scale S6 (per-file content fan-out) /
   S7 (cross-file relational) / S8 (git-tracked overlay)
-- **v0.9.5.9** — `docs/development/RULE-AUTHORING.md` workflow doc
+- **v0.9.5.9** — `docs/development/rule-authoring.md` workflow doc
 - **v0.9.5.reorg** — `docs/benchmarks/{micro,macro,investigations,archive}/`
   layout + per-version results + `xtask publish-benches`
 
@@ -723,7 +723,7 @@ that hit ~5 B glob-match ops at 1M with 5,000 packages.
   overlay). New `alint_bench::tree::generate_git_monorepo`
   helper.
 - ✅ **Rule-authoring workflow doc** (v0.9.5.9).
-  `docs/development/RULE-AUTHORING.md` codifies the
+  `docs/development/rule-authoring.md` codifies the
   four-step workflow new rules / bundled rulesets / aliases
   follow. Self-dogfooding via `action-selftest.yml` covers
   the in-repo lint enforcement.

@@ -384,7 +384,7 @@ alint/
 ├── schemas/v1/             JSON Schema for .alint.yml + report shapes (mirrored under crates/alint-dsl/schemas/)
 ├── docs/
 │   ├── design/             architecture, roadmap, per-cut design passes (v0.7, v0.9, ...)
-│   ├── development/        contributor docs (RULE-AUTHORING.md)
+│   ├── development/        contributor docs (rule-authoring.md)
 │   └── benchmarks/         methodology + per-platform published numbers (micro/, macro/, investigations/, archive/)
 ├── install.sh              curl-pipeable platform-detecting installer
 ├── action.yml              official GitHub Action (composite)
