@@ -376,10 +376,10 @@ extends:
 
 ### Feeding violations back to an agent
 
-`--format=agent` (also accepted as `--format=agentic` or `--format=ai`) emits a flat JSON shape optimised for an LLM to act on. Each violation carries an `agent_instruction` field templated from the rule's message + location + fix availability + policy URL, so an agent loop can read the violation and apply the suggested remediation directly:
+`--format agent` (also accepted as `--format agentic` or `--format ai`) emits a flat JSON shape optimised for an LLM to act on. Each violation carries an `agent_instruction` field templated from the rule's message + location + fix availability + policy URL, so an agent loop can read the violation and apply the suggested remediation directly:
 
 ```bash
-alint check --format=agent
+alint check --format agent
 ```
 
 ```json
@@ -408,7 +408,7 @@ alint check --format=agent
 }
 ```
 
-A typical agent-harness pattern: after each edit, run `alint check --format=agent`, parse the JSON, address the first violation, repeat until empty. The `agent_instruction` field is intentionally verbose. It's optimised for an LLM to act on without having to re-derive the action from `rule_id` and `human_message` separately.
+A typical agent-harness pattern: after each edit, run `alint check --format agent`, parse the JSON, address the first violation, repeat until empty. The `agent_instruction` field is intentionally verbose. It's optimised for an LLM to act on without having to re-derive the action from `rule_id` and `human_message` separately.
 
 ### Severity escalation
 
