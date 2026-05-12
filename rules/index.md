@@ -6,12 +6,13 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 60 rule kinds across 13 families. Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 21 rules
+- [Content](/docs/rules/content/) — 14 rules
+- [Structured query](/docs/rules/structured-query/) — 7 rules
 - [Naming](/docs/rules/naming/) — 2 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 6 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 3 rules
@@ -59,9 +60,9 @@ alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`git_commit_message`](/docs/rules/git-hygiene/git_commit_message/) — Validate HEAD's commit-message shape via regex, max-subject-length, or required-body. _(Git hygiene)_
 - [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_
-- [`json_path_equals`](/docs/rules/content/json_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. _(Content)_
-- [`json_path_matches`](/docs/rules/content/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Content)_
-- [`json_schema_passes`](/docs/rules/content/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. _(Content)_
+- [`json_path_equals`](/docs/rules/structured-query/json_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`json_path_matches`](/docs/rules/structured-query/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
+- [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. _(Structured query)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
@@ -80,8 +81,8 @@ alint ships 60 rule kinds across 12 families. Each rule is one entry in your `.a
 - [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) — Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). _(Security / Unicode sanity)_
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
-- [`toml_path_equals`](/docs/rules/content/toml_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. _(Content)_
-- [`toml_path_matches`](/docs/rules/content/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Content)_
+- [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`unique_by`](/docs/rules/cross-file/unique_by/) — No two files matching `paths` may share the value of `key` (a path template). _(Cross-file)_
-- [`yaml_path_equals`](/docs/rules/content/yaml_path_equals/) — Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. _(Content)_
-- [`yaml_path_matches`](/docs/rules/content/yaml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Content)_
+- [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_

@@ -2,7 +2,7 @@
 title: 'Text hygiene'
 description: 'Rule reference: the text hygiene family.'
 sidebar:
-  order: 4
+  order: 5
   label: 'Text hygiene'
 ---
 

@@ -1,11 +1,11 @@
 ---
 title: 'json_path_equals'
-description: 'alint rule kind `json_path_equals` (Content family).'
+description: 'alint rule kind `json_path_equals` (Structured query family).'
 sidebar:
-  order: 13
+  order: 1
 ---
 
-Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression and assert every match deep-equals the supplied value. YAML and TOML are parsed through serde and then treated as JSON-shaped trees, so the same JSONPath engine handles all three formats.
+Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
 ```yaml
 - id: require-mit-license
@@ -37,5 +37,5 @@ Query a structured document (JSON / YAML / TOML) with a [JSONPath](https://datat
 
 ## See also
 
-- [`yaml_path_equals`](/docs/rules/content/yaml_path_equals/)
-- [`toml_path_equals`](/docs/rules/content/toml_path_equals/)
+- [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/)
+- [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/)

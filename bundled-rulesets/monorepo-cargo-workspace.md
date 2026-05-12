@@ -58,7 +58,7 @@ Tracking: v0.10 design candidate "*_path_array_iter".
 
 ### `cargo-workspace-members-declared`
 
-- **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
+- **kind**: [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
 - **level**: `error`
 - **when**: `facts.is_cargo_workspace`
 - **policy**: <https://doc.rust-lang.org/cargo/reference/workspaces.html>

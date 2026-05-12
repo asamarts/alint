@@ -41,7 +41,7 @@ block if you need a different heuristic.
 
 ### `python-pyproject-declares-name`
 
-- **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
+- **kind**: [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
 - **level**: `warning`
 - **when**: `facts.has_python`
 - **policy**: <https://peps.python.org/pep-0621/>
@@ -50,7 +50,7 @@ block if you need a different heuristic.
 
 ### `python-pyproject-declares-requires-python`
 
-- **kind**: [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
+- **kind**: [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
 - **level**: `info`
 - **when**: `facts.has_python`
 

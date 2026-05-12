@@ -25,7 +25,7 @@ the rules silently no-op.
 
 ### `yarn-workspace-declares-workspaces`
 
-- **kind**: [`json_path_matches`](/docs/rules/content/json_path_matches/)
+- **kind**: [`json_path_matches`](/docs/rules/structured-query/json_path_matches/)
 - **level**: `error`
 - **when**: `facts.is_yarn_workspace`
 - **policy**: <https://yarnpkg.com/features/workspaces>

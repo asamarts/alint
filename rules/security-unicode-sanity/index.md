@@ -2,7 +2,7 @@
 title: 'Security / Unicode sanity'
 description: 'Rule reference: the security / unicode sanity family.'
 sidebar:
-  order: 5
+  order: 6
   label: 'Security / Unicode sanity'
 ---
 

@@ -2,7 +2,7 @@
 title: 'Unix metadata'
 description: 'Rule reference: the unix metadata family.'
 sidebar:
-  order: 9
+  order: 10
   label: 'Unix metadata'
 ---
 

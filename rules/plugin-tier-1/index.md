@@ -2,7 +2,7 @@
 title: 'Plugin (tier 1)'
 description: 'Rule reference: the plugin (tier 1) family.'
 sidebar:
-  order: 12
+  order: 13
   label: 'Plugin (tier 1)'
 ---
 

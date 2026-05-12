@@ -2,7 +2,7 @@
 title: 'Cross-file'
 description: 'Rule reference: the cross-file family.'
 sidebar:
-  order: 11
+  order: 12
   label: 'Cross-file'
 ---
 

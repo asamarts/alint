@@ -2,7 +2,7 @@
 title: 'Portable metadata'
 description: 'Rule reference: the portable metadata family.'
 sidebar:
-  order: 8
+  order: 9
   label: 'Portable metadata'
 ---
 

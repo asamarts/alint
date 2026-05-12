@@ -2,7 +2,7 @@
 title: 'Encoding'
 description: 'Rule reference: the encoding family.'
 sidebar:
-  order: 6
+  order: 7
   label: 'Encoding'
 ---
 

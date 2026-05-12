@@ -21,7 +21,7 @@ rules silently no-op.
 
 ### `pnpm-workspace-declares-packages`
 
-- **kind**: [`yaml_path_matches`](/docs/rules/content/yaml_path_matches/)
+- **kind**: [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/)
 - **level**: `error`
 - **when**: `facts.is_pnpm_workspace`
 - **policy**: <https://pnpm.io/pnpm-workspace_yaml>

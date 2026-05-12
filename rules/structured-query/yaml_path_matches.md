@@ -1,8 +1,8 @@
 ---
 title: 'yaml_path_matches'
-description: 'alint rule kind `yaml_path_matches` (Content family).'
+description: 'alint rule kind `yaml_path_matches` (Structured query family).'
 sidebar:
-  order: 17
+  order: 5
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
@@ -25,5 +25,5 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 
 ## See also
 
-- [`json_path_matches`](/docs/rules/content/json_path_matches/)
-- [`toml_path_matches`](/docs/rules/content/toml_path_matches/)
+- [`json_path_matches`](/docs/rules/structured-query/json_path_matches/)
+- [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)

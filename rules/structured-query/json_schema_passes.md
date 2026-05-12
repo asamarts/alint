@@ -1,8 +1,8 @@
 ---
 title: 'json_schema_passes'
-description: 'alint rule kind `json_schema_passes` (Content family).'
+description: 'alint rule kind `json_schema_passes` (Structured query family).'
 sidebar:
-  order: 19
+  order: 7
 ---
 
 Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
@@ -25,4 +25,6 @@ Each schema-validation error becomes one violation, with the failing instance pa
 ```
 
 Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
+
+---
 

@@ -2,7 +2,7 @@
 title: 'Git hygiene'
 description: 'Rule reference: the git hygiene family.'
 sidebar:
-  order: 10
+  order: 11
   label: 'Git hygiene'
 ---
 

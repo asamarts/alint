@@ -2,7 +2,7 @@
 title: 'Naming'
 description: 'Rule reference: the naming family.'
 sidebar:
-  order: 3
+  order: 4
   label: 'Naming'
 ---
 

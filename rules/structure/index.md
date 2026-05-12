@@ -2,7 +2,7 @@
 title: 'Structure'
 description: 'Rule reference: the structure family.'
 sidebar:
-  order: 7
+  order: 8
   label: 'Structure'
 ---
 
