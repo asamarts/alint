@@ -89,7 +89,7 @@ jobs:
           printf 'tags=%s\n' "${tags[*]}" >>"$GITHUB_OUTPUT"
 
       - name: build + push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.1.0
         with:
           context: bench
           file: bench/Dockerfile
