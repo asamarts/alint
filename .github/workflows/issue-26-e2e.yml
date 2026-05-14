@@ -148,11 +148,16 @@ jobs:
           echo "✓ Bad-ref hard-fails with the fetch-depth: 0 hint"
 
       - name: Verify env-var default fallback works
-        # No ALINT_BASE_SHA set; the rule's ${ALINT_BASE_SHA:-HEAD~3}
-        # default kicks in. The range HEAD~3..HEAD covers the
-        # feature commits + the merge (3 commits back). With
+        # No ALINT_BASE_SHA set; the rule's ${ALINT_BASE_SHA:-HEAD^1}
+        # default kicks in. HEAD^1 is the merge commit's first
+        # parent — always exists for non-root commits and stable
+        # across merge graphs (unlike HEAD~N which follows
+        # first-parent N times and can hit the root). HEAD^1..HEAD
+        # covers the feature commits + the merge; with
         # include_merges off, only the two feat:/fix: commits get
-        # validated and both pass.
+        # validated and both pass. Demonstrates that the same
+        # .alint.yml works locally (no env var, default kicks in)
+        # and in CI (env var set, override resolves to a base SHA).
         run: |
           set -euxo pipefail
           unset ALINT_BASE_SHA
@@ -162,11 +167,11 @@ jobs:
             - id: env-default
               kind: git_commit_message
               pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
-              since: ${ALINT_BASE_SHA:-HEAD~3}
+              since: ${ALINT_BASE_SHA:-HEAD^1}
               level: error
           YAML
           ./target/release/alint check /tmp/range-fixture
-          echo "✓ Env-var default fallback (\${VAR:-HEAD~3}) resolves cleanly"
+          echo "✓ Env-var default fallback (\${VAR:-HEAD^1}) resolves cleanly"
 
   # Job 2: real PR shape. Runs only on pull_request events so the
   # job has a real base.sha + the real synthetic-merge HEAD that
