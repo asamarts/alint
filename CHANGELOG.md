@@ -34,6 +34,23 @@ silently goes stale" gap can't reopen post-launch.
 
 ### Added
 
+- **`git_commit_message` range mode** ([#26](https://github.com/asamarts/alint/issues/26)):
+  new `since:` option validates every commit in `<since>..HEAD`
+  instead of only HEAD. Right shape for `pull_request`-trigger CI,
+  where `actions/checkout` produces a synthetic merge commit at
+  HEAD that the rule would otherwise always flag. `since:` accepts
+  any `git rev-parse`-able ref (SHA, branch, tag, `HEAD~N`) and
+  supports POSIX `${VAR}` and `${VAR:-default}` env-var
+  interpolation so CI workflows can pass the PR base SHA in via
+  an env var without templating the YAML. Merge commits in the
+  range are skipped by default; opt in with `include_merges: true`.
+  Per-commit violations carry the abbreviated SHA + a subject
+  snippet so users know which commit to amend. Shallow-clone
+  gotchas (the common `actions/checkout@v4` `fetch-depth: 1`
+  default) hard-fail with a `fetch-depth: 0` hint rather than
+  silently returning an empty range. Plus 5 new e2e scenarios
+  covering range happy path, multiple failing commits, empty
+  range, HEAD-only backward compat, and the merge-skip default.
 - `GOVERNANCE.md` + `.github/FUNDING.yml` (pre-launch repo polish).
 - `ci/scripts/preflight.sh` wrapper + git `pre-push` hook
   enforcing fmt / clippy / doc / pin-sync.

@@ -56,3 +56,43 @@ For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/d
 ```
 
 Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags).
+
+## Validate PR commits with `git_commit_message`
+
+`actions/checkout@v4` on a `pull_request` trigger checks out a synthetic merge commit, not the PR's tip. The HEAD subject is then auto-generated (`Merge <sha> into <sha>`) and trips any `git_commit_message` rule applied to HEAD only. To validate the PR's own commits instead, use the rule's `since:` option together with `actions/checkout`'s full-history fetch:
+
+```yaml
+# .github/workflows/lint.yml
+name: lint
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  alint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `since:` walks <base>..HEAD. fetch-depth: 0 makes the
+          # base ref reachable; the default depth of 1 leaves it
+          # out of local objects and the rule will hard-fail with
+          # a shallow-clone hint.
+          fetch-depth: 0
+      - name: alint check
+        env:
+          ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        uses: asamarts/alint@v0.9.20
+```
+
+The rule in `.alint.yml`:
+
+```yaml
+- id: pr-conventional-commits
+  kind: git_commit_message
+  pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+  subject_max_length: 72
+  since: ${ALINT_BASE_SHA:-origin/main}
+  level: error
+```
+
+The `${ALINT_BASE_SHA:-origin/main}` default makes the same config work locally too: when you run `alint check` on your feature branch without setting the env var, the rule falls back to `origin/main` and validates everything since you branched. See the [`git_commit_message` reference](/docs/rules/git-hygiene/git_commit_message/) for the full options surface.
