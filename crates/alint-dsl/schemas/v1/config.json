@@ -918,7 +918,7 @@
     },
 
     "rule_git_commit_message": {
-      "description": "Validate HEAD's commit message against shape rules: regex, max subject length, body required. At least one of `pattern:` / `subject_max_length:` / `requires_body: true` must be set. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops.",
+      "description": "Validate one or more commit messages against shape rules: regex, max subject length, body required. With `since:` unset, only HEAD is checked. With `since:` set to a ref, every commit in `<since>..HEAD` is checked (oldest first, merge commits excluded by default); right shape for PR-trigger workflows where HEAD is a synthetic `actions/checkout` merge commit. At least one of `pattern:` / `subject_max_length:` / `requires_body: true` must be set. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
       "type": "object",
       "properties": {
         "kind": { "const": "git_commit_message" },
@@ -934,7 +934,16 @@
         "requires_body": {
           "type": "boolean",
           "default": false,
-          "description": "When true, the message must have a non-empty body — at least one line of content after the subject's blank-line separator."
+          "description": "When true, the message must have a non-empty body, that is, at least one line of content after the subject's blank-line separator."
+        },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA` exported in a workflow step from `github.event.pull_request.base.sha`). The GitHub Actions double-brace template syntax `${{ ... }}` is NOT interpolated by alint."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Defaults to `false` because merge commits in PR contexts are typically the synthetic merge `actions/checkout` produces (with an auto-generated subject the rule would always flag) or maintainer-resolved merges from the base branch. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
         }
       },
       "anyOf": [

@@ -656,6 +656,8 @@ GitCommitMessageRule {
     ),
     subject_max_length: None,
     requires_body: false,
+    since_raw: None,
+    include_merges: false,
 }
 
 === kind: git_no_denied_paths | id: no-tracked-secrets ===

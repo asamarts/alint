@@ -1,23 +1,41 @@
-//! `git_commit_message` — assert HEAD's commit message matches a
-//! shape (regex, max subject length, body required).
+//! `git_commit_message` — assert commit messages match a shape
+//! (regex, max subject length, body required).
+//!
+//! Two modes:
+//!
+//! - **HEAD-only** (default, `since:` omitted): validate the tip
+//!   commit. Right shape for push-trigger CI and post-commit hooks.
+//! - **Range** (`since:` set): validate every commit reachable from
+//!   `HEAD` but not from `since`. Right shape for pull-request CI,
+//!   where `actions/checkout` checks out a synthetic merge commit
+//!   that the rule should never see. Set `since:` to the PR base
+//!   SHA (typically via `${ALINT_BASE_SHA}` env interpolation, with
+//!   the env var sourced from `github.event.pull_request.base.sha`
+//!   in the workflow). Merge commits in the range are skipped by
+//!   default (`include_merges: false`); set `include_merges: true`
+//!   to lint them too.
 //!
 //! Use cases: enforce Conventional Commits / Angular-style
-//! prefixes, cap the subject at a screen-friendly width
-//! (50–72), require commits that fix issues to include a body
-//! linking the issue. CI integration: run `alint check
-//! --changed` (or `alint check`) on every PR; alint reads the
-//! tip commit and fires if the shape is off.
+//! prefixes, cap the subject at a screen-friendly width (50–72),
+//! require commits that fix issues to include a body linking the
+//! issue.
 //!
-//! Outside a git repo, with no commits yet, or when `git` isn't
-//! on PATH, the rule silently no-ops. This is the same advisory
-//! posture as `git_tracked_only` and `git_no_denied_paths`: a
-//! rule about git only fires when there's git to inspect.
+//! Outside a git repo, with no commits yet, or when `git` isn't on
+//! PATH, the rule silently no-ops. Same advisory posture as
+//! `git_tracked_only` and `git_no_denied_paths`: a rule about git
+//! only fires when there's git to inspect.
 //!
-//! Check-only — alint can't rewrite the user's commit
-//! message, and `git commit --amend` is a sensitive operation
-//! we don't automate.
+//! Bad `since:` refs (typo, or a shallow-clone gotcha that left
+//! the ref out of local objects) hard-fail with a hint to widen
+//! the checkout. The user asked for a range; silently falling back
+//! to HEAD-only would mask the misconfiguration.
+//!
+//! Check-only — alint can't rewrite the user's commit message, and
+//! `git commit --amend` is a sensitive operation we don't automate.
 
-use alint_core::git::head_commit_message;
+use alint_core::git::{
+    CommitRangeError, CommitRecord, commit_messages_in_range, head_commit_message,
+};
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use regex::Regex;
 use serde::Deserialize;
@@ -25,24 +43,44 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Regex the full commit message (subject + body, joined
-    /// with newlines) must match. When omitted, no regex check
-    /// is applied. Use `(?s)` to make `.` match newlines if you
-    /// want to assert about content past the subject.
+    /// Regex the full commit message (subject + body, joined with
+    /// newlines) must match. When omitted, no regex check is
+    /// applied. Use `(?s)` to make `.` match newlines if you want
+    /// to assert about content past the subject.
     #[serde(default)]
     pattern: Option<String>,
     /// Maximum length of the subject line (the message's first
     /// line, before any body). When omitted, no length cap.
-    /// Common values: 50 (Tim Pope's recommendation), 72
-    /// (GitHub's PR-title cutoff).
+    /// Common values: 50 (Tim Pope's recommendation), 72 (GitHub's
+    /// PR-title cutoff).
     #[serde(default)]
     subject_max_length: Option<usize>,
-    /// When `true`, the message must have a non-empty body —
-    /// at least one line of content after the subject's
-    /// trailing blank line. Useful for mandating an
-    /// explanation on `fix:` commits etc.
+    /// When `true`, the message must have a non-empty body — at
+    /// least one line of content after the subject's trailing
+    /// blank line. Useful for mandating an explanation on `fix:`
+    /// commits etc.
     #[serde(default)]
     requires_body: bool,
+    /// Git ref to use as the base of the commit range. When set,
+    /// the rule validates every commit in `<since>..HEAD` instead
+    /// of just `HEAD`. Anything `git rev-parse` accepts works: a
+    /// 40-char or abbreviated SHA, a branch (`origin/main`), a tag
+    /// (`v1.2.3`), or a relative ref (`HEAD~5`). Supports POSIX
+    /// `${VAR}` and `${VAR:-default}` env-var interpolation so CI
+    /// can pass a SHA in via an env var (see the GitHub Actions
+    /// integration doc for the canonical recipe).
+    #[serde(default)]
+    since: Option<String>,
+    /// When validating a range (`since:` set), include merge
+    /// commits in the set of commits to check. Default `false`
+    /// because merge commits in a PR context are typically the
+    /// synthetic merge `actions/checkout` produces (with an
+    /// auto-generated subject the rule would always flag) or
+    /// maintainer-resolved merges from the base branch (also
+    /// uninteresting). Set `true` to lint them anyway. Has no
+    /// effect when `since:` is unset.
+    #[serde(default)]
+    include_merges: bool,
 }
 
 #[derive(Debug)]
@@ -54,6 +92,12 @@ pub struct GitCommitMessageRule {
     pattern: Option<Regex>,
     subject_max_length: Option<usize>,
     requires_body: bool,
+    /// `since:` value as written in the config, with `${VAR}`
+    /// interpolation NOT yet performed. Resolution is deferred to
+    /// evaluate-time so env vars exported by CI steps after rule
+    /// load are picked up correctly.
+    since_raw: Option<String>,
+    include_merges: bool,
 }
 
 impl Rule for GitCommitMessageRule {
@@ -61,37 +105,58 @@ impl Rule for GitCommitMessageRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        let Some(message) = head_commit_message(ctx.root) else {
-            // No git, no commits, or git not on PATH — silent
-            // no-op. This rule only makes sense when there's a
-            // commit to inspect.
-            return Ok(violations);
+
+        // Resolve `since:` once at evaluate-time so `${VAR}` env
+        // expansions reflect the current process environment.
+        let since = match &self.since_raw {
+            None => None,
+            Some(raw) => match expand_env(raw, env_lookup) {
+                Ok(resolved) => Some(resolved),
+                Err(missing) => {
+                    return Err(Error::rule_config(
+                        &self.id,
+                        format!(
+                            "`since:` references undefined env var `{missing}` \
+                             and has no default. Either set the env var (for \
+                             example, `ALINT_BASE_SHA` from \
+                             `github.event.pull_request.base.sha` in a GitHub \
+                             Actions workflow) or use the `${{VAR:-default}}` \
+                             default-value syntax."
+                        ),
+                    ));
+                }
+            },
         };
 
-        let (subject, body) = split_subject_body(&message);
+        let commits = match &since {
+            None => match head_commit_message(ctx.root) {
+                Some(message) => vec![CommitRecord {
+                    sha: "HEAD".to_string(),
+                    message,
+                }],
+                None => return Ok(violations), // silent no-op
+            },
+            Some(since) => {
+                match commit_messages_in_range(ctx.root, since, self.include_merges) {
+                    Ok(None) => return Ok(violations), // not a git repo: silent
+                    Ok(Some(records)) => records,
+                    Err(CommitRangeError::BadRange { stderr }) => {
+                        return Err(Error::rule_config(
+                            &self.id,
+                            format!(
+                                "could not resolve commit range `{since}..HEAD`: {stderr}. \
+                                 Common cause: shallow clone. In a GitHub Actions PR \
+                                 workflow, use `actions/checkout@v4` with \
+                                 `fetch-depth: 0` so the base ref is reachable."
+                            ),
+                        ));
+                    }
+                }
+            }
+        };
 
-        if let Some(re) = &self.pattern
-            && !re.is_match(&message)
-        {
-            violations.push(self.make_violation(format!(
-                "HEAD commit message does not match pattern `{}`",
-                re.as_str(),
-            )));
-        }
-
-        if let Some(max) = self.subject_max_length
-            && subject.chars().count() > max
-        {
-            violations.push(self.make_violation(format!(
-                "HEAD commit subject is {} chars; max allowed is {max}",
-                subject.chars().count(),
-            )));
-        }
-
-        if self.requires_body && body.trim().is_empty() {
-            violations.push(self.make_violation(
-                "HEAD commit message has no body; this rule requires one".to_string(),
-            ));
+        for commit in &commits {
+            self.check_one(commit, &mut violations);
         }
 
         Ok(violations)
@@ -99,24 +164,141 @@ impl Rule for GitCommitMessageRule {
 }
 
 impl GitCommitMessageRule {
+    fn check_one(&self, commit: &CommitRecord, violations: &mut Vec<Violation>) {
+        let (subject, body) = split_subject_body(&commit.message);
+
+        if let Some(re) = &self.pattern
+            && !re.is_match(&commit.message)
+        {
+            violations.push(self.make_violation(format_msg(
+                commit,
+                subject,
+                &format!("commit message does not match pattern `{}`", re.as_str()),
+            )));
+        }
+
+        if let Some(max) = self.subject_max_length
+            && subject.chars().count() > max
+        {
+            violations.push(self.make_violation(format_msg(
+                commit,
+                subject,
+                &format!(
+                    "commit subject is {} chars; max allowed is {max}",
+                    subject.chars().count(),
+                ),
+            )));
+        }
+
+        if self.requires_body && body.trim().is_empty() {
+            violations.push(self.make_violation(format_msg(
+                commit,
+                subject,
+                "commit message has no body; this rule requires one",
+            )));
+        }
+    }
+
     fn make_violation(&self, default_msg: String) -> Violation {
         Violation::new(self.message_override.clone().unwrap_or(default_msg))
     }
 }
 
-/// Split a commit message into (subject, body). The subject is
-/// the first line; the body is everything after the first
-/// blank line that follows it. Messages with no blank-line
-/// separator have an empty body. Trailing whitespace on the
-/// subject is preserved as-is — the length check counts it.
+/// Render a violation message with the commit SHA + a trimmed
+/// subject snippet for context. SHA is "HEAD" in single-commit
+/// mode (the helper synthesises it) and an abbreviated SHA in
+/// range mode. Subject is truncated to ~60 chars so violation
+/// output stays readable.
+fn format_msg(commit: &CommitRecord, subject: &str, what: &str) -> String {
+    const SUBJECT_PREVIEW_MAX: usize = 60;
+    let preview: String = subject.chars().take(SUBJECT_PREVIEW_MAX).collect();
+    let ellipsis = if subject.chars().count() > SUBJECT_PREVIEW_MAX {
+        "…"
+    } else {
+        ""
+    };
+    format!(
+        "commit {}: {what} (subject: \"{preview}{ellipsis}\")",
+        commit.sha
+    )
+}
+
+/// Split a commit message into (subject, body). The subject is the
+/// first line; the body is everything after the first blank line
+/// that follows it. Messages with no blank-line separator have an
+/// empty body. Trailing whitespace on the subject is preserved
+/// as-is — the length check counts it.
 fn split_subject_body(message: &str) -> (&str, &str) {
     let (subject, rest) = message.split_once('\n').unwrap_or((message, ""));
     // Skip exactly one trailing blank-line separator if present
     // (the canonical "subject\n\nbody" shape). Multiple blank
-    // lines fall through into the body — they're unusual but
-    // we don't want to silently swallow user content.
+    // lines fall through into the body — they're unusual but we
+    // don't want to silently swallow user content.
     let body = rest.strip_prefix('\n').unwrap_or(rest);
     (subject, body)
+}
+
+/// Expand POSIX-style env-var references in a `since:` value. The
+/// syntax is intentionally narrow:
+///
+/// - `${VAR}` — substitute the value of `VAR`. If unset, returns
+///   `Err(missing-var-name)` so the rule can hard-fail with a
+///   CI-friendly hint.
+/// - `${VAR:-default}` — substitute `VAR`, or `default` when
+///   `VAR` is unset or empty. `default` may not itself contain
+///   `${`, `}` or `:-` — keep the surface small.
+/// - Bare text — left as-is. So `since: origin/main` works
+///   unchanged.
+///
+/// Multiple `${...}` references in one value are supported. The
+/// double-brace GitHub Actions syntax (`${{ ... }}`) is NOT
+/// interpolated by alint; it has to be rendered by Actions before
+/// the YAML is read, which only works in workflow files, not in
+/// `.alint.yml`. The single-brace form is the alint convention.
+///
+/// `lookup` is an explicit env-var resolver (typically
+/// `|name| std::env::var(name).ok()`); injecting it keeps the
+/// pure-string parsing testable without `set_var` calls (the
+/// crate forbids unsafe code, and Rust 2024 marks `set_var` /
+/// `remove_var` unsafe).
+fn expand_env<F>(input: &str, lookup: F) -> std::result::Result<String, String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after_open = &rest[start + 2..];
+        let Some(end) = after_open.find('}') else {
+            // Unclosed `${...`. Treat as literal, don't error —
+            // the caller's value is probably a literal SHA that
+            // happens to contain `${`.
+            out.push_str("${");
+            rest = after_open;
+            continue;
+        };
+        let inner = &after_open[..end];
+        let (name, default) = match inner.split_once(":-") {
+            Some((n, d)) => (n, Some(d)),
+            None => (inner, None),
+        };
+        match lookup(name) {
+            Some(v) if !v.is_empty() => out.push_str(&v),
+            _ => match default {
+                Some(d) => out.push_str(d),
+                None => return Err(name.to_string()),
+            },
+        }
+        rest = &after_open[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Production lookup: read from the process environment.
+fn env_lookup(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -135,6 +317,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         return Err(Error::rule_config(
             &spec.id,
             "git_commit_message has no fix op",
+        ));
+    }
+    if opts.include_merges && opts.since.is_none() {
+        return Err(Error::rule_config(
+            &spec.id,
+            "`include_merges: true` has no effect without `since:`. Either remove it \
+             or set `since:` to enable range mode.",
         ));
     }
 
@@ -156,6 +345,8 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         pattern,
         subject_max_length: opts.subject_max_length,
         requires_body: opts.requires_body,
+        since_raw: opts.since,
+        include_merges: opts.include_merges,
     }))
 }
 
@@ -179,10 +370,10 @@ mod tests {
 
     #[test]
     fn split_subject_no_blank_separator() {
-        // git-style messages should have a blank line, but
-        // tools like `git commit -m "first\nsecond"` produce
-        // bodies without one. Treat the second line on as body
-        // even without a separator.
+        // git-style messages should have a blank line, but tools
+        // like `git commit -m "first\nsecond"` produce bodies
+        // without one. Treat the second line on as body even
+        // without a separator.
         let (subj, body) = split_subject_body("subject\nrest of content");
         assert_eq!(subj, "subject");
         assert_eq!(body, "rest of content");
@@ -215,5 +406,155 @@ mod tests {
     fn requires_body_accepts_canonical_form() {
         let (_, body) = split_subject_body("subject\n\nbody content");
         assert!(!body.trim().is_empty());
+    }
+
+    // ----- format_msg formatting --------------------------------
+
+    #[test]
+    fn format_msg_renders_sha_and_subject() {
+        let commit = CommitRecord {
+            sha: "a1b2c3d".to_string(),
+            message: "fix: thing".to_string(),
+        };
+        let s = format_msg(&commit, "fix: thing", "subject too long");
+        assert!(s.contains("commit a1b2c3d"));
+        assert!(s.contains("fix: thing"));
+        assert!(s.contains("subject too long"));
+    }
+
+    #[test]
+    fn format_msg_truncates_long_subjects() {
+        let long_subject = "x".repeat(120);
+        let commit = CommitRecord {
+            sha: "abc1234".to_string(),
+            message: long_subject.clone(),
+        };
+        let s = format_msg(&commit, &long_subject, "too long");
+        // Subject preview is capped at 60 chars + ellipsis.
+        assert!(s.contains(&"x".repeat(60)));
+        assert!(s.contains('…'));
+        assert!(!s.contains(&"x".repeat(61)));
+    }
+
+    // ----- env-var interpolation --------------------------------
+
+    /// Build a fake env lookup from a list of (name, value) pairs.
+    /// Anything not in the list is treated as unset.
+    fn fake_env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| (*v).to_string())
+        }
+    }
+
+    #[test]
+    fn expand_env_passthrough_for_bare_string() {
+        let env = fake_env(&[]);
+        assert_eq!(expand_env("origin/main", &env).unwrap(), "origin/main");
+        assert_eq!(expand_env("v0.9.20", &env).unwrap(), "v0.9.20");
+        assert_eq!(
+            expand_env("abc1234567890abcdef1234567890abcdef12345678", &env,).unwrap(),
+            "abc1234567890abcdef1234567890abcdef12345678"
+        );
+    }
+
+    #[test]
+    fn expand_env_substitutes_simple_var() {
+        let env = fake_env(&[("ALINT_BASE_SHA", "deadbeef")]);
+        assert_eq!(expand_env("${ALINT_BASE_SHA}", &env).unwrap(), "deadbeef");
+    }
+
+    #[test]
+    fn expand_env_default_used_when_var_unset() {
+        let env = fake_env(&[]);
+        assert_eq!(
+            expand_env("${MISSING:-origin/main}", &env).unwrap(),
+            "origin/main"
+        );
+    }
+
+    #[test]
+    fn expand_env_default_used_when_var_empty() {
+        let env = fake_env(&[("EMPTY", "")]);
+        assert_eq!(
+            expand_env("${EMPTY:-origin/main}", &env).unwrap(),
+            "origin/main"
+        );
+    }
+
+    #[test]
+    fn expand_env_errors_when_var_unset_and_no_default() {
+        let env = fake_env(&[]);
+        let err = expand_env("${NOPE}", &env).unwrap_err();
+        assert_eq!(err, "NOPE");
+    }
+
+    #[test]
+    fn expand_env_handles_multiple_references() {
+        let env = fake_env(&[("A", "foo"), ("B", "bar")]);
+        assert_eq!(expand_env("${A}-${B}", &env).unwrap(), "foo-bar");
+    }
+
+    #[test]
+    fn expand_env_handles_text_around_var() {
+        let env = fake_env(&[("SHA", "abc1234")]);
+        assert_eq!(
+            expand_env("refs/${SHA}/head", &env).unwrap(),
+            "refs/abc1234/head"
+        );
+    }
+
+    #[test]
+    fn expand_env_ignores_unclosed_brace() {
+        // Don't crash on a value that contains a literal `${` —
+        // could be a base64 SHA or something weirder. Treat as
+        // literal.
+        let env = fake_env(&[]);
+        assert_eq!(expand_env("foo${unclosed", &env).unwrap(), "foo${unclosed");
+    }
+
+    // ----- build() validation -----------------------------------
+
+    fn spec(toml: &str) -> RuleSpec {
+        let mut full =
+            String::from("id = \"test-rule\"\nkind = \"git_commit_message\"\nlevel = \"error\"\n");
+        full.push_str(toml);
+        toml::from_str(&full).unwrap()
+    }
+
+    #[test]
+    fn build_requires_at_least_one_assertion() {
+        // No pattern, no subject_max_length, no requires_body. The
+        // rule has nothing to check; build() rejects.
+        let s = spec("");
+        let err = build(&s).unwrap_err();
+        assert!(err.to_string().contains("at least one of"));
+    }
+
+    #[test]
+    fn build_rejects_include_merges_without_since() {
+        // include_merges only makes sense alongside since:.
+        // Surfacing this at config-load time prevents silent
+        // no-ops.
+        let s = spec("requires_body = true\ninclude_merges = true\n");
+        let err = build(&s).unwrap_err();
+        assert!(
+            err.to_string().contains("include_merges"),
+            "expected include_merges hint, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_accepts_since_with_other_options() {
+        let s = spec("pattern = \"^feat: \"\nsince = \"origin/main\"\n");
+        assert!(build(&s).is_ok());
+    }
+
+    #[test]
+    fn build_accepts_since_with_include_merges() {
+        let s = spec("subject_max_length = 50\nsince = \"origin/main\"\ninclude_merges = true\n");
+        assert!(build(&s).is_ok());
     }
 }

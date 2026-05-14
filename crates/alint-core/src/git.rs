@@ -155,6 +155,155 @@ pub fn head_commit_message(root: &Path) -> Option<String> {
     Some(raw.trim_end_matches('\n').to_string())
 }
 
+/// One commit in a `<since>..HEAD` range, as returned by
+/// [`commit_messages_in_range`]. `sha` is the abbreviated SHA from
+/// `git log --abbrev-commit` (typically 7 chars; git auto-extends if
+/// the prefix is ambiguous in the local repo). `message` is the full
+/// commit message (subject + body, separated by a blank line) with
+/// the trailing newline that `git log --format=%B` appends already
+/// trimmed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitRecord {
+    pub sha: String,
+    pub message: String,
+}
+
+/// Errors that distinguish "git is here but the range is invalid"
+/// from "git isn't here at all." The rule layer uses this to hard-
+/// fail on misconfiguration (a bad `since:` ref, often a shallow-
+/// clone gotcha in CI) while silently no-op'ing in non-git
+/// directories.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitRangeError {
+    /// The `<since>` ref doesn't resolve, or the range itself is
+    /// rejected by git (e.g. `bad revision`). Carries the stderr
+    /// `git` produced so the caller can include it in its error.
+    /// Typically caused by:
+    /// - typo in the ref name
+    /// - shallow clone that doesn't have the ref in local objects
+    ///   (the most common CI gotcha; `actions/checkout` defaults to
+    ///   `fetch-depth: 1`)
+    BadRange { stderr: String },
+}
+
+/// Enumerate commits reachable from `HEAD` but not from `since`,
+/// i.e. the standard `<since>..HEAD` range, oldest first.
+///
+/// `since` is anything `git rev-parse` accepts: a 40-char SHA, an
+/// abbreviated SHA, a branch (`origin/main`), a tag (`v1.2.3`), or
+/// a relative ref (`HEAD~5`).
+///
+/// `include_merges` controls whether merge commits in the range are
+/// returned. Defaults to `false` at the call site for PR workflows
+/// (where the merge commit at HEAD is the synthetic
+/// `actions/checkout`-produced one) but the caller decides.
+///
+/// Returns:
+/// - `Ok(Some(records))` on success. The vec may be empty if the
+///   range itself is empty (`since` == HEAD on a force-push PR, or
+///   no non-merge commits in the range).
+/// - `Ok(None)` if `git` isn't on PATH or `root` isn't inside a git
+///   repo. Matches the advisory posture of the rest of this module;
+///   rules that consult this helper silently no-op in non-git
+///   settings.
+/// - `Err(CommitRangeError::BadRange)` if `git` is present and the
+///   repo is valid but the range couldn't be resolved. Rules
+///   surface this as a hard error so the user sees the
+///   misconfiguration instead of a confused empty range.
+///
+/// Implementation note: uses `--format=%h%x00%B%x1e` so the SHA and
+/// the message are NUL-separated (NUL never appears in either) and
+/// commits are RS-separated (RS = U+001E, "record separator", which
+/// also doesn't appear in well-formed commit text). The compound
+/// encoding is robust against commit messages containing arbitrary
+/// text — including em dashes, blank lines, and Unicode shenanigans
+/// — without resorting to fragile line-counting.
+pub fn commit_messages_in_range(
+    root: &Path,
+    since: &str,
+    include_merges: bool,
+) -> Result<Option<Vec<CommitRecord>>, CommitRangeError> {
+    // First check `git rev-parse` (no range syntax) confirms we're
+    // in a git repo at all. If not, this returns Ok(None) (the
+    // "silent" branch) without surfacing the BadRange error,
+    // matching head_commit_message's posture.
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--git-dir"])
+        .output();
+    let Ok(probe) = probe else {
+        return Ok(None);
+    };
+    if !probe.status.success() {
+        return Ok(None);
+    }
+
+    // Now invoke `git log <since>..HEAD`. If THIS fails, it's a bad
+    // ref / shallow-clone case, not a "no git" case — bubble the
+    // BadRange error.
+    let range = format!("{since}..HEAD");
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(root).args([
+        "log",
+        "--reverse",
+        "--abbrev-commit",
+        "--format=%h%x00%B%x1e",
+    ]);
+    if !include_merges {
+        cmd.arg("--no-merges");
+    }
+    cmd.arg(&range);
+
+    let Ok(output) = cmd.output() else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(CommitRangeError::BadRange { stderr });
+    }
+
+    Ok(Some(parse_commit_log(&output.stdout)))
+}
+
+/// Parse the NUL+RS-separated `git log` output produced by
+/// [`commit_messages_in_range`]'s `--format` string. Empty trailing
+/// records (from the final RS) are skipped. Messages have their
+/// trailing newline trimmed (`git log` always appends one).
+fn parse_commit_log(stdout: &[u8]) -> Vec<CommitRecord> {
+    let mut out = Vec::new();
+    // Records are RS-separated (0x1e). The last record ends with
+    // RS too, so the final split chunk is empty.
+    for record in stdout.split(|&b| b == 0x1e) {
+        if record.is_empty() {
+            continue;
+        }
+        // Each record is sha + NUL + message. Trim the leading
+        // newline that git inserts between records.
+        let record = record.strip_prefix(b"\n").unwrap_or(record);
+        let mut parts = record.splitn(2, |&b| b == 0);
+        let Some(sha_bytes) = parts.next() else {
+            continue;
+        };
+        let Some(msg_bytes) = parts.next() else {
+            continue;
+        };
+        let Ok(sha) = std::str::from_utf8(sha_bytes) else {
+            continue;
+        };
+        let Ok(msg) = std::str::from_utf8(msg_bytes) else {
+            continue;
+        };
+        // `--format=%B` ends every body with a trailing newline.
+        let message = msg.trim_end_matches('\n').to_string();
+        out.push(CommitRecord {
+            sha: sha.to_string(),
+            message,
+        });
+    }
+    out
+}
+
 /// One line of `git blame --line-porcelain` output: the
 /// 1-indexed final line number in the working-tree file, the
 /// authoring time of the commit that last touched the line
@@ -527,5 +676,225 @@ filename a.rs
         // match `target/foo` because no tracked path is under
         // `tar/`.
         assert!(!dir_has_tracked_files(Path::new("tar"), &set));
+    }
+
+    // ----- commit_messages_in_range -----------------------------
+
+    /// Build a temp dir into a git repo with the given list of
+    /// empty commits in order (commit N is HEAD~(len-1-N)). Returns
+    /// the tempdir so the caller controls its lifetime.
+    ///
+    /// Uses `git commit --allow-empty` so the test doesn't need to
+    /// write fixture files. Disables GPG signing and sets a fixed
+    /// author so the commits are deterministic.
+    fn make_repo_with_commits(subjects: &[&str]) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let init_dir = tmp.path();
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+            vec!["config", "commit.gpgsign", "false"],
+        ] {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(init_dir)
+                .args(&args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?} failed");
+        }
+        for subject in subjects {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(init_dir)
+                .args(["commit", "--allow-empty", "-m", subject])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git commit failed: stderr={}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        tmp
+    }
+
+    #[test]
+    fn parse_commit_log_empty_input() {
+        assert!(parse_commit_log(b"").is_empty());
+    }
+
+    #[test]
+    fn parse_commit_log_single_commit() {
+        // sha + NUL + body-with-trailing-newline + RS.
+        let raw = b"abc1234\0subject line\n\nbody line one\nbody line two\n\x1e";
+        let records = parse_commit_log(raw);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sha, "abc1234");
+        assert_eq!(
+            records[0].message,
+            "subject line\n\nbody line one\nbody line two"
+        );
+    }
+
+    #[test]
+    fn parse_commit_log_multiple_commits() {
+        // Two commits, oldest first (matches --reverse). Between
+        // records, git inserts a newline before the next SHA; the
+        // parser strips it.
+        let raw = b"a1\0first\n\x1e\nb2\0second\n\x1e";
+        let records = parse_commit_log(raw);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].sha, "a1");
+        assert_eq!(records[0].message, "first");
+        assert_eq!(records[1].sha, "b2");
+        assert_eq!(records[1].message, "second");
+    }
+
+    #[test]
+    fn parse_commit_log_subject_only_no_body() {
+        let raw = b"deadbef\0just the subject\n\x1e";
+        let records = parse_commit_log(raw);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].message, "just the subject");
+    }
+
+    #[test]
+    fn parse_commit_log_preserves_blank_lines_in_body() {
+        // A real commit body with multiple paragraphs survives the
+        // round-trip unchanged.
+        let raw = b"sha7777\0fix: thing\n\nfirst paragraph.\n\nsecond paragraph.\n\nthird.\n\x1e";
+        let records = parse_commit_log(raw);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].message,
+            "fix: thing\n\nfirst paragraph.\n\nsecond paragraph.\n\nthird."
+        );
+    }
+
+    #[test]
+    fn parse_commit_log_skips_record_with_invalid_utf8() {
+        // A SHA followed by invalid UTF-8 in the message. The
+        // parser drops the malformed record rather than panicking.
+        let mut raw: Vec<u8> = b"abc1234\0".to_vec();
+        raw.extend_from_slice(&[0xff, 0xfe, 0xfd]); // invalid UTF-8
+        raw.push(0x1e);
+        let records = parse_commit_log(&raw);
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn commit_range_returns_none_outside_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Non-git directory: silent None. Distinguishes from the
+        // BadRange error (which a bad ref inside a real repo
+        // produces) so the rule layer can decide between "skip
+        // silently" and "hard fail."
+        let result = commit_messages_in_range(tmp.path(), "main", false);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn commit_range_returns_empty_vec_for_head_to_head() {
+        let repo = make_repo_with_commits(&["feat: first commit"]);
+        let result = commit_messages_in_range(repo.path(), "HEAD", false).unwrap();
+        // HEAD..HEAD is the empty range. Some(empty), not None.
+        assert_eq!(result, Some(Vec::new()));
+    }
+
+    #[test]
+    fn commit_range_enumerates_real_commits_oldest_first() {
+        // Four commits. Use the root commit's full SHA as the
+        // `since` base; the range then yields the three later
+        // commits, oldest first.
+        let repo =
+            make_repo_with_commits(&["root: zero", "feat: alpha", "fix: beta", "chore: gamma"]);
+        let root_sha = String::from_utf8(
+            Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(["rev-parse", "HEAD~3"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let records = commit_messages_in_range(repo.path(), &root_sha, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].message, "feat: alpha");
+        assert_eq!(records[1].message, "fix: beta");
+        assert_eq!(records[2].message, "chore: gamma");
+        // SHAs are abbreviated (7+ chars, hex).
+        for r in &records {
+            assert!(r.sha.len() >= 7);
+            assert!(r.sha.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn commit_range_skips_merges_by_default() {
+        // Build the canonical PR-CI shape: a base branch with one
+        // commit, a feature branch off it with two commits, then a
+        // merge commit on the base branch. The merge is what
+        // actions/checkout produces at HEAD on a pull_request
+        // trigger.
+        let repo = make_repo_with_commits(&["init commit on main"]);
+        let root = repo.path();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let base_sha = run(&["rev-parse", "HEAD"]).trim().to_string();
+        run(&["checkout", "-q", "-b", "feature"]);
+        run(&["commit", "--allow-empty", "-m", "feat: A"]);
+        run(&["commit", "--allow-empty", "-m", "fix: B"]);
+        run(&["checkout", "-q", "main"]);
+        run(&["merge", "--no-ff", "--no-edit", "feature"]);
+
+        // Range main-base..HEAD: includes feat:A, fix:B, and the
+        // merge commit. Default skips the merge.
+        let records = commit_messages_in_range(root, &base_sha, false)
+            .unwrap()
+            .unwrap();
+        let subjects: Vec<&str> = records.iter().map(|r| r.message.as_str()).collect();
+        assert_eq!(subjects, vec!["feat: A", "fix: B"]);
+
+        // Same range with include_merges: true picks up the merge.
+        let with_merge = commit_messages_in_range(root, &base_sha, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(with_merge.len(), 3);
+        assert!(with_merge.iter().any(|r| r.message.starts_with("Merge ")));
+    }
+
+    #[test]
+    fn commit_range_returns_bad_range_for_unknown_ref() {
+        let repo = make_repo_with_commits(&["init"]);
+        let result = commit_messages_in_range(repo.path(), "does-not-exist-ref", false);
+        match result {
+            Err(CommitRangeError::BadRange { stderr }) => {
+                // Git typically says "unknown revision or path not
+                // in the working tree." We don't assert the exact
+                // wording (varies across git versions); just that
+                // we got a non-empty stderr.
+                assert!(!stderr.is_empty());
+            }
+            other => panic!("expected BadRange, got {other:?}"),
+        }
     }
 }
