@@ -103,6 +103,15 @@ pub struct GivenGit {
     /// "fully checked-in repo."
     #[serde(default = "default_true")]
     pub commit: bool,
+    /// Make a chain of empty commits, oldest first. Each entry is
+    /// the subject line of one commit; the runner uses
+    /// `git commit --allow-empty -m <subject>` for every entry so
+    /// no working-tree file is required. Mutually exclusive with
+    /// `add:`/`commit:` (which write one mass commit of the
+    /// staged files). Used to fixture multi-commit shapes the
+    /// `git_commit_message` rule's `since:` mode needs to walk.
+    #[serde(default)]
+    pub commits: Vec<String>,
 }
 
 fn default_true() -> bool {

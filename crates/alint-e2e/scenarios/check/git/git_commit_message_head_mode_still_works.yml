@@ -1,0 +1,29 @@
+name: git_commit_message without since:still validates HEAD only
+tags: [check, git_commit_message, git, failing]
+
+# Backward-compat shape: no `since:`, just HEAD-mode. A long
+# subject on the tip commit fires once. Older commits in the
+# history are invisible to the rule because they're not HEAD.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: short-subjects
+        kind: git_commit_message
+        subject_max_length: 20
+        level: error
+  git:
+    init: true
+    commits:
+      - "init"
+      - "feat: ok"
+      - "WIP: this final commit subject is well over twenty chars"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: short-subjects, level: error}

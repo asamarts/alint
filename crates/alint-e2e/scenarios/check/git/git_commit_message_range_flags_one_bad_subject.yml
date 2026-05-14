@@ -1,0 +1,36 @@
+name: git_commit_message with since:HEAD~3 flags the one bad subject and reports the SHA
+tags: [check, git_commit_message, git, failing]
+
+# The PR-CI use case (issue #26): four commits on the branch — a
+# "base" commit and three later ones, one of which has a subject
+# longer than the cap. The rule's `since:` mode walks all three
+# later commits and fires exactly once, on the bad one, with the
+# commit SHA in the message so the user knows which to amend.
+#
+# `HEAD~3..HEAD` covers commits 2, 3, 4. The root commit (HEAD~3)
+# itself is excluded — same shape as `<pr-base>..HEAD` in real PRs.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: short-subjects
+        kind: git_commit_message
+        subject_max_length: 30
+        since: HEAD~3
+        level: error
+  git:
+    init: true
+    commits:
+      - "init: base"
+      - "feat: alpha is fine"
+      - "WIP: this subject is way too long for the configured cap"
+      - "fix: gamma is also fine"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: short-subjects, level: error}

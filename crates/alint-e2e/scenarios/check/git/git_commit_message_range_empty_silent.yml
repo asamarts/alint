@@ -1,0 +1,29 @@
+name: git_commit_message range stays silent when the range is empty
+tags: [check, git_commit_message, git, passing]
+
+# `since: HEAD` means the range `HEAD..HEAD`, which is always
+# empty. The rule no-ops cleanly — no commits to validate, no
+# violations to report. Surfaces in CI on the force-push-and-
+# rebase case where the PR head ends up identical to the base.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: short-subjects
+        kind: git_commit_message
+        subject_max_length: 30
+        since: HEAD
+        level: error
+  git:
+    init: true
+    commits:
+      - "init: base"
+      - "feat: anything here, would normally trip the cap above"
+
+when: [check]
+
+expect:
+  - violations: []

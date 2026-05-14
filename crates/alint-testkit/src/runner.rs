@@ -100,6 +100,34 @@ fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
         args.extend(spec.add_force.iter().map(String::as_str));
         git(root, &args)?;
     }
+    // Chain of empty commits (oldest first). Mutually exclusive
+    // with the add/commit single-commit path above. Use one or the
+    // other in any given scenario; mixing them is a fixture smell.
+    if !spec.commits.is_empty() {
+        if !spec.add.is_empty() || !spec.add_force.is_empty() {
+            return Err(Error::scenario(
+                "git: cannot combine `add:`/`add_force:` with `commits:` — use one path or the other"
+                    .to_string(),
+            ));
+        }
+        for subject in &spec.commits {
+            git(
+                root,
+                &[
+                    "-c",
+                    "user.name=alint scenario",
+                    "-c",
+                    "user.email=scenario@alint.test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    subject,
+                ],
+            )?;
+        }
+        return Ok(());
+    }
     if spec.add.is_empty() && spec.add_force.is_empty() {
         return Ok(());
     }

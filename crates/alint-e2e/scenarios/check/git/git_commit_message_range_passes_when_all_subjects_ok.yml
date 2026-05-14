@@ -1,0 +1,30 @@
+name: git_commit_message range passes when every commit in the range matches
+tags: [check, git_commit_message, git, passing]
+
+# Range mode happy path: three later commits, all conforming to
+# the Conventional Commits pattern. No violations.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: conventional-commits
+        kind: git_commit_message
+        pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+        subject_max_length: 72
+        since: HEAD~3
+        level: error
+  git:
+    init: true
+    commits:
+      - "init: base"
+      - "feat: add markdown formatter"
+      - "fix(parser): handle nested arrays"
+      - "chore: bump deps"
+
+when: [check]
+
+expect:
+  - violations: []

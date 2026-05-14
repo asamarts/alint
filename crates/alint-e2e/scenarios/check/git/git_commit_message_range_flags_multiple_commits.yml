@@ -1,0 +1,33 @@
+name: git_commit_message range emits one violation per failing commit
+tags: [check, git_commit_message, git, failing]
+
+# Two of three commits in the range violate the pattern. The rule
+# emits one violation per failing commit, so users can rebase /
+# amend each one independently rather than chasing a single
+# collapsed "something is wrong" report.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: conventional-prefix
+        kind: git_commit_message
+        pattern: '^(feat|fix|chore): '
+        since: HEAD~3
+        level: error
+  git:
+    init: true
+    commits:
+      - "init: base"
+      - "feat: this one passes"
+      - "WIP no prefix here"
+      - "random thoughts on architecture"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: conventional-prefix, level: error}
+      - {rule: conventional-prefix, level: error}
