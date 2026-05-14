@@ -1,0 +1,230 @@
+name: issue-26 e2e (git_commit_message range mode)
+
+# End-to-end demonstration of issue #26's fix. Three test jobs that
+# exercise the new `since:` option of `git_commit_message` against
+# both a synthetic git fixture (deterministic, always reproducible)
+# and the real PR shape that triggered the original bug report
+# (synthetic merge commit at HEAD on `pull_request` events).
+#
+# Built from source on every run so the workflow reflects the
+# branch's code, not whatever's published as latest. After v0.9.21
+# ships, the canonical recipe in
+# `docs/site/integrations/github-actions.md` becomes the supported
+# path; this workflow stays as the regression gate.
+
+on:
+  push:
+    branches: [issue-26-commit-range]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: synthetic fixture. Deterministic; doesn't depend on the
+  # PR's own commit history. The fixture mimics the canonical PR
+  # shape (synthetic merge at HEAD + Conventional-Commits commits
+  # on the feature branch in between).
+  synthetic-fixture:
+    name: range mode (synthetic fixture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build alint from this branch
+        run: cargo build --release -p alint
+
+      - name: Build the canonical PR fixture
+        # base commit -> feature branch with 2 Conventional Commits
+        # -> merge back to main with --no-ff. HEAD is the merge
+        # commit; its subject is "Merge branch 'feature'" which
+        # doesn't match the Conventional Commits pattern.
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/range-fixture
+          cd /tmp/range-fixture
+          git init -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test"
+          git config commit.gpgsign false
+          git commit --allow-empty -q -m "init: base"
+          BASE_SHA=$(git rev-parse HEAD)
+          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          git checkout -q -b feature
+          git commit --allow-empty -q -m "feat(api): add range support"
+          git commit --allow-empty -q -m "fix(parser): handle merge subject"
+          git checkout -q main
+          git merge --no-ff --no-edit feature
+          # Sanity: HEAD's subject should now be the synthetic
+          # merge.
+          git log -1 --format=%s | tee /tmp/head-subject
+          grep -q "^Merge branch 'feature'" /tmp/head-subject
+
+      - name: Write the rule config
+        run: |
+          cat > /tmp/range-fixture/.alint.yml <<'YAML'
+          version: 1
+          rules:
+            - id: conventional-commits
+              kind: git_commit_message
+              pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+              subject_max_length: 72
+              since: ${ALINT_BASE_SHA}
+              level: error
+          YAML
+
+      - name: Demonstrate the original bug (HEAD-only mode flags the merge)
+        # Before the fix: a `git_commit_message` rule without
+        # `since:` validates only HEAD. On a real PR, HEAD is the
+        # synthetic merge commit, so the rule fires every time.
+        # Here we force HEAD-only mode and assert it fails.
+        run: |
+          set +e
+          cat > /tmp/range-fixture/.alint.yml <<'YAML'
+          version: 1
+          rules:
+            - id: head-only-mode
+              kind: git_commit_message
+              pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+              level: error
+          YAML
+          output=$(./target/release/alint check /tmp/range-fixture 2>&1)
+          rc=$?
+          set -e
+          echo "$output"
+          if [ "$rc" = "0" ]; then
+            echo "::error::HEAD-only mode unexpectedly passed; expected failure on merge subject"
+            exit 1
+          fi
+          echo "✓ HEAD-only mode correctly fails on synthetic merge (exit $rc), demonstrating issue #26"
+
+      - name: Verify range mode passes (the fix in action)
+        env:
+          ALINT_BASE_SHA: ${{ env.BASE_SHA }}
+        run: |
+          set -euxo pipefail
+          cat > /tmp/range-fixture/.alint.yml <<'YAML'
+          version: 1
+          rules:
+            - id: range-mode
+              kind: git_commit_message
+              pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+              subject_max_length: 72
+              since: ${ALINT_BASE_SHA}
+              level: error
+          YAML
+          ./target/release/alint check /tmp/range-fixture
+          echo "✓ Range mode validates the feature-branch commits and ignores the merge"
+
+      - name: Verify shallow-clone gotcha surfaces with a clear hint
+        run: |
+          set +e
+          cat > /tmp/range-fixture/.alint.yml <<'YAML'
+          version: 1
+          rules:
+            - id: bad-ref
+              kind: git_commit_message
+              pattern: '.'
+              since: "does-not-exist-ref"
+              level: error
+          YAML
+          output=$(./target/release/alint check /tmp/range-fixture 2>&1)
+          rc=$?
+          set -e
+          echo "$output"
+          if [ "$rc" = "0" ]; then
+            echo "::error::expected non-zero exit for unresolvable ref"
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "fetch-depth: 0"; then
+            echo "::error::expected shallow-clone hint in output"
+            exit 1
+          fi
+          echo "✓ Bad-ref hard-fails with the fetch-depth: 0 hint"
+
+      - name: Verify env-var default fallback works
+        # No ALINT_BASE_SHA set; the rule's ${ALINT_BASE_SHA:-HEAD~3}
+        # default kicks in. The range HEAD~3..HEAD covers the
+        # feature commits + the merge (3 commits back). With
+        # include_merges off, only the two feat:/fix: commits get
+        # validated and both pass.
+        run: |
+          set -euxo pipefail
+          unset ALINT_BASE_SHA
+          cat > /tmp/range-fixture/.alint.yml <<'YAML'
+          version: 1
+          rules:
+            - id: env-default
+              kind: git_commit_message
+              pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+              since: ${ALINT_BASE_SHA:-HEAD~3}
+              level: error
+          YAML
+          ./target/release/alint check /tmp/range-fixture
+          echo "✓ Env-var default fallback (\${VAR:-HEAD~3}) resolves cleanly"
+
+  # Job 2: real PR shape. Runs only on pull_request events so the
+  # job has a real base.sha + the real synthetic-merge HEAD that
+  # actions/checkout produces. Validates that on a real
+  # `pull_request` trigger, the rule walks the PR's own commits
+  # (which all start with `feat:` / `fix:` / etc. per project
+  # commit-message conventions) instead of HEAD.
+  real-pr-shape:
+    name: range mode (real pull_request shape)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Confirm HEAD is the synthetic merge
+        run: |
+          subject=$(git log -1 --format=%s)
+          echo "HEAD subject: $subject"
+          if ! echo "$subject" | grep -qE "^Merge "; then
+            echo "::warning::HEAD is not a Merge commit; this PR may be in an unusual state, skipping real-PR assertion"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build alint from this branch
+        if: env.SKIP != '1'
+        run: cargo build --release -p alint
+
+      - name: Validate PR commits via range mode
+        if: env.SKIP != '1'
+        env:
+          ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euxo pipefail
+          cat > /tmp/pr-validation.yml <<'YAML'
+          version: 1
+          rules:
+            - id: pr-commits-are-conventional
+              kind: git_commit_message
+              pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
+              subject_max_length: 100
+              since: ${ALINT_BASE_SHA}
+              level: error
+          YAML
+          # Run from /tmp so the repo root's .alint.yml isn't
+          # auto-discovered.
+          cp -r . /tmp/pr-copy
+          cp /tmp/pr-validation.yml /tmp/pr-copy/.alint.yml
+          ./target/release/alint check /tmp/pr-copy
+
+  # Job 3: end-to-end unit + e2e test re-run to confirm nothing
+  # regressed locally. Cheap insurance against "I forgot to run
+  # tests before pushing."
+  test-suites:
+    name: rust test suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo test (workspace)
+        run: cargo test --workspace --quiet
