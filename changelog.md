@@ -4726,7 +4726,24 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.22...HEAD
+[0.9.22]: https://github.com/asamarts/alint/compare/v0.9.21...v0.9.22
+[0.9.21]: https://github.com/asamarts/alint/compare/v0.9.20...v0.9.21
+[0.9.20]: https://github.com/asamarts/alint/compare/v0.9.19...v0.9.20
+[0.9.19]: https://github.com/asamarts/alint/compare/v0.9.18...v0.9.19
+[0.9.18]: https://github.com/asamarts/alint/compare/v0.9.17...v0.9.18
+[0.9.17]: https://github.com/asamarts/alint/compare/v0.9.16...v0.9.17
+[0.9.16]: https://github.com/asamarts/alint/compare/v0.9.14...v0.9.16
+[0.9.14]: https://github.com/asamarts/alint/compare/v0.9.13...v0.9.14
+[0.9.13]: https://github.com/asamarts/alint/compare/v0.9.12...v0.9.13
+[0.9.12]: https://github.com/asamarts/alint/compare/v0.9.11...v0.9.12
+[0.9.11]: https://github.com/asamarts/alint/compare/v0.9.10...v0.9.11
+[0.9.10]: https://github.com/asamarts/alint/compare/v0.9.9...v0.9.10
+[0.9.9]: https://github.com/asamarts/alint/compare/v0.9.8...v0.9.9
+[0.9.8]: https://github.com/asamarts/alint/compare/v0.9.7...v0.9.8
+[0.9.7]: https://github.com/asamarts/alint/compare/v0.9.6...v0.9.7
+[0.9.6]: https://github.com/asamarts/alint/compare/v0.9.5...v0.9.6
+[0.9.5]: https://github.com/asamarts/alint/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/asamarts/alint/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/asamarts/alint/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/asamarts/alint/compare/v0.9.1...v0.9.2
@@ -4736,6 +4753,11 @@ Initial release. MVP.
 [0.8.0]: https://github.com/asamarts/alint/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/asamarts/alint/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/asamarts/alint/compare/v0.5.12...v0.6.0
+[0.5.12]: https://github.com/asamarts/alint/compare/v0.5.11...v0.5.12
+[0.5.11]: https://github.com/asamarts/alint/compare/v0.5.10...v0.5.11
+[0.5.10]: https://github.com/asamarts/alint/compare/v0.5.9...v0.5.10
+[0.5.9]: https://github.com/asamarts/alint/compare/v0.5.8...v0.5.9
+[0.5.8]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.8
 [0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4

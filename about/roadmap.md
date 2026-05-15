@@ -12,12 +12,16 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.9.21** (2026-05-14). Commit-range mode
-for `git_commit_message`: optional `since:` accepts a refspec
-(`origin/main..HEAD`) or env-var (`${BASE_SHA}`); the rule
-validates every commit in the range instead of just HEAD, with
-optional `include_merges:` and merge-commit env-default
-fallback (closes #26). v0.9.12 - v0.9.20 brought the launch-
+**Latest release: v0.9.22** (2026-05-15). Doc-drift cleanup
+plus prevention automation: CHANGELOG link-reference footer
+regenerated for every release back to v0.9.5, `bump-version.sh`
+extended to append a `[X.Y.Z]: compare/...` row on each bump,
+`check-version-pins.sh` gained a fourth site (`docs/index.mdx`
+landing badge), the `action-selftest` pinned-version job now
+tracks the previous minor instead of v0.9.6, and the alint.org
+hero stat-strip + keyword landings caught up to "70 rule kinds"
+(was a mix of 60/70). v0.9.21 shipped commit-range mode for
+`git_commit_message` (closes #26). v0.9.12 - v0.9.20 brought the launch-
 readiness capstone: width-aware output across every command,
 `--no-docs` and `--width N` honored uniformly, bundled-rule
 message audit, em-dash scrub on first-impression marketing
