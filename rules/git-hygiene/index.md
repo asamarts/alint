@@ -1,0 +1,16 @@
+---
+title: 'Git hygiene'
+description: 'Rule reference: the git hygiene family.'
+sidebar:
+  order: 11
+  label: 'Git hygiene'
+---
+
+Rule kinds in the **Git hygiene** family. Each entry below has its own page with options, an example, and any auto-fix support.
+
+- [`no_submodules`](/docs/rules/git-hygiene/no_submodules/) — Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`.
+- [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners).
+- [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo.
+- [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist.
+- [`git_commit_message`](/docs/rules/git-hygiene/git_commit_message/) — Validate commit-message shape via regex, max-subject-length, or required-body.
+- [`git_blame_age`](/docs/rules/git-hygiene/git_blame_age/) — Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`.

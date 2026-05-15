@@ -1,0 +1,144 @@
+---
+title: The walker and `.gitignore`
+description: How alint discovers files, what `.gitignore` filters out by default, and how rules like `file_absent` / `dir_absent` interpret git state.
+sidebar:
+  order: 5
+---
+
+Every alint run starts the same way: walk the repo, build an in-memory index of files, then evaluate rules against that index. The walker is a thin wrapper around the [`ignore`](https://docs.rs/ignore/) crate (the same crate that powers `ripgrep`), and its filtering behaviour is the most common source of confusion when a rule "doesn't fire when I expected it to."
+
+## What the walker sees by default
+
+Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** for paths matched by any of the following:
+
+- The repo's `.gitignore` files (root and per-directory)
+- `.git/info/exclude`
+- Your global gitignore (`~/.config/git/ignore`, or whatever `core.excludesFile` points at)
+- `.ignore` files (the `ignore` crate's own convention; same syntax as `.gitignore`)
+- The `.git/` directory itself
+- Anything added under the config's `ignore:` field (see below)
+
+Hidden files (those starting with `.`) **are** included; alint walks `.github/`, `.editorconfig`, `.cargo/`, etc. by default. Symlinks are followed.
+
+The walker does *not* require a git repo to function. Rules run identically on a plain directory, a tarball extraction, or a fresh git clone. The only difference is that without `.gitignore` files, no paths get filtered out.
+
+## The `respect_gitignore` config field
+
+The default is the equivalent of:
+
+```yaml
+version: 1
+respect_gitignore: true   # the default
+```
+
+Set it to `false` to disable every gitignore source above (per-directory, root, info/exclude, global, `.ignore`):
+
+```yaml
+version: 1
+respect_gitignore: false
+```
+
+The CLI's `--no-gitignore` flag overrides whatever's in config to `false` for one invocation. Useful when you want to lint files that *would* be committed if `.gitignore` weren't there, e.g. for a one-off audit of a build directory.
+
+## The `ignore:` config field
+
+`ignore:` adds patterns *on top of* whatever `.gitignore` already excludes. Same gitignore-style syntax. Use it for repo-specific exclusions you don't want to put in `.gitignore` itself (because they're an alint thing, not a git thing):
+
+```yaml
+version: 1
+ignore:
+  - "vendor/**"
+  - "**/*.snapshot.json"
+  - "fixtures/golden/**"
+```
+
+These patterns are excluded *regardless* of `respect_gitignore`. Setting `respect_gitignore: false` disables `.gitignore`-sourced filters but leaves `ignore:` filters in place.
+
+## How this affects rules
+
+Every rule sees a **pre-filtered file index**. If a path was excluded by the walker, no rule can act on it; they don't get a chance.
+
+For most rules (`file_exists`, `file_content_matches`, `filename_case`, `for_each_dir`) this is exactly what you want. You don't care about gitignored caches, you care about the files git would actually track.
+
+For **absence-style rules** (`file_absent`, `dir_absent`, `no_*` rules), the implication is sharper:
+
+> A `dir_absent` rule with `paths: "**/target"` fires whenever `target/` exists in the walked tree. If `target/` is in `.gitignore`, the walker filters it out, and the rule never sees it. No violation, even if `target/` is sitting on disk full of build artefacts.
+
+That's the intent. When your `.gitignore` is correct, build artefacts are invisible to alint, and the rule effectively means "this directory wouldn't be committed." When `.gitignore` is missing or wrong, the directory becomes visible, the rule fires, and you've caught a hygiene gap.
+
+The rule's name often reads as "no committed `target/`". That's a useful mental model, but the actual implementation is **"no un-ignored `target/`"**. The two coincide in well-configured repos. They diverge in the edge cases below.
+
+## What this is *not*: a check against git's index
+
+alint doesn't read `.git/index` and doesn't shell out to `git ls-files`. The walker observes the filesystem; `.gitignore` is a coarse approximation of "what would be committed." Two cases where this approximation drifts:
+
+- **Tracked-then-gitignored files.** `.gitignore` only affects *untracked* files. If a file was added to git first and then later listed in `.gitignore`, git still tracks it on every commit, but alint's walker filters it out, so absence-style rules don't fire and content rules don't inspect it. `git ls-files <path>` would still report the file.
+- **`git add -f`'d files.** Adding a file with `--force` overrides `.gitignore`. The file is in git's index, but alint's walker still filters it out by the matching gitignore entry.
+
+In a healthy repo neither case is common. If you suspect either, `git ls-files <path>` is the authoritative answer.
+
+## When to use `respect_gitignore: false`
+
+Rare, but legitimate cases:
+
+- **Auditing a CI runner's working tree** where build outputs accumulated and you want to enforce content rules on everything, including gitignored caches.
+- **Linting a directory that isn't a git repo** but happens to contain a stray `.gitignore` you don't want to honour.
+- **Running absence-style rules deliberately on the full disk state**, e.g. as a pre-package check that "no `.env` is sitting in this directory regardless of `.gitignore`."
+
+Don't reach for `--no-gitignore` casually. With it on, every `dir_absent` / `file_absent` rule fires on any developer who has built locally: `target/`, `node_modules/`, `__pycache__/`, `.next/` all become violations. That's almost never what you want during normal development.
+
+## Tightening the rule with `git_tracked_only`
+
+The walker's gitignore-based approximation works for most repos, but if you want a rule that fires *only* when a path is actually in git's index (independent of `.gitignore` state) set `git_tracked_only: true` on the rule:
+
+```yaml
+- id: target-not-tracked
+  kind: dir_absent
+  paths: "**/target"
+  git_tracked_only: true
+  level: error
+```
+
+This is the canonical "don't let `target/` be committed" rule. With the flag set, the rule only fires when `target/` contains at least one file in `git ls-files`. A locally-built `target/` that's properly gitignored stays silent (no tracked content). A `target/` whose contents have been added with `git add -f` or before `.gitignore` was set up (the cases the [walker approximation misses](#what-this-is-not-a-check-against-gits-index)) does fire, because `git ls-files` reports them.
+
+Behaviour summary:
+
+| `target/` state | Without `git_tracked_only` | With `git_tracked_only` |
+|---|---|---|
+| Gitignored, never built | silent | silent |
+| Gitignored, built locally | silent | silent |
+| Not gitignored, exists on disk | **fires** | silent (not in index) |
+| Tracked in git's index | **fires** | **fires** |
+| Repo isn't a git repo | **fires** | silent (no index) |
+
+`git_tracked_only` currently applies to four rule kinds: `file_exists`, `file_absent`, `dir_exists`, `dir_absent`. The other rule kinds ignore the field; we'll extend coverage as use cases come up.
+
+When `alint` runs outside a git repo (no `.git/`), or when `git` isn't on `PATH`, the tracked-set is empty and absence-style rules with `git_tracked_only: true` become silent no-ops. That's the right default for "don't let X be committed": if there's no repo, there's nothing to commit. Existence rules with the flag set fail in that case (no file qualifies), which is also the correct conservative behaviour.
+
+The other roadmap'd git primitives (`git_no_denied_paths`, `git_commit_message`) are still pending.
+
+## Restricting the walk: `--changed`
+
+The walker is the engine's source of truth about what's on disk. `alint check --changed` adds a second filter layer on top: only files that appear in the *diff* are visible to per-file rules. The walked index still spans the whole tree (so cross-file rules and existence rules can answer their full-tree questions), but per-file rules see a filtered view.
+
+Two diff modes:
+
+| Invocation | Diff source | Right shape for |
+|---|---|---|
+| `alint check --changed` | `git ls-files --modified --others --exclude-standard` | Pre-commit / local dev |
+| `alint check --changed --base=main` | `git diff --name-only --relative main...HEAD` | PR checks (three-dot, merge-base) |
+
+The `<base>...HEAD` form (three-dot) diffs against the merge-base of `<base>` and `HEAD`, which is what GitHub PR checks consider "your changes." The two-dot form `<base>..HEAD` is rarely what you want here, because it includes commits in `HEAD` since you branched, plus any commits *removed* from `<base>` since the branch point.
+
+**Which rules opt out of the changed-set filter:**
+
+- **Cross-file rules** (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) always evaluate against the full tree. A `pair` rule still fires when a `.h` partner is missing, even if the matching `.c` wasn't in your diff.
+- **Existence rules** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`) evaluate against the full tree, but the engine *skips them entirely* when their `paths:` scope doesn't intersect the diff. So an unchanged-but-missing `LICENSE` doesn't fire on every PR; it only fires on PRs that touched a `LICENSE*` path.
+
+**Edge cases:**
+
+- **Empty diff** (no working-tree changes, no untracked files): the engine short-circuits to an empty report. The "ran on a no-op commit" pre-commit case completes in milliseconds.
+- **Outside a git repo** (or `git` missing from `PATH`): `--changed` exits non-zero with an explicit error rather than silently fall back to a full check. Falling back would violate the intent the user expressed by passing the flag.
+- **Deleted files** are reported by both diff modes. A `LICENSE` deleted in your branch shows up in the diff; the walker doesn't see it on disk (it's gone), so an existence rule for `LICENSE*` evaluates against the full tree (which lacks it) and fires.
+
+`--changed` pairs naturally with `git_tracked_only: true`: the changed-set is a working-tree concept, the tracked-set is an index concept, and an absence-style rule with both is "fire only on tracked entries that are part of this diff." The same flags work for `alint fix --changed`.

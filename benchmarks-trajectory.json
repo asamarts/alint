@@ -1,0 +1,475 @@
+{
+  "schema_version": 1,
+  "arch": "linux-x86_64",
+  "rows": [
+    {
+      "version": "v0.9.21",
+      "date": "2026-05-14",
+      "headline": "Headline feature: the `git_commit_message` rule's new `since:` option ([#26](https://github.com/asamarts/alint/issues/26)), which makes the rule usable on `pull_request`-trigger CI for the first time.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11598.957396426667,
+          "stddev_ms": 163.9561286104515,
+          "display": "11.60 s ± 0.16"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11753.179422226667,
+          "stddev_ms": 281.3652825212295,
+          "display": "11.75 s ± 0.28"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15401.423340659996,
+          "stddev_ms": 145.15111019691741,
+          "display": "15.40 s ± 0.15"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7638.438625493332,
+          "stddev_ms": 112.74127052791005,
+          "display": "7.64 s ± 0.11"
+        }
+      }
+    },
+    {
+      "version": "v0.9.20",
+      "date": "2026-05-10",
+      "headline": "Extends v0.9.19's width-aware-output / `--no-docs` / message-wrap treatment from `alint check` to every other human-renderer command in the CLI.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12380.981769006668,
+          "stddev_ms": 223.33998119040172,
+          "display": "12.38 s ± 0.22"
+        },
+        "s6_1m_full": {
+          "mean_ms": 12204.384707893334,
+          "stddev_ms": 331.758124359516,
+          "display": "12.20 s ± 0.33"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15297.376505486665,
+          "stddev_ms": 116.42572059099831,
+          "display": "15.30 s ± 0.12"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7879.318014066667,
+          "stddev_ms": 100.68939652334134,
+          "display": "7.88 s ± 0.10"
+        }
+      }
+    },
+    {
+      "version": "v0.9.19",
+      "date": "2026-05-09",
+      "headline": "Quality-of-life patch focused on the human formatter's behaviour in narrow terminals, screen recordings, and CI logs — surfaced while polishing the alint.org landing-page CLI demo (long `docs:` URLs and 200+ char rule messages were wrapping unpredictably inside the asciinema-player frame).",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12154.80639564,
+          "stddev_ms": 130.71372676664254,
+          "display": "12.15 s ± 0.13"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11794.571665486666,
+          "stddev_ms": 21.870053870007457,
+          "display": "11.79 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15377.032855886666,
+          "stddev_ms": 243.7921148603105,
+          "display": "15.38 s ± 0.24"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7604.778930926667,
+          "stddev_ms": 69.32595461631666,
+          "display": "7.60 s ± 0.07"
+        }
+      }
+    },
+    {
+      "version": "v0.9.18",
+      "date": "2026-05-08",
+      "headline": "Findings from the v0.9.17 deep-analysis pass (30 case studies — see [`docs/development/case-study-deep-analysis-log.md`](docs/development/case-study-deep-analysis-log.md)) surfaced 6 bundled-ruleset bugs + 3 case-study config issues.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11695.056315573334,
+          "stddev_ms": 185.52927211489774,
+          "display": "11.70 s ± 0.19"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11191.166934106668,
+          "stddev_ms": 248.31171184018498,
+          "display": "11.19 s ± 0.25"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15564.670120053333,
+          "stddev_ms": 101.21948373409984,
+          "display": "15.56 s ± 0.10"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7466.650501066667,
+          "stddev_ms": 78.40091892827789,
+          "display": "7.47 s ± 0.08"
+        }
+      }
+    },
+    {
+      "version": "v0.9.17",
+      "date": "2026-05-06",
+      "headline": "Corrective release that re-publishes v0.9.16's content + the build.rs/main.rs lint fixes that prevented v0.9.16's Release workflow from publishing artifacts.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11673.109639173332,
+          "stddev_ms": 203.74478258378215,
+          "display": "11.67 s ± 0.20"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11380.820589266667,
+          "stddev_ms": 293.9136820212283,
+          "display": "11.38 s ± 0.29"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15369.89991262,
+          "stddev_ms": 252.21596820132442,
+          "display": "15.37 s ± 0.25"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7369.715788293334,
+          "stddev_ms": 61.178985710786186,
+          "display": "7.37 s ± 0.06"
+        }
+      }
+    },
+    {
+      "version": "v0.9.16",
+      "date": "2026-05-06",
+      "headline": "Config DX hardening release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11582.992328866669,
+          "stddev_ms": 194.8688964081715,
+          "display": "11.58 s ± 0.19"
+        },
+        "s6_1m_full": {
+          "mean_ms": 10719.726312006667,
+          "stddev_ms": 323.27090330199934,
+          "display": "10.72 s ± 0.32"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15350.192457760002,
+          "stddev_ms": 6.447607648298504,
+          "display": "15.35 s ± 0.01"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7213.480730720001,
+          "stddev_ms": 208.33306742697698,
+          "display": "7.21 s ± 0.21"
+        }
+      }
+    },
+    {
+      "version": "v0.9.14",
+      "date": "2026-05-05",
+      "headline": "CI automation release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12056.017257033334,
+          "stddev_ms": 270.0123312749194,
+          "display": "12.06 s ± 0.27"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11193.09583608,
+          "stddev_ms": 355.6815319059869,
+          "display": "11.19 s ± 0.36"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15312.215576199998,
+          "stddev_ms": 55.67930190969299,
+          "display": "15.31 s ± 0.06"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7331.021740213334,
+          "stddev_ms": 54.055133360712055,
+          "display": "7.33 s ± 0.05"
+        }
+      }
+    },
+    {
+      "version": "v0.9.13",
+      "date": "2026-05-04",
+      "headline": "Dependency-refresh release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11460.87642104,
+          "stddev_ms": 285.31446104791695,
+          "display": "11.46 s ± 0.29"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11177.767074053332,
+          "stddev_ms": 40.87825848928331,
+          "display": "11.18 s ± 0.04"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15451.024555940003,
+          "stddev_ms": 74.49968305302177,
+          "display": "15.45 s ± 0.07"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7217.586440933333,
+          "stddev_ms": 79.1006365202451,
+          "display": "7.22 s ± 0.08"
+        }
+      }
+    },
+    {
+      "version": "v0.9.12",
+      "date": "2026-05-03",
+      "headline": "Backlog cleanup release closing the explicitly-held v0.9 items that didn't fit cleanly into earlier cuts.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11981.516008326666,
+          "stddev_ms": 365.3850960577119,
+          "display": "11.98 s ± 0.37"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11326.569772519995,
+          "stddev_ms": 243.3167197397227,
+          "display": "11.33 s ± 0.24"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15361.526014800002,
+          "stddev_ms": 174.0855726563347,
+          "display": "15.36 s ± 0.17"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7459.86332838,
+          "stddev_ms": 57.18096646959186,
+          "display": "7.46 s ± 0.06"
+        }
+      }
+    },
+    {
+      "version": "v0.9.11",
+      "date": "2026-05-03",
+      "headline": "Structural fix for the `git_tracked_only:` silent-no-op recurrence-risk shape.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11838.288893913337,
+          "stddev_ms": 214.3967825191842,
+          "display": "11.84 s ± 0.21"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11906.744880373331,
+          "stddev_ms": 155.83987416293445,
+          "display": "11.91 s ± 0.16"
+        },
+        "s7_1m_full": {
+          "mean_ms": 17294.682197973332,
+          "stddev_ms": 465.4099580870043,
+          "display": "17.29 s ± 0.47"
+        },
+        "s9_1m_full": {
+          "mean_ms": 8497.794055926666,
+          "stddev_ms": 1069.5046301656319,
+          "display": "8.50 s ± 1.07"
+        }
+      }
+    },
+    {
+      "version": "v0.9.10",
+      "date": "2026-05-03",
+      "headline": "Structural fix for the `scope_filter:` silent-no-op bug class.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11619.008955793332,
+          "stddev_ms": 383.90035384132267,
+          "display": "11.62 s ± 0.38"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11219.903983199998,
+          "stddev_ms": 496.6745585712025,
+          "display": "11.22 s ± 0.50"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15502.934274066667,
+          "stddev_ms": 140.91883856430627,
+          "display": "15.50 s ± 0.14"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7213.466441533332,
+          "stddev_ms": 27.13297917581507,
+          "display": "7.21 s ± 0.03"
+        }
+      }
+    },
+    {
+      "version": "v0.9.9",
+      "date": "2026-05-03",
+      "headline": "Patch release for two `scope_filter:` silent-no-op gaps surfaced by the post-v0.9.8 audit.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 13229.091810833332,
+          "stddev_ms": 25.616040388618046,
+          "display": "13.23 s ± 0.03"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11935.887356420002,
+          "stddev_ms": 336.6362926805773,
+          "display": "11.94 s ± 0.34"
+        },
+        "s7_1m_full": {
+          "mean_ms": 17319.141672973336,
+          "stddev_ms": 204.6488165459301,
+          "display": "17.32 s ± 0.20"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7914.547256746666,
+          "stddev_ms": 178.45786536956533,
+          "display": "7.91 s ± 0.18"
+        }
+      }
+    },
+    {
+      "version": "v0.9.8",
+      "date": "2026-05-02",
+      "headline": "Cross-file dispatch fast paths, round 2.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11333.128536880002,
+          "stddev_ms": 203.30949238819628,
+          "display": "11.33 s ± 0.20"
+        },
+        "s6_1m_full": {
+          "mean_ms": 10889.529214193333,
+          "stddev_ms": 418.98895132651245,
+          "display": "10.89 s ± 0.42"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15409.021716053332,
+          "stddev_ms": 86.49842367488579,
+          "display": "15.41 s ± 0.09"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7319.076480799999,
+          "stddev_ms": 96.27959142159072,
+          "display": "7.32 s ± 0.10"
+        }
+      }
+    },
+    {
+      "version": "v0.9.7",
+      "date": "2026-05-02",
+      "headline": "Patch release for the v0.9.6 `scope_filter:` runtime no-op (v0.9.6 shipped the field, the type, and the engine gate but never wired the parsed filter onto the built rule).",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11894.117464286666,
+          "stddev_ms": 161.3014142367413,
+          "display": "11.89 s ± 0.16"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11347.441901920001,
+          "stddev_ms": 526.4991941299197,
+          "display": "11.35 s ± 0.53"
+        },
+        "s7_1m_full": {
+          "mean_ms": 614415.8014042401,
+          "stddev_ms": 1556.7025835446816,
+          "display": "614.4 s ± 1.6"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7363.076305206666,
+          "stddev_ms": 3.963259518854692,
+          "display": "7.36 s ± 0.00"
+        }
+      }
+    },
+    {
+      "version": "v0.9.6",
+      "date": "2026-05-02",
+      "headline": "Closes the v0.9 cut with the `scope_filter:` primitive — closest- ancestor manifest scoping for per-file rules, designed to make the bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) correctly handle nested packages in polyglot monorepos.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11093.055617479999,
+          "stddev_ms": 142.73002194440065,
+          "display": "11.09 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11396.452356986667,
+          "stddev_ms": 347.0392584613437,
+          "display": "11.40 s ± 0.35"
+        },
+        "s7_1m_full": {
+          "mean_ms": 623714.6706277066,
+          "stddev_ms": 823.9679045364234,
+          "display": "623.7 s ± 0.8"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7117.9139152200005,
+          "stddev_ms": 58.92518436540764,
+          "display": "7.12 s ± 0.06"
+        }
+      }
+    },
+    {
+      "version": "v0.9.5",
+      "date": "2026-05-01",
+      "headline": "Reopens v0.9 with cross-file dispatch fast paths, the test/coverage floor that prevents the same class of regression from slipping by again, and a benchmark-docs reorganisation that makes the perf story discoverable from a single entry point.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12593.648948033333,
+          "stddev_ms": 1683.1448246978593,
+          "display": "12.59 s ± 1.68"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11845.296646886667,
+          "stddev_ms": 582.6811265139581,
+          "display": "11.85 s ± 0.58"
+        },
+        "s7_1m_full": {
+          "mean_ms": 652427.6198980066,
+          "stddev_ms": 50347.512277295864,
+          "display": "652.4 s ± 50.3"
+        },
+        "s9_1m_full": null
+      }
+    },
+    {
+      "version": "v0.9.4",
+      "date": "2026-04-30",
+      "headline": "Mechanical follow-up to v0.9.3: migrates 16 of the remaining ~22 per-file content rules to opt into the file-major dispatch path.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 731856.1983079334,
+          "stddev_ms": 5348.852512798812,
+          "display": "731.9 s ± 5.3"
+        },
+        "s6_1m_full": null,
+        "s7_1m_full": null,
+        "s9_1m_full": null
+      }
+    },
+    {
+      "version": "v0.5.7",
+      "date": "2026-04-26",
+      "headline": "Competitive bench publication.",
+      "cells": {
+        "s3_1m_full": null,
+        "s6_1m_full": null,
+        "s7_1m_full": null,
+        "s9_1m_full": null
+      }
+    },
+    {
+      "version": "v0.5.6",
+      "date": "2026-04-26",
+      "headline": "Scale-ceiling bench publication + a latent walker bug fix that the bench surfaced.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 569078.0,
+          "stddev_ms": 60911.0,
+          "display": "569.1 s ± 60.9"
+        },
+        "s6_1m_full": null,
+        "s7_1m_full": null,
+        "s9_1m_full": null
+      }
+    }
+  ]
+}
