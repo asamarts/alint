@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 60 rule kinds across 13 families. Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 70 rule kinds across 13 families (60 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 

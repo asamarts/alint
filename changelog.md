@@ -10,6 +10,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **GitHub Action: a pinned action ref now pins the binary.** When
+  `uses: asamarts/alint@vX.Y.Z` is used without a `version:` input,
+  the Action now installs the alint release matching that tag
+  (`vX.Y.Z`) instead of always installing the latest release. The
+  Action already fetched `install.sh` from the pinned ref for
+  provenance; the installed binary now follows the same ref, so
+  pinning the Action is reproducible with zero release-time
+  maintenance. The `version:` input default changed from `latest`
+  to empty (unset). **Action required only if** you pinned
+  `@vX.Y.Z` but intentionally relied on implicitly getting the
+  newest release: set `version: latest` explicitly to keep that
+  behaviour. Pinning to a branch/SHA (e.g. `@main`) still installs
+  `latest`, and an explicit `version:` (a tag, or `latest`) behaves
+  exactly as before.
 - **`ci/scripts/bump-version.sh`** now refreshes `Cargo.lock`
   after bumping `[workspace.package].version` (via
   `cargo metadata --offline --format-version 1`), so the workspace
