@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.9.22",
+      "date": "2026-05-14",
+      "headline": "Doc + prevention-automation cleanup release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11711.888509406668,
+          "stddev_ms": 245.1989793511233,
+          "display": "11.71 s ± 0.25"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11738.588844380001,
+          "stddev_ms": 96.04485720420335,
+          "display": "11.74 s ± 0.10"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15404.9778511,
+          "stddev_ms": 7.197784831937317,
+          "display": "15.40 s ± 0.01"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7411.12286194,
+          "stddev_ms": 68.38171336849209,
+          "display": "7.41 s ± 0.07"
+        }
+      }
+    },
+    {
       "version": "v0.9.21",
       "date": "2026-05-14",
       "headline": "Headline feature: the `git_commit_message` rule's new `since:` option ([#26](https://github.com/asamarts/alint/issues/26)), which makes the rule usable on `pull_request`-trigger CI for the first time.",
