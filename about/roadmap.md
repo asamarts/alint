@@ -12,22 +12,23 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.9.22** (2026-05-15). Doc-drift cleanup
-plus prevention automation: CHANGELOG link-reference footer
-regenerated for every release back to v0.9.5, `bump-version.sh`
-extended to append a `[X.Y.Z]: compare/...` row on each bump,
-`check-version-pins.sh` gained a fourth site (`docs/index.mdx`
-landing badge), the `action-selftest` pinned-version job now
-tracks the previous minor instead of v0.9.6, and the alint.org
-hero stat-strip + keyword landings caught up to "70 rule kinds"
-(was a mix of 60/70). v0.9.21 shipped commit-range mode for
-`git_commit_message` (closes #26). v0.9.12 - v0.9.20 brought the launch-
-readiness capstone: width-aware output across every command,
-`--no-docs` and `--width N` honored uniformly, bundled-rule
-message audit, em-dash scrub on first-impression marketing
-surfaces, install-snippet pin sweep, polyglot demo with 5 auto-
-fixable seeds. See [CHANGELOG.md](../../CHANGELOG.md) for v0.9.12
-- v0.9.21 details and [`docs/development/launch-evidence.md`](../development/launch-evidence.md)
+**Latest release: v0.9.23** (2026-05-17). GitHub Action pinning
+plus release-pipeline hardening: a pinned action ref now pins the
+installed binary (`uses: asamarts/alint@vX.Y.Z` reproducible with
+zero release-time maintenance), `bump-version.sh` refreshes
+`Cargo.lock` on bump (proven on this release: the cross-platform
+build matrix passed first try, preventing the v0.9.22 incident),
+a cargo-deny license/supply-chain gate, the generated
+`/docs/rules/` index corrected to the canonical "70 rule kinds",
+and an `action.yml` empty-ref provenance hardening. First
+review-gated release (cut via PR #30). v0.9.22 (2026-05-15) was
+doc-drift cleanup plus prevention automation; v0.9.21 shipped
+commit-range mode for `git_commit_message` (closes #26);
+v0.9.12 - v0.9.20 brought the launch-readiness capstone (width-
+aware output, bundled-rule message audit, em-dash scrub, install-
+snippet pin sweep, polyglot demo). See
+[CHANGELOG.md](../../CHANGELOG.md) for per-version detail and
+[`docs/development/launch-evidence.md`](../development/launch-evidence.md)
 for the case-study corpus + rule-kind demand aggregation.
 
 **Launch readiness: clean.** Pre-flight gates wired:
@@ -38,8 +39,12 @@ consistency + dogfood, all bundled into
 -version` rule in the dogfood `.alint.yml` flags drift between
 Cargo.toml's workspace version and any user-facing install
 snippet, so a release with stale `v0.9.X` README/Docker/GHA pins
-fails CI before it ships. v0.9.21 is the version we expect to
-launch on.
+fails CI before it ships. The project has been launch-ready
+since the v0.9.x preflight-gate capstone; public-launch timing
+is tracked in the alint.org marketing repo (`marketing/STATE.md`
+and `marketing/launch-strategy.md`), deliberately not pinned to
+a version here, since a scope-based, dateless roadmap shouldn't
+carry a launch-version that keeps going stale.
 
 **v0.9 cut closed (2026-05-02).** A scaling-profile
 investigation surfaced a +28-37% 1M S3 regression vs
