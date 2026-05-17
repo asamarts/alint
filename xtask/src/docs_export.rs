@@ -576,6 +576,67 @@ fn first_sentence(body: &str) -> String {
     paragraph.trim().to_string()
 }
 
+/// SERP `<meta description>` line normaliser. Strips markdown
+/// inline backticks (they read as literal grave accents in a
+/// search snippet), collapses whitespace, removes em/en dashes
+/// (the marketing style guide bans them — substitute a period or
+/// keep the clause as-is), and hard-caps the length so Google
+/// doesn't truncate mid-word. Sentence-aware: if the cap lands
+/// inside a sentence, back off to the previous sentence end so the
+/// snippet never trails an ellipsis.
+fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
+    // Drop inline-code backticks, collapse all whitespace runs.
+    let despaced: String = raw.replace('`', "");
+    let mut s = despaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    // The style guide bans em/en dashes in SERP copy. A dash
+    // joining two clauses reads cleanly as a comma (keeps it one
+    // clause, no broken mid-sentence capitalisation that a period
+    // would introduce). A bare em/en dash with no surrounding
+    // spaces collapses to a space. Intra-word hyphens stay.
+    s = s.replace(" — ", ", ").replace(" – ", ", ");
+    s = s.replace(" -- ", ", ");
+    s = s.replace('—', " ").replace('–', " ");
+    // Tidy any ", ." / ".," artifacts the substitution can leave
+    // when a dash sat next to existing punctuation.
+    s = s.replace(", .", ".").replace(". ,", ".").replace(" ,", ",");
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    // Over the cap: prefer cutting at the last sentence end that
+    // still fits; else cut at the last word boundary that fits.
+    let truncated: String = s.chars().take(max_chars).collect();
+    if let Some(idx) = truncated.rfind(". ") {
+        return truncated[..idx + 1].trim().to_string();
+    }
+    if let Some(idx) = truncated.rfind(' ') {
+        return truncated[..idx].trim().to_string();
+    }
+    truncated.trim().to_string()
+}
+
+/// Build the per-rule SERP description: lead with what the rule
+/// actually checks (its own first sentence — the unique value
+/// prop), keep the rule kind (the search query) and family
+/// (disambiguator) in the string, cap ~155 chars, no em-dashes.
+/// Falls back to a family-scoped sentence when the rule body's
+/// opening line is too terse to stand alone.
+fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
+    let summary = meta_desc_clean(&first_sentence(body), 140);
+    let family = family_title.to_lowercase();
+    let composed = if summary.len() < 25 {
+        // Doc-comment opener too thin to be a useful snippet —
+        // fall back to a kind + family clause (still concrete:
+        // names the rule the searcher typed and where it lives).
+        format!("{kind} rule in alint's {family} family.")
+    } else if summary.ends_with('.') {
+        format!("{summary} alint {kind} rule, {family} family.")
+    } else {
+        format!("{summary}. alint {kind} rule, {family} family.")
+    };
+    meta_desc_clean(&composed, 158)
+}
+
 /// Render one `rules/<family>/<kind>.md` page. Frontmatter
 /// `title` is the bare kind name so URLs and Starlight headings
 /// match what the user types in `.alint.yml`. The page body is
@@ -594,7 +655,8 @@ fn emit_rule_page(
     let _ = writeln!(&mut page, "title: '{kind}'");
     let _ = writeln!(
         &mut page,
-        "description: 'alint rule kind `{kind}` ({family_title} family).'"
+        "description: '{}'",
+        escape_yaml_string(&rule_meta_description(kind, family_title, body))
     );
     let _ = writeln!(&mut page, "sidebar:");
     let _ = writeln!(&mut page, "  order: {sidebar_order}");
@@ -993,9 +1055,24 @@ fn render_ruleset_page(
     let mut out = String::new();
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out, "title: '{name}@v1'");
+    // SERP description: lead with what the ruleset actually does
+    // (its author-written overview, first sentence — the unique
+    // value prop a searcher scanning results wants reflected
+    // back), keep the ruleset name (the search query) in the
+    // string, cap ~155 chars, no em-dashes. Fall back to a name-
+    // scoped clause when the YAML has no leading comment block.
+    let ruleset_summary = meta_desc_clean(&first_overview_sentence(overview_md), 130);
+    let ruleset_desc = if ruleset_summary.len() < 25 {
+        format!("{name}@v1: a bundled alint ruleset. Adopt with extends: [alint://bundled/{name}@v1].")
+    } else if ruleset_summary.ends_with('.') {
+        format!("{ruleset_summary} alint bundled ruleset {name}@v1.")
+    } else {
+        format!("{ruleset_summary}. alint bundled ruleset {name}@v1.")
+    };
     let _ = writeln!(
         &mut out,
-        "description: Bundled alint ruleset at alint://bundled/{name}@v1."
+        "description: '{}'",
+        escape_yaml_string(&meta_desc_clean(&ruleset_desc, 158))
     );
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out);
@@ -1251,12 +1328,27 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
     let subcmds = ["check", "fix", "list", "explain", "facts"];
     for sub in subcmds {
         let help = run_help(&bin, &[sub])?;
+        // SERP description: clap prints the subcommand's own one-
+        // line summary as the first non-empty line of --help
+        // (before the blank line and `Usage:`). Use it verbatim
+        // so the snippet says what `alint <sub>` does, not "see
+        // --help". Keep the command (the search query) in the
+        // string; no em-dashes (style guide).
+        let help_summary = meta_desc_clean(&help_first_line(&help), 120);
+        let cli_desc = if help_summary.len() < 12 {
+            format!("alint {sub} subcommand. CLI reference and flags for alint {sub}.")
+        } else if help_summary.ends_with('.') {
+            format!("{help_summary} alint {sub} CLI reference and flags.")
+        } else {
+            format!("{help_summary}. alint {sub} CLI reference and flags.")
+        };
         let mut page = String::new();
         let _ = writeln!(&mut page, "---");
         let _ = writeln!(&mut page, "title: 'alint {sub}'");
         let _ = writeln!(
             &mut page,
-            "description: '`alint {sub}` — captured from `alint {sub} --help`.'"
+            "description: '{}'",
+            escape_yaml_string(&meta_desc_clean(&cli_desc, 158))
         );
         let _ = writeln!(&mut page, "---");
         let _ = writeln!(&mut page);
@@ -1283,6 +1375,38 @@ fn run_help(bin: &Path, subcmd_args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// First descriptive line of a clap `--help` dump: clap prints the
+/// command's about-string as the leading line(s) before the blank
+/// line that precedes `Usage:`. Returns the joined about block
+/// (it can wrap to a second line), skipping anything that is
+/// itself a section header (`Usage:`, `Options:`, `Arguments:`,
+/// `Commands:`). Used as the seed for the CLI page SERP
+/// description.
+fn help_first_line(help: &str) -> String {
+    let mut acc = String::new();
+    for line in help.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            if !acc.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if t.starts_with("Usage:")
+            || t.starts_with("Options:")
+            || t.starts_with("Arguments:")
+            || t.starts_with("Commands:")
+        {
+            break;
+        }
+        if !acc.is_empty() {
+            acc.push(' ');
+        }
+        acc.push_str(t);
+    }
+    acc
 }
 
 /// Run `xtask/scripts/render-history.py --json-out <bundle>/benchmarks-trajectory.json`
