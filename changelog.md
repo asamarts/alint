@@ -8,6 +8,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
+
+Distribution + release-reliability release. The headline is the
+GitHub Action change: a pinned action ref now pins the installed
+binary, so `uses: asamarts/alint@vX.Y.Z` is reproducible with zero
+release-time maintenance. Bundled in: the `bump-version.sh`
+`Cargo.lock` refresh that recovers the v0.9.22 release-day failure
+mode, a cargo-deny supply-chain gate, the generated `/docs/rules/`
+index corrected to the canonical 70-rule-kinds figure, and a
+GitHub Action provenance hardening. No `.alint.yml` schema,
+output-format, or rule-engine changes; safe upgrade for every
+consumer except the single Action-pinning edge case called out
+under **Changed** below.
+
+### Added
+
+- **cargo-deny license / supply-chain gate (`deny.toml`).** A
+  tailored `deny.toml` plus `ci/scripts/deny.sh` enforce the
+  dependency graph's license, ban, and source policy. `licenses.allow`
+  is the exact permissive set present in the graph (not a blanket
+  allow): an LGPL-2.1 dependency that is OR-satisfied by MIT/Apache
+  is not separately allowed, and MPL-2.0 is a scoped single-crate
+  exception so a future MPL dependency fails the check. Wildcard
+  version requirements are banned and duplicate versions warn;
+  sources are restricted to crates.io; advisories stay advisory-only
+  (mirroring `audit.sh`). Wired as a `deny` job in `ci.yml` and into
+  the `release.yml` preflight, so a license or supply-chain
+  violation blocks a release. Build-time control only; no effect on
+  the published binary or library.
+
 ### Changed
 
 - **GitHub Action: a pinned action ref now pins the binary.** When
@@ -41,6 +71,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Cargo.lock` refresh; step 4 stage list now includes
   `Cargo.lock` explicitly; new "Why `Cargo.lock` is in the stage
   list" note under step 4 captures the recurrence rationale.
+
+### Fixed
+
+- **Generated `/docs/rules/` index now reports the canonical "70
+  rule kinds".** The rules master-index headline counted only the
+  60 distinct documented behaviours and excluded the 10 short-name
+  aliases, contradicting `/docs/about/`, the README (corrected in
+  v0.9.22), the JSON schema, and the alint.org marketing surfaces,
+  all of which say 70. The generator (`xtask/src/docs_export.rs`)
+  now derives the count as behaviours + aliases, so the page reads
+  "70 rule kinds across 13 families (60 distinct rule behaviours
+  plus 10 short-name aliases)". Documentation output only; no
+  engine or schema change.
+
+### Security
+
+- **GitHub Action: an empty `action_ref` no longer silently falls
+  back to `main`.** Previously, if `github.action_ref` resolved
+  empty the Action fetched `install.sh` from `main`, silently
+  defeating the supply-chain-pin guarantee for a consumer who
+  pinned the Action. The fallback to `main` is now restricted to
+  the `asamarts/alint` local-checkout self-test path; for any
+  external consumer an empty ref is a hard error rather than an
+  implicit `main` fetch. Restores the provenance guarantee that
+  pinning `uses: asamarts/alint@<ref>` fetches the install script
+  from that exact ref. Pairs with the binary-pin change under
+  **Changed**.
 
 ## [0.9.22] — 2026-05-14 (doc-drift cleanup + prevention automation)
 
@@ -4740,7 +4797,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.22...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.23...HEAD
+[0.9.23]: https://github.com/asamarts/alint/compare/v0.9.22...v0.9.23
 [0.9.22]: https://github.com/asamarts/alint/compare/v0.9.21...v0.9.22
 [0.9.21]: https://github.com/asamarts/alint/compare/v0.9.20...v0.9.21
 [0.9.20]: https://github.com/asamarts/alint/compare/v0.9.19...v0.9.20
