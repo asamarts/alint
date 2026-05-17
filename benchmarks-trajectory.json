@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.9.23",
+      "date": "2026-05-17",
+      "headline": "Distribution + release-reliability release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11936.238445993335,
+          "stddev_ms": 140.83484546045796,
+          "display": "11.94 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11883.377944686667,
+          "stddev_ms": 119.69745053134977,
+          "display": "11.88 s ± 0.12"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15227.729757013336,
+          "stddev_ms": 160.9200531144165,
+          "display": "15.23 s ± 0.16"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7548.722122833333,
+          "stddev_ms": 56.684615720492225,
+          "display": "7.55 s ± 0.06"
+        }
+      }
+    },
+    {
       "version": "v0.9.22",
       "date": "2026-05-14",
       "headline": "Doc + prevention-automation cleanup release.",
