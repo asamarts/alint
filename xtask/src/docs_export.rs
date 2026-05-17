@@ -1063,7 +1063,9 @@ fn render_ruleset_page(
     // scoped clause when the YAML has no leading comment block.
     let ruleset_summary = meta_desc_clean(&first_overview_sentence(overview_md), 130);
     let ruleset_desc = if ruleset_summary.len() < 25 {
-        format!("{name}@v1: a bundled alint ruleset. Adopt with extends: [alint://bundled/{name}@v1].")
+        format!(
+            "{name}@v1: a bundled alint ruleset. Adopt with extends: [alint://bundled/{name}@v1]."
+        )
     } else if ruleset_summary.ends_with('.') {
         format!("{ruleset_summary} alint bundled ruleset {name}@v1.")
     } else {
