@@ -595,7 +595,7 @@ fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
     // spaces collapses to a space. Intra-word hyphens stay.
     s = s.replace(" — ", ", ").replace(" – ", ", ");
     s = s.replace(" -- ", ", ");
-    s = s.replace('—', " ").replace('–', " ");
+    s = s.replace(['—', '–'], " ");
     // Tidy any ", ." / ".," artifacts the substitution can leave
     // when a dash sat next to existing punctuation.
     s = s.replace(", .", ".").replace(". ,", ".").replace(" ,", ",");
@@ -607,7 +607,7 @@ fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
     // still fits; else cut at the last word boundary that fits.
     let truncated: String = s.chars().take(max_chars).collect();
     if let Some(idx) = truncated.rfind(". ") {
-        return truncated[..idx + 1].trim().to_string();
+        return truncated[..=idx].trim().to_string();
     }
     if let Some(idx) = truncated.rfind(' ') {
         return truncated[..idx].trim().to_string();
