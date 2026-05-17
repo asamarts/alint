@@ -1,6 +1,6 @@
 ---
 title: 'max_directory_depth'
-description: 'alint rule kind `max_directory_depth` (Structure family).'
+description: 'Tree depth from repo root may not exceed max. alint max_directory_depth rule, structure family.'
 sidebar:
   order: 1
 ---

@@ -1,6 +1,6 @@
 ---
 title: 'file_hash'
-description: 'alint rule kind `file_hash` (Content family).'
+description: 'Content SHA-256 must equal the expected digest. alint file_hash rule, content family.'
 sidebar:
   order: 6
 ---

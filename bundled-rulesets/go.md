@@ -1,6 +1,6 @@
 ---
 title: 'go@v1'
-description: Bundled alint ruleset at alint://bundled/go@v1.
+description: 'Hygiene checks for Go modules. alint bundled ruleset go@v1.'
 ---
 
 Hygiene checks for Go modules. Adopt it with:

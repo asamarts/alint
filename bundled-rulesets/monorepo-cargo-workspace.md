@@ -1,6 +1,6 @@
 ---
 title: 'monorepo/cargo-workspace@v1'
-description: Bundled alint ruleset at alint://bundled/monorepo/cargo-workspace@v1.
+description: 'Workspace-aware overlay for Cargo workspaces. alint bundled ruleset monorepo/cargo-workspace@v1.'
 ---
 
 Workspace-aware overlay for Cargo workspaces. Layered on

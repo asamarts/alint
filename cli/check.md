@@ -1,6 +1,6 @@
 ---
 title: 'alint check'
-description: '`alint check` — captured from `alint check --help`.'
+description: 'Run linters against the current (or given) directory. Default command. alint check CLI reference and flags.'
 ---
 
 ```

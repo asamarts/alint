@@ -1,6 +1,6 @@
 ---
 title: 'max_files_per_directory'
-description: 'alint rule kind `max_files_per_directory` (Structure family).'
+description: 'Per-directory fanout may not exceed max_files. alint max_files_per_directory rule, structure family.'
 sidebar:
   order: 2
 ---

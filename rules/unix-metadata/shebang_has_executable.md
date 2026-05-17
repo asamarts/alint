@@ -1,6 +1,6 @@
 ---
 title: 'shebang_has_executable'
-description: 'alint rule kind `shebang_has_executable` (Unix metadata family).'
+description: 'Every file starting with #! must have +x set. alint shebang_has_executable rule, unix metadata family.'
 sidebar:
   order: 4
 ---

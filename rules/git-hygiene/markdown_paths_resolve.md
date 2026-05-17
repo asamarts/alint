@@ -1,6 +1,6 @@
 ---
 title: 'markdown_paths_resolve'
-description: 'alint rule kind `markdown_paths_resolve` (Git hygiene family).'
+description: 'Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo.'
 sidebar:
   order: 3
 ---

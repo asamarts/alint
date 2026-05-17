@@ -1,6 +1,6 @@
 ---
 title: 'indent_style'
-description: 'alint rule kind `indent_style` (Text hygiene family).'
+description: 'Every non-blank line indents with the configured style (tabs or spaces). alint indent_style rule, text hygiene family.'
 sidebar:
   order: 5
 ---

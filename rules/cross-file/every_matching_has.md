@@ -1,6 +1,6 @@
 ---
 title: 'every_matching_has'
-description: 'alint rule kind `every_matching_has` (Cross-file family).'
+description: 'For every file or directory matching select:, every nested rule under require: must be satisfied. alint every_matching_has rule, cross-file family.'
 sidebar:
   order: 7
 ---

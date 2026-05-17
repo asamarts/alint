@@ -1,6 +1,6 @@
 ---
 title: 'file_absent'
-description: 'alint rule kind `file_absent` (Existence family).'
+description: 'No file matching paths may exist in the walked tree. alint file_absent rule, existence family.'
 sidebar:
   order: 2
 ---

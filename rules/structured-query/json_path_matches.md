@@ -1,6 +1,6 @@
 ---
 title: 'json_path_matches'
-description: 'alint rule kind `json_path_matches` (Structured query family).'
+description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
 sidebar:
   order: 4
 ---

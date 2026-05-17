@@ -1,6 +1,6 @@
 ---
 title: 'file_shebang'
-description: 'alint rule kind `file_shebang` (Content family).'
+description: 'First line of each file in scope must match the shebang regex. alint file_shebang rule, content family.'
 sidebar:
   order: 12
 ---

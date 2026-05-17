@@ -1,6 +1,6 @@
 ---
 title: 'no_illegal_windows_names'
-description: 'alint rule kind `no_illegal_windows_names` (Portable metadata family).'
+description: 'Reject path components Windows can''t represent:. alint no_illegal_windows_names rule, portable metadata family.'
 sidebar:
   order: 2
 ---

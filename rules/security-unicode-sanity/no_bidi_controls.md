@@ -1,6 +1,6 @@
 ---
 title: 'no_bidi_controls'
-description: 'alint rule kind `no_bidi_controls` (Security / Unicode sanity family).'
+description: 'Flag Trojan-Source bidi override characters (U+202A 202E, U+2066 2069). alint no_bidi_controls rule, security / unicode sanity family.'
 sidebar:
   order: 2
 ---

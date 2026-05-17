@@ -1,6 +1,6 @@
 ---
 title: 'monorepo/pnpm-workspace@v1'
-description: Bundled alint ruleset at alint://bundled/monorepo/pnpm-workspace@v1.
+description: 'Workspace-aware overlay for pnpm workspaces. alint bundled ruleset monorepo/pnpm-workspace@v1.'
 ---
 
 Workspace-aware overlay for pnpm workspaces. Layered on top

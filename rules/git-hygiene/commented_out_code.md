@@ -1,6 +1,6 @@
 ---
 title: 'commented_out_code'
-description: 'alint rule kind `commented_out_code` (Git hygiene family).'
+description: 'Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners).'
 sidebar:
   order: 2
 ---

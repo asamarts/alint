@@ -1,6 +1,6 @@
 ---
 title: 'file_max_lines'
-description: 'alint rule kind `file_max_lines` (Content family).'
+description: 'File must have at most max_lines lines, using the same accounting as file_min_lines. alint file_max_lines rule, content family.'
 sidebar:
   order: 10
 ---

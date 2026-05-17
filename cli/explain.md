@@ -1,6 +1,6 @@
 ---
 title: 'alint explain'
-description: '`alint explain` — captured from `alint explain --help`.'
+description: 'Show a rule''s definition. alint explain CLI reference and flags.'
 ---
 
 ```

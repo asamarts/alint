@@ -1,6 +1,6 @@
 ---
 title: 'compliance/reuse@v1'
-description: Bundled alint ruleset at alint://bundled/compliance/reuse@v1.
+description: 'Hygiene checks for repositories that follow the FSFE REUSE Specification (https://reuse.software/), every licensable file.'
 ---
 
 Hygiene checks for repositories that follow the FSFE REUSE

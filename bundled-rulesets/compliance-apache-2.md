@@ -1,6 +1,6 @@
 ---
 title: 'compliance/apache-2@v1'
-description: Bundled alint ruleset at alint://bundled/compliance/apache-2@v1.
+description: 'Hygiene checks for repositories distributed under the Apache License, Version 2.0. alint bundled ruleset compliance/apache-2@v1.'
 ---
 
 Hygiene checks for repositories distributed under the

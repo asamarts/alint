@@ -1,6 +1,6 @@
 ---
 title: 'no_trailing_whitespace'
-description: 'alint rule kind `no_trailing_whitespace` (Text hygiene family).'
+description: 'No line may end with space or tab. alint no_trailing_whitespace rule, text hygiene family.'
 sidebar:
   order: 1
 ---

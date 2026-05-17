@@ -1,6 +1,6 @@
 ---
 title: 'file_min_size'
-description: 'alint rule kind `file_min_size` (Content family).'
+description: 'File must be at least min_bytes in size. alint file_min_size rule, content family.'
 sidebar:
   order: 8
 ---

@@ -1,6 +1,6 @@
 ---
 title: 'alint facts'
-description: '`alint facts` — captured from `alint facts --help`.'
+description: 'Evaluate every facts: entry in the effective config and print the resolved value. Debugging aid for when: clauses. alint facts CLI reference and flags.'
 ---
 
 ```

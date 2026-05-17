@@ -1,6 +1,6 @@
 ---
 title: 'alint fix'
-description: '`alint fix` — captured from `alint fix --help`.'
+description: 'Apply automatic fixes for violations whose rules declare one. alint fix CLI reference and flags.'
 ---
 
 ```

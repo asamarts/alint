@@ -1,6 +1,6 @@
 ---
 title: 'dir_contains'
-description: 'alint rule kind `dir_contains` (Cross-file family).'
+description: 'Every directory matching select: must contain files matching every glob in require:. alint dir_contains rule, cross-file family.'
 sidebar:
   order: 4
 ---

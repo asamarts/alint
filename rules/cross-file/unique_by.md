@@ -1,6 +1,6 @@
 ---
 title: 'unique_by'
-description: 'alint rule kind `unique_by` (Cross-file family).'
+description: 'No two files matching paths may share the value of key (a path template). alint unique_by rule, cross-file family.'
 sidebar:
   order: 6
 ---

@@ -1,6 +1,6 @@
 ---
 title: 'tooling/editorconfig@v1'
-description: Bundled alint ruleset at alint://bundled/tooling/editorconfig@v1.
+description: 'Cross-editor standardization: an .editorconfig at the root plus a .gitattributes that normalizes line endings. alint bundled ruleset tooling/editorconfig@v1.'
 ---
 
 Cross-editor standardization: an `.editorconfig` at the root

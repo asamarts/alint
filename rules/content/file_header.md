@@ -1,6 +1,6 @@
 ---
 title: 'file_header'
-description: 'alint rule kind `file_header` (Content family).'
+description: 'The first N lines must match a regex (line-oriented). alint file_header rule, content family.'
 sidebar:
   order: 3
 ---

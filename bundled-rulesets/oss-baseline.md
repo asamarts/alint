@@ -1,6 +1,6 @@
 ---
 title: 'oss-baseline@v1'
-description: Bundled alint ruleset at alint://bundled/oss-baseline@v1.
+description: 'A minimal OSS-hygiene baseline, the documents and conventions most open-source repositories are expected to follow. alint bundled ruleset oss-baseline@v1.'
 ---
 
 A minimal OSS-hygiene baseline — the documents and conventions

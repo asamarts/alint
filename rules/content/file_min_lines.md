@@ -1,6 +1,6 @@
 ---
 title: 'file_min_lines'
-description: 'alint rule kind `file_min_lines` (Content family).'
+description: 'File must have at least min_lines lines (\n-terminated, with an unterminated trailing segment counting as one more, wc -l semantics).'
 sidebar:
   order: 9
 ---

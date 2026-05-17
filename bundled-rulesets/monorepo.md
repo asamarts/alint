@@ -1,6 +1,6 @@
 ---
 title: 'monorepo@v1'
-description: Bundled alint ruleset at alint://bundled/monorepo@v1.
+description: 'Hygiene checks for repositories that host multiple packages under common subdirectories (packages/*, crates/*, apps/*,. alint bundled ruleset monorepo@v1.'
 ---
 
 Hygiene checks for repositories that host multiple packages

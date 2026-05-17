@@ -1,6 +1,6 @@
 ---
 title: 'file_is_ascii'
-description: 'alint rule kind `file_is_ascii` (Content family).'
+description: 'Every byte in the file must be < 0x80. alint file_is_ascii rule, content family.'
 sidebar:
   order: 14
 ---

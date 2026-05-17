@@ -1,6 +1,6 @@
 ---
 title: 'json_schema_passes'
-description: 'alint rule kind `json_schema_passes` (Structured query family).'
+description: 'Validate every JSON / YAML / TOML file in paths against a JSON Schema document. alint json_schema_passes rule, structured query family.'
 sidebar:
   order: 7
 ---

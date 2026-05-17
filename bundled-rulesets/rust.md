@@ -1,6 +1,6 @@
 ---
 title: 'rust@v1'
-description: Bundled alint ruleset at alint://bundled/rust@v1.
+description: 'Hygiene checks for Rust projects. alint bundled ruleset rust@v1.'
 ---
 
 Hygiene checks for Rust projects. Adopt it with:

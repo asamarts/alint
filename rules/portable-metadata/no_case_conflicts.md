@@ -1,6 +1,6 @@
 ---
 title: 'no_case_conflicts'
-description: 'alint rule kind `no_case_conflicts` (Portable metadata family).'
+description: 'Flag paths that differ only by case (e.g. alint no_case_conflicts rule, portable metadata family.'
 sidebar:
   order: 1
 ---

@@ -1,6 +1,6 @@
 ---
 title: 'java@v1'
-description: Bundled alint ruleset at alint://bundled/java@v1.
+description: 'Hygiene checks for Java projects (Maven + Gradle). alint bundled ruleset java@v1.'
 ---
 
 Hygiene checks for Java projects (Maven + Gradle). Adopt it

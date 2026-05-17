@@ -1,6 +1,6 @@
 ---
 title: 'no_zero_width_chars'
-description: 'alint rule kind `no_zero_width_chars` (Security / Unicode sanity family).'
+description: 'Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). alint no_zero_width_chars rule, security / unicode sanity family.'
 sidebar:
   order: 3
 ---

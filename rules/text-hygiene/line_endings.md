@@ -1,6 +1,6 @@
 ---
 title: 'line_endings'
-description: 'alint rule kind `line_endings` (Text hygiene family).'
+description: 'Every line ending matches target: lf or crlf. alint line_endings rule, text hygiene family.'
 sidebar:
   order: 3
 ---

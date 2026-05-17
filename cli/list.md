@@ -1,6 +1,6 @@
 ---
 title: 'alint list'
-description: '`alint list` — captured from `alint list --help`.'
+description: 'List all rules loaded from the effective config. alint list CLI reference and flags.'
 ---
 
 ```

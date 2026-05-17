@@ -1,6 +1,6 @@
 ---
 title: 'file_footer'
-description: 'alint rule kind `file_footer` (Content family).'
+description: 'Last lines lines of each file in scope must match a regex. alint file_footer rule, content family.'
 sidebar:
   order: 11
 ---

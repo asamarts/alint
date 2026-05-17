@@ -1,6 +1,6 @@
 ---
 title: 'file_content_forbidden'
-description: 'alint rule kind `file_content_forbidden` (Content family).'
+description: 'File contents must NOT match a regex. alint file_content_forbidden rule, content family.'
 sidebar:
   order: 2
 ---

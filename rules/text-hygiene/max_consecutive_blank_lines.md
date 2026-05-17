@@ -1,6 +1,6 @@
 ---
 title: 'max_consecutive_blank_lines'
-description: 'alint rule kind `max_consecutive_blank_lines` (Text hygiene family).'
+description: 'Cap runs of blank lines to max. alint max_consecutive_blank_lines rule, text hygiene family.'
 sidebar:
   order: 6
 ---

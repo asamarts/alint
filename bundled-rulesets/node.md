@@ -1,6 +1,6 @@
 ---
 title: 'node@v1'
-description: Bundled alint ruleset at alint://bundled/node@v1.
+description: 'Hygiene checks for Node.js / npm / pnpm / yarn projects. alint bundled ruleset node@v1.'
 ---
 
 Hygiene checks for Node.js / npm / pnpm / yarn projects. Adopt

@@ -1,6 +1,6 @@
 ---
 title: 'ci/github-actions@v1'
-description: Bundled alint ruleset at alint://bundled/ci/github-actions@v1.
+description: 'GitHub Actions hardening. alint bundled ruleset ci/github-actions@v1.'
 ---
 
 GitHub Actions hardening. Guided by the two OpenSSF Scorecard

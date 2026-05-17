@@ -1,6 +1,6 @@
 ---
 title: 'hygiene/lockfiles@v1'
-description: Bundled alint ruleset at alint://bundled/hygiene/lockfiles@v1.
+description: 'Lockfile discipline: exactly one package-manager''s lockfile per workspace, and lockfiles only at the workspace root.'
 ---
 
 Lockfile discipline: exactly one package-manager's lockfile

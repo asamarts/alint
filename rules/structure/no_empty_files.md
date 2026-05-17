@@ -1,6 +1,6 @@
 ---
 title: 'no_empty_files'
-description: 'alint rule kind `no_empty_files` (Structure family).'
+description: 'no_empty_files rule in alint''s structure family.'
 sidebar:
   order: 3
 ---

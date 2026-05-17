@@ -1,6 +1,6 @@
 ---
 title: 'toml_path_equals'
-description: 'alint rule kind `toml_path_equals` (Structured query family).'
+description: 'Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.'
 sidebar:
   order: 3
 ---

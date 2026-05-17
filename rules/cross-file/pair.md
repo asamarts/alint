@@ -1,6 +1,6 @@
 ---
 title: 'pair'
-description: 'alint rule kind `pair` (Cross-file family).'
+description: 'For every file matching primary, a file matching the partner template must exist. alint pair rule, cross-file family.'
 sidebar:
   order: 1
 ---

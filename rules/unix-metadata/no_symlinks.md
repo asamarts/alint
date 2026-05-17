@@ -1,6 +1,6 @@
 ---
 title: 'no_symlinks'
-description: 'alint rule kind `no_symlinks` (Unix metadata family).'
+description: 'Flag tracked paths that are symbolic links. alint no_symlinks rule, unix metadata family.'
 sidebar:
   order: 1
 ---

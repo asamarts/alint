@@ -1,6 +1,6 @@
 ---
 title: 'python@v1'
-description: Bundled alint ruleset at alint://bundled/python@v1.
+description: 'Hygiene checks for Python projects (pyproject / setuptools / Poetry / PDM / uv). alint bundled ruleset python@v1.'
 ---
 
 Hygiene checks for Python projects (pyproject / setuptools /

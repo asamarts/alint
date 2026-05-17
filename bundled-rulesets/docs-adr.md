@@ -1,6 +1,6 @@
 ---
 title: 'docs/adr@v1'
-description: Bundled alint ruleset at alint://bundled/docs/adr@v1.
+description: 'Architecture Decision Records following the MADR ("Markdown Architectural Decision Records") convention: files named. alint bundled ruleset docs/adr@v1.'
 ---
 
 Architecture Decision Records following the MADR ("Markdown
