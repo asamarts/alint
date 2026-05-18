@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 71 rule kinds across 13 families (61 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 72 rule kinds across 13 families (62 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,13 +21,14 @@ alint ships 71 rule kinds across 13 families (61 distinct rule behaviors plus 10
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 6 rules
-- [Cross-file](/docs/rules/cross-file/) — 8 rules
+- [Cross-file](/docs/rules/cross-file/) — 9 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
 
 - [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
 - [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). _(Git hygiene)_
+- [`cross_file_value_equals`](/docs/rules/cross-file/cross_file_value_equals/) — A value extracted from one authoritative `source` file must equal a value extracted from one or more `targets`. _(Cross-file)_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `select:` must contain files matching every glob in `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_

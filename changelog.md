@@ -28,6 +28,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   v0.9.5 path index. First rule kind of the v0.10 case-study
   coverage push (top demand: 13 sources). Existing configs are
   unaffected; `version: 1` unchanged.
+- **`cross_file_value_equals` rule kind.** A value extracted
+  from one authoritative `source` file must equal a value
+  extracted from one or more `targets`. `targets` is a
+  `{ files: <glob>, extract }` map (one query per glob match —
+  the per-file `value_extractor` shape) or a `{ file, extract }`
+  list (heterogeneous pins: monorepo version lockstep, toolchain
+  pins, SDK bands). `extract` is the same one-of as
+  `registry_paths_resolve` (shared `crate::extract`); `normalize`
+  (`none` / `trim` / `lower` / `semver-major`) relaxes the
+  compare; non-literal values are skipped, not failed;
+  `allow_missing_target` controls absent files/values. Cross-file;
+  `version: 1` unchanged. Second rule kind of the v0.10
+  case-study coverage push (12 demand sources).
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 

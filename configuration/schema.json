@@ -458,6 +458,7 @@
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
+        { "$ref": "#/$defs/rule_cross_file_value_equals" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1069,6 +1070,70 @@
           },
           "additionalProperties": false
         }
+      }
+    },
+
+    "extract_spec": {
+      "type": "object",
+      "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value).",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "toml": { "type": "string" },
+        "json": { "type": "string" },
+        "yaml": { "type": "string" },
+        "lines": {
+          "type": "object",
+          "properties": { "comment": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "regex": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "rule_cross_file_value_equals": {
+      "description": "A value extracted from one authoritative `source` file must equal a value extracted from one or more `targets`. `targets` is either a `{ files: <glob>, extract }` map (one query per glob match — the istio value_extractor / pitfall-#20 shape) or a sequence of `{ file, extract }` (heterogeneous pins). `normalize` relaxes the comparison (semver-major = same band). Non-literal extracted values are skipped, not failed.",
+      "type": "object",
+      "required": ["source", "targets"],
+      "properties": {
+        "kind": { "const": "cross_file_value_equals" },
+        "source": {
+          "type": "object",
+          "required": ["file", "extract"],
+          "properties": {
+            "file": { "type": "string" },
+            "extract": { "$ref": "#/$defs/extract_spec" }
+          },
+          "additionalProperties": false
+        },
+        "targets": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["files", "extract"],
+              "properties": {
+                "files": { "type": "string" },
+                "extract": { "$ref": "#/$defs/extract_spec" }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["file", "extract"],
+                "properties": {
+                  "file": { "type": "string" },
+                  "extract": { "$ref": "#/$defs/extract_spec" }
+                },
+                "additionalProperties": false
+              }
+            }
+          ]
+        },
+        "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
+        "allow_missing_target": { "type": "boolean" }
       }
     },
 
