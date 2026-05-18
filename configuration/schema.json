@@ -461,6 +461,7 @@
         { "$ref": "#/$defs/rule_cross_file_value_equals" },
         { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_generated_file_fresh" },
+        { "$ref": "#/$defs/rule_import_gate" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1180,6 +1181,30 @@
           "description": "Generator cwd, relative to the lint root (default: lint root)."
         },
         "normalize": { "enum": ["none", "trim", "final-newline"] }
+      }
+    },
+
+    "rule_import_gate": {
+      "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
+      "type": "object",
+      "required": ["forbid"],
+      "properties": {
+        "kind": { "const": "import_gate" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "forbid": {
+          "type": "string",
+          "description": "Regex tested against the extracted import target."
+        },
+        "language": { "enum": ["go", "python", "rust", "js", "generic"] },
+        "import_pattern": {
+          "type": "string",
+          "description": "Explicit import-line regex (capture group 1 = imported target); overrides the language preset."
+        },
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "File globs inside the scope exempt from the gate."
+        }
       }
     },
 

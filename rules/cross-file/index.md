@@ -13,6 +13,7 @@ Rule kinds in the **Cross-file** family. Each entry below has its own page with 
 - [`cross_file_value_equals`](/docs/rules/cross-file/cross_file_value_equals/) — A value extracted from one authoritative `source` file must equal a value extracted from one or more `targets`.
 - [`ordered_block`](/docs/rules/cross-file/ordered_block/) — The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`).
 - [`generated_file_fresh`](/docs/rules/cross-file/generated_file_fresh/) — A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check.
+- [`import_gate`](/docs/rules/cross-file/import_gate/) — Forbid imports whose **extracted target** matches a `forbid` regex, within the `paths` scope — an architectural import firewall (staging-layer isolation, core/providers separation, private-API gates).
 - [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context.
 - [`for_each_file`](/docs/rules/cross-file/for_each_file/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context.
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `select:` must contain files matching every glob in `require:`.

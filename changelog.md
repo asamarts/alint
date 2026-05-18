@@ -65,6 +65,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`none` / `trim` / `final-newline`) absorbs trailing-newline
   churn. Single-shot; `version: 1` unchanged. Fourth rule kind
   of the v0.10 case-study coverage push (8 demand sources).
+- **`import_gate` rule kind.** Forbid imports whose extracted
+  target matches a `forbid` regex, within the `paths` scope — an
+  architectural import firewall (k8s `staging/` layer
+  isolation, airflow core/providers separation, `torch._C`
+  private-API gates, prometheus-imports). Matches the *extracted
+  import target*, not the raw line (a comment/string mentioning
+  the path doesn't fire — the low-false-positive specialisation
+  of `file_content_forbidden`). `language` (`go`/`python`/
+  `rust`/`js`) supplies a built-in import-line pattern;
+  `import_pattern` overrides it (capture group 1 = target;
+  required for `generic`); `allow` globs exempt sanctioned
+  files. One violation per offending import. Per-file;
+  `version: 1` unchanged. Fifth rule kind of the v0.10
+  case-study coverage push (5 demand sources).
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 
