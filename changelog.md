@@ -79,6 +79,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   files. One violation per offending import. Per-file;
   `version: 1` unchanged. Fifth rule kind of the v0.10
   case-study coverage push (5 demand sources).
+- **`command_idempotent` rule kind.** Run a user-declared
+  formatter/checker in its `--check` (idempotence) mode once:
+  exit `0` ⇒ the tree is formatter-clean (silent), non-zero ⇒
+  violation(s). The sibling of `generated_file_fresh` (that
+  rule diffs a *generator's* captured stdout against a committed
+  file; this trusts a *checker's* own `--check` exit code —
+  `cargo fmt --check` / `gofmt -l` / `ruff format --check` /
+  `prettier --check` / `dprint check` / `eslint --no-fix`).
+  alint never runs a mutating formatter and never writes the
+  tree. With `files_from` (`stdout`/`stderr`) + optional
+  `files_pattern` (capture group 1 = path) the tool's own
+  offender list is parsed into one violation per file; a
+  non-zero exit is never swallowed into a pass. Single-shot,
+  opt-in, trust-gated like `command`; `version: 1` unchanged.
+  Sixth rule kind of the v0.10 case-study coverage push (5
+  demand sources).
+
+### Security
+
+- **Spawn trust-gate generalised — closes a `generated_file_fresh`
+  code-execution gap.** `alint_dsl::reject_command_rules_in` (the
+  `extends:`-resolver gate that refuses process-spawning rules in
+  any extended ruleset — local / HTTPS / `alint://bundled/`)
+  matched only the literal `kind: command`. `generated_file_fresh`
+  (added earlier in `[Unreleased]`) shells out identically but
+  was never added to the gate, so an `extends:`'d ruleset could
+  declare `kind: generated_file_fresh` with an arbitrary
+  `command:` and execute code on every consumer. The gate now
+  covers the full set of process-spawning kinds (`command`,
+  `generated_file_fresh`, `command_idempotent`) via
+  `SPAWNING_RULE_KINDS`, with a regression test asserting each is
+  rejected in an extended config. The gap existed only within
+  `[Unreleased]` (`generated_file_fresh` never reached a
+  release), so no released version is affected.
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 

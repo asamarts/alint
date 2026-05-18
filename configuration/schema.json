@@ -462,6 +462,7 @@
         { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_generated_file_fresh" },
         { "$ref": "#/$defs/rule_import_gate" },
+        { "$ref": "#/$defs/rule_command_idempotent" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1204,6 +1205,33 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "File globs inside the scope exempt from the gate."
+        }
+      }
+    },
+
+    "rule_command_idempotent": {
+      "description": "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 = the tree is formatter-clean (silent), non-zero = violation(s). alint never runs a mutating formatter and never writes the tree (the sibling of generated_file_fresh; same trust tier as the command rule — trust-gated to the user's own top-level config). With `files_from` (+ optional `files_pattern`) the tool's offender list is parsed into one violation per file. Single-shot, opt-in.",
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "kind": { "const": "command_idempotent" },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Checker argv (no shell), run in its --check / idempotence mode; exit 0 = clean."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Checker cwd, relative to the lint root (default: lint root)."
+        },
+        "files_from": {
+          "enum": ["none", "stdout", "stderr"],
+          "description": "On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation)."
+        },
+        "files_pattern": {
+          "type": "string",
+          "description": "Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers)."
         }
       }
     },

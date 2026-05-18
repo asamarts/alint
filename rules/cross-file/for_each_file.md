@@ -2,7 +2,7 @@
 title: 'for_each_file'
 description: 'For every matching directory / file, evaluate a nested require: block with the entry as context. alint for_each_file rule, cross-file family.'
 sidebar:
-  order: 8
+  order: 9
 ---
 
 For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match.

@@ -30,7 +30,7 @@ Environment threaded into the child:
 
 `timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a violation reports the timeout.
 
-**Trust gate.** `command` rules are only allowed in the user's own top-level config. A `kind: command` rule introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary process execution.
+**Trust gate.** Every process-spawning rule kind — `command`, `generated_file_fresh`, and `command_idempotent` — is allowed only in the user's own top-level config. Any of them introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary code execution.
 
 `--changed` interaction: `command` is a per-file rule, so under `alint check --changed` it spawns only for files in the diff. The expensive check is automatically incremental in CI.
 
