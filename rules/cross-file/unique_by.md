@@ -2,7 +2,7 @@
 title: 'unique_by'
 description: 'No two files matching paths may share the value of key (a path template). alint unique_by rule, cross-file family.'
 sidebar:
-  order: 8
+  order: 9
 ---
 
 No two files matching `paths` may share the value of `key` (a path template). Catches basename collisions across subdirectories.

@@ -41,6 +41,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `allow_missing_target` controls absent files/values. Cross-file;
   `version: 1` unchanged. Second rule kind of the v0.10
   case-study coverage push (12 demand sources).
+- **`ordered_block` rule kind.** The lines between a `start` /
+  `end` marker pair must stay sorted, and with `unique: true`
+  free of duplicates, under `comparator` (`lexical` /
+  `lexical-ci` / `numeric`). The generic form of the per-project
+  keep-sorted scripts (protobuf `failure_lists`, sorted
+  `.gitignore` / `CODEOWNERS` / dependency lists). Per-file:
+  files without the `start` marker are silently fine; markers
+  match the trimmed line; blank lines inside a block are
+  ignored; one violation per out-of-order block. Detection-only
+  (auto-fix is a follow-up); `version: 1` unchanged. Third rule
+  kind of the v0.10 case-study coverage push (8 demand sources).
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 

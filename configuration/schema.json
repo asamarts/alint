@@ -459,6 +459,7 @@
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
         { "$ref": "#/$defs/rule_cross_file_value_equals" },
+        { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1134,6 +1135,26 @@
         },
         "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
         "allow_missing_target": { "type": "boolean" }
+      }
+    },
+
+    "rule_ordered_block": {
+      "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. The generic form of per-project keep-sorted scripts. Per-file: a file with no `start` marker is silently fine; markers match the trimmed line; blank lines inside a block are ignored.",
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "kind": { "const": "ordered_block" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "start": {
+          "type": "string",
+          "description": "Marker line opening a block (matched on the trimmed line)."
+        },
+        "end": {
+          "type": "string",
+          "description": "Marker line closing a block."
+        },
+        "comparator": { "enum": ["lexical", "lexical-ci", "numeric"] },
+        "unique": { "type": "boolean" }
       }
     },
 

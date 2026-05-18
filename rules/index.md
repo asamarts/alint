@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 72 rule kinds across 13 families (62 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 73 rule kinds across 13 families (63 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,7 +21,7 @@ alint ships 72 rule kinds across 13 families (62 distinct rule behaviors plus 10
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 6 rules
-- [Cross-file](/docs/rules/cross-file/) — 9 rules
+- [Cross-file](/docs/rules/cross-file/) — 10 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -80,6 +80,7 @@ alint ships 72 rule kinds across 13 families (62 distinct rule behaviors plus 10
 - [`no_symlinks`](/docs/rules/unix-metadata/no_symlinks/) — Flag tracked paths that are symbolic links. _(Unix metadata)_
 - [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/) — No line may end with space or tab. _(Text hygiene)_
 - [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) — Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). _(Security / Unicode sanity)_
+- [`ordered_block`](/docs/rules/cross-file/ordered_block/) — The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`). _(Cross-file)_
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
