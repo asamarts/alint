@@ -2,7 +2,7 @@
 title: 'dir_only_contains'
 description: 'Every direct-child file of a directory matching select: must match at least one glob in allow:. alint dir_only_contains rule, cross-file family.'
 sidebar:
-  order: 8
+  order: 9
 ---
 
 Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. Catches stray test data in `src/`.

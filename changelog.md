@@ -52,6 +52,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ignored; one violation per out-of-order block. Detection-only
   (auto-fix is a follow-up); `version: 1` unchanged. Third rule
   kind of the v0.10 case-study coverage push (8 demand sources).
+- **`generated_file_fresh` rule kind.** A committed `file` must
+  equal the stdout of a declared `command` generator — a
+  non-mutating freshness check (protobuf/buf stubs, `pip-compile`
+  / `uv` lock outputs, cbindgen headers, cpython generated
+  tables). alint does **not** run codegen as a build step: it
+  only verifies, capturing the generator's stdout, and never
+  writes the working tree — the same trust tier as the existing
+  `command` rule, opt-in (no `command:` is a config error).
+  Spawn failure, non-zero exit, and a missing committed file are
+  each a distinct, clearly-worded violation; `normalize`
+  (`none` / `trim` / `final-newline`) absorbs trailing-newline
+  churn. Single-shot; `version: 1` unchanged. Fourth rule kind
+  of the v0.10 case-study coverage push (8 demand sources).
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 

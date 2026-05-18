@@ -460,6 +460,7 @@
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
         { "$ref": "#/$defs/rule_cross_file_value_equals" },
         { "$ref": "#/$defs/rule_ordered_block" },
+        { "$ref": "#/$defs/rule_generated_file_fresh" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1155,6 +1156,30 @@
         },
         "comparator": { "enum": ["lexical", "lexical-ci", "numeric"] },
         "unique": { "type": "boolean" }
+      }
+    },
+
+    "rule_generated_file_fresh": {
+      "description": "A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. alint does not run codegen as a build step; this only verifies, capturing stdout, never writing the tree (same trust tier as the `command` rule). Single-shot, opt-in.",
+      "type": "object",
+      "required": ["file", "command"],
+      "properties": {
+        "kind": { "const": "generated_file_fresh" },
+        "file": {
+          "type": "string",
+          "description": "The committed generated file to verify."
+        },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Generator argv (no shell); must emit the file's contents to stdout."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Generator cwd, relative to the lint root (default: lint root)."
+        },
+        "normalize": { "enum": ["none", "trim", "final-newline"] }
       }
     },
 
