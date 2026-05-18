@@ -8,6 +8,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`registry_paths_resolve` rule kind.** A manifest file
+  enumerates path entries (Cargo `[workspace] members`,
+  `package.json` `workspaces`, a plain line list, a regex
+  capture, etc.); each must resolve to an on-disk artefact.
+  `extract` selects the parse: structured-query `toml` / `json` /
+  `yaml` (RFC 9535 JSONPath), `lines` (optional `comment`
+  prefix), or `regex` (capture group 1). `expect`
+  (`any` / `file` / `dir`) and `must_contain` constrain the
+  resolved kind; `exclude_query` subtracts entries;
+  `entries_are_globs` expands each entry as a glob; non-literal
+  entries (interpolation / antiquotation) are skipped, not
+  failed. Optional `orphans` adds the reverse-completeness
+  check: on-disk artefacts under a `space` glob that no entry
+  references (the "new crate not wired into the workspace"
+  detector). Cross-file; O(1) per-entry existence via the
+  v0.9.5 path index. First rule kind of the v0.10 case-study
+  coverage push (top demand: 13 sources). Existing configs are
+  unaffected; `version: 1` unchanged.
+
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 
 Distribution + release-reliability release. The headline is the

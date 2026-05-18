@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 70 rule kinds across 13 families (60 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 71 rule kinds across 13 families (61 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,7 +21,7 @@ alint ships 70 rule kinds across 13 families (60 distinct rule behaviors plus 10
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 6 rules
-- [Cross-file](/docs/rules/cross-file/) — 7 rules
+- [Cross-file](/docs/rules/cross-file/) — 8 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -80,6 +80,7 @@ alint ships 70 rule kinds across 13 families (60 distinct rule behaviors plus 10
 - [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/) — No line may end with space or tab. _(Text hygiene)_
 - [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) — Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). _(Security / Unicode sanity)_
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
+- [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_

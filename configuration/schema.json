@@ -457,6 +457,7 @@
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
+        { "$ref": "#/$defs/rule_registry_paths_resolve" },
         { "$ref": "#/$defs/rule_for_each_dir" },
         { "$ref": "#/$defs/rule_for_each_file" },
         { "$ref": "#/$defs/rule_dir_only_contains" },
@@ -1019,6 +1020,54 @@
         "partner": {
           "type": "string",
           "description": "Path template resolved per primary match. Example: \"{dir}/{stem}.h\"."
+        }
+      }
+    },
+
+    "rule_registry_paths_resolve": {
+      "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
+      "type": "object",
+      "required": ["registry", "extract"],
+      "properties": {
+        "kind": { "const": "registry_paths_resolve" },
+        "registry": {
+          "type": "string",
+          "description": "Manifest path, or a glob to run once per matching manifest."
+        },
+        "extract": {
+          "type": "object",
+          "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path).",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "toml": { "type": "string" },
+            "json": { "type": "string" },
+            "yaml": { "type": "string" },
+            "lines": {
+              "type": "object",
+              "properties": { "comment": { "type": "string" } },
+              "additionalProperties": false
+            },
+            "regex": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "base": {
+          "type": "string",
+          "description": "Resolve entries relative to: registry_dir (default), lint_root, or an explicit path."
+        },
+        "entries_are_globs": { "type": "boolean" },
+        "expect": { "enum": ["any", "file", "dir"] },
+        "must_contain": { "type": "string" },
+        "exclude_query": { "type": "string" },
+        "orphans": {
+          "type": "object",
+          "required": ["space"],
+          "properties": {
+            "space": { "type": "string" },
+            "unreferenced": { "enum": ["warn", "error", "off"] }
+          },
+          "additionalProperties": false
         }
       }
     },
