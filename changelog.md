@@ -95,6 +95,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opt-in, trust-gated like `command`; `version: 1` unchanged.
   Sixth rule kind of the v0.10 case-study coverage push (5
   demand sources).
+- **`xml_path_equals` + `xml_path_matches` rule kinds.** The XML
+  arm of the structured-query family, completing JSON / YAML /
+  TOML / **XML** under one RFC 9535 JSONPath query language.
+  XML maps to the same value tree via an xmltodict-style
+  convention: attributes are `@name` keys, repeated child
+  elements become an array (`dependency[*]`), a leaf element
+  collapses to its text string, namespaces flatten to the local
+  name (Maven `pom.xml`'s default namespace just works), and
+  every XML leaf value is a string (quote `equals:`). Same
+  option surface as the rest of the family (`paths` / `path` /
+  `equals` | `matches` / `if_present`); not-well-formed XML is
+  one parse-error violation per file. Demand-validated by spark
+  (`pom.xml`) and dotnet/runtime (`.csproj` / `.props` /
+  `.targets` at ~2,300-manifest scale); unblocks the planned
+  `dotnet@v1` bundled ruleset. New dependency: `roxmltree`
+  (MIT/Apache, read-only DOM). Per-file; `version: 1`
+  unchanged. The seventh v0.10 case-study-coverage item — and
+  the first that adds **two** rule kinds (2 demand sources).
 
 ### Security
 

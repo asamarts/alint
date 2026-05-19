@@ -1,8 +1,8 @@
 ---
-title: 'yaml_path_matches'
+title: 'xml_path_matches'
 description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
 sidebar:
-  order: 6
+  order: 8
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
@@ -33,5 +33,5 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 ## See also
 
 - [`json_path_matches`](/docs/rules/structured-query/json_path_matches/)
+- [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/)
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
-- [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/)

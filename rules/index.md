@@ -6,13 +6,13 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 76 rule kinds across 13 families (66 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 78 rule kinds across 13 families (68 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
 - [Content](/docs/rules/content/) — 14 rules
-- [Structured query](/docs/rules/structured-query/) — 7 rules
+- [Structured query](/docs/rules/structured-query/) — 9 rules
 - [Naming](/docs/rules/naming/) — 2 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 6 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 3 rules
@@ -90,5 +90,7 @@ alint ships 76 rule kinds across 13 families (66 distinct rule behaviors plus 10
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`unique_by`](/docs/rules/cross-file/unique_by/) — No two files matching `paths` may share the value of `key` (a path template). _(Cross-file)_
+- [`xml_path_equals`](/docs/rules/structured-query/xml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_

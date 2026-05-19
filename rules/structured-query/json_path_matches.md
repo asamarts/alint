@@ -2,7 +2,7 @@
 title: 'json_path_matches'
 description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
 sidebar:
-  order: 4
+  order: 5
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
@@ -21,9 +21,17 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
   path: "$.jobs.*.steps[*].uses"
   matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
   level: warning
+
+- id: packageref-has-version
+  kind: xml_path_matches
+  paths: "**/*.csproj"
+  path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
+  matches: '^\d'
+  level: error
 ```
 
 ## See also
 
 - [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/)
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
+- [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/)

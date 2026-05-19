@@ -2,7 +2,7 @@
 title: 'json_schema_passes'
 description: 'Validate every JSON / YAML / TOML file in paths against a JSON Schema document. alint json_schema_passes rule, structured query family.'
 sidebar:
-  order: 7
+  order: 9
 ---
 
 Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.

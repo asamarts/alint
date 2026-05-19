@@ -1,8 +1,8 @@
 ---
-title: 'json_path_equals'
+title: 'xml_path_equals'
 description: 'Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.'
 sidebar:
-  order: 1
+  order: 4
 ---
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
@@ -47,6 +47,6 @@ Query a structured document with a JSONPath expression and assert every match de
 
 ## See also
 
+- [`json_path_equals`](/docs/rules/structured-query/json_path_equals/)
 - [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/)
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/)
-- [`xml_path_equals`](/docs/rules/structured-query/xml_path_equals/)

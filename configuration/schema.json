@@ -448,6 +448,8 @@
         { "$ref": "#/$defs/rule_yaml_path_matches" },
         { "$ref": "#/$defs/rule_toml_path_equals" },
         { "$ref": "#/$defs/rule_toml_path_matches" },
+        { "$ref": "#/$defs/rule_xml_path_equals" },
+        { "$ref": "#/$defs/rule_xml_path_matches" },
         { "$ref": "#/$defs/rule_json_schema_passes" },
         { "$ref": "#/$defs/rule_commented_out_code" },
         { "$ref": "#/$defs/rule_markdown_paths_resolve" },
@@ -814,6 +816,32 @@
       "required": ["paths", "path", "matches"],
       "properties": {
         "kind": { "const": "toml_path_matches" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "matches": { "type": "string" },
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_xml_path_equals": {
+      "description": "XML sibling of `json_path_equals`. XML maps to the same value tree via the xmltodict-style convention: attributes are `@name` keys, repeated child elements become an array, a leaf element collapses to its text string, namespaces flatten to local names, and every leaf value is a string (quote your `equals:`, e.g. `equals: \"4.0.0\"`). Typical use: enforce `$.Project.PropertyGroup.TargetFramework == \"net8.0\"` on every `.csproj`, or a Maven `$.project.parent.version` across `pom.xml`.",
+      "type": "object",
+      "required": ["paths", "path", "equals"],
+      "properties": {
+        "kind": { "const": "xml_path_equals" },
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "path": { "type": "string" },
+        "equals": {},
+        "if_present": { "$ref": "#/$defs/if_present" }
+      }
+    },
+
+    "rule_xml_path_matches": {
+      "description": "XML sibling of `json_path_matches` (same xmltodict-style mapping as `xml_path_equals`; all XML leaf values are strings). Typical use: `$.Project.ItemGroup.PackageReference[*]['@Version']` matches a version pattern across `.csproj`.",
+      "type": "object",
+      "required": ["paths", "path", "matches"],
+      "properties": {
+        "kind": { "const": "xml_path_matches" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "path": { "type": "string" },
         "matches": { "type": "string" },
