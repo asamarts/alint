@@ -229,6 +229,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   / billion-laughs was already closed by `roxmltree`'s
   `allow_dtd: false` default.) The gap existed only within
   `[Unreleased]`, so no released version is affected.
+- **Whole-file reads bounded — closes an OOM (DoS).** The
+  cross-file / structured rules (`registry_paths_resolve`,
+  `cross_file_value_equals`, `pair_hash`,
+  `generated_file_fresh`) read a manifest / source / target /
+  committed file fully into memory with no size cap, so a
+  hostile or accidental multi-GB file in a linted repo OOM-ed
+  the run. All such reads now go through
+  `crate::io::read_capped` — a `metadata` stat-gate so the
+  oversized bytes are never read, refusing anything over
+  `MAX_ANALYZE_BYTES` (256 MiB) with a clear "too large to
+  analyze" violation (never a silent skip — notably
+  `pair_hash`'s per-source read, which previously skipped
+  unreadable sources, now flags an over-cap source). Side
+  effect: `registry_paths_resolve` / `cross_file_value_equals`
+  read bytes + `from_utf8_lossy` instead of `read_to_string`,
+  so a non-UTF-8 manifest now surfaces as a parse error rather
+  than a read error (still a clear, distinct violation). The
+  gap existed only within `[Unreleased]`, so no released
+  version is affected.
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 
