@@ -133,6 +133,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   case-study coverage push is now rule-complete; the remaining
   items (#9 `apache/governance@v1`, #10 `dotnet@v1`) are bundled
   rulesets.
+- **`apache/governance@v1` bundled ruleset.** A new
+  `alint://bundled/apache/governance@v1` ruleset (composed of
+  existing rule kinds — **not** a new rule kind; the rule-kind
+  count is unchanged) covering the Apache Top-Level Project
+  governance / release-artefact baseline that arrow + spark +
+  airflow each re-implement by hand: LICENSE + NOTICE (incl. the
+  ASF attribution line, not merely existence) + KEYS +
+  RAT discipline (source-license headers reusing
+  `compliance/apache-2@v1`'s v0.9.18-broadened ASF-preamble
+  pattern verbatim; no compiled binaries in the source tree) +
+  README + changelog. Eight rules, ids namespaced `apache-gov-*`
+  so it is safe to adopt alongside `compliance/apache-2@v1` (the
+  governance superset vs. that ruleset's license-redistribution
+  focus). Tiered levels (legally load-bearing artefacts `error`,
+  release discipline `warning`, nice-to-have `info`); no fact
+  gate. 3 demand sources (arrow + spark + airflow converge on
+  9 of 12 governance artefacts). The ninth v0.10 case-study-
+  coverage item and the first bundled ruleset of the cut;
+  bundled-ruleset count 19 → 20.
 
 ### Security
 
