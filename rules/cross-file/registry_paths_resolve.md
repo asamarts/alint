@@ -10,7 +10,7 @@ A manifest file enumerates path entries; each must resolve to an on-disk artefac
 ```yaml
 - id: workspace-members-resolve
   kind: registry_paths_resolve
-  registry: Cargo.toml
+  source: Cargo.toml
   extract: { toml: "$.workspace.members[*]" }
   expect: dir
   must_contain: Cargo.toml

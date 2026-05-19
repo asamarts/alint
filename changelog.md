@@ -115,13 +115,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the first that adds **two** rule kinds (2 demand sources).
 - **`pair_hash` rule kind.** Cross-file: the `algorithm` digest
   (`sha256` default / `sha512`) of every file matching `source`
-  must appear in the single `in` target — either as an embedded
-  hex substring (`format: contains`, default) or a coreutils /
-  go-`.sum`-style `<hex>  <path>` manifest line
+  must appear in the single `target` file — either as an
+  embedded hex substring (`format: contains`, default) or a
+  coreutils / go-`.sum`-style `<hex>  <path>` manifest line
   (`format: sums-line`, path token = the source's path; a
   leading `*` binary marker tolerated). One violation per source
-  whose digest is absent or mismatched; a missing `in` is one
-  violation. Raw bytes are hashed (an integrity pin — a newline
+  whose digest is absent or mismatched; a missing `target` is
+  one violation. Raw bytes are hashed (an integrity pin — a newline
   change flips the verdict); detection-only (alint never
   regenerates the manifest, same posture as `file_hash`). The
   cross-file sibling of `file_hash` (literal-hash pin) and

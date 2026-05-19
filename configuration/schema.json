@@ -1059,18 +1059,18 @@
     },
 
     "rule_pair_hash": {
-      "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `in` target file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `in` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
+      "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `target` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
       "type": "object",
-      "required": ["source", "in"],
+      "required": ["source", "target"],
       "properties": {
         "kind": { "const": "pair_hash" },
         "source": {
           "type": "string",
           "description": "Literal path or glob selecting the file(s) whose content is hashed (one check per match)."
         },
-        "in": {
+        "target": {
           "type": "string",
-          "description": "The target file that must carry the digest (a `.sum` / `SHA256SUMS` / file with an embedded hash)."
+          "description": "The single file that must carry the digest (a `.sum` / `SHA256SUMS` / file with an embedded hash)."
         },
         "algorithm": {
           "enum": ["sha256", "sha512"],
@@ -1078,7 +1078,7 @@
         },
         "format": {
           "enum": ["contains", "sums-line"],
-          "description": "How the digest must appear in `in`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path."
+          "description": "How the digest must appear in `target`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path."
         }
       }
     },
@@ -1086,12 +1086,12 @@
     "rule_registry_paths_resolve": {
       "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
       "type": "object",
-      "required": ["registry", "extract"],
+      "required": ["source", "extract"],
       "properties": {
         "kind": { "const": "registry_paths_resolve" },
-        "registry": {
+        "source": {
           "type": "string",
-          "description": "Manifest path, or a glob to run once per matching manifest."
+          "description": "The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries."
         },
         "extract": {
           "type": "object",
