@@ -51,10 +51,10 @@ yourself (see the design doc, open question 1).
 ### `apache-gov-notice-asf-attribution`
 
 - **kind**: [`file_content_matches`](/docs/rules/content/file_content_matches/)
-- **level**: `error`
+- **level**: `warning`
 - **policy**: <https://www.apache.org/legal/src-headers.html#notice>
 
-> Apache governance: NOTICE must carry the ASF attribution line — "This product includes software developed at / The Apache Software Foundation (https://www.apache.org/).".
+> Apache governance: NOTICE should carry the ASF attribution — either the bare "Copyright <year> The Apache Software Foundation" or the long "This product includes software developed at / The Apache Software Foundation (https://www.apache.org/)." form.
 
 ### `apache-gov-keys-exists`
 
@@ -152,20 +152,28 @@ rules:
     policy_url: "https://www.apache.org/legal/release-policy.html#notice-file"
 
   # The NOTICE must carry the ASF attribution, not merely exist —
-  # this is the check `compliance/apache-2@v1` does NOT do. The
-  # foundation parenthetical is the invariant across every
-  # historical NOTICE variant (the "This product includes
-  # software developed at" prefix wraps differently); match it
-  # scheme- and trailing-slash-tolerantly across line breaks.
+  # the check `compliance/apache-2@v1` does NOT do. Match only
+  # the invariant substring "The Apache Software Foundation":
+  # this covers BOTH the long template ("This product includes
+  # software developed at / The Apache Software Foundation
+  # (https://www.apache.org/).") AND the very common bare form
+  # ("Copyright <year> The Apache Software Foundation"). The
+  # `(https://www.apache.org/)` parenthetical is LICENSE-appendix
+  # boilerplate, NOT a NOTICE invariant — requiring it
+  # false-positived on legitimate TLP NOTICEs (P1 #44 / D1).
+  # `warning`, not `error`: a wording mismatch on a
+  # baseline-adoption ruleset must not hard-block.
   - id: apache-gov-notice-asf-attribution
     kind: file_content_matches
     paths: ["NOTICE", "NOTICE.txt"]
-    pattern: 'The Apache Software Foundation \(https?://www\.apache\.org/?\)'
-    level: error
+    pattern: 'The Apache Software Foundation'
+    level: warning
     message: >-
-      Apache governance: NOTICE must carry the ASF attribution
-      line — "This product includes software developed at / The
-      Apache Software Foundation (https://www.apache.org/).".
+      Apache governance: NOTICE should carry the ASF attribution
+      — either the bare "Copyright <year> The Apache Software
+      Foundation" or the long "This product includes software
+      developed at / The Apache Software Foundation
+      (https://www.apache.org/)." form.
     policy_url: "https://www.apache.org/legal/src-headers.html#notice"
 
   # --- Release-signing (KEYS) --------------------------------------

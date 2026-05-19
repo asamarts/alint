@@ -138,8 +138,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   existing rule kinds — **not** a new rule kind; the rule-kind
   count is unchanged) covering the Apache Top-Level Project
   governance / release-artefact baseline that arrow + spark +
-  airflow each re-implement by hand: LICENSE + NOTICE (incl. the
-  ASF attribution line, not merely existence) + KEYS +
+  airflow each re-implement by hand: LICENSE + NOTICE (incl. an
+  ASF-attribution content check — bare or long form, `warning`
+  — not merely existence) + KEYS +
   RAT discipline (source-license headers reusing
   `compliance/apache-2@v1`'s v0.9.18-broadened ASF-preamble
   pattern verbatim; no compiled binaries in the source tree) +
