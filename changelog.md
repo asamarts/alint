@@ -178,6 +178,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   content-complete (8 rule kinds + 2 bundled rulesets);
   bundled-ruleset count 20 → 21.
 
+### Fixed
+
+- **`pair_hash` `sums-line` false "not listed in manifest" on
+  `./`-prefixed paths.** The `sums-line` path-token compare
+  stripped a coreutils binary-mode `*` marker but not a
+  `find`-style `./` prefix, so a manifest line `<hex>  ./path`
+  (what `find … -exec sha256sum` and Go checksum tooling emit)
+  did not match the source's repo-root-relative index path and
+  produced a false "not listed in manifest" violation on a
+  correctly-pinned file. Both `*` and a leading `./` are now
+  normalised off before the compare. Gap was `[Unreleased]`-only
+  (`pair_hash` never reached a release).
+
 ### Security
 
 - **Spawn trust-gate generalised — closes a `generated_file_fresh`
