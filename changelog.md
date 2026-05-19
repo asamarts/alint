@@ -194,6 +194,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rejected in an extended config. The gap existed only within
   `[Unreleased]` (`generated_file_fresh` never reached a
   release), so no released version is affected.
+- **XML parsing recursion bound — closes a deep-nesting
+  process-abort (DoS).** The `xml_path_*` arm's
+  `element_to_value` recursed once per nesting level with no
+  depth limit; `roxmltree`'s default options bound node count
+  but not nesting depth (the JSON/YAML/TOML parsers carry
+  internal recursion limits the XML arm lacked). A crafted or
+  accidental deeply-nested XML file (reachable from any
+  passively-linted repo once an `xml_path_*` rule or the
+  `dotnet@v1` ruleset, which targets `**/*.csproj`, is active)
+  overflowed the stack and aborted the whole `alint` process —
+  an unrecoverable abort, not a catchable panic. Now bounded by
+  `MAX_XML_DEPTH` (256): past the bound the file yields one
+  ordinary parse-error violation ("XML nesting exceeds the
+  maximum supported depth"), per-file contained, no abort. (XXE
+  / billion-laughs was already closed by `roxmltree`'s
+  `allow_dtd: false` default.) The gap existed only within
+  `[Unreleased]`, so no released version is affected.
 
 ## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 
