@@ -194,6 +194,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correctly-pinned file. Both `*` and a leading `./` are now
   normalised off before the compare. Gap was `[Unreleased]`-only
   (`pair_hash` never reached a release).
+- **`registry_paths_resolve` / `cross_file_value_equals`
+  silently skipped real literal paths containing `$`, `` ` ``,
+  or `(.`.** The shared `is_non_literal` heuristic (which
+  decides an entry is a computed/interpolated value to skip
+  rather than check) over-matched: a bare `$`, backtick, or
+  `(.` — all legal in real filenames — made a literal path get
+  silently dropped (never checked, never reported: a false
+  negative). Narrowed to the genuine interpolation /
+  concatenation markers only: `${`, `$(`, `{{`, `+ `. Such
+  entries are now checked. (The skip remains intentionally
+  silent — `alint check` has no informational-finding channel;
+  visibly surfacing skipped entries is a tracked v0.11 item.)
+  Gap was `[Unreleased]`-only.
 
 ### Security
 
