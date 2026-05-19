@@ -16,6 +16,7 @@ Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list
 - [`compliance/apache-2@v1`](/docs/bundled-rulesets/compliance-apache-2/) — Hygiene checks for repositories distributed under the Apache License, Version 2.0.
 - [`compliance/reuse@v1`](/docs/bundled-rulesets/compliance-reuse/) — Hygiene checks for repositories that follow the FSFE REUSE Specification (https://reuse.software/) — every licensable file declares its license + copyright via an SPDX header (or a `.license` companion / REUSE.toml entry), and the full license texts live under `LICENSES/`.
 - [`docs/adr@v1`](/docs/bundled-rulesets/docs-adr/) — Architecture Decision Records following the MADR ("Markdown Architectural Decision Records") convention: files named NNNN-title.md under docs/adr/, each with at least Status, Context, and Decision sections.
+- [`dotnet@v1`](/docs/bundled-rulesets/dotnet/) — Baseline conventions for .NET projects.
 - [`go@v1`](/docs/bundled-rulesets/go/) — Hygiene checks for Go modules.
 - [`hygiene/lockfiles@v1`](/docs/bundled-rulesets/hygiene-lockfiles/) — Lockfile discipline: exactly one package-manager's lockfile per workspace, and lockfiles only at the workspace root.
 - [`hygiene/no-tracked-artifacts@v1`](/docs/bundled-rulesets/hygiene-no-tracked-artifacts/) — The set of paths/files that essentially no repository should track: build outputs, dependency caches, editor/OS junk, secrets-shaped files, oversized blobs.

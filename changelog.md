@@ -152,6 +152,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   9 of 12 governance artefacts). The ninth v0.10 case-study-
   coverage item and the first bundled ruleset of the cut;
   bundled-ruleset count 19 → 20.
+- **`dotnet@v1` bundled ruleset.** A new
+  `alint://bundled/dotnet@v1` ecosystem ruleset (top-level, like
+  `rust`/`go`/`java`; composed of existing rule kinds — **not** a
+  new rule kind, the rule-kind count is unchanged) for the .NET
+  project baseline. Ecosystem-gated via `facts.has_dotnet`
+  (`*.sln` / `**/*.csproj` / `.fsproj` / `.vbproj` /
+  `global.json`) so it is a silent no-op in non-.NET repos and
+  the non-.NET parts of a polyglot monorepo. Seven rules; three
+  exercise the now-shipped structured-query family —
+  `json_path_matches` on `global.json` (`$.sdk.version`),
+  `xml_path_matches` + `xml_path_equals` on `.csproj` /
+  `Directory.Packages.props` (SDK-style, `Nullable`, Central
+  Package Management) — the concrete payoff that made this item
+  depend on the v0.10 `xml_path_*` work. Deliberately does
+  **not** require a per-`<PackageReference>` `Version` (CPM
+  makes it absent by design — enforcing it would false-positive
+  across dotnet/runtime); the structured-query rules are
+  `if_present: true` and levels are non-blocking (no `error`)
+  given the adopter surface (every `dotnet/*` + every Azure SDK
+  + every `microsoft/*` .NET project). 1 demand source
+  (dotnet/runtime) but a vast adopter surface. The tenth and
+  **final v0.10 case-study-coverage item** — v0.10 is now
+  content-complete (8 rule kinds + 2 bundled rulesets);
+  bundled-ruleset count 20 → 21.
 
 ### Security
 
