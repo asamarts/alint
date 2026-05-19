@@ -113,6 +113,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (MIT/Apache, read-only DOM). Per-file; `version: 1`
   unchanged. The seventh v0.10 case-study-coverage item — and
   the first that adds **two** rule kinds (2 demand sources).
+- **`pair_hash` rule kind.** Cross-file: the `algorithm` digest
+  (`sha256` default / `sha512`) of every file matching `source`
+  must appear in the single `in` target — either as an embedded
+  hex substring (`format: contains`, default) or a coreutils /
+  go-`.sum`-style `<hex>  <path>` manifest line
+  (`format: sums-line`, path token = the source's path; a
+  leading `*` binary marker tolerated). One violation per source
+  whose digest is absent or mismatched; a missing `in` is one
+  violation. Raw bytes are hashed (an integrity pin — a newline
+  change flips the verdict); detection-only (alint never
+  regenerates the manifest, same posture as `file_hash`). The
+  cross-file sibling of `file_hash` (literal-hash pin) and
+  `generated_file_fresh`; golang/go `fips140.sum` is the
+  canonical, highest-stakes use (k8s + tokio the same shape).
+  Reuses the existing `sha2` dependency — no new crate.
+  Cross-file; `version: 1` unchanged. The **eighth and final**
+  v0.10 rule-kind item (3 demand sources) — the v0.10
+  case-study coverage push is now rule-complete; the remaining
+  items (#9 `apache/governance@v1`, #10 `dotnet@v1`) are bundled
+  rulesets.
 
 ### Security
 

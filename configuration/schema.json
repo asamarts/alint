@@ -459,6 +459,7 @@
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
+        { "$ref": "#/$defs/rule_pair_hash" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
         { "$ref": "#/$defs/rule_cross_file_value_equals" },
         { "$ref": "#/$defs/rule_ordered_block" },
@@ -1053,6 +1054,31 @@
         "partner": {
           "type": "string",
           "description": "Path template resolved per primary match. Example: \"{dir}/{stem}.h\"."
+        }
+      }
+    },
+
+    "rule_pair_hash": {
+      "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `in` target file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `in` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
+      "type": "object",
+      "required": ["source", "in"],
+      "properties": {
+        "kind": { "const": "pair_hash" },
+        "source": {
+          "type": "string",
+          "description": "Literal path or glob selecting the file(s) whose content is hashed (one check per match)."
+        },
+        "in": {
+          "type": "string",
+          "description": "The target file that must carry the digest (a `.sum` / `SHA256SUMS` / file with an embedded hash)."
+        },
+        "algorithm": {
+          "enum": ["sha256", "sha512"],
+          "description": "Digest algorithm (default: sha256)."
+        },
+        "format": {
+          "enum": ["contains", "sums-line"],
+          "description": "How the digest must appear in `in`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path."
         }
       }
     },
