@@ -1235,7 +1235,12 @@
           "type": "string",
           "description": "Generator cwd, relative to the lint root (default: lint root)."
         },
-        "normalize": { "enum": ["none", "trim", "final-newline"] }
+        "normalize": { "enum": ["none", "trim", "final-newline"] },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Generator timeout in seconds (default 120). On timeout the child is killed and one violation is emitted."
+        }
       }
     },
 
@@ -1286,6 +1291,11 @@
         "files_pattern": {
           "type": "string",
           "description": "Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers)."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted."
         }
       }
     },

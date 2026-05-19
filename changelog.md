@@ -63,8 +63,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Spawn failure, non-zero exit, and a missing committed file are
   each a distinct, clearly-worded violation; `normalize`
   (`none` / `trim` / `final-newline`) absorbs trailing-newline
-  churn. Single-shot; `version: 1` unchanged. Fourth rule kind
-  of the v0.10 case-study coverage push (8 demand sources).
+  churn. Single-shot; opt-in `timeout:` (seconds, default 120 —
+  a hung generator yields one timeout violation, not a hung
+  run); `version: 1` unchanged. Fourth rule kind of the v0.10
+  case-study coverage push (8 demand sources).
 - **`import_gate` rule kind.** Forbid imports whose extracted
   target matches a `forbid` regex, within the `paths` scope — an
   architectural import firewall (k8s `staging/` layer
@@ -92,9 +94,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `files_pattern` (capture group 1 = path) the tool's own
   offender list is parsed into one violation per file; a
   non-zero exit is never swallowed into a pass. Single-shot,
-  opt-in, trust-gated like `command`; `version: 1` unchanged.
-  Sixth rule kind of the v0.10 case-study coverage push (5
-  demand sources).
+  opt-in, trust-gated like `command`; opt-in `timeout:`
+  (seconds, default 120 — a hung checker yields one timeout
+  violation, not a hung run); `version: 1` unchanged. Sixth
+  rule kind of the v0.10 case-study coverage push (5 demand
+  sources).
 - **`xml_path_equals` + `xml_path_matches` rule kinds.** The XML
   arm of the structured-query family, completing JSON / YAML /
   TOML / **XML** under one RFC 9535 JSONPath query language.
