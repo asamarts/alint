@@ -8,6 +8,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-05-20 (case-study coverage push: 8 rule kinds + 2 bundled rulesets + pre-release hardening sweep)
+
+The "case-study coverage push" minor. Eight new rule kinds and
+two bundled rulesets aggregated from the 30-OSS-repo demand-
+validation pass ([`docs/development/launch-evidence.md`](docs/development/launch-evidence.md)),
+plus three pre-release security retirements that landed alongside.
+Headline shape: cross-file (`registry_paths_resolve` /
+`cross_file_value_equals` / `pair_hash`) makes manifest-driven
+policy a first-class shape; per-file (`ordered_block` /
+`import_gate`) covers the keep-sorted and architectural-import-
+firewall patterns five-plus case studies wanted; single-shot
+(`generated_file_fresh` / `command_idempotent`) extends the
+`command`-rule trust tier to freshness and idempotency gates;
+the XML arm of structured-query (`xml_path_equals` /
+`xml_path_matches`) reaches the .NET ecosystem (the new
+`dotnet@v1` bundled ruleset is the concrete payoff); Apache TLP
+governance lands as `apache/governance@v1`. Security hardening
+retired three audit-found gaps before tagging: spawn-trust-gate
+now covers every spawning rule kind (not just literal
+`kind: command`); XML parsing has a 256-deep recursion bound;
+every cross-file / structured rule-level whole-file read is
+bounded at 256 MiB. No schema-version bump; `version: 1`
+configs continue to work.
+
 ### Added
 
 - **`registry_paths_resolve` rule kind.** A manifest file
@@ -5051,7 +5075,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.9.23...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/asamarts/alint/compare/v0.9.23...v0.10.0
 [0.9.23]: https://github.com/asamarts/alint/compare/v0.9.22...v0.9.23
 [0.9.22]: https://github.com/asamarts/alint/compare/v0.9.21...v0.9.22
 [0.9.21]: https://github.com/asamarts/alint/compare/v0.9.20...v0.9.21

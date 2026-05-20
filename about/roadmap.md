@@ -12,18 +12,21 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.9.23** (2026-05-17). GitHub Action pinning
-plus release-pipeline hardening: a pinned action ref now pins the
-installed binary (`uses: asamarts/alint@vX.Y.Z` reproducible with
-zero release-time maintenance), `bump-version.sh` refreshes
-`Cargo.lock` on bump (proven on this release: the cross-platform
-build matrix passed first try, preventing the v0.9.22 incident),
-a cargo-deny license/supply-chain gate, the generated
-`/docs/rules/` index corrected to the canonical "70 rule kinds",
-and an `action.yml` empty-ref provenance hardening. First
-review-gated release (cut via PR #30). v0.9.22 (2026-05-15) was
-doc-drift cleanup plus prevention automation; v0.9.21 shipped
-commit-range mode for `git_commit_message` (closes #26);
+**Latest release: v0.10.0** (2026-05-20). The case-study coverage
+push: eight new rule kinds and two bundled rulesets aggregated
+from the 30-OSS-repo demand-validation pass — `registry_paths_resolve`,
+`cross_file_value_equals`, `ordered_block`, `generated_file_fresh`,
+`import_gate`, `command_idempotent`, `xml_path_equals` /
+`xml_path_matches`, `pair_hash`, plus `apache/governance@v1` and
+`dotnet@v1`. Three pre-release security retirements landed
+alongside (spawn-trust-gate generalised, XML recursion bound,
+whole-file reads capped at 256 MiB). Rule-kind count 71 → 79;
+bundled-ruleset count 19 → 21. No schema-version bump.
+v0.9.23 (2026-05-17) shipped GitHub Action pinning plus release-
+pipeline hardening (pinned-ref binary, cargo-deny, the bench-gate
+re-engineering); v0.9.22 (2026-05-15) was doc-drift cleanup plus
+prevention automation; v0.9.21 shipped commit-range mode for
+`git_commit_message` (closes #26);
 v0.9.12 - v0.9.20 brought the launch-readiness capstone (width-
 aware output, bundled-rule message audit, em-dash scrub, install-
 snippet pin sweep, polyglot demo). See
