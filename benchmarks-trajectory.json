@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.10.0",
+      "date": "2026-05-20",
+      "headline": "The \"case-study coverage push\" minor.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11817.567226013332,
+          "stddev_ms": 179.65318496062835,
+          "display": "11.82 s ± 0.18"
+        },
+        "s6_1m_full": {
+          "mean_ms": 12135.877477046668,
+          "stddev_ms": 771.7047295854519,
+          "display": "12.14 s ± 0.77"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15554.8103118,
+          "stddev_ms": 13.471920277156315,
+          "display": "15.55 s ± 0.01"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7698.347548473333,
+          "stddev_ms": 43.567079831432586,
+          "display": "7.70 s ± 0.04"
+        }
+      }
+    },
+    {
       "version": "v0.9.23",
       "date": "2026-05-17",
       "headline": "Distribution + release-reliability release.",
