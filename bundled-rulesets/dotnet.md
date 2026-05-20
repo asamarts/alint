@@ -60,7 +60,7 @@ exists, CPM is actually enabled.
 - **when**: `facts.has_dotnet`
 - **policy**: <https://learn.microsoft.com/dotnet/core/project-sdk/overview>
 
-> .NET: prefer SDK-style projects (`<Project Sdk="Microsoft.NET.Sdk">`). Legacy non-SDK-style .csproj is harder to maintain and tool.
+> .NET: prefer SDK-style projects (`<Project Sdk="Microsoft.NET.Sdk">`). Legacy non-SDK-style .csproj is harder to maintain and is poorly supported by modern dotnet tooling.
 
 ### `dotnet-csproj-nullable-enabled`
 
@@ -192,8 +192,9 @@ rules:
     level: warning
     message: >-
       .NET: prefer SDK-style projects
-      (`<Project Sdk="Microsoft.NET.Sdk">`). Legacy
-      non-SDK-style .csproj is harder to maintain and tool.
+      (`<Project Sdk="Microsoft.NET.Sdk">`). Legacy non-SDK-style
+      .csproj is harder to maintain and is poorly supported by
+      modern dotnet tooling.
     policy_url: "https://learn.microsoft.com/dotnet/core/project-sdk/overview"
 
   - id: dotnet-csproj-nullable-enabled
