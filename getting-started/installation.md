@@ -42,7 +42,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.9`) and the raw git tag (`:v0.10.0`).
+Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.10.0`).
 
 ## crates.io
 

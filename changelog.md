@@ -8,6 +8,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Whole-file reads bounded — extended reach.** The Phase 3
+  [v0.10] sweep brought every cross-file / structured rule-level
+  whole-file read through `crate::io::read_capped` (256 MiB cap).
+  Two pre-existing whole-file read sites that pre-dated v0.10
+  were missed by that sweep and now also go through the cap:
+  `json_schema_passes` (each matched file + the schema file at
+  build time) and `for_each_dir`'s literal-path nested-rule
+  bypass (`crates/alint-rules/src/for_each_dir.rs:371`).
+  Over-cap files now emit a clear "too large to analyze
+  (N bytes; 256 MiB cap)" violation rather than the previous
+  silent skip (which masked an OOM-DoS surface on hostile /
+  accidental multi-GB candidate files). `version: 1` unchanged.
+
 ## [0.10.0] — 2026-05-20 (case-study coverage push: 8 rule kinds + 2 bundled rulesets + pre-release hardening sweep)
 
 The "case-study coverage push" minor. Eight new rule kinds and
