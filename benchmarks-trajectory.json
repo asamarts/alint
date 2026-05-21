@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.10.2",
+      "date": "2026-05-21",
+      "headline": "Targeted follow-up to v0.10.1.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12277.058410693333,
+          "stddev_ms": 287.5524497389837,
+          "display": "12.28 s ± 0.29"
+        },
+        "s6_1m_full": {
+          "mean_ms": 12271.086320753333,
+          "stddev_ms": 270.65893495349684,
+          "display": "12.27 s ± 0.27"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15496.823780059998,
+          "stddev_ms": 199.04670218632168,
+          "display": "15.50 s ± 0.20"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7943.393411873334,
+          "stddev_ms": 151.66992398421868,
+          "display": "7.94 s ± 0.15"
+        }
+      }
+    },
+    {
       "version": "v0.10.1",
       "date": "2026-05-20",
       "headline": "Small post-release follow-up to v0.10.0.",
