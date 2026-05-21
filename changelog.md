@@ -8,6 +8,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-05-21 (asciinema-demo underline-extension fix)
+
+Targeted follow-up to v0.10.1. The alint.org landing-page demo
+rendered `docs:` link underlines extending past the URL text to
+the end of the terminal row in `asciinema-player`. Root cause:
+the human formatter emitted `\e[4m\e[34m{URL}\e[0m` around each
+URL, and the player's `.ap-underline` class extended visually
+across the row's trailing cells. Fix: when an OSC 8 hyperlink
+wrap is also being emitted around the URL, drop the explicit
+`\e[4m` — the OSC 8 already carries the link semantic and the
+terminal handles the link affordance itself. The fallback path
+(no OSC 8 detected) keeps `\e[4m` as the visual link cue.
+Bundled in: a new `ALINT_FORCE_HYPERLINKS=1` env var that lets
+screen-recording captures opt into OSC 8 emission even when
+stdout isn't a TTY. No schema-version bump; `version: 1`
+configs continue to work; safe upgrade for every consumer.
+
 ### Changed
 
 - **Human output: `docs:` URLs drop the explicit underline
@@ -5132,7 +5149,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/asamarts/alint/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/asamarts/alint/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/asamarts/alint/compare/v0.9.23...v0.10.0
 [0.9.23]: https://github.com/asamarts/alint/compare/v0.9.22...v0.9.23
