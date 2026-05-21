@@ -35,7 +35,8 @@ scenario the v0.9.6 `scope_filter:` primitive exists for.
 
 | Version | Date | 1M S3 full | 1M S6 full | 1M S7 full | 1M S9 full | Headline change |
 |---|---|---:|---:|---:|---:|---|
-| **v0.10.0** | 2026-05-20 | 11.82 s ± 0.18 | 12.14 s ± 0.77 | 15.55 s ± 0.01 | 7.70 s ± 0.04 | The "case-study coverage push" minor. |
+| **v0.10.1** | 2026-05-20 | 11.91 s ± 0.06 | 12.02 s ± 0.28 | 15.51 s ± 0.25 | 7.96 s ± 0.07 | Small post-release follow-up to v0.10.0. |
+| v0.10.0 | 2026-05-20 | 11.82 s ± 0.18 | 12.14 s ± 0.77 | 15.55 s ± 0.01 | 7.70 s ± 0.04 | The "case-study coverage push" minor. |
 | v0.9.23 | 2026-05-17 | 11.94 s ± 0.14 | 11.88 s ± 0.12 | 15.23 s ± 0.16 | 7.55 s ± 0.06 | Distribution + release-reliability release. |
 | v0.9.22 | 2026-05-14 | 11.71 s ± 0.25 | 11.74 s ± 0.10 | 15.40 s ± 0.01 | 7.41 s ± 0.07 | Doc + prevention-automation cleanup release. |
 | v0.9.21 | 2026-05-14 | 11.60 s ± 0.16 | 11.75 s ± 0.28 | 15.40 s ± 0.15 | 7.64 s ± 0.11 | Headline feature: the `git_commit_message` rule's new `since:` option ([#26](https://github.com/asamarts/alint/issues/26)), which makes the rule usable on `pull_request`-trigger CI for the first time. |
@@ -71,7 +72,8 @@ Eight filename-only rules (`filename_case`, `filename_regex`). Pure walker plus 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 8 ms ± 1 | 20 ms ± 1 | 147 ms ± 2 | 1.53 s ± 0.00 |
+| **v0.10.1** | 11 ms ± 11 | 20 ms ± 1 | 151 ms ± 7 | 1.55 s ± 0.04 |
+| v0.10.0 | 8 ms ± 1 | 20 ms ± 1 | 147 ms ± 2 | 1.53 s ± 0.00 |
 | v0.9.23 | 8 ms ± 1 | 20 ms ± 1 | 146 ms ± 7 | 1.49 s ± 0.01 |
 | v0.9.22 | 8 ms ± 1 | 19 ms ± 1 | 147 ms ± 9 | 1.48 s ± 0.02 |
 | v0.9.21 | 8 ms ± 1 | 20 ms ± 1 | 148 ms ± 12 | 1.50 s ± 0.01 |
@@ -98,7 +100,8 @@ Eight filename-only rules (`filename_case`, `filename_regex`). Pure walker plus 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 19 ms ± 1 | 51 ms ± 11 | 426 ms ± 16 | 4.23 s ± 0.02 |
+| **v0.10.1** | 19 ms ± 1 | 47 ms ± 1 | 428 ms ± 14 | 4.24 s ± 0.06 |
+| v0.10.0 | 19 ms ± 1 | 51 ms ± 11 | 426 ms ± 16 | 4.23 s ± 0.02 |
 | v0.9.23 | 22 ms ± 9 | 46 ms ± 1 | 412 ms ± 16 | 4.19 s ± 0.06 |
 | v0.9.22 | 23 ms ± 10 | 46 ms ± 1 | 409 ms ± 19 | 4.09 s ± 0.02 |
 | v0.9.21 | 12 ms ± 1 | 47 ms ± 5 | 415 ms ± 13 | 4.23 s ± 0.06 |
@@ -129,7 +132,8 @@ Eight existence + content rules (`file_exists`, `file_absent`, `file_content_for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 10 ms ± 0 | 32 ms ± 1 | 254 ms ± 5 | 2.81 s ± 0.03 |
+| **v0.10.1** | 10 ms ± 1 | 32 ms ± 1 | 265 ms ± 16 | 2.80 s ± 0.03 |
+| v0.10.0 | 10 ms ± 0 | 32 ms ± 1 | 254 ms ± 5 | 2.81 s ± 0.03 |
 | v0.9.23 | 10 ms ± 1 | 40 ms ± 18 | 253 ms ± 10 | 2.86 s ± 0.12 |
 | v0.9.22 | 10 ms ± 1 | 35 ms ± 12 | 253 ms ± 9 | 2.83 s ± 0.04 |
 | v0.9.21 | 10 ms ± 1 | 32 ms ± 1 | 250 ms ± 10 | 2.87 s ± 0.08 |
@@ -156,7 +160,8 @@ Eight existence + content rules (`file_exists`, `file_absent`, `file_content_for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 25 ms ± 11 | 50 ms ± 7 | 421 ms ± 15 | 4.30 s ± 0.10 |
+| **v0.10.1** | 21 ms ± 1 | 50 ms ± 2 | 431 ms ± 17 | 4.38 s ± 0.01 |
+| v0.10.0 | 25 ms ± 11 | 50 ms ± 7 | 421 ms ± 15 | 4.30 s ± 0.10 |
 | v0.9.23 | 21 ms ± 1 | 48 ms ± 1 | 433 ms ± 13 | 4.25 s ± 0.05 |
 | v0.9.22 | 20 ms ± 1 | 48 ms ± 1 | 428 ms ± 11 | 4.24 s ± 0.06 |
 | v0.9.21 | 14 ms ± 1 | 48 ms ± 1 | 424 ms ± 17 | 4.28 s ± 0.04 |
@@ -187,7 +192,8 @@ Eight existence + content rules (`file_exists`, `file_absent`, `file_content_for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 24 ms ± 1 | 129 ms ± 5 | 1.19 s ± 0.02 | 11.82 s ± 0.18 |
+| **v0.10.1** | 24 ms ± 1 | 128 ms ± 2 | 1.19 s ± 0.03 | 11.91 s ± 0.06 |
+| v0.10.0 | 24 ms ± 1 | 129 ms ± 5 | 1.19 s ± 0.02 | 11.82 s ± 0.18 |
 | v0.9.23 | 24 ms ± 1 | 123 ms ± 2 | 1.16 s ± 0.03 | 11.94 s ± 0.14 |
 | v0.9.22 | 23 ms ± 1 | 124 ms ± 2 | 1.14 s ± 0.04 | 11.71 s ± 0.25 |
 | v0.9.21 | 24 ms ± 1 | 125 ms ± 2 | 1.16 s ± 0.02 | 11.60 s ± 0.16 |
@@ -214,7 +220,8 @@ Eight existence + content rules (`file_exists`, `file_absent`, `file_content_for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 29 ms ± 1 | 81 ms ± 7 | 607 ms ± 8 | 6.40 s ± 0.01 |
+| **v0.10.1** | 29 ms ± 1 | 83 ms ± 11 | 637 ms ± 15 | 6.53 s ± 0.02 |
+| v0.10.0 | 29 ms ± 1 | 81 ms ± 7 | 607 ms ± 8 | 6.40 s ± 0.01 |
 | v0.9.23 | 28 ms ± 1 | 83 ms ± 13 | 604 ms ± 12 | 6.38 s ± 0.07 |
 | v0.9.22 | 31 ms ± 10 | 78 ms ± 1 | 601 ms ± 10 | 6.40 s ± 0.07 |
 | v0.9.21 | 21 ms ± 1 | 78 ms ± 1 | 610 ms ± 16 | 6.48 s ± 0.03 |
@@ -245,7 +252,8 @@ Five rules from the v0.6 `agent-hygiene` bundled ruleset (`file_absent`, `file_c
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 14 ms ± 15 | 22 ms ± 1 | 156 ms ± 11 | 1.58 s ± 0.02 |
+| **v0.10.1** | 9 ms ± 1 | 22 ms ± 1 | 158 ms ± 10 | 1.60 s ± 0.03 |
+| v0.10.0 | 14 ms ± 15 | 22 ms ± 1 | 156 ms ± 11 | 1.58 s ± 0.02 |
 | v0.9.23 | 9 ms ± 1 | 30 ms ± 18 | 154 ms ± 11 | 1.54 s ± 0.01 |
 | v0.9.22 | 9 ms ± 1 | 21 ms ± 1 | 150 ms ± 6 | 1.53 s ± 0.03 |
 | v0.9.21 | 9 ms ± 1 | 26 ms ± 12 | 157 ms ± 15 | 1.55 s ± 0.04 |
@@ -272,7 +280,8 @@ Five rules from the v0.6 `agent-hygiene` bundled ruleset (`file_absent`, `file_c
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 21 ms ± 1 | 50 ms ± 8 | 412 ms ± 13 | 4.18 s ± 0.04 |
+| **v0.10.1** | 21 ms ± 3 | 48 ms ± 1 | 423 ms ± 16 | 4.24 s ± 0.06 |
+| v0.10.0 | 21 ms ± 1 | 50 ms ± 8 | 412 ms ± 13 | 4.18 s ± 0.04 |
 | v0.9.23 | 24 ms ± 8 | 47 ms ± 1 | 410 ms ± 14 | 4.12 s ± 0.03 |
 | v0.9.22 | 21 ms ± 1 | 50 ms ± 9 | 413 ms ± 14 | 4.20 s ± 0.02 |
 | v0.9.21 | 14 ms ± 1 | 47 ms ± 1 | 404 ms ± 16 | 4.17 s ± 0.03 |
@@ -303,7 +312,8 @@ Four content-edit rules under `--fix` (`final_newline`, `no_trailing_whitespace`
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 15 ms ± 1 | 95 ms ± 2 | 916 ms ± 14 | 9.30 s ± 0.04 |
+| **v0.10.1** | 15 ms ± 1 | 94 ms ± 4 | 932 ms ± 14 | 9.45 s ± 0.45 |
+| v0.10.0 | 15 ms ± 1 | 95 ms ± 2 | 916 ms ± 14 | 9.30 s ± 0.04 |
 | v0.9.23 | 15 ms ± 1 | 95 ms ± 10 | 910 ms ± 10 | 9.11 s ± 0.20 |
 | v0.9.22 | 15 ms ± 1 | 92 ms ± 2 | 902 ms ± 15 | 9.24 s ± 0.11 |
 | v0.9.21 | 15 ms ± 1 | 96 ms ± 8 | 906 ms ± 23 | 9.14 s ± 0.29 |
@@ -330,7 +340,8 @@ Four content-edit rules under `--fix` (`final_newline`, `no_trailing_whitespace`
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 20 ms ± 1 | 54 ms ± 10 | 449 ms ± 15 | 4.55 s ± 0.10 |
+| **v0.10.1** | 22 ms ± 3 | 50 ms ± 1 | 462 ms ± 16 | 4.62 s ± 0.04 |
+| v0.10.0 | 20 ms ± 1 | 54 ms ± 10 | 449 ms ± 15 | 4.55 s ± 0.10 |
 | v0.9.23 | 20 ms ± 1 | 49 ms ± 1 | 448 ms ± 18 | 4.50 s ± 0.05 |
 | v0.9.22 | 20 ms ± 1 | 59 ms ± 18 | 451 ms ± 16 | 4.50 s ± 0.04 |
 | v0.9.21 | 13 ms ± 1 | 50 ms ± 1 | 441 ms ± 16 | 4.55 s ± 0.06 |
@@ -361,7 +372,8 @@ Thirteen content rules over `**/*.rs`. Per-file dispatch path width — every `.
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 17 ms ± 1 | 120 ms ± 5 | 1.16 s ± 0.03 | 12.14 s ± 0.77 |
+| **v0.10.1** | 17 ms ± 1 | 124 ms ± 12 | 1.17 s ± 0.05 | 12.02 s ± 0.28 |
+| v0.10.0 | 17 ms ± 1 | 120 ms ± 5 | 1.16 s ± 0.03 | 12.14 s ± 0.77 |
 | v0.9.23 | 17 ms ± 1 | 118 ms ± 4 | 1.16 s ± 0.05 | 11.88 s ± 0.12 |
 | v0.9.22 | 17 ms ± 1 | 119 ms ± 8 | 1.15 s ± 0.03 | 11.74 s ± 0.10 |
 | v0.9.21 | 17 ms ± 1 | 126 ms ± 12 | 1.15 s ± 0.02 | 11.75 s ± 0.28 |
@@ -388,7 +400,8 @@ Thirteen content rules over `**/*.rs`. Per-file dispatch path width — every `.
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 20 ms ± 1 | 53 ms ± 2 | 473 ms ± 20 | 4.81 s ± 0.06 |
+| **v0.10.1** | 27 ms ± 18 | 53 ms ± 1 | 485 ms ± 17 | 4.84 s ± 0.06 |
+| v0.10.0 | 20 ms ± 1 | 53 ms ± 2 | 473 ms ± 20 | 4.81 s ± 0.06 |
 | v0.9.23 | 26 ms ± 19 | 56 ms ± 10 | 485 ms ± 21 | 4.79 s ± 0.07 |
 | v0.9.22 | 20 ms ± 1 | 53 ms ± 1 | 469 ms ± 17 | 4.71 s ± 0.06 |
 | v0.9.21 | 14 ms ± 1 | 57 ms ± 11 | 471 ms ± 12 | 4.81 s ± 0.05 |
@@ -419,7 +432,8 @@ Six cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 11 ms ± 1 | 31 ms ± 1 | 322 ms ± 14 | 15.55 s ± 0.01 |
+| **v0.10.1** | 11 ms ± 1 | 35 ms ± 13 | 322 ms ± 10 | 15.51 s ± 0.25 |
+| v0.10.0 | 11 ms ± 1 | 31 ms ± 1 | 322 ms ± 14 | 15.55 s ± 0.01 |
 | v0.9.23 | 11 ms ± 1 | 30 ms ± 1 | 323 ms ± 15 | 15.23 s ± 0.16 |
 | v0.9.22 | 14 ms ± 10 | 29 ms ± 1 | 318 ms ± 11 | 15.40 s ± 0.01 |
 | v0.9.21 | 14 ms ± 10 | 30 ms ± 1 | 320 ms ± 11 | 15.40 s ± 0.15 |
@@ -446,7 +460,8 @@ Six cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 26 ms ± 11 | 57 ms ± 1 | 595 ms ± 20 | 18.13 s ± 0.19 |
+| **v0.10.1** | 23 ms ± 0 | 59 ms ± 3 | 598 ms ± 15 | 18.20 s ± 0.40 |
+| v0.10.0 | 26 ms ± 11 | 57 ms ± 1 | 595 ms ± 20 | 18.13 s ± 0.19 |
 | v0.9.23 | 22 ms ± 1 | 64 ms ± 20 | 599 ms ± 12 | 18.05 s ± 0.10 |
 | v0.9.22 | 22 ms ± 1 | 57 ms ± 1 | 591 ms ± 15 | 17.93 s ± 0.04 |
 | v0.9.21 | 15 ms ± 1 | 57 ms ± 1 | 587 ms ± 17 | 17.93 s ± 0.06 |
@@ -477,7 +492,8 @@ S3 reshape plus `git_no_denied_paths` and `git_tracked_only` over a real git rep
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 26 ms ± 13 | 124 ms ± 16 | 1.12 s ± 0.02 | 12.17 s ± 0.16 |
+| **v0.10.1** | 22 ms ± 1 | 120 ms ± 1 | 1.12 s ± 0.02 | 12.36 s ± 0.09 |
+| v0.10.0 | 26 ms ± 13 | 124 ms ± 16 | 1.12 s ± 0.02 | 12.17 s ± 0.16 |
 | v0.9.23 | 22 ms ± 1 | 117 ms ± 2 | 1.09 s ± 0.02 | 12.18 s ± 0.04 |
 | v0.9.22 | 22 ms ± 1 | 116 ms ± 2 | 1.08 s ± 0.02 | 11.84 s ± 0.24 |
 | v0.9.21 | 25 ms ± 9 | 117 ms ± 2 | 1.09 s ± 0.02 | 11.93 s ± 0.03 |
@@ -504,7 +520,8 @@ S3 reshape plus `git_no_denied_paths` and `git_tracked_only` over a real git rep
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 26 ms ± 1 | 77 ms ± 10 | 569 ms ± 20 | 6.50 s ± 0.03 |
+| **v0.10.1** | 27 ms ± 1 | 77 ms ± 9 | 577 ms ± 15 | 6.63 s ± 0.06 |
+| v0.10.0 | 26 ms ± 1 | 77 ms ± 10 | 569 ms ± 20 | 6.50 s ± 0.03 |
 | v0.9.23 | 26 ms ± 0 | 73 ms ± 1 | 564 ms ± 18 | 6.39 s ± 0.02 |
 | v0.9.22 | 26 ms ± 1 | 80 ms ± 16 | 558 ms ± 18 | 6.44 s ± 0.05 |
 | v0.9.21 | 19 ms ± 1 | 74 ms ± 8 | 564 ms ± 13 | 6.43 s ± 0.03 |
@@ -535,7 +552,8 @@ Three competing ecosystem rulesets: `extends: rust + node + python` (~26 rules) 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 16 ms ± 1 | 76 ms ± 1 | 727 ms ± 11 | 7.70 s ± 0.04 |
+| **v0.10.1** | 20 ms ± 14 | 79 ms ± 10 | 727 ms ± 14 | 7.96 s ± 0.07 |
+| v0.10.0 | 16 ms ± 1 | 76 ms ± 1 | 727 ms ± 11 | 7.70 s ± 0.04 |
 | v0.9.23 | 15 ms ± 1 | 79 ms ± 15 | 706 ms ± 15 | 7.55 s ± 0.06 |
 | v0.9.22 | 15 ms ± 1 | 74 ms ± 3 | 699 ms ± 14 | 7.41 s ± 0.07 |
 | v0.9.21 | 19 ms ± 9 | 79 ms ± 10 | 715 ms ± 16 | 7.64 s ± 0.11 |
@@ -562,7 +580,8 @@ Three competing ecosystem rulesets: `extends: rust + node + python` (~26 rules) 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 28 ms ± 17 | 56 ms ± 14 | 431 ms ± 15 | 4.38 s ± 0.02 |
+| **v0.10.1** | 25 ms ± 7 | 54 ms ± 7 | 443 ms ± 17 | 4.50 s ± 0.05 |
+| v0.10.0 | 28 ms ± 17 | 56 ms ± 14 | 431 ms ± 15 | 4.38 s ± 0.02 |
 | v0.9.23 | 15 ms ± 1 | 51 ms ± 1 | 433 ms ± 21 | 4.43 s ± 0.02 |
 | v0.9.22 | 22 ms ± 1 | 56 ms ± 15 | 428 ms ± 17 | 4.32 s ± 0.03 |
 | v0.9.21 | 22 ms ± 1 | 55 ms ± 11 | 427 ms ± 14 | 4.43 s ± 0.05 |
@@ -593,7 +612,8 @@ Five rules from outside the `PerFileRule` dispatch path (`file_max_size`, `no_em
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 10 ms ± 1 | 38 ms ± 1 | 330 ms ± 10 | 3.59 s ± 0.01 |
+| **v0.10.1** | 10 ms ± 0 | 38 ms ± 1 | 335 ms ± 11 | 3.67 s ± 0.01 |
+| v0.10.0 | 10 ms ± 1 | 38 ms ± 1 | 330 ms ± 10 | 3.59 s ± 0.01 |
 | v0.9.23 | 13 ms ± 10 | 41 ms ± 15 | 325 ms ± 12 | 3.46 s ± 0.04 |
 | v0.9.22 | 10 ms ± 1 | 37 ms ± 1 | 316 ms ± 8 | 3.44 s ± 0.03 |
 | v0.9.21 | 10 ms ± 1 | 40 ms ± 9 | 322 ms ± 6 | 3.53 s ± 0.02 |
@@ -620,7 +640,8 @@ Five rules from outside the `PerFileRule` dispatch path (`file_max_size`, `no_em
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.10.0** | 20 ms ± 1 | 48 ms ± 1 | 424 ms ± 17 | 4.30 s ± 0.04 |
+| **v0.10.1** | 20 ms ± 1 | 50 ms ± 2 | 432 ms ± 12 | 4.45 s ± 0.10 |
+| v0.10.0 | 20 ms ± 1 | 48 ms ± 1 | 424 ms ± 17 | 4.30 s ± 0.04 |
 | v0.9.23 | 13 ms ± 0 | 48 ms ± 1 | 433 ms ± 29 | 4.29 s ± 0.05 |
 | v0.9.22 | 20 ms ± 1 | 49 ms ± 3 | 432 ms ± 19 | 4.28 s ± 0.06 |
 | v0.9.21 | 25 ms ± 16 | 47 ms ± 1 | 420 ms ± 16 | 4.29 s ± 0.07 |
