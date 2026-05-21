@@ -8,10 +8,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-05-20 (read_capped reach extension + post-release CI/docs hygiene)
+
+Small post-release follow-up to v0.10.0. Headline change: the
+`crate::io::read_capped` 256 MiB whole-file cap (introduced in
+v0.10 for the cross-file / structured rule kinds) now also
+covers two pre-existing read sites that pre-dated v0.10 and
+were missed by the original sweep — `json_schema_passes` and
+`for_each_dir`'s literal-path nested-rule bypass. Over-cap
+files now emit a clear "too large to analyze" violation rather
+than the previous silent skip. Bundled in: post-release CI
+hygiene (bench-record PR-body template refreshed to reflect
+S1-S13 + `xtask bench-gate` instead of the obsolete eyeball
+checklist; pinned GitHub Actions runner agent bumped 2.332.0
+→ 2.334.0 after GitHub's deprecation rotation), and the
+Docker `<major>.<minor>` channel example refreshed from
+`:0.9` to `:0.10` across the install docs. No schema-version
+bump; `version: 1` configs continue to work; safe upgrade
+for every consumer.
+
 ### Security
 
 - **Whole-file reads bounded — extended reach.** The Phase 3
-  [v0.10] sweep brought every cross-file / structured rule-level
+  v0.10 sweep brought every cross-file / structured rule-level
   whole-file read through `crate::io::read_capped` (256 MiB cap).
   Two pre-existing whole-file read sites that pre-dated v0.10
   were missed by that sweep and now also go through the cap:
@@ -5090,7 +5109,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/asamarts/alint/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/asamarts/alint/compare/v0.9.23...v0.10.0
 [0.9.23]: https://github.com/asamarts/alint/compare/v0.9.22...v0.9.23
 [0.9.22]: https://github.com/asamarts/alint/compare/v0.9.21...v0.9.22

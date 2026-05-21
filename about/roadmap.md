@@ -12,16 +12,24 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.10.0** (2026-05-20). The case-study coverage
-push: eight new rule kinds and two bundled rulesets aggregated
-from the 30-OSS-repo demand-validation pass — `registry_paths_resolve`,
+**Latest release: v0.10.1** (2026-05-20). Small post-release
+follow-up to v0.10.0: the `crate::io::read_capped` 256 MiB
+whole-file cap (introduced in v0.10) now also covers
+`json_schema_passes` and `for_each_dir`'s literal-path
+nested-rule bypass — two pre-existing read sites that pre-dated
+v0.10 and were missed by the original Phase 3 sweep. Bundled in:
+bench-record PR-body template refresh, runner agent bump
+2.332.0 → 2.334.0 after deprecation, Docker channel example
+refreshed `:0.9` → `:0.10` across the install docs. No
+schema-version bump. v0.10.0 (2026-05-20) was the case-study
+coverage push (eight new rule kinds — `registry_paths_resolve`,
 `cross_file_value_equals`, `ordered_block`, `generated_file_fresh`,
 `import_gate`, `command_idempotent`, `xml_path_equals` /
-`xml_path_matches`, `pair_hash`, plus `apache/governance@v1` and
-`dotnet@v1`. Three pre-release security retirements landed
-alongside (spawn-trust-gate generalised, XML recursion bound,
-whole-file reads capped at 256 MiB). Rule-kind count 71 → 79;
-bundled-ruleset count 19 → 21. No schema-version bump.
+`xml_path_matches`, `pair_hash` — and two new bundled rulesets,
+`apache/governance@v1` + `dotnet@v1`; three pre-release
+security retirements: spawn-trust-gate generalised, XML
+recursion bound, whole-file reads capped at 256 MiB; rule-kind
+count 71 → 79, bundled-ruleset count 19 → 21).
 v0.9.23 (2026-05-17) shipped GitHub Action pinning plus release-
 pipeline hardening (pinned-ref binary, cargo-deny, the bench-gate
 re-engineering); v0.9.22 (2026-05-15) was doc-drift cleanup plus
