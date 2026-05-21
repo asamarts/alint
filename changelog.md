@@ -8,6 +8,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Human output: `docs:` URLs drop the explicit underline
+  escape when emitted alongside an OSC 8 hyperlink** (the OSC 8
+  wrap already carries the link semantic; the terminal handles
+  the link affordance itself — typically a hover-driven
+  underline + pointer cursor). Emitting our own `\e[4m` on top
+  caused some renderers — notably `asciinema-player` — to
+  extend the underline past the URL text to the end of the
+  terminal row, visible on the alint.org landing-page demo.
+  Non-OSC-8 terminals (no `supports-hyperlinks` detection)
+  keep `\e[4m` as the visual link cue; this is purely a
+  conditional swap on the existing `opts.hyperlinks` flag.
+
+### Added
+
+- **`ALINT_FORCE_HYPERLINKS=1` environment variable** — forces
+  OSC 8 hyperlink emission even when stdout isn't a TTY. The
+  only intended use is screen-recording capture (e.g. the
+  asciinema demo build script), where `alint check >
+  /tmp/demo-outputs/01.txt` would otherwise see `is_tty=false`
+  and skip OSC 8 entirely. Empty / `0` values do NOT force.
+
 ## [0.10.1] — 2026-05-20 (read_capped reach extension + post-release CI/docs hygiene)
 
 Small post-release follow-up to v0.10.0. Headline change: the
