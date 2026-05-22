@@ -91,8 +91,8 @@ The rule in `.alint.yml`:
   kind: git_commit_message
   pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
   subject_max_length: 72
-  since: ${ALINT_BASE_SHA:-origin/main}
+  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
   level: error
 ```
 
-The `${ALINT_BASE_SHA:-origin/main}` default makes the same config work locally too: when you run `alint check` on your feature branch without setting the env var, the rule falls back to `origin/main` and validates everything since you branched. See the [`git_commit_message` reference](/docs/rules/git-hygiene/git_commit_message/) for the full options surface.
+The `{{env.ALINT_BASE_SHA | default('origin/main')}}` default makes the same config work locally too: when you run `alint check` on your feature branch without setting the env var, the rule falls back to `origin/main` and validates everything since you branched. See the [`git_commit_message` reference](/docs/rules/git-hygiene/git_commit_message/) and [variable interpolation](/docs/concepts/variable-interpolation/) for the full surface. (The older POSIX `since: ${ALINT_BASE_SHA:-origin/main}` form still works but is deprecated — alint prints a one-line migration hint at load.)

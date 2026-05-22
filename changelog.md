@@ -8,6 +8,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Variable interpolation: `{{env.NAME}}` across the config.** Any
+  string-typed config value can now reference an environment variable
+  — `paths:`, `pattern:`, `since:`, `policy_url:`, `message:`,
+  `extends:` URLs, `vars:` values, etc. — resolved once at config
+  load. `{{env.NAME | default('fallback')}}` supplies a fallback;
+  an unset variable with no default is a load error naming the field.
+  Only local config files are interpolated (bundled rulesets are
+  static; a remote `extends:` ruleset is never interpolated against
+  your environment). A fully-resolved value re-types, so
+  `subject_max_length: "{{env.MAX | default('72')}}"` validates as a
+  number. alint only claims `env`/`vars`/`ctx` spans (and close typos
+  of `env`/`vars`); foreign `{{...}}` templates — Go's `{{json .}}`,
+  cookiecutter, etc. — pass through verbatim. See
+  [variable interpolation](https://alint.org/docs/concepts/variable-interpolation/).
+- **`env.X` namespace in `when:` expressions.** `when: env.CI == "true"`
+  gates a rule on an environment variable, alongside the existing
+  `facts.` / `vars.` namespaces. Resolved at evaluation time; an unset
+  variable is `null` (falsy).
+
+### Deprecated
+
+- **The v0.9.21 POSIX `${VAR}` syntax on `git_commit_message.since:`.**
+  It still works this minor (and is still expanded at evaluate time)
+  but emits a one-line deprecation warning at config load with the
+  canonical `{{env.VAR}}` rewrite shown inline. The `${VAR}` form will
+  be removed in v1.0.
+
+### Changed
+
+- Bumped `workspace.dependencies` version pins `0.10.0` → `0.10.2`
+  to match `workspace.package.version`. No behavior change — intra-
+  workspace deps resolve via path; this only tightens the SemVer
+  floor for external consumers pulling a single workspace crate by
+  name.
+
 ## [0.10.2] — 2026-05-21 (asciinema-demo underline-extension fix)
 
 Targeted follow-up to v0.10.1. The alint.org landing-page demo
