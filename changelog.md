@@ -10,6 +10,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Informational notes channel + `--show-notes`.** Rules can now
+  surface non-violation findings: `registry_paths_resolve` and
+  `cross_file_value_equals` report the non-literal (interpolated /
+  computed) entries they skip rather than silently dropping them.
+  `alint check` prints a one-line note count on stderr by default
+  (stdout stays clean) and lists them in full with `--show-notes`;
+  the `json` output carries a per-result `notes` array (omitted when
+  empty). Notes never affect pass/fail or the exit code.
 - **`git_no_denied_paths` gains an optional `since:` ref** — when set,
   only denied paths changed in the `<since>...HEAD` diff are flagged
   (PR-scoped: catches a secret added in a PR even if HEAD still tracks
