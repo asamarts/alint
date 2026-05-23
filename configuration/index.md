@@ -179,6 +179,21 @@ rules:
 
 `has_ancestor:` accepts a literal filename or a list of filenames; path separators and glob metacharacters are rejected at build time. The bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) use this to scope per-file content rules to their ecosystem's package subtrees in polyglot monorepos.
 
+`changed_since: <git-ref>` (v0.11+) narrows a per-file rule to files in the `<ref>...HEAD` diff — the same merge-base diff as `alint check --changed`. Use it to grandfather pre-existing files in a PR (e.g. require an SPDX header only on files the PR touched):
+
+```yaml
+rules:
+  - id: spdx-on-new-files
+    kind: file_header
+    paths: "src/**/*.rs"
+    pattern: "^// SPDX-License-Identifier:"
+    scope_filter:
+      changed_since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
+    level: error
+```
+
+It accepts the `{{env.X}}` interpolation, resolves the diff once per run, matches nothing outside a git repo (silent), and hard-errors on an unresolvable ref with a shallow-clone hint. `has_ancestor:` and `changed_since:` AND-compose when both are set; at least one must be present.
+
 Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field; gate them via the rule's `paths:` glob instead.
 
 ### `fix_size_limit`

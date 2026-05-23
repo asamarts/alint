@@ -10,6 +10,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`scope_filter.changed_since: <git-ref>`** — narrow a per-file rule
+  to files in the `<ref>...HEAD` diff (the merge-base diff `alint check
+  --changed` uses), so a rule can grandfather pre-existing files and
+  fire only on what a PR touched. AND-composes with `has_ancestor:`;
+  accepts the `{{env.X}}` interpolation; resolved once per run and
+  cached on the file index. Matches nothing outside a git repo
+  (silent); an unresolvable ref inside a repo hard-fails with a
+  shallow-clone hint.
 - **`git_commit_signed_off` rule kind** — assert every commit in scope
   carries a DCO `Signed-off-by:` trailer (the first of the v0.11
   commit-validation family). Takes `since:` + `include_merges:` like

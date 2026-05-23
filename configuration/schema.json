@@ -577,8 +577,11 @@
     "scope_filter": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Closest-ancestor manifest scoping (v0.9.6+). Supported on per-file rules and on `dir_absent` (since v0.9.18 — for scoping bundled dir-hygiene rules to specific package contexts, e.g. `hygiene-no-js-build-outputs` only fires on `dist/`/`build/` whose ancestor chain contains a `package.json`). Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time. The engine walks `Path::parent()` upward from the file or directory (the path's own directory counts as an ancestor) and consults the v0.9.5 path-index at each step; first-match-wins on the upward walk gates the rule per-file. Combine with the rule's existing `paths:` glob — both must match for the rule to fire. Useful in polyglot monorepos where a per-file content rule should narrow to files inside a specific ecosystem's package directory (e.g. only `.rs` files under an ancestor `Cargo.toml`).",
-      "required": ["has_ancestor"],
+      "description": "Per-file rule scoping. `has_ancestor` (v0.9.6+) admits files whose ancestor chain contains a named manifest; `changed_since` (v0.11+) admits files in a `<ref>...HEAD` git diff. At least one must be set; setting both is an AND. Supported on per-file rules and on `dir_absent` (since v0.9.18). Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time. Combine with the rule's existing `paths:` glob — all gates must match for the rule to fire.",
+      "anyOf": [
+        { "required": ["has_ancestor"] },
+        { "required": ["changed_since"] }
+      ],
       "properties": {
         "has_ancestor": {
           "description": "Manifest filename (or list of filenames) whose presence in any ancestor directory of the linted file admits the rule. Each entry is a literal filename like `Cargo.toml` or `package.json` — no path separators, no glob metacharacters; the ancestor walk handles \"anywhere up the tree\" by traversing `Path::parent()` upward.",
@@ -590,6 +593,11 @@
               "items": { "type": "string", "minLength": 1 }
             }
           ]
+        },
+        "changed_since": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git ref; the rule only fires on files in the `<ref>...HEAD` diff (the same merge-base diff as `alint check --changed`). Right shape for grandfathering pre-existing files in a PR — e.g. require an SPDX header only on files the PR touched. Accepts the `{{env.X}}` interpolation (e.g. `changed_since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`). Outside a git repo the predicate matches nothing (silent); an unresolvable ref inside a repo is a hard error with a shallow-clone hint."
         }
       }
     },
