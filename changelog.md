@@ -10,6 +10,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`git_commit_signed_off` rule kind** — assert every commit in scope
+  carries a DCO `Signed-off-by:` trailer (the first of the v0.11
+  commit-validation family). Takes `since:` + `include_merges:` like
+  `git_commit_message`: unset checks HEAD, set checks `<since>..HEAD`
+  (PR-CI shape). Defaults to the canonical DCO pattern; override
+  `pattern:` for a stricter form. Silent outside a git repo; a bad
+  `since:` ref hard-fails with a shallow-clone hint.
+- **`git_commit_no_fixup` rule kind** — fail on residual `fixup!` /
+  `squash!` / `amend!` commits left in scope (forgot to
+  `git rebase --autosquash`). Same `since:` / `include_merges:` shape
+  as the rest of the commit-validation family; no configuration knobs.
+- **`git_commit_author_allowlist` rule kind** — assert every commit
+  author matches an allowed `email_pattern:` and/or `name_pattern:`
+  (at least one required; both = AND). For enterprise contributor-
+  identity enforcement and catching sock-puppet / compromised-account
+  commits. Same `since:` / `include_merges:` shape as the family.
+- **`git_commit_gpg_signed` rule kind** — assert every commit has a
+  verifying signature (`git verify-commit` exits 0); unsigned or
+  unverifiable commits fire. Completes the v0.11 commit-validation
+  family. Reflects git's own verdict (trust stays git's job). Same
+  `since:` / `include_merges:` shape as the family.
 - **Variable interpolation: `{{env.NAME}}` across the config.** Any
   string-typed config value can now reference an environment variable
   — `paths:`, `pattern:`, `since:`, `policy_url:`, `message:`,

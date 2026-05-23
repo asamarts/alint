@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 79 rule kinds across 13 families (69 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 83 rule kinds across 13 families (73 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -20,7 +20,7 @@ alint ships 79 rule kinds across 13 families (69 distinct rule behaviors plus 10
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 6 rules
+- [Git hygiene](/docs/rules/git-hygiene/) — 10 rules
 - [Cross-file](/docs/rules/cross-file/) — 14 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
@@ -60,7 +60,11 @@ alint ships 79 rule kinds across 13 families (69 distinct rule behaviors plus 10
 - [`for_each_file`](/docs/rules/cross-file/for_each_file/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
 - [`generated_file_fresh`](/docs/rules/cross-file/generated_file_fresh/) — A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. _(Cross-file)_
 - [`git_blame_age`](/docs/rules/git-hygiene/git_blame_age/) — Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. _(Git hygiene)_
+- [`git_commit_author_allowlist`](/docs/rules/git-hygiene/git_commit_author_allowlist/) — Assert every commit author in scope matches an allowed email and/or name pattern. _(Git hygiene)_
+- [`git_commit_gpg_signed`](/docs/rules/git-hygiene/git_commit_gpg_signed/) — Assert every commit in scope has a verifying signature (`git verify-commit` exits 0). _(Git hygiene)_
 - [`git_commit_message`](/docs/rules/git-hygiene/git_commit_message/) — Validate commit-message shape via regex, max-subject-length, or required-body. _(Git hygiene)_
+- [`git_commit_no_fixup`](/docs/rules/git-hygiene/git_commit_no_fixup/) — Fail on residual `fixup!` / `squash!` / `amend!` commits left in scope — the ones `git commit --fixup` / `--squash` produce, meant to be collapsed by `git rebase --autosquash` before merging. _(Git hygiene)_
+- [`git_commit_signed_off`](/docs/rules/git-hygiene/git_commit_signed_off/) — Assert every commit in scope carries a DCO (Developer Certificate of Origin) `Signed-off-by:` trailer — required by every CNCF / Linux Foundation / kernel-style project. _(Git hygiene)_
 - [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`import_gate`](/docs/rules/cross-file/import_gate/) — Forbid imports whose **extracted target** matches a `forbid` regex, within the `paths` scope — an architectural import firewall (staging-layer isolation, core/providers separation, private-API gates). _(Cross-file)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_

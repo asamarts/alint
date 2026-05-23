@@ -455,6 +455,10 @@
         { "$ref": "#/$defs/rule_markdown_paths_resolve" },
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
+        { "$ref": "#/$defs/rule_git_commit_signed_off" },
+        { "$ref": "#/$defs/rule_git_commit_no_fixup" },
+        { "$ref": "#/$defs/rule_git_commit_author_allowlist" },
+        { "$ref": "#/$defs/rule_git_commit_gpg_signed" },
         { "$ref": "#/$defs/rule_git_blame_age" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
@@ -986,6 +990,90 @@
         { "required": ["subject_max_length"] },
         { "required": ["requires_body"] }
       ]
+    },
+
+    "rule_git_commit_signed_off": {
+      "description": "Assert every commit in scope carries a DCO `Signed-off-by:` trailer. With `since:` unset, only HEAD is checked; with `since:` set to a ref, every commit in `<since>..HEAD` is checked (oldest first, merge commits excluded by default) — the right shape for PR-trigger workflows. Required by CNCF / Linux Foundation / kernel-style projects. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "git_commit_signed_off" },
+        "pattern": {
+          "type": "string",
+          "description": "Trailer pattern each commit message must contain. Defaults to the canonical DCO sign-off shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override to enforce a stricter form (e.g. a corporate-domain email)."
+        },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
+        }
+      }
+    },
+
+    "rule_git_commit_no_fixup": {
+      "description": "Fail on residual `fixup!` / `squash!` / `amend!` commits in scope — the ones `git commit --fixup`/`--squash` produce, meant to be collapsed by `git rebase --autosquash` before merging. With `since:` unset, only HEAD is checked; with `since:` set to a ref, every commit in `<since>..HEAD` is checked. No configuration knobs — the matched prefixes are exactly what `--autosquash` understands. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "git_commit_no_fixup" },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
+        }
+      }
+    },
+
+    "rule_git_commit_author_allowlist": {
+      "description": "Assert every commit author in scope matches an allowed email and/or name pattern. At least one of `email_pattern:` / `name_pattern:` is required; specifying both means BOTH must match (AND). A commit whose author fails any specified pattern fires one violation. With `since:` unset, only HEAD is checked; with `since:` set to a ref, every commit in `<since>..HEAD` is checked. Demand: enterprise repos enforcing contributor identity against a corporate domain; OSS projects catching sock-puppet / compromised-account commits. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "git_commit_author_allowlist" },
+        "email_pattern": {
+          "type": "string",
+          "description": "Rust-regex the author email (`git log %ae`) must match, e.g. `^.+@example\\.com$`."
+        },
+        "name_pattern": {
+          "type": "string",
+          "description": "Rust-regex the author name (`git log %an`) must match."
+        },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
+        }
+      },
+      "anyOf": [
+        { "required": ["email_pattern"] },
+        { "required": ["name_pattern"] }
+      ]
+    },
+
+    "rule_git_commit_gpg_signed": {
+      "description": "Assert every commit in scope has a verifying signature (`git verify-commit` exits 0). A commit that is unsigned, or signed with a key that doesn't verify against the local keyring, fires one violation. With `since:` unset, only HEAD is checked; with `since:` set to a ref, every commit in `<since>..HEAD` is checked. Demand: kernel maintainers, security-sensitive OSS, GitHub 'Require signed commits' branch protection. Reflects git's own verdict — does NOT distinguish 'unsigned' from 'signed with an untrusted key' (trust is git's GPG config / `.git/allowed_signers`). Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "git_commit_gpg_signed" },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
+        }
+      }
     },
 
     "rule_git_blame_age": {
