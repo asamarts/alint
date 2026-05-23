@@ -950,7 +950,7 @@
     },
 
     "rule_git_no_denied_paths": {
-      "description": "Fire when any tracked path matches a configured glob denylist. Companion of `git_tracked_only` for the absence axis: catches secrets, large binaries, or accidentally-tracked artifacts that would otherwise need a `file_absent` per pattern. Outside a git repo, silently no-ops.",
+      "description": "Fire when any tracked path matches a configured glob denylist. Companion of `git_tracked_only` for the absence axis: catches secrets, large binaries, or accidentally-tracked artifacts that would otherwise need a `file_absent` per pattern. With `since:` set, only paths changed in the `<since>...HEAD` diff are flagged (PR-scoped). Outside a git repo, silently no-ops; a `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
       "type": "object",
       "required": ["denied"],
       "properties": {
@@ -960,6 +960,10 @@
           "minItems": 1,
           "items": { "type": "string" },
           "description": "Globset patterns no tracked path may match. Both whole-path patterns (`secrets/**`) and basename-only patterns (`*.env`) work."
+        },
+        "since": {
+          "type": "string",
+          "description": "Optional git ref. When set, only denied paths that changed in the `<since>...HEAD` diff are flagged — catches a secret added in a PR even if HEAD's tree still tracks an older one. Accepts the `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
         }
       }
     },

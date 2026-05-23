@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`git_no_denied_paths` gains an optional `since:` ref** — when set,
+  only denied paths changed in the `<since>...HEAD` diff are flagged
+  (PR-scoped: catches a secret added in a PR even if HEAD still tracks
+  an older one). Accepts the `{{env.X}}` interpolation; a bad ref
+  hard-fails with a shallow-clone hint. Completes the diff-scoping
+  pair with `scope_filter.changed_since:`.
 - **`scope_filter.changed_since: <git-ref>`** — narrow a per-file rule
   to files in the `<ref>...HEAD` diff (the merge-base diff `alint check
   --changed` uses), so a rule can grandfather pre-existing files and
