@@ -10,14 +10,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`alint lsp` language server (scaffold).** A new `alint-lsp` crate
-  and `alint lsp` subcommand speak the Language Server Protocol over
-  stdio for editor integrations. This first slice publishes
-  diagnostics for the workspace's `.alint.yml` rules on document open
-  and save (full-document sync; one `Engine::run` over the workspace,
-  violations mapped to LSP diagnostics keyed by file). Per-edit live
-  re-evaluation, hover-to-explain, and code actions are deferred to
-  later slices of the v0.11 LSP epic.
+- **`alint lsp` language server.** A new `alint-lsp` crate and `alint
+  lsp` subcommand speak the Language Server Protocol over stdio for
+  editor integrations. Open and save run the full `Engine::run` over
+  the workspace (cross-file rules included); every (debounced) edit
+  re-runs only the per-file rules for the changed file against the
+  editor's in-memory bytes via the single-file hot path, so
+  per-keystroke feedback stays cheap. Violations map to LSP diagnostics
+  keyed by file (full-document sync). Hover-to-explain and code actions
+  are deferred to later slices of the v0.11 LSP epic.
+- **`Engine::run_for_file` — single-file re-evaluation.** Evaluates
+  only the per-file rules in scope for one file, using caller-supplied
+  bytes, at a cost proportional to that file rather than the whole
+  tree. Cross-file rules are intentionally skipped. Returns the new
+  `Error::FileNotInIndex` when the path is excluded from the walked
+  tree. Powers the LSP change hot path above.
 - **Informational notes channel + `--show-notes`.** Rules can now
   surface non-violation findings: `registry_paths_resolve` and
   `cross_file_value_equals` report the non-literal (interpolated /
