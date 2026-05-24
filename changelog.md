@@ -10,6 +10,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Tier-2 editor configs (Neovim, Sublime Text, Emacs) + honorable
+  mentions (Helix, Eclipse).** Config-only integrations that point each
+  editor's LSP client at `alint lsp`: `editors/nvim/` (an `lsp/alint.lua`
+  for Neovim 0.11+ / nvim-lspconfig), `editors/sublime/` (an `LSP`
+  package client config), `editors/emacs/` (an `alint.el` Eglot
+  registration + lsp-mode snippet), `editors/helix/` (a `languages.toml`
+  snippet), and `editors/eclipse/` (LSP4E setup docs). Each documents
+  the per-language attachment limitation (these clients have no
+  "all files" wildcard). No packaged artifacts/release jobs — Neovim is
+  upstreamed to nvim-lspconfig; the rest are documented snippets.
 - **Zed extension (`editors/zed/`).** A Rust→wasm extension
   (`zed_extension_api`) that launches `alint lsp` for Zed, with the
   same binary resolution (settings → PATH → managed GitHub download).
