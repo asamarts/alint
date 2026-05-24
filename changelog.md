@@ -20,8 +20,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keyed by file (full-document sync). Hovering a violation shows the
   rule id, severity, message, and `policy_url` (as a link); the
   `policy_url` is also attached to each diagnostic so editors link it
-  from the Problems panel. Code actions are deferred to a later slice
-  of the v0.11 LSP epic.
+  from the Problems panel. A violation whose rule declares a fixer
+  offers an "Apply fix" quick-fix code action that returns a
+  `WorkspaceEdit` (applied to the buffer, undoable) — content fixes as
+  a full-document edit, file create/delete/rename as resource
+  operations. (The "add rule to ignore" action is still deferred.)
+- **`Fixer::fix_edit` → `FixEdit`.** A non-writing sibling of
+  `Fixer::apply` that expresses a fix as data (`SetContent` /
+  `CreateFile` / `DeleteFile` / `RenameFile`) so a caller can build an
+  editor edit instead of mutating the filesystem. Powers the LSP
+  "Apply fix" action above; `alint fix`'s disk-writing path is
+  unchanged.
 - **`Engine::run_for_file` — single-file re-evaluation.** Evaluates
   only the per-file rules in scope for one file, using caller-supplied
   bytes, at a cost proportional to that file rather than the whole
