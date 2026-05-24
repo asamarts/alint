@@ -17,8 +17,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-runs only the per-file rules for the changed file against the
   editor's in-memory bytes via the single-file hot path, so
   per-keystroke feedback stays cheap. Violations map to LSP diagnostics
-  keyed by file (full-document sync). Hover-to-explain and code actions
-  are deferred to later slices of the v0.11 LSP epic.
+  keyed by file (full-document sync). Hovering a violation shows the
+  rule id, severity, message, and `policy_url` (as a link); the
+  `policy_url` is also attached to each diagnostic so editors link it
+  from the Problems panel. Code actions are deferred to a later slice
+  of the v0.11 LSP epic.
 - **`Engine::run_for_file` — single-file re-evaluation.** Evaluates
   only the per-file rules in scope for one file, using caller-supplied
   bytes, at a cost proportional to that file rather than the whole
