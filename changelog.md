@@ -10,6 +10,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **JetBrains plugin (`editors/jetbrains/`).** A Kotlin plugin
+  (`intellij-platform-gradle-plugin` 2.x) that registers `alint lsp`
+  with LSP4IJ, bringing alint's diagnostics, hover, and quick-fixes to
+  the whole JetBrains suite (IDEA, PyCharm, GoLand, WebStorm, RustRover,
+  CLion, Rider, Android Studio). Binary resolution mirrors the VS Code
+  extension (`alint.path` setting → PATH → opt-in SHA-256-verified
+  download). A tag-gated `publish-jetbrains` release job runs
+  `gradle publishPlugin` to the JetBrains Marketplace
+  (`JETBRAINS_MARKETPLACE_TOKEN` + signing secrets).
 - **VS Code extension (`editors/vscode/`).** A TypeScript extension
   that launches `alint lsp` as a language server and surfaces alint's
   diagnostics, hover, and quick-fixes natively in VS Code (and forks
