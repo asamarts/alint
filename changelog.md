@@ -10,6 +10,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Zed extension (`editors/zed/`).** A Rust→wasm extension
+  (`zed_extension_api`) that launches `alint lsp` for Zed, with the
+  same binary resolution (settings → PATH → managed GitHub download).
+  Completes the Tier-1 editor set (VS Code + JetBrains + Zed).
+  Publishing is a manual PR to `zed-industries/extensions`. Note: Zed
+  attaches language servers per-language, so the extension registers a
+  broad common-language set (no all-files wildcard).
 - **JetBrains plugin (`editors/jetbrains/`).** A Kotlin plugin
   (`intellij-platform-gradle-plugin` 2.x) that registers `alint lsp`
   with LSP4IJ, bringing alint's diagnostics, hover, and quick-fixes to
