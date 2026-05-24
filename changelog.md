@@ -10,6 +10,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **VS Code extension (`editors/vscode/`).** A TypeScript extension
+  that launches `alint lsp` as a language server and surfaces alint's
+  diagnostics, hover, and quick-fixes natively in VS Code (and forks
+  via Open VSX). Resolves the `alint` binary from the `alint.path`
+  setting, then `PATH`, then an opt-in download of the matching release
+  (SHA-256 verified, mirroring the npm shim). A tag-gated
+  `publish-vscode` release job publishes to both the VS Code
+  Marketplace and Open VSX (`VSCE_PAT` / `OVSX_PAT` secrets).
+
 - **`alint lsp` language server.** A new `alint-lsp` crate and `alint
   lsp` subcommand speak the Language Server Protocol over stdio for
   editor integrations. Open and save run the full `Engine::run` over
