@@ -20,6 +20,7 @@ Commands:
   export-agents-md  Generate (or maintain a section of) `AGENTS.md` from the active rule set, so the agent's pre-prompt directives stay in sync with the lint config. Outputs to stdout by default; use `--output PATH` to write a file or `--inline --output PATH` to splice between `<!-- alint:start -->` / `<!-- alint:end -->` markers
   suggest           Scan the repo for known antipatterns and propose rules that would catch them. Prints proposals to stdout for review — never edits the user's config. Pairs naturally with `alint init` for a smarter cold-start adoption flow
   validate-config   Parse-validate an `.alint.yml` (resolves `extends:`, builds every rule, parses every `when:`) and report any errors — without walking the tree. For editor LSP, pre-commit hooks, and fail-fast CI steps that just want to know "is the config loadable?". Exit 0 on success; exit 1 on validation failure
+  lsp               Start the alint language server, speaking LSP over stdio. Editor integrations (VS Code, Zed, Neovim, and others) spawn this and drive it via the Language Server Protocol; it is not meant to be run interactively. Publishes diagnostics for the workspace's `.alint.yml` rules on document open and save
   help              Print this message or the help of the given subcommand(s)
 
 Options:

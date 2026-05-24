@@ -10,6 +10,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`alint lsp` language server (scaffold).** A new `alint-lsp` crate
+  and `alint lsp` subcommand speak the Language Server Protocol over
+  stdio for editor integrations. This first slice publishes
+  diagnostics for the workspace's `.alint.yml` rules on document open
+  and save (full-document sync; one `Engine::run` over the workspace,
+  violations mapped to LSP diagnostics keyed by file). Per-edit live
+  re-evaluation, hover-to-explain, and code actions are deferred to
+  later slices of the v0.11 LSP epic.
 - **Informational notes channel + `--show-notes`.** Rules can now
   surface non-violation findings: `registry_paths_resolve` and
   `cross_file_value_equals` report the non-literal (interpolated /
