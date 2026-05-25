@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **LSP hardening (post-review).** The language server now: reloads on
+  `.alint.yml` changes via `didChangeWatchedFiles`; surfaces tree-level
+  findings (e.g. a missing required file) and config-load errors as
+  diagnostics on `.alint.yml` instead of dropping/logging them;
+  preserves cross-file diagnostics while typing (only per-file findings
+  are replaced on each edit, the rest refresh on save); caches evaluated
+  `facts:` on the file index so per-keystroke re-evaluation doesn't
+  re-scan the tree (`Engine::run_for_file`); and honors the client's
+  code-action `only` filter. Adds `Engine::is_per_file`.
+
 ### Added
 
 - **Tier-2 editor configs (Neovim, Sublime Text, Emacs) + honorable
