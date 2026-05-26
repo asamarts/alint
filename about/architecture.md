@@ -464,7 +464,7 @@ alint/
 **Planned additions (see [ROADMAP.md](./ROADMAP.md)):**
 
 - `crates/alint-lsp/` — language-server implementation (v0.11; v0.10 is the case-study coverage push of 8 rule kinds + 2 bundled rulesets, no new crate. `tower-lsp = "0.20"` is already in `[workspace.dependencies]` as a dormant dep)
-- `crates/alint-plugin/` — WASM plugin host (v0.12; the tier-1 `command` plugin already lives in `alint-rules` since v0.5.1)
+- `crates/alint-plugin/` — WASM plugin host (v0.13; the tier-1 `command` plugin already lives in `alint-rules` since v0.5.1)
 - `editors/` — VS Code, Zed, Helix extensions (paired with v0.11)
 - `crates/alint-facts/` — currently subsumed by `alint-core::facts`; promotion to its own crate is deferred until language and license detectors (PROPOSAL §4.6 `detect: linguist`, `detect: askalono`) actually land
 

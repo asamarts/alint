@@ -139,9 +139,20 @@ on it for adoption — they can lint without it.
   `tower-lsp` workspace dep already landed in v0.9.7 so the
   crate scaffold is the only structural lift.
 
-- **v0.12 — WASM plugins.** Per the existing v0.11 scope,
-  bumped one slot. `wasmtime` host, signed plugin registry,
-  blessed examples (mock-ratio checker, near-dup detector,
+- **v0.12 — Real-world coverage expansion + gap rule kinds.** A
+  100+ repo case study (3-4× the 30-repo re-analysis) plus the
+  demand-ranked rule-kind backlog it produced:
+  `git_commit_subject_matches`, the diff "must-add" family
+  (`changeset_requires_path` / `pair_changed_together`), the
+  value-set membership family, a `normalize:` transform on
+  `cross_file_value_equals`, richer `import_gate`
+  (default-deny + glob-discovered rule files), a resolved-graph
+  dependency allowlist, and the ASF compliance-bundle over-fire
+  fix.
+
+- **v0.13 — WASM plugins.** Bumped one slot to make room for
+  v0.12. `wasmtime` host, signed plugin registry, blessed
+  examples (mock-ratio checker, near-dup detector,
   debug-statement stripper).
 
 - **v1.0 — Stability.** DSL committed, plugin ABI committed,
@@ -951,7 +962,9 @@ Design pass: [`docs/design/v0.11/variable_interpolation.md`](https://github.com/
 ### Long-tail rule kinds (opportunistic)
 
 Carried over unchanged from the original v0.11 plan; not gating
-the release.
+the release. Anything not picked up opportunistically here rolls
+into the v0.12 gap-closing cut (see below), where the 100+ repo
+study refreshes the demand ranking.
 
 - **`cross_language_implementation_complete`** (5 sources:
   arrow, tensorflow, protobuf, angular, flutter). Densest
@@ -967,9 +980,127 @@ the release.
   `tests/fixtures/has-broken-symlinks/`). `strict` /
   `skip-broken-symlinks` / `permissive` modes.
 
-## v0.12 — WASM plugins
+## v0.12 — Real-world coverage expansion (100+ repos) + gap rule kinds
 
-Per the previous v0.11 scope, bumped one slot.
+The v0.10 case-study coverage push and the post-v0.11 30-repo
+re-analysis (see
+[`docs/development/case-study-v011-reanalysis-log.md`](https://github.com/asamarts/alint/blob/main/docs/development/case-study-v011-reanalysis-log.md))
+proved a method: clone a real repo, catalogue its bespoke
+manual/script/CI validation, express as much as alint can, and record
+the residual as either a concrete new-kind candidate or a deliberate
+non-goal. The 30-repo pass found no v0.10/v0.11 regressions but
+surfaced a ranked backlog of additive gaps. v0.12 scales the study
+3-4× (100+ repos, broader ecosystem spread) **and** closes the
+rule-kind gaps the 30-repo pass already identified — folding any
+further gaps the wider study turns up into the same cut.
+
+Design index: [`docs/design/v0.12/`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/README.md).
+
+### The 100+ repo case study
+
+Design pass: [`docs/design/v0.12/case_study_100_repos.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/case_study_100_repos.md).
+
+- Expand from 30 to 100+ OSS repos. The 30-repo corpus skewed toward
+  big-tech monorepos + Rust/Go/JS; the expansion deliberately broadens
+  ecosystem coverage: more Python (django, pandas, scikit-learn,
+  fastapi, poetry), JVM (spring-boot, gradle, kotlin), Ruby (rails),
+  PHP (laravel, symfony), systems (llvm, postgres, redis, sqlite,
+  curl), infra/data (terraform, ansible, grafana, prometheus, dbt),
+  ML (transformers, jax), web (vue, svelte, solid), and a long tail of
+  mid-size single-language libraries — where the bespoke-validation /
+  alint fit is often highest.
+- Same per-repo methodology, run through the proven subagent
+  batch-orchestration pipeline (clone → catalogue → draft config →
+  parent validates with `validate-config` / integrates / commits per
+  batch).
+- Outputs: per-repo example configs, an expanded findings log, and a
+  refreshed gap ranking that supersedes the 30-repo synthesis.
+- Gate: the study runs first; any new-kind candidates it surfaces
+  beyond the list below are triaged into this same release.
+
+### Gap rule kinds (ranked by demand from the 30-repo pass)
+
+Each ships design-doc-first per the project convention; demand counts
+name the corpus repos that independently needed the capability.
+
+- **`git_commit_subject_matches`** (go, node, nixpkgs) — the
+  commit-validation family's missing subject-shape rule. Reuses the
+  v0.11 `git_commit_*` plumbing (`since:`, per-commit violations with
+  abbreviated SHAs); the cheapest, clearest single win. Design:
+  [`git_commit_subject_matches.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/git_commit_subject_matches.md).
+- **Diff-aware "must-add" family** — `changeset_requires_path` ("the
+  diff must add a file matching glob X": prettier changelog_unreleased,
+  cpython Misc/NEWS.d, pnpm `.changeset/`) and `pair_changed_together`
+  (two files must change in one commit: rust rustdoc_json
+  FORMAT_VERSION, turbo/rust release guards). Both build on v0.11's
+  `scope_filter.changed_since` machinery. Design:
+  [`changeset_requires_path.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/changeset_requires_path.md).
+- **Value-set membership family** — `registry_value_used` (every TS
+  diagnostic / react error code referenced ≥1×), `cross_file_keys_cover`
+  (pnpm catalog ⊆ keys), `cross_file_set_equals` (rust features ↔
+  unstable-book, tf v1/v2 goldens). `cross_file_value_equals` is 1:1
+  and `pair_hash` is digest-only; N-in-1 / set relations are the gap.
+  First verify how far `registry_paths_resolve`'s existing
+  `orphans` / `must_contain` / `exclude_query` already reaches. Design:
+  [`value_set_membership.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/value_set_membership.md).
+- **`normalize:` value-transform on `cross_file_value_equals`**
+  (protobuf `4.36-dev` ↔ `4.36.0`, pnpm `pnpm@11.3.0` ↔ `11.3.0`) —
+  strip-prefix / semver-floor transforms so "same value, two forms"
+  stops forcing dual regex pins. Extends the existing trim/lower
+  `normalize:`. Design:
+  [`cross_file_normalize.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/cross_file_normalize.md).
+- **Richer `import_gate`** — a default-deny / table-driven allowlist
+  mode (vscode `code-import-patterns`) and glob-discovered
+  per-directory rule files (k8s's 66 `.import-restrictions` = 66
+  hand-written rules today). Design:
+  [`import_gate_enrichment.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/import_gate_enrichment.md).
+- **Dependency-graph allowlist kind** (distinct from `import_gate`) —
+  a `cargo metadata` / lockfile-aware permitted-dependency firewall for
+  rust `PERMITTED_DEPENDENCIES` and go's transitive `deps_test.go`
+  closure. `import_gate` reads source text, not the resolved graph, so
+  this is genuinely separate. Design:
+  [`dependency_graph_allowlist.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/dependency_graph_allowlist.md).
+- **Niche kinds** (1-2 sources each, batched into one design doc):
+  `embedded_checksum` (cpython Argument Clinic self-digests), full-file
+  `lines:{}` equality with diff-on-mismatch (tokio README mirror —
+  `pair_hash` reports only a digest mismatch), `no_case_collisions`
+  (tensorflow Windows dup-casing), `dir_name_equals_field` (turbo crate
+  dir ↔ name), and `cross_language_implementation_complete` (carried
+  from the v0.11 long-tail; arrow/tf/protobuf/angular/flutter parity).
+  Design:
+  [`niche_rule_kinds.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/niche_rule_kinds.md).
+- **`nix@v1` ecosystem bundle** (nixpkgs) — no nix ecosystem bundle
+  exists alongside `rust`/`go`/`python`/`node`/`dotnet`.
+
+### Bundled-ruleset + engine tuning
+
+Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/asf_bundle_overfire.md).
+
+- **Fix the ASF compliance-bundle over-fire (highest confidence).**
+  `compliance/apache-2@v1` and `apache/governance@v1` over-fire on
+  every large Apache/CNCF repo in the corpus — 5 confirmations
+  (airflow, helm, istio, kubernetes, tensorflow). Universal cause:
+  branded/abbreviated headers, generated files
+  (`.pbtxt`/`.pb.go`/`.gen.go`/`_pb2.py`), `third_party/` vendored
+  trees, "The X Authors" attribution, no top-level NOTICE. Ship
+  generated-file + third_party excludes and header tolerance in the
+  bundles, with a documented per-rule override recipe for the rest.
+  Every batch of the 30-repo pass independently re-derived the same
+  `paths.exclude` workaround — strong signal the bundle defaults are
+  wrong for real ASF repos.
+- **`import_gate` presets** for scala/java/dart/nix (generic +
+  explicit `import_pattern` works but a preset is cleaner; spark,
+  flutter, nixpkgs).
+- **Docs: `generated_file_fresh` is stdout-only.** Real codegen
+  mutates files in place, so `command_idempotent --check` is the
+  broadly-applicable form. Make the distinction explicit in the rule
+  reference so users don't reach for the wrong kind (the dominant
+  pattern across the corpus was the mutating one).
+
+## v0.13 — WASM plugins
+
+Bumped one slot to make room for the v0.12 real-world-coverage cut;
+otherwise unchanged from the previous post-v0.11 scope.
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT
   interface. Plugins receive their config *post-interpolation*
