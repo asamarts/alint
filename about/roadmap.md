@@ -897,7 +897,9 @@ Design pass: [`docs/design/v0.11/scope_filter_changed_since.md`](https://github.
   index for cheap per-file gating.
 - **`has_sibling`, `has_descendant`** predicates (carried over
   from the original v0.11 plan). v0.9.10's `Scope::from_spec`
-  makes additions purely additive (no API churn).
+  makes additions purely additive (no API churn). **Not built in
+  v0.11; deferred to v0.12** (see that version's "Deferred from
+  v0.11"). Only `changed_since` shipped here.
 - **`git_no_denied_paths` `since:` option.** Path-listing analog
   of v0.9.21's `git_commit_message.since:`. Fires on tracked
   paths *added* in `<since>..HEAD`, not on all currently-tracked
@@ -1065,12 +1067,34 @@ name the corpus repos that independently needed the capability.
   `lines:{}` equality with diff-on-mismatch (tokio README mirror —
   `pair_hash` reports only a digest mismatch), `no_case_collisions`
   (tensorflow Windows dup-casing), `dir_name_equals_field` (turbo crate
-  dir ↔ name), and `cross_language_implementation_complete` (carried
-  from the v0.11 long-tail; arrow/tf/protobuf/angular/flutter parity).
-  Design:
+  dir ↔ name), `cross_language_implementation_complete` (carried from
+  the v0.11 long-tail; arrow/tf/protobuf/angular/flutter parity), and a
+  Bazel-licensing-declaration-aware kind (tensorflow `licenses([...])`
+  discipline; also a v0.11 long-tail carryover). Design:
   [`niche_rule_kinds.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/niche_rule_kinds.md).
 - **`nix@v1` ecosystem bundle** (nixpkgs) — no nix ecosystem bundle
   exists alongside `rust`/`go`/`python`/`node`/`dotnet`.
+
+### Deferred from v0.11
+
+Design pass: [`deferred_from_v011.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/deferred_from_v011.md).
+
+v0.11-plan items not picked up before the cut, with no home in the
+case-study gap backlog — collected here so they don't slip untracked.
+None gated v0.11; all are additive and slip-tolerant.
+
+- **`has_sibling` / `has_descendant` scope predicates** — the two
+  `ScopeFilter` predicates from the v0.11 scope-generalisation plan that
+  did not ship alongside `changed_since`. Purely additive via v0.9.10's
+  `Scope::from_spec`.
+- **`walk_error_policy:` engine knob** (1 source: pnpm broken-symlink
+  fixtures) — `strict` / `skip-broken-symlinks` / `permissive` walker
+  modes. Single-source and touches the walker error path; the 100-repo
+  study (far more filesystem shapes) is the right place to settle the
+  mode set first.
+- **LSP "Add rule to ignore" code action** — explicitly deferred in
+  v0.11's `lsp_server.md` (it edits `.alint.yml`, a separate design
+  decision). Only relevant if v0.12 reopens LSP work.
 
 ### Bundled-ruleset + engine tuning
 
