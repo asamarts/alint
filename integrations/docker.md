@@ -18,10 +18,10 @@ The image's `WORKDIR` is `/repo`, so the bind-mount lets alint see your repo as 
 ## Pin to a version
 
 ```bash
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.10.2 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.11.0 check
 ```
 
-Tags published per release: the exact git tag (`:v0.10.2`), the bare semver (`:0.10.2`), the `<major>.<minor>` channel (`:0.10`), and `:latest`.
+Tags published per release: the exact git tag (`:v0.11.0`), the bare semver (`:0.11.0`), the `<major>.<minor>` channel (`:0.10`), and `:latest`.
 
 ## Apply auto-fixes
 
@@ -46,7 +46,7 @@ For one-shot lint runs in CI systems that prefer containers over running custom 
 ```yaml
 # Generic CI (GitLab, Drone, BuildKite, …)
 script:
-  - docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.10.2 check --format json
+  - docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.11.0 check --format json
 ```
 
 For GitHub Actions specifically, the [official Action](/docs/integrations/github-actions/) is more ergonomic.

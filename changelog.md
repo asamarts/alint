@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-27
+
+The LSP + editor-integration release. Ships the `alint lsp` language
+server (the new `alint-lsp` crate) with in-editor diagnostics,
+hover-to-explain, and apply-fix quick actions, wired up across VS Code,
+JetBrains, and Zed extensions plus Neovim / Sublime / Emacs / Helix
+configs. Alongside it lands the v0.9.21-derived DSL polish: per-rule
+`scope_filter.changed_since:` (lint only the files a PR touched), the
+`git_commit_signed_off` / `_no_fixup` / `_author_allowlist` /
+`_gpg_signed` commit-validation family, `{{env.X}}` interpolation across
+config fields (with `env.X` in `when:` expressions), and an
+informational-notes channel surfaced via `--show-notes`.
+
 ### Changed
 
 - **LSP hardening (post-review).** The language server now: reloads on
@@ -5303,7 +5316,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/asamarts/alint/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/asamarts/alint/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/asamarts/alint/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/asamarts/alint/compare/v0.9.23...v0.10.0

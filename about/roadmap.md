@@ -12,19 +12,15 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.10.2** (2026-05-21). Targeted asciinema-
-demo follow-up to v0.10.1: the alint.org landing-page demo
-rendered `docs:` link underlines extending past the URL text
-in `asciinema-player`. Root cause was an
-`\e[4m\e[34m{URL}\e[0m` ANSI wrap that the player's
-`.ap-underline` class then extended visually across the row.
-Fix: when OSC 8 is also being emitted around the same URL,
-drop the explicit `\e[4m` — the OSC 8 already carries the
-link semantic and the terminal handles the link affordance
-itself. Non-OSC-8 terminals keep `\e[4m` as the visual cue.
-Bundled in: a new `ALINT_FORCE_HYPERLINKS=1` env var so
-screen-recording captures (stdout-redirected, so non-TTY) can
-opt into OSC 8. v0.10.1 (2026-05-20) extended
+**Latest release: v0.11.0** (2026-05-27). The LSP + editor-integration
+release: the `alint lsp` language server (the new `alint-lsp` crate)
+with in-editor diagnostics, hover-to-explain, and apply-fix quick
+actions, wired across the VS Code, JetBrains, and Zed extensions plus
+the Neovim / Sublime / Emacs / Helix configs; the v0.9.21-derived DSL
+polish (`scope_filter.changed_since:`, the `git_commit_*`
+commit-validation family, `{{env.X}}` interpolation); and an
+informational-notes channel. v0.10.2 (2026-05-21) was the asciinema-demo
+OSC 8 hyperlink fix. v0.10.1 (2026-05-20) extended
 `crate::io::read_capped` to `json_schema_passes` +
 `for_each_dir`'s literal-path bypass (two pre-existing read
 sites missed by the original Phase 3 sweep), plus CI hygiene
