@@ -18,6 +18,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the v0.11.0 zip was rebuilt and re-uploaded with this fix during
   moderation.
 
+### CI / pipeline
+
+- **JetBrains plugin — Marketplace-rejection gate.** Added a
+  `verifyNoMarketplaceDeniedApis` gradle task that scans the built
+  jar's constant pool for an explicit deny-list of platform-internal
+  class FQNs (initially `com/intellij/ide/plugins/PluginManagerCore`)
+  and fails the build with a pointer to the public alternative.
+  Wired as a `buildPlugin` finalizer so every path — local `./gradlew
+  buildPlugin`, CI `./gradlew buildPlugin verifyPlugin`, AND the
+  release-job `./gradlew publishPlugin` — runs it. Also opted the
+  existing `verifyPlugin` task's `failureLevel` into the broader set of
+  Marketplace-rejection-worthy problem classes (`INTERNAL_API_USAGES`,
+  `OVERRIDE_ONLY_API_USAGES`, `NON_EXTENDABLE_API_USAGES`,
+  `SCHEDULED_FOR_REMOVAL_API_USAGES`, `PLUGIN_STRUCTURE_WARNINGS`,
+  `MISSING_DEPENDENCIES`). Closes the gap that let the v0.11.0
+  `PluginManagerCore` call ship — Marketplace moderation should no
+  longer be the first detector of this class of issue.
+
 ## [0.11.0] - 2026-05-28
 
 The LSP + editor-integration release. Ships the `alint lsp` language
