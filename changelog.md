@@ -10,13 +10,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **JetBrains plugin:** stop calling the `@ApiStatus.Internal`
-  `PluginManagerCore.getPlugin(PluginId)` to look up the running plugin's
-  own version; use the supported `PluginManager.getPluginByClass(Class)`
-  instead. JetBrains Marketplace validation rejects internal-API usage
-  per <https://plugins.jetbrains.com/docs/intellij/api-internal.html>;
-  the v0.11.0 zip was rebuilt and re-uploaded with this fix during
-  moderation.
+- **JetBrains plugin:** stop calling platform plugin-lookup APIs to read
+  the running plugin's own version. Marketplace validation rejects both
+  `PluginManagerCore.getPlugin(PluginId)` and
+  `PluginManager.getPluginByClass(Class)` as internal-API usage even
+  though neither is `@ApiStatus.Internal` in released-IDE bytecode. The
+  version is now stamped into a build-time classpath resource
+  (`alint-lsp/version.txt` via `generateVersionResource` in
+  `build.gradle.kts`) that `AlintNotifier.pluginVersion()` reads with
+  its own classloader — zero platform-API surface. A
+  `PluginVersionResourceTest` JUnit test locks the wiring (cross-checks
+  the embedded content against the gradle build's version). See
+  <https://plugins.jetbrains.com/docs/intellij/api-internal.html>.
 
 ### CI / pipeline
 
@@ -25,7 +30,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   jar's constant pool for an explicit deny-list of platform-internal
   class FQNs (initially `com/intellij/ide/plugins/PluginManagerCore`)
   and fails the build with a pointer to the public alternative.
-  Wired as a `buildPlugin` finalizer so every path — local `./gradlew
+  (initially `PluginManagerCore` AND `PluginManager` — both classes'
+  plugin-lookup methods are rejected by Marketplace moderation despite
+  not being annotated `@ApiStatus.Internal` in IDE bytecode). Wired as
+  a `buildPlugin` finalizer so every path — local `./gradlew
   buildPlugin`, CI `./gradlew buildPlugin verifyPlugin`, AND the
   release-job `./gradlew publishPlugin` — runs it. Also opted the
   existing `verifyPlugin` task's `failureLevel` into the broader set of
