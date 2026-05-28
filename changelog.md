@@ -8,7 +8,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-05-27
+## [0.11.0] - 2026-05-28
 
 The LSP + editor-integration release. Ships the `alint lsp` language
 server (the new `alint-lsp` crate) with in-editor diagnostics,
