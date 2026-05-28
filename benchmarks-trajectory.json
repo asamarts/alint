@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.11.0",
+      "date": "2026-05-28",
+      "headline": "The LSP + editor-integration release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 12051.131071026668,
+          "stddev_ms": 146.06917943852915,
+          "display": "12.05 s ± 0.15"
+        },
+        "s6_1m_full": {
+          "mean_ms": 11992.340490193332,
+          "stddev_ms": 664.2859685283318,
+          "display": "11.99 s ± 0.66"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15115.07653096,
+          "stddev_ms": 111.97801734487025,
+          "display": "15.12 s ± 0.11"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7704.260352753334,
+          "stddev_ms": 102.70346020561986,
+          "display": "7.70 s ± 0.10"
+        }
+      }
+    },
+    {
       "version": "v0.10.2",
       "date": "2026-05-21",
       "headline": "Targeted follow-up to v0.10.1.",
