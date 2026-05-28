@@ -28,12 +28,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **JetBrains plugin — Marketplace-rejection gate.** Added a
   `verifyNoMarketplaceDeniedApis` gradle task that scans the built
   jar's constant pool for an explicit deny-list of platform-internal
-  class FQNs (initially `com/intellij/ide/plugins/PluginManagerCore`)
-  and fails the build with a pointer to the public alternative.
-  (initially `PluginManagerCore` AND `PluginManager` — both classes'
+  class FQNs (initially `com/intellij/ide/plugins/PluginManagerCore`
+  and `com/intellij/ide/plugins/PluginManager` — both classes'
   plugin-lookup methods are rejected by Marketplace moderation despite
-  not being annotated `@ApiStatus.Internal` in IDE bytecode). Wired as
-  a `buildPlugin` finalizer so every path — local `./gradlew
+  not being annotated `@ApiStatus.Internal` in IDE bytecode) and fails
+  the build with a pointer to the public alternative. Wired as a
+  `buildPlugin` finalizer so every path — local `./gradlew
   buildPlugin`, CI `./gradlew buildPlugin verifyPlugin`, AND the
   release-job `./gradlew publishPlugin` — runs it. Also opted the
   existing `verifyPlugin` task's `failureLevel` into the broader set of
