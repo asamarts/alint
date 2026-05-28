@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **JetBrains plugin:** stop calling the `@ApiStatus.Internal`
+  `PluginManagerCore.getPlugin(PluginId)` to look up the running plugin's
+  own version; use the supported `PluginManager.getPluginByClass(Class)`
+  instead. JetBrains Marketplace validation rejects internal-API usage
+  per <https://plugins.jetbrains.com/docs/intellij/api-internal.html>;
+  the v0.11.0 zip was rebuilt and re-uploaded with this fix during
+  moderation.
+
 ## [0.11.0] - 2026-05-28
 
 The LSP + editor-integration release. Ships the `alint lsp` language
