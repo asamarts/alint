@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-05-31
+
+A JetBrains-plugin patch that clears JetBrains Marketplace moderation.
+The v0.11.0 plugin read its own version through platform plugin-lookup
+APIs (`PluginManagerCore` / `PluginManager`) that the Marketplace's
+validator rejects as internal-API usage even though
+`intellij-plugin-verifier` passes them; the version is now stamped into
+a build-time classpath resource with zero platform-API surface, and a
+new `verifyNoMarketplaceDeniedApis` bytecode gate fails the build on any
+denied API so Marketplace moderation is no longer the first detector.
+Linter behavior, the DSL, the CLI, and every other distribution channel
+are unchanged.
+
 ### Fixed
 
 - **JetBrains plugin:** stop calling platform plugin-lookup APIs to read
@@ -5352,7 +5365,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/asamarts/alint/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/asamarts/alint/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/asamarts/alint/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/asamarts/alint/compare/v0.10.0...v0.10.1

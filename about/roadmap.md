@@ -12,7 +12,14 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.11.0** (2026-05-27). The LSP + editor-integration
+**Latest release: v0.11.1** (2026-05-31). A JetBrains-plugin patch that
+clears JetBrains Marketplace moderation: the v0.11.0 plugin read its own
+version via platform plugin-lookup APIs (`PluginManagerCore` /
+`PluginManager`) the Marketplace rejects as internal even though
+`intellij-plugin-verifier` passes them; the version is now stamped into
+a build-time classpath resource with zero platform-API surface, gated by
+a new `verifyNoMarketplaceDeniedApis` bytecode check. Linter behavior
+unchanged. **v0.11.0** (2026-05-28) was the LSP + editor-integration
 release: the `alint lsp` language server (the new `alint-lsp` crate)
 with in-editor diagnostics, hover-to-explain, and apply-fix quick
 actions, wired across the VS Code, JetBrains, and Zed extensions plus
