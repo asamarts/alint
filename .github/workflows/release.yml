@@ -453,7 +453,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: stamp version from tag + publish
         env:
           # Repo secrets (Settings → Secrets → Actions):
