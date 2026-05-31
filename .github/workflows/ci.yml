@@ -246,7 +246,7 @@ jobs:
       - name: Zed — wasm build
         working-directory: editors/zed
         run: cargo build --release --target wasm32-wasip1
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
