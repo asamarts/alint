@@ -30,6 +30,15 @@ Scope: graduated TLPs (the three demand sources). Incubating
 podlings additionally need a DISCLAIMER — layer that on
 yourself (see the design doc, open question 1).
 
+Still over-firing on generated / vendored / branded-header files?
+apache-gov-source-license-header already excludes vendored (vendor/,
+third_party/) and generated-by-naming (*.pb.go, zz_generated.*.go,
+*_pb2.py, ...) trees, and accepts the SPDX form
+(SPDX-License-Identifier: Apache-2.0); apache-gov-no-binaries-in-source
+likewise skips third_party/. For residual project-specific cases,
+override the rule in your own config: narrow its `paths:` to your
+source dirs, or set `level: off`.
+
 ## Rules
 
 ### `apache-gov-license-exists`
@@ -126,6 +135,15 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/apach
 # Scope: graduated TLPs (the three demand sources). Incubating
 # podlings additionally need a DISCLAIMER — layer that on
 # yourself (see the design doc, open question 1).
+#
+# Still over-firing on generated / vendored / branded-header files?
+# apache-gov-source-license-header already excludes vendored (vendor/,
+# third_party/) and generated-by-naming (*.pb.go, zz_generated.*.go,
+# *_pb2.py, ...) trees, and accepts the SPDX form
+# (SPDX-License-Identifier: Apache-2.0); apache-gov-no-binaries-in-source
+# likewise skips third_party/. For residual project-specific cases,
+# override the rule in your own config: narrow its `paths:` to your
+# source dirs, or set `level: off`.
 
 version: 1
 
