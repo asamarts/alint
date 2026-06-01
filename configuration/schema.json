@@ -1316,7 +1316,7 @@
     },
 
     "rule_generated_file_fresh": {
-      "description": "A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. alint does not run codegen as a build step; this only verifies, capturing stdout, never writing the tree (same trust tier as the `command` rule). Single-shot, opt-in.",
+      "description": "A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. alint does not run codegen as a build step; this only verifies, capturing stdout, never writing the tree (same trust tier as the `command` rule). The generator must emit canonical content to STDOUT; most real codegen rewrites files in place instead — for that, use `command_idempotent` (the tool's own `--check` mode), the broadly-applicable form. Single-shot, opt-in.",
       "type": "object",
       "required": ["file", "command"],
       "properties": {
@@ -1345,7 +1345,7 @@
     },
 
     "rule_import_gate": {
-      "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
+      "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js/scala/java/dart/nix) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
       "type": "object",
       "required": ["forbid"],
       "properties": {
@@ -1355,7 +1355,7 @@
           "type": "string",
           "description": "Regex tested against the extracted import target."
         },
-        "language": { "enum": ["go", "python", "rust", "js", "generic"] },
+        "language": { "enum": ["go", "python", "rust", "js", "scala", "java", "dart", "nix", "generic"] },
         "import_pattern": {
           "type": "string",
           "description": "Explicit import-line regex (capture group 1 = imported target); overrides the language preset."

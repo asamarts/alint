@@ -8,6 +8,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
+  Joins the existing go/python/rust/js presets, so these ecosystems get
+  a built-in import-line pattern instead of a hand-written
+  `import_pattern` (the form spark / flutter / nixpkgs used). The Nix
+  preset targets the `import` builtin (`import <nixpkgs>` /
+  `import ./mod.nix`); the NixOS `imports = [ ... ]` module-list form
+  still needs `language: generic` plus a custom pattern.
+
+### Changed
+
+- **`generated_file_fresh` reference clarifies it is stdout-only.** The
+  declared generator must print canonical content to stdout; most real
+  codegen rewrites files in place, for which `command_idempotent` (the
+  tool's own `--check` mode) is the broadly-applicable form.
+  Schema / reference text only; no behavior change.
+
 ### Fixed
 
 - **`compliance/apache-2@v1` and `apache/governance@v1` over-fired on
