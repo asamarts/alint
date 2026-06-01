@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`compliance/apache-2@v1` and `apache/governance@v1` over-fired on
+  CNCF / codegen-heavy repos.** The source-header rules now accept the
+  modern `SPDX-License-Identifier: Apache-2.0` form alongside the ASF
+  short and long-preamble forms (CNCF projects such as helm, istio, and
+  kubernetes carry an SPDX id rather than the ASF appendix text), and
+  they exclude vendored trees (`third_party/`, `3rdparty/`) and
+  generated-by-naming source (`*.pb.go`, `*_grpc.pb.go`,
+  `zz_generated.*.go`, `*_pb2.py`, `*.pb.cc`, `*.pb.swift`,
+  `*.generated.*`, and similar). `apache-gov-no-binaries-in-source`
+  likewise excludes `third_party/`. Every large ASF/CNCF repo in the
+  case-study corpus (airflow, helm, istio, kubernetes, tensorflow) hit
+  one of these. This is a pure false-positive reduction, so the bundles
+  stay `@v1`: a tree that passed before still passes.
+
 ## [0.11.1] - 2026-05-31
 
 A JetBrains-plugin patch that clears JetBrains Marketplace moderation.

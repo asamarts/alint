@@ -202,16 +202,40 @@ rules:
       include:
         ["**/*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,hh,sh,rb,swift,scala}"]
       exclude:
+        # Vendored / third-party trees (CNCF + Google convention).
         - "**/vendor/**"
         - "**/node_modules/**"
+        - "**/third_party/**"
+        - "**/3rdparty/**"
+        # Build output.
         - "**/target/**"
         - "**/build/**"
         - "**/dist/**"
         - "**/.cargo/**"
         - "**/generated/**"
         - "**/__generated__/**"
+        # Generated source by naming convention. Codegen carries its own
+        # header (or none); requiring the ASF header here false-positives
+        # at scale across protobuf / kubernetes / istio / tensorflow.
+        # Kept verbatim-lockstep with compliance/apache-2@v1.
+        - "**/*.pb.go"
+        - "**/*_grpc.pb.go"
+        - "**/*.gen.go"
+        - "**/*_generated.go"
+        - "**/zz_generated.*.go"
+        - "**/*_pb2.py"
+        - "**/*_pb2_grpc.py"
+        - "**/*.pb.cc"
+        - "**/*.pb.h"
+        - "**/*.pb.swift"
+        - "**/*_pb.rb"
+        - "**/*.generated.*"
     lines: 25
-    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)'
+    # v0.12: accept the ASF short form, the long ASF-preamble form, OR
+    # the modern SPDX identifier (`SPDX-License-Identifier: Apache-2.0`)
+    # that CNCF / branded-header projects (helm, istio, kubernetes) use.
+    # Pure false-positive reduction; rides @v1. Lockstep with A2.
+    pattern: '(Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)|SPDX-License-Identifier:\s*Apache-2\.0)'
     level: warning
     message: >-
       Apache RAT: source files must carry the canonical ASF
@@ -232,6 +256,8 @@ rules:
       exclude:
         - "**/vendor/**"
         - "**/node_modules/**"
+        - "**/third_party/**"
+        - "**/3rdparty/**"
         - "**/target/**"
         - "**/build/**"
         - "**/dist/**"
