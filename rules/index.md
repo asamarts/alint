@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 87 rule kinds across 13 families (76 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 88 rule kinds across 13 families (77 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -20,7 +20,7 @@ alint ships 87 rule kinds across 13 families (76 distinct rule behaviors plus 11
 - [Structure](/docs/rules/structure/) — 3 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
-- [Git hygiene](/docs/rules/git-hygiene/) — 12 rules
+- [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
 - [Cross-file](/docs/rules/cross-file/) — 15 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
@@ -92,6 +92,7 @@ alint ships 87 rule kinds across 13 families (76 distinct rule behaviors plus 11
 - [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) — Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). _(Security / Unicode sanity)_
 - [`ordered_block`](/docs/rules/cross-file/ordered_block/) — The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`). _(Cross-file)_
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
+- [`pair_changed_together`](/docs/rules/git-hygiene/pair_changed_together/) — If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. _(Git hygiene)_
 - [`pair_hash`](/docs/rules/cross-file/pair_hash/) — The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker is tolerated). _(Cross-file)_
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_

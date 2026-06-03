@@ -83,6 +83,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `collect_changed_paths_filtered` git helper (`--diff-filter=A`). Silent
   no-op outside a git repo or when nothing relevant changed; a `since:` that
   fails to resolve hard-fails with a shallow-clone hint. Check-only.
+- **`pair_changed_together` — the co-change gate (new).** If the
+  `<since>...HEAD` diff changes any path matching `if_changed:`, at least one
+  path matching `then_changed:` must change in the same range (rust's
+  `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct
+  changes; "`version.txt` and the lockfile change together" release guards).
+  Both globs and `since:` (the base ref) are required. Directional — a
+  `then_changed`-only change never triggers it; swap the globs in a second
+  rule for a bidirectional pact. The `changeset_requires_path` sibling, on the
+  same merge-base diff as `alint check --changed`. Silent no-op outside a git
+  repo or when `if_changed` didn't change; a `since:` that fails to resolve
+  hard-fails with a shallow-clone hint. Check-only.
 - **Selector tuning — `file_is_ascii` `allow:` + `ordered_block` `select:`
   (the C-tuning cluster from the v0.12 study; no new rule kinds).**
   `file_is_ascii` gains `allow:` — a list of permitted non-ASCII codepoints,
