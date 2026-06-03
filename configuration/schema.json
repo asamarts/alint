@@ -1308,7 +1308,7 @@
         },
         "edges": {
           "type": "object",
-          "required": ["from_content"],
+          "description": "Exactly one edge extractor: `from_content` (content references → the reference-graph modes) or `derive_target` (a name template → the codegen-freshness `fresh` mode).",
           "properties": {
             "from_content": {
               "type": "object",
@@ -1318,12 +1318,26 @@
                 "resolve": { "enum": ["relative_to_file", "relative_to_repo_root"] }
               },
               "additionalProperties": false
+            },
+            "derive_target": {
+              "type": "object",
+              "description": "Derive the generated target's path from the source node's path: `from` is a regex matched against the node path, `to` is a replacement template using its captures (e.g. `to: $1.pb.go`).",
+              "required": ["from", "to"],
+              "properties": {
+                "from": { "type": "string" },
+                "to": { "type": "string" }
+              },
+              "additionalProperties": false
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            { "required": ["from_content"] },
+            { "required": ["derive_target"] }
+          ]
         },
         "require": {
-          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, or `{ no_orphans: { roots: [...] } }`). `no_dangling` = every path-shaped edge resolves to an existing path; `no_orphans` = no node is unreferenced except those matching a `roots` glob.",
+          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, `{ no_orphans: { roots: [...] } }`, or `{ fresh: { hash, marker } }`). `no_dangling` = every path-shaped edge resolves to an existing path; `no_orphans` = no node is unreferenced except those matching a `roots` glob; `fresh` (needs `edges.derive_target`) = the derived output carries the source's current `hash` digest, captured by `marker` (group 1).",
           "oneOf": [
             { "enum": ["acyclic", "no_dangling", "no_orphans"] },
             {
@@ -1357,6 +1371,22 @@
                       "type": "array",
                       "items": { "type": "string" }
                     }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["fresh"],
+              "properties": {
+                "fresh": {
+                  "type": "object",
+                  "required": ["marker"],
+                  "properties": {
+                    "hash": { "enum": ["sha256", "sha512"] },
+                    "marker": { "type": "string" }
                   },
                   "additionalProperties": false
                 }

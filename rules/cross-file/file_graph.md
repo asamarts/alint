@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files; `edges.from_content` extracts one reference per match — `extract` is the same one-of as `registry_paths_resolve` (`toml` / `json` / `yaml` JSONPath, `lines`, `regex` capture group 1) — and `resolve`s it to a path (`relative_to_file`, default, or `relative_to_repo_root`). Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and two configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); and `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
+Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the codegen-freshness `fresh` mode. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
 
 ```yaml
 # Layering: domain code must not reach into infra (file → file).
@@ -52,5 +52,19 @@ Assemble the repo's *file → file* reference graph and assert a global structur
   require:
     no_orphans:
       roots: ["docs/index.md", "docs/README.md"]
+
+# Freshness: each generated *.pb.go must embed the sha256 of its .proto
+# source (the alint-native, no-spawn form of `make gen && git diff`).
+- id: generated-stays-fresh
+  kind: file_graph
+  nodes: "proto/**/*.proto"
+  edges:
+    derive_target:
+      from: '(.*)\.proto'
+      to: '$1.pb.go'
+  require:
+    fresh:
+      hash: sha256
+      marker: 'sha256:([0-9a-f]{64})'
 ```
 
