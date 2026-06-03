@@ -465,7 +465,7 @@
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_pair_hash" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
-        { "$ref": "#/$defs/rule_cross_file_value_equals" },
+        { "$ref": "#/$defs/rule_cross_file" },
         { "$ref": "#/$defs/rule_file_graph" },
         { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_generated_file_fresh" },
@@ -1251,12 +1251,12 @@
       "additionalProperties": false
     },
 
-    "rule_cross_file_value_equals": {
-      "description": "A value extracted from one authoritative `source` file must equal a value extracted from one or more `targets`. `targets` is either a `{ files: <glob>, extract }` map (one query per glob match — the istio value_extractor / pitfall-#20 shape) or a sequence of `{ file, extract }` (heterogeneous pins). `normalize` relaxes the comparison (semver-major = same band). Non-literal extracted values are skipped, not failed.",
+    "rule_cross_file": {
+      "description": "A value (or set of values) extracted from one authoritative `source` file must hold a `relation` to the values extracted from each of one or more `targets`. `relation`: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), or the set relations `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `targets` is either a `{ files: <glob>, extract }` map (one query per glob match) or a sequence of `{ file, extract }` (heterogeneous pins). `normalize` relaxes the comparison (semver-major = same band). Non-literal extracted values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals).",
       "type": "object",
       "required": ["source", "targets"],
       "properties": {
-        "kind": { "const": "cross_file_value_equals" },
+        "kind": { "enum": ["cross_file", "cross_file_value_equals"] },
         "source": {
           "type": "object",
           "required": ["file", "extract"],
@@ -1291,6 +1291,7 @@
             }
           ]
         },
+        "relation": { "enum": ["equals", "subset", "superset", "set_equals"] },
         "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
         "allow_missing_target": { "type": "boolean" }
       }

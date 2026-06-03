@@ -38,6 +38,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   out, so it stays out of the spawning-rule trust gate. The #1 demand-ranked
   new kind of the 111-repo v0.12 case study (257 file-reference-graph edge
   sources across 56 repos).
+- **`cross_file` — the unified cross-file value-relation kind (new).**
+  One kind, parameterised by `relation:`, over the shared `extract:`
+  (`crate::extract`) and `normalize:`. `relation: equals` (default) is the
+  released `cross_file_value_equals` — now a **byte-compatible alias**
+  (`relation` defaults to `equals`, so every existing config is unchanged).
+  The new set relations compare the source's extracted set `S` to each
+  target's set `T`: `subset` (`S ⊆ T`, a singleton `S` = membership — e.g.
+  pnpm catalog refs ⊆ catalog keys), `superset` (`S ⊇ T` — a registry covers
+  every use), and `set_equals` (`S == T` — rust `features` ↔ unstable-book,
+  protobuf binding parity). The engine reports relation-specific diffs
+  (`missing: {…}` / `extra: {…}`), not a generic "values differ". Realises
+  architecture-synthesis primitive A and the whole `value_set_membership`
+  demand in one kind; `requires_full_index` cross-file dispatch. The
+  `identical` (whole-file) and `resolves` (path-existence) relations, plus
+  the `normalize:` promotion, follow in later increments.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written
