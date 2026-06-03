@@ -1323,9 +1323,9 @@
           "additionalProperties": false
         },
         "require": {
-          "description": "Either the string `acyclic`, or a map with `forbidden_edges`.",
+          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, or `{ no_orphans: { roots: [...] } }`). `no_dangling` = every path-shaped edge resolves to an existing path; `no_orphans` = no node is unreferenced except those matching a `roots` glob.",
           "oneOf": [
-            { "const": "acyclic" },
+            { "enum": ["acyclic", "no_dangling", "no_orphans"] },
             {
               "type": "object",
               "required": ["forbidden_edges"],
@@ -1342,6 +1342,23 @@
                     },
                     "additionalProperties": false
                   }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["no_orphans"],
+              "properties": {
+                "no_orphans": {
+                  "type": "object",
+                  "properties": {
+                    "roots": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

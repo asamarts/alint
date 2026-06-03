@@ -17,20 +17,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   extracts one reference per match (reusing the `extract:` one-of —
   toml/json/yaml JSONPath, `lines`, or `regex` capture group 1) and
   `resolve`s it to a path (`relative_to_file` or `relative_to_repo_root`).
-  This first increment ships two `require:` modes: `forbidden_edges` (the
-  whole-repo layering firewall — no edge whose source matches `from` and
-  whose resolved target matches `to`, e.g. domain code must not import
-  infra; `import_gate` is the cheap per-file version) and `acyclic` (no
-  dependency cycle among the nodes, each reported once as a
-  rotation-canonical path list — the clearest capability gap, since no
-  current kind detects cycles). Bare module names, absolute paths, URLs,
-  and computed references are dropped, not mis-resolved — nodes stay
-  path-based (module-*name* resolution is the package-graph non-goal).
-  Pure-parse and extraction-based: it never shells out, so it stays out
-  of the spawning-rule trust gate. The #1 demand-ranked new kind of the
-  111-repo v0.12 case study (257 file-reference-graph edge sources across
-  56 repos). The `no_dangling` / `no_orphans` integrity modes and the
-  content-hash `fresh` mode follow in later increments.
+  Ships four `require:` modes: `forbidden_edges` (the whole-repo layering
+  firewall — no edge whose source matches `from` and whose resolved target
+  matches `to`, e.g. domain code must not import infra; `import_gate` is the
+  cheap per-file version), `acyclic` (no dependency cycle among the nodes,
+  each reported once as a rotation-canonical path list — the clearest
+  capability gap, since no current kind detects cycles), `no_dangling`
+  (every path-shaped edge must resolve to a path that exists on disk — the
+  generic doc-cross-link / `markdown_paths_resolve` integrity check), and
+  `no_orphans` (no node is unreferenced by another node, except those
+  matching a `roots:` glob — the registry / staging orphan detector). Bare
+  module names, absolute paths, URLs, and computed references are dropped,
+  not mis-resolved — nodes stay path-based (module-*name* resolution is the
+  package-graph non-goal). Pure-parse and extraction-based: it never shells
+  out, so it stays out of the spawning-rule trust gate. The #1 demand-ranked
+  new kind of the 111-repo v0.12 case study (257 file-reference-graph edge
+  sources across 56 repos). Only the content-hash `fresh` mode remains for a
+  later increment.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written
