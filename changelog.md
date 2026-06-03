@@ -58,6 +58,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disk (`source.extract`, no `targets` — the forward half of
   `registry_paths_resolve`, which keeps its richer `base`/`must_contain`/
   `orphans` ergonomics). Only the `normalize:` promotion remains.
+- **`git_commit_subject_matches` — subject-line grammar for the commit
+  family (new).** Each commit's subject (the first line of its message)
+  must match a `matches:` regex — the subject-grammar member alongside
+  `git_commit_signed_off` / `_no_fixup` / `_author_allowlist` /
+  `_gpg_signed`. The regex is anchored to the subject alone (so `^…$`
+  describes the first line exactly), unlike `git_commit_message`'s
+  whole-message `pattern:`; use that rule's `subject_max_length:` for a
+  length cap. Enforces conventions like go / Gerrit's `pkg/path:
+  lowercase summary`, node's `subsystem: description`, or
+  conventional-commit types. Shares the family's `since:` /
+  `include_merges:` semantics (HEAD-only when unset, `<since>..HEAD` when
+  set), `{{env.X}}` interpolation, silent-outside-a-repo posture, and the
+  shallow-clone hint on an unresolvable `since:`.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written

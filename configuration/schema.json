@@ -456,6 +456,7 @@
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
         { "$ref": "#/$defs/rule_git_commit_signed_off" },
+        { "$ref": "#/$defs/rule_git_commit_subject_matches" },
         { "$ref": "#/$defs/rule_git_commit_no_fixup" },
         { "$ref": "#/$defs/rule_git_commit_author_allowlist" },
         { "$ref": "#/$defs/rule_git_commit_gpg_signed" },
@@ -1017,6 +1018,28 @@
         "since": {
           "type": "string",
           "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
+        },
+        "include_merges": {
+          "type": "boolean",
+          "default": false,
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
+        }
+      }
+    },
+
+    "rule_git_commit_subject_matches": {
+      "description": "Each commit's subject line (the first line of its message) must match the `matches:` regex — the subject-grammar member of the commit family (e.g. `pkg/path: lowercase summary`, conventional-commit types). Anchored to the subject alone, unlike `git_commit_message`'s whole-message `pattern:`; use `git_commit_message`'s `subject_max_length:` for a length cap. With `since:` unset, only HEAD is checked; with `since:` set, every commit in `<since>..HEAD`. Outside a git repo / with no commits / when git is unavailable, silently no-ops; a bad `since:` ref hard-fails with a shallow-clone hint.",
+      "type": "object",
+      "required": ["matches"],
+      "properties": {
+        "kind": { "const": "git_commit_subject_matches" },
+        "matches": {
+          "type": "string",
+          "description": "Rust-regex the commit subject (first line of the message) must match."
+        },
+        "since": {
+          "type": "string",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
         },
         "include_merges": {
           "type": "boolean",
