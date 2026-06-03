@@ -1505,20 +1505,31 @@
     },
 
     "rule_generated_file_fresh": {
-      "description": "A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. alint does not run codegen as a build step; this only verifies, capturing stdout, never writing the tree (same trust tier as the `command` rule). The generator must emit canonical content to STDOUT; most real codegen rewrites files in place instead — for that, use `command_idempotent` (the tool's own `--check` mode), the broadly-applicable form. Single-shot, opt-in.",
+      "description": "A committed artefact must equal what a declared `command` generator produces. Two modes, selected by shape (exactly one of `file` / `outputs` required): STDOUT mode (`file`) compares one committed file to the generator's stdout — non-mutating, never writes the tree. MUTATING / in-place mode (`outputs`, a glob or list of globs) runs an in-place generator and asserts the regenerated files are unchanged: alint snapshots `outputs`, runs the generator, diffs, reports any stale / new / removed file, and RESTORES the snapshot — so `alint check` stays pure (no regenerated files left behind); the alint-native form of `make gen && git diff --exit-code`. Either mode runs a process, so the kind is trust-gated to the user's own top-level config (same tier as the `command` rule). Single-shot, opt-in.",
       "type": "object",
-      "required": ["file", "command"],
+      "required": ["command"],
+      "oneOf": [
+        { "required": ["file"] },
+        { "required": ["outputs"] }
+      ],
       "properties": {
         "kind": { "const": "generated_file_fresh" },
         "file": {
           "type": "string",
-          "description": "The committed generated file to verify."
+          "description": "STDOUT mode: the committed generated file to verify against the generator's stdout."
+        },
+        "outputs": {
+          "description": "MUTATING mode: the glob (or list of globs) the in-place generator rewrites; its presence selects the mutating mode. alint snapshots these, runs the generator, diffs, and restores them.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
         },
         "command": {
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1,
-          "description": "Generator argv (no shell); must emit the file's contents to stdout."
+          "description": "Generator argv (no shell). STDOUT mode: emit the file's contents to stdout. MUTATING mode: write the `outputs` in place."
         },
         "workdir": {
           "type": "string",

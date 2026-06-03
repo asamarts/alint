@@ -94,6 +94,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same merge-base diff as `alint check --changed`. Silent no-op outside a git
   repo or when `if_changed` didn't change; a `since:` that fails to resolve
   hard-fails with a shallow-clone hint. Check-only.
+- **`generated_file_fresh` — mutating / in-place mode (`outputs:`).** The
+  shipped kind only diffed a generator's *stdout* against one committed
+  `file:`; the common real pattern is a generator that rewrites files **in
+  place**, after which CI runs `git diff --exit-code` (redis `make
+  commands.def`, ruff `cargo dev generate-all`, pytorch `generate_ci_workflows`,
+  symfony, postgres, protobuf, cpython `make regen-all`, … — the #1 residual of
+  the post-build coverage re-analysis, ≈23 repos). The new `outputs:` field (a
+  glob or list) selects this mode: alint **snapshots** the outputs, runs the
+  generator, **diffs** (flagging each stale / newly-created / removed file), and
+  **restores the snapshot** — so `alint check` leaves the tree byte-identical
+  (the restore is panic-safe via a Drop guard). It preserves the kind's "never
+  run codegen as a build step" non-goal: alint *verifies* freshness, it never
+  *performs* it. Exactly one of `file:` / `outputs:` is required; `command:` /
+  `workdir:` / `normalize:` / `timeout:` and the spawn trust-gate are shared
+  with the stdout mode. A *mode* on the existing kind — rule count unchanged.
 - **Selector tuning — `file_is_ascii` `allow:` + `ordered_block` `select:`
   (the C-tuning cluster from the v0.12 study; no new rule kinds).**
   `file_is_ascii` gains `allow:` — a list of permitted non-ASCII codepoints,

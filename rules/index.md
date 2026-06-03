@@ -60,7 +60,7 @@ alint ships 88 rule kinds across 13 families (77 distinct rule behaviors plus 11
 - [`final_newline`](/docs/rules/text-hygiene/final_newline/) — File must end with a single `\n`. _(Text hygiene)_
 - [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
 - [`for_each_file`](/docs/rules/cross-file/for_each_file/) — For every matching directory / file, evaluate a nested `require:` block with the entry as context. _(Cross-file)_
-- [`generated_file_fresh`](/docs/rules/cross-file/generated_file_fresh/) — A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. _(Cross-file)_
+- [`generated_file_fresh`](/docs/rules/cross-file/generated_file_fresh/) — A committed artefact must equal what a declared `command` generator produces, in one of two modes (exactly one of `file` / `outputs`). _(Cross-file)_
 - [`git_blame_age`](/docs/rules/git-hygiene/git_blame_age/) — Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. _(Git hygiene)_
 - [`git_commit_author_allowlist`](/docs/rules/git-hygiene/git_commit_author_allowlist/) — Assert every commit author in scope matches an allowed email and/or name pattern. _(Git hygiene)_
 - [`git_commit_gpg_signed`](/docs/rules/git-hygiene/git_commit_gpg_signed/) — Assert every commit in scope has a verifying signature (`git verify-commit` exits 0). _(Git hygiene)_
