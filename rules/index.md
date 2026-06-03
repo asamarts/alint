@@ -29,7 +29,7 @@ alint ships 85 rule kinds across 13 families (74 distinct rule behaviors plus 11
 - [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
 - [`command_idempotent`](/docs/rules/cross-file/command_idempotent/) — Run a user-declared formatter/checker in its **`--check` (idempotence) mode** once: exit `0` ⇒ the tree is formatter-clean (silent); non-zero ⇒ violation(s). _(Cross-file)_
 - [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). _(Git hygiene)_
-- [`cross_file`](/docs/rules/cross-file/cross_file/) — A value — or *set* of values — extracted from one authoritative `source` file must hold a `relation` to the values extracted from each of one or more `targets`. _(Cross-file)_
+- [`cross_file`](/docs/rules/cross-file/cross_file/) — A `source` file must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). _(Cross-file)_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `select:` must contain files matching every glob in `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_

@@ -1252,14 +1252,14 @@
     },
 
     "rule_cross_file": {
-      "description": "A value (or set of values) extracted from one authoritative `source` file must hold a `relation` to the values extracted from each of one or more `targets`. `relation`: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), or the set relations `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `targets` is either a `{ files: <glob>, extract }` map (one query per glob match) or a sequence of `{ file, extract }` (heterogeneous pins). `normalize` relaxes the comparison (semver-major = same band). Non-literal extracted values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals).",
+      "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` — the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
       "type": "object",
-      "required": ["source", "targets"],
+      "required": ["source"],
       "properties": {
         "kind": { "enum": ["cross_file", "cross_file_value_equals"] },
         "source": {
           "type": "object",
-          "required": ["file", "extract"],
+          "required": ["file"],
           "properties": {
             "file": { "type": "string" },
             "extract": { "$ref": "#/$defs/extract_spec" }
@@ -1270,7 +1270,7 @@
           "oneOf": [
             {
               "type": "object",
-              "required": ["files", "extract"],
+              "required": ["files"],
               "properties": {
                 "files": { "type": "string" },
                 "extract": { "$ref": "#/$defs/extract_spec" }
@@ -1281,7 +1281,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["file", "extract"],
+                "required": ["file"],
                 "properties": {
                   "file": { "type": "string" },
                   "extract": { "$ref": "#/$defs/extract_spec" }
@@ -1291,9 +1291,10 @@
             }
           ]
         },
-        "relation": { "enum": ["equals", "subset", "superset", "set_equals"] },
+        "relation": { "enum": ["equals", "subset", "superset", "set_equals", "identical", "resolves"] },
         "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
-        "allow_missing_target": { "type": "boolean" }
+        "allow_missing_target": { "type": "boolean" },
+        "skip_header_lines": { "type": "integer", "minimum": 0 }
       }
     },
 

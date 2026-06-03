@@ -50,9 +50,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protobuf binding parity). The engine reports relation-specific diffs
   (`missing: {…}` / `extra: {…}`), not a generic "values differ". Realises
   architecture-synthesis primitive A and the whole `value_set_membership`
-  demand in one kind; `requires_full_index` cross-file dispatch. The
-  `identical` (whole-file) and `resolves` (path-existence) relations, plus
-  the `normalize:` promotion, follow in later increments.
+  demand in one kind; `requires_full_index` cross-file dispatch. Two further
+  relations have a different shape (validated at load): `identical` compares
+  whole files byte-for-byte (no `extract`; optional `skip_header_lines` to
+  ignore a differing license/header — the README-mirror / `files_equal`
+  case), and `resolves` checks that each path the source extracts exists on
+  disk (`source.extract`, no `targets` — the forward half of
+  `registry_paths_resolve`, which keeps its richer `base`/`must_contain`/
+  `orphans` ergonomics). Only the `normalize:` promotion remains.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written

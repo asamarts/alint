@@ -11,7 +11,7 @@ Rule kinds in the **Cross-file** family. Each entry below has its own page with 
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist.
 - [`pair_hash`](/docs/rules/cross-file/pair_hash/) — The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker is tolerated).
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact.
-- [`cross_file`](/docs/rules/cross-file/cross_file/) — A value — or *set* of values — extracted from one authoritative `source` file must hold a `relation` to the values extracted from each of one or more `targets`.
+- [`cross_file`](/docs/rules/cross-file/cross_file/) — A `source` file must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem).
 - [`file_graph`](/docs/rules/cross-file/file_graph/) — Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express.
 - [`ordered_block`](/docs/rules/cross-file/ordered_block/) — The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`).
 - [`generated_file_fresh`](/docs/rules/cross-file/generated_file_fresh/) — A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check.
