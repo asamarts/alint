@@ -1337,7 +1337,16 @@
           ]
         },
         "relation": { "enum": ["equals", "subset", "superset", "set_equals", "identical", "resolves"] },
-        "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
+        "normalize": {
+          "description": "A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band (each token's leading digits, leading non-digits stripped) — the protobuf / pnpm version-format reconcile.",
+          "oneOf": [
+            { "enum": ["none", "trim", "lower", "semver-major", "semver-minor"] },
+            {
+              "type": "array",
+              "items": { "enum": ["none", "trim", "lower", "semver-major", "semver-minor"] }
+            }
+          ]
+        },
         "allow_missing_target": { "type": "boolean" },
         "skip_header_lines": { "type": "integer", "minimum": 0 }
       }

@@ -101,6 +101,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal`). Completes the C-tuning selector cluster (eslint's
   include/exclude shape); a `select:` with no include pattern is a load-time
   error. Single-glob configs are unchanged.
+- **`cross_file` `normalize:` promotion — `semver-minor` + composable lists.**
+  `normalize:` now accepts an ordered list of transforms applied
+  left-to-right (`normalize: [trim, semver-minor]`), not just a single
+  transform, and adds `semver-minor` — the leading `MAJOR.MINOR` band, taking
+  each token's leading digits with a non-digit prefix stripped. So `4.36-dev`,
+  `4.36.0`, `pnpm@11.3.0` (→ `11.3`) and `>=22.13` all reconcile to one band
+  (the protobuf / pnpm version-format case from the v0.12 study). `semver-major`
+  keeps its exact released behaviour, and every existing scalar `normalize:`
+  config — including `cross_file_value_equals` — is byte-compatible.
+  `strip_prefix` / `strip_suffix` / `casefold` are deferred (not corpus-proven;
+  `semver-minor`'s non-digit strip already covers the prefix cases).
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written
