@@ -461,6 +461,7 @@
         { "$ref": "#/$defs/rule_git_commit_author_allowlist" },
         { "$ref": "#/$defs/rule_git_commit_gpg_signed" },
         { "$ref": "#/$defs/rule_git_blame_age" },
+        { "$ref": "#/$defs/rule_changeset_requires_path" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
@@ -1127,6 +1128,27 @@
           "type": "integer",
           "minimum": 1,
           "description": "Minimum line age (in days) for a matching line to fire as a violation. Lines younger than this pass silently. Common values: 90 (one quarter), 180 (half a year), 365 (a full year of debt)."
+        }
+      }
+    },
+
+    "rule_changeset_requires_path": {
+      "description": "The `<since>...HEAD` diff must ADD (git status A) at least one path matching `add_glob:` — the 'did you add a changelog entry?' gate (prettier `changelog_unreleased/`, cpython `Misc/NEWS.d/next/`, pnpm `.changeset/*.md`). `since:` (the base ref) is required. Optional `when_changed:` gates the requirement on some other glob having changed (don't demand a changelog for a docs-only PR); with no gate, any non-empty changeset triggers it. Diff-scoped: silent no-op outside a git repo / when nothing relevant changed; a `since:` that fails to resolve hard-fails with a shallow-clone hint. Check-only.",
+      "type": "object",
+      "required": ["add_glob", "since"],
+      "properties": {
+        "kind": { "const": "changeset_requires_path" },
+        "add_glob": {
+          "type": "string",
+          "description": "Glob; the diff must ADD at least one path matching it."
+        },
+        "when_changed": {
+          "type": "string",
+          "description": "Optional gate: only require the add when some path matching this glob changed (any status). Omit to require it on any non-empty changeset."
+        },
+        "since": {
+          "type": "string",
+          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
         }
       }
     },

@@ -7,7 +7,7 @@ sidebar:
 
 ## Why alint exists
 
-Most linters check the code inside files; alint checks the files themselves. The *filesystem shape* of a repository — which files exist, what they're called, what's inside them at the structural level, how they relate to each other — turns out to be where a lot of structural correctness lives, and where existing tooling is patchy. alint covers that surface in one declarative `.alint.yml`: 86 rule kinds across 13 families, 21 bundled ecosystem rulesets, structured queries (RFC 9535 JSONPath over JSON / YAML / TOML / XML), cross-file relational rules, conditional `when:` gates on per-run facts, and auto-fix.
+Most linters check the code inside files; alint checks the files themselves. The *filesystem shape* of a repository — which files exist, what they're called, what's inside them at the structural level, how they relate to each other — turns out to be where a lot of structural correctness lives, and where existing tooling is patchy. alint covers that surface in one declarative `.alint.yml`: 87 rule kinds across 13 families, 21 bundled ecosystem rulesets, structured queries (RFC 9535 JSONPath over JSON / YAML / TOML / XML), cross-file relational rules, conditional `when:` gates on per-run facts, and auto-fix.
 
 When [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026 it took a piece of the OSS-baseline checking tooling with it; alint's `oss-baseline@v1` ruleset is a strict superset of Repolinter's default rules for users migrating in. See the [Repolinter-alternative landing](/repolinter-alternative/) and the [step-by-step migration guide](/migrating-from/repolinter/) for the full mapping.
 

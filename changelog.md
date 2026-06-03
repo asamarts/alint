@@ -71,6 +71,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `include_merges:` semantics (HEAD-only when unset, `<since>..HEAD` when
   set), `{{env.X}}` interpolation, silent-outside-a-repo posture, and the
   shallow-clone hint on an unresolvable `since:`.
+- **`changeset_requires_path` — "did you add a changelog entry?" diff gate
+  (new).** The `<since>...HEAD` diff must ADD (git status `A`) at least one
+  path matching `add_glob:` — the changeset / changelog-per-PR convention
+  (prettier `changelog_unreleased/`, cpython `Misc/NEWS.d/next/`, pnpm
+  `.changeset/*.md`). `since:` (the base ref) is required; an optional
+  `when_changed:` gates the requirement on some other glob having changed (no
+  changelog demanded for a docs-only PR), and with no gate any non-empty
+  changeset triggers it. Builds on the same `<since>...HEAD` three-dot
+  (merge-base) diff as `alint check --changed`, via a new
+  `collect_changed_paths_filtered` git helper (`--diff-filter=A`). Silent
+  no-op outside a git repo or when nothing relevant changed; a `since:` that
+  fails to resolve hard-fails with a shallow-clone hint. Check-only.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written

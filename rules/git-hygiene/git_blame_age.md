@@ -34,5 +34,3 @@ Heuristic notes:
 
 Outside a git repo, on untracked files, or when blame fails for any other reason, the rule silently no-ops per file. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
 
----
-
