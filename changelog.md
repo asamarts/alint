@@ -112,6 +112,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   config — including `cross_file_value_equals` — is byte-compatible.
   `strip_prefix` / `strip_suffix` / `casefold` are deferred (not corpus-proven;
   `semver-minor`'s non-digit strip already covers the prefix cases).
+- **`cross_file` `whole_file: {}` extract source.** A new `extract` source
+  (alongside `toml`/`json`/`yaml`/`lines`/`regex`) that yields the entire file
+  content as one value, so the value relations can compare whole-file content —
+  e.g. `equals` between a `LICENSE` and a `LICENSE-MIT` copy — without dropping
+  to `identical` (which forbids `extract` and `normalize`). Unlike the other
+  sources, a `whole_file` value is compared verbatim: the non-literal skip
+  (which drops interpolated *paths*) does not apply, so content embedding
+  `${…}` / `{{…}}` is still compared. `whole_file` honours `normalize`. No new
+  rule kind — an extract option on the existing cross-file kinds; rule count
+  unchanged.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written

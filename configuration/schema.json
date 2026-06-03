@@ -1279,7 +1279,7 @@
 
     "extract_spec": {
       "type": "object",
-      "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value).",
+      "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), whole_file (object `{}`; the entire file content as one value — for byte-level cross_file comparison; the non-literal skip does not apply).",
       "minProperties": 1,
       "maxProperties": 1,
       "properties": {
@@ -1291,7 +1291,11 @@
           "properties": { "comment": { "type": "string" } },
           "additionalProperties": false
         },
-        "regex": { "type": "string" }
+        "regex": { "type": "string" },
+        "whole_file": {
+          "type": "object",
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
