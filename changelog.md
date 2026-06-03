@@ -151,6 +151,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`no_merge_conflict_markers` false-fired on reST/Markdown setext
+  headings.** A bare `=======` line is now treated as a conflict
+  separator only when the file also carries an unambiguous anchor
+  marker (`<<<<<<< ` / `>>>>>>> ` / `||||||| `, each followed by a ref
+  that never appears in prose). On its own, a seven-character `=======`
+  is identical to a setext H1 underline — "Changes" and "Git tag" are
+  both exactly seven characters — and a real conflict always carries a
+  `<<<<<<<` start anyway. This removes the need to exclude `docs/**`
+  from the rule (flask, django, and other reST/MD-heavy repos hit it).
+- **`import_gate language: js` matched `import(…)` inside comments.**
+  The `js` preset's pattern is unanchored (it must catch dynamic
+  `import("m")` and `require("m")` anywhere on a line), so it also
+  matched a JSDoc type annotation like `@typedef {import("../x")}` — a
+  type-only reference, not a real import (eslint, svelte). The preset
+  now blanks `//` and `/* … */` comments (preserving string literals,
+  since the import target is itself a quoted string, and newlines, so
+  violation line numbers are unchanged) before matching. The anchored
+  presets (`go`/`python`/`rust`/`scala`/`java`/`dart`/`nix`) can't
+  match a comment line, so they are unaffected, as is a custom
+  `import_pattern`.
 - **`compliance/apache-2@v1` and `apache/governance@v1` over-fired on
   CNCF / codegen-heavy repos.** The source-header rules now accept the
   modern `SPDX-License-Identifier: Apache-2.0` form alongside the ASF

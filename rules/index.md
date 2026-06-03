@@ -85,7 +85,7 @@ alint ships 88 rule kinds across 13 families (77 distinct rule behaviors plus 11
 - [`no_case_conflicts`](/docs/rules/portable-metadata/no_case_conflicts/) — Flag paths that differ only by case (e.g. _(Portable metadata)_
 - [`no_empty_files`](/docs/rules/structure/no_empty_files/) — Flag zero-byte files. _(Structure)_
 - [`no_illegal_windows_names`](/docs/rules/portable-metadata/no_illegal_windows_names/) — Reject path components Windows can't represent: _(Portable metadata)_
-- [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) — Flag `<<<<<<< `, `=======`, `>>>>>>> ` markers at the start of a line — almost always left over from an unresolved merge. _(Security / Unicode sanity)_
+- [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) — Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. _(Security / Unicode sanity)_
 - [`no_submodules`](/docs/rules/git-hygiene/no_submodules/) — Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`. _(Git hygiene)_
 - [`no_symlinks`](/docs/rules/unix-metadata/no_symlinks/) — Flag tracked paths that are symbolic links. _(Unix metadata)_
 - [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/) — No line may end with space or tab. _(Text hygiene)_
