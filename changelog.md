@@ -94,6 +94,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a regex that restricts the sortable entries to matching lines, so other
   lines inside the block (comments, group headers) pass through untouched
   (the sectioned / keep-sorted-subset shape; rubocop / gradle / pandas).
+- **`select:` on `for_each_dir` / `for_each_file` / `every_matching_has` now
+  takes a list with `!`-excludes.** Previously a single glob; now a single
+  glob or a list where `!`-prefixed patterns are excludes (e.g. `select:
+  ["packages/*", "!packages/internal"]` — iterate every package except
+  `internal`). Completes the C-tuning selector cluster (eslint's
+  include/exclude shape); a `select:` with no include pattern is a load-time
+  error. Single-glob configs are unchanged.
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written

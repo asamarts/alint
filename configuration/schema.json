@@ -1561,8 +1561,11 @@
       "properties": {
         "kind": { "const": "for_each_dir" },
         "select": {
-          "type": "string",
-          "description": "Glob selecting the directories to iterate."
+          "description": "Glob(s) selecting the directories to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. [\"src/*\", \"!src/internal\"]).",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
         },
         "when_iter": {
           "type": "string",
@@ -1584,8 +1587,11 @@
       "properties": {
         "kind": { "const": "for_each_file" },
         "select": {
-          "type": "string",
-          "description": "Glob selecting the files to iterate."
+          "description": "Glob(s) selecting the files to iterate — a single glob, or a list with `!`-prefixed excludes.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
         },
         "when_iter": {
           "type": "string",
@@ -1661,7 +1667,13 @@
       "required": ["select", "require"],
       "properties": {
         "kind": { "const": "every_matching_has" },
-        "select": { "type": "string" },
+        "select": {
+          "description": "Glob(s) selecting the files/dirs to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. [\"packages/*\", \"!packages/internal\"]).",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        },
         "when_iter": {
           "type": "string",
           "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter."
