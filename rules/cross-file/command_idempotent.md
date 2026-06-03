@@ -2,7 +2,7 @@
 title: 'command_idempotent'
 description: 'Run a user-declared formatter/checker in its **--check (idempotence) mode** once: exit 0 ⇒ the tree is formatter-clean (silent); non-zero ⇒.'
 sidebar:
-  order: 8
+  order: 9
 ---
 
 Run a user-declared formatter/checker in its **`--check`

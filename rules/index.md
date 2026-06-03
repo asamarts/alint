@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 83 rule kinds across 13 families (73 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 84 rule kinds across 13 families (74 distinct rule behaviors plus 10 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,7 +21,7 @@ alint ships 83 rule kinds across 13 families (73 distinct rule behaviors plus 10
 - [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 10 rules
-- [Cross-file](/docs/rules/cross-file/) — 14 rules
+- [Cross-file](/docs/rules/cross-file/) — 15 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -43,6 +43,7 @@ alint ships 83 rule kinds across 13 families (73 distinct rule behaviors plus 10
 - [`file_ends_with`](/docs/rules/content/file_ends_with/) — Byte-level prefix / suffix check. _(Content)_
 - [`file_exists`](/docs/rules/existence/file_exists/) — Every glob match in `paths` must correspond to a real file. _(Existence)_
 - [`file_footer`](/docs/rules/content/file_footer/) — Last `lines` lines of each file in scope must match a regex. _(Content)_
+- [`file_graph`](/docs/rules/cross-file/file_graph/) — Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. _(Cross-file)_
 - [`file_hash`](/docs/rules/content/file_hash/) — Content SHA-256 must equal the expected digest. _(Content)_
 - [`file_header`](/docs/rules/content/file_header/) — The first N lines must match a regex (line-oriented). _(Content)_
 - [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80. _(Content)_

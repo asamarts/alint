@@ -466,6 +466,7 @@
         { "$ref": "#/$defs/rule_pair_hash" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
         { "$ref": "#/$defs/rule_cross_file_value_equals" },
+        { "$ref": "#/$defs/rule_file_graph" },
         { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_generated_file_fresh" },
         { "$ref": "#/$defs/rule_import_gate" },
@@ -1292,6 +1293,61 @@
         },
         "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
         "allow_missing_target": { "type": "boolean" }
+      }
+    },
+
+    "rule_file_graph": {
+      "description": "Assemble the repo's file→file reference graph and assert a global structural property the 1-level cross-file kinds can't. `nodes` (glob) selects the graph's files; `edges.from_content` extracts one reference per match (the `extract` one-of: toml/json/yaml JSONPath, lines, or regex capture group 1) and resolves it to a path via `resolve` (relative_to_file default, or relative_to_repo_root). Bare module names, absolute paths, URLs, and computed/interpolated references are dropped, not mis-resolved. `require` is either the string `acyclic` (no dependency cycle among the nodes) or `{ forbidden_edges: [{ from, to }] }` (no edge whose source matches `from` and whose resolved target matches `to`). Pure-parse, cross-file (no spawn).",
+      "type": "object",
+      "required": ["nodes", "edges", "require"],
+      "properties": {
+        "kind": { "const": "file_graph" },
+        "nodes": {
+          "type": "string",
+          "description": "Glob selecting the graph's node files."
+        },
+        "edges": {
+          "type": "object",
+          "required": ["from_content"],
+          "properties": {
+            "from_content": {
+              "type": "object",
+              "required": ["extract"],
+              "properties": {
+                "extract": { "$ref": "#/$defs/extract_spec" },
+                "resolve": { "enum": ["relative_to_file", "relative_to_repo_root"] }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "require": {
+          "description": "Either the string `acyclic`, or a map with `forbidden_edges`.",
+          "oneOf": [
+            { "const": "acyclic" },
+            {
+              "type": "object",
+              "required": ["forbidden_edges"],
+              "properties": {
+                "forbidden_edges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["from", "to"],
+                    "properties": {
+                      "from": { "type": "string" },
+                      "to": { "type": "string" }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
       }
     },
 
