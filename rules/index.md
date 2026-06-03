@@ -47,7 +47,7 @@ alint ships 87 rule kinds across 13 families (76 distinct rule behaviors plus 11
 - [`file_graph`](/docs/rules/cross-file/file_graph/) — Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. _(Cross-file)_
 - [`file_hash`](/docs/rules/content/file_hash/) — Content SHA-256 must equal the expected digest. _(Content)_
 - [`file_header`](/docs/rules/content/file_header/) — The first N lines must match a regex (line-oriented). _(Content)_
-- [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80. _(Content)_
+- [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. _(Content)_
 - [`file_is_text`](/docs/rules/content/file_is_text/) — Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`. _(Content)_
 - [`file_max_lines`](/docs/rules/content/file_max_lines/) — File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. _(Content)_
 - [`file_max_size`](/docs/rules/content/file_max_size/) — File must be at most `max_bytes` in size. _(Content)_

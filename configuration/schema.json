@@ -1461,7 +1461,11 @@
           "description": "Marker line closing a block."
         },
         "comparator": { "enum": ["lexical", "lexical-ci", "numeric"] },
-        "unique": { "type": "boolean" }
+        "unique": { "type": "boolean" },
+        "select": {
+          "type": "string",
+          "description": "Regex; when set, only lines inside a block matching it are sortable entries (others — comments, group headers — pass through). The sectioned / keep-sorted-subset shape."
+        }
       }
     },
 
@@ -1743,12 +1747,17 @@
     },
 
     "rule_file_is_ascii": {
-      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII). Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning.",
+      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning. With `allow:` the file is decoded as UTF-8 and checked per character; without it, the strict byte-level fast path is used.",
       "type": "object",
       "required": ["paths"],
       "properties": {
         "kind": { "const": "file_is_ascii" },
-        "paths": { "$ref": "#/$defs/paths_spec" }
+        "paths": { "$ref": "#/$defs/paths_spec" },
+        "allow": {
+          "type": "array",
+          "description": "Permitted non-ASCII codepoints — each entry a single character (e.g. \"ö\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` inclusive range.",
+          "items": { "type": "string" }
+        }
       }
     },
 

@@ -83,6 +83,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `collect_changed_paths_filtered` git helper (`--diff-filter=A`). Silent
   no-op outside a git repo or when nothing relevant changed; a `since:` that
   fails to resolve hard-fails with a shallow-clone hint. Check-only.
+- **Selector tuning — `file_is_ascii` `allow:` + `ordered_block` `select:`
+  (the C-tuning cluster from the v0.12 study; no new rule kinds).**
+  `file_is_ascii` gains `allow:` — a list of permitted non-ASCII codepoints,
+  each a single character (`"ö"`), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY`
+  inclusive range — so a tree that keeps source ASCII can still allow `ö` in
+  "Björn" (curl-proven; recurs across llvm / vscode / elixir). With `allow:`
+  the file is decoded as UTF-8 and checked per character; without it the
+  strict byte-level fast path is unchanged. `ordered_block` gains `select:` —
+  a regex that restricts the sortable entries to matching lines, so other
+  lines inside the block (comments, group headers) pass through untouched
+  (the sectioned / keep-sorted-subset shape; rubocop / gradle / pandas).
 - **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
   Joins the existing go/python/rust/js presets, so these ecosystems get
   a built-in import-line pattern instead of a hand-written
