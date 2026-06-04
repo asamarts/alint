@@ -127,6 +127,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal`). Completes the C-tuning selector cluster (eslint's
   include/exclude shape); a `select:` with no include pattern is a load-time
   error. Single-glob configs are unchanged.
+- **`php@v1` bundled ruleset — PHP / Composer baseline (new).** The PHP
+  ecosystem was the one with first-class corpus demand
+  (composer/laravel/symfony/guzzle/phpstan) and no bundled ruleset (rust / node
+  / python / go / java / dotnet all have one). `alint://bundled/php@v1` is gated
+  with `when: facts.has_php` (any `composer.json`, so it is a silent no-op in
+  non-PHP repos) and composed entirely of existing kinds — no engine change. Its
+  heart is the **"Composer-fatals" invariants**: `registry_paths_resolve` checks
+  that every `composer.json` `autoload.psr-4` directory, `autoload.files` entry,
+  and `bin` script resolves on disk (Composer aborts at install/autoload time
+  otherwise — the checks laravel and phpstan hand-roll), plus a `name`-format
+  structured-query check and a no-committed-`vendor/` guard. 6 rules, non-blocking
+  levels; bundled-ruleset count 21 → 22.
 - **Structured-query JSON parsing is now JSONC-tolerant.** A `.json` file with
   `//` or `/* … */` comments or trailing commas (`tsconfig.json`,
   `.vscode/*.json`, and other JS/TS-ecosystem files that use a `.json`
