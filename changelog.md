@@ -127,6 +127,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal`). Completes the C-tuning selector cluster (eslint's
   include/exclude shape); a `select:` with no include pattern is a load-time
   error. Single-glob configs are unchanged.
+- **Structured-query JSON parsing is now JSONC-tolerant.** A `.json` file with
+  `//` or `/* … */` comments or trailing commas (`tsconfig.json`,
+  `.vscode/*.json`, and other JS/TS-ecosystem files that use a `.json`
+  extension for JSONC content) now parses — so `json_path_*`, the `json:`
+  extract (`cross_file` / `registry_paths_resolve`), and `json_schema_passes`
+  work on them (astro, TypeScript, nix). Strict JSON is tried first and is
+  byte-identical (plain JSON pays nothing); only on failure is a comment- and
+  trailing-comma-stripped retry attempted (string-aware, so markers inside
+  string values are preserved). A genuinely-malformed document still fails and
+  reports the strict parser's error.
 - **`unique_by` gains `case_insensitive:`.** When `true` the rendered `key` is
   folded to lowercase before grouping, so files that collide only under
   case-folding (`README.md` vs `readme.md`) are flagged — the
