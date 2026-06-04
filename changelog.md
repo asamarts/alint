@@ -127,6 +127,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal`). Completes the C-tuning selector cluster (eslint's
   include/exclude shape); a `select:` with no include pattern is a load-time
   error. Single-glob configs are unchanged.
+- **`unique_by` gains `case_insensitive:`.** When `true` the rendered `key` is
+  folded to lowercase before grouping, so files that collide only under
+  case-folding (`README.md` vs `readme.md`) are flagged — the
+  case-insensitive-filesystem hazard (Windows / macOS; tensorflow's
+  `full.bats` Windows-dup check, recurs in git). Default `false` keeps the
+  exact-key behaviour.
 - **`cross_file` `normalize:` promotion — `semver-minor` + composable lists.**
   `normalize:` now accepts an ordered list of transforms applied
   left-to-right (`normalize: [trim, semver-minor]`), not just a single
@@ -166,6 +172,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`pair_hash` `sums-line` now accepts a path-first manifest.** The
+  parser handled only the coreutils / go-`.sum` `<hex>  <path>` order;
+  the Go FIPS snapshot manifest (`lib/fips140/fips140.sum`) writes
+  `<path> <hex>` (path-first), which silently never matched. The digest
+  token is now identified by its shape (the algorithm fixes the hex
+  length), so either order parses; an ambiguous line still assumes the
+  hex-first default. No new option.
 - **`no_merge_conflict_markers` false-fired on reST/Markdown setext
   headings.** A bare `=======` line is now treated as a conflict
   separator only when the file also carries an unambiguous anchor

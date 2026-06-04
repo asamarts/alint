@@ -1673,7 +1673,7 @@
     },
 
     "rule_unique_by": {
-      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`.",
+      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`. With `case_insensitive: true` the key is folded to lowercase before grouping, catching collisions that only occur on a case-insensitive filesystem (Windows / macOS).",
       "type": "object",
       "required": ["select"],
       "properties": {
@@ -1686,6 +1686,11 @@
           "type": "string",
           "default": "{basename}",
           "description": "Path-template producing a key per matched file. Default: {basename}."
+        },
+        "case_insensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Fold the key to lowercase before grouping (case-insensitive-filesystem collision detection)."
         }
       }
     },
