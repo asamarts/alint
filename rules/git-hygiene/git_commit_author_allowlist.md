@@ -2,7 +2,7 @@
 title: 'git_commit_author_allowlist'
 description: 'Assert every commit author in scope matches an allowed email and/or name pattern. alint git_commit_author_allowlist rule, git hygiene family.'
 sidebar:
-  order: 9
+  order: 8
 ---
 
 Assert every commit author in scope matches an allowed email and/or name pattern. At least one of `email_pattern:` / `name_pattern:` is required; specifying both means BOTH must match (AND). A commit whose author fails any specified pattern fires one violation. Demand: enterprise repos enforcing contributor identity against a corporate domain; OSS projects catching commits from sock-puppet or compromised accounts.

@@ -27,7 +27,6 @@ Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list
 - [`monorepo/yarn-workspace@v1`](/docs/bundled-rulesets/monorepo-yarn-workspace/) — Workspace-aware overlay for Yarn / npm workspaces (both encode the workspace declaration in the root `package.json` under `"workspaces"`).
 - [`node@v1`](/docs/bundled-rulesets/node/) — Hygiene checks for Node.js / npm / pnpm / yarn projects.
 - [`oss-baseline@v1`](/docs/bundled-rulesets/oss-baseline/) — A minimal OSS-hygiene baseline — the documents and conventions most open-source repositories are expected to follow.
-- [`php@v1`](/docs/bundled-rulesets/php/) — Baseline conventions for PHP / Composer projects.
 - [`python@v1`](/docs/bundled-rulesets/python/) — Hygiene checks for Python projects (pyproject / setuptools / Poetry / PDM / uv).
 - [`rust@v1`](/docs/bundled-rulesets/rust/) — Hygiene checks for Rust projects.
 - [`tooling/editorconfig@v1`](/docs/bundled-rulesets/tooling-editorconfig/) — Cross-editor standardization: an `.editorconfig` at the root plus a `.gitattributes` that normalizes line endings.

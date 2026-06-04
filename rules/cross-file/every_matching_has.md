@@ -2,10 +2,10 @@
 title: 'every_matching_has'
 description: 'For every file or directory matching select:, every nested rule under require: must be satisfied. alint every_matching_has rule, cross-file family.'
 sidebar:
-  order: 15
+  order: 14
 ---
 
-For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. Lightweight sibling of `pair` that iterates both file and directory entries. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["packages/*", "!packages/internal"]`).
+For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. Lightweight sibling of `pair` that iterates both file and directory entries.
 
 ```yaml
 - id: every-pkg-has-readme

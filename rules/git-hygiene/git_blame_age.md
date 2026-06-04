@@ -2,7 +2,7 @@
 title: 'git_blame_age'
 description: 'Fire on lines matching a regex whose git blame author-time is older than max_age_days. alint git_blame_age rule, git hygiene family.'
 sidebar:
-  order: 11
+  order: 10
 ---
 
 Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Same regex match shape as `file_content_forbidden`, but with a per-line age gate: a TODO added yesterday passes silently; a TODO that has sat in tree for 18 months fires. Closes the gap between `level: warning` on every TODO (too noisy) and `level: off` (accepts unbounded debt accumulation).
@@ -33,4 +33,6 @@ Heuristic notes:
 - **Performance.** `git blame` is O(file_size × commits_touching_file) per file. On large monorepos pair with `alint check --changed` so blame only runs over modified files in CI.
 
 Outside a git repo, on untracked files, or when blame fails for any other reason, the rule silently no-ops per file. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
+
+---
 

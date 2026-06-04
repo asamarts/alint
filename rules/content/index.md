@@ -21,4 +21,4 @@ Rule kinds in the **Content** family. Each entry below has its own page with opt
 - [`file_footer`](/docs/rules/content/file_footer/) — Last `lines` lines of each file in scope must match a regex.
 - [`file_shebang`](/docs/rules/content/file_shebang/) — First line of each file in scope must match the `shebang` regex.
 - [`file_is_text`](/docs/rules/content/file_is_text/) — Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
-- [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`.
+- [`file_is_ascii`](/docs/rules/content/file_is_ascii/) — Every byte in the file must be < 0x80.

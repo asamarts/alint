@@ -456,20 +456,16 @@
         { "$ref": "#/$defs/rule_git_no_denied_paths" },
         { "$ref": "#/$defs/rule_git_commit_message" },
         { "$ref": "#/$defs/rule_git_commit_signed_off" },
-        { "$ref": "#/$defs/rule_git_commit_subject_matches" },
         { "$ref": "#/$defs/rule_git_commit_no_fixup" },
         { "$ref": "#/$defs/rule_git_commit_author_allowlist" },
         { "$ref": "#/$defs/rule_git_commit_gpg_signed" },
         { "$ref": "#/$defs/rule_git_blame_age" },
-        { "$ref": "#/$defs/rule_changeset_requires_path" },
-        { "$ref": "#/$defs/rule_pair_changed_together" },
         { "$ref": "#/$defs/rule_filename_case" },
         { "$ref": "#/$defs/rule_filename_regex" },
         { "$ref": "#/$defs/rule_pair" },
         { "$ref": "#/$defs/rule_pair_hash" },
         { "$ref": "#/$defs/rule_registry_paths_resolve" },
-        { "$ref": "#/$defs/rule_cross_file" },
-        { "$ref": "#/$defs/rule_file_graph" },
+        { "$ref": "#/$defs/rule_cross_file_value_equals" },
         { "$ref": "#/$defs/rule_ordered_block" },
         { "$ref": "#/$defs/rule_generated_file_fresh" },
         { "$ref": "#/$defs/rule_import_gate" },
@@ -1029,28 +1025,6 @@
       }
     },
 
-    "rule_git_commit_subject_matches": {
-      "description": "Each commit's subject line (the first line of its message) must match the `matches:` regex — the subject-grammar member of the commit family (e.g. `pkg/path: lowercase summary`, conventional-commit types). Anchored to the subject alone, unlike `git_commit_message`'s whole-message `pattern:`; use `git_commit_message`'s `subject_max_length:` for a length cap. With `since:` unset, only HEAD is checked; with `since:` set, every commit in `<since>..HEAD`. Outside a git repo / with no commits / when git is unavailable, silently no-ops; a bad `since:` ref hard-fails with a shallow-clone hint.",
-      "type": "object",
-      "required": ["matches"],
-      "properties": {
-        "kind": { "const": "git_commit_subject_matches" },
-        "matches": {
-          "type": "string",
-          "description": "Rust-regex the commit subject (first line of the message) must match."
-        },
-        "since": {
-          "type": "string",
-          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
-        },
-        "include_merges": {
-          "type": "boolean",
-          "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error."
-        }
-      }
-    },
-
     "rule_git_commit_no_fixup": {
       "description": "Fail on residual `fixup!` / `squash!` / `amend!` commits in scope — the ones `git commit --fixup`/`--squash` produce, meant to be collapsed by `git rebase --autosquash` before merging. With `since:` unset, only HEAD is checked; with `since:` set to a ref, every commit in `<since>..HEAD` is checked. No configuration knobs — the matched prefixes are exactly what `--autosquash` understands. Outside a git repo, with no commits, or when `git` is unavailable, silently no-ops. A `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
       "type": "object",
@@ -1129,48 +1103,6 @@
           "type": "integer",
           "minimum": 1,
           "description": "Minimum line age (in days) for a matching line to fire as a violation. Lines younger than this pass silently. Common values: 90 (one quarter), 180 (half a year), 365 (a full year of debt)."
-        }
-      }
-    },
-
-    "rule_changeset_requires_path": {
-      "description": "The `<since>...HEAD` diff must ADD (git status A) at least one path matching `add_glob:` — the 'did you add a changelog entry?' gate (prettier `changelog_unreleased/`, cpython `Misc/NEWS.d/next/`, pnpm `.changeset/*.md`). `since:` (the base ref) is required. Optional `when_changed:` gates the requirement on some other glob having changed (don't demand a changelog for a docs-only PR); with no gate, any non-empty changeset triggers it. Diff-scoped: silent no-op outside a git repo / when nothing relevant changed; a `since:` that fails to resolve hard-fails with a shallow-clone hint. Check-only.",
-      "type": "object",
-      "required": ["add_glob", "since"],
-      "properties": {
-        "kind": { "const": "changeset_requires_path" },
-        "add_glob": {
-          "type": "string",
-          "description": "Glob; the diff must ADD at least one path matching it."
-        },
-        "when_changed": {
-          "type": "string",
-          "description": "Optional gate: only require the add when some path matching this glob changed (any status). Omit to require it on any non-empty changeset."
-        },
-        "since": {
-          "type": "string",
-          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
-        }
-      }
-    },
-
-    "rule_pair_changed_together": {
-      "description": "If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the co-change gate (a FORMAT_VERSION must bump when the format struct changes; version.txt and the lockfile change together). Both globs and `since:` (the base ref) are required. Directional: a `then_changed`-only change never triggers it (add a second rule with the globs swapped for a bidirectional pact). Diff-scoped: silent no-op outside a git repo / when `if_changed` didn't change; a `since:` that fails to resolve hard-fails with a shallow-clone hint. Check-only.",
-      "type": "object",
-      "required": ["if_changed", "then_changed", "since"],
-      "properties": {
-        "kind": { "const": "pair_changed_together" },
-        "if_changed": {
-          "type": "string",
-          "description": "Glob; the trigger. When the diff changes a path matching this, a `then_changed` co-change is required."
-        },
-        "then_changed": {
-          "type": "string",
-          "description": "Glob; the obligation. At least one changed path must match it whenever `if_changed` fired."
-        },
-        "since": {
-          "type": "string",
-          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`."
         }
       }
     },
@@ -1301,7 +1233,7 @@
 
     "extract_spec": {
       "type": "object",
-      "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), whole_file (object `{}`; the entire file content as one value — for byte-level cross_file comparison; the non-literal skip does not apply).",
+      "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value).",
       "minProperties": 1,
       "maxProperties": 1,
       "properties": {
@@ -1313,30 +1245,22 @@
           "properties": { "comment": { "type": "string" } },
           "additionalProperties": false
         },
-        "regex": { "type": "string" },
-        "whole_file": {
-          "type": "object",
-          "additionalProperties": false
-        }
+        "regex": { "type": "string" }
       },
       "additionalProperties": false
     },
 
-    "rule_cross_file": {
-      "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` — the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
+    "rule_cross_file_value_equals": {
+      "description": "A value extracted from one authoritative `source` file must equal a value extracted from one or more `targets`. `targets` is either a `{ files: <glob>, extract }` map (one query per glob match — the istio value_extractor / pitfall-#20 shape) or a sequence of `{ file, extract }` (heterogeneous pins). `normalize` relaxes the comparison (semver-major = same band). Non-literal extracted values are skipped, not failed.",
       "type": "object",
-      "required": ["source"],
+      "required": ["source", "targets"],
       "properties": {
-        "kind": { "enum": ["cross_file", "cross_file_value_equals"] },
+        "kind": { "const": "cross_file_value_equals" },
         "source": {
           "type": "object",
-          "oneOf": [
-            { "required": ["file"] },
-            { "required": ["files"] }
-          ],
+          "required": ["file", "extract"],
           "properties": {
-            "file": { "type": "string", "description": "A single source file." },
-            "files": { "type": "string", "description": "A glob whose matches are read and whose extracted values are UNIONED into one set — for the set relations only (subset / superset / set_equals). The 'every match across a glob == a set' shape." },
+            "file": { "type": "string" },
             "extract": { "$ref": "#/$defs/extract_spec" }
           },
           "additionalProperties": false
@@ -1345,7 +1269,7 @@
           "oneOf": [
             {
               "type": "object",
-              "required": ["files"],
+              "required": ["files", "extract"],
               "properties": {
                 "files": { "type": "string" },
                 "extract": { "$ref": "#/$defs/extract_spec" }
@@ -1356,7 +1280,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["file"],
+                "required": ["file", "extract"],
                 "properties": {
                   "file": { "type": "string" },
                   "extract": { "$ref": "#/$defs/extract_spec" }
@@ -1366,173 +1290,46 @@
             }
           ]
         },
-        "relation": { "enum": ["equals", "subset", "superset", "set_equals", "identical", "resolves"] },
-        "normalize": {
-          "description": "A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band (each token's leading digits, leading non-digits stripped) — the protobuf / pnpm version-format reconcile.",
-          "oneOf": [
-            { "enum": ["none", "trim", "lower", "semver-major", "semver-minor"] },
-            {
-              "type": "array",
-              "items": { "enum": ["none", "trim", "lower", "semver-major", "semver-minor"] }
-            }
-          ]
-        },
-        "allow_missing_target": { "type": "boolean" },
-        "skip_header_lines": { "type": "integer", "minimum": 0 }
-      }
-    },
-
-    "rule_file_graph": {
-      "description": "Assemble the repo's file→file reference graph and assert a global structural property the 1-level cross-file kinds can't. `nodes` (glob) selects the graph's files; `edges.from_content` extracts one reference per match (the `extract` one-of: toml/json/yaml JSONPath, lines, or regex capture group 1) and resolves it to a path via `resolve` (relative_to_file default, or relative_to_repo_root). Bare module names, absolute paths, URLs, and computed/interpolated references are dropped, not mis-resolved. `require` is either the string `acyclic` (no dependency cycle among the nodes) or `{ forbidden_edges: [{ from, to }] }` (no edge whose source matches `from` and whose resolved target matches `to`). Pure-parse, cross-file (no spawn).",
-      "type": "object",
-      "required": ["nodes", "edges", "require"],
-      "properties": {
-        "kind": { "const": "file_graph" },
-        "nodes": {
-          "type": "string",
-          "description": "Glob selecting the graph's node files."
-        },
-        "edges": {
-          "type": "object",
-          "description": "Exactly one edge extractor: `from_content` (content references → the reference-graph modes) or `derive_target` (a name template → `fresh` codegen-freshness or `no_dangling` derived-sibling existence).",
-          "properties": {
-            "from_content": {
-              "type": "object",
-              "required": ["extract"],
-              "properties": {
-                "extract": { "$ref": "#/$defs/extract_spec" },
-                "resolve": { "enum": ["relative_to_file", "relative_to_repo_root"] }
-              },
-              "additionalProperties": false
-            },
-            "derive_target": {
-              "type": "object",
-              "description": "Derive the generated target's path from the source node's path: `from` is a regex matched against the node path, `to` is a replacement template using its captures (e.g. `to: $1.pb.go`).",
-              "required": ["from", "to"],
-              "properties": {
-                "from": { "type": "string" },
-                "to": { "type": "string" }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false,
-          "oneOf": [
-            { "required": ["from_content"] },
-            { "required": ["derive_target"] }
-          ]
-        },
-        "require": {
-          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, `{ no_orphans: { roots: [...] } }`, or `{ fresh: { hash, marker } }`). `no_dangling` = every path-shaped edge resolves to an existing path (with `edges.derive_target`, each node's derived sibling must exist — e.g. every `X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` = no node is unreferenced except those matching a `roots` glob; `fresh` (needs `edges.derive_target`) = the derived output carries the source's current `hash` digest, captured by `marker` (group 1).",
-          "oneOf": [
-            { "enum": ["acyclic", "no_dangling", "no_orphans"] },
-            {
-              "type": "object",
-              "required": ["forbidden_edges"],
-              "properties": {
-                "forbidden_edges": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "object",
-                    "required": ["from", "to"],
-                    "properties": {
-                      "from": { "type": "string" },
-                      "to": { "type": "string" }
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["no_orphans"],
-              "properties": {
-                "no_orphans": {
-                  "type": "object",
-                  "properties": {
-                    "roots": {
-                      "type": "array",
-                      "items": { "type": "string" }
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["fresh"],
-              "properties": {
-                "fresh": {
-                  "type": "object",
-                  "required": ["marker"],
-                  "properties": {
-                    "hash": { "enum": ["sha256", "sha512"] },
-                    "marker": { "type": "string" }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            }
-          ]
-        }
+        "normalize": { "enum": ["none", "trim", "lower", "semver-major"] },
+        "allow_missing_target": { "type": "boolean" }
       }
     },
 
     "rule_ordered_block": {
-      "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. Both markers are optional: omit `end` to sort from `start` to EOF, omit both to sort the whole file (the markerless 'this file is one sorted list' form). The generic form of per-project keep-sorted scripts. Per-file: markers match the trimmed line; blank lines inside a block are ignored.",
+      "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. The generic form of per-project keep-sorted scripts. Per-file: a file with no `start` marker is silently fine; markers match the trimmed line; blank lines inside a block are ignored.",
       "type": "object",
+      "required": ["start", "end"],
       "properties": {
         "kind": { "const": "ordered_block" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "start": {
           "type": "string",
-          "description": "Marker line opening a block (matched on the trimmed line). Optional — omit to anchor the block at the start of the file."
+          "description": "Marker line opening a block (matched on the trimmed line)."
         },
         "end": {
           "type": "string",
-          "description": "Marker line closing a block. Optional — omit to run the block to EOF."
+          "description": "Marker line closing a block."
         },
         "comparator": { "enum": ["lexical", "lexical-ci", "numeric"] },
-        "unique": { "type": "boolean" },
-        "select": {
-          "type": "string",
-          "description": "Regex; when set, only lines inside a block matching it are sortable entries (others — comments, group headers — pass through). The sectioned / keep-sorted-subset shape."
-        }
+        "unique": { "type": "boolean" }
       }
     },
 
     "rule_generated_file_fresh": {
-      "description": "A committed artefact must equal what a declared `command` generator produces. Two modes, selected by shape (exactly one of `file` / `outputs` required): STDOUT mode (`file`) compares one committed file to the generator's stdout — non-mutating, never writes the tree. MUTATING / in-place mode (`outputs`, a glob or list of globs) runs an in-place generator and asserts the regenerated files are unchanged: alint snapshots `outputs`, runs the generator, diffs, reports any stale / new / removed file, and RESTORES the snapshot — so `alint check` stays pure (no regenerated files left behind); the alint-native form of `make gen && git diff --exit-code`. Either mode runs a process, so the kind is trust-gated to the user's own top-level config (same tier as the `command` rule). Single-shot, opt-in.",
+      "description": "A committed `file` must equal the stdout of a declared `command` generator — a non-mutating freshness check. alint does not run codegen as a build step; this only verifies, capturing stdout, never writing the tree (same trust tier as the `command` rule). Single-shot, opt-in.",
       "type": "object",
-      "required": ["command"],
-      "oneOf": [
-        { "required": ["file"] },
-        { "required": ["outputs"] }
-      ],
+      "required": ["file", "command"],
       "properties": {
         "kind": { "const": "generated_file_fresh" },
         "file": {
           "type": "string",
-          "description": "STDOUT mode: the committed generated file to verify against the generator's stdout."
-        },
-        "outputs": {
-          "description": "MUTATING mode: the glob (or list of globs) the in-place generator rewrites; its presence selects the mutating mode. alint snapshots these, runs the generator, diffs, and restores them.",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-          ]
+          "description": "The committed generated file to verify."
         },
         "command": {
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1,
-          "description": "Generator argv (no shell). STDOUT mode: emit the file's contents to stdout. MUTATING mode: write the `outputs` in place."
+          "description": "Generator argv (no shell); must emit the file's contents to stdout."
         },
         "workdir": {
           "type": "string",
@@ -1548,7 +1345,7 @@
     },
 
     "rule_import_gate": {
-      "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js/scala/java/dart/nix) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
+      "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
       "type": "object",
       "required": ["forbid"],
       "properties": {
@@ -1558,7 +1355,7 @@
           "type": "string",
           "description": "Regex tested against the extracted import target."
         },
-        "language": { "enum": ["go", "python", "rust", "js", "scala", "java", "dart", "nix", "generic"] },
+        "language": { "enum": ["go", "python", "rust", "js", "generic"] },
         "import_pattern": {
           "type": "string",
           "description": "Explicit import-line regex (capture group 1 = imported target); overrides the language preset."
@@ -1610,11 +1407,8 @@
       "properties": {
         "kind": { "const": "for_each_dir" },
         "select": {
-          "description": "Glob(s) selecting the directories to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. [\"src/*\", \"!src/internal\"]).",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-          ]
+          "type": "string",
+          "description": "Glob selecting the directories to iterate."
         },
         "when_iter": {
           "type": "string",
@@ -1636,11 +1430,8 @@
       "properties": {
         "kind": { "const": "for_each_file" },
         "select": {
-          "description": "Glob(s) selecting the files to iterate — a single glob, or a list with `!`-prefixed excludes.",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-          ]
+          "type": "string",
+          "description": "Glob selecting the files to iterate."
         },
         "when_iter": {
           "type": "string",
@@ -1676,7 +1467,7 @@
     },
 
     "rule_unique_by": {
-      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`. With `case_insensitive: true` the key is folded to lowercase before grouping, catching collisions that only occur on a case-insensitive filesystem (Windows / macOS).",
+      "description": "Flag any group of files (matching `select`) sharing the same rendered `key`. One violation per collision group, anchored on the lexicographically-first file. Path-template tokens ({path}, {dir}, {basename}, {stem}, {ext}, {parent_name}) may appear in `key`.",
       "type": "object",
       "required": ["select"],
       "properties": {
@@ -1689,11 +1480,6 @@
           "type": "string",
           "default": "{basename}",
           "description": "Path-template producing a key per matched file. Default: {basename}."
-        },
-        "case_insensitive": {
-          "type": "boolean",
-          "default": false,
-          "description": "Fold the key to lowercase before grouping (case-insensitive-filesystem collision detection)."
         }
       }
     },
@@ -1721,13 +1507,7 @@
       "required": ["select", "require"],
       "properties": {
         "kind": { "const": "every_matching_has" },
-        "select": {
-          "description": "Glob(s) selecting the files/dirs to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. [\"packages/*\", \"!packages/internal\"]).",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-          ]
-        },
+        "select": { "type": "string" },
         "when_iter": {
           "type": "string",
           "description": "Per-iteration `when:` filter — see rule_for_each_dir.when_iter."
@@ -1813,17 +1593,12 @@
     },
 
     "rule_file_is_ascii": {
-      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning. With `allow:` the file is decoded as UTF-8 and checked per character; without it, the strict byte-level fast path is used.",
+      "description": "Every byte in every file in scope must be < 0x80 (pure ASCII). Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning.",
       "type": "object",
       "required": ["paths"],
       "properties": {
         "kind": { "const": "file_is_ascii" },
-        "paths": { "$ref": "#/$defs/paths_spec" },
-        "allow": {
-          "type": "array",
-          "description": "Permitted non-ASCII codepoints — each entry a single character (e.g. \"ö\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` inclusive range.",
-          "items": { "type": "string" }
-        }
+        "paths": { "$ref": "#/$defs/paths_spec" }
       }
     },
 

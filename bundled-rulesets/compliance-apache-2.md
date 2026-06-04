@@ -24,14 +24,6 @@ dual-licensed (e.g. Apache-2.0 OR MIT), extend this ruleset
 AND set `level: off` on the rules you don't want firing
 strictly.
 
-Still over-firing on generated / vendored / branded-header files?
-The source-header rule already excludes vendored (vendor/,
-third_party/) and generated-by-naming (*.pb.go, zz_generated.*.go,
-*_pb2.py, ...) trees, and accepts the SPDX form
-(SPDX-License-Identifier: Apache-2.0). For residual project-specific
-cases, override apache-2-source-has-license-header in your own config:
-narrow its `paths:` to your source dirs, or set `level: off`.
-
 ## Rules
 
 ### `apache-2-license-text-present`
@@ -83,14 +75,6 @@ The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/compl
 # dual-licensed (e.g. Apache-2.0 OR MIT), extend this ruleset
 # AND set `level: off` on the rules you don't want firing
 # strictly.
-#
-# Still over-firing on generated / vendored / branded-header files?
-# The source-header rule already excludes vendored (vendor/,
-# third_party/) and generated-by-naming (*.pb.go, zz_generated.*.go,
-# *_pb2.py, ...) trees, and accepts the SPDX form
-# (SPDX-License-Identifier: Apache-2.0). For residual project-specific
-# cases, override apache-2-source-has-license-header in your own config:
-# narrow its `paths:` to your source dirs, or set `level: off`.
 
 version: 1
 
@@ -153,40 +137,16 @@ rules:
       include:
         ["**/*.{rs,py,js,jsx,ts,tsx,go,java,kt,c,cc,cpp,h,hpp,hh,sh,rb,swift,scala}"]
       exclude:
-        # Vendored / third-party trees (CNCF + Google convention).
         - "**/vendor/**"
         - "**/node_modules/**"
-        - "**/third_party/**"
-        - "**/3rdparty/**"
-        # Build output.
         - "**/target/**"
         - "**/build/**"
         - "**/dist/**"
         - "**/.cargo/**"
         - "**/generated/**"
         - "**/__generated__/**"
-        # Generated source by naming convention. Codegen carries its own
-        # header (or none); requiring the ASF header here false-positives
-        # at scale across protobuf / kubernetes / istio / tensorflow.
-        - "**/*.pb.go"
-        - "**/*_grpc.pb.go"
-        - "**/*.gen.go"
-        - "**/*_generated.go"
-        - "**/zz_generated.*.go"
-        - "**/*_pb2.py"
-        - "**/*_pb2_grpc.py"
-        - "**/*.pb.cc"
-        - "**/*.pb.h"
-        - "**/*.pb.swift"
-        - "**/*_pb.rb"
-        - "**/*.generated.*"
     lines: 25
-    # v0.12: accept the ASF short form, the long ASF-preamble form, OR
-    # the modern SPDX identifier (`SPDX-License-Identifier: Apache-2.0`)
-    # that CNCF / branded-header projects (helm, istio, kubernetes) use
-    # instead of the ASF appendix text. Broadening the accept-pattern is
-    # a pure false-positive reduction, so it rides @v1.
-    pattern: '(Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)|SPDX-License-Identifier:\s*Apache-2\.0)'
+    pattern: 'Licensed (to the Apache Software Foundation|under the Apache License,?\s*Version 2)'
     level: warning
     message: >-
       Apache-2.0: source files should carry the canonical

@@ -2,7 +2,7 @@
 title: 'git_commit_gpg_signed'
 description: 'Assert every commit in scope has a verifying signature (git verify-commit exits 0). alint git_commit_gpg_signed rule, git hygiene family.'
 sidebar:
-  order: 10
+  order: 9
 ---
 
 Assert every commit in scope has a verifying signature (`git verify-commit` exits 0). A commit that is unsigned — or signed with a key that doesn't verify against the local keyring — fires one violation. Demand: kernel maintainers, security-sensitive OSS, anyone using GitHub's "Require signed commits" branch protection.
