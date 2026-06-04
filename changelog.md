@@ -127,6 +127,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal`). Completes the C-tuning selector cluster (eslint's
   include/exclude shape); a `select:` with no include pattern is a load-time
   error. Single-glob configs are unchanged.
+- **`cross_file` gains a glob-union `source.files:`.** The `source` may now be
+  `{ files: <glob>, extract }` instead of `{ file, extract }`: every file the
+  glob matches is read and its extracted values are **unioned into one set**,
+  for the set relations (`subset` / `superset` / `set_equals`). This expresses
+  symbol-set / cross-language parity — "the union of `*hl-X*` across every
+  `runtime/doc/*.txt` must equal the `default link X` set in `src/highlight.c`"
+  (vim hlgroups), protobuf cross-language binding parity, error-code completeness
+  (react/neovim), JS barrel `index.js` re-export sets. A `files:` source is
+  rejected with a non-set relation (it would yield many values), and `file` /
+  `files` are mutually exclusive. Reuses the shipped set relations — no new
+  dispatch class, rule-kind count unchanged.
 - **`php@v1` bundled ruleset — PHP / Composer baseline (new).** The PHP
   ecosystem was the one with first-class corpus demand
   (composer/laravel/symfony/guzzle/phpstan) and no bundled ruleset (rust / node

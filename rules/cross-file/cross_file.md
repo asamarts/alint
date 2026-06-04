@@ -1,11 +1,11 @@
 ---
 title: 'cross_file'
-description: 'A source file must hold a relation to one or more targets (or, for resolves, the filesystem). alint cross_file rule, cross-file family.'
+description: 'A source must hold a relation to one or more targets (or, for resolves, the filesystem). alint cross_file rule, cross-file family.'
 sidebar:
   order: 4
 ---
 
-A `source` file must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). For the value relations, `targets` is either a `{ files: <glob>, extract }` map (one query applied per glob match) or a sequence of `{ file, extract }` (heterogeneous pins); `extract` is the same one-of as `registry_paths_resolve` (`toml`/`json`/`yaml` JSONPath, `lines`, `regex` group 1) plus `whole_file: {}` (the entire file content as one value — for byte-level content equality without `identical`'s no-`extract`/no-`normalize` constraint). `relation` (default `equals`) selects the assertion, checked independently per target; the *shape* (which of `source.extract` / `targets` is present) follows the relation and is validated at load:
+A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). The `source` is a single `{ file, extract }` — **or**, for the set relations only (`subset` / `superset` / `set_equals`), `{ files: <glob>, extract }`, whose matches are read and whose extracted values are **unioned into one set** (the "every `*hl-X*` across `runtime/doc/*.txt` must equal the `default link X` set in `highlight.c`" shape — symbol-set / cross-language parity). For the value relations, `targets` is either a `{ files: <glob>, extract }` map (one query applied per glob match) or a sequence of `{ file, extract }` (heterogeneous pins); `extract` is the same one-of as `registry_paths_resolve` (`toml`/`json`/`yaml` JSONPath, `lines`, `regex` group 1) plus `whole_file: {}` (the entire file content as one value — for byte-level content equality without `identical`'s no-`extract`/no-`normalize` constraint). `relation` (default `equals`) selects the assertion, checked independently per target; the *shape* (which of `source.file`/`source.files`, `source.extract`, `targets` is present) follows the relation and is validated at load:
 
 | `relation` | source ⇒ | asserts (per target) |
 |---|---|---|

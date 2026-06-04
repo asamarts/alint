@@ -1330,9 +1330,13 @@
         "kind": { "enum": ["cross_file", "cross_file_value_equals"] },
         "source": {
           "type": "object",
-          "required": ["file"],
+          "oneOf": [
+            { "required": ["file"] },
+            { "required": ["files"] }
+          ],
           "properties": {
-            "file": { "type": "string" },
+            "file": { "type": "string", "description": "A single source file." },
+            "files": { "type": "string", "description": "A glob whose matches are read and whose extracted values are UNIONED into one set — for the set relations only (subset / superset / set_equals). The 'every match across a glob == a set' shape." },
             "extract": { "$ref": "#/$defs/extract_spec" }
           },
           "additionalProperties": false
