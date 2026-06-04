@@ -138,6 +138,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rejected with a non-set relation (it would yield many values), and `file` /
   `files` are mutually exclusive. Reuses the shipped set relations — no new
   dispatch class, rule-kind count unchanged.
+- **`file_graph` `derive_target` edges now compose with `require: no_dangling`.**
+  `derive_target` (a `from`→`to` regex-capture name template) was coupled to the
+  `fresh` codegen-freshness mode; it now also works under `no_dangling`, where the
+  **derived sibling must merely exist** (no content hash). This expresses
+  "capture a name and require a rewritten sibling" — every `licenses/X-LICENSE.txt`
+  needs an `X-NOTICE.txt` (elasticsearch `DependencyLicensesTask`), a `.proto` its
+  `.pb.go`, a `.d.ts` its sibling. The derived edge is computed purely from the
+  node *path* (no file read); a node the `from` regex doesn't match has no edge.
+  This is the strict superset of a captured `pair.partner` for existence-pairing.
+  The content-graph modes (`acyclic` / `no_orphans` / `forbidden_edges`) keep
+  rejecting `derive_target` (a 1:1 name map isn't a reference graph). No new
+  dispatch class, rule-kind count unchanged.
 - **`php@v1` bundled ruleset — PHP / Composer baseline (new).** The PHP
   ecosystem was the one with first-class corpus demand
   (composer/laravel/symfony/guzzle/phpstan) and no bundled ruleset (rust / node

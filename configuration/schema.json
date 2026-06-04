@@ -1394,7 +1394,7 @@
         },
         "edges": {
           "type": "object",
-          "description": "Exactly one edge extractor: `from_content` (content references → the reference-graph modes) or `derive_target` (a name template → the codegen-freshness `fresh` mode).",
+          "description": "Exactly one edge extractor: `from_content` (content references → the reference-graph modes) or `derive_target` (a name template → `fresh` codegen-freshness or `no_dangling` derived-sibling existence).",
           "properties": {
             "from_content": {
               "type": "object",
@@ -1423,7 +1423,7 @@
           ]
         },
         "require": {
-          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, `{ no_orphans: { roots: [...] } }`, or `{ fresh: { hash, marker } }`). `no_dangling` = every path-shaped edge resolves to an existing path; `no_orphans` = no node is unreferenced except those matching a `roots` glob; `fresh` (needs `edges.derive_target`) = the derived output carries the source's current `hash` digest, captured by `marker` (group 1).",
+          "description": "A bare-string mode (`acyclic` | `no_dangling` | `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, `{ no_orphans: { roots: [...] } }`, or `{ fresh: { hash, marker } }`). `no_dangling` = every path-shaped edge resolves to an existing path (with `edges.derive_target`, each node's derived sibling must exist — e.g. every `X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` = no node is unreferenced except those matching a `roots` glob; `fresh` (needs `edges.derive_target`) = the derived output carries the source's current `hash` digest, captured by `marker` (group 1).",
           "oneOf": [
             { "enum": ["acyclic", "no_dangling", "no_orphans"] },
             {
