@@ -150,6 +150,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The content-graph modes (`acyclic` / `no_orphans` / `forbidden_edges`) keep
   rejecting `derive_target` (a 1:1 name map isn't a reference graph). No new
   dispatch class, rule-kind count unchanged.
+- **`ordered_block` markers are now optional.** `start` and `end` were both
+  required; either may now be omitted — drop `end` to sort from `start` to EOF,
+  drop both to sort the **whole file** (the markerless "this file is one sorted
+  list" form: dictionaries, allow-lists, a fully-sorted `CODEOWNERS`). A block
+  with an absent `end` runs to EOF by design (never reported `unclosed`); the
+  fully-delimited start+end contract — including the `unclosed` check — is
+  unchanged, so every existing config behaves identically. Reproduce-first: the
+  v0.12 case study found ~7 repos whose whole-file sorted lists had no marker
+  pair to hang the rule on.
 - **`php@v1` bundled ruleset — PHP / Composer baseline (new).** The PHP
   ecosystem was the one with first-class corpus demand
   (composer/laravel/symfony/guzzle/phpstan) and no bundled ruleset (rust / node

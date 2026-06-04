@@ -1485,19 +1485,18 @@
     },
 
     "rule_ordered_block": {
-      "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. The generic form of per-project keep-sorted scripts. Per-file: a file with no `start` marker is silently fine; markers match the trimmed line; blank lines inside a block are ignored.",
+      "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. Both markers are optional: omit `end` to sort from `start` to EOF, omit both to sort the whole file (the markerless 'this file is one sorted list' form). The generic form of per-project keep-sorted scripts. Per-file: markers match the trimmed line; blank lines inside a block are ignored.",
       "type": "object",
-      "required": ["start", "end"],
       "properties": {
         "kind": { "const": "ordered_block" },
         "paths": { "$ref": "#/$defs/paths_spec" },
         "start": {
           "type": "string",
-          "description": "Marker line opening a block (matched on the trimmed line)."
+          "description": "Marker line opening a block (matched on the trimmed line). Optional — omit to anchor the block at the start of the file."
         },
         "end": {
           "type": "string",
-          "description": "Marker line closing a block."
+          "description": "Marker line closing a block. Optional — omit to run the block to EOF."
         },
         "comparator": { "enum": ["lexical", "lexical-ci", "numeric"] },
         "unique": { "type": "boolean" },
