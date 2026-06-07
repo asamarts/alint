@@ -8,6 +8,422 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-07
+
+The case-study-driven rule-kind expansion, paired with a security cycle that
+hardens path handling into a real boundary. New kinds: `file_graph`
+(file-dependency-graph firewalls plus cycle / orphan / dangling-edge checks),
+`for_each_match` (a per-line predicate quantifier), a unified `cross_file`
+value-relation kind, `pair_changed_together` (a co-change gate), and
+`generated_file_fresh` mutating / in-place mode — plus markerless
+`ordered_block`, a `php@v1` bundled ruleset, JSONC-tolerant structured parsing,
+and more `import_gate` language presets. On the security side, every
+config-declared path a rule reads or resolves is now confined to the repo root
+(the untrusted-`extends:` threat model), with `allow_out_of_root:` as the
+explicit top-level opt-in, the file walker pruning symlinks that escape the
+tree, and — most notably — a fixed **git argument-injection** in the `since:`
+range mode that could write or truncate an arbitrary out-of-tree file and
+affected released versions back to v0.9.21.
+
+### Added
+
+- **`allow_out_of_root:` — a top-level opt-in to read config-declared paths
+  outside the repo root.** Path confinement is the secure default (a rule can
+  never read or resolve a config-declared path outside the tree); this
+  top-level-only key relaxes it for *reads* when a trusted config needs to
+  reference an external file (a shared schema, a manifest in a sibling checkout).
+  `allow_out_of_root: true` permits every rule; `{ kinds: [...], rules: [...] }`
+  permits only the listed rule kinds / ids; absent or `false` keeps full
+  confinement. **Rejected from `extends:`'d rulesets** — only the user's own
+  top-level config may open the hatch (the same trust model as the spawning-rule
+  gate), so adopting a ruleset can never grant it out-of-tree reads. Honored by
+  the non-spawn-gated read kinds `registry_paths_resolve` (`source:`),
+  `json_schema_passes` (`schema_path:`), and `pair_hash` (`target:`); a permitted
+  read emits an informational note. Resolve/index checks, the spawn-gated
+  `generated_file_fresh`, and (for now) `cross_file`/`file_graph` reads stay
+  confined. Design: `docs/design/v0.12/allow_out_of_root.md`.
+
+- **Macro bench scenario `S14` — comprehensive v0.12 featureset coverage.** One
+  deliberately-mixed `xtask bench-scale` scenario exercises every file-shape
+  rule kind/mode added in v0.12 over the synthetic macro tree (so a single bench
+  row catches a regression anywhere in the v0.12 surface): `file_graph` +
+  `no_dangling` over both `from_content` and `derive_target` edges,
+  `for_each_match`, `cross_file` glob-union `source.files`, markerless
+  `ordered_block`, and `generated_file_fresh` mutating mode. All six run silent
+  on the clean tree, so the row measures dispatch work, not violation emission.
+  Wired into `Scenario::all()` + the publish-grade `bench-record.yml` matrix
+  (now S1-S14 = 112 cells). The git-extract kinds are excluded (they need a
+  `since:` diff base the one-commit synthetic tree doesn't model — their
+  git-dispatch cost is the S8 git-tree class).
+- **`for_each_match` — the in-file line quantifier (new rule kind).** For each
+  line matching `select:` (a regex), the line must satisfy the nested `require:`
+  predicates: `matches` (the line matches **all** listed regexes), `forbid` (the
+  line matches **none**), and `equal` (the listed named `select` captures are all
+  **equal**). The dual of `ordered_block`'s `select:` — where `ordered_block`
+  *orders* selected lines, this asserts a *conjunction of predicates* over each.
+  It closes two shapes no `file_content_*` kind can express, both reproduced
+  against the shipped binary first: a **per-line changelog grammar** ("every
+  `* ` entry must *also* end with a linked PR ref" — `file_content_matches` is
+  existence, `is_match`, not a per-line conjunction) and **intra-line capture
+  equality** ("the display number must equal the `/pull/` URL number" — the Rust
+  `regex` engine is RE2, with no backreferences). One violation per offending
+  line; lines `select` does not match are ignored. Per-file (the `PerFileRule`
+  fast path). Rule-kind count +1.
+- **`file_graph` — the file-dependency-graph rule kind (new).**
+  Assembles the repo's *file → file* reference graph from path-based
+  edges and asserts a global structural property no 1-level kind can
+  express. `nodes:` (a glob) selects the graph's files; the `edges:` block
+  takes either `from_content` (extract one reference per match — reusing the
+  `extract:` one-of: toml/json/yaml JSONPath, `lines`, or `regex` capture
+  group 1 — then `resolve` it to a path, `relative_to_file` /
+  `relative_to_repo_root`) or `derive_target` (a name template, source →
+  generated file). Ships all five `require:` modes: `forbidden_edges` (the
+  whole-repo layering firewall — no edge whose source matches `from` and
+  whose resolved target matches `to`, e.g. domain code must not import infra;
+  `import_gate` is the cheap per-file version), `acyclic` (no dependency
+  cycle among the nodes, each reported once as a rotation-canonical path
+  list — the clearest capability gap, since no current kind detects cycles),
+  `no_dangling` (every path-shaped edge must resolve to a path that exists on
+  disk — the generic doc-cross-link / `markdown_paths_resolve` integrity
+  check), `no_orphans` (no node is unreferenced by another node, except those
+  matching a `roots:` glob — the registry / staging orphan detector), and
+  `fresh` (over `derive_target` edges: the generated file must embed the
+  source's current content-hash, captured by a `marker` regex — the
+  alint-native, content-hash form of `make gen && git diff`, no generator
+  run and no mtime, reusing the `pair_hash` digest machinery). Bare module
+  names, absolute paths, URLs, and computed references are dropped, not
+  mis-resolved — nodes stay path-based (module-*name* resolution is the
+  package-graph non-goal). Pure-parse and extraction-based: it never shells
+  out, so it stays out of the spawning-rule trust gate. The #1 demand-ranked
+  new kind of the 111-repo v0.12 case study (257 file-reference-graph edge
+  sources across 56 repos).
+- **`cross_file` — the unified cross-file value-relation kind (new).**
+  One kind, parameterised by `relation:`, over the shared `extract:`
+  (`crate::extract`) and `normalize:`. `relation: equals` (default) is the
+  released `cross_file_value_equals` — now a **byte-compatible alias**
+  (`relation` defaults to `equals`, so every existing config is unchanged).
+  The new set relations compare the source's extracted set `S` to each
+  target's set `T`: `subset` (`S ⊆ T`, a singleton `S` = membership — e.g.
+  pnpm catalog refs ⊆ catalog keys), `superset` (`S ⊇ T` — a registry covers
+  every use), and `set_equals` (`S == T` — rust `features` ↔ unstable-book,
+  protobuf binding parity). The engine reports relation-specific diffs
+  (`missing: {…}` / `extra: {…}`), not a generic "values differ". Realises
+  architecture-synthesis primitive A and the whole `value_set_membership`
+  demand in one kind; `requires_full_index` cross-file dispatch. Two further
+  relations have a different shape (validated at load): `identical` compares
+  whole files byte-for-byte (no `extract`; optional `skip_header_lines` to
+  ignore a differing license/header — the README-mirror / `files_equal`
+  case), and `resolves` checks that each path the source extracts exists on
+  disk (`source.extract`, no `targets` — the forward half of
+  `registry_paths_resolve`, which keeps its richer `base`/`must_contain`/
+  `orphans` ergonomics). Only the `normalize:` promotion remains.
+- **`git_commit_subject_matches` — subject-line grammar for the commit
+  family (new).** Each commit's subject (the first line of its message)
+  must match a `matches:` regex — the subject-grammar member alongside
+  `git_commit_signed_off` / `_no_fixup` / `_author_allowlist` /
+  `_gpg_signed`. The regex is anchored to the subject alone (so `^…$`
+  describes the first line exactly), unlike `git_commit_message`'s
+  whole-message `pattern:`; use that rule's `subject_max_length:` for a
+  length cap. Enforces conventions like go / Gerrit's `pkg/path:
+  lowercase summary`, node's `subsystem: description`, or
+  conventional-commit types. Shares the family's `since:` /
+  `include_merges:` semantics (HEAD-only when unset, `<since>..HEAD` when
+  set), `{{env.X}}` interpolation, silent-outside-a-repo posture, and the
+  shallow-clone hint on an unresolvable `since:`.
+- **`changeset_requires_path` — "did you add a changelog entry?" diff gate
+  (new).** The `<since>...HEAD` diff must ADD (git status `A`) at least one
+  path matching `add_glob:` — the changeset / changelog-per-PR convention
+  (prettier `changelog_unreleased/`, cpython `Misc/NEWS.d/next/`, pnpm
+  `.changeset/*.md`). `since:` (the base ref) is required; an optional
+  `when_changed:` gates the requirement on some other glob having changed (no
+  changelog demanded for a docs-only PR), and with no gate any non-empty
+  changeset triggers it. Builds on the same `<since>...HEAD` three-dot
+  (merge-base) diff as `alint check --changed`, via a new
+  `collect_changed_paths_filtered` git helper (`--diff-filter=A`). Silent
+  no-op outside a git repo or when nothing relevant changed; a `since:` that
+  fails to resolve hard-fails with a shallow-clone hint. Check-only.
+- **`pair_changed_together` — the co-change gate (new).** If the
+  `<since>...HEAD` diff changes any path matching `if_changed:`, at least one
+  path matching `then_changed:` must change in the same range (rust's
+  `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct
+  changes; "`version.txt` and the lockfile change together" release guards).
+  Both globs and `since:` (the base ref) are required. Directional — a
+  `then_changed`-only change never triggers it; swap the globs in a second
+  rule for a bidirectional pact. The `changeset_requires_path` sibling, on the
+  same merge-base diff as `alint check --changed`. Silent no-op outside a git
+  repo or when `if_changed` didn't change; a `since:` that fails to resolve
+  hard-fails with a shallow-clone hint. Check-only.
+- **`generated_file_fresh` — mutating / in-place mode (`outputs:`).** The
+  shipped kind only diffed a generator's *stdout* against one committed
+  `file:`; the common real pattern is a generator that rewrites files **in
+  place**, after which CI runs `git diff --exit-code` (redis `make
+  commands.def`, ruff `cargo dev generate-all`, pytorch `generate_ci_workflows`,
+  symfony, postgres, protobuf, cpython `make regen-all`, … — the #1 residual of
+  the post-build coverage re-analysis, ≈23 repos). The new `outputs:` field (a
+  glob or list) selects this mode: alint **snapshots** the outputs, runs the
+  generator, **diffs** (flagging each stale / newly-created / removed file), and
+  **restores the snapshot** — so `alint check` leaves the tree byte-identical
+  (the restore is panic-safe via a Drop guard). It preserves the kind's "never
+  run codegen as a build step" non-goal: alint *verifies* freshness, it never
+  *performs* it. Exactly one of `file:` / `outputs:` is required; `command:` /
+  `workdir:` / `normalize:` / `timeout:` and the spawn trust-gate are shared
+  with the stdout mode. A *mode* on the existing kind — rule count unchanged.
+- **Selector tuning — `file_is_ascii` `allow:` + `ordered_block` `select:`
+  (the C-tuning cluster from the v0.12 study; no new rule kinds).**
+  `file_is_ascii` gains `allow:` — a list of permitted non-ASCII codepoints,
+  each a single character (`"ö"`), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY`
+  inclusive range — so a tree that keeps source ASCII can still allow `ö` in
+  "Björn" (curl-proven; recurs across llvm / vscode / elixir). With `allow:`
+  the file is decoded as UTF-8 and checked per character; without it the
+  strict byte-level fast path is unchanged. `ordered_block` gains `select:` —
+  a regex that restricts the sortable entries to matching lines, so other
+  lines inside the block (comments, group headers) pass through untouched
+  (the sectioned / keep-sorted-subset shape; rubocop / gradle / pandas).
+- **`select:` on `for_each_dir` / `for_each_file` / `every_matching_has` now
+  takes a list with `!`-excludes.** Previously a single glob; now a single
+  glob or a list where `!`-prefixed patterns are excludes (e.g. `select:
+  ["packages/*", "!packages/internal"]` — iterate every package except
+  `internal`). Completes the C-tuning selector cluster (eslint's
+  include/exclude shape); a `select:` with no include pattern is a load-time
+  error. Single-glob configs are unchanged.
+- **`cross_file` gains a glob-union `source.files:`.** The `source` may now be
+  `{ files: <glob>, extract }` instead of `{ file, extract }`: every file the
+  glob matches is read and its extracted values are **unioned into one set**,
+  for the set relations (`subset` / `superset` / `set_equals`). This expresses
+  symbol-set / cross-language parity — "the union of `*hl-X*` across every
+  `runtime/doc/*.txt` must equal the `default link X` set in `src/highlight.c`"
+  (vim hlgroups), protobuf cross-language binding parity, error-code completeness
+  (react/neovim), JS barrel `index.js` re-export sets. A `files:` source is
+  rejected with a non-set relation (it would yield many values), and `file` /
+  `files` are mutually exclusive. Reuses the shipped set relations — no new
+  dispatch class, rule-kind count unchanged.
+- **`file_graph` `derive_target` edges now compose with `require: no_dangling`.**
+  `derive_target` (a `from`→`to` regex-capture name template) was coupled to the
+  `fresh` codegen-freshness mode; it now also works under `no_dangling`, where the
+  **derived sibling must merely exist** (no content hash). This expresses
+  "capture a name and require a rewritten sibling" — every `licenses/X-LICENSE.txt`
+  needs an `X-NOTICE.txt` (elasticsearch `DependencyLicensesTask`), a `.proto` its
+  `.pb.go`, a `.d.ts` its sibling. The derived edge is computed purely from the
+  node *path* (no file read); a node the `from` regex doesn't match has no edge.
+  This is the strict superset of a captured `pair.partner` for existence-pairing.
+  The content-graph modes (`acyclic` / `no_orphans` / `forbidden_edges`) keep
+  rejecting `derive_target` (a 1:1 name map isn't a reference graph). No new
+  dispatch class, rule-kind count unchanged.
+- **`ordered_block` markers are now optional.** `start` and `end` were both
+  required; either may now be omitted — drop `end` to sort from `start` to EOF,
+  drop both to sort the **whole file** (the markerless "this file is one sorted
+  list" form: dictionaries, allow-lists, a fully-sorted `CODEOWNERS`). A block
+  with an absent `end` runs to EOF by design (never reported `unclosed`); the
+  fully-delimited start+end contract — including the `unclosed` check — is
+  unchanged, so every existing config behaves identically. Reproduce-first: the
+  v0.12 case study found ~7 repos whose whole-file sorted lists had no marker
+  pair to hang the rule on.
+- **`php@v1` bundled ruleset — PHP / Composer baseline (new).** The PHP
+  ecosystem was the one with first-class corpus demand
+  (composer/laravel/symfony/guzzle/phpstan) and no bundled ruleset (rust / node
+  / python / go / java / dotnet all have one). `alint://bundled/php@v1` is gated
+  with `when: facts.has_php` (any `composer.json`, so it is a silent no-op in
+  non-PHP repos) and composed entirely of existing kinds — no engine change. Its
+  heart is the **"Composer-fatals" invariants**: `registry_paths_resolve` checks
+  that every `composer.json` `autoload.psr-4` directory, `autoload.files` entry,
+  and `bin` script resolves on disk (Composer aborts at install/autoload time
+  otherwise — the checks laravel and phpstan hand-roll), plus a `name`-format
+  structured-query check and a no-committed-`vendor/` guard. 6 rules, non-blocking
+  levels; bundled-ruleset count 21 → 22.
+- **Structured-query JSON parsing is now JSONC-tolerant.** A `.json` file with
+  `//` or `/* … */` comments or trailing commas (`tsconfig.json`,
+  `.vscode/*.json`, and other JS/TS-ecosystem files that use a `.json`
+  extension for JSONC content) now parses — so `json_path_*`, the `json:`
+  extract (`cross_file` / `registry_paths_resolve`), and `json_schema_passes`
+  work on them (astro, TypeScript, nix). Strict JSON is tried first and is
+  byte-identical (plain JSON pays nothing); only on failure is a comment- and
+  trailing-comma-stripped retry attempted (string-aware, so markers inside
+  string values are preserved). A genuinely-malformed document still fails and
+  reports the strict parser's error.
+- **`unique_by` gains `case_insensitive:`.** When `true` the rendered `key` is
+  folded to lowercase before grouping, so files that collide only under
+  case-folding (`README.md` vs `readme.md`) are flagged — the
+  case-insensitive-filesystem hazard (Windows / macOS; tensorflow's
+  `full.bats` Windows-dup check, recurs in git). Default `false` keeps the
+  exact-key behaviour.
+- **`cross_file` `normalize:` promotion — `semver-minor` + composable lists.**
+  `normalize:` now accepts an ordered list of transforms applied
+  left-to-right (`normalize: [trim, semver-minor]`), not just a single
+  transform, and adds `semver-minor` — the leading `MAJOR.MINOR` band, taking
+  each token's leading digits with a non-digit prefix stripped. So `4.36-dev`,
+  `4.36.0`, `pnpm@11.3.0` (→ `11.3`) and `>=22.13` all reconcile to one band
+  (the protobuf / pnpm version-format case from the v0.12 study). `semver-major`
+  keeps its exact released behaviour, and every existing scalar `normalize:`
+  config — including `cross_file_value_equals` — is byte-compatible.
+  `strip_prefix` / `strip_suffix` / `casefold` are deferred (not corpus-proven;
+  `semver-minor`'s non-digit strip already covers the prefix cases).
+- **`cross_file` `whole_file: {}` extract source.** A new `extract` source
+  (alongside `toml`/`json`/`yaml`/`lines`/`regex`) that yields the entire file
+  content as one value, so the value relations can compare whole-file content —
+  e.g. `equals` between a `LICENSE` and a `LICENSE-MIT` copy — without dropping
+  to `identical` (which forbids `extract` and `normalize`). Unlike the other
+  sources, a `whole_file` value is compared verbatim: the non-literal skip
+  (which drops interpolated *paths*) does not apply, so content embedding
+  `${…}` / `{{…}}` is still compared. `whole_file` honours `normalize`. No new
+  rule kind — an extract option on the existing cross-file kinds; rule count
+  unchanged.
+- **`import_gate` `language:` presets for Scala, Java, Dart, and Nix.**
+  Joins the existing go/python/rust/js presets, so these ecosystems get
+  a built-in import-line pattern instead of a hand-written
+  `import_pattern` (the form spark / flutter / nixpkgs used). The Nix
+  preset targets the `import` builtin (`import <nixpkgs>` /
+  `import ./mod.nix`); the NixOS `imports = [ ... ]` module-list form
+  still needs `language: generic` plus a custom pattern.
+
+### Changed
+
+- **`generated_file_fresh` reference clarifies it is stdout-only.** The
+  declared generator must print canonical content to stdout; most real
+  codegen rewrites files in place, for which `command_idempotent` (the
+  tool's own `--check` mode) is the broadly-applicable form.
+  Schema / reference text only; no behavior change.
+
+### Fixed
+
+- **The pass count ("All N rule(s) passed") now includes silently-passing
+  per-file rules.** A per-file rule (`for_each_match`, `ordered_block`,
+  `file_content_matches`, …) that ran over matching files and found nothing was
+  dropped from the report, so `alint check` printed "All 0 rule(s) passed" (and
+  JSON `passing_rules: 0`) even though the rule passed — only cross-file passing
+  rules were counted. Per-file passing rules are now emitted as passing results,
+  matching the cross-file path. Cosmetic / observability only — exit codes,
+  violations, and the failing-rule report were always correct; the v0.12
+  per-file kinds just made the miscount far more visible.
+- **`pair_hash` `sums-line` now accepts a path-first manifest.** The
+  parser handled only the coreutils / go-`.sum` `<hex>  <path>` order;
+  the Go FIPS snapshot manifest (`lib/fips140/fips140.sum`) writes
+  `<path> <hex>` (path-first), which silently never matched. The digest
+  token is now identified by its shape (the algorithm fixes the hex
+  length), so either order parses; an ambiguous line still assumes the
+  hex-first default. No new option.
+- **`no_merge_conflict_markers` false-fired on reST/Markdown setext
+  headings.** A bare `=======` line is now treated as a conflict
+  separator only when the file also carries an unambiguous anchor
+  marker (`<<<<<<< ` / `>>>>>>> ` / `||||||| `, each followed by a ref
+  that never appears in prose). On its own, a seven-character `=======`
+  is identical to a setext H1 underline — "Changes" and "Git tag" are
+  both exactly seven characters — and a real conflict always carries a
+  `<<<<<<<` start anyway. This removes the need to exclude `docs/**`
+  from the rule (flask, django, and other reST/MD-heavy repos hit it).
+- **`import_gate language: js` matched `import(…)` inside comments.**
+  The `js` preset's pattern is unanchored (it must catch dynamic
+  `import("m")` and `require("m")` anywhere on a line), so it also
+  matched a JSDoc type annotation like `@typedef {import("../x")}` — a
+  type-only reference, not a real import (eslint, svelte). The preset
+  now blanks `//` and `/* … */` comments (preserving string literals,
+  since the import target is itself a quoted string, and newlines, so
+  violation line numbers are unchanged) before matching. The anchored
+  presets (`go`/`python`/`rust`/`scala`/`java`/`dart`/`nix`) can't
+  match a comment line, so they are unaffected, as is a custom
+  `import_pattern`.
+- **`compliance/apache-2@v1` and `apache/governance@v1` over-fired on
+  CNCF / codegen-heavy repos.** The source-header rules now accept the
+  modern `SPDX-License-Identifier: Apache-2.0` form alongside the ASF
+  short and long-preamble forms (CNCF projects such as helm, istio, and
+  kubernetes carry an SPDX id rather than the ASF appendix text), and
+  they exclude vendored trees (`third_party/`, `3rdparty/`) and
+  generated-by-naming source (`*.pb.go`, `*_grpc.pb.go`,
+  `zz_generated.*.go`, `*_pb2.py`, `*.pb.cc`, `*.pb.swift`,
+  `*.generated.*`, and similar). `apache-gov-no-binaries-in-source`
+  likewise excludes `third_party/`. Every large ASF/CNCF repo in the
+  case-study corpus (airflow, helm, istio, kubernetes, tensorflow) hit
+  one of these. This is a pure false-positive reduction, so the bundles
+  stay `@v1`: a tree that passed before still passes.
+- **`cross_file` build-validates its config (was silent / late).** A malformed
+  `extract.regex` is now a clean config error at load — previously it built fine
+  and surfaced as an error-level *eval-time* violation reading like a content
+  failure. And options the chosen relation ignores are now rejected at build:
+  `skip_header_lines` on any relation but `identical`, and `normalize` on
+  `identical` / `resolves`. A config that previously loaded then misbehaved now
+  fails fast with a clear message.
+- **`ordered_block` flags an abandoned block in fully-delimited mode.** With both
+  markers set, a second `start` before the `end` now emits an "unclosed"
+  violation for the unterminated first block instead of silently swallowing it.
+  (Start-only / markerless mode is unchanged — a repeated `start` there is the
+  intended section delimiter.)
+- **`file_graph` no longer double-reports a repeated edge.** `no_dangling` and
+  `forbidden_edges` now emit one violation per *distinct* dangling/forbidden
+  target (a node referencing the same target twice produced two identical
+  violations), matching `acyclic` / `no_orphans`. A violation-count change.
+
+### Security
+
+- **A git rule's `since:` could write or truncate an arbitrary file (argument
+  injection).** The commit-range / diff helpers interpolated the
+  config-controlled `since:` (a revision ref) into a `git log` / `git diff`
+  argument with **no `--end-of-options` separator**, so a `since:` beginning with
+  `-` — e.g. `since: "--output=/path"` — was parsed by git as an *option*, letting
+  it **create or truncate an arbitrary out-of-tree file** (git-log content via
+  `git log --output=`; a 0-byte truncation via `git diff`). It is reachable from
+  an untrusted `extends:`'d ruleset — the git kinds correctly aren't
+  process-spawn gated (git is a fixed program), but the *argument* was
+  unvalidated, so the spawn gate gave no cover. The git invocations now pass
+  `--end-of-options` before the range, and a `since:` / `base` starting with `-`
+  is rejected with a clear error. **Unlike the other v0.12 Security entries, this
+  one affected released versions** — `git_commit_message`'s `since:` range mode
+  shipped in v0.9.21 (and `git_commit_signed_off` / `_no_fixup` /
+  `_author_allowlist` via the shared range helper); the v0.12
+  `changeset_requires_path` / `pair_changed_together` diff kinds were affected on
+  `[Unreleased]`.
+
+- **`file_exists` with `respect_gitignore: false` no longer stats outside the
+  repo root.** The per-rule gitignore-bypass (the bazel-style "tracked AND
+  gitignored" case) stat'd a literal `paths:` entry on disk directly, so an
+  absolute or `../` literal (e.g. `paths: "/etc/passwd"`) probed a host path — an
+  *existence* oracle reachable from an `extends:`'d ruleset. The literal is now
+  confined via `normalize_confined` before the stat (an escaping literal is
+  treated as absent), matching `structured_path` / `for_each_dir`. Pre-existing
+  since v0.9.16; existence-only (no content read); pre-release hardening — no
+  released version is affected.
+
+- **Walker — a committed symlink whose target escapes the repo root is no longer
+  followed into the file index.** With `follow_links(true)` the walker indexed a
+  symlink under its in-tree path while reading the link's *target*, so a symlink
+  like `link -> /etc/passwd` committed to a linted tree was indexed as an in-tree
+  file — and a symlink to a *directory* had its out-of-tree children descended
+  and indexed too — letting any content rule read out-of-tree bytes. This is the
+  untrusted-repo-*content* half of the path-confinement threat (it bites CI that
+  lints fork PRs with a trusted config). The walker now prunes any symlink whose
+  canonicalized target is not under the canonicalized repo root
+  (`build_walk_builder`'s `filter_entry`); pruning a symlink-dir also stops
+  descent, so its children are never indexed. In-tree symlinks are still followed
+  (byte-compatible for trees without out-of-root symlinks); broken symlinks are
+  pruned. Pre-existing since v0.1; pre-release hardening — no released version is
+  affected. See `docs/design/v0.12/path-confinement.md`.
+
+- **Path confinement — config-derived paths can no longer read or resolve
+  outside the repo root.** Several rule kinds turn a config-author-controlled
+  string into a filesystem path that is then read or resolved: `file_graph`
+  (`fresh` reads the `derive_target` output; `derive_target`/`from_content`
+  resolve edges), `cross_file` (`identical` + the value relations read
+  `source.file` / `targets[].file`; `resolves` resolves extracted paths),
+  `registry_paths_resolve` (resolves each declared entry **and reads the
+  `source:` registry file**), `json_schema_passes` (reads `schema_path:`),
+  `pair_hash` (reads `target:`), and `generated_file_fresh` (reads `file:`).
+  The per-kind `normalise()` helpers had two escapes (both reproduced): an
+  **absolute** path was read via `root.join(absolute)` (Rust discards `root`),
+  giving an **out-of-tree read oracle** reachable from an untrusted `extends:`'d
+  ruleset (these kinds are not spawn-gated); and **`..` double-dot
+  cancellation** (`../../x`) collapsed to an in-tree path that a first-component
+  escape check missed, resolving references to the wrong file. A single
+  `crate::pathsafe::normalize_confined` now rejects absolute paths and every
+  `..` escape (caught during the walk, not after); every read site refuses to
+  read and emits an "escapes the repo root" violation, and every resolve site
+  treats the path as unresolved. All config-derived path reads route through the
+  one confiner — including `registry_paths_resolve`'s `source:`,
+  `json_schema_passes`'s `schema_path:`, and `pair_hash`'s `target:`, which a
+  pre-release re-audit found were still unconfined (each leaked an
+  existence/size/parse oracle in its error message); `generated_file_fresh`'s
+  `file:` is confined too as defense-in-depth (the kind is spawn-gated). Each
+  newly-confined site has a "fires and is never read" regression test.
+  Pre-release hardening — no released version is affected (all v0.12 work is
+  `[Unreleased]`). Design: `docs/design/v0.12/path-confinement.md`.
+
 ## [0.11.1] - 2026-05-31
 
 A JetBrains-plugin patch that clears JetBrains Marketplace moderation.
@@ -5365,7 +5781,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/asamarts/alint/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/asamarts/alint/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/asamarts/alint/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/asamarts/alint/compare/v0.10.1...v0.10.2

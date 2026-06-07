@@ -237,6 +237,26 @@ Guardrails: nested configs may only declare `version:` and `rules:`; every neste
 
 Only the user's top-level config may set `nested_configs: true`. Nested configs themselves cannot spawn further nested discovery (one level of opt-in, intentionally).
 
+### `allow_out_of_root`
+
+By default alint confines every config-declared path to the repository root: a rule can never read or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for *reads* — when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
+
+```yaml
+allow_out_of_root: true            # every rule may read out-of-root paths
+```
+
+Or scope it to specific rule kinds and/or ids — a rule is permitted if its `kind` is in `kinds` **or** its `id` is in `rules`:
+
+```yaml
+allow_out_of_root:
+  kinds: [json_schema_passes, pair_hash]   # any rule of these kinds
+  rules: [external-shared-schema]          # specific rule ids
+```
+
+Absent or `false` keeps the secure default (full confinement).
+
+**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config — any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
+
 ## See also
 
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.

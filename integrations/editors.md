@@ -11,8 +11,8 @@ streams `.alint.yml` diagnostics into your editor as you type, surfaces
 rule descriptions on hover, and exposes apply-fix code actions for
 auto-fixable rules.
 
-All editor surfaces are versioned in lockstep with the `alint` binary;
-the latest release across every channel is **0.11.0**.
+All editor surfaces are versioned in lockstep with the `alint` binary,
+so every channel ships the same release.
 
 ## Tier 1 — packaged extension, marketplace install
 

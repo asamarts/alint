@@ -2,10 +2,10 @@
 title: 'for_each_file'
 description: 'For every matching directory / file, evaluate a nested require: block with the entry as context. alint for_each_file rule, cross-file family.'
 sidebar:
-  order: 10
+  order: 12
 ---
 
-For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match.
+For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["src/*", "!src/internal"]`).
 
 ```yaml
 - id: every-pkg-has-readme

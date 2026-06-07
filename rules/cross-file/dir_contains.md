@@ -2,7 +2,7 @@
 title: 'dir_contains'
 description: 'Every directory matching select: must contain files matching every glob in require:. alint dir_contains rule, cross-file family.'
 sidebar:
-  order: 11
+  order: 13
 ---
 
 Every directory matching `select:` must contain files matching every glob in `require:`. Sugar for a common `for_each_dir` shape.

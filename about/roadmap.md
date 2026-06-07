@@ -12,7 +12,20 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](./v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.11.1** (2026-05-31). A JetBrains-plugin patch that
+**Latest release: v0.12.0** (2026-06-07). The case-study-driven rule-kind
+expansion paired with a security cycle. New kinds: `file_graph`
+(file-dependency-graph firewalls + cycle / orphan / dangling checks),
+`for_each_match` (a per-line predicate quantifier), a unified `cross_file`
+value-relation kind, `pair_changed_together` (a co-change gate), and
+`generated_file_fresh` mutating / in-place mode — plus markerless
+`ordered_block`, a `php@v1` bundled ruleset, JSONC-tolerant structured parsing,
+and more `import_gate` presets. Security: every config-declared path a rule
+reads or resolves is now confined to the repo root (the untrusted-`extends:`
+threat model), with `allow_out_of_root:` as the explicit top-level opt-in, the
+walker pruning symlinks that escape the tree, and a fixed git
+argument-injection in the `since:` range mode (write/truncate of an arbitrary
+out-of-tree file; affected releases back to v0.9.21). **v0.11.1** (2026-05-31)
+was a JetBrains-plugin patch that
 clears JetBrains Marketplace moderation: the v0.11.0 plugin read its own
 version via platform plugin-lookup APIs (`PluginManagerCore` /
 `PluginManager`) the Marketplace rejects as internal even though
