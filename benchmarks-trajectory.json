@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.12.0",
+      "date": "2026-06-07",
+      "headline": "The case-study-driven rule-kind expansion, paired with a security cycle that hardens path handling into a real boundary.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 11996.40104618,
+          "stddev_ms": 184.04530466133232,
+          "display": "12.00 s ± 0.18"
+        },
+        "s6_1m_full": {
+          "mean_ms": 10894.50909152,
+          "stddev_ms": 95.48881099983998,
+          "display": "10.89 s ± 0.10"
+        },
+        "s7_1m_full": {
+          "mean_ms": 15549.94874213333,
+          "stddev_ms": 19.76847102959882,
+          "display": "15.55 s ± 0.02"
+        },
+        "s9_1m_full": {
+          "mean_ms": 7629.919129746667,
+          "stddev_ms": 55.322262619190134,
+          "display": "7.63 s ± 0.06"
+        }
+      }
+    },
+    {
       "version": "v0.11.0",
       "date": "2026-05-28",
       "headline": "The LSP + editor-integration release.",
