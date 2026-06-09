@@ -1,0 +1,150 @@
+---
+title: The agent output format
+description: "The alint check --format agent report: a flat violations array, a templated agent_instruction per finding, lowercase severities, stable behind schema_version 1."
+sidebar:
+  label: agent
+  order: 2
+---
+
+`alint check --format agent` emits JSON shaped for AI coding agents that consume alint inside their own self-correction loops. It reports the same findings as [`--format json`](/docs/reference/output-formats/), reshaped so an agent can act on one violation at a time without re-deriving what to do.
+
+```bash
+alint check --format agent
+```
+
+`--format agentic` and `--format ai` are aliases for the same format.
+
+## How it differs from `--format json`
+
+- **Flat list of violations.** `json` groups violations under each rule result; `agent` flattens them into a single `violations` array, so an agent loops once.
+- **A templated `agent_instruction` per violation.** A ready-to-act sentence composed from the severity, message, location, fix availability, and policy URL. `json` leaves that synthesis to the consumer.
+- **`severity` is a lowercase string** (`"error"` / `"warning"` / `"info"`), not the SARIF level mapping, so it drops straight into a prompt.
+- **Check-side only.** There is no agent-format fix report. An agent confirming a fix landed re-runs `alint check --format agent` against the modified tree.
+
+## The self-correction loop
+
+The format exists to make an agent's lint loop deterministic: the agent makes a change, runs `alint check --format agent` (locally or in CI), reads its own violations, acts on each `agent_instruction`, and re-runs until the report is empty.
+
+## Report shape
+
+A report is a single JSON object. This example has three violations: one path-bound and fixable, one path-bound and not, and one tree-wide.
+
+```json
+{
+  "schema_version": 1,
+  "format": "agent",
+  "summary": {
+    "total_violations": 3,
+    "by_severity": { "error": 1, "warning": 2, "info": 0 },
+    "fixable_violations": 1,
+    "passing_rules": 18,
+    "failing_rules": 3
+  },
+  "violations": [
+    {
+      "rule_id": "agent-no-console-log",
+      "severity": "warning",
+      "file": "src/api.ts",
+      "line": 2,
+      "column": 1,
+      "human_message": "console.log left in non-test source.",
+      "agent_instruction": "warning: console.log left in non-test source. To resolve: edit src/api.ts:2:1.",
+      "fix_available": false
+    },
+    {
+      "rule_id": "final-newline",
+      "severity": "warning",
+      "file": "src/config.ts",
+      "human_message": "File does not end with a newline.",
+      "agent_instruction": "warning: File does not end with a newline. To resolve: edit src/config.ts — or run `alint fix --only final-newline` to apply the auto-fix.",
+      "fix_available": true
+    },
+    {
+      "rule_id": "lockfiles-only-one",
+      "severity": "error",
+      "human_message": "Multiple lockfiles found.",
+      "agent_instruction": "error: Multiple lockfiles found. To resolve: this is a repository-level rule with no specific file location; resolve the underlying invariant the rule enforces.",
+      "fix_available": false
+    }
+  ]
+}
+```
+
+## Top-level fields
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `schema_version` | integer | Always `1` for this schema. |
+| `format` | string | Always `"agent"`. Lets a multi-format consumer route on one field. |
+| `summary` | object | Aggregate counts (below). |
+| `violations` | array | One entry per violation, flattened across all rules. |
+
+### `summary`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `total_violations` | integer | Length of `violations`. |
+| `by_severity` | object | `error`, `warning`, `info`, each an integer count. |
+| `fixable_violations` | integer | How many violations come from a rule that declares an autofix. Use it to decide whether to suggest `alint fix`. |
+| `passing_rules` | integer | Rules that produced no violation. |
+| `failing_rules` | integer | Rules that produced at least one violation. |
+
+### `violations[]`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `rule_id` | string | yes | Matches the `id:` of a rule in your config. |
+| `severity` | string | yes | `"error"`, `"warning"`, or `"info"`. |
+| `human_message` | string | yes | The rule's message verbatim. Mirror of `message` in `--format json`. |
+| `agent_instruction` | string | yes | Templated remediation phrasing (see below). |
+| `fix_available` | boolean | yes | `true` when the source rule declares an autofix. |
+| `file` | string | no | Repo-relative path. Absent for tree-wide (cross-file) violations. |
+| `line` | integer | no | 1-based line, when the rule reports one. |
+| `column` | integer | no | 1-based column, when the rule reports one. |
+| `policy_url` | string | no | Documentation URL provided by the rule. |
+
+`off` rules never produce violations, so `"off"` never appears as a severity.
+
+## How `agent_instruction` is composed
+
+The string is built deterministically, not generated by a model. The shape is:
+
+```text
+<severity>: <human_message>  To resolve: <action>[ — or run `alint fix --only <rule_id>` to apply the auto-fix][. See <policy_url> for the policy this rule enforces].
+```
+
+`<action>` is `edit <path>[:line[:column]]` when the violation has a path, and a repository-level phrasing when it does not. The three concrete cases:
+
+Path-bound, not fixable:
+
+```text
+warning: console.log left in non-test source. To resolve: edit src/api.ts:2:1.
+```
+
+Path-bound, fixable:
+
+```text
+warning: File does not end with a newline. To resolve: edit src/config.ts — or run `alint fix --only final-newline` to apply the auto-fix.
+```
+
+Tree-wide (no path):
+
+```text
+error: Multiple lockfiles found. To resolve: this is a repository-level rule with no specific file location; resolve the underlying invariant the rule enforces.
+```
+
+The remediation language comes from the rule's own `message` (and optional `policy_url`), written once by the rule author, rather than the agent re-deriving it from a human-targeted error string on every run.
+
+## Stability
+
+The format is stable behind `schema_version: 1`. Field additions are non-breaking; field removals or semantic changes bump the version. The machine-readable JSON Schema is published at:
+
+```text
+https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/agent-report.json
+```
+
+## See also
+
+- [Output formats overview](/docs/reference/output-formats/) — every format `alint check` can emit.
+- [Guard an agent-heavy repo](/docs/cookbook/) — wiring the loop end to end with the `agent-hygiene` and `agent-context` rulesets.
+- [`alint check`](/docs/cli/check/) — the command and all its flags.
