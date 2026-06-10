@@ -3,6 +3,13 @@
 
 version: 1
 
+extends:
+  # Dogfood alint's own ADR ruleset on alint's own decision records under
+  # docs/adr/. Every docs/adr/*.md is a numbered, MADR-shaped file (the
+  # template lives at 0000-template.md and is itself a valid ADR shape), so
+  # this stays green. See ADR-0001 and docs/design/spec-driven-development.md.
+  - url: "alint://bundled/docs/adr@v1"
+
 ignore:
   - "target/**"
   # Test fixtures deliberately contain shapes that violate our own
