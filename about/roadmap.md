@@ -668,7 +668,7 @@ impossible to ship.
   with elide rules for crate-internal Debug churn.
 - ✅ **CLI flag inventory snapshot** per subcommand:
   `crates/alint/tests/cli_flag_inventory.rs` (separate
-  from --help text snapshots).
+  from `--help` text snapshots).
 - ✅ **JSON report schemas** at
   `schemas/v1/{check-report,fix-report}.json` + cross-
   formatter validation tests.
@@ -852,7 +852,7 @@ surface:
 | 3 | `ordered_block` | 8 | Lines between marker pairs sorted unique under configurable comparator. |
 | 4 | `generated_file_fresh` | 8 | Run a generator, diff against on-disk file. Opt-in framing: alint's deliberate non-goal is running codegen. |
 | 5 | `import_gate` | 5 | Forbid imports of pattern X in scope Y. k8s prometheus-imports + airflow + go + helm + pytorch. |
-| 6 | `command_idempotent` mode | 5 | `--check` mode that fails if working tree would change. ruff-format / prettier --check / dprint check / deno fmt --check / eslint --no-fix shape. **Promoted from design candidate** in the deep-analysis aggregation. |
+| 6 | `command_idempotent` mode | 5 | `--check` mode that fails if working tree would change. `ruff-format` / `prettier --check` / `dprint check` / `deno fmt --check` / `eslint --no-fix` shape. **Promoted from design candidate** in the deep-analysis aggregation. |
 | 7 | `xml_path_matches` + `xml_path_equals` | 2 | Completes the structured-query family (JSON / YAML / TOML / XML). spark + dotnet/runtime ~7,100 manifests. |
 | 8 | `pair_hash` | 3 | Hash of file A appears at offset Y of file B. golang/go FIPS = highest stakes (CMVP submission references the file format). |
 | 9 | `apache/governance@v1` (bundled ruleset) | 3 | LICENSE + NOTICE + KEYS + RAT discipline. Apache TLPs converge: arrow + spark + airflow on 9 of 12 governance artefacts. v0.9.18 A2 is a prerequisite. |
