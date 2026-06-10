@@ -41,21 +41,31 @@ use serde_json::Value;
 
 use crate::structured_path::Format;
 
-#[derive(Debug, Deserialize)]
+/// The `format:` override values for `json_schema_passes`. Distinct from
+/// `structured_path::Format` (which has `xml`, not `yml`): this validator targets
+/// json/yaml/toml documents and accepts `yml` as a `yaml` alias.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum TargetFormat {
+    Json,
+    Yaml,
+    Yml,
+    Toml,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Path to a JSON Schema file, relative to the lint root.
-    /// JSON only — even when validating YAML / TOML targets,
-    /// the schema document itself must be JSON. Most upstream
-    /// schemas (Cargo's, GitHub Actions') ship as JSON anyway.
+    /// Path to a JSON Schema file relative to the lint root. The schema must
+    /// itself be JSON even when validating YAML / TOML targets.
     schema_path: PathBuf,
-    /// Override the auto-detected target file format. One of
-    /// `json` / `yaml` / `toml`. When omitted, the format is
-    /// detected from the target file's extension; targets with
-    /// no detectable extension produce a per-file violation.
+    /// Override the auto-detected target format. When omitted, format is inferred
+    /// from each target file's extension (.json / .yaml / .yml / .toml).
     #[serde(default)]
-    format: Option<String>,
+    format: Option<TargetFormat>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct JsonSchemaPassesRule {
@@ -224,18 +234,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
 
-    let format_override = match opts.format.as_deref() {
-        None => None,
-        Some("json") => Some(Format::Json),
-        Some("yaml" | "yml") => Some(Format::Yaml),
-        Some("toml") => Some(Format::Toml),
-        Some(other) => {
-            return Err(Error::rule_config(
-                &spec.id,
-                format!("unknown format `{other}`; expected json | yaml | toml"),
-            ));
-        }
-    };
+    let format_override = opts.format.map(|f| match f {
+        TargetFormat::Json => Format::Json,
+        TargetFormat::Yaml | TargetFormat::Yml => Format::Yaml,
+        TargetFormat::Toml => Format::Toml,
+    });
 
     if spec.fix.is_some() {
         return Err(Error::rule_config(

@@ -134,6 +134,7 @@ pub mod unique_by;
 /// its hand-written branch verbatim, so the published schema stays complete and
 /// valid at every step.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
     vec![
         ("rule_file_header", file_header::options_schema()),
@@ -224,6 +225,44 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         (
             "rule_command_idempotent",
             command_idempotent::options_schema(),
+        ),
+        ("rule_import_gate", import_gate::options_schema()),
+        ("rule_executable_bit", executable_bit::options_schema()),
+        (
+            "rule_json_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_yaml_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_toml_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_xml_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_json_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_yaml_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_toml_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_xml_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_json_schema_passes",
+            json_schema_passes::options_schema(),
         ),
     ]
 }

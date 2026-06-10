@@ -25,8 +25,11 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
+// Rename in the schema so the derived `$defs` entry does not collide with
+// commented_out_code's (different) `Language` enum.
+#[schemars(rename = "ImportLanguage")]
 enum Language {
     Go,
     Python,
@@ -78,10 +81,13 @@ impl Language {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Regex tested against the extracted import target.
     forbid: String,
+    /// Built-in import-line pattern preset (capture group 1 = the imported
+    /// target). Omit to require an explicit `import_pattern`.
     #[serde(default)]
     language: Option<Language>,
     /// Explicit import-line regex (capture group 1 = target).
@@ -92,6 +98,8 @@ struct Options {
     #[serde(default)]
     allow: Vec<String>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct ImportGateRule {

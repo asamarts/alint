@@ -251,23 +251,49 @@ pub enum Op {
 // ---------------------------------------------------------------
 
 /// Options shared by every `*_path_equals` rule kind.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EqualsOptions {
+    /// `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`),
+    /// array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every
+    /// other RFC 9535 construct.
     path: String,
+    /// Expected value. Any JSON type (string, number, boolean, null, array, object).
     equals: Value,
+    /// When true, a query returning zero matches is silently OK - only real
+    /// matches that fail the op produce violations.
     #[serde(default)]
     if_present: bool,
 }
 
 /// Options shared by every `*_path_matches` rule kind.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct MatchesOptions {
+    /// `JSONPath` expression rooted at `$`.
     path: String,
+    /// Rust-regex pattern to match against the value at `path`.
     matches: String,
+    /// When true, a query returning zero matches is silently OK - only real
+    /// matches that fail the op produce violations.
     #[serde(default)]
     if_present: bool,
+}
+
+/// schemars-derived options schema for the four `*_path_equals` kinds; composed
+/// into their `$defs` branches by `xtask gen-schema`. See
+/// [`crate::migrated_option_schemas`].
+#[must_use]
+pub fn equals_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(EqualsOptions))
+        .expect("EqualsOptions JSON schema serializes")
+}
+
+/// schemars-derived options schema for the four `*_path_matches` kinds.
+#[must_use]
+pub fn matches_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(MatchesOptions))
+        .expect("MatchesOptions JSON schema serializes")
 }
 
 // ---------------------------------------------------------------

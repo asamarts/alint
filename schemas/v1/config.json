@@ -59,6 +59,28 @@
         }
       ]
     },
+    "ImportLanguage": {
+      "oneOf": [
+        {
+          "enum": [
+            "go",
+            "python",
+            "rust",
+            "js",
+            "scala",
+            "java",
+            "dart",
+            "nix"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "generic",
+          "description": "No preset — an explicit `import_pattern` is required.",
+          "type": "string"
+        }
+      ]
+    },
     "Language": {
       "enum": [
         "auto",
@@ -79,6 +101,16 @@
       "enum": [
         "tabs",
         "spaces"
+      ],
+      "type": "string"
+    },
+    "TargetFormat": {
+      "description": "The `format:` override values for `json_schema_passes`. Distinct from `structured_path::Format` (which has `xml`, not `yml`): this validator targets json/yaml/toml documents and accepts `yml` as a `yaml` alias.",
+      "enum": [
+        "json",
+        "yaml",
+        "yml",
+        "toml"
       ],
       "type": "string"
     },
@@ -1120,7 +1152,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "require": {
-          "description": "`true`: +x must be set. `false`: +x must not be set.",
+          "description": "`true` → +x must be set; `false` → +x must NOT be set.",
           "type": "boolean"
         }
       },
@@ -2209,7 +2241,8 @@
       "description": "Forbid imports whose extracted target matches `forbid` (a regex), within the `paths` scope — an architectural import firewall. Matches the EXTRACTED import target (not the raw line), the precise low-false-positive specialisation of `file_content_forbidden`. `language` (go/python/rust/js/scala/java/dart/nix) selects a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). `allow` globs exempt files inside the scope. Per-file.",
       "properties": {
         "allow": {
-          "description": "File globs inside the scope exempt from the gate.",
+          "default": [],
+          "description": "File globs inside the scope that are exempt from the gate.",
           "items": {
             "type": "string"
           },
@@ -2220,24 +2253,26 @@
           "type": "string"
         },
         "import_pattern": {
-          "description": "Explicit import-line regex (capture group 1 = imported target); overrides the language preset.",
-          "type": "string"
+          "default": null,
+          "description": "Explicit import-line regex (capture group 1 = target). Overrides the `language` preset.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "const": "import_gate"
         },
         "language": {
-          "enum": [
-            "go",
-            "python",
-            "rust",
-            "js",
-            "scala",
-            "java",
-            "dart",
-            "nix",
-            "generic"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImportLanguage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Built-in import-line pattern preset (capture group 1 = the imported target). Omit to require an explicit `import_pattern`."
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
@@ -2285,13 +2320,15 @@
           "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
         },
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "json_path_equals"
         },
         "path": {
-          "description": "JSONPath expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct.",
+          "description": "`JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct.",
           "type": "string"
         },
         "paths": {
@@ -2309,7 +2346,9 @@
       "description": "Value at a JSONPath in every JSON file in `paths` must be a string and must match `matches` (a Rust regex). Non-string matches produce a clear 'not a string' violation.",
       "properties": {
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "json_path_matches"
@@ -2319,6 +2358,7 @@
           "type": "string"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
           "type": "string"
         },
         "paths": {
@@ -2336,14 +2376,15 @@
       "description": "Validate every JSON / YAML / TOML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
       "properties": {
         "format": {
-          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml).",
-          "enum": [
-            "json",
-            "yaml",
-            "yml",
-            "toml"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetFormat"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "type": "string"
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
         },
         "kind": {
           "const": "json_schema_passes"
@@ -2352,7 +2393,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "schema_path": {
-          "description": "Path to a JSON Schema file relative to the lint root. Schema must itself be JSON even when validating YAML / TOML targets.",
+          "description": "Path to a JSON Schema file relative to the lint root. The schema must itself be JSON even when validating YAML / TOML targets.",
           "type": "string"
         }
       },
@@ -3156,14 +3197,19 @@
     "rule_toml_path_equals": {
       "description": "TOML sibling of `json_path_equals`. Typical use: enforce `[package].edition == \"2024\"` on every `Cargo.toml`.",
       "properties": {
-        "equals": {},
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        },
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "toml_path_equals"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct.",
           "type": "string"
         },
         "paths": {
@@ -3181,15 +3227,19 @@
       "description": "TOML sibling of `json_path_matches`.",
       "properties": {
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "toml_path_matches"
         },
         "matches": {
+          "description": "Rust-regex pattern to match against the value at `path`.",
           "type": "string"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
           "type": "string"
         },
         "paths": {
@@ -3232,14 +3282,19 @@
     "rule_xml_path_equals": {
       "description": "XML sibling of `json_path_equals`. XML maps to the same value tree via the xmltodict-style convention: attributes are `@name` keys, repeated child elements become an array, a leaf element collapses to its text string, namespaces flatten to local names, and every leaf value is a string (quote your `equals:`, e.g. `equals: \"4.0.0\"`). Typical use: enforce `$.Project.PropertyGroup.TargetFramework == \"net8.0\"` on every `.csproj`, or a Maven `$.project.parent.version` across `pom.xml`.",
       "properties": {
-        "equals": {},
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        },
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "xml_path_equals"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct.",
           "type": "string"
         },
         "paths": {
@@ -3257,15 +3312,19 @@
       "description": "XML sibling of `json_path_matches` (same xmltodict-style mapping as `xml_path_equals`; all XML leaf values are strings). Typical use: `$.Project.ItemGroup.PackageReference[*]['@Version']` matches a version pattern across `.csproj`.",
       "properties": {
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "xml_path_matches"
         },
         "matches": {
+          "description": "Rust-regex pattern to match against the value at `path`.",
           "type": "string"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
           "type": "string"
         },
         "paths": {
@@ -3282,14 +3341,19 @@
     "rule_yaml_path_equals": {
       "description": "YAML sibling of `json_path_equals`. Parses the file as YAML before applying the JSONPath query. Use this on GitHub Actions workflows, docker-compose.yml, kubernetes manifests, `.gitlab-ci.yml`, etc.",
       "properties": {
-        "equals": {},
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        },
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "yaml_path_equals"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct.",
           "type": "string"
         },
         "paths": {
@@ -3307,15 +3371,19 @@
       "description": "YAML sibling of `json_path_matches`.",
       "properties": {
         "if_present": {
-          "$ref": "#/$defs/if_present"
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
         },
         "kind": {
           "const": "yaml_path_matches"
         },
         "matches": {
+          "description": "Rust-regex pattern to match against the value at `path`.",
           "type": "string"
         },
         "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
           "type": "string"
         },
         "paths": {
