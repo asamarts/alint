@@ -3,11 +3,14 @@
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Maximum allowed file size in bytes.
     max_bytes: u64,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileMaxSizeRule {

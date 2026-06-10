@@ -22,11 +22,14 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Minimum allowed line count.
     min_lines: u64,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileMinLinesRule {

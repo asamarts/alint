@@ -18,6 +18,7 @@ struct Options {
     pattern: String,
     /// Number of leading lines to consider.
     #[serde(default = "default_lines")]
+    #[schemars(range(min = 1))]
     lines: usize,
 }
 
@@ -25,52 +26,7 @@ fn default_lines() -> usize {
     20
 }
 
-/// The `$defs/rule_file_header` JSON-Schema branch, assembled from the
-/// schemars-derived `Options` schema (field types and descriptions) plus the
-/// common `kind`/`paths` discriminator and the validating `lines` minimum.
-///
-/// Consumed by `xtask gen-schema`. This is the keystone-prototype kind: the
-/// first whose schema branch is generated from its Rust type rather than
-/// hand-written in `schemas/v1/config.json`. See ADR-0001 and
-/// `docs/design/spec-driven-development.md`.
-#[must_use]
-pub fn rule_def_schema() -> serde_json::Value {
-    let derived = serde_json::to_value(schemars::schema_for!(Options))
-        .expect("Options JSON schema serializes to a value");
-
-    let mut properties = serde_json::Map::new();
-    properties.insert(
-        "kind".to_string(),
-        serde_json::json!({ "enum": ["file_header", "header"] }),
-    );
-    properties.insert(
-        "paths".to_string(),
-        serde_json::json!({ "$ref": "#/$defs/paths_spec" }),
-    );
-    if let Some(opts) = derived
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-    {
-        for (key, value) in opts {
-            properties.insert(key.clone(), value.clone());
-        }
-    }
-    // `lines` is a usize, so schemars emits `minimum: 0`; the rule's contract is
-    // `lines >= 1`. Apply the validating constraint in the assembler rather than
-    // a schemars attribute to keep the constraint visible next to its rationale.
-    if let Some(lines) = properties
-        .get_mut("lines")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        lines.insert("minimum".to_string(), serde_json::json!(1));
-    }
-
-    serde_json::json!({
-        "type": "object",
-        "required": ["paths", "pattern"],
-        "properties": properties,
-    })
-}
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileHeaderRule {

@@ -24,13 +24,18 @@ use serde::Deserialize;
 
 use crate::fixers::FileAppendFixer;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Rust regex. The last `lines` lines of each file must match.
     pattern: String,
+    /// Number of trailing lines to consider.
     #[serde(default = "default_lines")]
+    #[schemars(range(min = 1))]
     lines: usize,
 }
+
+crate::options_schema_for!(Options);
 
 fn default_lines() -> usize {
     20

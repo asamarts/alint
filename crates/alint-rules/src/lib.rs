@@ -5,6 +5,21 @@
 
 use alint_core::RuleRegistry;
 
+/// Generates a migrated rule kind's `options_schema()` fn: the schemars-derived
+/// JSON Schema for its `Options` struct. `xtask gen-schema` composes the result
+/// with the `kind`/`paths` structure preserved from the committed base branch.
+/// See [`migrated_option_schemas`] and ADR-0001.
+macro_rules! options_schema_for {
+    ($ty:ty) => {
+        #[must_use]
+        pub fn options_schema() -> ::serde_json::Value {
+            ::serde_json::to_value(::schemars::schema_for!($ty))
+                .expect("options JSON schema serializes to a value")
+        }
+    };
+}
+pub(crate) use options_schema_for;
+
 pub mod case;
 pub mod changeset_requires_path;
 pub mod command;
@@ -86,17 +101,26 @@ pub mod structured_path;
 mod test_support;
 pub mod unique_by;
 
-/// Rule kinds whose `$defs/rule_*` schema branch is generated from Rust types
-/// via schemars, rather than hand-written in `schemas/v1/config.json`. Consumed
-/// by `xtask gen-schema`.
+/// Rule kinds whose options schema is generated from Rust types via schemars,
+/// rather than hand-written in `schemas/v1/config.json`. Each entry maps a
+/// `$defs/rule_<kind>` definition name to that kind's derived options schema;
+/// `xtask gen-schema` composes it with the `kind`/`paths`/`required` structure
+/// preserved from the committed base branch.
 ///
 /// Migration is incremental (see ADR-0001 and
 /// `docs/design/spec-driven-development.md`): a kind absent from this list keeps
-/// its hand-written branch, which `gen-schema` passes through verbatim, so the
-/// published schema stays complete and valid at every step.
+/// its hand-written branch verbatim, so the published schema stays complete and
+/// valid at every step.
 #[must_use]
-pub fn migrated_rule_defs() -> Vec<(&'static str, serde_json::Value)> {
-    vec![("rule_file_header", file_header::rule_def_schema())]
+pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("rule_file_header", file_header::options_schema()),
+        ("rule_file_footer", file_footer::options_schema()),
+        ("rule_file_max_size", file_max_size::options_schema()),
+        ("rule_file_min_size", file_min_size::options_schema()),
+        ("rule_file_max_lines", file_max_lines::options_schema()),
+        ("rule_file_min_lines", file_min_lines::options_schema()),
+    ]
 }
 
 /// Register every built-in rule kind into the given registry.

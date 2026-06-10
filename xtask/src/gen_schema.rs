@@ -33,13 +33,71 @@ pub fn build_generated_schema() -> Result<Value> {
         .and_then(Value::as_object_mut)
         .context("base schema has no `$defs` object")?;
 
-    for (def_name, def_schema) in alint_rules::migrated_rule_defs() {
-        if !defs.contains_key(def_name) {
-            bail!("migrated def `{def_name}` is not present in the base schema `$defs`");
-        }
-        defs.insert(def_name.to_string(), def_schema);
+    for (def_name, options) in alint_rules::migrated_option_schemas() {
+        let base = defs
+            .get(def_name)
+            .with_context(|| format!("migrated def `{def_name}` is not present in `$defs`"))?
+            .clone();
+        defs.insert(def_name.to_string(), compose_branch(&base, &options));
     }
     Ok(schema)
+}
+
+/// Compose a `$defs/rule_<kind>` branch from the schemars-derived options schema
+/// and the committed base branch. The `kind` discriminator (including aliases)
+/// and the `paths` property/requirement are preserved from the base (they are
+/// stable and not expressible as plain Rust struct fields); the option
+/// properties and their `required` set come from the derived schema, so an
+/// option rename or type change in the Rust struct propagates automatically.
+fn compose_branch(base: &Value, options: &Value) -> Value {
+    let base_props = base.get("properties").and_then(Value::as_object);
+    let base_required = base.get("required").and_then(Value::as_array);
+
+    let mut properties = serde_json::Map::new();
+    if let Some(kind) = base_props.and_then(|p| p.get("kind")) {
+        properties.insert("kind".to_string(), kind.clone());
+    }
+    if let Some(paths) = base_props.and_then(|p| p.get("paths")) {
+        properties.insert("paths".to_string(), paths.clone());
+    }
+    if let Some(opts) = options.get("properties").and_then(Value::as_object) {
+        for (key, value) in opts {
+            let mut prop = value.clone();
+            // Safety net: if a field's rustdoc description has not been migrated
+            // yet, carry the committed base branch's description so the published
+            // schema never loses documentation during an incremental rollout.
+            if prop.get("description").is_none() {
+                if let Some(base_desc) = base_props
+                    .and_then(|p| p.get(key))
+                    .and_then(|p| p.get("description"))
+                {
+                    if let Some(obj) = prop.as_object_mut() {
+                        obj.insert("description".to_string(), base_desc.clone());
+                    }
+                }
+            }
+            properties.insert(key.clone(), prop);
+        }
+    }
+
+    let mut required: Vec<Value> = Vec::new();
+    if base_required.is_some_and(|r| r.iter().any(|x| x == "paths")) {
+        required.push(Value::from("paths"));
+    }
+    if let Some(req) = options.get("required").and_then(Value::as_array) {
+        required.extend(req.iter().cloned());
+    }
+
+    let mut branch = serde_json::Map::new();
+    if let Some(desc) = base.get("description") {
+        branch.insert("description".to_string(), desc.clone());
+    }
+    branch.insert("type".to_string(), Value::from("object"));
+    if !required.is_empty() {
+        branch.insert("required".to_string(), Value::Array(required));
+    }
+    branch.insert("properties".to_string(), Value::Object(properties));
+    Value::Object(branch)
 }
 
 fn render(schema: &Value) -> Result<String> {
