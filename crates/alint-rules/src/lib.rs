@@ -20,6 +20,28 @@ macro_rules! options_schema_for {
 }
 pub(crate) use options_schema_for;
 
+/// Render a path for a violation message with forward slashes on every platform.
+/// `Path::display()` emits the OS-native separator (`\` on Windows), which is
+/// inconsistent with the rest of alint's output and makes message contents
+/// platform-dependent; this mirrors the normalization the walker already applies
+/// to reported paths.
+#[must_use]
+pub(crate) fn slash(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().display().to_string().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod slash_tests {
+    #[test]
+    fn renders_forward_slashes_regardless_of_separator() {
+        use std::path::Path;
+        // On Linux `\` is a legal filename byte, so this exercises exactly the
+        // replacement the fix relies on for Windows path separators.
+        assert_eq!(super::slash(Path::new("a\\b\\c")), "a/b/c");
+        assert_eq!(super::slash(Path::new("a/b/c")), "a/b/c");
+    }
+}
+
 pub mod case;
 pub mod changeset_requires_path;
 pub mod command;

@@ -501,7 +501,7 @@ impl FileGraphRule {
                     &target,
                     &format!(
                         "is missing or unreadable (the derived output for {})",
-                        source.display()
+                        crate::slash(source)
                     ),
                 ));
                 continue;
@@ -517,7 +517,7 @@ impl FileGraphRule {
                     &format!(
                         "is out of date with {}: it carries no {} freshness marker matching the \
                          source's current digest (regenerate it)",
-                        source.display(),
+                        crate::slash(source),
                         algo.label(),
                     ),
                 ));
@@ -527,7 +527,7 @@ impl FileGraphRule {
     }
 
     fn node_violation(node: &Path, reason: &str) -> Violation {
-        Violation::new(format!("file_graph node {} {reason}", node.display()))
+        Violation::new(format!("file_graph node {} {reason}", crate::slash(node)))
             .with_path(node.to_path_buf())
     }
 
@@ -535,8 +535,8 @@ impl FileGraphRule {
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
                 "{} has a forbidden dependency edge to {} (forbidden_edges: from {:?} to {:?})",
-                src.display(),
-                target.display(),
+                crate::slash(src),
+                crate::slash(target),
                 pat.from_glob,
                 pat.to_glob,
             )
@@ -547,12 +547,12 @@ impl FileGraphRule {
     fn cycle_violation(&self, nodes: &[PathBuf], cycle: &[usize]) -> Violation {
         let mut rendered: String = cycle
             .iter()
-            .map(|&i| nodes[i].display().to_string())
+            .map(|&i| crate::slash(&nodes[i]))
             .collect::<Vec<_>>()
             .join(" \u{2192} ");
         // Close the loop so the cycle reads unambiguously.
         rendered.push_str(" \u{2192} ");
-        rendered.push_str(&nodes[cycle[0]].display().to_string());
+        rendered.push_str(&crate::slash(&nodes[cycle[0]]));
         let msg = self
             .message
             .clone()
@@ -564,8 +564,8 @@ impl FileGraphRule {
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
                 "{} references {}, which does not resolve to any path on disk",
-                src.display(),
-                target.display(),
+                crate::slash(src),
+                crate::slash(target),
             )
         });
         Violation::new(msg).with_path(src.to_path_buf())
@@ -575,7 +575,7 @@ impl FileGraphRule {
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
                 "{} is an orphan: no other node references it (and it is not a declared root)",
-                node.display(),
+                crate::slash(node),
             )
         });
         Violation::new(msg).with_path(node.to_path_buf())
@@ -588,7 +588,7 @@ impl FileGraphRule {
         let msg = self
             .message
             .clone()
-            .unwrap_or_else(|| format!("{} {reason}", target.display()));
+            .unwrap_or_else(|| format!("{} {reason}", crate::slash(target)));
         Violation::new(msg).with_path(target.to_path_buf())
     }
 }

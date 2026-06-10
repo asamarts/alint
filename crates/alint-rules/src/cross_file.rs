@@ -481,7 +481,7 @@ impl CrossFileRule {
         let msg = self
             .message
             .clone()
-            .unwrap_or_else(|| format!("{} {reason}", target.display()));
+            .unwrap_or_else(|| format!("{} {reason}", crate::slash(target)));
         Some(Violation::new(msg).with_path(target.to_path_buf()))
     }
 
@@ -541,7 +541,7 @@ impl CrossFileRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
                         "{} is not byte-identical to {}",
-                        target.display(),
+                        crate::slash(&target),
                         self.source_file,
                     )
                 });
@@ -585,7 +585,7 @@ impl CrossFileRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
                         "{}: declared path {entry:?} does not resolve to a file or directory",
-                        src.display(),
+                        crate::slash(src),
                     )
                 });
                 out.push(Violation::new(msg).with_path(src.to_path_buf()));
@@ -694,7 +694,7 @@ impl CrossFileRule {
     }
 
     fn violation(path: &Path, reason: &str) -> Violation {
-        Violation::new(format!("{}: {reason}", path.display())).with_path(path.to_path_buf())
+        Violation::new(format!("{}: {reason}", crate::slash(path))).with_path(path.to_path_buf())
     }
 
     /// An informational note (non-violation finding) — e.g. a
@@ -707,7 +707,7 @@ impl CrossFileRule {
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
                 "{} value {target_value:?} != {} value {source:?}",
-                target.display(),
+                crate::slash(target),
                 self.source_file,
             )
         });
