@@ -23,12 +23,16 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Rust regex; the first line of every matched file must match. Default
+    /// `^#!` only enforces shebang presence.
     #[serde(default = "default_shebang")]
     shebang: String,
 }
+
+crate::options_schema_for!(Options);
 
 fn default_shebang() -> String {
     "^#!".to_string()

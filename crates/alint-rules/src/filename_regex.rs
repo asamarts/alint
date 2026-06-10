@@ -6,15 +6,17 @@ use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Rust regex, automatically anchored with ^...$ by the engine.
     pattern: String,
-    /// Check against the file *stem* (no final extension) instead of the
-    /// full basename. Defaults to `false` (full basename is matched).
+    /// Match the file stem (no extension) instead of the full basename.
     #[serde(default)]
     stem: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FilenameRegexRule {

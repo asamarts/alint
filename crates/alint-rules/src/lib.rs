@@ -120,6 +120,16 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ("rule_file_min_size", file_min_size::options_schema()),
         ("rule_file_max_lines", file_max_lines::options_schema()),
         ("rule_file_min_lines", file_min_lines::options_schema()),
+        (
+            "rule_file_content_matches",
+            file_content_matches::options_schema(),
+        ),
+        (
+            "rule_file_content_forbidden",
+            file_content_forbidden::options_schema(),
+        ),
+        ("rule_file_shebang", file_shebang::options_schema()),
+        ("rule_filename_regex", filename_regex::options_schema()),
     ]
 }
 

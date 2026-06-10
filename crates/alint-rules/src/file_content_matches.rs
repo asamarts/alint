@@ -10,11 +10,14 @@ use serde::Deserialize;
 
 use crate::fixers::FileAppendFixer;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Rust regex. File contents must match.
     pattern: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileContentMatchesRule {

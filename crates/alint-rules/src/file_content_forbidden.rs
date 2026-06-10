@@ -6,11 +6,14 @@ use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Sco
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Rust regex. File contents must NOT match.
     pattern: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileContentForbiddenRule {
