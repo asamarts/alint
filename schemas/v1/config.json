@@ -1,5 +1,94 @@
 {
   "$defs": {
+    "Algorithm": {
+      "enum": [
+        "sha256",
+        "sha512"
+      ],
+      "type": "string"
+    },
+    "Comparator": {
+      "oneOf": [
+        {
+          "const": "lexical",
+          "description": "Rust `str` `Ord` — byte-wise over the UTF-8.",
+          "type": "string"
+        },
+        {
+          "const": "lexical-ci",
+          "description": "ASCII-case-insensitive lexical.",
+          "type": "string"
+        },
+        {
+          "const": "numeric",
+          "description": "Leading-integer order; entries without a leading integer\nfall back to `lexical` so a mixed block degrades\npredictably rather than panicking.",
+          "type": "string"
+        }
+      ]
+    },
+    "FilesFrom": {
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "One violation for the whole invocation (default).",
+          "type": "string"
+        },
+        {
+          "const": "stdout",
+          "description": "Parse the checker's stdout for the offender list.",
+          "type": "string"
+        },
+        {
+          "const": "stderr",
+          "description": "Parse the checker's stderr for the offender list.",
+          "type": "string"
+        }
+      ]
+    },
+    "Format": {
+      "oneOf": [
+        {
+          "const": "contains",
+          "description": "The digest must appear as a substring anywhere in `target`.",
+          "type": "string"
+        },
+        {
+          "const": "sums-line",
+          "description": "`target` must carry a `sha256sum`-style `<hex> [*]<path>`\nline whose path token is the source's path.",
+          "type": "string"
+        }
+      ]
+    },
+    "Language": {
+      "enum": [
+        "auto",
+        "rust",
+        "typescript",
+        "javascript",
+        "python",
+        "go",
+        "java",
+        "c",
+        "cpp",
+        "ruby",
+        "shell"
+      ],
+      "type": "string"
+    },
+    "StyleName": {
+      "enum": [
+        "tabs",
+        "spaces"
+      ],
+      "type": "string"
+    },
+    "TargetName": {
+      "enum": [
+        "lf",
+        "crlf"
+      ],
+      "type": "string"
+    },
     "case_convention": {
       "description": "Case convention. Aliases like PascalCase / pascal / pascal-case / UpperCamelCase all resolve to the same canonical form.",
       "enum": [
@@ -597,7 +686,7 @@
       "description": "Shell out to an external CLI per matched file. argv[0] is the program; remaining tokens support path-template substitution (`{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`). Working dir = repo root; stdin = /dev/null. Env: ALINT_PATH, ALINT_ROOT, ALINT_RULE_ID, ALINT_LEVEL, plus ALINT_VAR_<NAME> per `vars:` and ALINT_FACT_<NAME> per resolved fact. Verdict: exit 0 = pass; non-zero = one violation whose message is the (truncated) stdout+stderr. Trust-gated: only allowed in the user's top-level config (rejected at load-time when introduced via `extends:` or a bundled ruleset).",
       "properties": {
         "command": {
-          "description": "Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends.",
+          "description": "Argv tokens. The first token is the program (looked up via PATH if it's\na bare name); remaining tokens accept `{path}` and friends.",
           "items": {
             "type": "string"
           },
@@ -611,9 +700,14 @@
           "$ref": "#/$defs/paths_spec"
         },
         "timeout": {
-          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout.",
+          "default": null,
+          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed\nand a violation reports the timeout.",
+          "format": "uint64",
           "minimum": 1,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -626,7 +720,7 @@
       "description": "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 = the tree is formatter-clean (silent), non-zero = violation(s). alint never runs a mutating formatter and never writes the tree (the sibling of generated_file_fresh; same trust tier as the command rule — trust-gated to the user's own top-level config). With `files_from` (+ optional `files_pattern`) the tool's offender list is parsed into one violation per file. Single-shot, opt-in.",
       "properties": {
         "command": {
-          "description": "Checker argv (no shell), run in its --check / idempotence mode; exit 0 = clean.",
+          "description": "Checker argv (no shell), run in its --check / idempotence mode; exit\n0 = clean.",
           "items": {
             "type": "string"
           },
@@ -634,28 +728,37 @@
           "type": "array"
         },
         "files_from": {
-          "description": "On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation).",
-          "enum": [
-            "none",
-            "stdout",
-            "stderr"
-          ]
+          "$ref": "#/$defs/FilesFrom",
+          "description": "On failure, parse this stream into per-file violations (default: none =\none violation for the whole invocation)."
         },
         "files_pattern": {
-          "description": "Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers).",
-          "type": "string"
+          "default": null,
+          "description": "Regex whose capture group 1 is a file path, applied per output line\n(requires `files_from`; omit for bare-path listers).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "const": "command_idempotent"
         },
         "timeout": {
-          "description": "Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted.",
+          "default": null,
+          "description": "Checker timeout in seconds (default 120). On timeout the child is killed\nand one violation is emitted.",
+          "format": "uint64",
           "minimum": 1,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "workdir": {
+          "default": null,
           "description": "Checker cwd, relative to the lint root (default: lint root).",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -670,26 +773,13 @@
           "const": "commented_out_code"
         },
         "language": {
-          "default": "auto",
-          "description": "Comment-marker set to use. `auto` (default) infers from each file's extension. Files with extensions the resolver doesn't recognise are silently skipped.",
-          "enum": [
-            "auto",
-            "rust",
-            "typescript",
-            "javascript",
-            "python",
-            "go",
-            "java",
-            "c",
-            "cpp",
-            "ruby",
-            "shell"
-          ],
-          "type": "string"
+          "$ref": "#/$defs/Language",
+          "description": "`auto` (default) infers the comment-marker set from\neach file's extension. Explicit override useful for\nembedded DSLs or cases where the extension lies."
         },
         "min_lines": {
           "default": 3,
-          "description": "Minimum consecutive comment-line count for a block to be considered. Default 3 — 1-2 line comments are almost always prose.",
+          "description": "Minimum consecutive comment-line count for a block to\nbe considered. 1-2 line comments are almost always\nprose; 3+ starts looking like dead code. Default 3.",
+          "format": "uint",
           "minimum": 2,
           "type": "integer"
         },
@@ -698,13 +788,15 @@
         },
         "skip_leading_lines": {
           "default": 30,
-          "description": "Skip blocks whose first line is at or before this line number. Default 30 — covers typical license headers without false-positive flagging them as commented-out code.",
+          "description": "Skip the first N lines of any file. Defaults to 30 to\npass over license headers without false-positive\nflagging them as commented-out code.",
+          "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
         "threshold": {
           "default": 0.5,
-          "description": "Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow.",
+          "description": "Token-density floor (0.0-1.0). Higher = stricter (only\nthe most code-shaped blocks fire). Default 0.5.",
+          "format": "double",
           "maximum": 1.0,
           "minimum": 0.0,
           "type": "number"
@@ -1360,6 +1452,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "sha256": {
+          "description": "Expected SHA-256 in lowercase hex (64 chars). Accepting\nuppercase and the `sha256:` prefix keeps the field forgiving.",
           "pattern": "^(sha256:)?[0-9a-fA-F]{64}$",
           "type": "string"
         }
@@ -1403,7 +1496,8 @@
       "description": "Every byte in every file in scope must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. Stricter than file_is_text; check-only — auto-replacement for non-ASCII bytes would silently lose meaning. With `allow:` the file is decoded as UTF-8 and checked per character; without it, the strict byte-level fast path is used.",
       "properties": {
         "allow": {
-          "description": "Permitted non-ASCII codepoints — each entry a single character (e.g. \"ö\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` inclusive range.",
+          "default": [],
+          "description": "Permitted non-ASCII codepoints - each a single character\n(e.g. \"o-umlaut\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY`\ninclusive range.",
           "items": {
             "type": "string"
           },
@@ -2163,16 +2257,18 @@
           "$ref": "#/$defs/paths_spec"
         },
         "style": {
-          "enum": [
-            "tabs",
-            "spaces"
-          ],
-          "type": "string"
+          "$ref": "#/$defs/StyleName",
+          "description": "Required indentation style: `tabs` rejects any leading space; `spaces`\nrejects any leading tab."
         },
         "width": {
-          "description": "When `style: spaces`, the leading-space count on every non-blank line must be a multiple of this. Ignored for `style: tabs`.",
+          "default": null,
+          "description": "When `style: spaces`, the leading-space count on every non-blank line\nmust be a multiple of this. Ignored for `style: tabs`.",
+          "format": "uint32",
           "minimum": 1,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -2514,11 +2610,8 @@
           "$ref": "#/$defs/paths_spec"
         },
         "target": {
-          "enum": [
-            "lf",
-            "crlf"
-          ],
-          "type": "string"
+          "$ref": "#/$defs/TargetName",
+          "description": "Required line ending style: `lf` or `crlf`. Mixed endings within a\nfile also fail."
         }
       },
       "required": [
@@ -2800,15 +2893,16 @@
       "description": "The lines between a `start` / `end` marker pair must stay sorted (and, with `unique`, free of duplicates) under `comparator`. Both markers are optional: omit `end` to sort from `start` to EOF, omit both to sort the whole file (the markerless 'this file is one sorted list' form). The generic form of per-project keep-sorted scripts. Per-file: markers match the trimmed line; blank lines inside a block are ignored.",
       "properties": {
         "comparator": {
-          "enum": [
-            "lexical",
-            "lexical-ci",
-            "numeric"
-          ]
+          "$ref": "#/$defs/Comparator",
+          "description": "Comparator used to order entries: lexical (default), lexical-ci, or\nnumeric."
         },
         "end": {
-          "description": "Marker line closing a block. Optional — omit to run the block to EOF.",
-          "type": "string"
+          "default": null,
+          "description": "Marker line closing a block. Optional - omit to run the block to EOF.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "const": "ordered_block"
@@ -2817,14 +2911,24 @@
           "$ref": "#/$defs/paths_spec"
         },
         "select": {
-          "description": "Regex; when set, only lines inside a block matching it are sortable entries (others — comments, group headers — pass through). The sectioned / keep-sorted-subset shape.",
-          "type": "string"
+          "default": null,
+          "description": "Regex; when set, only lines inside a block matching it are sortable\nentries (others, such as comments or group headers, pass through).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "start": {
-          "description": "Marker line opening a block (matched on the trimmed line). Optional — omit to anchor the block at the start of the file.",
-          "type": "string"
+          "default": null,
+          "description": "Marker line opening a block (matched on the trimmed line). Optional -\nomit to anchor the block at the start of the file.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "unique": {
+          "default": false,
+          "description": "When true, also forbid duplicate (equal) entries within a block.",
           "type": "boolean"
         }
       },
@@ -2881,28 +2985,22 @@
       "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `target` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
       "properties": {
         "algorithm": {
-          "description": "Digest algorithm (default: sha256).",
-          "enum": [
-            "sha256",
-            "sha512"
-          ]
+          "$ref": "#/$defs/Algorithm",
+          "description": "Digest algorithm (default: sha256)."
         },
         "format": {
-          "description": "How the digest must appear in `target`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path.",
-          "enum": [
-            "contains",
-            "sums-line"
-          ]
+          "$ref": "#/$defs/Format",
+          "description": "How the digest must appear in `target`: `contains` = hex\nsubstring anywhere (default); `sums-line` = a `<hex> [*]<path>`\nline whose path token is the source's path."
         },
         "kind": {
           "const": "pair_hash"
         },
         "source": {
-          "description": "Literal path or glob selecting the file(s) whose content is hashed (one check per match).",
+          "description": "Literal path or glob selecting the file(s) whose content is\nhashed (one check per match).",
           "type": "string"
         },
         "target": {
-          "description": "The single file that must carry the digest (a `.sum` / `SHA256SUMS` / file with an embedded hash).",
+          "description": "The single file that must carry the digest (a `.sum` /\n`SHA256SUMS` / a file with an embedded hash).",
           "type": "string"
         }
       },

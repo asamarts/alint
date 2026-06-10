@@ -1,7 +1,15 @@
 # Spec-Driven Development for alint: A Proposal
 
 Status: Accepted (2026-06-10), recorded as ADR-0001. Full program (all five
-workstreams) approved; ADR home is docs/adr/. Phase 0 implemented.
+workstreams) approved; ADR home is docs/adr/. Phase 0 + Phase 1 implemented on
+branch `spec-driven-development`: 38 of ~56 option-bearing rule kinds now derive
+their `schemas/v1/config.json` branch from their Rust types (schemars), gated by
+`gen-schema --check`. The remaining kinds stay hand-written passthrough by design:
+the deeply nested ones (cross_file, file_graph, registry_paths_resolve, for_each_*,
+dir_contains/dir_only_contains, every_matching_has, generated_file_fresh, import_gate,
+the structured-query family) plus two whose option type can't be faithfully derived
+(filename_case's custom case-alias deserializer, json_schema_passes's runtime-validated
+format string). Phases 2-5 pending.
 Scope: cross-cutting (engine, DSL, schema, docs, CI, alint.org)
 Related: [ARCHITECTURE.md](./ARCHITECTURE.md), [ROADMAP.md](./ROADMAP.md), [deterministic-perf-gating.md](./deterministic-perf-gating.md)
 

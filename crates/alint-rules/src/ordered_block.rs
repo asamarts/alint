@@ -29,7 +29,7 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 enum Comparator {
     /// Rust `str` `Ord` — byte-wise over the UTF-8.
@@ -73,26 +73,30 @@ fn leading_int(s: &str) -> Option<i64> {
     s[..digits_end].parse::<i64>().ok()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Block start marker (matched on the trimmed line). Omit to
-    /// anchor the block at the start of the file.
+    /// Marker line opening a block (matched on the trimmed line). Optional -
+    /// omit to anchor the block at the start of the file.
     #[serde(default)]
     start: Option<String>,
-    /// Block end marker (matched on the trimmed line). Omit to run
-    /// the block to EOF.
+    /// Marker line closing a block. Optional - omit to run the block to EOF.
     #[serde(default)]
     end: Option<String>,
+    /// Comparator used to order entries: lexical (default), lexical-ci, or
+    /// numeric.
     #[serde(default)]
     comparator: Comparator,
+    /// When true, also forbid duplicate (equal) entries within a block.
     #[serde(default)]
     unique: bool,
-    /// When set, only lines matching this regex are sortable
-    /// entries; other lines inside the block pass through.
+    /// Regex; when set, only lines inside a block matching it are sortable
+    /// entries (others, such as comments or group headers, pass through).
     #[serde(default)]
     select: Option<String>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct OrderedBlockRule {

@@ -16,13 +16,16 @@ use alint_core::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// Expected SHA-256 in lowercase hex (64 chars). Accepting
     /// uppercase and the `sha256:` prefix keeps the field forgiving.
+    #[schemars(regex(pattern = r"^(sha256:)?[0-9a-fA-F]{64}$"))]
     sha256: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileHashRule {

@@ -12,13 +12,17 @@ use serde::Deserialize;
 
 use crate::fixers::{FileNormalizeLineEndingsFixer, LineEndingTarget};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Required line ending style: `lf` or `crlf`. Mixed endings within a
+    /// file also fail.
     target: TargetName,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+crate::options_schema_for!(Options);
+
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum TargetName {
     Lf,

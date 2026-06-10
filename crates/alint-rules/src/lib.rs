@@ -188,6 +188,21 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             pair_changed_together::options_schema(),
         ),
         ("rule_pair", pair::options_schema()),
+        ("rule_line_endings", line_endings::options_schema()),
+        ("rule_indent_style", indent_style::options_schema()),
+        ("rule_file_is_ascii", file_is_ascii::options_schema()),
+        ("rule_ordered_block", ordered_block::options_schema()),
+        ("rule_file_hash", file_hash::options_schema()),
+        ("rule_pair_hash", pair_hash::options_schema()),
+        (
+            "rule_commented_out_code",
+            commented_out_code::options_schema(),
+        ),
+        ("rule_command", command::options_schema()),
+        (
+            "rule_command_idempotent",
+            command_idempotent::options_schema(),
+        ),
     ]
 }
 

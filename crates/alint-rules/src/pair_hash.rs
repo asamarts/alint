@@ -28,7 +28,7 @@ use sha2::{Digest, Sha256, Sha512};
 // `pub(crate)` so the `file_graph` `fresh` mode reuses one digest
 // enum instead of triplicating it (the third sha consumer after
 // `file_hash` / `pair_hash`).
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Algorithm {
     #[default]
@@ -53,7 +53,7 @@ impl Algorithm {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 enum Format {
     /// The digest must appear as a substring anywhere in `target`.
@@ -64,18 +64,26 @@ enum Format {
     SumsLine,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Literal path or glob selecting the file(s) whose content is
+    /// hashed (one check per match).
     source: String,
     /// The single file that must carry the digest (a `.sum` /
     /// `SHA256SUMS` / a file with an embedded hash).
     target: String,
+    /// Digest algorithm (default: sha256).
     #[serde(default)]
     algorithm: Algorithm,
+    /// How the digest must appear in `target`: `contains` = hex
+    /// substring anywhere (default); `sums-line` = a `<hex> [*]<path>`
+    /// line whose path token is the source's path.
     #[serde(default)]
     format: Format,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct PairHashRule {

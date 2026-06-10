@@ -37,7 +37,7 @@ use serde::Deserialize;
 /// legible (mirrors the `command` rule's output cap intent).
 const OUTPUT_SNIPPET_CAP: usize = 400;
 
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum FilesFrom {
     /// One violation for the whole invocation (default).
@@ -49,23 +49,32 @@ enum FilesFrom {
     Stderr,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Checker argv (no shell), run in its --check / idempotence mode; exit
+    /// 0 = clean.
+    #[schemars(length(min = 1))]
     command: Vec<String>,
+    /// Checker cwd, relative to the lint root (default: lint root).
     #[serde(default)]
     workdir: Option<String>,
+    /// On failure, parse this stream into per-file violations (default: none =
+    /// one violation for the whole invocation).
     #[serde(default)]
     files_from: FilesFrom,
-    /// Regex whose capture group 1 is a file path, applied per
-    /// output line (only with `files_from`).
+    /// Regex whose capture group 1 is a file path, applied per output line
+    /// (requires `files_from`; omit for bare-path listers).
     #[serde(default)]
     files_pattern: Option<String>,
-    /// Child timeout in seconds. Default
-    /// [`crate::spawn::DEFAULT_SPAWN_TIMEOUT_SECS`].
+    /// Checker timeout in seconds (default 120). On timeout the child is killed
+    /// and one violation is emitted.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     timeout: Option<u64>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct CommandIdempotentRule {

@@ -34,6 +34,15 @@ pub fn build_generated_schema() -> Result<Value> {
         .context("base schema has no `$defs` object")?;
 
     for (def_name, options) in alint_rules::migrated_option_schemas() {
+        // schemars emits an option field's enum/struct type as a `$ref` to a
+        // `#/$defs/<TypeName>` definition carried in the derived schema's own
+        // `$defs`. Merge those definitions into the main schema's `$defs` so the
+        // refs resolve (e.g. commented_out_code's `language: #/$defs/Language`).
+        if let Some(extra_defs) = options.get("$defs").and_then(Value::as_object) {
+            for (name, def) in extra_defs {
+                defs.insert(name.clone(), def.clone());
+            }
+        }
         let base = defs
             .get(def_name)
             .with_context(|| format!("migrated def `{def_name}` is not present in `$defs`"))?

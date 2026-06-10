@@ -26,14 +26,17 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Permitted non-ASCII codepoints — each a single character
-    /// (`"ö"`), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` range.
+    /// Permitted non-ASCII codepoints - each a single character
+    /// (e.g. "o-umlaut"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY`
+    /// inclusive range.
     #[serde(default)]
     allow: Vec<String>,
 }
+
+crate::options_schema_for!(Options);
 
 /// Parse one `allow:` entry into an inclusive codepoint range.
 fn parse_allow_entry(s: &str) -> std::result::Result<(u32, u32), String> {

@@ -24,15 +24,22 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Required indentation style: `tabs` rejects any leading space; `spaces`
+    /// rejects any leading tab.
     style: StyleName,
+    /// When `style: spaces`, the leading-space count on every non-blank line
+    /// must be a multiple of this. Ignored for `style: tabs`.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     width: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+crate::options_schema_for!(Options);
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum StyleName {
     Tabs,

@@ -69,15 +69,21 @@ const OUTPUT_CAP_BYTES: usize = 16 * 1024;
 /// idle while the child runs.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Argv tokens. The first token is the program (looked up via PATH if it's
+    /// a bare name); remaining tokens accept `{path}` and friends.
+    #[schemars(length(min = 1))]
     command: Vec<String>,
-    /// Per-file timeout in seconds. Default
-    /// [`DEFAULT_TIMEOUT_SECS`].
+    /// Per-file timeout in seconds. Default 30. Past this, the child is killed
+    /// and a violation reports the timeout.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     timeout: Option<u64>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct CommandRule {
