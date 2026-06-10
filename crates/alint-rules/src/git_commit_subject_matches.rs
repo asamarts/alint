@@ -27,21 +27,22 @@ use serde::Deserialize;
 
 use crate::commit_range::{collect_commits, format_commit_violation};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Regex the commit subject (first line of the message) must
-    /// match.
+    /// Rust-regex the commit subject (first line of the message) must match.
     matches: String,
-    /// Base ref for range mode. Unset → HEAD only. The canonical
-    /// `{{env.X}}` interpolation is resolved at config load.
+    /// Git ref to use as the base of the commit range. When set, validates
+    /// every commit in `<since>..HEAD` instead of just HEAD.
     #[serde(default)]
     since: Option<String>,
-    /// Include merge commits when checking a range. No effect
-    /// without `since:`.
+    /// When validating a range (`since:` set), include merge commits. Has no
+    /// effect when `since:` is unset.
     #[serde(default)]
     include_merges: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct GitCommitSubjectMatchesRule {

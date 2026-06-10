@@ -16,11 +16,15 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Maximum number of Unicode scalar values (chars) allowed per line.
+    #[schemars(range(min = 1))]
     max_width: usize,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct LineMaxWidthRule {

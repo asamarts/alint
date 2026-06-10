@@ -88,16 +88,22 @@ fn compose_branch(base: &Value, options: &Value) -> Value {
         required.extend(req.iter().cloned());
     }
 
-    let mut branch = serde_json::Map::new();
-    if let Some(desc) = base.get("description") {
-        branch.insert("description".to_string(), desc.clone());
+    // Start from the base branch so branch-level keywords the assembler does not
+    // model (the rule `description`, and any branch-level `anyOf`/`oneOf` such as
+    // git_commit_message's "at least one of pattern/subject_max_length") survive;
+    // then overwrite only the property set and required list with the composed ones.
+    let mut branch = base.clone();
+    let obj = branch
+        .as_object_mut()
+        .expect("rule branch is a JSON object");
+    obj.insert("type".to_string(), Value::from("object"));
+    obj.insert("properties".to_string(), Value::Object(properties));
+    if required.is_empty() {
+        obj.remove("required");
+    } else {
+        obj.insert("required".to_string(), Value::Array(required));
     }
-    branch.insert("type".to_string(), Value::from("object"));
-    if !required.is_empty() {
-        branch.insert("required".to_string(), Value::Array(required));
-    }
-    branch.insert("properties".to_string(), Value::Object(properties));
-    Value::Object(branch)
+    branch
 }
 
 fn render(schema: &Value) -> Result<String> {
@@ -196,5 +202,64 @@ mod tests {
         assert!(!generated.is_valid(&cases[3]));
         // `lines: 0` (below minimum 1) rejected
         assert!(!generated.is_valid(&cases[4]));
+    }
+
+    fn collect_yaml(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_yaml(&path, out);
+                } else if path.extension().is_some_and(|x| x == "yml" || x == "yaml") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    /// Broad fidelity gate: every real config in the repo (the all-kinds
+    /// fixture, every bundled ruleset, every example) must get the SAME
+    /// accept/reject verdict from the committed and the generated schema. These
+    /// are all valid configs, so this rules out the generated schema NARROWING
+    /// acceptance for any migrated kind. (Widening is caught by the rejection
+    /// cases in `cargo test -p alint-dsl` against the regenerated schema.)
+    #[test]
+    fn generated_and_committed_agree_on_real_configs() {
+        let root = crate::workspace_root().unwrap();
+        let committed = jsonschema::validator_for(&committed_schema()).unwrap();
+        let generated = jsonschema::validator_for(&build_generated_schema().unwrap()).unwrap();
+
+        let mut configs = vec![root.join("crates/alint-dsl/tests/fixtures/all_kinds.yaml")];
+        collect_yaml(&root.join("crates/alint-dsl/rulesets/v1"), &mut configs);
+        if let Ok(entries) = std::fs::read_dir(root.join("examples")) {
+            for entry in entries.flatten() {
+                let cfg = entry.path().join(".alint.yml");
+                if cfg.is_file() {
+                    configs.push(cfg);
+                }
+            }
+        }
+
+        let mut checked = 0;
+        for path in configs {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) else {
+                continue;
+            };
+            let json = serde_json::to_value(value).unwrap();
+            assert_eq!(
+                committed.is_valid(&json),
+                generated.is_valid(&json),
+                "committed vs generated schema disagree for {}",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(
+            checked > 10,
+            "expected many configs, only checked {checked}"
+        );
     }
 }

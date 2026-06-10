@@ -25,20 +25,20 @@ use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Regex applied to each blame line's content. Same flavour
-    /// as `file_content_forbidden`'s pattern. Captured groups
-    /// are exposed as `{{ctx.match}}` in the message template
-    /// (defaults to the full match when no capture group is
-    /// present).
+    /// Rust-regex pattern applied to each blame line's content. Capture group 1
+    /// (when present) is exposed as `{{ctx.match}}` in the message template;
+    /// without a capture group, `{{ctx.match}}` substitutes the full match.
     pattern: String,
-    /// Minimum line age (in days) for a matching line to fire as
-    /// a violation. Lines younger than this pass silently.
-    /// Required.
+    /// Minimum line age (in days) for a matching line to fire as a violation.
+    /// Lines younger than this pass silently.
+    #[schemars(range(min = 1))]
     max_age_days: u64,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct GitBlameAgeRule {

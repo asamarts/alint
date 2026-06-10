@@ -25,24 +25,26 @@ use crate::commit_range::{collect_commits, format_commit_violation};
 /// just the whole message. Matches `Signed-off-by: Name <email>`.
 const DEFAULT_PATTERN: &str = r"(?m)^Signed-off-by: .+ <.+@.+>$";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Trailer pattern each commit message must contain. Defaults to
-    /// the DCO sign-off shape; override to enforce a stricter form
+    /// Trailer pattern each commit message must contain. Defaults to the
+    /// canonical DCO sign-off shape. Override to enforce a stricter form
     /// (e.g. a corporate-domain email).
     #[serde(default)]
     pattern: Option<String>,
-    /// Base ref for range mode. Unset → HEAD only. Accepts anything
-    /// `git rev-parse` does. The canonical `{{env.X}}` interpolation
-    /// is resolved at config load.
+    /// Git ref to use as the base of the commit range. When set, validates
+    /// every commit in `<since>..HEAD` instead of just HEAD. Accepts anything
+    /// `git rev-parse` does.
     #[serde(default)]
     since: Option<String>,
-    /// Include merge commits when checking a range. No effect without
-    /// `since:`.
+    /// When validating a range (`since:` set), include merge commits. Has no
+    /// effect when `since:` is unset.
     #[serde(default)]
     include_merges: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct GitCommitSignedOffRule {

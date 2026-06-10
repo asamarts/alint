@@ -24,10 +24,12 @@ use alint_core::template::{PathTokens, render_message, render_path};
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Glob selecting the files to deduplicate.
     select: String,
+    /// Path-template producing a key per matched file. Default: {basename}.
     #[serde(default = "default_key")]
     key: String,
     /// Fold the key to lowercase before grouping, so keys that
@@ -36,6 +38,8 @@ struct Options {
     #[serde(default)]
     case_insensitive: bool,
 }
+
+crate::options_schema_for!(Options);
 
 fn default_key() -> String {
     "{basename}".to_string()

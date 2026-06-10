@@ -23,12 +23,16 @@ use alint_core::template::{PathTokens, render_message, render_path};
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// Glob selecting the primary files.
     primary: String,
+    /// Path template resolved per primary match. Example: "{dir}/{stem}.h".
     partner: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct PairRule {

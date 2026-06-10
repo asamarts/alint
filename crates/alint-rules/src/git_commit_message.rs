@@ -40,48 +40,36 @@ use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use regex::Regex;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Regex the full commit message (subject + body, joined with
-    /// newlines) must match. When omitted, no regex check is
-    /// applied. Use `(?s)` to make `.` match newlines if you want
-    /// to assert about content past the subject.
+    /// Rust-regex pattern the full message (subject + body, joined with
+    /// newlines) must match. Use `(?s)` to make `.` match newlines.
     #[serde(default)]
     pattern: Option<String>,
-    /// Maximum length of the subject line (the message's first
-    /// line, before any body). When omitted, no length cap.
-    /// Common values: 50 (Tim Pope's recommendation), 72 (GitHub's
-    /// PR-title cutoff).
+    /// Maximum number of characters allowed in the subject line. Common
+    /// values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff).
     #[serde(default)]
+    #[schemars(range(min = 1))]
     subject_max_length: Option<usize>,
-    /// When `true`, the message must have a non-empty body — at
-    /// least one line of content after the subject's trailing
-    /// blank line. Useful for mandating an explanation on `fix:`
-    /// commits etc.
+    /// When true, the message must have a non-empty body, that is, at least
+    /// one line of content after the subject's blank-line separator.
     #[serde(default)]
     requires_body: bool,
-    /// Git ref to use as the base of the commit range. When set,
-    /// the rule validates every commit in `<since>..HEAD` instead
-    /// of just `HEAD`. Anything `git rev-parse` accepts works: a
-    /// 40-char or abbreviated SHA, a branch (`origin/main`), a tag
-    /// (`v1.2.3`), or a relative ref (`HEAD~5`). Supports POSIX
-    /// `${VAR}` and `${VAR:-default}` env-var interpolation so CI
-    /// can pass a SHA in via an env var (see the GitHub Actions
-    /// integration doc for the canonical recipe).
+    /// Git ref to use as the base of the commit range. When set, validates
+    /// every commit in `<since>..HEAD` instead of just HEAD. Accepts anything
+    /// `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`),
+    /// tag (`v1.2.3`), or relative ref (`HEAD~5`).
     #[serde(default)]
     since: Option<String>,
-    /// When validating a range (`since:` set), include merge
-    /// commits in the set of commits to check. Default `false`
-    /// because merge commits in a PR context are typically the
-    /// synthetic merge `actions/checkout` produces (with an
-    /// auto-generated subject the rule would always flag) or
-    /// maintainer-resolved merges from the base branch (also
-    /// uninteresting). Set `true` to lint them anyway. Has no
-    /// effect when `since:` is unset.
+    /// When validating a range (`since:` set), include merge commits. Has no
+    /// effect when `since:` is unset; combining `include_merges: true` with no
+    /// `since:` is a load-time error.
     #[serde(default)]
     include_merges: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct GitCommitMessageRule {

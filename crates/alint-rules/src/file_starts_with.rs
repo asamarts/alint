@@ -18,12 +18,15 @@ use serde::Deserialize;
 
 use crate::io::read_prefix_n;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// The required prefix. Matched byte-for-byte.
+    /// Required prefix, matched byte-for-byte.
+    #[schemars(length(min = 1))]
     prefix: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileStartsWithRule {

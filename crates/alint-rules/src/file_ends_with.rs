@@ -18,12 +18,15 @@ use serde::Deserialize;
 
 use crate::io::read_suffix_n;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// The required suffix. Matched byte-for-byte.
+    /// Required suffix, matched byte-for-byte.
+    #[schemars(length(min = 1))]
     suffix: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileEndsWithRule {

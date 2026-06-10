@@ -20,13 +20,15 @@ use serde::Deserialize;
 
 use crate::fixers::{FileCollapseBlankLinesFixer, line_is_blank};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// Maximum number of blank lines allowed in a row. `0` means
     /// no blank lines at all.
     max: u32,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct MaxConsecutiveBlankLinesRule {

@@ -24,23 +24,22 @@ use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Glob patterns (`globset` syntax — same as `paths:` on
-    /// other rules) that no tracked path may match. Patterns
-    /// that match the whole path (e.g. `secrets/**`) and
-    /// basename-only patterns (`*.env`) both work; `globset`'s
-    /// matcher checks both forms.
+    /// Globset patterns no tracked path may match. Both whole-path patterns
+    /// (`secrets/**`) and basename-only patterns (`*.env`) work.
+    #[schemars(length(min = 1))]
     denied: Vec<String>,
-    /// Optional git ref. When set, only denied paths that changed
-    /// in the `<since>...HEAD` diff are flagged (the PR-scoped
-    /// shape — catches a secret added in the PR even if HEAD's
-    /// tree still tracks an older one). Accepts the `{{env.X}}`
-    /// interpolation (resolved at config load).
+    /// Optional git ref. When set, only denied paths that changed in the
+    /// `<since>...HEAD` diff are flagged, catches a secret added in a PR even if
+    /// HEAD's tree still tracks an older one. Accepts the `{{env.X}}`
+    /// interpolation, e.g. `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`.
     #[serde(default)]
     since: Option<String>,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct GitNoDeniedPathsRule {

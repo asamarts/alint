@@ -130,6 +130,64 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ),
         ("rule_file_shebang", file_shebang::options_schema()),
         ("rule_filename_regex", filename_regex::options_schema()),
+        ("rule_file_starts_with", file_starts_with::options_schema()),
+        ("rule_file_ends_with", file_ends_with::options_schema()),
+        ("rule_line_max_width", line_max_width::options_schema()),
+        (
+            "rule_max_directory_depth",
+            max_directory_depth::options_schema(),
+        ),
+        (
+            "rule_max_files_per_directory",
+            max_files_per_directory::options_schema(),
+        ),
+        (
+            "rule_max_consecutive_blank_lines",
+            max_consecutive_blank_lines::options_schema(),
+        ),
+        ("rule_unique_by", unique_by::options_schema()),
+        (
+            "rule_markdown_paths_resolve",
+            markdown_paths_resolve::options_schema(),
+        ),
+        (
+            "rule_git_commit_message",
+            git_commit_message::options_schema(),
+        ),
+        (
+            "rule_git_commit_signed_off",
+            git_commit_signed_off::options_schema(),
+        ),
+        (
+            "rule_git_commit_no_fixup",
+            git_commit_no_fixup::options_schema(),
+        ),
+        (
+            "rule_git_commit_subject_matches",
+            git_commit_subject_matches::options_schema(),
+        ),
+        (
+            "rule_git_commit_gpg_signed",
+            git_commit_gpg_signed::options_schema(),
+        ),
+        (
+            "rule_git_commit_author_allowlist",
+            git_commit_author_allowlist::options_schema(),
+        ),
+        ("rule_git_blame_age", git_blame_age::options_schema()),
+        (
+            "rule_git_no_denied_paths",
+            git_no_denied_paths::options_schema(),
+        ),
+        (
+            "rule_changeset_requires_path",
+            changeset_requires_path::options_schema(),
+        ),
+        (
+            "rule_pair_changed_together",
+            pair_changed_together::options_schema(),
+        ),
+        ("rule_pair", pair::options_schema()),
     ]
 }
 

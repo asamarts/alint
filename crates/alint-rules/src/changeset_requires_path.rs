@@ -26,21 +26,21 @@ use alint_core::git::{
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// Glob; the diff must ADD (git status `A`) at least one path
-    /// matching it.
+    /// Glob; the diff must ADD at least one path matching it.
     add_glob: String,
-    /// Optional gate: only require the add when some path matching
-    /// this glob changed (any status). Unset → any non-empty
-    /// changeset triggers the requirement.
+    /// Optional gate: only require the add when some path matching this glob
+    /// changed (any status). Omit to require it on any non-empty changeset.
     #[serde(default)]
     when_changed: Option<String>,
-    /// Base ref for the `<since>...HEAD` diff. The canonical
-    /// `{{env.X}}` interpolation is resolved at config load.
+    /// Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}`
+    /// interpolation, e.g. `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`.
     since: String,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct ChangesetRequiresPathRule {
