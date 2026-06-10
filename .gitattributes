@@ -18,3 +18,9 @@ crates/alint/tests/cli/*.stdout text eol=lf
 crates/alint/tests/cli/*.stderr text eol=lf
 crates/alint/tests/cli/*.in text eol=lf
 crates/alint/tests/cli/*.toml text eol=lf
+
+# Generated config schema: `gen-schema --check` (and its xtask test) read these
+# back and byte-compare against a `\n`-only rendered string, so a CRLF checkout
+# on Windows would spuriously report the schema as stale.
+schemas/v1/config.json text eol=lf
+crates/alint-dsl/schemas/v1/config.json text eol=lf
