@@ -885,10 +885,12 @@ makes single-file path-scope re-tests O(1). Plus the v0.11+ ship-
 targets the case-study aggregation surfaced for the smaller-demand
 long tail.
 
-LSP becomes the demonstration vehicle for the new interpolation
-system: hover-on-rule renders the resolved value of every
-`{{env.X}}` site in the user's config, so adopters see at a glance
-what their rules actually do in their current environment.
+Note (post-ship): the originally-planned LSP demonstration of the
+interpolation system, hover-on-rule rendering the resolved value of
+every `{{env.X}}` site in the user's config, did not land in v0.11.0.
+The shipped hover surfaces a violation's rule id, severity, message,
+and `policy_url`; the interpolation system shipped as a config-load
+feature without the hover demo.
 
 ### LSP + editor support
 
@@ -898,12 +900,15 @@ what their rules actually do in their current environment.
 - VS Code extension bundling the LSP, shipped alongside the JetBrains
   and Zed extensions. Design:
   [`docs/design/v0.11/vscode_extension.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/vscode_extension.md).
+- Tier-2 editor configs (Neovim, Sublime, Emacs) plus Helix and Eclipse,
+  config-only LSP-client integrations, also shipped in v0.11.0. Neovim is
+  upstreamed to nvim-lspconfig; the rest are documented snippets.
 
 ### Scope generalisation (v0.9.21 #26 follow-up)
 
 Design pass: [`docs/design/v0.11/scope_filter_changed_since.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/scope_filter_changed_since.md).
 
-- **`ScopeFilter.changed_since:`** predicate. Restricts a per-file
+- **[shipped v0.11.0]** `ScopeFilter.changed_since:` predicate. Restricts a per-file
   rule to files modified in `<since>..HEAD`. Composable with the
   existing `has_ancestor` (AND semantics) and with the rule's
   `paths:` glob. Equivalent to the existing CLI `--changed --base
@@ -912,12 +917,12 @@ Design pass: [`docs/design/v0.11/scope_filter_changed_since.md`](https://github.
   filename-case rule always") become expressible, the first
   example that's not expressible today. Reuses v0.9.5's path-
   index for cheap per-file gating.
-- **`has_sibling`, `has_descendant`** predicates (carried over
+- **[still deferred after v0.12.0]** `has_sibling`, `has_descendant` predicates (carried over
   from the original v0.11 plan). v0.9.10's `Scope::from_spec`
   makes additions purely additive (no API churn). **Not built in
-  v0.11; deferred to v0.12** (see that version's "Deferred from
+  v0.11, and not in v0.12.0 either** (see that version's "Deferred from
   v0.11"). Only `changed_since` shipped here.
-- **`git_no_denied_paths` `since:` option.** Path-listing analog
+- **[shipped v0.11.0]** `git_no_denied_paths` `since:` option. Path-listing analog
   of v0.9.21's `git_commit_message.since:`. Fires on tracked
   paths *added* in `<since>..HEAD`, not on all currently-tracked
   paths. Closes the secrets-introduced-in-PR gap cleanly.
@@ -933,7 +938,7 @@ Four new rule kinds that share v0.9.21's `git_commit_message`
 shape (`since:`, `include_merges:`, env-var interpolation,
 per-commit violations with abbreviated SHAs). Designed as a
 family so the shared infrastructure cost amortises across all
-four.
+four. **All four shipped in v0.11.0.**
 
 - **`git_commit_signed_off`**, DCO-style `Signed-off-by:`
   trailer in commit footer. Maps to the kernel / Linux
@@ -958,50 +963,50 @@ cheap to reuse.
 
 Design pass: [`docs/design/v0.11/variable_interpolation.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/variable_interpolation.md).
 
-- **`{{env.X}}` interpolation** at config-load time across every
+- **[shipped v0.11.0]** `{{env.X}}` interpolation at config-load time across every
   string-typed value field: `extends:` URLs, `paths:`, `pattern:`,
   `policy_url:`, `since:`, `changed_since:`, `content:`,
   `content_from:`, and the `vars:` value side. Type-like and
   identifier-like fields (`id:`, `kind:`, `level:`) are skipped
   by design, env-driven rule IDs would break audit trails.
-- **`| default(...)` filter** for fallbacks. Jinja-conventional;
+- **[shipped v0.11.0]** `| default(...)` filter for fallbacks. Jinja-conventional;
   future filter additions cost nothing (`| upper`, `| lower`).
   Example: `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`.
-- **`env.X` in the `when:` expression language** as a third
+- **[shipped v0.11.0]** `env.X` in the `when:` expression language as a third
   namespace alongside `vars.X` and `facts.X`. Symmetric with how
   vars/facts surface today.
-- **Deprecate `${VAR}` in `git_commit_message.since:`**. Emit a
+- **[shipped v0.11.0, deprecation warning]** `${VAR}` in `git_commit_message.since:` is deprecated. Emits a
   load-time warning recommending `{{env.X}}`; remove the legacy
   path in v1.0 (clean break at the version-stability gate).
-- **LSP integration**: hover-on-rule renders the resolved value
-  of every `{{env.X}}` site so users see what their config
-  actually does in the current environment. The single concrete
-  example of LSP × DSL synergy this release.
+- **[not shipped]** the planned LSP × DSL hover (render the resolved
+  value of every `{{env.X}}` site on hover) did not land; v0.11.0's hover
+  surfaces a violation's rule id, severity, message, and `policy_url`.
 
 ### Long-tail rule kinds (opportunistic)
 
 Carried over unchanged from the original v0.11 plan; not gating
 the release. Anything not picked up opportunistically here rolls
 into the v0.12 gap-closing cut (see below), where the 100+ repo
-study refreshes the demand ranking.
+study refreshes the demand ranking. **None were picked up in v0.11; all
+carried into the v0.12 cut (per-item status below).**
 
-- **`cross_language_implementation_complete`** (5 sources:
+- **[expressible in v0.12.0 via `cross_file` `set_equals`]** `cross_language_implementation_complete` (5 sources:
   arrow, tensorflow, protobuf, angular, flutter). Densest
   demand: protobuf's 10 in-tree language bindings + 1 spun-out
   (~45 cross-language assertions one rule would express).
   Three distinct topologies (data-format-driven, within-
   language source ↔ golden, platform-driven).
-- **Bazel-licensing-declaration-aware rule kind** (1 source:
+- **[still open]** Bazel-licensing-declaration-aware rule kind (1 source:
   tensorflow's `licenses(["notice"])` BUILD-file discipline).
   Single-source but the source is a 100k+ file tree with high
   alignment cost.
-- **`walk_error_policy:` engine knob** (1 source: pnpm's
+- **[still deferred, see v0.12 "Deferred from v0.11"]** `walk_error_policy:` engine knob (1 source: pnpm's
   `tests/fixtures/has-broken-symlinks/`). `strict` /
   `skip-broken-symlinks` / `permissive` modes.
 
 ## v0.12: Real-world coverage expansion (100+ repos) + gap rule kinds
 
-**v0.12.0 shipped** (2026-06-07) the first cut of this scope (see the release summary at the top for the rule kinds and the security cycle that landed). The 100+ repo study and the remaining gap kinds below continue in the v0.12 line.
+**v0.12.0 shipped** (2026-06-07) a large first cut of this scope. New rule kinds that landed: `file_graph` (file-dependency-graph firewalls plus cycle / orphan / dangling-edge checks, the top demand-ranked kind of the 111-repo study), `for_each_match` (a per-line predicate quantifier), `cross_file` (a unifying value-relation kind that subsumes `cross_file_value_equals` and adds `subset` / `superset` / `set_equals` / `identical` / `resolves`), `git_commit_subject_matches`, `changeset_requires_path`, and `pair_changed_together`. Also shipped: `generated_file_fresh`'s in-place `outputs:` mode, markerless `ordered_block`, the `php@v1` bundled ruleset (21 → 22), JSONC-tolerant structured parsing, the `cross_file` `normalize:` promotion, and `import_gate` presets for Scala / Java / Dart / Nix, plus a security cycle that confines every config-declared path to the repo root and fixes a git argument-injection in `since:` reaching back to v0.9.21. Per-item status is tagged inline below. The 100+ repo study (111 repos done) and the still-open gap kinds continue in the v0.12 line.
 
 The v0.10 case-study coverage push and the post-v0.11 30-repo
 re-analysis (see
@@ -1021,7 +1026,7 @@ Design index: [`docs/design/v0.12/`](https://github.com/asamarts/alint/blob/main
 
 Design pass: [`docs/design/v0.12/case_study_100_repos.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/case_study_100_repos.md).
 
-- Expand from 30 to 100+ OSS repos. The 30-repo corpus skewed toward
+- **[done in v0.12.0: 111 repos]** the corpus the v0.12.0 rule kinds were derived from. As planned: expand from 30 to 100+ OSS repos. The 30-repo corpus skewed toward
   big-tech monorepos + Rust/Go/JS; the expansion deliberately broadens
   ecosystem coverage: more Python (django, pandas, scikit-learn,
   fastapi, poetry), JVM (spring-boot, gradle, kotlin), Ruby (rails),
@@ -1044,19 +1049,19 @@ Design pass: [`docs/design/v0.12/case_study_100_repos.md`](https://github.com/as
 Each ships design-doc-first per the project convention; demand counts
 name the corpus repos that independently needed the capability.
 
-- **`git_commit_subject_matches`** (go, node, nixpkgs), the
+- **[shipped v0.12.0]** `git_commit_subject_matches` (go, node, nixpkgs), the
   commit-validation family's missing subject-shape rule. Reuses the
   v0.11 `git_commit_*` plumbing (`since:`, per-commit violations with
   abbreviated SHAs); the cheapest, clearest single win. Design:
   [`git_commit_subject_matches.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/git_commit_subject_matches.md).
-- **Diff-aware "must-add" family**, `changeset_requires_path` ("the
+- **[both shipped v0.12.0]** the diff-aware "must-add" family, `changeset_requires_path` ("the
   diff must add a file matching glob X": prettier changelog_unreleased,
   cpython Misc/NEWS.d, pnpm `.changeset/`) and `pair_changed_together`
   (two files must change in one commit: rust rustdoc_json
   FORMAT_VERSION, turbo/rust release guards). Both build on v0.11's
   `scope_filter.changed_since` machinery. Design:
   [`changeset_requires_path.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/changeset_requires_path.md).
-- **Value-set membership family**, `registry_value_used` (every TS
+- **[shipped v0.12.0, unified into `cross_file` as `subset` / `superset` / `set_equals`]** the value-set membership family, originally proposed as `registry_value_used` (every TS
   diagnostic / react error code referenced ≥1×), `cross_file_keys_cover`
   (pnpm catalog ⊆ keys), `cross_file_set_equals` (rust features ↔
   unstable-book, tf v1/v2 goldens). `cross_file_value_equals` is 1:1
@@ -1064,24 +1069,29 @@ name the corpus repos that independently needed the capability.
   First verify how far `registry_paths_resolve`'s existing
   `orphans` / `must_contain` / `exclude_query` already reaches. Design:
   [`value_set_membership.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/value_set_membership.md).
-- **`normalize:` value-transform on `cross_file_value_equals`**
+- **[shipped v0.12.0 on `cross_file`, as `semver-minor` plus composable lists]** `normalize:` value-transform
   (protobuf `4.36-dev` ↔ `4.36.0`, pnpm `pnpm@11.3.0` ↔ `11.3.0`):
   strip-prefix / semver-floor transforms so "same value, two forms"
   stops forcing dual regex pins. Extends the existing trim/lower
   `normalize:`. Design:
   [`cross_file_normalize.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/cross_file_normalize.md).
-- **Richer `import_gate`**, a default-deny / table-driven allowlist
+- **[partly shipped]** richer `import_gate`: a default-deny / table-driven allowlist
   mode (vscode `code-import-patterns`) and glob-discovered
   per-directory rule files (k8s's 66 `.import-restrictions` = 66
-  hand-written rules today). Design:
+  hand-written rules today). The whole-repo layering-firewall this targets
+  shipped instead as `file_graph` `forbidden_edges` in v0.12.0; the
+  `import_gate` default-deny / glob-discovery enrichment itself is still open.
+  Design:
   [`import_gate_enrichment.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/import_gate_enrichment.md).
-- **Dependency-graph allowlist kind** (distinct from `import_gate`):
+- **[still open]** dependency-graph allowlist kind (distinct from `import_gate`):
   a `cargo metadata` / lockfile-aware permitted-dependency firewall for
   rust `PERMITTED_DEPENDENCIES` and go's transitive `deps_test.go`
   closure. `import_gate` reads source text, not the resolved graph, so
-  this is genuinely separate. Design:
+  this is genuinely separate. v0.12.0's `file_graph` covers the file-reference
+  graph but stays path-based (the resolved package graph is its declared
+  non-goal), so this lockfile-aware dependency firewall is still unbuilt. Design:
   [`dependency_graph_allowlist.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/dependency_graph_allowlist.md).
-- **Niche kinds** (1-2 sources each, batched into one design doc):
+- **[partly shipped]** niche kinds (1-2 sources each, one design doc):
   `embedded_checksum` (cpython Argument Clinic self-digests), full-file
   `lines:{}` equality with diff-on-mismatch (tokio README mirror:
   `pair_hash` reports only a digest mismatch), `no_case_collisions`
@@ -1089,10 +1099,16 @@ name the corpus repos that independently needed the capability.
   dir ↔ name), `cross_language_implementation_complete` (carried from
   the v0.11 long-tail; arrow/tf/protobuf/angular/flutter parity), and a
   Bazel-licensing-declaration-aware kind (tensorflow `licenses([...])`
-  discipline; also a v0.11 long-tail carryover). Design:
+  discipline; also a v0.11 long-tail carryover). Of these, v0.12.0 shipped the
+  full-file `lines:{}` equality as `cross_file` `identical`, `no_case_collisions`
+  as `unique_by` `case_insensitive:`, and cross-language parity as `cross_file`
+  `set_equals` over a glob-union source; `embedded_checksum`,
+  `dir_name_equals_field`, and the Bazel-licensing kind are still open. Design:
   [`niche_rule_kinds.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/niche_rule_kinds.md).
-- **`nix@v1` ecosystem bundle** (nixpkgs), no nix ecosystem bundle
-  exists alongside `rust`/`go`/`python`/`node`/`dotnet`.
+- **[not shipped; `php@v1` shipped instead]** `nix@v1` ecosystem bundle (nixpkgs).
+  v0.12.0 shipped `php@v1` (the higher-demand ecosystem that lacked a bundle),
+  taking the bundled count to 22, and gave Nix an `import_gate` preset; a
+  dedicated `nix@v1` bundle is still open.
 
 ### Deferred from v0.11
 
@@ -1100,7 +1116,7 @@ Design pass: [`deferred_from_v011.md`](https://github.com/asamarts/alint/blob/ma
 
 v0.11-plan items not picked up before the cut, with no home in the
 case-study gap backlog, collected here so they don't slip untracked.
-None gated v0.11; all are additive and slip-tolerant.
+None gated v0.11; all are additive and slip-tolerant. All three remain open after v0.12.0.
 
 - **`has_sibling` / `has_descendant` scope predicates**, the two
   `ScopeFilter` predicates from the v0.11 scope-generalisation plan that
@@ -1119,7 +1135,7 @@ None gated v0.11; all are additive and slip-tolerant.
 
 Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.12/asf_bundle_overfire.md).
 
-- **Fix the ASF compliance-bundle over-fire (highest confidence).**
+- **[shipped v0.12.0]** fix the ASF compliance-bundle over-fire.
   `compliance/apache-2@v1` and `apache/governance@v1` over-fire on
   every large Apache/CNCF repo in the corpus, 5 confirmations
   (airflow, helm, istio, kubernetes, tensorflow). Universal cause:
@@ -1131,14 +1147,16 @@ Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/m
   Every batch of the 30-repo pass independently re-derived the same
   `paths.exclude` workaround, strong signal the bundle defaults are
   wrong for real ASF repos.
-- **`import_gate` presets** for scala/java/dart/nix (generic +
+- **[shipped v0.12.0]** `import_gate` presets for scala / java / dart / nix (generic +
   explicit `import_pattern` works but a preset is cleaner; spark,
   flutter, nixpkgs).
-- **Docs: `generated_file_fresh` is stdout-only.** Real codegen
+- **[shipped v0.12.0]** docs: `generated_file_fresh` is stdout-only. Real codegen
   mutates files in place, so `command_idempotent --check` is the
   broadly-applicable form. Make the distinction explicit in the rule
   reference so users don't reach for the wrong kind (the dominant
-  pattern across the corpus was the mutating one).
+  pattern across the corpus was the mutating one). v0.12.0 also added the
+  in-place `outputs:` mode to `generated_file_fresh` for that mutating pattern,
+  so the kind now covers it directly.
 
 ## v0.13: WASM plugins
 
