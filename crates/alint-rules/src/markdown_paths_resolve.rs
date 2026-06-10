@@ -27,8 +27,9 @@ struct Options {
     #[schemars(length(min = 1))]
     prefixes: Vec<String>,
 
-    /// Skip backticked tokens containing template-variable
-    /// markers (`{{ }}`, `${ }`, `<…>`). Default true.
+    /// When true (default), skip backticked tokens containing `{{ ... }}`,
+    /// `${ ... }`, or `<...>` template-variable markers. These are
+    /// placeholders, not real paths.
     #[serde(default = "default_ignore_template_vars")]
     ignore_template_vars: bool,
 }

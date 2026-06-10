@@ -140,7 +140,6 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-      && github.event_name == 'push'
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
@@ -148,6 +147,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ci-docs
+      # Runs on pull_request too (not just push): docs.sh carries the
+      # `gen-schema --check`, `docs-export --check`, and rustdoc gates, which
+      # are load-bearing for schema/parser correctness and must catch drift on a
+      # PR, not only post-merge.
       - run: ci/scripts/docs.sh
 
   dogfood:

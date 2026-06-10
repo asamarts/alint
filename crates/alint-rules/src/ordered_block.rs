@@ -91,7 +91,8 @@ struct Options {
     #[serde(default)]
     unique: bool,
     /// Regex; when set, only lines inside a block matching it are sortable
-    /// entries (others, such as comments or group headers, pass through).
+    /// entries (others, such as comments or group headers, pass through). The
+    /// sectioned / keep-sorted-subset shape.
     #[serde(default)]
     select: Option<String>,
 }

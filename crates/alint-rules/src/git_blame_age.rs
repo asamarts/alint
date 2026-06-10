@@ -33,7 +33,8 @@ struct Options {
     /// without a capture group, `{{ctx.match}}` substitutes the full match.
     pattern: String,
     /// Minimum line age (in days) for a matching line to fire as a violation.
-    /// Lines younger than this pass silently.
+    /// Lines younger than this pass silently. Common values: 90 (one quarter),
+    /// 180 (half a year), 365 (a full year of debt).
     #[schemars(range(min = 1))]
     max_age_days: u64,
 }

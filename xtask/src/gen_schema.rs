@@ -33,13 +33,29 @@ pub fn build_generated_schema() -> Result<Value> {
         .and_then(Value::as_object_mut)
         .context("base schema has no `$defs` object")?;
 
-    for (def_name, options) in alint_rules::migrated_option_schemas() {
+    for (def_name, mut options) in alint_rules::migrated_option_schemas() {
+        // Normalize derived descriptions BEFORE merging, so the merged enum
+        // definitions match the committed (already-normalized) copy on re-runs;
+        // otherwise the collision guard below would compare a normalized base
+        // def against a freshly-derived (un-normalized) one and bail, making
+        // generation non-idempotent.
+        normalize_descriptions(&mut options);
         // schemars emits an option field's enum/struct type as a `$ref` to a
         // `#/$defs/<TypeName>` definition carried in the derived schema's own
         // `$defs`. Merge those definitions into the main schema's `$defs` so the
         // refs resolve (e.g. commented_out_code's `language: #/$defs/Language`).
         if let Some(extra_defs) = options.get("$defs").and_then(Value::as_object) {
             for (name, def) in extra_defs {
+                // Guard against two distinct Rust types sharing one schemars def
+                // name (e.g. pair_hash::Format vs structured_path::Format): a
+                // silent last-write-wins would point a `$ref` at the wrong type.
+                if defs.get(name).is_some_and(|existing| existing != def) {
+                    bail!(
+                        "schemars `$defs` collision on `{name}` while composing `{def_name}`: \
+                         two distinct types share that name. Rename one with \
+                         `#[schemars(rename = \"...\")]` on its Rust type."
+                    );
+                }
                 defs.insert(name.clone(), def.clone());
             }
         }
@@ -47,9 +63,32 @@ pub fn build_generated_schema() -> Result<Value> {
             .get(def_name)
             .with_context(|| format!("migrated def `{def_name}` is not present in `$defs`"))?
             .clone();
-        defs.insert(def_name.to_string(), compose_branch(&base, &options));
+        defs.insert(def_name.to_string(), compose_branch(&base, &options)?);
     }
+
+    normalize_descriptions(&mut schema);
     Ok(schema)
+}
+
+/// Collapse internal whitespace (including the `\n` schemars inserts between
+/// wrapped rustdoc lines) in every `description` string, so the published schema
+/// carries clean single-line prose rather than literal newlines.
+fn normalize_descriptions(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if key == "description" {
+                    if let Value::String(text) = child {
+                        *text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    }
+                } else {
+                    normalize_descriptions(child);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(normalize_descriptions),
+        _ => {}
+    }
 }
 
 /// Compose a `$defs/rule_<kind>` branch from the schemars-derived options schema
@@ -58,7 +97,7 @@ pub fn build_generated_schema() -> Result<Value> {
 /// stable and not expressible as plain Rust struct fields); the option
 /// properties and their `required` set come from the derived schema, so an
 /// option rename or type change in the Rust struct propagates automatically.
-fn compose_branch(base: &Value, options: &Value) -> Value {
+fn compose_branch(base: &Value, options: &Value) -> Result<Value> {
     let base_props = base.get("properties").and_then(Value::as_object);
     let base_required = base.get("required").and_then(Value::as_array);
 
@@ -72,16 +111,18 @@ fn compose_branch(base: &Value, options: &Value) -> Value {
     if let Some(opts) = options.get("properties").and_then(Value::as_object) {
         for (key, value) in opts {
             let mut prop = value.clone();
-            // Safety net: if a field's rustdoc description has not been migrated
-            // yet, carry the committed base branch's description so the published
-            // schema never loses documentation during an incremental rollout.
-            if prop.get("description").is_none() {
-                if let Some(base_desc) = base_props
-                    .and_then(|p| p.get(key))
-                    .and_then(|p| p.get("description"))
-                {
-                    if let Some(obj) = prop.as_object_mut() {
-                        obj.insert("description".to_string(), base_desc.clone());
+            // Safety net for fields schemars renders as a bare `$ref` (enums):
+            // the derived prop carries neither the base `description` nor its
+            // `default`, so restore both from the committed base when the derived
+            // schema omits them. Keeps option docs and defaults intact during an
+            // incremental rollout.
+            if let Some(obj) = prop.as_object_mut() {
+                let base_prop = base_props.and_then(|p| p.get(key));
+                for carried in ["description", "default"] {
+                    if !obj.contains_key(carried) {
+                        if let Some(v) = base_prop.and_then(|p| p.get(carried)) {
+                            obj.insert(carried.to_string(), v.clone());
+                        }
                     }
                 }
             }
@@ -112,7 +153,41 @@ fn compose_branch(base: &Value, options: &Value) -> Value {
     } else {
         obj.insert("required".to_string(), Value::Array(required));
     }
-    branch
+    assert_branch_combinators_resolve(&branch)?;
+    Ok(branch)
+}
+
+/// A branch-level `anyOf`/`oneOf`/`allOf` preserved from the base hard-codes
+/// property names in its sub-schemas' `required` (e.g. `git_commit_message`'s "at
+/// least one of `pattern`/`subject_max_length`/`requires_body`"). If a Rust field
+/// rename drops one, the constraint would silently reference a property the
+/// derived schema no longer defines. Fail loudly instead.
+fn assert_branch_combinators_resolve(branch: &Value) -> Result<()> {
+    let props: std::collections::HashSet<&str> = branch
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|m| m.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    for combinator in ["anyOf", "oneOf", "allOf"] {
+        let Some(subs) = branch.get(combinator).and_then(Value::as_array) else {
+            continue;
+        };
+        for sub in subs {
+            let Some(reqs) = sub.get("required").and_then(Value::as_array) else {
+                continue;
+            };
+            for name in reqs.iter().filter_map(Value::as_str) {
+                if !props.contains(name) {
+                    bail!(
+                        "branch-level `{combinator}` references property `{name}` that the \
+                         derived schema does not define (likely a renamed Rust field); update \
+                         the base branch's `{combinator}` in schemas/v1/config.json."
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn render(schema: &Value) -> Result<String> {
@@ -128,12 +203,24 @@ pub fn run(check: bool) -> Result<()> {
     let rendered = render(&generated)?;
 
     if check {
-        let root = std::fs::read_to_string(root_schema_path()?)?;
-        let in_crate = std::fs::read_to_string(in_crate_schema_path()?)?;
-        if root != rendered || in_crate != rendered {
+        let root_path = root_schema_path()?;
+        let in_crate_path = in_crate_schema_path()?;
+        let root = std::fs::read_to_string(&root_path)
+            .with_context(|| format!("read {}", root_path.display()))?;
+        let in_crate = std::fs::read_to_string(&in_crate_path)
+            .with_context(|| format!("read {}", in_crate_path.display()))?;
+        let stale: Vec<&str> = [
+            (root != rendered).then_some("schemas/v1/config.json"),
+            (in_crate != rendered).then_some("crates/alint-dsl/schemas/v1/config.json"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !stale.is_empty() {
             bail!(
-                "schemas/v1/config.json is stale (or not yet in generated form). \
-                 Run `cargo run -p xtask -- gen-schema` to regenerate and commit the result."
+                "schema is stale (or not yet in generated form): {}. \
+                 Run `cargo run -p xtask -- gen-schema` to regenerate and commit the result.",
+                stale.join(", ")
             );
         }
         println!("schema is up to date");
@@ -270,5 +357,42 @@ mod tests {
             checked > 10,
             "expected many configs, only checked {checked}"
         );
+    }
+
+    #[test]
+    fn migrated_option_schemas_list_is_well_formed() {
+        let mut seen = std::collections::HashSet::new();
+        for (name, _) in alint_rules::migrated_option_schemas() {
+            assert!(seen.insert(name), "duplicate migrated def name: {name}");
+        }
+        // Exercises the present-in-`$defs` check and the enum `$defs` collision
+        // guard inside `build_generated_schema`.
+        build_generated_schema().unwrap();
+    }
+
+    #[test]
+    fn generated_schema_rejects_bad_options_on_migrated_kinds() {
+        let v = jsonschema::validator_for(&build_generated_schema().unwrap()).unwrap();
+        // Stray unknown option on a migrated kind (caught by the shared
+        // `unevaluatedProperties: false`).
+        assert!(!v.is_valid(&serde_json::json!(
+            {"version":1,"rules":[{"id":"x","kind":"file_header","level":"error","paths":"a","pattern":"p","bogus":1}]}
+        )));
+        // Invalid enum value on a migrated enum-typed field (locks in that the
+        // enum constraint survived the schemars `oneOf`/`$defs` round-trip).
+        assert!(!v.is_valid(&serde_json::json!(
+            {"version":1,"rules":[{"id":"x","kind":"pair_hash","level":"error","source":"a","target":"b","algorithm":"md5"}]}
+        )));
+        // Valid baseline accepted.
+        assert!(v.is_valid(&serde_json::json!(
+            {"version":1,"rules":[{"id":"x","kind":"pair_hash","level":"error","source":"a","target":"b","algorithm":"sha256"}]}
+        )));
+    }
+
+    #[test]
+    fn gen_schema_check_passes_on_committed_tree() {
+        // The committed schema is kept in generated form, so the `--check` gate
+        // must be green; this exercises `run(check=true)` (the read + compare).
+        run(true).expect("gen-schema --check should pass on the committed tree");
     }
 }

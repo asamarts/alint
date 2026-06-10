@@ -21,7 +21,7 @@
         },
         {
           "const": "numeric",
-          "description": "Leading-integer order; entries without a leading integer\nfall back to `lexical` so a mixed block degrades\npredictably rather than panicking.",
+          "description": "Leading-integer order; entries without a leading integer fall back to `lexical` so a mixed block degrades predictably rather than panicking.",
           "type": "string"
         }
       ]
@@ -54,7 +54,7 @@
         },
         {
           "const": "sums-line",
-          "description": "`target` must carry a `sha256sum`-style `<hex> [*]<path>`\nline whose path token is the source's path.",
+          "description": "`target` must carry a `sha256sum`-style `<hex> [*]<path>` line whose path token is the source's path.",
           "type": "string"
         }
       ]
@@ -664,12 +664,12 @@
           "const": "changeset_requires_path"
         },
         "since": {
-          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}`\ninterpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
+          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": "string"
         },
         "when_changed": {
           "default": null,
-          "description": "Optional gate: only require the add when some path matching this glob\nchanged (any status). Omit to require it on any non-empty changeset.",
+          "description": "Optional gate: only require the add when some path matching this glob changed (any status). Omit to require it on any non-empty changeset.",
           "type": [
             "string",
             "null"
@@ -686,7 +686,7 @@
       "description": "Shell out to an external CLI per matched file. argv[0] is the program; remaining tokens support path-template substitution (`{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`). Working dir = repo root; stdin = /dev/null. Env: ALINT_PATH, ALINT_ROOT, ALINT_RULE_ID, ALINT_LEVEL, plus ALINT_VAR_<NAME> per `vars:` and ALINT_FACT_<NAME> per resolved fact. Verdict: exit 0 = pass; non-zero = one violation whose message is the (truncated) stdout+stderr. Trust-gated: only allowed in the user's top-level config (rejected at load-time when introduced via `extends:` or a bundled ruleset).",
       "properties": {
         "command": {
-          "description": "Argv tokens. The first token is the program (looked up via PATH if it's\na bare name); remaining tokens accept `{path}` and friends.",
+          "description": "Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends.",
           "items": {
             "type": "string"
           },
@@ -701,7 +701,7 @@
         },
         "timeout": {
           "default": null,
-          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed\nand a violation reports the timeout.",
+          "description": "Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout.",
           "format": "uint64",
           "minimum": 1,
           "type": [
@@ -720,7 +720,7 @@
       "description": "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 = the tree is formatter-clean (silent), non-zero = violation(s). alint never runs a mutating formatter and never writes the tree (the sibling of generated_file_fresh; same trust tier as the command rule — trust-gated to the user's own top-level config). With `files_from` (+ optional `files_pattern`) the tool's offender list is parsed into one violation per file. Single-shot, opt-in.",
       "properties": {
         "command": {
-          "description": "Checker argv (no shell), run in its --check / idempotence mode; exit\n0 = clean.",
+          "description": "Checker argv (no shell), run in its --check / idempotence mode; exit 0 = clean.",
           "items": {
             "type": "string"
           },
@@ -729,11 +729,11 @@
         },
         "files_from": {
           "$ref": "#/$defs/FilesFrom",
-          "description": "On failure, parse this stream into per-file violations (default: none =\none violation for the whole invocation)."
+          "description": "On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation)."
         },
         "files_pattern": {
           "default": null,
-          "description": "Regex whose capture group 1 is a file path, applied per output line\n(requires `files_from`; omit for bare-path listers).",
+          "description": "Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers).",
           "type": [
             "string",
             "null"
@@ -744,7 +744,7 @@
         },
         "timeout": {
           "default": null,
-          "description": "Checker timeout in seconds (default 120). On timeout the child is killed\nand one violation is emitted.",
+          "description": "Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted.",
           "format": "uint64",
           "minimum": 1,
           "type": [
@@ -774,11 +774,12 @@
         },
         "language": {
           "$ref": "#/$defs/Language",
-          "description": "`auto` (default) infers the comment-marker set from\neach file's extension. Explicit override useful for\nembedded DSLs or cases where the extension lies."
+          "default": "auto",
+          "description": "`auto` (default) infers the comment-marker set from each file's extension. Explicit override useful for embedded DSLs or cases where the extension lies."
         },
         "min_lines": {
           "default": 3,
-          "description": "Minimum consecutive comment-line count for a block to\nbe considered. 1-2 line comments are almost always\nprose; 3+ starts looking like dead code. Default 3.",
+          "description": "Minimum consecutive comment-line count for a block to be considered. 1-2 line comments are almost always prose; 3+ starts looking like dead code. Default 3.",
           "format": "uint",
           "minimum": 2,
           "type": "integer"
@@ -788,14 +789,14 @@
         },
         "skip_leading_lines": {
           "default": 30,
-          "description": "Skip the first N lines of any file. Defaults to 30 to\npass over license headers without false-positive\nflagging them as commented-out code.",
+          "description": "Skip blocks whose first line is at or before this line number. Default 30 - covers typical license headers without false-positive flagging them as commented-out code.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
         "threshold": {
           "default": 0.5,
-          "description": "Token-density floor (0.0-1.0). Higher = stricter (only\nthe most code-shaped blocks fire). Default 0.5.",
+          "description": "Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow.",
           "format": "double",
           "maximum": 1.0,
           "minimum": 0.0,
@@ -1452,7 +1453,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "sha256": {
-          "description": "Expected SHA-256 in lowercase hex (64 chars). Accepting\nuppercase and the `sha256:` prefix keeps the field forgiving.",
+          "description": "Expected SHA-256 in lowercase hex (64 chars). Accepting uppercase and the `sha256:` prefix keeps the field forgiving.",
           "pattern": "^(sha256:)?[0-9a-fA-F]{64}$",
           "type": "string"
         }
@@ -1497,7 +1498,7 @@
       "properties": {
         "allow": {
           "default": [],
-          "description": "Permitted non-ASCII codepoints - each a single character\n(e.g. \"o-umlaut\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY`\ninclusive range.",
+          "description": "Permitted non-ASCII codepoints - each a single character (e.g. \"o-umlaut\"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` inclusive range.",
           "items": {
             "type": "string"
           },
@@ -1645,7 +1646,7 @@
         },
         "shebang": {
           "default": "^#!",
-          "description": "Rust regex; the first line of every matched file must match. Default\n`^#!` only enforces shebang presence.",
+          "description": "Rust regex; the first line of every matched file must match. Default `^#!` only enforces shebang presence.",
           "type": "string"
         }
       },
@@ -1936,7 +1937,7 @@
           "const": "git_blame_age"
         },
         "max_age_days": {
-          "description": "Minimum line age (in days) for a matching line to fire as a violation.\nLines younger than this pass silently.",
+          "description": "Minimum line age (in days) for a matching line to fire as a violation. Lines younger than this pass silently. Common values: 90 (one quarter), 180 (half a year), 365 (a full year of debt).",
           "format": "uint64",
           "minimum": 1,
           "type": "integer"
@@ -1945,7 +1946,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "pattern": {
-          "description": "Rust-regex pattern applied to each blame line's content. Capture group 1\n(when present) is exposed as `{{ctx.match}}` in the message template;\nwithout a capture group, `{{ctx.match}}` substitutes the full match.",
+          "description": "Rust-regex pattern applied to each blame line's content. Capture group 1 (when present) is exposed as `{{ctx.match}}` in the message template; without a capture group, `{{ctx.match}}` substitutes the full match.",
           "type": "string"
         }
       },
@@ -1973,7 +1974,7 @@
       "properties": {
         "email_pattern": {
           "default": null,
-          "description": "Rust-regex the author email (`git log %ae`) must match, e.g.\n`^.+@example\\.com$`.",
+          "description": "Rust-regex the author email (`git log %ae`) must match, e.g. `^.+@example\\.com$`.",
           "type": [
             "string",
             "null"
@@ -1981,7 +1982,7 @@
         },
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset.",
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -1997,7 +1998,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD. Accepts anything\n`git rev-parse` does.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2011,7 +2012,7 @@
       "properties": {
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset.",
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -2019,7 +2020,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD. Accepts anything\n`git rev-parse` does.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2050,7 +2051,7 @@
       "properties": {
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset; combining `include_merges: true` with no\n`since:` is a load-time error.",
+          "description": "When validating a range (`since:` set), include merge commits. Defaults to `false` because merge commits in PR contexts are typically the synthetic merge `actions/checkout` produces (with an auto-generated subject the rule would always flag) or maintainer-resolved merges from the base branch. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -2058,7 +2059,7 @@
         },
         "pattern": {
           "default": null,
-          "description": "Rust-regex pattern the full message (subject + body, joined with\nnewlines) must match. Use `(?s)` to make `.` match newlines.",
+          "description": "Rust-regex pattern the full message (subject + body, joined with newlines) must match. Use `(?s)` to make `.` match newlines.",
           "type": [
             "string",
             "null"
@@ -2066,12 +2067,12 @@
         },
         "requires_body": {
           "default": false,
-          "description": "When true, the message must have a non-empty body, that is, at least\none line of content after the subject's blank-line separator.",
+          "description": "When true, the message must have a non-empty body, that is, at least one line of content after the subject's blank-line separator.",
           "type": "boolean"
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD. Accepts anything\n`git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`),\ntag (`v1.2.3`), or relative ref (`HEAD~5`).",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA` exported in a workflow step from `github.event.pull_request.base.sha`). The GitHub Actions double-brace template syntax `${{ ... }}` is NOT interpolated by alint.",
           "type": [
             "string",
             "null"
@@ -2079,7 +2080,7 @@
         },
         "subject_max_length": {
           "default": null,
-          "description": "Maximum number of characters allowed in the subject line. Common\nvalues: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff).",
+          "description": "Maximum number of characters allowed in the subject line. Common values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff).",
           "format": "uint",
           "minimum": 1,
           "type": [
@@ -2095,7 +2096,7 @@
       "properties": {
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset.",
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -2103,7 +2104,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD. Accepts anything\n`git rev-parse` does.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2117,7 +2118,7 @@
       "properties": {
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset.",
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -2125,7 +2126,7 @@
         },
         "pattern": {
           "default": null,
-          "description": "Trailer pattern each commit message must contain. Defaults to the\ncanonical DCO sign-off shape. Override to enforce a stricter form\n(e.g. a corporate-domain email).",
+          "description": "Trailer pattern each commit message must contain. Defaults to the canonical DCO sign-off shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override to enforce a stricter form (e.g. a corporate-domain email).",
           "type": [
             "string",
             "null"
@@ -2133,7 +2134,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD. Accepts anything\n`git rev-parse` does.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2147,7 +2148,7 @@
       "properties": {
         "include_merges": {
           "default": false,
-          "description": "When validating a range (`since:` set), include merge commits. Has no\neffect when `since:` is unset.",
+          "description": "When validating a range (`since:` set), include merge commits. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error.",
           "type": "boolean"
         },
         "kind": {
@@ -2159,7 +2160,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates\nevery commit in `<since>..HEAD` instead of just HEAD.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Use the canonical `{{env.X}}` interpolation to pass a SHA via an env var, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2175,7 +2176,7 @@
       "description": "Fire when any tracked path matches a configured glob denylist. Companion of `git_tracked_only` for the absence axis: catches secrets, large binaries, or accidentally-tracked artifacts that would otherwise need a `file_absent` per pattern. With `since:` set, only paths changed in the `<since>...HEAD` diff are flagged (PR-scoped). Outside a git repo, silently no-ops; a `since:` ref that fails to resolve hard-fails with a shallow-clone hint.",
       "properties": {
         "denied": {
-          "description": "Globset patterns no tracked path may match. Both whole-path patterns\n(`secrets/**`) and basename-only patterns (`*.env`) work.",
+          "description": "Globset patterns no tracked path may match. Both whole-path patterns (`secrets/**`) and basename-only patterns (`*.env`) work.",
           "items": {
             "type": "string"
           },
@@ -2187,7 +2188,7 @@
         },
         "since": {
           "default": null,
-          "description": "Optional git ref. When set, only denied paths that changed in the\n`<since>...HEAD` diff are flagged, catches a secret added in a PR even if\nHEAD's tree still tracks an older one. Accepts the `{{env.X}}`\ninterpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
+          "description": "Optional git ref. When set, only denied paths that changed in the `<since>...HEAD` diff are flagged, catches a secret added in a PR even if HEAD's tree still tracks an older one. Accepts the `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": [
             "string",
             "null"
@@ -2258,11 +2259,11 @@
         },
         "style": {
           "$ref": "#/$defs/StyleName",
-          "description": "Required indentation style: `tabs` rejects any leading space; `spaces`\nrejects any leading tab."
+          "description": "Required indentation style: `tabs` rejects any leading space; `spaces` rejects any leading tab."
         },
         "width": {
           "default": null,
-          "description": "When `style: spaces`, the leading-space count on every non-blank line\nmust be a multiple of this. Ignored for `style: tabs`.",
+          "description": "When `style: spaces`, the leading-space count on every non-blank line must be a multiple of this. Ignored for `style: tabs`.",
           "format": "uint32",
           "minimum": 1,
           "type": [
@@ -2611,7 +2612,7 @@
         },
         "target": {
           "$ref": "#/$defs/TargetName",
-          "description": "Required line ending style: `lf` or `crlf`. Mixed endings within a\nfile also fail."
+          "description": "Required line ending style: `lf` or `crlf`. Mixed endings within a file also fail."
         }
       },
       "required": [
@@ -2647,7 +2648,7 @@
       "properties": {
         "ignore_template_vars": {
           "default": true,
-          "description": "Skip backticked tokens containing template-variable\nmarkers (`{{ }}`, `${ }`, `<…>`). Default true.",
+          "description": "When true (default), skip backticked tokens containing `{{ ... }}`, `${ ... }`, or `<...>` template-variable markers. These are placeholders, not real paths.",
           "type": "boolean"
         },
         "kind": {
@@ -2657,7 +2658,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "prefixes": {
-          "description": "Whitelist of path-shape prefixes to validate. A backticked\ntoken must start with one of these to be considered a path\ncandidate. No defaults — every project's layout differs and\nthe user must declare which prefixes mark a path.",
+          "description": "Whitelist of path-shape prefixes to validate. A backticked token must start with one of these to be considered a path candidate. No defaults — every project's layout differs and the user must declare which prefixes mark a path.",
           "items": {
             "type": "string"
           },
@@ -2678,7 +2679,7 @@
           "const": "max_consecutive_blank_lines"
         },
         "max": {
-          "description": "Maximum number of blank lines allowed in a row. `0` means\nno blank lines at all.",
+          "description": "Maximum number of blank lines allowed in a row. `0` means no blank lines at all.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -2722,7 +2723,7 @@
           "const": "max_files_per_directory"
         },
         "max_files": {
-          "description": "Maximum number of in-scope files allowed as immediate children\nof any one directory (non-recursive).",
+          "description": "Maximum number of in-scope files allowed as immediate children of any one directory (non-recursive).",
           "format": "uint",
           "minimum": 1,
           "type": "integer"
@@ -2894,7 +2895,7 @@
       "properties": {
         "comparator": {
           "$ref": "#/$defs/Comparator",
-          "description": "Comparator used to order entries: lexical (default), lexical-ci, or\nnumeric."
+          "description": "Comparator used to order entries: lexical (default), lexical-ci, or numeric."
         },
         "end": {
           "default": null,
@@ -2912,7 +2913,7 @@
         },
         "select": {
           "default": null,
-          "description": "Regex; when set, only lines inside a block matching it are sortable\nentries (others, such as comments or group headers, pass through).",
+          "description": "Regex; when set, only lines inside a block matching it are sortable entries (others, such as comments or group headers, pass through). The sectioned / keep-sorted-subset shape.",
           "type": [
             "string",
             "null"
@@ -2920,7 +2921,7 @@
         },
         "start": {
           "default": null,
-          "description": "Marker line opening a block (matched on the trimmed line). Optional -\nomit to anchor the block at the start of the file.",
+          "description": "Marker line opening a block (matched on the trimmed line). Optional - omit to anchor the block at the start of the file.",
           "type": [
             "string",
             "null"
@@ -2959,18 +2960,18 @@
       "description": "If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the co-change gate (a FORMAT_VERSION must bump when the format struct changes; version.txt and the lockfile change together). Both globs and `since:` (the base ref) are required. Directional: a `then_changed`-only change never triggers it (add a second rule with the globs swapped for a bidirectional pact). Diff-scoped: silent no-op outside a git repo / when `if_changed` didn't change; a `since:` that fails to resolve hard-fails with a shallow-clone hint. Check-only.",
       "properties": {
         "if_changed": {
-          "description": "Glob; the trigger. When the diff changes a path matching this, a\n`then_changed` co-change is required.",
+          "description": "Glob; the trigger. When the diff changes a path matching this, a `then_changed` co-change is required.",
           "type": "string"
         },
         "kind": {
           "const": "pair_changed_together"
         },
         "since": {
-          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}`\ninterpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
+          "description": "Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`.",
           "type": "string"
         },
         "then_changed": {
-          "description": "Glob; the obligation. At least one changed path must match it whenever\n`if_changed` fired.",
+          "description": "Glob; the obligation. At least one changed path must match it whenever `if_changed` fired.",
           "type": "string"
         }
       },
@@ -2982,7 +2983,7 @@
       "type": "object"
     },
     "rule_pair_hash": {
-      "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex>  <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `target` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
+      "description": "Cross-file: the `algorithm` digest of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, the default) or a coreutils / go-`.sum`-style `<hex> <path>` manifest line (`format: sums-line`). Detection-only (alint never rewrites the manifest). A missing `target` is one violation; one violation per source whose digest is absent or mismatched. golang/go FIPS `fips140.sum` is the canonical use.",
       "properties": {
         "algorithm": {
           "$ref": "#/$defs/Algorithm",
@@ -2990,17 +2991,17 @@
         },
         "format": {
           "$ref": "#/$defs/Format",
-          "description": "How the digest must appear in `target`: `contains` = hex\nsubstring anywhere (default); `sums-line` = a `<hex> [*]<path>`\nline whose path token is the source's path."
+          "description": "How the digest must appear in `target`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path."
         },
         "kind": {
           "const": "pair_hash"
         },
         "source": {
-          "description": "Literal path or glob selecting the file(s) whose content is\nhashed (one check per match).",
+          "description": "Literal path or glob selecting the file(s) whose content is hashed (one check per match).",
           "type": "string"
         },
         "target": {
-          "description": "The single file that must carry the digest (a `.sum` /\n`SHA256SUMS` / a file with an embedded hash).",
+          "description": "The single file that must carry the digest (a `.sum` / `SHA256SUMS` / a file with an embedded hash).",
           "type": "string"
         }
       },
@@ -3207,7 +3208,7 @@
       "properties": {
         "case_insensitive": {
           "default": false,
-          "description": "Fold the key to lowercase before grouping, so keys that\ncollide only under case-folding count as duplicates — the\ncase-insensitive-filesystem hazard (Windows / macOS).",
+          "description": "Fold the key to lowercase before grouping, so keys that collide only under case-folding count as duplicates — the case-insensitive-filesystem hazard (Windows / macOS).",
           "type": "boolean"
         },
         "key": {
@@ -3430,7 +3431,7 @@
       ]
     },
     "extends": {
-      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging.\n\nEntries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends.\n\n**Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it.\n\n**Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately.\n\nRemote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead.",
+      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends. **Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it. **Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately. Remote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead.",
       "items": {
         "$ref": "#/$defs/extends_entry"
       },

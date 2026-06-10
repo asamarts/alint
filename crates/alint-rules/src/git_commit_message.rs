@@ -59,12 +59,20 @@ struct Options {
     /// Git ref to use as the base of the commit range. When set, validates
     /// every commit in `<since>..HEAD` instead of just HEAD. Accepts anything
     /// `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`),
-    /// tag (`v1.2.3`), or relative ref (`HEAD~5`).
+    /// tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and
+    /// `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env
+    /// var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA`
+    /// exported in a workflow step from `github.event.pull_request.base.sha`).
+    /// The GitHub Actions double-brace template syntax `${{ ... }}` is NOT
+    /// interpolated by alint.
     #[serde(default)]
     since: Option<String>,
-    /// When validating a range (`since:` set), include merge commits. Has no
-    /// effect when `since:` is unset; combining `include_merges: true` with no
-    /// `since:` is a load-time error.
+    /// When validating a range (`since:` set), include merge commits. Defaults
+    /// to `false` because merge commits in PR contexts are typically the
+    /// synthetic merge `actions/checkout` produces (with an auto-generated
+    /// subject the rule would always flag) or maintainer-resolved merges from
+    /// the base branch. Has no effect when `since:` is unset; combining
+    /// `include_merges: true` with no `since:` is a load-time error.
     #[serde(default)]
     include_merges: bool,
 }

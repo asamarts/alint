@@ -6,12 +6,11 @@ use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
 use regex::Regex;
-use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::fixers::FilePrependFixer;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// Rust regex. The first `lines` lines of each file in scope must match.

@@ -36,6 +36,17 @@ at test time.
    `coverage_audit_*` should pass.
 ```
 
+If the kind carries options, derive its schema branch from the Rust `Options`
+struct rather than hand-editing `schemas/v1/config.json`: add
+`#[derive(schemars::JsonSchema)]` to the struct (with `///` field docs and any
+`#[schemars(range/length/regex)]` constraints), register it in
+`alint-rules/src/lib.rs::migrated_option_schemas()`, then run
+`cargo run -p xtask -- gen-schema` to regenerate the schema (root + the in-crate
+copy). CI and preflight run `gen-schema --check`, which fails if the committed
+schema drifts from the Rust types. See ADR-0001 and
+`docs/design/spec-driven-development.md`. Kinds with deeply nested option shapes
+stay hand-written in the schema (omit them from `migrated_option_schemas`).
+
 ### Family-directory conventions
 
 The family directory is chosen by what the rule *does*:

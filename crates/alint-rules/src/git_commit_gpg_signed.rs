@@ -29,11 +29,14 @@ use crate::commit_range::{collect_commits, format_commit_violation};
 struct Options {
     /// Git ref to use as the base of the commit range. When set, validates
     /// every commit in `<since>..HEAD` instead of just HEAD. Accepts anything
-    /// `git rev-parse` does.
+    /// `git rev-parse` does. Use the canonical `{{env.X}}` interpolation to
+    /// pass a SHA via an env var, e.g.
+    /// `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`.
     #[serde(default)]
     since: Option<String>,
     /// When validating a range (`since:` set), include merge commits. Has no
-    /// effect when `since:` is unset.
+    /// effect when `since:` is unset; combining `include_merges: true` with no
+    /// `since:` is a load-time error.
     #[serde(default)]
     include_merges: bool,
 }

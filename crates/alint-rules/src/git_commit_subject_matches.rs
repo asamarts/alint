@@ -33,11 +33,14 @@ struct Options {
     /// Rust-regex the commit subject (first line of the message) must match.
     matches: String,
     /// Git ref to use as the base of the commit range. When set, validates
-    /// every commit in `<since>..HEAD` instead of just HEAD.
+    /// every commit in `<since>..HEAD` instead of just HEAD. Use the canonical
+    /// `{{env.X}}` interpolation to pass a SHA via an env var, e.g.
+    /// `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`.
     #[serde(default)]
     since: Option<String>,
     /// When validating a range (`since:` set), include merge commits. Has no
-    /// effect when `since:` is unset.
+    /// effect when `since:` is unset; combining `include_merges: true` with no
+    /// `since:` is a load-time error.
     #[serde(default)]
     include_merges: bool,
 }
