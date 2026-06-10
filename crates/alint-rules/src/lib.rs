@@ -86,6 +86,19 @@ pub mod structured_path;
 mod test_support;
 pub mod unique_by;
 
+/// Rule kinds whose `$defs/rule_*` schema branch is generated from Rust types
+/// via schemars, rather than hand-written in `schemas/v1/config.json`. Consumed
+/// by `xtask gen-schema`.
+///
+/// Migration is incremental (see ADR-0001 and
+/// `docs/design/spec-driven-development.md`): a kind absent from this list keeps
+/// its hand-written branch, which `gen-schema` passes through verbatim, so the
+/// published schema stays complete and valid at every step.
+#[must_use]
+pub fn migrated_rule_defs() -> Vec<(&'static str, serde_json::Value)> {
+    vec![("rule_file_header", file_header::rule_def_schema())]
+}
+
 /// Register every built-in rule kind into the given registry.
 ///
 /// Naming convention: rules that have a `dir_*` sibling keep

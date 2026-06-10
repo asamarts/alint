@@ -31,6 +31,7 @@ use clap::{Parser, Subcommand};
 mod bench;
 mod bench_release;
 mod docs_export;
+mod gen_schema;
 mod roadmap_generator;
 
 pub(crate) use bench_release::{build_release_binary, git_sha, now_iso, workspace_root};
@@ -234,6 +235,14 @@ enum Commands {
         #[arg(long, default_value = "Roadmap")]
         title: String,
     },
+    /// Generate `schemas/v1/config.json` from Rust types (schemars) for the
+    /// migrated rule kinds, passing hand-written branches through for the rest.
+    /// See ADR-0001 and docs/design/spec-driven-development.md.
+    GenSchema {
+        /// Verify the committed schema is up to date instead of rewriting it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -295,6 +304,7 @@ fn main() -> Result<()> {
             };
             roadmap_generator::generate_public_roadmap(&input, &output, &title)
         }
+        Commands::GenSchema { check } => gen_schema::run(check),
     }
 }
 
