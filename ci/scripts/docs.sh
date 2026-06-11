@@ -32,3 +32,12 @@ cargo run -q -p xtask -- gen-schema --check
 # after adding a rule kind, family, ruleset, fixer, formatter, or subcommand.
 echo "==> Running xtask gen-facts --check"
 cargo run -q -p xtask -- gen-facts --check
+
+# `xtask gen-arch --check` regenerates the crate dependency graph
+# (docs/design/architecture/crate-graph.md) from `cargo metadata` and fails if
+# it drifted, and verifies the hand-modeled C4 model (workspace.dsl) still
+# declares exactly the workspace crate set. Phase 4 / WS3 of the spec-driven
+# program (docs/design/architecture-as-code.md). Run `cargo run -p xtask --
+# gen-arch` to refresh after adding/removing a crate or an intra-workspace dep.
+echo "==> Running xtask gen-arch --check"
+cargo run -q -p xtask -- gen-arch --check

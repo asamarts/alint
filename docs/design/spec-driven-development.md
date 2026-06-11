@@ -482,6 +482,17 @@ WS3: `cargo-depgraph` / `cargo-modules` extracted graphs + acyclic gate; the Str
 `workspace.dsl` with Mermaid/SVG export and the crate-name consistency gate; arc42
 cherry-pick into ARCHITECTURE.md.
 
+*Progress (2026-06-11): shipped, Mermaid-native (no Graphviz/Java/Structurizr in CI).
+`xtask gen-arch [--check]` extracts the workspace crate dependency graph from `cargo
+metadata` into a committed `docs/design/architecture/crate-graph.md` (Mermaid graph +
+crate-by-tier table), content-diff gated like `gen-schema`/`gen-facts`. A hand-modeled C4
+`workspace.dsl` (Structurizr) is kept honest by a crate-name consistency gate (model crates
+== `cargo metadata` members); an acyclic gate and an `alint-core`-is-a-dependency-sink
+layering invariant are unit tests. `ARCHITECTURE.md` gains a Building Block View pointer
+(arc42 cherry-pick) linking the graph, the C4 model, and `docs/adr/`. Spec:
+`docs/design/architecture-as-code.md`. Deferred (heavy tooling): `cargo-modules` per-crate
+internal graphs + `--acyclic` CI flag, and Structurizr `.war` SVG export.*
+
 **Phase 5 - Pragmatic formal methods.**
 WS4: Kani job on the pure core; Miri nightly; `contracts` on a few invariants; evaluate a
 single Stateright model for cross-file dispatch determinism / LSP cache. This phase is

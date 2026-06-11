@@ -55,6 +55,7 @@ mod docs_paths {
     pub const CHANGELOG: &str = "CHANGELOG.md";
     pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
     pub const FACTS_JSON: &str = "facts.json";
+    pub const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";
     pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
 }
 
@@ -138,6 +139,16 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
             docs_paths::FACTS_JSON
         )
     })?;
+
+    // 4c. The code-extracted crate dependency graph (Mermaid), shipped
+    //     as a docs page (Starlight frontmatter injected via copy_one)
+    //     so alint.org renders it. Generated + gated by `xtask gen-arch`;
+    //     see docs/design/architecture-as-code.md.
+    copy_one(
+        &workspace.join(docs_paths::CRATE_GRAPH_MD),
+        &target_dir.join("about/crate-graph.md"),
+        Some("Crate dependency graph"),
+    )?;
 
     // 5. CLI reference, captured from the alint binary's --help.
     generate_cli_reference(&workspace, &target_dir)?;

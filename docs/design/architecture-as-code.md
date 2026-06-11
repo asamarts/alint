@@ -1,6 +1,6 @@
 # Design doc: architecture diagrams as code (Phase 4 / WS3)
 
-Status: Draft.
+Status: Implemented (`xtask gen-arch` + committed `crate-graph.md` + `workspace.dsl`, Phase 4).
 Decisions: ADR-0001 (spec-driven development). WS3 of `spec-driven-development.md`.
 Demand evidence: the hand-drawn ASCII crate tree in `ARCHITECTURE.md` is the only
 structural picture today; it lists directories, not the dependency graph, and is

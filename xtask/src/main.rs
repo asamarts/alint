@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
+mod arch;
 mod bench;
 mod bench_release;
 mod docs_export;
@@ -251,6 +252,12 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the crate dependency graph from `cargo metadata` + gate the C4 model.
+    GenArch {
+        /// Verify the committed crate graph + C4 model instead of rewriting.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -314,6 +321,7 @@ fn main() -> Result<()> {
         }
         Commands::GenSchema { check } => gen_schema::run(check),
         Commands::GenFacts { check } => facts::run(check),
+        Commands::GenArch { check } => arch::run(check),
     }
 }
 
