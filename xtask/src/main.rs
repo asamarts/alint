@@ -31,6 +31,7 @@ use clap::{Parser, Subcommand};
 mod bench;
 mod bench_release;
 mod docs_export;
+mod facts;
 mod gen_schema;
 mod roadmap_generator;
 mod rule_options_table;
@@ -244,6 +245,12 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate `facts.json` (the surface-area contract) from canonical sources.
+    GenFacts {
+        /// Verify the committed `facts.json` is up to date instead of rewriting it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -306,6 +313,7 @@ fn main() -> Result<()> {
             roadmap_generator::generate_public_roadmap(&input, &output, &title)
         }
         Commands::GenSchema { check } => gen_schema::run(check),
+        Commands::GenFacts { check } => facts::run(check),
     }
 }
 

@@ -1,6 +1,6 @@
 # Design doc: `facts.json` — the machine-readable surface-area contract
 
-Status: Draft.
+Status: Implemented (`xtask gen-facts` + committed `facts.json`, Phase 3).
 Decisions: ADR-0001 (spec-driven development). Phase 3 / WS1e of
 `spec-driven-development.md`.
 Demand evidence: the v0.9.22 audit found a "60 rule kinds" README claim that was

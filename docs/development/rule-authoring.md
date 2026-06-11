@@ -55,6 +55,13 @@ and it surfaces in the published reference - no separate options list to
 maintain. The `committed_schema_every_branch_renders_a_clean_table` test in
 `xtask` fails if a new option shape can't be classified into a clean table cell.
 
+Adding a new rule kind also moves a surface-area count, so regenerate the
+contract: `cargo run -p xtask -- gen-facts` refreshes the committed `facts.json`
+(version + the six headline counts + catalogue lists that the README, docs, and
+alint.org render from). CI + the docs script run `gen-facts --check` and fail if
+`facts.json` drifts. The same applies when you add a family, bundled ruleset,
+fixer, output format, or subcommand. See `docs/design/facts-json.md`.
+
 ### Family-directory conventions
 
 The family directory is chosen by what the rule *does*:

@@ -23,3 +23,12 @@ cargo run -q -p xtask -- docs-export --check
 # to refresh after changing a migrated kind's Options struct.
 echo "==> Running xtask gen-schema --check"
 cargo run -q -p xtask -- gen-schema --check
+
+# `xtask gen-facts --check` regenerates facts.json (the surface-area contract:
+# version + the six headline counts + catalogue lists) from the same canonical
+# sources coverage_audit_readme_claims pins the README to, and fails if the
+# committed facts.json drifted. Phase 3 / WS1e of the spec-driven program
+# (docs/design/facts-json.md). Run `cargo run -p xtask -- gen-facts` to refresh
+# after adding a rule kind, family, ruleset, fixer, formatter, or subcommand.
+echo "==> Running xtask gen-facts --check"
+cargo run -q -p xtask -- gen-facts --check

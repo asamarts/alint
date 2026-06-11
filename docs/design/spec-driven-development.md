@@ -467,6 +467,16 @@ rendered tables remain to add.*
 WS1e `facts.json`; WS5 site renders from it with a content test and version-pin parity.
 Closes the highest-remaining-risk external drift.
 
+*Progress (2026-06-11): WS1e shipped. A committed, gated `facts.json` (`xtask gen-facts`
+[`--check`], mirroring `gen-schema`) carries the version, the six headline counts -
+including the `families` count the build-time `manifest.json` omitted - and catalogue lists
+(rule kinds, families, bundled rulesets, output formats, subcommands, fact predicates).
+Every field derives from the same canonical source `coverage_audit_readme_claims` pins the
+README to; a test binds `facts.json`'s counts to the README's claimed numbers. Shipped into
+the docs bundle next to `manifest.json` for alint.org to consume. The live `manifest.json`
+shape is deliberately untouched. Spec: `docs/design/facts-json.md`. WS5 (site renders from
+`facts.json` + cross-repo content/version-pin test) remains, in the private alint.org repo.*
+
 **Phase 4 - Architecture as code.**
 WS3: `cargo-depgraph` / `cargo-modules` extracted graphs + acyclic gate; the Structurizr
 `workspace.dsl` with Mermaid/SVG export and the crate-name consistency gate; arc42

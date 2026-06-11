@@ -30,7 +30,7 @@ use crate::{build_release_binary, git_sha, now_iso, walkdir_plain, workspace_roo
 ///
 /// Names are kebab-case to match `clap`'s default conversion of the
 /// `PascalCase` enum variants (`ExportAgentsMd` -> `export-agents-md`).
-const CLI_REFERENCE_SUBCMDS: &[&str] = &[
+pub(crate) const CLI_REFERENCE_SUBCMDS: &[&str] = &[
     "check",
     "fix",
     "list",
@@ -54,6 +54,7 @@ mod docs_paths {
     pub const RULE_AUTHORING_DOC: &str = "docs/development/rule-authoring.md";
     pub const CHANGELOG: &str = "CHANGELOG.md";
     pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
+    pub const FACTS_JSON: &str = "facts.json";
     pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
 }
 
@@ -122,6 +123,21 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
     let schema_dest = target_dir.join("configuration/schema.json");
     fs::create_dir_all(schema_dest.parent().unwrap())?;
     fs::copy(workspace.join(docs_paths::SCHEMA_JSON), &schema_dest)?;
+
+    // 4b. The surface-area contract (`facts.json`), shipped at the
+    //     bundle root next to `manifest.json` so alint.org can render
+    //     counts/catalogues from it at a stable URL. Generated +
+    //     gated in-repo by `xtask gen-facts`; see docs/design/facts-json.md.
+    fs::copy(
+        workspace.join(docs_paths::FACTS_JSON),
+        target_dir.join("facts.json"),
+    )
+    .with_context(|| {
+        format!(
+            "copy {} (run `cargo run -p xtask -- gen-facts`)",
+            docs_paths::FACTS_JSON
+        )
+    })?;
 
     // 5. CLI reference, captured from the alint binary's --help.
     generate_cli_reference(&workspace, &target_dir)?;
