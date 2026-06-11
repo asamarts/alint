@@ -140,14 +140,20 @@ impl Normalize {
             Self::None => v.to_string(),
             Self::Trim => v.trim().to_string(),
             Self::Lower => v.trim().to_lowercase(),
-            // Unchanged released behaviour: leading token, leading
-            // non-digits stripped.
+            // Leading `.`-token, leading non-digits stripped. The trailing
+            // `trim_end` keeps normalisation idempotent: `trim()` runs before
+            // the split, so the pre-`.` token can still carry trailing
+            // whitespace (e.g. `"0 ."` -> token `"0 "`) that a second pass
+            // would strip — found by `normalize_transforms_are_idempotent`.
+            // (Trailing non-whitespace like `-dev` is intentionally kept, so
+            // released behaviour is unchanged for real version strings.)
             Self::SemverMajor => v
                 .trim()
                 .split('.')
                 .next()
                 .unwrap_or("")
                 .trim_start_matches(|c: char| !c.is_ascii_digit())
+                .trim_end()
                 .to_string(),
             Self::SemverMinor => semver_minor(v),
         }
@@ -1241,6 +1247,17 @@ mod tests {
         let v = eval(&r, root, &idx);
         assert_eq!(v.len(), 1);
         assert!(v[0].message.contains("exactly one value"));
+    }
+
+    #[test]
+    fn semver_major_is_idempotent_on_trailing_space_token() {
+        // Regression (found by normalize_transforms_are_idempotent): `trim()`
+        // runs before `split('.')`, so the pre-`.` token can carry trailing
+        // whitespace (`"0 ."` -> token `"0 "`). Without the trailing `trim_end`
+        // the first pass returned `"0 "` and a second pass `"0"` — not stable.
+        assert_eq!(Normalize::SemverMajor.apply("0 ."), "0");
+        let once = Normalize::SemverMajor.apply("0 .");
+        assert_eq!(Normalize::SemverMajor.apply(&once), once);
     }
 
     #[test]
