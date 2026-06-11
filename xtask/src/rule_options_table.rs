@@ -92,7 +92,7 @@ pub(crate) fn options_section(branch: &serde_json::Value, schema: &serde_json::V
         );
         let _ = writeln!(&mut out, "|---|---|---|---|---|");
         for (oname, ov) in rows {
-            let ty = schema_type_label(ov, schema);
+            let ty = format!("{}{}", schema_type_label(ov, schema), constraint_suffix(ov));
             let req = if required.contains(oname.as_str()) {
                 "yes"
             } else {
@@ -305,6 +305,22 @@ fn humanize_ref_name(rf: &str) -> String {
     }
 }
 
+/// A ` (>= N)` / ` (<= N)` / ` (N..M)` note from a property's numeric
+/// `minimum`/`maximum`, so a bound the schema enforces is visible in the
+/// rendered docs too (e.g. `min_lines` >= 2, `threshold` 0..1) instead of
+/// surviving only in the schema an IDE reads.
+fn constraint_suffix(prop: &serde_json::Value) -> String {
+    // `f64` Display drops a trailing `.0` (`2.0` -> "2", `0.5` -> "0.5"),
+    // so whole bounds read cleanly without a lossy integer cast.
+    let num = |key: &str| prop.get(key).and_then(serde_json::Value::as_f64);
+    match (num("minimum"), num("maximum")) {
+        (Some(lo), Some(hi)) => format!(" ({lo}..{hi})"),
+        (Some(lo), None) => format!(" (>= {lo})"),
+        (None, Some(hi)) => format!(" (<= {hi})"),
+        (None, None) => String::new(),
+    }
+}
+
 fn render_default(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => format!("`{s}`"),
@@ -339,6 +355,17 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+
+    #[test]
+    fn constraint_suffix_renders_numeric_bounds() {
+        assert_eq!(constraint_suffix(&json!({"minimum": 2})), " (>= 2)");
+        assert_eq!(constraint_suffix(&json!({"maximum": 100})), " (<= 100)");
+        assert_eq!(
+            constraint_suffix(&json!({"minimum": 0.0, "maximum": 1.0})),
+            " (0..1)"
+        );
+        assert_eq!(constraint_suffix(&json!({"type": "string"})), "");
+    }
 
     /// A tiny schema carrying the enum `$defs` the `$ref` cases
     /// resolve against. Mirrors the real shapes schemars emits.

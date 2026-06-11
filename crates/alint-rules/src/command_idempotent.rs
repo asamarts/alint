@@ -62,6 +62,7 @@ struct Options {
     /// On failure, parse this stream into per-file violations (default: none =
     /// one violation for the whole invocation).
     #[serde(default)]
+    #[schemars(extend("default" = "none"))]
     files_from: FilesFrom,
     /// Regex whose capture group 1 is a file path, applied per output line
     /// (requires `files_from`; omit for bare-path listers).

@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`facts.json` — a machine-readable surface-area contract.** A generated,
+  committed manifest (alint version; the rule-kind / family / bundled-ruleset /
+  auto-fix-op / output-format / subcommand counts; and catalogue lists) shipped
+  into the docs bundle at a stable URL, so the README, docs, and alint.org render
+  these numbers from one source instead of restating them in prose. Generated and
+  drift-gated by `xtask gen-facts --check`.
+
+### Changed
+
+- **Every rule reference page on alint.org now carries a generated `## Options`
+  table** (name / type / required / default / description), derived from the
+  type-driven JSON Schema rather than hand-maintained prose — so the documented
+  options can't drift from the engine.
+
 ## [0.12.0] - 2026-06-07
 
 The case-study-driven rule-kind expansion, paired with a security cycle that

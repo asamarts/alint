@@ -21,6 +21,12 @@
 //!   docs) and the site repo (presentation).
 //! - `gen-public-roadmap` — render the public roadmap from the canonical
 //!   `docs/design/ROADMAP.md` (also invoked internally by `docs-export`).
+//! - `gen-schema`         — regenerate `schemas/v1/config.json` from the rule
+//!   `Options` structs (schemars); `--check` gates drift.
+//! - `gen-facts`          — regenerate `facts.json` (the surface-area contract)
+//!   from canonical sources; `--check` gates drift.
+//! - `gen-arch`           — regenerate the crate dependency graph from
+//!   `cargo metadata` + check the C4 model; `--check` gates drift.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -86,6 +86,7 @@ struct Options {
     /// Comparator used to order entries: lexical (default), lexical-ci, or
     /// numeric.
     #[serde(default)]
+    #[schemars(extend("default" = "lexical"))]
     comparator: Comparator,
     /// When true, also forbid duplicate (equal) entries within a block.
     #[serde(default)]

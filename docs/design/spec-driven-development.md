@@ -1,15 +1,22 @@
 # Spec-Driven Development for alint: A Proposal
 
-Status: Accepted (2026-06-10), recorded as ADR-0001. Full program (all five
-workstreams) approved; ADR home is docs/adr/. Phase 0 + Phase 1 implemented on
-branch `spec-driven-development`: 38 of ~56 option-bearing rule kinds now derive
-their `schemas/v1/config.json` branch from their Rust types (schemars), gated by
-`gen-schema --check`. The remaining kinds stay hand-written passthrough by design:
-the deeply nested ones (cross_file, file_graph, registry_paths_resolve, for_each_*,
-dir_contains/dir_only_contains, every_matching_has, generated_file_fresh, import_gate,
-the structured-query family) plus two whose option type can't be faithfully derived
-(filename_case's custom case-alias deserializer, json_schema_passes's runtime-validated
-format string). Phases 2-5 pending.
+Status: Accepted (2026-06-10), recorded as ADR-0001. **All five workstreams
+implemented and merged to `main` (2026-06-11):** Phase 0 governance (ADRs,
+constitution, template); Phase 1 schema-from-types (`gen-schema --check`); Phase 2
+schema-derived rule-options tables; Phase 3 the `facts.json` contract
+(`gen-facts --check`); Phase 4 architecture-as-code (`gen-arch --check` — crate
+graph + C4 model); Phase 5 pragmatic formal methods (proptest properties + a
+verified Kani confinement proof). The only remainder is WS5 — alint.org rendering
+*from* the shipped `facts.json` — which lives in the private site repo. Per-phase
+"Progress" notes are inline below; ADR home is docs/adr/.
+
+Phase 1 scope note: the option-bearing rule kinds with flat option structs derive
+their `schemas/v1/config.json` branch from their Rust types (schemars); the deeply
+nested kinds (cross_file, file_graph, registry_paths_resolve, for_each_*,
+dir_contains/dir_only_contains, every_matching_has, generated_file_fresh,
+import_gate, the structured-query family) stay hand-written passthrough by design,
+plus two whose option type can't be faithfully derived (filename_case's custom
+case-alias deserializer, json_schema_passes's runtime-validated format string).
 Scope: cross-cutting (engine, DSL, schema, docs, CI, alint.org)
 Related: [ARCHITECTURE.md](./ARCHITECTURE.md), [ROADMAP.md](./ROADMAP.md), [deterministic-perf-gating.md](./deterministic-perf-gating.md)
 

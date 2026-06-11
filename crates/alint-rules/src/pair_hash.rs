@@ -75,11 +75,13 @@ struct Options {
     target: String,
     /// Digest algorithm (default: sha256).
     #[serde(default)]
+    #[schemars(extend("default" = "sha256"))]
     algorithm: Algorithm,
     /// How the digest must appear in `target`: `contains` = hex
     /// substring anywhere (default); `sums-line` = a `<hex> [*]<path>`
     /// line whose path token is the source's path.
     #[serde(default)]
+    #[schemars(extend("default" = "contains"))]
     format: Format,
 }
 

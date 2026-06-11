@@ -761,6 +761,7 @@
         },
         "files_from": {
           "$ref": "#/$defs/FilesFrom",
+          "default": "none",
           "description": "On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation)."
         },
         "files_pattern": {
@@ -2936,6 +2937,7 @@
       "properties": {
         "comparator": {
           "$ref": "#/$defs/Comparator",
+          "default": "lexical",
           "description": "Comparator used to order entries: lexical (default), lexical-ci, or numeric."
         },
         "end": {
@@ -3028,10 +3030,12 @@
       "properties": {
         "algorithm": {
           "$ref": "#/$defs/Algorithm",
+          "default": "sha256",
           "description": "Digest algorithm (default: sha256)."
         },
         "format": {
           "$ref": "#/$defs/Format",
+          "default": "contains",
           "description": "How the digest must appear in `target`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path."
         },
         "kind": {

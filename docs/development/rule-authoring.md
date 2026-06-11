@@ -62,6 +62,12 @@ alint.org render from). CI + the docs script run `gen-facts --check` and fail if
 `facts.json` drifts. The same applies when you add a family, bundled ruleset,
 fixer, output format, or subcommand. See `docs/design/facts-json.md`.
 
+If you add or remove a *crate* (or an intra-workspace dependency), run
+`cargo run -p xtask -- gen-arch` to refresh the committed crate dependency graph
+(`docs/design/architecture/crate-graph.md`) and update the C4 model
+(`docs/design/architecture/workspace.dsl`); `gen-arch --check` gates both. See
+`docs/design/architecture-as-code.md`.
+
 ### Family-directory conventions
 
 The family directory is chosen by what the rule *does*:

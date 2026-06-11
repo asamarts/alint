@@ -69,7 +69,7 @@ Under the hood it runs:
 ci/scripts/fmt.sh                          # cargo fmt --check
 ci/scripts/clippy.sh                       # cargo clippy --workspace --all-targets -- -D warnings
 ci/scripts/test.sh                         # cargo test --workspace + bash CLI tests
-ci/scripts/docs.sh                         # cargo doc -D warnings + xtask docs-export --check
+ci/scripts/docs.sh                         # cargo doc -D warnings + docs-export/gen-schema/gen-facts/gen-arch --check
 ci/scripts/check-version-pins.sh           # README/SECURITY/docs/site install snippets + npm pin to workspace version
 ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= workspace.package.version
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
