@@ -22,7 +22,17 @@ reads or resolves is now confined to the repo root (the untrusted-`extends:`
 threat model), with `allow_out_of_root:` as the explicit top-level opt-in, the
 walker pruning symlinks that escape the tree, and a fixed git
 argument-injection in the `since:` range mode (write/truncate of an arbitrary
-out-of-tree file; affected releases back to v0.9.21). **v0.11.1** (2026-05-31)
+out-of-tree file; affected releases back to v0.9.21).
+
+**Since v0.12, a spec-driven-development program shipped to `main`** (engineering
+foundations, not a version cut): the config schema, the per-rule options docs, a
+`facts.json` surface-area contract, the crate-dependency graph + C4 model, and a
+Kani-verified path-confinement proof are all now generated and regenerate-and-diff
+gated, and alint.org renders its headline counts from `facts.json`. See the
+[Engineering foundations](#engineering-foundations-spec-driven-development) section
+below.
+
+**v0.11.1** (2026-05-31)
 was a JetBrains-plugin patch that
 clears JetBrains Marketplace moderation: the v0.11.0 plugin read its own
 version via platform plugin-lookup APIs (`PluginManagerCore` /
@@ -1293,6 +1303,38 @@ Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/m
   pattern across the corpus was the mutating one). v0.12.0 also added the
   in-place `outputs:` mode to `generated_file_fresh` for that mutating pattern,
   so the kind now covers it directly.
+
+## Engineering foundations: spec-driven development
+
+A drift-elimination program run on `main` after v0.12 — a foundations track, not a
+user-facing version cut, so it interleaves with the release cadence rather than
+occupying a slot. The premise an anti-drift linter has to honour itself — *alint's
+own claims can't drift from the tool* — now holds end to end. Five workstreams
+shipped, each artifact regenerate-and-diff gated:
+
+- **Schema from types.** `schemas/v1/config.json` is generated from the Rust
+  `Options` structs (schemars) and gated by `gen-schema --check`, so a field rename
+  propagates to the schema (and the IDE) automatically.
+- **Generated rule reference.** Every rule page's `## Options` table is rendered
+  from the type-derived schema (name / type / required / default / constraints), so
+  the published options can't drift from the engine.
+- **`facts.json` contract.** A committed surface-area manifest — version, the six
+  headline counts (rule kinds, families, rulesets, fix ops, output formats,
+  subcommands), and catalogue lists — gated by `gen-facts --check`. alint.org renders
+  these numbers from it, so the marketing site can't lag a release.
+- **Architecture as code.** The crate dependency graph is extracted from
+  `cargo metadata` into a committed Mermaid diagram (runtime vs dev/build edges) and
+  a hand-modeled Structurizr C4 model is kept honest against the workspace members,
+  both gated by `gen-arch --check`.
+- **Pragmatic formal methods.** proptest properties as an always-on behaviour spec,
+  plus a verified Kani bounded proof of the path-confinement security policy.
+
+Recorded in [`spec-driven-development.md`](https://github.com/asamarts/alint/blob/main/docs/design/spec-driven-development.md),
+[ADR-0001](https://github.com/asamarts/alint/blob/main/docs/adr/0001-adopt-spec-driven-development.md),
+and the per-workstream design docs. An adversarial multi-reviewer pass after the cut
+found and fixed a CI gate bypass, a too-weak Kani proof, and a crate graph that
+conflated dev and runtime edges — the value of reviewing your own anti-drift work
+adversarially.
 
 ## v0.13: WASM plugins
 
