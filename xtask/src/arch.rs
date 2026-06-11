@@ -31,8 +31,13 @@ const WORKSPACE_DSL: &str = "docs/design/architecture/workspace.dsl";
 struct Crate {
     name: String,
     description: String,
-    /// Sorted, de-duplicated workspace-member dependency names.
+    /// Sorted normal (runtime) intra-workspace dependency names — the
+    /// production architecture; the tier + acyclic computations use these.
     deps: Vec<String>,
+    /// Sorted dev/build-only intra-workspace dependency names (test
+    /// harnesses, xtask's test deps). Rendered as dashed edges; excluded
+    /// from tiers and the cycle check (a normal+dev cycle is legal in Cargo).
+    dev_deps: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +56,10 @@ struct Package {
 #[derive(Deserialize)]
 struct MetaDep {
     name: String,
+    /// `null` for a normal (runtime) dependency; `"dev"` / `"build"`
+    /// otherwise. `cargo metadata` lists the same dep once per kind.
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 /// `cargo metadata --no-deps`, reduced to workspace crates and the
@@ -74,17 +83,28 @@ fn workspace_crates(root: &Path) -> Result<Vec<Crate>> {
         .packages
         .iter()
         .map(|p| {
-            let mut deps: BTreeSet<String> = p
-                .dependencies
-                .iter()
-                .map(|d| d.name.clone())
-                .filter(|n| members.contains(n))
-                .collect();
-            deps.remove(&p.name); // a crate never lists itself, but be safe
+            let mut deps: BTreeSet<String> = BTreeSet::new();
+            let mut dev_deps: BTreeSet<String> = BTreeSet::new();
+            for d in &p.dependencies {
+                // Self-edges never occur, but guard; and only workspace members.
+                if d.name == p.name || !members.contains(&d.name) {
+                    continue;
+                }
+                if d.kind.is_none() {
+                    deps.insert(d.name.clone());
+                } else {
+                    dev_deps.insert(d.name.clone());
+                }
+            }
+            // A dep listed as both normal and dev counts as normal (runtime).
+            for n in &deps {
+                dev_deps.remove(n);
+            }
             Crate {
                 name: p.name.clone(),
                 description: p.description.clone().unwrap_or_default(),
                 deps: deps.into_iter().collect(),
+                dev_deps: dev_deps.into_iter().collect(),
             }
         })
         .collect();
@@ -146,13 +166,16 @@ fn render_crate_graph(crates: &[Crate]) -> String {
     );
     let _ = writeln!(
         &mut out,
-        "`cargo metadata`. `alint-core` is the foundation (no workspace dependencies); the"
+        "`cargo metadata`. A solid edge `A --> B` is a normal (runtime) dependency; a dashed"
     );
     let _ = writeln!(
         &mut out,
-        "`alint` binary and `xtask` sit at the top. An edge `A --> B` means crate A depends"
+        "edge `A -.-> B` is dev/build-only (test harnesses, tooling). `alint-core` is the"
     );
-    let _ = writeln!(&mut out, "on crate B.");
+    let _ = writeln!(
+        &mut out,
+        "foundation (no runtime dependencies); the tiers below count runtime edges only."
+    );
     let _ = writeln!(&mut out);
 
     let _ = writeln!(&mut out, "```mermaid");
@@ -160,9 +183,17 @@ fn render_crate_graph(crates: &[Crate]) -> String {
     for c in crates {
         let _ = writeln!(&mut out, "    {}[\"{}\"]", node_id(&c.name), c.name);
     }
+    // Normal (runtime) dependency edges — solid.
     for c in crates {
         for dep in &c.deps {
             let _ = writeln!(&mut out, "    {} --> {}", node_id(&c.name), node_id(dep));
+        }
+    }
+    // Dev/build-only edges — dashed, so the architecture (solid) reads clean
+    // while the full structure stays visible (test crates aren't orphaned).
+    for c in crates {
+        for dep in &c.dev_deps {
+            let _ = writeln!(&mut out, "    {} -.-> {}", node_id(&c.name), node_id(dep));
         }
     }
     let _ = writeln!(&mut out, "```");
@@ -172,7 +203,8 @@ fn render_crate_graph(crates: &[Crate]) -> String {
     let _ = writeln!(&mut out);
     let _ = writeln!(
         &mut out,
-        "Tier = longest dependency chain to the foundation (`alint-core` = 0)."
+        "Tier = longest runtime-dependency chain to the foundation (`alint-core` = 0); \
+         dev/build-only edges don't count."
     );
     let _ = writeln!(&mut out);
     let _ = writeln!(&mut out, "| Tier | Crate | Role |");

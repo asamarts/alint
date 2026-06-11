@@ -72,7 +72,8 @@ workspace "alint" "Language-agnostic repository linter" {
         comp_alint -> comp_output "Renders reports"
         comp_alint -> comp_lsp "Starts the server (`alint lsp`)"
         comp_dsl -> comp_core "Builds the config AST"
-        comp_dsl -> comp_rules "Resolves rule kinds"
+        # (alint-dsl depends on alint-rules only in tests — a dev-dependency,
+        #  not a runtime relationship; see crate-graph.md's dashed edge.)
         comp_rules -> comp_core "Implements the Rule trait"
         comp_output -> comp_core "Formats the engine's Report"
         comp_lsp -> comp_core "Runs the engine"

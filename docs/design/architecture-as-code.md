@@ -48,9 +48,13 @@ linking the generated graph, the C4 model, and `docs/adr/`. The live
 themselves workspace members, and renders:
 
 - A `graph TD` Mermaid block: one node per crate (id = name with `-`→`_`,
-  label = crate name; the binary and `xtask` annotated), one edge `A --> B` per
-  "A depends on B". Nodes and edges sorted for determinism.
-- A table sorted by `(tier, name)`, where **tier** = longest dependency chain to
+  label = crate name). A solid edge `A --> B` is a normal (runtime)
+  dependency; a dashed edge `A -.-> B` is dev/build-only (test harnesses,
+  tooling). Distinguishing them keeps the architecture honest — the previous
+  version drew test-only edges as production ones — and avoids orphaning the
+  pure-test crates (e.g. `alint-e2e`, whose deps are all dev). Nodes and edges
+  sorted for determinism.
+- A table sorted by `(tier, name)`, where **tier** = longest *runtime*-dependency chain to
   a leaf (`alint-core` = 0). The role text is the crate's Cargo `description`.
 
 `gen-arch` (no flag) rewrites `crate-graph.md`; `gen-arch --check` regenerates
@@ -107,8 +111,10 @@ In `xtask` (`arch.rs` `#[cfg(test)]`):
 
 - `gen_arch_check_passes_on_committed_tree` — `run(true)` succeeds on the
   committed `crate-graph.md` (freshness; mirrors the schema/facts tests).
-- `workspace_graph_is_acyclic` — DFS cycle check over the extracted edges.
-- `alint_core_is_a_dependency_sink` — `alint-core` has no intra-workspace deps.
+- `workspace_graph_is_acyclic` — DFS cycle check over the runtime (normal)
+  edges. (Dev/build edges are excluded: a normal+dev cycle is legal in Cargo,
+  so checking all edges could bail spuriously.)
+- `alint_core_is_a_dependency_sink` — `alint-core` has no runtime intra-workspace deps.
 - `workspace_dsl_components_match_cargo_metadata` — the C4 model's crate set
   equals the workspace-member set.
 

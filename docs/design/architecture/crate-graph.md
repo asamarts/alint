@@ -4,9 +4,9 @@
      Edit the crates' Cargo.toml and regenerate; `gen-arch --check` gates it. -->
 
 The intra-workspace dependency edges of alint's Cargo workspace, extracted from
-`cargo metadata`. `alint-core` is the foundation (no workspace dependencies); the
-`alint` binary and `xtask` sit at the top. An edge `A --> B` means crate A depends
-on crate B.
+`cargo metadata`. A solid edge `A --> B` is a normal (runtime) dependency; a dashed
+edge `A -.-> B` is dev/build-only (test harnesses, tooling). `alint-core` is the
+foundation (no runtime dependencies); the tiers below count runtime edges only.
 
 ```mermaid
 graph TD
@@ -30,11 +30,6 @@ graph TD
     alint_bench --> alint_output
     alint_bench --> alint_rules
     alint_dsl --> alint_core
-    alint_dsl --> alint_rules
-    alint_e2e --> alint_core
-    alint_e2e --> alint_dsl
-    alint_e2e --> alint_rules
-    alint_e2e --> alint_testkit
     alint_lsp --> alint_core
     alint_lsp --> alint_dsl
     alint_lsp --> alint_rules
@@ -45,23 +40,28 @@ graph TD
     alint_testkit --> alint_rules
     xtask --> alint_bench
     xtask --> alint_core
-    xtask --> alint_dsl
     xtask --> alint_rules
+    alint_dsl -.-> alint_rules
+    alint_e2e -.-> alint_core
+    alint_e2e -.-> alint_dsl
+    alint_e2e -.-> alint_rules
+    alint_e2e -.-> alint_testkit
+    xtask -.-> alint_dsl
 ```
 
 ## Crates by tier
 
-Tier = longest dependency chain to the foundation (`alint-core` = 0).
+Tier = longest runtime-dependency chain to the foundation (`alint-core` = 0); dev/build-only edges don't count.
 
 | Tier | Crate | Role |
 |---|---|---|
 | 0 | `alint-core` | Core types and execution engine for the alint language-agnostic repository linter. |
+| 0 | `alint-e2e` | Internal: end-to-end scenario tests for alint. Not a library. |
+| 1 | `alint-dsl` | Internal: YAML DSL loader for alint configuration files. Not a stable public API. |
 | 1 | `alint-output` | Internal: output formatters for alint reports (human, json, ...). Not a stable public API. |
 | 1 | `alint-rules` | Internal: built-in rule implementations for alint. Not a stable public API. |
-| 2 | `alint-dsl` | Internal: YAML DSL loader for alint configuration files. Not a stable public API. |
-| 3 | `alint-bench` | Benchmark harness and deterministic fixture generator for alint |
-| 3 | `alint-lsp` | Internal: Language Server Protocol server for alint. Not a stable public API. |
-| 3 | `alint-testkit` | Internal: end-to-end scenario fixtures + tree-spec utilities for alint's own tests. Not a stable public API. |
-| 4 | `alint` | Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. |
-| 4 | `alint-e2e` | Internal: end-to-end scenario tests for alint. Not a library. |
-| 4 | `xtask` | Cargo-xtask helpers for alint (bench, release, etc.) |
+| 2 | `alint-bench` | Benchmark harness and deterministic fixture generator for alint |
+| 2 | `alint-lsp` | Internal: Language Server Protocol server for alint. Not a stable public API. |
+| 2 | `alint-testkit` | Internal: end-to-end scenario fixtures + tree-spec utilities for alint's own tests. Not a stable public API. |
+| 3 | `alint` | Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. |
+| 3 | `xtask` | Cargo-xtask helpers for alint (bench, release, etc.) |
