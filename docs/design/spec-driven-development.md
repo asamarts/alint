@@ -454,6 +454,15 @@ as the net. Add the schema-validate-all-examples gate (WS1d, partial).
 WS1b/1c/1d: rule reference and CLI reference generated and gated; `insta` snapshots for
 `--help` and the rules table; `trycmd` over documented invocations and README examples.
 
+*Progress (2026-06-10): each generated rule page now carries a schema-derived `## Options`
+table - name, type, required, default, description - sourced from the type-derived
+`$defs/rule_<kind>` branch, so option docs flow Rust type -> schema -> alint.org with no
+hand-maintained intermediate (the Ruff model). Aliases resolve to their canonical branch;
+enums render as `one of ...`; whole-repo kinds advertise no `paths`. Locked by
+`committed_schema_every_branch_renders_a_clean_table` in `xtask`. CLI reference and README
+invocations are already covered by the existing `trycmd` suite; `insta` snapshots for the
+rendered tables remain to add.*
+
 **Phase 3 - The facts contract + alint.org loop.**
 WS1e `facts.json`; WS5 site renders from it with a content test and version-pin parity.
 Closes the highest-remaining-risk external drift.

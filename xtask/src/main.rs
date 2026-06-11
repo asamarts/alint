@@ -33,6 +33,7 @@ mod bench_release;
 mod docs_export;
 mod gen_schema;
 mod roadmap_generator;
+mod rule_options_table;
 
 pub(crate) use bench_release::{build_release_binary, git_sha, now_iso, workspace_root};
 

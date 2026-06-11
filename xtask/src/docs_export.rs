@@ -13,6 +13,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::rule_options_table::{build_kind_branch_index, load_config_schema, options_section};
 use crate::{build_release_binary, git_sha, now_iso, walkdir_plain, workspace_root};
 
 // ---- docs-export ----------------------------------------------------------
@@ -269,6 +270,12 @@ fn generate_rules_pages(
     // documented, just under their canonical name's heading.
     let aliases: HashSet<String> = harvest_aliases(&src);
 
+    // Source of truth for the per-rule "## Options" tables: the
+    // type-derived JSON Schema. Loaded once; indexed by every kind
+    // spelling so aliases resolve to their canonical branch.
+    let schema = load_config_schema(&workspace.join(docs_paths::SCHEMA_JSON))?;
+    let kind_branches = build_kind_branch_index(&schema);
+
     let rules_dir = target_dir.join("rules");
     fs::create_dir_all(&rules_dir)?;
 
@@ -312,6 +319,8 @@ fn generate_rules_pages(
             &family_dir,
             &family_slug,
             &known_kinds,
+            &schema,
+            &kind_branches,
             &mut kind_to_family,
             &mut all_kinds,
             &mut missing_examples,
@@ -368,11 +377,17 @@ fn generate_rules_pages(
 /// of `generate_rules_pages` because clippy's `too_many_lines`
 /// flagged the original — and even ignoring that, "process one
 /// family" is its own logical chunk worth naming.
+// Threads the read-only registry/schema context plus the three
+// accumulators through one family's H3 sections; bundling these into
+// a struct would obscure more than it clarifies.
+#[allow(clippy::too_many_arguments)]
 fn process_family_h3s(
     h2: &H2Section,
     family_dir: &Path,
     family_slug: &str,
     known_kinds: &std::collections::HashSet<String>,
+    schema: &serde_json::Value,
+    kind_branches: &std::collections::HashMap<String, serde_json::Value>,
     kind_to_family: &mut std::collections::HashMap<String, String>,
     all_kinds: &mut Vec<KindEntry>,
     missing_examples: &mut Vec<String>,
@@ -412,6 +427,9 @@ fn process_family_h3s(
                 .filter(|k| *k != kind)
                 .map(String::as_str)
                 .collect();
+            let options_md = kind_branches
+                .get(kind)
+                .map(|branch| options_section(branch, schema));
             emit_rule_page(
                 family_dir,
                 kind,
@@ -419,6 +437,7 @@ fn process_family_h3s(
                 &h2.title,
                 &h3.body,
                 &siblings,
+                options_md.as_deref(),
                 kind_order,
             )?;
             kind_to_family.insert(kind.clone(), family_slug.to_string());
@@ -666,6 +685,9 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
 /// `title` is the bare kind name so URLs and Starlight headings
 /// match what the user types in `.alint.yml`. The page body is
 /// the H3's content plus a "See also" footer for paired rules.
+// Page-rendering inputs are all distinct scalars/slices; a struct
+// would just relocate the argument list without simplifying callers.
+#[allow(clippy::too_many_arguments)]
 fn emit_rule_page(
     family_dir: &Path,
     kind: &str,
@@ -673,6 +695,7 @@ fn emit_rule_page(
     family_title: &str,
     body: &str,
     siblings: &[&str],
+    options_md: Option<&str>,
     sidebar_order: u32,
 ) -> Result<()> {
     let mut page = String::new();
@@ -688,6 +711,18 @@ fn emit_rule_page(
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page);
     page.push_str(body.trim_start_matches('\n'));
+    // Authoritative options table, derived from the type-generated
+    // JSON Schema (ADR-0001). Injected between the hand-written
+    // prose and the "See also" footer so every rule page carries a
+    // reference that can't drift from the engine's `Options` structs.
+    if let Some(opts) = options_md {
+        while page.ends_with('\n') {
+            page.pop();
+        }
+        page.push_str("\n\n");
+        page.push_str(opts.trim_end_matches('\n'));
+        page.push('\n');
+    }
     if !siblings.is_empty() {
         // Trim trailing newlines so the footer doesn't have a
         // gaping gap above it.

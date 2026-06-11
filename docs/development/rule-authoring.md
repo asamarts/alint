@@ -47,6 +47,14 @@ schema drifts from the Rust types. See ADR-0001 and
 `docs/design/spec-driven-development.md`. Kinds with deeply nested option shapes
 stay hand-written in the schema (omit them from `migrated_option_schemas`).
 
+Your `///` field docs and constraints are not just for the schema: `xtask
+docs-export` reads the type-derived `$defs/rule_<kind>` branch and renders a
+`## Options` table (name / type / required / default / description) into the
+rule's alint.org page automatically. Write the field doc once on the Rust struct
+and it surfaces in the published reference - no separate options list to
+maintain. The `committed_schema_every_branch_renders_a_clean_table` test in
+`xtask` fails if a new option shape can't be classified into a clean table cell.
+
 ### Family-directory conventions
 
 The family directory is chosen by what the rule *does*:
