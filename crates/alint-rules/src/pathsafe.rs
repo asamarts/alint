@@ -148,30 +148,53 @@ mod model {
 mod kani_proofs {
     use super::model::{Step, confine_steps};
 
-    /// For every bounded component sequence: an absolute component
-    /// always escapes (`None`), and a surviving path has a positive
-    /// depth that never exceeds its `Normal` count — so the result can
-    /// never reference a component the input didn't supply, and the
-    /// `..` arithmetic never underflows/panics.
+    /// For every bounded component sequence, `confine_steps` implements
+    /// the confinement policy *exactly*: it escapes (`None`) on any
+    /// absolute component or on a `..` that underflows the root, and
+    /// otherwise yields the surviving depth `#Normal - #Parent` (with the
+    /// empty root, depth 0, rejected). The proof checks this against an
+    /// **independent counting formulation** of the spec — a different
+    /// algorithm shape from the early-return fold under test — so it
+    /// catches a real escape bug (e.g. a `..` that fails to pop), not just
+    /// the weaker side-conditions (`AbsRoot => None`, `depth <= #Normal`)
+    /// an earlier version proved. It also proves the `..` arithmetic never
+    /// underflows or panics.
     #[kani::proof]
     #[kani::unwind(7)]
     fn confine_steps_is_sound() {
         let steps: [Step; 6] = kani::any();
         let result = confine_steps(steps);
-        if steps.iter().any(|s| matches!(s, Step::AbsRoot)) {
-            assert!(
-                result.is_none(),
-                "an absolute component must escape the root"
-            );
+
+        // Independent spec: walk the whole sequence counting a running
+        // balance; the policy escapes iff any absolute component is
+        // present or the balance ever goes negative (a `..` underflowing
+        // the root). When no escape occurs, the depth is the final
+        // balance, and depth 0 (the bare root) is not a valid path.
+        let has_abs = steps.iter().any(|s| matches!(s, Step::AbsRoot));
+        let mut balance: i64 = 0;
+        let mut underflowed = false;
+        for s in &steps {
+            match s {
+                Step::Normal => balance += 1,
+                Step::Parent => {
+                    balance -= 1;
+                    if balance < 0 {
+                        underflowed = true;
+                    }
+                }
+                Step::Cur | Step::AbsRoot => {}
+            }
         }
-        if let Some(depth) = result {
-            let normals = steps.iter().filter(|s| matches!(s, Step::Normal)).count();
-            assert!(depth > 0, "a confined path is never the empty root");
-            assert!(
-                depth <= normals,
-                "depth cannot exceed the Normal-component count"
-            );
-        }
+        let expected = if has_abs || underflowed || balance <= 0 {
+            None
+        } else {
+            Some(balance as usize)
+        };
+
+        assert!(
+            result == expected,
+            "confine_steps must implement the confinement policy exactly"
+        );
     }
 }
 
@@ -218,13 +241,58 @@ mod tests {
         assert_eq!(confined("a/.."), None); // collapses to the root itself
     }
 
+    /// The `allow_out_of_root` decision surface -- the actual allow/deny
+    /// gate. In-tree is always `In`; an escaping path is `Denied` without
+    /// the permission and `AllowedEscape` with it.
+    #[test]
+    fn confine_honors_allow_out_of_root() {
+        use super::{Confined, confine};
+        assert!(matches!(confine(Path::new("a/b"), false), Confined::In(_)));
+        assert!(matches!(confine(Path::new("a/b"), true), Confined::In(_)));
+        assert!(matches!(
+            confine(Path::new("../../etc"), false),
+            Confined::Denied
+        ));
+        assert!(matches!(
+            confine(Path::new("/etc/passwd"), false),
+            Confined::Denied
+        ));
+        assert!(matches!(
+            confine(Path::new("../../etc"), true),
+            Confined::AllowedEscape(_)
+        ));
+        assert!(matches!(
+            confine(Path::new("/etc/passwd"), true),
+            Confined::AllowedEscape(_)
+        ));
+    }
+
+    /// A path strategy that actually exercises the confinement logic: each
+    /// component is a short name, `..`, or `.`, joined by `/` and
+    /// optionally absolute. A flat character regex produces `..` in well
+    /// under 0.01% of cases, so it almost never hits the `..`-underflow
+    /// rejection (the headline cancellation attack); this makes escapes,
+    /// cancellation, and root underflow common, so the properties stress
+    /// the security-critical rejection paths, not just the in-tree case.
+    fn confinement_paths() -> impl Strategy<Value = String> {
+        let component = prop_oneof![
+            3 => "[a-z]{1,4}",
+            2 => Just("..".to_string()),
+            1 => Just(".".to_string()),
+        ];
+        (any::<bool>(), prop::collection::vec(component, 0..8)).prop_map(|(absolute, comps)| {
+            let body = comps.join("/");
+            if absolute { format!("/{body}") } else { body }
+        })
+    }
+
     proptest! {
         /// The security invariant, as a property: whatever path the
         /// config author supplies, a `Some(_)` result is always
         /// root-confined — every component `Normal`, never empty — so
         /// `root.join(it)` can never escape the tree.
         #[test]
-        fn confinement_invariant(s in r"[A-Za-z0-9_./\\-]{0,40}") {
+        fn confinement_invariant(s in confinement_paths()) {
             if let Some(out) = normalize_confined(Path::new(&s)) {
                 prop_assert!(super::is_confined(&out));
             }
@@ -234,7 +302,7 @@ mod tests {
         /// so re-normalising never changes it (a non-stable normaliser
         /// would make `equals`/index lookups order-dependent).
         #[test]
-        fn normalize_confined_is_idempotent(s in r"[A-Za-z0-9_./\\-]{0,40}") {
+        fn normalize_confined_is_idempotent(s in confinement_paths()) {
             if let Some(out) = normalize_confined(Path::new(&s)) {
                 prop_assert_eq!(normalize_confined(&out), Some(out.clone()));
             }
@@ -245,7 +313,7 @@ mod tests {
         /// returns `Some(N)`. This ties the bounded proof to the actual
         /// `PathBuf`-building code.
         #[test]
-        fn agrees_with_proven_model(s in r"[A-Za-z0-9_./\\-]{0,40}") {
+        fn agrees_with_proven_model(s in confinement_paths()) {
             let p = Path::new(&s);
             let model = super::model::confine_steps(p.components().map(|c| super::model::step_of(&c)));
             let real = normalize_confined(p).map(|o| o.components().count());

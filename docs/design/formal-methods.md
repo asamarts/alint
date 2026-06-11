@@ -43,9 +43,14 @@ Following WS4's tiering:
 **Properties (`cargo test`, every CI run):**
 
 - `pathsafe`: `confinement_invariant` (a `Some(_)` result is always non-empty and
-  purely `Normal` — safe to `root.join`), `normalize_confined_is_idempotent`, and
+  purely `Normal` — safe to `root.join`), `normalize_confined_is_idempotent`,
   `agrees_with_proven_model` (the real `PathBuf`-building code matches the bounded
-  model the Kani proof verifies).
+  model the Kani proof verifies), and `confine_honors_allow_out_of_root` (the
+  allow/deny decision surface). These draw from a **component-based generator**
+  (`confinement_paths`) — a mix of `..` / `.` / short names, optionally absolute —
+  so escapes, `..`-cancellation, and root underflow are common; a flat character
+  regex produces `..` in well under 0.01% of cases and would skip the
+  security-critical rejection paths entirely.
 - `cross_file`: `normalize_transforms_are_idempotent` (all of `trim` / `lower` /
   `semver-major` / `semver-minor`), `apply_normalize_single_equals_transform`, and
   `semver_minor_yields_a_clean_band` (output is `MAJOR` or `MAJOR.MINOR`, digits
@@ -53,11 +58,16 @@ Following WS4's tiering:
 
 **Proof (`cargo kani`, scheduled CI):** `pathsafe::kani_proofs::confine_steps_is_sound`
 proves, for every bounded component sequence, that the confinement policy
-(`model::confine_steps`) is sound — an absolute component always escapes, a
-surviving result has positive depth bounded by its `Normal` count (no phantom
-components), and the `..` arithmetic never underflows or panics. The model is the
-distilled policy; the `agrees_with_proven_model` property ties it to the real
-function so the proof's guarantee transfers.
+(`model::confine_steps`) implements the spec **exactly**: it escapes (`None`) on any
+absolute component or on a `..` that underflows the root, and otherwise yields the
+surviving depth `#Normal − #Parent` (depth 0, the bare root, rejected). The proof
+checks this against an *independent counting formulation* of the spec — a different
+algorithm shape from the early-return fold under test — so it catches a genuine
+escape bug (e.g. a `..` that fails to pop), not merely the weaker side-conditions
+(`AbsRoot ⇒ None`, `depth ≤ #Normal`) an earlier version proved; it also proves the
+`..` arithmetic never underflows or panics. The model is the distilled policy; the
+`agrees_with_proven_model` property ties it to the real function so the proof's
+guarantee transfers.
 
 **Contract (`debug_assert!`):** `normalize_confined` asserts `is_confined(&out)`
 at its exit — the invariant as runtime-checked documentation.
