@@ -89,6 +89,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros", "syn
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 unused_must_use = "deny"
+# `cfg(kani)` is set by the Kani verifier (`cargo kani`), not cargo, so
+# declare it known to silence `unexpected_cfgs` in normal builds. See the
+# `#[cfg(kani)]` proof harnesses (docs/design/formal-methods.md).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -1,0 +1,31 @@
+# Kani bounded-proof job (Phase 5 / WS4, docs/design/formal-methods.md).
+#
+# Runs the `#[kani::proof]` harnesses (today: the path-confinement policy
+# proof in alint-rules). Kept OFF the PR path and on a weekly schedule +
+# manual dispatch, because model-checking time should never block a merge
+# — the proptest properties on the PR path are the always-on behaviour
+# spec; this is the deeper, slower guarantee.
+name: Kani proofs
+
+on:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kani-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kani:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run Kani proofs
+        uses: model-checking/kani-github-action@v1
+        with:
+          args: "-p alint-rules"

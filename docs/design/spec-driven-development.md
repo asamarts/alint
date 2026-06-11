@@ -498,6 +498,18 @@ WS4: Kani job on the pure core; Miri nightly; `contracts` on a few invariants; e
 single Stateright model for cross-file dispatch determinism / LSP cache. This phase is
 genuinely optional and can trail the rest.
 
+*Progress (2026-06-11): shipped, scoped to where it pays. (1) **proptest** properties as the
+always-on behaviour spec: `normalize_confined` confinement + idempotence + model-agreement,
+and the `cross_file` normalisers' idempotence + clean-band shape. (2) A **verified Kani
+proof** of the path-confinement security policy (`confine_steps_is_sound`) — a bounded proof
+that an absolute component always escapes and a surviving path's depth never exceeds its
+`Normal` count, run on a weekly/dispatch CI job (`.github/workflows/kani.yml`, off the PR
+path). (3) A **`debug_assert!`** confinement contract. Miri (deferred: `forbid(unsafe_code)`
+makes it near-zero ROI), the `contracts` crate (deferred: `debug_assert!` suffices; migrate
+to MCP-759 native contracts later), and Stateright (deferred: dispatch is sequential; revisit
+for an LSP incremental cache) are documented with rationale. Research-grade verifiers skipped.
+Spec: `docs/design/formal-methods.md`.*
+
 Each phase is independently shippable and leaves the tree green. The whole program is mostly
 non-user-facing (engine internals, CI, docs pipeline), so it can interleave with feature work
 rather than blocking a release; the natural home is an engineering-foundations track

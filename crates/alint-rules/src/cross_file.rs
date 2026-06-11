@@ -1022,6 +1022,53 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex};
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Every `normalize` transform is idempotent: normalising an
+        /// already-normalised value is a no-op. A non-idempotent
+        /// transform would make `equals` comparisons depend on how many
+        /// times normalisation ran — a latent correctness bug. (This is
+        /// the behaviour spec; proptest is the partial proof.)
+        #[test]
+        fn normalize_transforms_are_idempotent(s in r"\PC{0,48}") {
+            for t in [
+                Normalize::Trim,
+                Normalize::Lower,
+                Normalize::SemverMajor,
+                Normalize::SemverMinor,
+            ] {
+                let once = t.apply(&s);
+                let twice = t.apply(&once);
+                prop_assert_eq!(&twice, &once, "{:?} is not idempotent on {:?}", t, s);
+            }
+        }
+
+        /// `apply_normalize` with a single transform equals that
+        /// transform applied directly — the fold has no off-by-one.
+        #[test]
+        fn apply_normalize_single_equals_transform(s in r"\PC{0,48}") {
+            let t = Normalize::SemverMinor;
+            prop_assert_eq!(apply_normalize(&[t], &s), t.apply(&s));
+        }
+
+        /// `semver_minor` always yields a clean band: empty, or digits
+        /// optionally followed by `.` and more digits (`MAJOR` or
+        /// `MAJOR.MINOR`). No stray separators or non-digits survive.
+        #[test]
+        fn semver_minor_yields_a_clean_band(s in r"\PC{0,48}") {
+            let band = semver_minor(&s);
+            if !band.is_empty() {
+                let mut parts = band.split('.');
+                let major = parts.next().unwrap();
+                prop_assert!(!major.is_empty() && major.bytes().all(|b| b.is_ascii_digit()));
+                if let Some(minor) = parts.next() {
+                    prop_assert!(!minor.is_empty() && minor.bytes().all(|b| b.is_ascii_digit()));
+                }
+                prop_assert!(parts.next().is_none(), "at most MAJOR.MINOR");
+            }
+        }
+    }
 
     fn index(files: &[&str]) -> FileIndex {
         FileIndex::from_entries(
