@@ -228,21 +228,15 @@ fn auto_fix_ops_count(root: &Path) -> Result<usize> {
     walk(&root.join("crates/alint-rules/src/fixers"))
 }
 
-/// The `FactSpec::name()` arms in `crates/alint-core/src/facts.rs`,
-/// sorted. A small, stable set kept in lockstep with that match by the
-/// list being short enough to eyeball in review.
+/// The built-in fact-kind names, taken from `alint_core::FactKind::ALL_NAMES`
+/// (the single source of truth, gated against `FactKind::name()` by a test
+/// in alint-core) rather than a copy here — so `facts.json` can't drift from
+/// the engine's fact kinds. `ALL_NAMES` is already sorted; re-sort defensively.
 fn fact_predicates() -> Vec<String> {
-    let mut v: Vec<String> = [
-        "all_files_exist",
-        "any_file_exists",
-        "count_files",
-        "custom",
-        "file_content_matches",
-        "git_branch",
-    ]
-    .iter()
-    .map(|s| (*s).to_string())
-    .collect();
+    let mut v: Vec<String> = alint_core::FactKind::ALL_NAMES
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     v.sort();
     v
 }

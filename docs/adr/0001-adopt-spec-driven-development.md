@@ -59,6 +59,14 @@ Wherever a CI gate is needed, we prefer an alint rule (for example `generated_fi
 for regenerate-and-diff freshness) over a bespoke script, so alint enforces its own
 spec-driven discipline on itself.
 
+Amendment (2026-06-11): in practice the generator freshness gates shipped as
+`gen-{schema,facts,arch} --check` (CI `docs` job + a cargo test each), not as
+`generated_file_fresh` alint rules. `generated_file_fresh` diffs a command's stdout against
+one file; the generators write files (`gen-schema` writes two), already expose `--check`, and
+dogfooding them would shell `cargo` from inside `alint check .`. The `--check` gates are
+themselves under cargo test, preserving the "alint generator under test" intent without the
+poor fit. See WS1f in `docs/design/spec-driven-development.md` for the full rationale.
+
 ## Consequences
 
 Positive: most drift becomes machine-detectable and auto-fixable; the schema can no

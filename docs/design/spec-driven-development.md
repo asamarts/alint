@@ -238,6 +238,18 @@ and guarded by a regenerate-then-diff check. Implement the gate as an alint rule
 itself an alint feature under test. Keep `git diff --exit-code` as the CI backstop. Prefer
 content-diff over any mtime-based staleness check (mtime is unreliable on fresh CI clones).
 
+*Decision (2026-06-11): the gates shipped as `gen-{schema,facts,arch} --check` (run in CI's
+`docs` job via `ci/scripts/docs.sh`) plus a `gen_*_check_passes_on_committed_tree` cargo
+test per generator — content-diff, not mtime. We did NOT dogfood them via
+`generated_file_fresh` because it doesn't fit: that kind diffs a command's stdout against a
+single target, but our generators write files (and `gen-schema` writes two — root + the
+in-crate copy), have a first-class `--check` mode, and would have to shell `cargo` from
+inside `alint check .` — making the dogfood non-self-contained and slow on every push. The
+`--check` gates are themselves under cargo test, so the mechanism is still "an alint
+generator under test," just not routed through an alint rule. The earlier CI-gate bypass
+(artifact-only PRs skipping the `docs` job) was closed in the same review by routing
+`facts.json` + `docs/design/architecture/**` through the `docs` change-class.*
+
 **WS1 net effect:** the schema, the rule reference, the CLI reference, and the public facts
 all become generated, snapshot-pinned, and gated. Drift sources #1, #3, #4 are closed; #2 is
 set up for WS5.

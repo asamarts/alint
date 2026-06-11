@@ -71,7 +71,10 @@ if echo "$CHANGED" | grep -qE '^(crates/alint-bench/|xtask/)'; then
   BENCH=true
 fi
 
-if echo "$CHANGED" | grep -qE '^(docs/|PROPOSAL\.md$|[A-Z_]+\.md$)'; then
+# `facts.json` (repo root) is a generated contract guarded by `gen-facts
+# --check` in the docs job; route it through `docs` so a hand-edit can't skip
+# every gate (the architecture artifacts under docs/ already match here).
+if echo "$CHANGED" | grep -qE '^(docs/|PROPOSAL\.md$|[A-Z_]+\.md$|facts\.json$)'; then
   DOCS=true
 fi
 

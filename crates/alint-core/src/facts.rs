@@ -112,6 +112,23 @@ impl FactKind {
             Self::Custom { .. } => "custom",
         }
     }
+
+    /// Every built-in fact-kind name, sorted — the single source of truth
+    /// the `facts.json` contract (xtask `gen-facts`) consumes, so the
+    /// published `fact_predicates` list can't drift from the engine.
+    ///
+    /// MUST list every variant's `name()`. `name()` above is an
+    /// exhaustive match, so adding a `FactKind` variant forces a new arm
+    /// there — add its name here too (the `all_names_covers_every_variant`
+    /// test fails if this list and `name()` disagree).
+    pub const ALL_NAMES: &'static [&'static str] = &[
+        "all_files_exist",
+        "any_file_exists",
+        "count_files",
+        "custom",
+        "file_content_matches",
+        "git_branch",
+    ];
 }
 
 /// Fact-kind body for `custom`. Spawns `argv` as a child process
@@ -335,6 +352,52 @@ mod tests {
 
     fn parse(yaml: &str) -> Vec<FactSpec> {
         serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    /// `FactKind::ALL_NAMES` is the source of truth for the `facts.json`
+    /// contract; keep it sorted/unique and in step with `name()`. Each
+    /// variant is built via the public parse path, so a renamed
+    /// discriminator or a name dropped from `ALL_NAMES` fails here. (A
+    /// brand-new variant also forces a `name()` arm — exhaustive match —
+    /// so this list can't silently fall behind.)
+    #[test]
+    fn all_names_is_sorted_unique_and_matches_name() {
+        let mut sorted = FactKind::ALL_NAMES.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            FactKind::ALL_NAMES,
+            sorted.as_slice(),
+            "FactKind::ALL_NAMES must be sorted and de-duplicated"
+        );
+
+        let cases = [
+            ("- id: f\n  any_file_exists: x\n", "any_file_exists"),
+            ("- id: f\n  all_files_exist: [x]\n", "all_files_exist"),
+            ("- id: f\n  count_files: \"**/*\"\n", "count_files"),
+            (
+                "- id: f\n  file_content_matches:\n    paths: x\n    pattern: y\n",
+                "file_content_matches",
+            ),
+            ("- id: f\n  git_branch: {}\n", "git_branch"),
+            ("- id: f\n  custom:\n    argv: [echo, hi]\n", "custom"),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for (yaml, expected) in cases {
+            let specs = parse(yaml);
+            assert_eq!(specs[0].kind.name(), expected, "name() drift for {yaml:?}");
+            assert!(
+                FactKind::ALL_NAMES.contains(&expected),
+                "{expected} is produced by name() but missing from ALL_NAMES"
+            );
+            seen.insert(expected);
+        }
+        let listed: std::collections::BTreeSet<&str> =
+            FactKind::ALL_NAMES.iter().copied().collect();
+        assert_eq!(
+            seen, listed,
+            "ALL_NAMES lists a name no covered variant produces (add a case above or fix ALL_NAMES)"
+        );
     }
 
     #[test]

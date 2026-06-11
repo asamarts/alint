@@ -137,9 +137,16 @@ jobs:
   docs:
     name: Docs
     needs: [changes, fmt]
+    # Runs on `docs` changes too, not just `rust`: docs.sh carries the
+    # gen-{schema,facts,arch} --check and docs-export --check gates, and the
+    # artifacts they guard (facts.json, docs/design/architecture/**, and the
+    # docs bundle from docs/rules.md) live under `docs`/root paths that don't
+    # flip `rust`. Without the `docs` clause, a PR hand-editing a generated
+    # artifact would skip this job and merge stale (the gate bypass the
+    # 2026-06-11 review found).
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.docs == 'true')
     runs-on: [self-hosted, linux, alint]
     steps:
       - uses: actions/checkout@v6
@@ -147,10 +154,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ci-docs
-      # Runs on pull_request too (not just push): docs.sh carries the
-      # `gen-schema --check`, `docs-export --check`, and rustdoc gates, which
-      # are load-bearing for schema/parser correctness and must catch drift on a
-      # PR, not only post-merge.
+      # Load-bearing for schema/parser/contract correctness; must catch drift
+      # on a PR, not only post-merge.
       - run: ci/scripts/docs.sh
 
   dogfood:
