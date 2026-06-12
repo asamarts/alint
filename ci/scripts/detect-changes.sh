@@ -62,7 +62,12 @@ if echo "$CHANGED" | grep -qE '^editors/'; then
   EDITORS=true
 fi
 
-if echo "$CHANGED" | grep -qE '^(crates/|xtask/|schemas/|\.alint\.yml$)'; then
+# `.gitattributes` controls the checkout line endings of byte-compared
+# fixtures and generated artifacts (snapshots, trycmd literals, the
+# schema, facts.json, crate-graph.md), so a change to it can flip
+# `gen-*-check` / snapshot tests on a CRLF platform — run the rust suite
+# (and, via `rust || docs`, the docs gates) so that's validated.
+if echo "$CHANGED" | grep -qE '^(crates/|xtask/|schemas/|\.alint\.yml$|\.gitattributes$)'; then
   RUST=true
 fi
 
