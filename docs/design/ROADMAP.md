@@ -1309,7 +1309,7 @@ Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/m
 A drift-elimination program run on `main` after v0.12 — a foundations track, not a
 user-facing version cut, so it interleaves with the release cadence rather than
 occupying a slot. The premise an anti-drift linter has to honour itself — *alint's
-own claims can't drift from the tool* — now holds end to end. Five workstreams
+own claims can't drift from the tool* — now holds end to end. Six workstreams
 shipped, each artifact regenerate-and-diff gated:
 
 - **Schema from types.** `schemas/v1/config.json` is generated from the Rust
@@ -1320,21 +1320,29 @@ shipped, each artifact regenerate-and-diff gated:
   the published options can't drift from the engine.
 - **`facts.json` contract.** A committed surface-area manifest — version, the six
   headline counts (rule kinds, families, rulesets, fix ops, output formats,
-  subcommands), and catalogue lists — gated by `gen-facts --check`. alint.org renders
-  these numbers from it, so the marketing site can't lag a release.
+  subcommands), and catalogue lists — gated by `gen-facts --check`. It is the single
+  contract the public site consumes (next).
 - **Architecture as code.** The crate dependency graph is extracted from
   `cargo metadata` into a committed Mermaid diagram (runtime vs dev/build edges) and
   a hand-modeled Structurizr C4 model is kept honest against the workspace members,
   both gated by `gen-arch --check`.
 - **Pragmatic formal methods.** proptest properties as an always-on behaviour spec,
   plus a verified Kani bounded proof of the path-confinement security policy.
+- **Contract-consuming site.** alint.org reads `facts.json` through a typed loader,
+  cross-checks at sync time that the bundled contract agrees with the site's own
+  manifest, and renders its headline counts and roadmap claims from it — so the
+  public site can't lag a release either. The site also dogfoods alint's own
+  house-style rules on its prose, closing the loop from the consuming end.
 
 Recorded in [`spec-driven-development.md`](https://github.com/asamarts/alint/blob/main/docs/design/spec-driven-development.md),
 [ADR-0001](https://github.com/asamarts/alint/blob/main/docs/adr/0001-adopt-spec-driven-development.md),
 and the per-workstream design docs. An adversarial multi-reviewer pass after the cut
 found and fixed a CI gate bypass, a too-weak Kani proof, and a crate graph that
 conflated dev and runtime edges — the value of reviewing your own anti-drift work
-adversarially.
+adversarially. Wiring the site to the contract then proved the thesis in miniature:
+two of the project's own drift gates — the site's version-pin consistency check and
+alint's `prose-no-em-dash` rule, dogfooded on the site's prose — caught drift that
+very change introduced, and it was fixed before the next release.
 
 ## v0.13: WASM plugins
 
