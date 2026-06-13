@@ -1026,7 +1026,7 @@ carried into the v0.12 cut (per-item status below).**
   `skip-broken-symlinks` / `permissive` modes.
 
 ## v0.12: Real-world coverage expansion (100+ repos) + gap rule kinds
-<!-- roadmap-public: blurb="New kinds file_graph, for_each_match, cross_file, and pair_changed_together, with a path-confinement security cut and the php ruleset." -->
+<!-- roadmap-public: blurb="New kinds file_graph, for_each_match, cross_file, and pair_changed_together, generated_file_fresh mutating mode, a path-confinement security cut, and the php ruleset." -->
 
 **v0.12.0 shipped** (2026-06-07) a large first cut of this scope. New rule kinds that landed: `file_graph` (file-dependency-graph firewalls plus cycle / orphan / dangling-edge checks, the top demand-ranked kind of the 111-repo study), `for_each_match` (a per-line predicate quantifier), `cross_file` (a unifying value-relation kind that subsumes `cross_file_value_equals` and adds `subset` / `superset` / `set_equals` / `identical` / `resolves`), `git_commit_subject_matches`, `changeset_requires_path`, and `pair_changed_together`. Also shipped: `generated_file_fresh`'s in-place `outputs:` mode, markerless `ordered_block`, the `php@v1` bundled ruleset (21 → 22), JSONC-tolerant structured parsing, the `cross_file` `normalize:` promotion, and `import_gate` presets for Scala / Java / Dart / Nix, plus a security cycle that confines every config-declared path to the repo root and fixes a git argument-injection in `since:` reaching back to v0.9.21. Per-item status is tagged inline below. The 100+ repo study (111 repos done) and the still-open gap kinds continue in the v0.12 line.
 

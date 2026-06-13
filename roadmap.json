@@ -71,7 +71,7 @@
       "version": "0.12",
       "title": "Real-world coverage expansion (100+ repos) + gap rule kinds",
       "kind": "release",
-      "blurb": "New kinds file_graph, for_each_match, cross_file, and pair_changed_together, with a path-confinement security cut and the php ruleset."
+      "blurb": "New kinds file_graph, for_each_match, cross_file, and pair_changed_together, generated_file_fresh mutating mode, a path-confinement security cut, and the php ruleset."
     },
     {
       "version": null,
