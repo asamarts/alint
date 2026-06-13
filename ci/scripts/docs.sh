@@ -33,6 +33,14 @@ cargo run -q -p xtask -- gen-schema --check
 echo "==> Running xtask gen-facts --check"
 cargo run -q -p xtask -- gen-facts --check
 
+# `xtask gen-roadmap --check` regenerates roadmap.json (the public-roadmap
+# contract the alint.org /roadmap/ timeline renders) from the marked phase
+# headings in docs/design/ROADMAP.md, and fails if the committed roadmap.json
+# drifted. Run `cargo run -p xtask -- gen-roadmap` to refresh after editing a
+# phase heading or its roadmap-public marker.
+echo "==> Running xtask gen-roadmap --check"
+cargo run -q -p xtask -- gen-roadmap --check
+
 # `xtask gen-arch --check` regenerates the crate dependency graph
 # (docs/design/architecture/crate-graph.md) from `cargo metadata` and fails if
 # it drifted, and verifies the hand-modeled C4 model (workspace.dsl) still

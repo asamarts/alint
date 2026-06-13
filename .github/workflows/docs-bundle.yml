@@ -81,14 +81,29 @@ jobs:
           # docs/design/ARCHITECTURE.md and ROADMAP.md are overlaid too: they
           # are living design documents for contributors (the
           # /docs/about/architecture/ and /docs/about/roadmap/ pages) that track
-          # main rather than waiting for the next tag.
+          # main rather than waiting for the next tag. roadmap.json (the
+          # machine-readable phase contract gen-roadmap derives from ROADMAP.md,
+          # which the alint.org /roadmap/ timeline renders) is overlaid with
+          # them so the published plan tracks main; facts.json deliberately is
+          # NOT overlaid, so the surface-area counts stay pinned to the release.
           git fetch --quiet origin main
-          git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md
+          git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json
           echo "Overlaid reference + design docs from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Generate docs-bundle/
         run: cargo run -q -p xtask -- docs-export
         # Output lives at target/docs-bundle/.
+
+      - name: Ensure roadmap.json is in the bundle (main-tracked)
+        run: |
+          set -euo pipefail
+          # docs-export copies roadmap.json into the bundle, but the bundle is
+          # built from the release TAG's xtask, which predates that copy step.
+          # roadmap.json was overlaid from main above, so copy it in here to
+          # bridge until the docs-export change ships in a release tag. Once it
+          # does this is idempotent (identical, main-tracked content).
+          cp roadmap.json target/docs-bundle/roadmap.json
+          echo "roadmap.json ($(wc -c < roadmap.json) bytes) overlaid into the bundle."
 
       - name: Refresh cross-version trajectory from main's bench results
         run: |

@@ -25,10 +25,12 @@ crates/alint/tests/cli/*.toml text eol=lf
 schemas/v1/config.json text eol=lf
 crates/alint-dsl/schemas/v1/config.json text eol=lf
 
-# Generated surface-area contract + crate dependency graph: `gen-facts --check`
-# and `gen-arch --check` (and their xtask tests) byte-compare these against a
-# `\n`-only rendered string — the same CRLF-on-Windows hazard as the schema
-# above. Without these pins the Windows CI job reports them spuriously stale
-# (the failure that started with the facts.json / crate-graph.md commits).
+# Generated contracts + crate dependency graph: `gen-facts --check`,
+# `gen-roadmap --check`, and `gen-arch --check` (and their xtask tests)
+# byte-compare these against a `\n`-only rendered string — the same
+# CRLF-on-Windows hazard as the schema above. Without these pins the Windows
+# CI job reports them spuriously stale (the failure that started with the
+# facts.json / crate-graph.md commits).
 facts.json text eol=lf
+roadmap.json text eol=lf
 docs/design/architecture/crate-graph.md text eol=lf

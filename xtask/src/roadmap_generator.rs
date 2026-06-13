@@ -110,6 +110,14 @@ fn elide_internal_blocks(content: &str) -> Result<String> {
             continue;
         }
 
+        // Drop the machine-readable `roadmap-public` markers that feed
+        // `xtask gen-roadmap`. They are invisible HTML comments, but
+        // stripping them keeps the published /docs/about/roadmap/ source
+        // clean. Inside a code fence they stay literal (handled above).
+        if trimmed.starts_with("<!-- roadmap-public:") {
+            continue;
+        }
+
         let has_start = line.contains(MARKER_START);
         let has_end = line.contains(MARKER_END);
 
@@ -362,5 +370,23 @@ mod tests {
         let a = transform(input, "T").unwrap();
         let b = transform(input, "T").unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn roadmap_public_markers_are_stripped() {
+        // The `roadmap-public` markers feed `xtask gen-roadmap`; they must
+        // not leak into the published /docs/about/roadmap/ page. The
+        // heading they annotate stays.
+        let input = "# T\n\
+                     \n\
+                     ## v0.12: Coverage\n\
+                     <!-- roadmap-public: blurb=\"New kinds and a security cut.\" -->\n\
+                     \n\
+                     Body.\n";
+        let result = transform(input, "T").unwrap();
+        assert!(result.contains("## v0.12: Coverage"));
+        assert!(result.contains("Body."));
+        assert!(!result.contains("roadmap-public"));
+        assert!(!result.contains("blurb="));
     }
 }

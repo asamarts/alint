@@ -1,0 +1,95 @@
+{
+  "format_version": 1,
+  "phases": [
+    {
+      "version": "0.1",
+      "title": "MVP",
+      "kind": "release",
+      "blurb": "The smallest adoptable scope: the walker, config loader, the core file, content, and naming primitives, and human plus JSON output."
+    },
+    {
+      "version": "0.2",
+      "title": "Cross-file and composition",
+      "kind": "release",
+      "blurb": "Cross-file primitives like pair and for_each_dir, the facts system, the when expression language, extends with SRI, and the fix subcommand."
+    },
+    {
+      "version": "0.3",
+      "title": "Hygiene, portable metadata, byte fingerprints",
+      "kind": "release",
+      "blurb": "Text and Unicode hygiene, encoding and byte-fingerprint rules, portable-name and Unix-metadata checks, and the first content auto-fixers."
+    },
+    {
+      "version": "0.4",
+      "title": "Bundled rulesets + pre-commit",
+      "kind": "release",
+      "blurb": "One-line adoption through bundled rulesets and pre-commit hooks, with the oss-baseline, rust, node, and monorepo sets landing first."
+    },
+    {
+      "version": "0.5",
+      "title": "Monorepo scale + plugins v1 + remaining distribution",
+      "kind": "release",
+      "blurb": "Monorepo ergonomics such as changed mode, scope filters, and workspace overlays, the command plugin tier, and the remaining install channels."
+    },
+    {
+      "version": "0.6",
+      "title": "Agent-era bundled rulesets and output",
+      "kind": "release",
+      "blurb": "The agent-hygiene and agent-context bundled rulesets, plus an agent output format for tools that read alint inside a self-correction loop."
+    },
+    {
+      "version": "0.7",
+      "title": "New rule kinds for agentic problems",
+      "kind": "release",
+      "blurb": "Heuristic rule kinds markdown_paths_resolve, commented_out_code, and git_blame_age, with the suggest and export-agents-md subcommands."
+    },
+    {
+      "version": "0.8",
+      "title": "Comprehensive test + bench foundation",
+      "kind": "release",
+      "blurb": "The test and benchmark floor: per-kind coverage, cross-platform CI, an 85 percent coverage gate, and nightly mutation testing."
+    },
+    {
+      "version": "0.9",
+      "title": "Engine optimization",
+      "kind": "release",
+      "blurb": "Parallel walker, a memory-footprint pass, the per-file dispatch flip, and cross-file fast paths that cut 1M-file runs from minutes to seconds."
+    },
+    {
+      "version": "0.10",
+      "title": "Case-study coverage push",
+      "kind": "release",
+      "blurb": "Eight case-study-validated rule kinds and the apache/governance and dotnet rulesets, with three pre-release security retirements."
+    },
+    {
+      "version": "0.11",
+      "title": "LSP + DSL polish",
+      "kind": "release",
+      "blurb": "The alint lsp language server with in-editor diagnostics and quick-fixes, scope generalisation, the commit-validation family, and env interpolation."
+    },
+    {
+      "version": "0.12",
+      "title": "Real-world coverage expansion (100+ repos) + gap rule kinds",
+      "kind": "release",
+      "blurb": "New kinds file_graph, for_each_match, cross_file, and pair_changed_together, with a path-confinement security cut and the php ruleset."
+    },
+    {
+      "version": null,
+      "title": "Engineering foundations: spec-driven development",
+      "kind": "foundations",
+      "blurb": "A drift-elimination program on main: schema, facts, and architecture generated and gated, plus a Kani-verified path-confinement proof."
+    },
+    {
+      "version": "0.13",
+      "title": "WASM plugins",
+      "kind": "release",
+      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry."
+    },
+    {
+      "version": "1.0",
+      "title": "Stability",
+      "kind": "release",
+      "blurb": "A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site."
+    }
+  ]
+}

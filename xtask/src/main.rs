@@ -25,6 +25,8 @@
 //!   `Options` structs (schemars); `--check` gates drift.
 //! - `gen-facts`          — regenerate `facts.json` (the surface-area contract)
 //!   from canonical sources; `--check` gates drift.
+//! - `gen-roadmap`        — regenerate `roadmap.json` (the public-roadmap
+//!   contract) from `docs/design/ROADMAP.md`; `--check` gates drift.
 //! - `gen-arch`           — regenerate the crate dependency graph from
 //!   `cargo metadata` + check the C4 model; `--check` gates drift.
 
@@ -39,6 +41,7 @@ mod bench;
 mod bench_release;
 mod docs_export;
 mod facts;
+mod gen_roadmap;
 mod gen_schema;
 mod roadmap_generator;
 mod rule_options_table;
@@ -258,6 +261,12 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate `roadmap.json` (the public-roadmap contract) from ROADMAP.md.
+    GenRoadmap {
+        /// Verify the committed `roadmap.json` is up to date instead of rewriting it.
+        #[arg(long)]
+        check: bool,
+    },
     /// Regenerate the crate dependency graph from `cargo metadata` + gate the C4 model.
     GenArch {
         /// Verify the committed crate graph + C4 model instead of rewriting.
@@ -327,6 +336,7 @@ fn main() -> Result<()> {
         }
         Commands::GenSchema { check } => gen_schema::run(check),
         Commands::GenFacts { check } => facts::run(check),
+        Commands::GenRoadmap { check } => gen_roadmap::run(check),
         Commands::GenArch { check } => arch::run(check),
     }
 }

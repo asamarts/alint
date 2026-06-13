@@ -55,6 +55,7 @@ mod docs_paths {
     pub const CHANGELOG: &str = "CHANGELOG.md";
     pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
     pub const FACTS_JSON: &str = "facts.json";
+    pub const ROADMAP_JSON: &str = "roadmap.json";
     pub const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";
     pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
 }
@@ -137,6 +138,23 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
         format!(
             "copy {} (run `cargo run -p xtask -- gen-facts`)",
             docs_paths::FACTS_JSON
+        )
+    })?;
+
+    // 4b-2. The public-roadmap contract (`roadmap.json`), shipped at the
+    //     bundle root so alint.org's /roadmap/ timeline renders the phase
+    //     list from it. Generated + gated in-repo by `xtask gen-roadmap`.
+    //     Unlike facts.json (pinned to the release tag), docs-bundle.yml
+    //     overlays this from main, so the published plan tracks main while
+    //     the surface-area counts stay pinned to what users can install.
+    fs::copy(
+        workspace.join(docs_paths::ROADMAP_JSON),
+        target_dir.join("roadmap.json"),
+    )
+    .with_context(|| {
+        format!(
+            "copy {} (run `cargo run -p xtask -- gen-roadmap`)",
+            docs_paths::ROADMAP_JSON
         )
     })?;
 
