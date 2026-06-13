@@ -56,6 +56,41 @@ fn roadmap_path() -> Result<PathBuf> {
     Ok(crate::workspace_root()?.join("roadmap.json"))
 }
 
+/// AI-content signals forbidden in any title or blurb. Enforced in
+/// `build_roadmap` (so `gen-roadmap --check` catches them on the docs-only CI
+/// lane, which never runs `cargo test`) because alint.org's prose lint
+/// deliberately ignores the synced `public/_alint/**` contract — the source
+/// owns this invariant.
+const FORBIDDEN_SIGNALS: &[char] = &[
+    '\u{2014}', // em dash
+    '\u{2013}', // en dash
+    '\u{2018}', '\u{2019}', // single curly quotes
+    '\u{201C}', '\u{201D}', // double curly quotes
+];
+
+/// Reject empty fields and any AI-content signal (em / en dash, smart quote,
+/// `&mdash;`) in a phase title or blurb.
+fn validate_no_ai_signals(phases: &[Phase]) -> Result<()> {
+    for p in phases {
+        for (field, val) in [("title", &p.title), ("blurb", &p.blurb)] {
+            if val.is_empty() {
+                bail!("phase {:?} has an empty {field}", p.version);
+            }
+            if let Some(c) = val.chars().find(|c| FORBIDDEN_SIGNALS.contains(c)) {
+                bail!(
+                    "phase {:?} {field} carries an AI-content signal {c:?} (em / en dash \
+                     or smart quote): {val:?}. Use plain ASCII punctuation.",
+                    p.version
+                );
+            }
+            if val.contains("&mdash;") {
+                bail!("phase {:?} {field} carries `&mdash;`: {val:?}", p.version);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn build_roadmap() -> Result<Roadmap> {
     let root = crate::workspace_root()?;
     let path = root.join(ROADMAP_DOC);
@@ -67,6 +102,7 @@ fn build_roadmap() -> Result<Roadmap> {
              roadmap would be empty"
         );
     }
+    validate_no_ai_signals(&phases)?;
     Ok(Roadmap {
         format_version: FORMAT_VERSION,
         phases,
@@ -86,7 +122,7 @@ fn parse_phases(md: &str) -> Result<Vec<Phase>> {
             let heading = current_heading.clone().with_context(|| {
                 format!("`roadmap-public` marker with no preceding `## ` heading: {trimmed}")
             })?;
-            phases.push(heading_to_phase(&heading, blurb));
+            phases.push(heading_to_phase(&heading, blurb)?);
         }
     }
     Ok(phases)
@@ -102,31 +138,48 @@ fn parse_marker(line: &str) -> Option<String> {
 
 /// `v0.12: Real-world coverage (shipped)` → versioned phase;
 /// `Engineering foundations: spec-driven development` → version-less.
-fn heading_to_phase(heading: &str, blurb: String) -> Phase {
+fn heading_to_phase(heading: &str, blurb: String) -> Result<Phase> {
+    // Versioned release heading: `v<major>.<minor>: <title>`. Treated as
+    // versioned only when it starts with `v` + a digit and has a colon. A
+    // version-looking heading whose version is NOT exactly two numeric
+    // components (a 3-part patch like `v0.9.11`, or a typo like `v0..1`) is
+    // rejected: the public roadmap is minor-version granular and the site
+    // keys status on major.minor, so a patch would silently collide with its
+    // minor.
     if let Some(rest) = heading.strip_prefix('v') {
-        if let Some(colon) = rest.find(':') {
-            let ver = &rest[..colon];
-            if !ver.is_empty()
-                && ver.contains('.')
-                && ver.chars().all(|c| c.is_ascii_digit() || c == '.')
-            {
+        if rest.starts_with(|c: char| c.is_ascii_digit()) {
+            if let Some(colon) = rest.find(':') {
+                let ver = &rest[..colon];
+                let parts: Vec<&str> = ver.split('.').collect();
+                let is_major_minor = parts.len() == 2
+                    && parts
+                        .iter()
+                        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+                if !is_major_minor {
+                    bail!(
+                        "roadmap-public heading {heading:?} has version {ver:?}; public \
+                         phases must be major.minor (e.g. `v0.12`). Do not put a \
+                         roadmap-public marker on a patch or malformed version."
+                    );
+                }
                 let raw = rest[colon + 1..].trim();
                 let title = raw.strip_suffix("(shipped)").map_or(raw, str::trim_end);
-                return Phase {
+                return Ok(Phase {
                     version: Some(ver.to_string()),
                     title: title.to_string(),
                     kind: "release".to_string(),
                     blurb,
-                };
+                });
             }
         }
     }
-    Phase {
+    // Version-less named milestone (e.g. the engineering-foundations track).
+    Ok(Phase {
         version: None,
         title: heading.trim().to_string(),
         kind: "foundations".to_string(),
         blurb,
-    }
+    })
 }
 
 /// Pretty JSON plus a trailing newline (git-friendly, byte-compared by
@@ -171,39 +224,73 @@ mod tests {
         run(true).expect("gen-roadmap --check should pass on the committed tree");
     }
 
-    /// No AI-content signals (em dashes, en dashes, smart quotes) in any
-    /// title or blurb. Enforced here because alint.org's prose lint ignores
-    /// the synced `public/_alint/**` contract, so the source owns it. Also
-    /// guards against an empty field.
+    /// `validate_no_ai_signals` (wired into `build_roadmap`, so it runs on the
+    /// docs-only `gen-roadmap --check` lane that never runs `cargo test`)
+    /// rejects em dashes, smart quotes, `&mdash;`, and empty fields, and
+    /// accepts clean ASCII. The committed tree being clean is covered by
+    /// `gen_roadmap_check_passes_on_committed_tree` (which calls `build_roadmap`).
     #[test]
-    fn no_ai_content_signals_in_any_field() {
-        const FORBIDDEN: &[char] = &[
-            '\u{2014}', // em dash
-            '\u{2013}', // en dash
-            '\u{2018}', '\u{2019}', // single curly quotes
-            '\u{201C}', '\u{201D}', // double curly quotes
-        ];
-        let roadmap = build_roadmap().expect("build roadmap");
-        for p in &roadmap.phases {
-            for (field, val) in [("title", &p.title), ("blurb", &p.blurb)] {
-                assert!(
-                    !val.contains(FORBIDDEN),
-                    "phase {:?} {field} carries an em dash / en dash / smart quote \
-                     (AI-content signal): {val:?}",
-                    p.version
-                );
-                assert!(
-                    !val.contains("&mdash;"),
-                    "phase {:?} {field} carries &mdash;: {val:?}",
-                    p.version
-                );
-                assert!(
-                    !val.is_empty(),
-                    "phase {:?} has an empty {field}",
-                    p.version
-                );
-            }
-        }
+    fn validate_rejects_ai_signals_and_empty() {
+        let mk = |title: &str, blurb: &str| Phase {
+            version: Some("0.1".to_string()),
+            title: title.to_string(),
+            kind: "release".to_string(),
+            blurb: blurb.to_string(),
+        };
+        assert!(validate_no_ai_signals(&[mk("MVP", "A clean ASCII blurb.")]).is_ok());
+        assert!(validate_no_ai_signals(&[mk("MVP", "an em dash \u{2014} here")]).is_err());
+        assert!(validate_no_ai_signals(&[mk("a \u{201C}smart\u{201D} title", "ok")]).is_err());
+        assert!(validate_no_ai_signals(&[mk("MVP", "an en dash \u{2013} here")]).is_err());
+        assert!(validate_no_ai_signals(&[mk("MVP", "and &mdash; entity")]).is_err());
+        assert!(validate_no_ai_signals(&[mk("", "empty title")]).is_err());
+        assert!(validate_no_ai_signals(&[mk("MVP", "")]).is_err());
+    }
+
+    /// `parse_phases` extracts versioned releases and the version-less
+    /// foundations milestone, strips the `(shipped)` suffix, and keeps
+    /// document order — driven by synthetic markdown, not the live file.
+    #[test]
+    fn parse_phases_handles_release_foundations_and_shipped_suffix() {
+        let md = r#"## v0.1: MVP (shipped)
+<!-- roadmap-public: blurb="first" -->
+
+## Engineering foundations: spec-driven development
+<!-- roadmap-public: blurb="second" -->
+
+## v0.13: WASM plugins
+<!-- roadmap-public: blurb="third" -->
+"#;
+        let phases = parse_phases(md).expect("parse");
+        assert_eq!(phases.len(), 3);
+        assert_eq!(phases[0].version.as_deref(), Some("0.1"));
+        assert_eq!(phases[0].title, "MVP"); // (shipped) stripped
+        assert_eq!(phases[0].kind, "release");
+        assert_eq!(phases[1].version, None);
+        assert_eq!(phases[1].kind, "foundations");
+        assert_eq!(
+            phases[1].title,
+            "Engineering foundations: spec-driven development"
+        );
+        assert_eq!(phases[2].version.as_deref(), Some("0.13"));
+        assert_eq!(phases[2].blurb, "third");
+    }
+
+    /// A `roadmap-public` marker with no preceding `## ` heading is an error.
+    #[test]
+    fn parse_phases_rejects_marker_without_heading() {
+        let md = "some prose\n<!-- roadmap-public: blurb=\"orphan\" -->\n";
+        assert!(parse_phases(md).is_err());
+    }
+
+    /// A versioned heading whose version is not exactly major.minor (a 3-part
+    /// patch, or malformed) is rejected, so it can't silently collide with its
+    /// minor on the site or render garbage. Version-less names are fine.
+    #[test]
+    fn heading_to_phase_rejects_non_major_minor_version() {
+        assert!(heading_to_phase("v0.9.11: patch", "b".to_string()).is_err());
+        assert!(heading_to_phase("v0..1: broken", "b".to_string()).is_err());
+        assert!(heading_to_phase("v0.12: ok", "b".to_string()).is_ok());
+        assert!(heading_to_phase("Engineering foundations: x", "b".to_string()).is_ok());
     }
 
     /// alint.org derives shipped/planned by comparing each phase's version

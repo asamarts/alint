@@ -44,7 +44,7 @@ jobs:
           MANUAL: ${{ github.event.inputs.crate }}
         run: |
           set -euo pipefail
-          CRATES=(alint-core alint-dsl alint-rules alint-output alint alint-bench alint-testkit alint-e2e)
+          CRATES=(alint-core alint-dsl alint-rules alint-output alint alint-lsp alint-bench alint-testkit alint-e2e)
           if [ -n "${MANUAL:-}" ]; then
             TARGET="$MANUAL"
           else

@@ -14,6 +14,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into the docs bundle at a stable URL, so the README, docs, and alint.org render
   these numbers from one source instead of restating them in prose. Generated and
   drift-gated by `xtask gen-facts --check`.
+- **`roadmap.json` — a machine-readable public-roadmap contract.** A generated,
+  committed phase list (version, title, kind, and a one-line blurb) parsed from
+  the `roadmap-public` markers in `docs/design/ROADMAP.md` and shipped into the
+  docs bundle, so alint.org's `/roadmap/` page renders a data-driven timeline
+  instead of a hand-maintained one (status is derived by the consumer from the
+  released version). Generated and drift-gated by `xtask gen-roadmap --check`,
+  which also forbids AI-content signals (em dashes, smart quotes) in the
+  published blurbs.
 
 ### Changed
 

@@ -10,8 +10,8 @@ inputs:
     description: |
       alint version to install: a release tag like `v0.1.0`, or
       `latest`. Leave unset to install the release matching the tag
-      the action itself is pinned to — e.g. `uses: asamarts/alint@v0.10.0`
-      installs v0.10.0, so pinning the action pins the binary. Falls
+      the action itself is pinned to — e.g. `uses: asamarts/alint@v0.12.0`
+      installs v0.12.0, so pinning the action pins the binary. Falls
       back to `latest` when the action is pinned to a branch or SHA.
     required: false
     default: ""
@@ -59,7 +59,7 @@ runs:
         ALINT_VERSION: ${{ inputs.version }}
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
         # Pin install.sh to whichever ref the consumer pinned the
-        # action to (e.g. `asamarts/alint@v0.10.0`). Without this,
+        # action to (e.g. `asamarts/alint@v0.12.0`). Without this,
         # `main`'s install.sh would be fetched on every run — a
         # change to that script affects every action consumer
         # regardless of the version they pinned.
@@ -82,7 +82,7 @@ runs:
         set -euo pipefail
         if [[ -z "${ACTION_REF:-}" ]]; then
           if [[ "${SOURCE_REPO}" != "asamarts/alint" ]]; then
-            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.10.0" >&2
+            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.12.0" >&2
             exit 1
           fi
           ref="main"

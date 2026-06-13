@@ -53,6 +53,21 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v6
+      - name: verify tag matches workspace version
+        # release.yml triggers only on `push: tags: ["v*"]`, so
+        # GITHUB_REF_NAME is the tag. Fail fast if the tag doesn't match the
+        # Cargo.toml version publish-crates.sh reads, otherwise a forgotten
+        # bump-version.sh ships a split-brain release (crates.io no-ops on the
+        # already-published version while npm/Docker/GH-Release ship the tag).
+        run: |
+          set -euo pipefail
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          CARGO_VER="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$TAG_VER" != "$CARGO_VER" ]; then
+            echo "::error::release tag ${GITHUB_REF_NAME} (=> ${TAG_VER}) != Cargo.toml version ${CARGO_VER}. Run ci/scripts/bump-version.sh and re-tag the bumped commit." >&2
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches Cargo.toml version ${CARGO_VER}."
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy

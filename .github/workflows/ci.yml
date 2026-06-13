@@ -205,6 +205,9 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     env:
+      # Advisory: a perf regression annotates but does not fail the job. When
+      # flipping this to "0" (enforcing), also add `perf-gate` to the `summary`
+      # job's `needs:` so a failed gate is reflected in the aggregate Summary.
       DET_PERF_ADVISORY: "1"
     steps:
       - uses: actions/checkout@v6

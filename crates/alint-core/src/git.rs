@@ -91,17 +91,25 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
     // status. Both emit NUL-separated output so paths with
     // newlines / non-UTF-8 bytes round-trip.
     let output = match base {
-        Some(base) => Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["diff", "--name-only", "--relative", "-z"])
-            // `--end-of-options` so a `base`/`since` starting with `-`
-            // can't be parsed as a git OPTION (e.g. `--output=…`, which
-            // would write/truncate an arbitrary file).
-            .arg("--end-of-options")
-            .arg(format!("{base}...HEAD"))
-            .output()
-            .ok()?,
+        Some(base) => {
+            // Defense-in-depth, matching `diff_name_only`: reject a `base`
+            // starting with `-` explicitly (treat as "no changed-set"), in
+            // addition to the `--end-of-options` guard below.
+            if base.starts_with('-') {
+                return None;
+            }
+            Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["diff", "--name-only", "--relative", "-z"])
+                // `--end-of-options` so a `base`/`since` starting with `-`
+                // can't be parsed as a git OPTION (e.g. `--output=…`, which
+                // would write/truncate an arbitrary file).
+                .arg("--end-of-options")
+                .arg(format!("{base}...HEAD"))
+                .output()
+                .ok()?
+        }
         None => Command::new("git")
             .arg("-C")
             .arg(root)

@@ -425,7 +425,7 @@ impl FileGraphRule {
             Err(crate::io::ReadCapError::TooLarge(n)) => {
                 out.push(Self::node_violation(
                     node,
-                    &format!("is too large to analyze ({n} bytes; 256 MiB cap)"),
+                    &format!("is too large to analyze ({})", crate::io::over_cap(n)),
                 ));
                 return Vec::new();
             }
@@ -597,7 +597,7 @@ impl FileGraphRule {
 fn read_cap_reason(e: &crate::io::ReadCapError) -> String {
     match e {
         crate::io::ReadCapError::TooLarge(n) => {
-            format!("is too large to analyze ({n} bytes; 256 MiB cap)")
+            format!("is too large to analyze ({})", crate::io::over_cap(*n))
         }
         crate::io::ReadCapError::Io(e) => format!("could not be read: {e}"),
     }

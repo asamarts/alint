@@ -362,7 +362,10 @@ impl CrossFileRule {
             Err(crate::io::ReadCapError::TooLarge(n)) => {
                 out.push(Self::violation(
                     src,
-                    &format!("source file is too large to analyze ({n} bytes; 256 MiB cap)"),
+                    &format!(
+                        "source file is too large to analyze ({})",
+                        crate::io::over_cap(n)
+                    ),
                 ));
                 return None;
             }
@@ -529,7 +532,10 @@ impl CrossFileRule {
                 Err(crate::io::ReadCapError::TooLarge(n)) => {
                     out.push(Self::violation(
                         &target,
-                        &format!("target file is too large to analyze ({n} bytes; 256 MiB cap)"),
+                        &format!(
+                            "target file is too large to analyze ({})",
+                            crate::io::over_cap(n)
+                        ),
                     ));
                     continue;
                 }
@@ -659,7 +665,10 @@ impl CrossFileRule {
                 // just unanalysable).
                 out.push(Self::violation(
                     target,
-                    &format!("target file is too large to analyze ({n} bytes; 256 MiB cap)"),
+                    &format!(
+                        "target file is too large to analyze ({})",
+                        crate::io::over_cap(n)
+                    ),
                 ));
                 return None;
             }
@@ -758,7 +767,10 @@ fn skip_header(bytes: &[u8], n: usize) -> &[u8] {
 fn read_cap_reason(what: &str, e: &crate::io::ReadCapError) -> String {
     match e {
         crate::io::ReadCapError::TooLarge(n) => {
-            format!("{what} is too large to analyze ({n} bytes; 256 MiB cap)")
+            format!(
+                "{what} is too large to analyze ({})",
+                crate::io::over_cap(*n)
+            )
         }
         crate::io::ReadCapError::Io(e) => format!("{what} is unreadable: {e}"),
     }
