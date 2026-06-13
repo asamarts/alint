@@ -76,10 +76,11 @@ if echo "$CHANGED" | grep -qE '^(crates/alint-bench/|xtask/)'; then
   BENCH=true
 fi
 
-# `facts.json` (repo root) is a generated contract guarded by `gen-facts
-# --check` in the docs job; route it through `docs` so a hand-edit can't skip
-# every gate (the architecture artifacts under docs/ already match here).
-if echo "$CHANGED" | grep -qE '^(docs/|PROPOSAL\.md$|[A-Z_]+\.md$|facts\.json$)'; then
+# `facts.json` and `roadmap.json` (repo root) are generated contracts guarded
+# by `gen-facts --check` / `gen-roadmap --check` in the docs job; route them
+# through `docs` so a hand-edit can't skip every gate (the architecture
+# artifacts under docs/ already match here).
+if echo "$CHANGED" | grep -qE '^(docs/|PROPOSAL\.md$|[A-Z_]+\.md$|(facts|roadmap)\.json$)'; then
   DOCS=true
 fi
 
