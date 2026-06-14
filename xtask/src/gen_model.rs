@@ -11,8 +11,13 @@
 //! - `rule-families.gen.c4` — the rule-kind taxonomy (families -> kinds), from
 //!   `docs/rules.md` (the same `## family` / `### kind` structure that
 //!   `facts.json`'s family and kind lists derive from).
+//!
+//! `--check` additionally gates the hand-authored model against its sources: the
+//! `alint.c4` crate elements *and* their runtime edges against `cargo metadata`,
+//! the `config-model.c4` Config keys against the JSON schema, and the taxonomy's
+//! completeness against `all_kinds.yaml`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -24,6 +29,7 @@ const MODEL_C4: &str = "docs/design/architecture/model/alint.c4";
 const CONFIG_MODEL_C4: &str = "docs/design/architecture/model/config-model.c4";
 const RULES_MD: &str = "docs/rules.md";
 const SCHEMA_JSON: &str = "schemas/v1/config.json";
+const ALL_KINDS_YAML: &str = "crates/alint-dsl/tests/fixtures/all_kinds.yaml";
 
 /// `docs/rules.md` `## ` headings that are not rule families.
 const META_FAMILIES: &[&str] = &[
@@ -59,9 +65,11 @@ pub fn run(check: bool) -> Result<()> {
             );
         }
         check_model_crate_set(&root)?;
+        check_model_crate_edges(&root)?;
         check_config_model_root_keys(&root)?;
+        check_taxonomy_complete(&families, &md, &root)?;
         println!(
-            "{RULE_FAMILIES_C4} is up to date; alint.c4 crate set + config-model keys match their sources"
+            "{RULE_FAMILIES_C4} is up to date; model gates pass (crate set + edges, config keys, taxonomy completeness)"
         );
         return Ok(());
     }
@@ -282,6 +290,133 @@ fn field_name_in_decl(line: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+/// The crate-to-crate runtime edges declared in `alint.c4` must equal the
+/// `cargo metadata` runtime intra-workspace dependency edges, so the component
+/// view can't drift from the manifests. `check_model_crate_set` checks the
+/// nodes; this checks the edges (the gap that let `alint-lsp -> alint-rules` go
+/// missing in the first cut).
+fn check_model_crate_edges(root: &Path) -> Result<()> {
+    let path = root.join(MODEL_C4);
+    let c4 = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    // The dynamic views (the `views {` block) reuse crate ids in their flow
+    // steps; only the `model {` block declares dependency edges.
+    let model_block = c4.split("views {").next().unwrap_or(c4.as_str());
+
+    let id_to_name: BTreeMap<String, String> =
+        model_block.lines().filter_map(crate_decl_id_name).collect();
+
+    let declared: BTreeSet<(String, String)> = model_block
+        .lines()
+        .filter_map(edge_endpoints)
+        .filter_map(|(src, dst)| {
+            Some((id_to_name.get(&src)?.clone(), id_to_name.get(&dst)?.clone()))
+        })
+        .collect();
+
+    let crates = crate::arch::workspace_crates(root)?;
+    let mut actual: BTreeSet<(String, String)> = BTreeSet::new();
+    for c in &crates {
+        for dep in &c.deps {
+            actual.insert((c.name.clone(), dep.clone()));
+        }
+    }
+
+    if declared != actual {
+        let missing: Vec<&(String, String)> = actual.difference(&declared).collect();
+        let extra: Vec<&(String, String)> = declared.difference(&actual).collect();
+        bail!(
+            "{MODEL_C4} crate runtime edges drifted from `cargo metadata`. \
+             missing (add the edge): {missing:?}; extra (remove): {extra:?}."
+        );
+    }
+    Ok(())
+}
+
+/// `(id, crate_name)` from a `<id> = crate 'name' '...'` declaration line.
+fn crate_decl_id_name(line: &str) -> Option<(String, String)> {
+    let (lhs, rhs) = line.split_once("= crate ")?;
+    let id = lhs.trim();
+    let rest = rhs.trim_start().strip_prefix('\'')?;
+    let end = rest.find('\'')?;
+    if id.is_empty() {
+        return None;
+    }
+    Some((id.to_string(), rest[..end].to_string()))
+}
+
+/// `(source_id, target_id)` from a `<src> -> <dst> '...'` relationship line.
+/// `None` for non-relationship lines (comments, declarations) and multi-token
+/// sources.
+fn edge_endpoints(line: &str) -> Option<(String, String)> {
+    let (lhs, rhs) = line.split_once(" -> ")?;
+    let src = lhs.trim();
+    let dst = rhs.trim_start().split([' ', '\t', '\'']).next()?.trim();
+    if src.is_empty() || dst.is_empty() || src.split_whitespace().count() != 1 {
+        return None;
+    }
+    Some((src.to_string(), dst.to_string()))
+}
+
+/// Every rule kind registered in `all_kinds.yaml` must be documented in
+/// `docs/rules.md`, either as a canonical kind (its own H3, hence in the
+/// taxonomy) or as an alias of one. A registered-but-undocumented kind would
+/// silently vanish from the taxonomy, and `docs-export` only warns, so this is
+/// the hard gate.
+fn check_taxonomy_complete(families: &[Family], md: &str, root: &Path) -> Result<()> {
+    let mut documented: BTreeSet<String> = families
+        .iter()
+        .flat_map(|f| f.kinds.iter().cloned())
+        .collect();
+    for line in md.lines() {
+        if let Some(h3) = line.strip_prefix("### ") {
+            documented.extend(aliases_in_heading(h3.trim()));
+        }
+    }
+    let registered = all_kinds_yaml_kinds(root)?;
+    if documented != registered {
+        let undocumented: Vec<&String> = registered.difference(&documented).collect();
+        let unregistered: Vec<&String> = documented.difference(&registered).collect();
+        bail!(
+            "rule taxonomy is incomplete vs {ALL_KINDS_YAML}. \
+             undocumented (add to docs/rules.md): {undocumented:?}; \
+             documented-but-unregistered: {unregistered:?}."
+        );
+    }
+    Ok(())
+}
+
+/// Distinct `kind:` values in `all_kinds.yaml` (mirrors the gen-facts extractor).
+fn all_kinds_yaml_kinds(root: &Path) -> Result<BTreeSet<String>> {
+    let path = root.join(ALL_KINDS_YAML);
+    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    Ok(text
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("kind:"))
+        .map(|v| v.trim().trim_end_matches(',').to_string())
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .collect())
+}
+
+/// Alias kind names from the `(alias: `x`, `y`)` group of an H3 heading body.
+fn aliases_in_heading(heading: &str) -> Vec<String> {
+    let Some(idx) = heading.find("(alias") else {
+        return Vec::new();
+    };
+    let group = heading[idx..].split(')').next().unwrap_or(&heading[idx..]);
+    let mut out = Vec::new();
+    let mut rest = group;
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('`') else { break };
+        let tok = &after[..close];
+        if !tok.is_empty() && tok.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            out.push(tok.to_string());
+        }
+        rest = &after[close + 1..];
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +483,43 @@ mod tests {
             Some("version")
         );
         assert_eq!(field_name_in_decl("    rule = entity 'RuleSpec'"), None);
+    }
+
+    /// The hand-authored component edges stay in lockstep with the cargo
+    /// metadata runtime dependency edges (the gate that catches a missing edge).
+    #[test]
+    fn model_crate_edges_match_cargo_metadata() {
+        let root = crate::workspace_root().expect("root");
+        check_model_crate_edges(&root).expect("alint.c4 crate edges must match cargo metadata");
+    }
+
+    /// Every registered rule kind is documented (canonical or alias), so none
+    /// can silently vanish from the taxonomy.
+    #[test]
+    fn taxonomy_is_complete_vs_all_kinds() {
+        let root = crate::workspace_root().expect("root");
+        let md = fs::read_to_string(root.join(RULES_MD)).expect("read rules.md");
+        let families = parse_families(&md);
+        check_taxonomy_complete(&families, &md, &root)
+            .expect("taxonomy must cover every registered kind");
+    }
+
+    #[test]
+    fn edge_endpoints_parses_relationships() {
+        assert_eq!(
+            edge_endpoints("  alintBin -> core 'drives the engine'"),
+            Some(("alintBin".to_string(), "core".to_string()))
+        );
+        assert_eq!(edge_endpoints("    cli = container 'CLI'"), None);
+        assert_eq!(edge_endpoints("  // a comment -> not an edge"), None);
+    }
+
+    #[test]
+    fn aliases_in_heading_extracts_alias_group() {
+        assert_eq!(
+            aliases_in_heading("`file_content_matches` (alias: `content_matches`)"),
+            vec!["content_matches"]
+        );
+        assert_eq!(aliases_in_heading("`file_exists`"), Vec::<String>::new());
     }
 }

@@ -33,7 +33,7 @@ pub(crate) struct Crate {
     description: String,
     /// Sorted normal (runtime) intra-workspace dependency names — the
     /// production architecture; the tier + acyclic computations use these.
-    deps: Vec<String>,
+    pub(crate) deps: Vec<String>,
     /// Sorted dev/build-only intra-workspace dependency names (test
     /// harnesses, xtask's test deps). Rendered as dashed edges; excluded
     /// from tiers and the cycle check (a normal+dev cycle is legal in Cargo).
