@@ -4,9 +4,11 @@
 //
 // The Config entity's top-level keys are gated against the root `properties` of
 // schemas/v1/config.json by `gen-model --check`, so a new (or renamed) top-level
-// config key fails CI until this map is updated. The entity relationships mirror
-// the schema's $ref structure (rules -> rule, facts -> fact, extends ->
-// extends_entry; rule -> paths_spec / scope_filter / fix).
+// config key fails CI until this map is updated. The container relationships
+// rules/facts/extends -> entity follow the schema's $ref structure; the
+// rule -> paths_spec / scope_filter / fix edges reflect the RuleSpec record in
+// alint-core (config.rs), not the schema (its base `rule` $def carries no such
+// $refs; the per-kind branches do).
 
 specification {
   element domain
@@ -39,7 +41,8 @@ model {
     fix = entity 'FixSpec' 'A fixer block; at most one op per rule kind'
   }
 
-  // Relationships mirror the schema's $ref structure.
+  // rules/facts/extends -> entity follow the schema $refs; rule -> paths /
+  // scope_filter / fix reflect the RuleSpec record (alint-core config.rs).
   config -> rule 'rules[]'
   config -> fact 'facts[]'
   config -> extendsEntry 'extends[]'
