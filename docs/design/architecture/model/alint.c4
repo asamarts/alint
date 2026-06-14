@@ -28,10 +28,19 @@ model {
   repo = system 'Linted repository' 'The target repo: files, structure, git history.' {
     #external
   }
-  registries = system 'Package registries' 'crates.io, npm, ghcr.io, Homebrew:distribution channels.' {
+  registries = system 'Package registries' 'crates.io, npm, ghcr.io, Homebrew (distribution channels).' {
     #external
   }
   site = system 'alint.org' 'Docs + marketing site; consumes the docs bundle (schema.json, facts.json, the model).' {
+    #external
+  }
+  editor = system 'Editor' 'VS Code, JetBrains, Zed, Neovim, ... via the LSP.' {
+    #external
+  }
+  codescan = system 'GitHub Code Scanning' 'Ingests SARIF; renders PR + security-tab annotations.' {
+    #external
+  }
+  docsbundle = system 'docs-bundle branch' 'The orphan-branch handoff the alint.org build pulls.' {
     #external
   }
 
@@ -65,6 +74,10 @@ model {
   alintBin -> repo 'reads files + git history; reports violations'
   lspd -> repo 'validates the open workspace'
   xtask -> site 'produces the docs bundle consumed by'
+  dev -> editor 'edits the repo in'
+  editor -> lspd 'speaks LSP over stdio to'
+  ci -> codescan 'uploads SARIF to'
+  xtask -> docsbundle 'pushes the docs bundle to'
 
   // --- Component (crate) runtime edges. Mirror crate-graph.md solid edges;
   //     gated against cargo metadata runtime deps by gen-model --check. ---
@@ -94,10 +107,10 @@ model {
 views {
   // System context. Listed explicitly (not `include *`) so generated
   // domain-model fragments (the rule catalogue, etc.) stay out of the
-  // architecture views:they live in their own dedicated views.
+  // architecture views; they live in their own dedicated views.
   view index {
     title 'alint system context'
-    include dev, ci, alint, repo, registries, site
+    include dev, ci, alint, repo, registries, site, editor, codescan, docsbundle
   }
 
   view containers of alint {
@@ -148,5 +161,54 @@ views {
     rules -> core 'apply fixers serially (FixEdit: set / create / delete / rename)'
     core -> core 'FixStatus: Applied / Skipped (over fix_size_limit) / Unfixable'
     core -> output 'fix report + re-check'
+  }
+
+  dynamic view dispatchFlow {
+    title 'Dispatch partition + read-coalescing'
+
+    core -> core 'partition rules: requires_full_index() -> rule-major; else per-file (ADR-0003)'
+    core -> rules 'rule-major: each cross-file rule scans the FileIndex itself'
+    core -> core 'file-major loop: read each matched file at most once'
+    core -> rules 'per-file: hand the byte slice to every applicable PerFileRule'
+    rules -> core 'Violations from both classes, merged + sorted (deterministic)'
+  }
+
+  dynamic view factsFlow {
+    title 'Facts evaluation + when gating'
+
+    alintBin -> core 'evaluate facts in parallel (any_file_exists, count_files, custom, ...)'
+    core -> core 'cache fact values keyed on input hashes'
+    core -> core 'evaluate each rule when: clause over facts / vars / ctx'
+    core -> core 'drop rules whose when is false'
+    core -> rules 'run only the surviving rules'
+  }
+
+  dynamic view lspFlow {
+    title 'LSP: editor integration'
+
+    editor -> lspd 'initialize / didOpen / didChange (LSP over stdio)'
+    lspd -> dsl 'validate the .alint.yml config'
+    lspd -> core 'run_for_file: engine over the open document'
+    core -> rules 'evaluate the applicable rules'
+    rules -> lspd 'Violations'
+    lspd -> editor 'publishDiagnostics + hover + code actions (fixes)'
+  }
+
+  dynamic view ciActionFlow {
+    title 'CI: GitHub Action + SARIF'
+
+    ci -> alintBin 'composite action: install the binary + alint check --format sarif'
+    alintBin -> repo 'lint the checked-out repository'
+    alintBin -> ci 'SARIF report + exit code (fail the job on error)'
+    ci -> codescan 'upload-sarif -> Code Scanning annotations'
+  }
+
+  dynamic view docsAsCodeFlow {
+    title 'Docs as code: bundle + drift gates'
+
+    xtask -> xtask 'gen-schema / gen-facts / gen-arch / gen-model --check (CI freshness gates)'
+    xtask -> docsbundle 'docs-export builds + pushes the bundle'
+    docsbundle -> site 'Cloudflare deploy hook -> alint.org rebuild'
+    site -> site 'sync-from-alint + internal-link / claim / meta-description gates'
   }
 }
