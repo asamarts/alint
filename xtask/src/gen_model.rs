@@ -21,7 +21,9 @@ use anyhow::{Context, Result, bail};
 
 const RULE_FAMILIES_C4: &str = "docs/design/architecture/model/rule-families.gen.c4";
 const MODEL_C4: &str = "docs/design/architecture/model/alint.c4";
+const CONFIG_MODEL_C4: &str = "docs/design/architecture/model/config-model.c4";
 const RULES_MD: &str = "docs/rules.md";
+const SCHEMA_JSON: &str = "schemas/v1/config.json";
 
 /// `docs/rules.md` `## ` headings that are not rule families.
 const META_FAMILIES: &[&str] = &[
@@ -57,7 +59,10 @@ pub fn run(check: bool) -> Result<()> {
             );
         }
         check_model_crate_set(&root)?;
-        println!("{RULE_FAMILIES_C4} is up to date; alint.c4 crate set matches cargo metadata");
+        check_config_model_root_keys(&root)?;
+        println!(
+            "{RULE_FAMILIES_C4} is up to date; alint.c4 crate set + config-model keys match their sources"
+        );
         return Ok(());
     }
 
@@ -234,6 +239,49 @@ fn crate_name_in_decl(line: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+/// The Config entity's top-level `field` elements in `config-model.c4` must
+/// equal the root `properties` of the JSON schema, so a top-level config key
+/// added or renamed without updating the domain map fails CI. The rest of the
+/// map (the entity relationships) is structural intent that `likec4 validate`
+/// checks.
+fn check_config_model_root_keys(root: &Path) -> Result<()> {
+    let path = root.join(CONFIG_MODEL_C4);
+    let c4 = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let declared: BTreeSet<String> = c4.lines().filter_map(field_name_in_decl).collect();
+
+    let schema_path = root.join(SCHEMA_JSON);
+    let schema: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&schema_path)
+            .with_context(|| format!("read {}", schema_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", schema_path.display()))?;
+    let actual: BTreeSet<String> = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .context("schema root has no `properties` object")?
+        .keys()
+        .cloned()
+        .collect();
+
+    if declared != actual {
+        let missing: Vec<&String> = actual.difference(&declared).collect();
+        let extra: Vec<&String> = declared.difference(&actual).collect();
+        bail!(
+            "{CONFIG_MODEL_C4} Config fields drifted from {SCHEMA_JSON} root properties. \
+             missing (add a field): {missing:?}; extra (remove): {extra:?}."
+        );
+    }
+    Ok(())
+}
+
+/// The field label in a `<id> = field 'name'` declaration line, if any.
+fn field_name_in_decl(line: &str) -> Option<String> {
+    let after = line.split("= field ").nth(1)?.trim_start();
+    let rest = after.strip_prefix('\'')?;
+    let end = rest.find('\'')?;
+    Some(rest[..end].to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +330,23 @@ mod tests {
         );
         assert_eq!(crate_name_in_decl("    cli = container 'CLI'"), None);
         assert_eq!(crate_name_in_decl("  dev -> alintBin 'runs'"), None);
+    }
+
+    /// The config-DSL domain map's Config keys stay in lockstep with the JSON
+    /// schema's top-level properties.
+    #[test]
+    fn config_model_keys_match_schema() {
+        let root = crate::workspace_root().expect("root");
+        check_config_model_root_keys(&root)
+            .expect("config-model.c4 Config fields must match schema root properties");
+    }
+
+    #[test]
+    fn field_name_in_decl_extracts_quoted_name() {
+        assert_eq!(
+            field_name_in_decl("      f_version = field 'version'").as_deref(),
+            Some("version")
+        );
+        assert_eq!(field_name_in_decl("    rule = entity 'RuleSpec'"), None);
     }
 }
