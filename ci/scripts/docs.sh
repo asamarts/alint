@@ -49,3 +49,21 @@ cargo run -q -p xtask -- gen-roadmap --check
 # gen-arch` to refresh after adding/removing a crate or an intra-workspace dep.
 echo "==> Running xtask gen-arch --check"
 cargo run -q -p xtask -- gen-arch --check
+
+# `xtask gen-model --check` regenerates the code-derived LikeC4 architecture-model
+# fragments (docs/design/architecture/model/*.gen.c4 — currently the rule-kind
+# taxonomy sliced from docs/rules.md) and fails if a committed fragment drifted
+# from its canonical source. The merged LikeC4 model's structural validity
+# (`likec4 validate`) is gated separately; see
+# docs/design/architecture-diagrams.md. Run `cargo run -p xtask -- gen-model` to
+# refresh after changing a source (e.g. adding a rule family or kind).
+echo "==> Running xtask gen-model --check"
+cargo run -q -p xtask -- gen-model --check
+
+# Validate the LikeC4 architecture model itself: `likec4 validate` proves every
+# dynamic-view (flow) step references a real, declared element/relationship -
+# the structural-integrity gate for the hand-authored flows. Separate script
+# because it needs Node; it loudly skips if Node is absent until the runner
+# image ships it. See ci/scripts/likec4.sh + docs/design/architecture-diagrams.md.
+echo "==> Running ci/scripts/likec4.sh"
+bash ci/scripts/likec4.sh

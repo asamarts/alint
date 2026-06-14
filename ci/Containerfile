@@ -17,6 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js 22 — for `npx likec4 validate` of the architecture model
+# (ci/scripts/likec4.sh, called from ci/scripts/docs.sh). bookworm's apt nodejs
+# (18.x) is too old for LikeC4, so pull 22.x from NodeSource. NOTE: adding this
+# requires a runner image rebuild (teardown/setup) to take effect; until then
+# likec4.sh detects the missing node and skips with a warning.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Rust toolchain
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
