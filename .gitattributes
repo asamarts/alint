@@ -38,4 +38,4 @@ docs/design/architecture/crate-graph.md text eol=lf
 # Generated LikeC4 architecture-model fragments: `gen-model --check` (and its
 # xtask test) byte-compare these against a `\n`-only rendered string — same
 # CRLF-on-Windows hazard as the generated contracts above.
-docs/design/architecture/model/*.gen.c4 text eol=lf
+docs/design/architecture/model/*.c4 text eol=lf

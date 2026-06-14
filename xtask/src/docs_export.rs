@@ -57,7 +57,31 @@ mod docs_paths {
     pub const FACTS_JSON: &str = "facts.json";
     pub const ROADMAP_JSON: &str = "roadmap.json";
     pub const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";
+    pub const MODEL_DIR: &str = "docs/design/architecture/model";
     pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
+}
+
+/// Copy the `LikeC4` architecture model (`*.c4`) into the bundle so alint.org can
+/// build the interactive web-component views and re-export Mermaid. Lands under
+/// `architecture-model/` in the bundle; the sync routes non-markdown files to
+/// `public/_alint/`.
+fn copy_c4_model(workspace: &Path, target_dir: &Path) -> Result<()> {
+    let src = workspace.join(docs_paths::MODEL_DIR);
+    let dest = target_dir.join("architecture-model");
+    fs::create_dir_all(&dest)?;
+    let mut copied = 0;
+    for entry in fs::read_dir(&src).with_context(|| format!("read_dir {}", src.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("c4") {
+            let name = path.file_name().context("c4 path has a file name")?;
+            fs::copy(&path, dest.join(name)).with_context(|| format!("copy {}", path.display()))?;
+            copied += 1;
+        }
+    }
+    if copied == 0 {
+        bail!("no .c4 files found under {}", docs_paths::MODEL_DIR);
+    }
+    Ok(())
 }
 
 pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
@@ -167,6 +191,13 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
         &target_dir.join("about/crate-graph.md"),
         Some("Crate dependency graph"),
     )?;
+
+    // 4d. The LikeC4 architecture model (*.c4 source). Shipped so alint.org can
+    //     build the interactive system + flow views (LikeC4 web component) and
+    //     re-export Mermaid. Non-markdown, so the sync routes it to
+    //     public/_alint/architecture-model/. Hand-authored alint.c4 + generated
+    //     *.gen.c4 (gen-model); validated by ci/scripts/likec4.sh.
+    copy_c4_model(&workspace, &target_dir)?;
 
     // 5. CLI reference, captured from the alint binary's --help.
     generate_cli_reference(&workspace, &target_dir)?;
