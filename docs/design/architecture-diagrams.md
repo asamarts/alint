@@ -97,15 +97,67 @@ failing CI.
 - GitHub: `likec4 gen mermaid` exports a per-view `.mmd` for embedding in repo
   markdown (the architecture page prose sections).
 
-## 6. View catalogue (target)
+## 6. View catalogue and page placement
 
-Structural (domain/model): system context, containers, CLI components, crate
-dependency graph, rule catalogue (families to kinds), config-DSL domain map.
+One LikeC4 view embeds on any page via `<likec4-view view-id="...">`, so the
+single gated model is a site-wide diagram library: each page embeds the views it
+needs and every diagram stays gated centrally. The question is which view-ids
+embed where, plus which new views are worth modeling.
 
-Behavioral (sequence/flow): execution pipeline (`alint check`), config load plus
-extends trust boundary (ADR-0004), dispatch partition plus read coalescing
-(ADR-0003), facts plus `when` gating, fix flow, LSP, CI/Action plus SARIF, and the
-docs-as-code drift-gate meta-flow.
+### Built (26 views)
+
+Structural: system context, containers, CLI components, crate dependency graph
+(gen-arch), config-DSL domain map, rule catalogue + 13 per-family views.
+
+Behavioral: checkFlow (execution pipeline), configLoad (extends trust boundary,
+ADR-0004), fixFlow, dispatchFlow (read-coalescing, ADR-0003), factsFlow
+(when-gating), lspFlow, ciActionFlow (SARIF), docsAsCodeFlow.
+
+### Page placement
+
+| Page / section | Views | Status |
+|---|---|---|
+| About > Architecture | context, containers, components, crate graph, checkFlow, dispatchFlow, configLoad, fixFlow, factsFlow | built |
+| Concepts (rules model) | config-DSL map, rule catalogue | built |
+| Concepts > walker-and-gitignore | walkerFlow | new |
+| Concepts > templates | templateFlow | new |
+| Configuration | config-DSL map, configLoad | built |
+| Integrations > github-actions | ciActionFlow | built |
+| Integrations > pre-commit | preCommitFlow | new |
+| Integrations > editors | lspFlow, editorArch | 1 built |
+| Integrations > docker | distributionFlow | new |
+| Reference > output-formats | outputFormatsFan | new |
+| Development (contributor guide) | ruleTypeModel, addRuleKindFlow, dispatchFlow, docsAsCodeFlow, spawningKindGate | mostly new |
+| Getting Started > installation | distributionFlow | new |
+| About > monorepos | monorepoNesting | new |
+| Benchmarks | perfGatingFlow | new |
+| Security | configLoad (trust lens), pathConfinement, trojanSourceFlow | partly new |
+| Marketing landings | simplified hero checkFlow (static SVG) | judicious |
+
+### Build tiers
+
+- Tier 1 (ships with the embedding; views already built): the Architecture page,
+  Integrations/github-actions, Integrations/editors, Configuration/Concepts. Pure
+  embedding, no new modeling.
+- Tier 2 (build next): ruleTypeModel, addRuleKindFlow, monorepoNesting,
+  distributionFlow, outputFormatsFan, walkerFlow, templateFlow.
+- Tier 3 (nice-to-have): perfGatingFlow, pluginModel, the security set,
+  editorArch, marketing hero diagrams.
+
+Each new view anchors in a real source (distributionFlow in release.yml plus
+install.sh; outputFormatsFan in the `Format` enum; monorepoNesting in the bundled
+rulesets), keeping the generate-and-gate ethos.
+
+### Mechanics caveats
+
+- Synced docs are plain `.md`, not `.mdx`, so embedding uses the LikeC4
+  web-component (`<likec4-view>` works in raw-HTML markdown once the script is
+  registered site-wide), not a component import.
+- Marketing `.astro` landings are Lighthouse-sensitive (near zero JS). For those,
+  prefer a static `likec4 export svg` image over the interactive embed.
+- ruleTypeModel is a class/ER shape, the one type LikeC4 strains on (like the
+  config-DSL map): model it as containment plus relationships, or emit a Mermaid
+  classDiagram for that one.
 
 ## 7. Config-DSL representation (decision)
 
