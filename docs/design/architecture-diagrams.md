@@ -134,15 +134,19 @@ ADR-0004), fixFlow, dispatchFlow (read-coalescing, ADR-0003), factsFlow
 | Security | configLoad (trust lens), pathConfinement, trojanSourceFlow | partly new |
 | Marketing landings | simplified hero checkFlow (static SVG) | judicious |
 
-### Build tiers
+### Build tiers (status)
 
-- Tier 1 (ships with the embedding; views already built): the Architecture page,
-  Integrations/github-actions, Integrations/editors, Configuration/Concepts. Pure
-  embedding, no new modeling.
-- Tier 2 (build next): ruleTypeModel, addRuleKindFlow, monorepoNesting,
-  distributionFlow, outputFormatsFan, walkerFlow, templateFlow.
-- Tier 3 (nice-to-have): perfGatingFlow, pluginModel, the security set,
-  editorArch, marketing hero diagrams.
+All ~38 model views are now built, validated, and gated. The remaining work is
+embedding the right views on each page per the table above; so far only the
+architecture-diagrams page embeds (the Tier-1 set).
+
+- Tier 1 (built + embedded): system context, containers, CLI components, crate
+  graph, config-DSL map, rule catalogue, and the core flows.
+- Tier 2 (built): ruleTypeModel, addRuleKindFlow, monorepoNesting,
+  distributionFlow, outputFormats, walkerFlow, templateFlow.
+- Tier 3 (built): perfGatingFlow, pluginModel, pathConfinement + trojanSourceFlow
+  (security), editorArch. The marketing hero stays a static-SVG export of an
+  existing view (e.g. checkFlow), not a separate model view.
 
 Each new view anchors in a real source (distributionFlow in release.yml plus
 install.sh; outputFormatsFan in the `Format` enum; monorepoNesting in the bundled

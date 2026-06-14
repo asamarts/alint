@@ -290,4 +290,47 @@ views {
     xtask -> xtask 'gen-* --check gates fail until schema/facts/arch/model are fresh'
     dev -> rules 'unit + snapshot tests (alint-testkit)'
   }
+
+  dynamic view perfGatingFlow {
+    title 'Deterministic performance gating'
+
+    ci -> bench 'cargo bench (criterion) on a seeded tree'
+    bench -> bench 'gungraun det_engine / det_check under Valgrind (callgrind Ir)'
+    bench -> ci 'instruction-count deltas (load-immune)'
+    ci -> ci 'advisory perf-gate job flags regressions on the SHA'
+  }
+
+  dynamic view pluginModel {
+    title 'Plugin model: command rule (+ roadmap WASM)'
+
+    core -> rules 'dispatch the command rule per matched file'
+    rules -> rules 'spawn external checker (env: path, rule id, level, vars, facts)'
+    rules -> core 'exit code = verdict; stdout/stderr = message -> Violation'
+    core -> core 'roadmap v0.13: WASM / WIT plugin host (sandboxed, no network by default)'
+  }
+
+  dynamic view pathConfinement {
+    title 'Security: path confinement + spawning-kind gating'
+
+    dsl -> dsl 'reject SPAWNING_RULE_KINDS (command / generated_file_fresh / command_idempotent) in extends (ADR-0004)'
+    dsl -> dsl 'reject allow_out_of_root + custom facts outside the top-level config'
+    core -> core 'walker prunes symlinks that escape the repo root'
+    core -> core 'git-backed rules sanitize the since: range (no argument injection)'
+  }
+
+  dynamic view trojanSourceFlow {
+    title 'Security: Trojan-source + unicode hygiene'
+
+    core -> rules 'per-file scan: no_bidi_controls / no_zero_width_chars / no_bom'
+    rules -> rules 'flag bidi overrides, zero-width chars, BOM, conflict markers'
+    rules -> core 'Violations (+ fixers: strip bidi / zero-width / BOM)'
+  }
+
+  dynamic view editorArch {
+    title 'Editor integrations'
+
+    dev -> editor 'install the extension (VS Code Marketplace / Open VSX / JetBrains Marketplace)'
+    editor -> lspd 'LSP over stdio (VS Code, Zed, Neovim native; JetBrains via LSP4IJ)'
+    lspd -> editor 'diagnostics, hover, code actions'
+  }
 }
