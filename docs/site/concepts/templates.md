@@ -7,6 +7,8 @@ sidebar:
 
 A common monorepo pattern: every package directory should have a README; every service directory should have a README; every app directory should have a README. The rule body is identical, only the directory name changes. Before v0.5.10, that meant pasting the rule three times. Rule templates collapse that to one definition + three instances.
 
+<likec4-view view-id="templateFlow"></likec4-view>
+
 ## How it works
 
 A top-level `templates:` block defines reusable rule bodies. Each template carries an `id:` (its reference key) and any other rule-spec fields, with `{{vars.<name>}}` placeholders standing in for the values that vary per instance. Rules in the `rules:` block then reference a template by id and supply their own `vars:`:

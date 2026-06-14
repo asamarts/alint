@@ -14,6 +14,10 @@ auto-fixable rules.
 All editor surfaces are versioned in lockstep with the `alint` binary,
 so every channel ships the same release.
 
+<likec4-view view-id="editorArch"></likec4-view>
+
+<likec4-view view-id="lspFlow"></likec4-view>
+
 ## Tier 1 — packaged extension, marketplace install
 
 | Editor | Install | Notes |

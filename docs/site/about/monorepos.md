@@ -9,6 +9,10 @@ alint's scope is **the filesystem shape and contents of a repository**, not the 
 
 This page is the framing for that boundary. If you're deciding whether alint belongs in your monorepo's CI, start here.
 
+The diagram below shows how nested `.alint.yml` files layer by directory and how the bundled ecosystem rulesets scope themselves by ancestor manifest:
+
+<likec4-view view-id="monorepoNesting"></likec4-view>
+
 ## Does alint fit?
 
 | Your monorepo | Fit | Why |

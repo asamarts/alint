@@ -1,33 +1,6 @@
 ---
 title: Architecture diagrams
 description: Interactive system, container, and flow diagrams generated from alint's LikeC4 model and kept in lockstep with the code by CI gates.
-head:
-  - tag: script
-    attrs:
-      type: module
-      src: /likec4-views.js
-  - tag: script
-    content: |
-      (function () {
-        function scheme() {
-          var t = document.documentElement.dataset.theme;
-          return t === 'light' || t === 'dark'
-            ? t
-            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        }
-        function sync() {
-          var s = scheme();
-          document.querySelectorAll('likec4-view').forEach(function (el) {
-            el.setAttribute('color-scheme', s);
-          });
-        }
-        document.addEventListener('DOMContentLoaded', sync);
-        new MutationObserver(sync).observe(document.documentElement, {
-          attributes: true,
-          attributeFilter: ['data-theme'],
-        });
-        sync();
-      })();
 ---
 
 These diagrams come from a single [LikeC4](https://likec4.dev) model in the alint

@@ -8,6 +8,10 @@ This doc supplements (does not replace)
 `docs/design/v0.9/coverage-and-dogfood.md`, which captures
 the *why*. This doc captures the *what to do*.
 
+<likec4-view view-id="addRuleKindFlow"></likec4-view>
+
+<likec4-view view-id="ruleTypeModel"></likec4-view>
+
 ## Two-layer enforcement
 
 | Layer | Tool | Catches |

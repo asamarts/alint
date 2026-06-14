@@ -7,6 +7,8 @@ sidebar:
 
 The official Action wraps the `install.sh` flow plus alint invocation into one step.
 
+<likec4-view view-id="ciActionFlow"></likec4-view>
+
 ## Inline PR annotations (default)
 
 ```yaml

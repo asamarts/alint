@@ -7,6 +7,8 @@ sidebar:
 
 Every alint run starts the same way: walk the repo, build an in-memory index of files, then evaluate rules against that index. The walker is a thin wrapper around the [`ignore`](https://docs.rs/ignore/) crate (the same crate that powers `ripgrep`), and its filtering behaviour is the most common source of confusion when a rule "doesn't fire when I expected it to."
 
+<likec4-view view-id="walkerFlow"></likec4-view>
+
 ## What the walker sees by default
 
 Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** for paths matched by any of the following:

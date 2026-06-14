@@ -7,6 +7,8 @@ sidebar:
 
 A distroless multi-arch image is published to ghcr.io on every alint release.
 
+<likec4-view view-id="distributionFlow"></likec4-view>
+
 ## Run against the current directory
 
 ```bash

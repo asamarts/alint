@@ -7,6 +7,8 @@ sidebar:
 
 alint ships as a single static Rust binary — no runtime, no JVM, nothing else to install. Pick whichever path matches your environment.
 
+<likec4-view view-id="distributionFlow"></likec4-view>
+
 ## install.sh (Linux + macOS + Windows tarballs)
 
 ```bash
