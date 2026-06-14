@@ -53,6 +53,11 @@ jobs:
         uses: ./
         with:
           format: sarif
+        # Tolerate a non-zero exit: when the linted tree has violations the
+        # check exits non-zero, but action.yml captures the exit code and still
+        # sets `sarif-file`, and this job only asserts the SARIF file is
+        # produced + valid JSON. Repo-cleanliness is asserted by the
+        # `action-default` job, not here.
         continue-on-error: true
       - name: verify SARIF file exists and parses as JSON
         run: |

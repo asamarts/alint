@@ -142,8 +142,18 @@ runs:
 
         if [ "$ALINT_FORMAT" = "sarif" ]; then
           out="${RUNNER_TEMP:-/tmp}/alint.sarif"
-          "$ALINT_BIN" "${cli_args[@]}" check "$ALINT_PATH" ${extra[@]+"${extra[@]}"} > "$out"
+          # A non-zero `alint check` (violations found) is a NORMAL SARIF
+          # outcome: the file is still written, and a SARIF consumer wants the
+          # path precisely when there ARE violations (to upload to code
+          # scanning). Capture the exit code with `|| rc=$?` so the
+          # `sarif-file` output is set REGARDLESS, then propagate the real
+          # exit. Without this, `set -e` aborts the step before the output is
+          # set whenever the check is non-zero, leaving consumers (and the
+          # action self-test's `test -f`) an empty path.
+          rc=0
+          "$ALINT_BIN" "${cli_args[@]}" check "$ALINT_PATH" ${extra[@]+"${extra[@]}"} > "$out" || rc=$?
           echo "sarif-file=$out" >> "$GITHUB_OUTPUT"
+          exit "$rc"
         else
           "$ALINT_BIN" "${cli_args[@]}" check "$ALINT_PATH" ${extra[@]+"${extra[@]}"}
         fi
