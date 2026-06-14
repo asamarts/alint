@@ -28,8 +28,8 @@ const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";
 const WORKSPACE_DSL: &str = "docs/design/architecture/workspace.dsl";
 
 /// A workspace crate plus its intra-workspace dependencies and role.
-struct Crate {
-    name: String,
+pub(crate) struct Crate {
+    pub(crate) name: String,
     description: String,
     /// Sorted normal (runtime) intra-workspace dependency names — the
     /// production architecture; the tier + acyclic computations use these.
@@ -64,7 +64,7 @@ struct MetaDep {
 
 /// `cargo metadata --no-deps`, reduced to workspace crates and the
 /// edges between them. Deterministic: names + edges only, fully sorted.
-fn workspace_crates(root: &Path) -> Result<Vec<Crate>> {
+pub(crate) fn workspace_crates(root: &Path) -> Result<Vec<Crate>> {
     let output = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .current_dir(root)

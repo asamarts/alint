@@ -29,6 +29,9 @@
 //!   contract) from `docs/design/ROADMAP.md`; `--check` gates drift.
 //! - `gen-arch`           — regenerate the crate dependency graph from
 //!   `cargo metadata` + check the C4 model; `--check` gates drift.
+//! - `gen-model`          — regenerate the code-derived `LikeC4` model fragments
+//!   (the rule-kind taxonomy, ...) for the architecture diagrams; `--check`
+//!   gates drift.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,6 +44,7 @@ mod bench;
 mod bench_release;
 mod docs_export;
 mod facts;
+mod gen_model;
 mod gen_roadmap;
 mod gen_schema;
 mod roadmap_generator;
@@ -273,6 +277,12 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the code-derived `LikeC4` model fragments (rule taxonomy, ...).
+    GenModel {
+        /// Verify the committed `*.gen.c4` fragments instead of rewriting them.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -338,6 +348,7 @@ fn main() -> Result<()> {
         Commands::GenFacts { check } => facts::run(check),
         Commands::GenRoadmap { check } => gen_roadmap::run(check),
         Commands::GenArch { check } => arch::run(check),
+        Commands::GenModel { check } => gen_model::run(check),
     }
 }
 
