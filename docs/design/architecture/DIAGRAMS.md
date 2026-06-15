@@ -37,6 +37,7 @@ graph TB
   Dev["Developer"]
   Ci["CI / GitHub Actions"]
   Editor["Editor"]
+  PreCommit["pre-commit"]
   subgraph Alint["`alint`"]
     Alint.Tooling["Dev + build tooling"]
     Alint.Cli["CLI"]
@@ -49,6 +50,8 @@ graph TB
   Dev -. "`gets inline diagnostics in the editor`" .-> Alint.LspServer
   Ci -. "`runs as a pipeline gate / GitHub Action`" .-> Alint.Cli
   Editor -. "`speaks LSP over stdio to`" .-> Alint.LspServer
+  PreCommit -. "`runs alint check on commit (and manual 
+alint fix)`" .-> Alint.Cli
   Alint.Cli -. "`starts the server (alint lsp)`" .-> Alint.LspServer
   Alint.LspServer -. "`[...]`" .-> Alint.Cli
   Alint.Tooling -. "`[...]`" .-> Alint.Cli
@@ -65,6 +68,7 @@ violations`" .-> Repo
 graph TB
   Dev["Developer"]
   Ci["CI / GitHub Actions"]
+  PreCommit["pre-commit"]
   AlintLspServer["LSP server"]
   AlintTooling["Dev + build tooling"]
   subgraph AlintCli["`CLI`"]
@@ -77,6 +81,8 @@ graph TB
   Repo["Linted repository"]
   Dev -. "`runs alint check / fix`" .-> AlintCli.AlintBin
   Ci -. "`runs as a pipeline gate / GitHub Action`" .-> AlintCli.AlintBin
+  PreCommit -. "`runs alint check on commit (and manual 
+alint fix)`" .-> AlintCli.AlintBin
   AlintLspServer -. "`runs the engine`" .-> AlintCli.Core
   AlintLspServer -. "`validates config`" .-> AlintCli.Dsl
   AlintLspServer -. "`registers built-in rules`" .-> AlintCli.Rules
@@ -376,6 +382,22 @@ alint check --format sarif`" .-> AlintCliAlintBin
 on error)`" .-> Ci
   Ci -. "`upload-sarif -> Code Scanning 
 annotations`" .-> Codescan
+```
+
+## pre-commit: the commit gate
+
+```mermaid
+graph LR
+  Dev["Developer"]
+  PreCommit["pre-commit"]
+  AlintCliAlintBin["alint"]
+  Dev -. "`git commit`" .-> PreCommit
+  PreCommit -. "`run the alint hook -> alint check`" .-> AlintCliAlintBin
+  AlintCliAlintBin -. "`errors block the commit; clean lets it 
+proceed`" .-> PreCommit
+  Dev -. "`manual: pre-commit run alint-fix`" .-> PreCommit
+  PreCommit -. "`alint fix (writes fixes to the working 
+tree)`" .-> AlintCliAlintBin
 ```
 
 ## Release and distribution

@@ -17,6 +17,10 @@ repos:
 
 The `alint` hook runs `alint check` against the repo's `.alint.yml` on every commit, blocking commits whose changes introduce errors.
 
+The commit gate, plus the manual fix hook:
+
+<likec4-view view-id="preCommitFlow"></likec4-view>
+
 ## Auto-fix on demand
 
 A second hook id, `alint-fix`, applies fixers. It's registered under `stages: [manual]` so it does not run on every commit (fixers mutate the working tree). Invoke explicitly:

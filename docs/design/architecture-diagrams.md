@@ -1,7 +1,7 @@
 # Design doc: architecture diagrams as a LikeC4 model (WS3, follow-on)
 
-Status: Implemented (pending merge + deploy). The single LikeC4 model (38 views:
-19 structural, 19 dynamic), the generated `*.gen.c4` fragment and its drift
+Status: Implemented (pending merge + deploy). The single LikeC4 model (39 views:
+19 structural, 20 dynamic), the generated `*.gen.c4` fragment and its drift
 gates, the config-DSL domain map, the alint.org web-component embedding with
 light/dark sync, and the GitHub-facing Mermaid gallery (`DIAGRAMS.md`) have all
 shipped. Remaining: a runner rebuild (Node) flips `likec4 validate` and
@@ -127,7 +127,7 @@ single gated model is a site-wide diagram library: each page embeds the views it
 needs and every diagram stays gated centrally. The question is which view-ids
 embed where, plus which new views are worth modeling.
 
-### Built (38 views, all embedded)
+### Built (39 views, all embedded)
 
 Structural: system context, containers, CLI components, crate dependency graph
 (gen-arch), config-DSL domain map, rule catalogue + 13 per-family views.
@@ -146,7 +146,7 @@ ADR-0004), fixFlow, dispatchFlow (read-coalescing, ADR-0003), factsFlow
 | Concepts > templates | templateFlow | embedded |
 | Configuration | config-DSL map, configLoad | embedded |
 | Integrations > github-actions | ciActionFlow | embedded |
-| Integrations > pre-commit | preCommitFlow | unbuilt (no view yet) |
+| Integrations > pre-commit | preCommitFlow | embedded |
 | Integrations > editors | editorArch, lspFlow | embedded |
 | Integrations > docker | distributionFlow | embedded |
 | Reference > output-formats | outputFormats | embedded |
@@ -159,7 +159,7 @@ ADR-0004), fixFlow, dispatchFlow (read-coalescing, ADR-0003), factsFlow
 
 ### Build tiers (status)
 
-All 38 model views are built, validated, gated, and embedded across ~30 pages
+All 39 model views are built, validated, gated, and embedded across ~30 pages
 per the table above. The alint.org gallery page (`about/architecture-diagrams`)
 is the full explorer; the per-page embeds place each view in its context, and
 `gen-mermaid` mirrors the same curated set into `DIAGRAMS.md` for GitHub.
@@ -210,8 +210,6 @@ diagram.
   (`likec4 validate`) and `gen-mermaid --check` from skip to hard gate.
 - Retire `crate-graph.md` and `workspace.dsl` once the LikeC4 model subsumes
   them (both are still kept through the transition).
-- Model a `preCommitFlow` view for the pre-commit integration page, the one
-  placement slot in the table above still without a view.
 
 ## 9. Tests and gates
 

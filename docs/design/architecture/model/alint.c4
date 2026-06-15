@@ -43,6 +43,9 @@ model {
   docsbundle = system 'docs-bundle branch' 'The orphan-branch handoff the alint.org build pulls.' {
     #external
   }
+  preCommit = system 'pre-commit' 'The pre-commit.com framework: runs the alint hook on git commit.' {
+    #external
+  }
 
   alint = system 'alint' 'Repository linter: structure, existence, content, cross-file, git, and structured-query rules.' {
 
@@ -78,6 +81,8 @@ model {
   editor -> lspd 'speaks LSP over stdio to'
   ci -> codescan 'uploads SARIF to'
   xtask -> docsbundle 'pushes the docs bundle to'
+  dev -> preCommit 'installs the alint hook; git commit triggers it'
+  preCommit -> alintBin 'runs alint check on commit (and manual alint fix)'
 
   // --- Component (crate) runtime edges. Mirror crate-graph.md solid edges;
   //     gated against cargo metadata runtime deps by gen-model --check. ---
@@ -221,6 +226,16 @@ views {
     alintBin -> repo 'lint the checked-out repository'
     alintBin -> ci 'SARIF report + exit code (fail the job on error)'
     ci -> codescan 'upload-sarif -> Code Scanning annotations'
+  }
+
+  dynamic view preCommitFlow {
+    title 'pre-commit: commit gate'
+
+    dev -> preCommit 'git commit'
+    preCommit -> alintBin 'run the alint hook -> alint check'
+    alintBin -> preCommit 'errors block the commit; clean lets it proceed'
+    dev -> preCommit 'manual: pre-commit run alint-fix'
+    preCommit -> alintBin 'alint fix (writes fixes to the working tree)'
   }
 
   dynamic view docsAsCodeFlow {

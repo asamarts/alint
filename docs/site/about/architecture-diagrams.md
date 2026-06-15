@@ -134,6 +134,13 @@ The GitHub Action: how a CI run produces SARIF for GitHub Code Scanning.
 
 <likec4-view view-id="ciActionFlow"></likec4-view>
 
+## pre-commit: the commit gate
+
+How the pre-commit hook runs `alint check` on commit and blocks on errors, plus
+the manual `alint-fix` hook.
+
+<likec4-view view-id="preCommitFlow"></likec4-view>
+
 ## Release and distribution
 
 How a tagged release fans out to crates.io, npm, Homebrew, Docker, and the
