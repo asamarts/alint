@@ -44,6 +44,7 @@ mod bench;
 mod bench_release;
 mod docs_export;
 mod facts;
+mod family_index;
 mod gen_mermaid;
 mod gen_model;
 mod gen_roadmap;

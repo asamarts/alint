@@ -70,7 +70,7 @@ pub fn run(check: bool) -> Result<()> {
         check_model_crate_edges(&root)?;
         check_config_model_root_keys(&root)?;
         check_taxonomy_complete(&families, &md, &root)?;
-        check_view_ids_exist(&families, &root)?;
+        check_view_ids_exist(&root)?;
         println!(
             "{RULE_FAMILIES_C4} is up to date; model gates pass (crate set + edges, config keys, taxonomy completeness, embedded view-ids)"
         );
@@ -430,9 +430,10 @@ fn aliases_in_heading(heading: &str) -> Vec<String> {
 /// Two reference sources are covered: literal `<likec4-view view-id="...">`
 /// embeds in hand-authored docs (`ARCHITECTURE.md` + everything under
 /// `docs/site`), and the ids `docs-export` injects into *generated* pages (the
-/// concept/CLI flow views and one `family_<slug>` per rule family) — reusing the
-/// real injection helpers so the gate can't drift from the emitter.
-fn check_view_ids_exist(families: &[Family], root: &Path) -> Result<()> {
+/// concept and CLI flow views) — reusing the real injection helpers so the gate
+/// can't drift from the emitter. (Per-family `family_<slug>` views are no longer
+/// embedded standalone; they remain catalogue drill-down targets in the model.)
+fn check_view_ids_exist(root: &Path) -> Result<()> {
     let model_ids = model_view_ids(root)?;
 
     // id -> a human-readable description of where it is first referenced.
@@ -468,15 +469,6 @@ fn check_view_ids_exist(families: &[Family], root: &Path) -> Result<()> {
                 .entry(v.to_string())
                 .or_insert_with(|| format!("docs-export cli/{sub} page"));
         }
-    }
-    for f in families {
-        let id = format!(
-            "family_{}",
-            crate::docs_export::slugify(&f.title).replace('-', "_")
-        );
-        referenced
-            .entry(id)
-            .or_insert_with(|| format!("docs-export rules/{} index", f.slug));
     }
 
     let missing: Vec<String> = referenced
@@ -634,10 +626,7 @@ mod tests {
     #[test]
     fn embedded_view_ids_resolve_to_model_views() {
         let root = crate::workspace_root().expect("root");
-        let md = fs::read_to_string(root.join(RULES_MD)).expect("read rules.md");
-        let families = parse_families(&md);
-        check_view_ids_exist(&families, &root)
-            .expect("every embedded view-id must name a real model view");
+        check_view_ids_exist(&root).expect("every embedded view-id must name a real model view");
     }
 
     #[test]

@@ -215,6 +215,7 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
     write_manifest(&target_dir)?;
 
     if check {
+        crate::family_index::check_ascii(&target_dir)?;
         eprintln!("[xtask] docs-export --check OK");
     } else {
         eprintln!("[xtask] docs-export wrote {}", target_dir.display());
@@ -533,9 +534,9 @@ fn process_family_h3s(
 }
 
 #[derive(Clone)]
-struct RuleEntry {
-    kind: String,
-    summary: String,
+pub(crate) struct RuleEntry {
+    pub(crate) kind: String,
+    pub(crate) summary: String,
 }
 
 #[derive(Clone)]
@@ -836,41 +837,10 @@ fn emit_family_index(
     family_slug: &str,
     rules: &[RuleEntry],
 ) -> Result<()> {
-    let mut page = String::new();
-    let _ = writeln!(&mut page, "---");
-    let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(family_title));
-    let _ = writeln!(
-        &mut page,
-        "description: 'Rule reference: the {} family.'",
-        family_title.to_lowercase()
-    );
-    let _ = writeln!(&mut page, "sidebar:");
-    let _ = writeln!(&mut page, "  order: {family_order}");
-    let _ = writeln!(&mut page, "  label: '{}'", escape_yaml_string(family_title));
-    let _ = writeln!(&mut page, "---");
-    let _ = writeln!(&mut page);
-    let _ = writeln!(
-        &mut page,
-        "Rule kinds in the **{family_title}** family. Each entry below has its own page with options, an example, and any auto-fix support."
-    );
-    let _ = writeln!(&mut page);
-    // The LikeC4 family view (gen-model emits `family_<slug>` with `_`
-    // separators; the URL slug uses `-`). Rendered by the global loader.
-    let _ = writeln!(
-        &mut page,
-        "<likec4-view view-id=\"family_{}\"></likec4-view>",
-        family_slug.replace('-', "_")
-    );
-    let _ = writeln!(&mut page);
-    for r in rules {
-        let _ = writeln!(
-            &mut page,
-            "- [`{kind}`](/docs/rules/{family_slug}/{kind}/) — {summary}",
-            kind = r.kind,
-            summary = r.summary
-        );
-    }
-    fs::write(family_dir.join("index.md"), page)?;
+    fs::write(
+        family_dir.join("index.md"),
+        crate::family_index::render(family_title, family_order, family_slug, rules),
+    )?;
     Ok(())
 }
 
@@ -1042,7 +1012,7 @@ pub(crate) fn slugify(s: &str) -> String {
 /// Quote a string safely for a single-quoted YAML scalar — only
 /// `'` needs escaping (doubled). Frontmatter titles like
 /// `Security / Unicode sanity` need this.
-fn escape_yaml_string(s: &str) -> String {
+pub(crate) fn escape_yaml_string(s: &str) -> String {
     s.replace('\'', "''")
 }
 
