@@ -463,7 +463,7 @@ fn check_view_ids_exist(families: &[Family], root: &Path) -> Result<()> {
         }
     }
     for sub in ["check", "fix", "lsp", "facts"] {
-        if let Some(v) = crate::docs_export::cli_view_id(sub) {
+        if let Some((v, _)) = crate::docs_export::cli_view(sub) {
             referenced
                 .entry(v.to_string())
                 .or_insert_with(|| format!("docs-export cli/{sub} page"));

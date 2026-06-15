@@ -334,11 +334,9 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 
 ## Execution model
 
+The pipeline from `alint check` to output:
+
 <likec4-view view-id="checkFlow"></likec4-view>
-
-<likec4-view view-id="dispatchFlow"></likec4-view>
-
-<likec4-view view-id="factsFlow"></likec4-view>
 
 1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
 2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
@@ -352,6 +350,14 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 10. **Emit.** Format via selected output.
 
 Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; fact and rule evaluation are both parallelized; fixers run serially (they mutate the tree).
+
+Step 2 in detail: facts are evaluated once (in parallel, cached), then gate which rules run via their `when:` conditions.
+
+<likec4-view view-id="factsFlow"></likec4-view>
+
+Steps 5 to 7 in detail: dispatch partitions rules into cross-file (rule-major) and per-file, so each matched file's bytes are read exactly once (ADR-0003).
+
+<likec4-view view-id="dispatchFlow"></likec4-view>
 
 ## Crate layout
 

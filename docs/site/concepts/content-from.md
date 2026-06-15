@@ -7,6 +7,10 @@ sidebar:
 
 The three content-providing fix ops — `file_create`, `file_prepend`, `file_append` — accept a `content_from: <path>` field as an alternative to inline `content:`. The path resolves relative to the lint root and is read when `alint fix` actually runs, so the source file's bytes flow into the target without round-tripping through YAML.
 
+Where `content_from:` is read during `alint fix`:
+
+<likec4-view view-id="fixFlow"></likec4-view>
+
 ## When to reach for it
 
 LICENSE / NOTICE / CONTRIBUTING / SPDX boilerplate is awkward to inline. A real Apache-2 LICENSE is ~10 KB; pasting it into YAML quotes is fragile (escape rules, indentation drift, code-search hits in the wrong column). Stash the canonical bytes under `.alint/templates/`, point `content_from:` at it:

@@ -8,11 +8,9 @@ This doc supplements (does not replace)
 `docs/design/v0.9/coverage-and-dogfood.md`, which captures
 the *why*. This doc captures the *what to do*.
 
+The four-step workflow every new rule kind, ruleset, or alias goes through:
+
 <likec4-view view-id="addRuleKindFlow"></likec4-view>
-
-<likec4-view view-id="ruleTypeModel"></likec4-view>
-
-<likec4-view view-id="docsAsCodeFlow"></likec4-view>
 
 ## Two-layer enforcement
 
@@ -273,6 +271,14 @@ This is opt-in — most rule additions don't need it.
   the ruleset's first three lines don't match the docs-export
   parser's expected header shape. See the rule's `message:` in
   `.alint.yml` for the exact pattern.
+
+## Keeping docs in lockstep
+
+The generated contracts (facts, schema, rules, the architecture model) flow to
+alint.org and are gated against drift, so a new rule kind's docs can't silently
+fall out of sync:
+
+<likec4-view view-id="docsAsCodeFlow"></likec4-view>
 
 ## Related docs
 

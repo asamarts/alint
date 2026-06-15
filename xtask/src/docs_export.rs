@@ -1459,12 +1459,15 @@ pub(crate) fn first_overview_sentence(overview_md: &str) -> String {
 }
 
 /// The architecture flow embedded atop a generated `cli/<sub>` page, if any.
-pub(crate) fn cli_view_id(sub: &str) -> Option<&'static str> {
+/// The architecture view embedded on a `cli/<sub>` reference page, with a
+/// one-line caption. `facts` is intentionally absent: factsFlow depicts
+/// fact-evaluation *plus* rule gating, but `alint facts` only evaluates and
+/// prints facts, so the diagram would over-reach.
+pub(crate) fn cli_view(sub: &str) -> Option<(&'static str, &'static str)> {
     match sub {
-        "check" => Some("checkFlow"),
-        "fix" => Some("fixFlow"),
-        "lsp" => Some("lspFlow"),
-        "facts" => Some("factsFlow"),
+        "check" => Some(("checkFlow", "The pipeline `alint check` runs:")),
+        "fix" => Some(("fixFlow", "How `alint fix` applies fixes and re-checks:")),
+        "lsp" => Some(("lspFlow", "How `alint lsp` serves an editor over LSP:")),
         _ => None,
     }
 }
@@ -1524,7 +1527,9 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
         );
         let _ = writeln!(&mut page, "---");
         let _ = writeln!(&mut page);
-        if let Some(view) = cli_view_id(sub) {
+        if let Some((view, caption)) = cli_view(sub) {
+            let _ = writeln!(&mut page, "{caption}");
+            let _ = writeln!(&mut page);
             let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
             let _ = writeln!(&mut page);
         }

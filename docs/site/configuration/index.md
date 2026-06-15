@@ -7,9 +7,9 @@ sidebar:
 
 `.alint.yml` is the only file alint reads. It declares the rules, the rule sources, the facts they're gated on, and a handful of run-time knobs.
 
-<likec4-view view-id="configModel"></likec4-view>
+The entities of a config and how they relate:
 
-<likec4-view view-id="factsFlow"></likec4-view>
+<likec4-view view-id="configModel"></likec4-view>
 
 Point your YAML language server at the JSON Schema for editor autocomplete:
 
