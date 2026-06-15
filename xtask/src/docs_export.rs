@@ -854,6 +854,14 @@ fn emit_family_index(
         "Rule kinds in the **{family_title}** family. Each entry below has its own page with options, an example, and any auto-fix support."
     );
     let _ = writeln!(&mut page);
+    // The LikeC4 family view (gen-model emits `family_<slug>` with `_`
+    // separators; the URL slug uses `-`). Rendered by the global loader.
+    let _ = writeln!(
+        &mut page,
+        "<likec4-view view-id=\"family_{}\"></likec4-view>",
+        family_slug.replace('-', "_")
+    );
+    let _ = writeln!(&mut page);
     for r in rules {
         let _ = writeln!(
             &mut page,
@@ -940,6 +948,15 @@ fn emit_rules_master_index(
     Ok(())
 }
 
+/// The architecture view embedded atop a generated concept page, if any.
+fn concept_view_id(slug: &str) -> Option<&'static str> {
+    match slug {
+        "fix-operations" => Some("fixFlow"),
+        "nested-configs" => Some("monorepoNesting"),
+        _ => None,
+    }
+}
+
 /// Emit a non-rule concept page (Fix operations, Nested
 /// configs). Lives under `concepts/` rather than `rules/` so
 /// the rules tree is purely about rule kinds.
@@ -956,6 +973,10 @@ fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> 
     );
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page);
+    if let Some(view) = concept_view_id(slug) {
+        let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
+        let _ = writeln!(&mut page);
+    }
     page.push_str(body.trim_start_matches('\n'));
     if !page.ends_with('\n') {
         page.push('\n');
@@ -1437,6 +1458,17 @@ pub(crate) fn first_overview_sentence(overview_md: &str) -> String {
     paragraph.trim().to_string()
 }
 
+/// The architecture flow embedded atop a generated `cli/<sub>` page, if any.
+fn cli_view_id(sub: &str) -> Option<&'static str> {
+    match sub {
+        "check" => Some("checkFlow"),
+        "fix" => Some("fixFlow"),
+        "lsp" => Some("lspFlow"),
+        "facts" => Some("factsFlow"),
+        _ => None,
+    }
+}
+
 /// Build the alint binary in release mode, then capture
 /// `alint --help` and `alint <subcmd> --help` for each subcommand.
 /// Each captured help text becomes its own markdown page under
@@ -1492,6 +1524,10 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
         );
         let _ = writeln!(&mut page, "---");
         let _ = writeln!(&mut page);
+        if let Some(view) = cli_view_id(sub) {
+            let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
+            let _ = writeln!(&mut page);
+        }
         let _ = writeln!(&mut page, "```");
         page.push_str(&help);
         let _ = writeln!(&mut page, "```");
