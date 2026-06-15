@@ -1,5 +1,5 @@
 ---
-title: '`content_from:` for fix ops'
+title: 'content_from: for fix ops'
 description: Reference fix-op body content from a file path instead of inlining it in YAML. Paths resolve relative to the lint root; bytes are read at fix-apply time.
 sidebar:
   order: 8

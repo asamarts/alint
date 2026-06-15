@@ -1,5 +1,5 @@
 ---
-title: The walker and `.gitignore`
+title: The walker and .gitignore
 description: How alint discovers files, what `.gitignore` filters out by default, and how rules like `file_absent` / `dir_absent` interpret git state.
 sidebar:
   order: 5
