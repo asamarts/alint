@@ -7,6 +7,8 @@
 
 alint is a language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**. It is a single static Rust binary that reads a declarative YAML config and enforces rules over a repository tree.
 
+<likec4-view view-id="index"></likec4-view>
+
 Examples of rules in scope:
 
 - Does file `X` exist at path `Y`? Does directory `Z` contain file `W`?
@@ -38,6 +40,8 @@ The clarity of these non-goals is itself a feature.
 8. **Single static binary.** Rust, no runtime dependency on Node, Ruby, or Python.
 
 ## Rule model
+
+<likec4-view view-id="ruleTypeModel"></likec4-view>
 
 Every rule is a record:
 
@@ -322,6 +326,8 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 
 ## Execution model
 
+<likec4-view view-id="checkFlow"></likec4-view>
+
 1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
 2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
 3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
@@ -338,6 +344,8 @@ Invariants: the walk runs exactly once per invocation; any given file's bytes ar
 ## Crate layout
 
 alint is a Cargo workspace, the standard shape for Rust tools (rustc, cargo, tokio, ruff, biome, rust-analyzer, wasmtime, ...). The reasons apply here: pre-1.0 breaking changes in the core ripple through the graph, so every such change is one PR rather than a multi-repo release; one `Cargo.lock` guarantees consistent transitive deps; one CI run (`cargo test --workspace`) validates the full graph; contributors clone once.
+
+<likec4-view view-id="cliComponents"></likec4-view>
 
 ### Building block view
 
