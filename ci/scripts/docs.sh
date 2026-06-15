@@ -67,3 +67,12 @@ cargo run -q -p xtask -- gen-model --check
 # image ships it. See ci/scripts/likec4.sh + docs/design/architecture-diagrams.md.
 echo "==> Running ci/scripts/likec4.sh"
 bash ci/scripts/likec4.sh
+
+# `xtask gen-mermaid --check` regenerates the GitHub-facing Mermaid diagram
+# gallery (docs/design/architecture/DIAGRAMS.md) from the same LikeC4 model and
+# fails if it drifted. GitHub strips the interactive <likec4-view> web component,
+# so this is how `.md` readers get the diagrams. Also needs Node (`likec4 gen
+# mermaid`); it loudly skips if Node is absent until the runner image ships it.
+# Run `cargo run -p xtask -- gen-mermaid` to refresh after a model change.
+echo "==> Running xtask gen-mermaid --check"
+cargo run -q -p xtask -- gen-mermaid --check

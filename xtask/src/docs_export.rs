@@ -949,7 +949,7 @@ fn emit_rules_master_index(
 }
 
 /// The architecture view embedded atop a generated concept page, if any.
-fn concept_view_id(slug: &str) -> Option<&'static str> {
+pub(crate) fn concept_view_id(slug: &str) -> Option<&'static str> {
     match slug {
         "fix-operations" => Some("fixFlow"),
         "nested-configs" => Some("monorepoNesting"),
@@ -1020,7 +1020,7 @@ fn split_h2_sections(src: &str) -> Vec<H2Section> {
 /// URL-safe slug from a heading. Lowercases, drops any character
 /// that isn't `[a-z0-9-]`, collapses runs of `-`. Adequate for
 /// headings like "Security / Unicode sanity" → "security-unicode-sanity".
-fn slugify(s: &str) -> String {
+pub(crate) fn slugify(s: &str) -> String {
     let lc = s.to_lowercase();
     let mut out = String::with_capacity(lc.len());
     let mut last_dash = false;
@@ -1459,7 +1459,7 @@ pub(crate) fn first_overview_sentence(overview_md: &str) -> String {
 }
 
 /// The architecture flow embedded atop a generated `cli/<sub>` page, if any.
-fn cli_view_id(sub: &str) -> Option<&'static str> {
+pub(crate) fn cli_view_id(sub: &str) -> Option<&'static str> {
     match sub {
         "check" => Some("checkFlow"),
         "fix" => Some("fixFlow"),

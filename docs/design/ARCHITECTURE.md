@@ -3,6 +3,12 @@
 > Status: Living design document. Describes alint's internals for contributors
 > and embedders. For the current scope by version, see [ROADMAP.md](./ROADMAP.md).
 
+> **Diagrams:** this document embeds interactive architecture diagrams that
+> render on [alint.org](https://alint.org/docs/about/architecture/); GitHub
+> strips the `<likec4-view>` web component, so on GitHub they appear blank. The
+> same views are static Mermaid flowcharts, generated from the same model, in
+> [DIAGRAMS.md](https://github.com/asamarts/alint/blob/main/docs/design/architecture/DIAGRAMS.md).
+
 ## Overview
 
 alint is a language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**. It is a single static Rust binary that reads a declarative YAML config and enforces rules over a repository tree.

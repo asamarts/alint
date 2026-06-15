@@ -44,6 +44,7 @@ mod bench;
 mod bench_release;
 mod docs_export;
 mod facts;
+mod gen_mermaid;
 mod gen_model;
 mod gen_roadmap;
 mod gen_schema;
@@ -283,6 +284,12 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the GitHub-facing Mermaid diagram gallery from the `LikeC4` model.
+    GenMermaid {
+        /// Verify the committed `DIAGRAMS.md` instead of rewriting it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -349,6 +356,7 @@ fn main() -> Result<()> {
         Commands::GenRoadmap { check } => gen_roadmap::run(check),
         Commands::GenArch { check } => arch::run(check),
         Commands::GenModel { check } => gen_model::run(check),
+        Commands::GenMermaid { check } => gen_mermaid::run(check),
     }
 }
 

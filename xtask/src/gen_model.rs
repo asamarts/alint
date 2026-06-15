@@ -30,6 +30,8 @@ const CONFIG_MODEL_C4: &str = "docs/design/architecture/model/config-model.c4";
 const RULES_MD: &str = "docs/rules.md";
 const SCHEMA_JSON: &str = "schemas/v1/config.json";
 const ALL_KINDS_YAML: &str = "crates/alint-dsl/tests/fixtures/all_kinds.yaml";
+const ARCHITECTURE_MD: &str = "docs/design/ARCHITECTURE.md";
+const SITE_DIR: &str = "docs/site";
 
 /// `docs/rules.md` `## ` headings that are not rule families.
 const META_FAMILIES: &[&str] = &[
@@ -68,8 +70,9 @@ pub fn run(check: bool) -> Result<()> {
         check_model_crate_edges(&root)?;
         check_config_model_root_keys(&root)?;
         check_taxonomy_complete(&families, &md, &root)?;
+        check_view_ids_exist(&families, &root)?;
         println!(
-            "{RULE_FAMILIES_C4} is up to date; model gates pass (crate set + edges, config keys, taxonomy completeness)"
+            "{RULE_FAMILIES_C4} is up to date; model gates pass (crate set + edges, config keys, taxonomy completeness, embedded view-ids)"
         );
         return Ok(());
     }
@@ -417,6 +420,117 @@ fn aliases_in_heading(heading: &str) -> Vec<String> {
     out
 }
 
+/// Every `view-id` referenced on a doc surface must name a `view` that actually
+/// exists in the `LikeC4` model. `likec4 validate` checks the model's internal
+/// integrity (every flow step references a declared element); this is the
+/// reverse direction — it ties the *surfaces* (the `<likec4-view>` embeds) back
+/// to the model, so a renamed or deleted view can't silently render an empty
+/// diagram on every page that embeds it.
+///
+/// Two reference sources are covered: literal `<likec4-view view-id="...">`
+/// embeds in hand-authored docs (`ARCHITECTURE.md` + everything under
+/// `docs/site`), and the ids `docs-export` injects into *generated* pages (the
+/// concept/CLI flow views and one `family_<slug>` per rule family) — reusing the
+/// real injection helpers so the gate can't drift from the emitter.
+fn check_view_ids_exist(families: &[Family], root: &Path) -> Result<()> {
+    let model_ids = model_view_ids(root)?;
+
+    // id -> a human-readable description of where it is first referenced.
+    let mut referenced: BTreeMap<String, String> = BTreeMap::new();
+
+    // (A) Literal embeds in hand-authored docs.
+    let mut md_files = vec![root.join(ARCHITECTURE_MD)];
+    for p in crate::walkdir_plain(&root.join(SITE_DIR))? {
+        if p.extension().is_some_and(|e| e == "md") {
+            md_files.push(p);
+        }
+    }
+    for f in &md_files {
+        let text = fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
+        let rel = f.strip_prefix(root).unwrap_or(f).display().to_string();
+        for id in embedded_view_ids(&text) {
+            referenced.entry(id).or_insert_with(|| rel.clone());
+        }
+    }
+
+    // (B) docs-export injects view ids into generated pages, which are absent
+    // from the scan above. Reuse the real injection logic.
+    for slug in ["fix-operations", "nested-configs"] {
+        if let Some(v) = crate::docs_export::concept_view_id(slug) {
+            referenced
+                .entry(v.to_string())
+                .or_insert_with(|| format!("docs-export concept page '{slug}'"));
+        }
+    }
+    for sub in ["check", "fix", "lsp", "facts"] {
+        if let Some(v) = crate::docs_export::cli_view_id(sub) {
+            referenced
+                .entry(v.to_string())
+                .or_insert_with(|| format!("docs-export cli/{sub} page"));
+        }
+    }
+    for f in families {
+        let id = format!(
+            "family_{}",
+            crate::docs_export::slugify(&f.title).replace('-', "_")
+        );
+        referenced
+            .entry(id)
+            .or_insert_with(|| format!("docs-export rules/{} index", f.slug));
+    }
+
+    let missing: Vec<String> = referenced
+        .iter()
+        .filter(|(id, _)| !model_ids.contains(*id))
+        .map(|(id, src)| format!("{id} (referenced in {src})"))
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "embedded view-id(s) have no matching `view` in the LikeC4 model \
+             (docs/design/architecture/model/*.c4): {missing:?}. A renamed or removed \
+             view renders an empty <likec4-view>; add the view or fix the embed."
+        );
+    }
+    Ok(())
+}
+
+/// All view ids declared across the three model `.c4` files: every `view <id>`,
+/// `dynamic view <id>`, and `view <id> of <element>`.
+fn model_view_ids(root: &Path) -> Result<BTreeSet<String>> {
+    let mut ids = BTreeSet::new();
+    for rel in [MODEL_C4, CONFIG_MODEL_C4, RULE_FAMILIES_C4] {
+        let path = root.join(rel);
+        let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        ids.extend(text.lines().filter_map(view_decl_id));
+    }
+    Ok(ids)
+}
+
+/// The view id from a `view <id>` / `dynamic view <id>` declaration line, if any.
+/// Skips the `views {` block opener (no space after `view`) and anything that is
+/// not a view declaration.
+fn view_decl_id(line: &str) -> Option<String> {
+    let t = line.trim_start();
+    let t = t.strip_prefix("dynamic ").unwrap_or(t);
+    let rest = t.strip_prefix("view ")?;
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if id.is_empty() { None } else { Some(id) }
+}
+
+/// Every `view-id="<id>"` attribute value in a string (the `<likec4-view>`
+/// embeds).
+fn embedded_view_ids(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.match_indices("view-id=\"").filter_map(|(i, m)| {
+        let after = &text[i + m.len()..];
+        let end = after.find('"')?;
+        let id = &after[..end];
+        (!id.is_empty()).then(|| id.to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,6 +626,41 @@ mod tests {
         );
         assert_eq!(edge_endpoints("    cli = container 'CLI'"), None);
         assert_eq!(edge_endpoints("  // a comment -> not an edge"), None);
+    }
+
+    /// Every `view-id` embedded on a doc surface (literal embeds + the ids
+    /// docs-export injects into generated pages) names a real model view, so a
+    /// renamed/removed view can't silently empty a diagram.
+    #[test]
+    fn embedded_view_ids_resolve_to_model_views() {
+        let root = crate::workspace_root().expect("root");
+        let md = fs::read_to_string(root.join(RULES_MD)).expect("read rules.md");
+        let families = parse_families(&md);
+        check_view_ids_exist(&families, &root)
+            .expect("every embedded view-id must name a real model view");
+    }
+
+    #[test]
+    fn view_decl_id_parses_declarations() {
+        assert_eq!(
+            view_decl_id("  dynamic view checkFlow {").as_deref(),
+            Some("checkFlow")
+        );
+        assert_eq!(view_decl_id("  view index {").as_deref(), Some("index"));
+        assert_eq!(
+            view_decl_id("  view catalogueOverview of ruleCatalogue {").as_deref(),
+            Some("catalogueOverview")
+        );
+        assert_eq!(view_decl_id("views {"), None);
+        assert_eq!(view_decl_id("    include *"), None);
+    }
+
+    #[test]
+    fn embedded_view_ids_scans_attrs() {
+        let ids: Vec<String> =
+            embedded_view_ids("x <likec4-view view-id=\"checkFlow\"></likec4-view> view-id=\"\" y view-id=\"fixFlow\">")
+                .collect();
+        assert_eq!(ids, vec!["checkFlow", "fixFlow"]);
     }
 
     #[test]
