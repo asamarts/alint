@@ -52,9 +52,9 @@ graph TB
   Editor -. "`speaks LSP over stdio to`" .-> Alint.LspServer
   PreCommit -. "`runs alint check on commit (and manual 
 alint fix)`" .-> Alint.Cli
-  Alint.Cli -. "`starts the server (alint lsp)`" .-> Alint.LspServer
-  Alint.LspServer -. "`[...]`" .-> Alint.Cli
-  Alint.Tooling -. "`[...]`" .-> Alint.Cli
+  Alint.Cli -.-> Alint.LspServer
+  Alint.LspServer -.-> Alint.Cli
+  Alint.Tooling -.-> Alint.Cli
   Alint.Cli -. "`reads files + git history; reports 
 violations`" .-> Repo
   Alint.LspServer -. "`validates the open workspace`" .-> Repo
@@ -74,8 +74,8 @@ graph TB
   subgraph AlintCli["`CLI`"]
     AlintCli.AlintBin["alint"]
     AlintCli.Dsl["alint-dsl"]
-    AlintCli.Rules["alint-rules"]
     AlintCli.Output["alint-output"]
+    AlintCli.Rules["alint-rules"]
     AlintCli.Core["alint-core"]
   end
   Repo["Linted repository"]
@@ -83,23 +83,73 @@ graph TB
   Ci -. "`runs as a pipeline gate / GitHub Action`" .-> AlintCli.AlintBin
   PreCommit -. "`runs alint check on commit (and manual 
 alint fix)`" .-> AlintCli.AlintBin
-  AlintLspServer -. "`runs the engine`" .-> AlintCli.Core
-  AlintLspServer -. "`validates config`" .-> AlintCli.Dsl
-  AlintLspServer -. "`registers built-in rules`" .-> AlintCli.Rules
-  AlintTooling -. "`[...]`" .-> AlintCli.Core
-  AlintTooling -. "`[...]`" .-> AlintCli.Dsl
-  AlintTooling -. "`[...]`" .-> AlintCli.Rules
-  AlintTooling -. "`formats bench reports`" .-> AlintCli.Output
-  AlintCli.AlintBin -. "`drives the engine`" .-> AlintCli.Core
-  AlintCli.AlintBin -. "`loads config`" .-> AlintCli.Dsl
-  AlintCli.AlintBin -. "`registers built-in rules`" .-> AlintCli.Rules
-  AlintCli.AlintBin -. "`renders reports`" .-> AlintCli.Output
-  AlintCli.Dsl -. "`builds the config AST`" .-> AlintCli.Core
-  AlintCli.Rules -. "`implements the Rule trait`" .-> AlintCli.Core
-  AlintCli.Output -. "`formats the Report`" .-> AlintCli.Core
+  AlintLspServer -.-> AlintCli.Core
+  AlintLspServer -.-> AlintCli.Dsl
+  AlintLspServer -.-> AlintCli.Rules
+  AlintTooling -.-> AlintCli.Core
+  AlintTooling -.-> AlintCli.Dsl
+  AlintTooling -.-> AlintCli.Rules
+  AlintTooling -.-> AlintCli.Output
+  AlintCli.AlintBin -.-> AlintCli.Core
+  AlintCli.AlintBin -.-> AlintCli.Dsl
+  AlintCli.AlintBin -.-> AlintCli.Rules
+  AlintCli.AlintBin -.-> AlintCli.Output
+  AlintCli.Dsl -.-> AlintCli.Core
+  AlintCli.Rules -.-> AlintCli.Core
+  AlintCli.Output -.-> AlintCli.Core
+  AlintCli.Dsl -.-> AlintCli.Rules
   AlintCli.AlintBin -. "`reads files + git history; reports 
 violations`" .-> Repo
-  AlintCli.AlintBin -. "`starts the server (alint lsp)`" .-> AlintLspServer
+  AlintCli.AlintBin -.-> AlintLspServer
+```
+
+## Crate dependency graph
+
+```mermaid
+graph TB
+  subgraph AlintTooling["`Dev + build tooling`"]
+    AlintTooling.E2e["alint-e2e"]
+    AlintTooling.Xtask["xtask"]
+    AlintTooling.Testkit["alint-testkit"]
+    AlintTooling.Bench["alint-bench"]
+  end
+  subgraph AlintCli["`CLI`"]
+    AlintCli.AlintBin["alint"]
+    AlintCli.Output["alint-output"]
+    AlintCli.Dsl["alint-dsl"]
+    AlintCli.Rules["alint-rules"]
+    AlintCli.Core["alint-core"]
+  end
+  subgraph AlintLspServer["`LSP server`"]
+    AlintLspServer.Lspd["alint-lsp"]
+  end
+  AlintCli.AlintBin -.-> AlintCli.Core
+  AlintCli.AlintBin -.-> AlintCli.Dsl
+  AlintCli.Dsl -.-> AlintCli.Core
+  AlintCli.AlintBin -.-> AlintCli.Output
+  AlintCli.Output -.-> AlintCli.Core
+  AlintCli.AlintBin -.-> AlintCli.Rules
+  AlintCli.Dsl -.-> AlintCli.Rules
+  AlintCli.Rules -.-> AlintCli.Core
+  AlintCli.AlintBin -.-> AlintLspServer.Lspd
+  AlintLspServer.Lspd -.-> AlintCli.Core
+  AlintLspServer.Lspd -.-> AlintCli.Dsl
+  AlintLspServer.Lspd -.-> AlintCli.Rules
+  AlintTooling.Bench -.-> AlintCli.Core
+  AlintTooling.Bench -.-> AlintCli.Dsl
+  AlintTooling.Bench -.-> AlintCli.Output
+  AlintTooling.Bench -.-> AlintCli.Rules
+  AlintTooling.E2e -.-> AlintCli.Core
+  AlintTooling.E2e -.-> AlintCli.Dsl
+  AlintTooling.E2e -.-> AlintCli.Rules
+  AlintTooling.E2e -.-> AlintTooling.Testkit
+  AlintTooling.Testkit -.-> AlintCli.Core
+  AlintTooling.Testkit -.-> AlintCli.Dsl
+  AlintTooling.Testkit -.-> AlintCli.Rules
+  AlintTooling.Xtask -.-> AlintCli.Core
+  AlintTooling.Xtask -.-> AlintCli.Dsl
+  AlintTooling.Xtask -.-> AlintCli.Rules
+  AlintTooling.Xtask -.-> AlintTooling.Bench
 ```
 
 ## Execution pipeline

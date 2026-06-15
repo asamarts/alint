@@ -19,6 +19,13 @@ specification {
 
   tag external
   tag generated
+
+  // Dev/build-only crate edges (generated into crate-graph.gen.c4) render
+  // dashed + muted, distinct from the solid runtime edges.
+  relationship dev {
+    line dashed
+    color muted
+  }
 }
 
 model {
@@ -84,29 +91,10 @@ model {
   dev -> preCommit 'installs the alint hook; git commit triggers it'
   preCommit -> alintBin 'runs alint check on commit (and manual alint fix)'
 
-  // --- Component (crate) runtime edges. Mirror crate-graph.md solid edges;
-  //     gated against cargo metadata runtime deps by gen-model --check. ---
-  alintBin -> core 'drives the engine'
-  alintBin -> dsl 'loads config'
-  alintBin -> rules 'registers built-in rules'
-  alintBin -> output 'renders reports'
-  alintBin -> lspd 'starts the server (alint lsp)'
-  dsl -> core 'builds the config AST'
-  rules -> core 'implements the Rule trait'
-  output -> core 'formats the Report'
-  lspd -> core 'runs the engine'
-  lspd -> dsl 'validates config'
-  lspd -> rules 'registers built-in rules'
-  bench -> core 'benchmarks the engine'
-  bench -> dsl 'loads configs under bench'
-  bench -> output 'formats bench reports'
-  bench -> rules 'benchmarks rule evaluation'
-  testkit -> core 'builds fixtures against the engine'
-  testkit -> dsl 'parses fixture configs'
-  testkit -> rules 'exercises rule impls'
-  xtask -> bench 'drives bench-release'
-  xtask -> core 'reads engine types for docs-export'
-  xtask -> rules 'enumerates rules for docs/gen'
+  // The crate-to-crate dependency edges (runtime + dev/build) are GENERATED
+  // from cargo metadata into crate-graph.gen.c4 by `xtask gen-arch`, so they
+  // can't drift from the manifests. They feed both this view's components and
+  // the dedicated crateGraph view.
 
   // Engine type model (the rule-execution types). A domain map (entities +
   // relationships), not a field-level ER; rendered as the ruleTypeModel view.
@@ -147,6 +135,9 @@ views {
     title 'alint CLI components (crates)'
     include *
   }
+
+  // The crateGraph view + the crate edges live in the generated
+  // crate-graph.gen.c4 fragment (xtask gen-arch).
 
   dynamic view checkFlow {
     title 'alint check: execution pipeline'

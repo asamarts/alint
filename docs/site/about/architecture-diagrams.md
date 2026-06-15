@@ -33,6 +33,13 @@ The crates inside the CLI and their runtime relationships.
 
 <likec4-view view-id="cliComponents"></likec4-view>
 
+## Crate dependency graph
+
+All workspace crates and their dependency edges, grouped by container: runtime
+dependencies solid, dev/build-only dashed. Generated from `cargo metadata`.
+
+<likec4-view view-id="crateGraph"></likec4-view>
+
 ## Execution pipeline
 
 `alint check`: config load, facts, rule filtering, the single parallel walk,
