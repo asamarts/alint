@@ -34,9 +34,11 @@ We will adopt LikeC4 as the single architecture model.
   intent (`alint.c4`: C4 context/containers/components plus behavioral dynamic
   views) and generated `*.gen.c4` fragments (`xtask gen-model`, starting with the
   rule-kind taxonomy from `docs/rules.md`).
-- alint.org renders the views interactively via the LikeC4 Vite plugin (which
-  also closes the render gap); GitHub gets `likec4 gen mermaid` output for
-  embedding in repo markdown.
+- alint.org renders the views interactively via the standalone `<likec4-view>`
+  web component (which also closes the render gap); GitHub gets `likec4 gen
+  mermaid` output, assembled by `xtask gen-mermaid` into a `DIAGRAMS.md` gallery
+  (the dual-surfaced `ARCHITECTURE.md` links to it rather than embedding Mermaid
+  that would double-render on alint.org).
 - Drift is controlled in two layers: generated fragments are byte-gated by
   `xtask gen-model --check`; the hand-authored model is gated by `likec4
   validate` (structural integrity of every flow step) plus a crate-set check
