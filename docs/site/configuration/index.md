@@ -9,6 +9,8 @@ sidebar:
 
 <likec4-view view-id="configModel"></likec4-view>
 
+<likec4-view view-id="factsFlow"></likec4-view>
+
 Point your YAML language server at the JSON Schema for editor autocomplete:
 
 ```yaml

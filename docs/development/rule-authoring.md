@@ -12,6 +12,8 @@ the *why*. This doc captures the *what to do*.
 
 <likec4-view view-id="ruleTypeModel"></likec4-view>
 
+<likec4-view view-id="docsAsCodeFlow"></likec4-view>
+
 ## Two-layer enforcement
 
 | Layer | Tool | Catches |

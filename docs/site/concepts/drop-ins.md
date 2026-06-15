@@ -7,6 +7,8 @@ sidebar:
 
 When `.alint.yml` lives alongside a `.alint.d/` directory at the same path, alint discovers every `*.yml` (or `*.yaml`) file inside that directory and merges them into the effective config. Merge order is alphabetical by filename — the **last drop-in wins** on field-level conflict, mirroring the `/etc/*.d/` convention. Non-yaml files (`.gitkeep`, `README.md`) are silently skipped.
 
+<likec4-view view-id="configLoad"></likec4-view>
+
 ## Layout
 
 ```

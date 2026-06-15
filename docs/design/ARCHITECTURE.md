@@ -131,6 +131,8 @@ test: byte-identical output before/after the type pass. Full design:
 
 ## DSL
 
+<likec4-view view-id="configModel"></likec4-view>
+
 YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) in the repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). Integration tests round-trip representative configs through a compliant validator so the schema and the engine's actual DSL stay in sync.
 
 For editor autocomplete, reference the schema via the YAML language server pragma, either by a relative path (recommended inside this repo) or by the GitHub raw URL (for downstream users):
@@ -328,6 +330,10 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 
 <likec4-view view-id="checkFlow"></likec4-view>
 
+<likec4-view view-id="dispatchFlow"></likec4-view>
+
+<likec4-view view-id="factsFlow"></likec4-view>
+
 1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
 2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
 3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
@@ -420,6 +426,8 @@ Unpublished crates still ship inside the binary and can be promoted later. The r
 
 ## Plugin model
 
+<likec4-view view-id="pluginModel"></likec4-view>
+
 Two tiers, introduced across the roadmap:
 
 - **`command` rule kind** (shipped). The rule shells out per matched file. Exit code is the verdict; stdout/stderr is the message. Environment variables expose path, rule id, level, vars, and facts. Simple, scriptable, language-agnostic.
@@ -428,6 +436,8 @@ Two tiers, introduced across the roadmap:
 Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
 
 ## Output formats
+
+<likec4-view view-id="outputFormats"></likec4-view>
 
 Selected via `--format`:
 

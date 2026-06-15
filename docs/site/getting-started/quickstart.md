@@ -7,6 +7,8 @@ sidebar:
 
 The shortest useful `.alint.yml` adopts a bundled ruleset and nothing else.
 
+<likec4-view view-id="checkFlow"></likec4-view>
+
 ```yaml
 # .alint.yml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
