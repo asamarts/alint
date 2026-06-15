@@ -216,6 +216,7 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
 
     if check {
         crate::family_index::check_ascii(&target_dir)?;
+        crate::docs_checks::check_titles_no_backticks(&target_dir)?;
         eprintln!("[xtask] docs-export --check OK");
     } else {
         eprintln!("[xtask] docs-export wrote {}", target_dir.display());

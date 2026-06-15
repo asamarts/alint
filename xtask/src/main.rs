@@ -42,6 +42,7 @@ use clap::{Parser, Subcommand};
 mod arch;
 mod bench;
 mod bench_release;
+mod docs_checks;
 mod docs_export;
 mod facts;
 mod family_index;
