@@ -86,9 +86,18 @@ jobs:
           # which the alint.org /roadmap/ timeline renders) is overlaid with
           # them so the published plan tracks main; facts.json deliberately is
           # NOT overlaid, so the surface-area counts stay pinned to the release.
+          #
+          # The LikeC4 architecture model (docs/design/architecture/model) and
+          # the two diagram pages (the architecture-diagrams gallery and the
+          # how-it-works concepts page) are overlaid for the same reason: they
+          # are living architecture docs that track main, and the model backs
+          # the <likec4-view> embeds in ARCHITECTURE.md. The model is copied
+          # into the bundle by a bridge step below, since the release tag's
+          # docs-export predates the copy step.
           git fetch --quiet origin main
-          git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json
-          echo "Overlaid reference + design docs from origin/main ($(git rev-parse --short origin/main))."
+          git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json \
+            docs/design/architecture/model docs/site/about/architecture-diagrams.md docs/site/concepts/how-it-works.md
+          echo "Overlaid reference + design docs + architecture model from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Generate docs-bundle/
         run: cargo run -q -p xtask -- docs-export
@@ -104,6 +113,19 @@ jobs:
           # does this is idempotent (identical, main-tracked content).
           cp roadmap.json target/docs-bundle/roadmap.json
           echo "roadmap.json ($(wc -c < roadmap.json) bytes) overlaid into the bundle."
+
+      - name: Ensure the architecture model is in the bundle (main-tracked)
+        run: |
+          set -euo pipefail
+          # docs-export copies the LikeC4 model (docs/design/architecture/model)
+          # into architecture-model/ in the bundle, which alint.org syncs to
+          # public/_alint/ to render the <likec4-view> embeds. The bundle is
+          # built from the release TAG's xtask, which predates that copy step,
+          # so copy it in here (the model dir was overlaid from main above).
+          # Idempotent once the docs-export copy step ships in a release tag.
+          mkdir -p target/docs-bundle/architecture-model
+          cp docs/design/architecture/model/*.c4 target/docs-bundle/architecture-model/
+          echo "architecture-model/ ($(ls docs/design/architecture/model/*.c4 | wc -l) .c4 files) overlaid into the bundle."
 
       - name: Refresh cross-version trajectory from main's bench results
         run: |
