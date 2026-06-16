@@ -1,8 +1,8 @@
 # alint
 
-[![Crates.io](https://img.shields.io/crates/v/alint.svg)](https://crates.io/crates/alint)
+[![Crates.io](https://img.shields.io/github/v/tag/asamarts/alint?sort=semver&label=crates.io)](https://crates.io/crates/alint)
 [![CI](https://github.com/asamarts/alint/actions/workflows/ci.yml/badge.svg)](https://github.com/asamarts/alint/actions/workflows/ci.yml)
-[![License](https://img.shields.io/crates/l/alint.svg)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
 **Fast, language-agnostic linter for repository structure, files, and content.** Declare the shape your repo should have (required files, filename conventions, content patterns, values inside `package.json` / `Cargo.toml` / GitHub workflows, cross-file relationships) in a single `.alint.yml`. alint enforces it.
 

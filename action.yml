@@ -106,7 +106,24 @@ runs:
         fi
         export ALINT_VERSION="$ver"
         echo "alint action: installing '${ver}' (action_ref='${ACTION_REF:-<local>}', install.sh ref='${ref}')"
-        curl -fsSL "https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh" | bash
+        # Fetch install.sh with retries: raw.githubusercontent.com can return a
+        # transient 403 (rate-limit / CDN edge) that previously failed the action
+        # outright. Portable retry loop (no curl --retry-all-errors version
+        # dependency), up to 3 attempts before giving up.
+        install_url="https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh"
+        install_sh="${RUNNER_TEMP:-/tmp}/alint-install.sh"
+        for attempt in 1 2 3; do
+          if curl -fsSL "$install_url" -o "$install_sh"; then
+            break
+          fi
+          if [[ "$attempt" -eq 3 ]]; then
+            echo "::error::failed to fetch install.sh from ${install_url} after 3 attempts (transient raw.githubusercontent error, e.g. rate-limit or CDN)" >&2
+            exit 1
+          fi
+          echo "alint action: install.sh fetch failed (attempt ${attempt}/3), retrying in 2s..." >&2
+          sleep 2
+        done
+        bash "$install_sh"
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
     - name: Run alint
