@@ -96,7 +96,7 @@ jobs:
           # docs-export predates the copy step.
           git fetch --quiet origin main
           git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json \
-            docs/design/architecture/model docs/site/about/architecture-diagrams.md docs/site/concepts/how-it-works.md
+            docs/design/architecture/model docs/design/architecture/crate-graph.md docs/site/about/architecture-diagrams.md docs/site/concepts/how-it-works.md
           echo "Overlaid reference + design docs + architecture model from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Generate docs-bundle/
@@ -114,18 +114,23 @@ jobs:
           cp roadmap.json target/docs-bundle/roadmap.json
           echo "roadmap.json ($(wc -c < roadmap.json) bytes) overlaid into the bundle."
 
-      - name: Ensure the architecture model is in the bundle (main-tracked)
+      - name: Ensure the architecture model + crate-graph page are in the bundle (main-tracked)
         run: |
           set -euo pipefail
           # docs-export copies the LikeC4 model (docs/design/architecture/model)
           # into architecture-model/ in the bundle, which alint.org syncs to
-          # public/_alint/ to render the <likec4-view> embeds. The bundle is
-          # built from the release TAG's xtask, which predates that copy step,
-          # so copy it in here (the model dir was overlaid from main above).
-          # Idempotent once the docs-export copy step ships in a release tag.
+          # public/_alint/ to render the <likec4-view> embeds, and renders the
+          # crate-graph design doc as a page (about/crate-graph.md). The bundle
+          # is built from the release TAG's xtask, which predates both steps, so
+          # reproduce them here (the sources were overlaid from main above).
+          # Idempotent once the docs-export changes ship in a release tag.
           mkdir -p target/docs-bundle/architecture-model
           cp docs/design/architecture/model/*.c4 target/docs-bundle/architecture-model/
           echo "architecture-model/ ($(ls docs/design/architecture/model/*.c4 | wc -l) .c4 files) overlaid into the bundle."
+          # Mirror copy_one: strip the leading H1, inject Starlight frontmatter.
+          mkdir -p target/docs-bundle/about
+          { printf -- '---\ntitle: Crate dependency graph\n---\n\n'; sed '0,/^# Crate dependency graph$/d' docs/design/architecture/crate-graph.md; } > target/docs-bundle/about/crate-graph.md
+          echo "about/crate-graph.md bridged into the bundle."
 
       - name: Refresh cross-version trajectory from main's bench results
         run: |
