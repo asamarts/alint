@@ -5,9 +5,17 @@ title: Architecture
 > Status: Living design document. Describes alint's internals for contributors
 > and embedders. For the current scope by version, see [ROADMAP.md](./ROADMAP.md).
 
+> **Diagrams:** this document embeds interactive architecture diagrams that
+> render on [alint.org](https://alint.org/docs/about/architecture/); GitHub
+> strips the `<likec4-view>` web component, so on GitHub they appear blank. The
+> same views are static Mermaid flowcharts, generated from the same model, in
+> [DIAGRAMS.md](https://github.com/asamarts/alint/blob/main/docs/design/architecture/DIAGRAMS.md).
+
 ## Overview
 
 alint is a language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**. It is a single static Rust binary that reads a declarative YAML config and enforces rules over a repository tree.
+
+<likec4-view view-id="index"></likec4-view>
 
 Examples of rules in scope:
 
@@ -40,6 +48,8 @@ The clarity of these non-goals is itself a feature.
 8. **Single static binary.** Rust, no runtime dependency on Node, Ruby, or Python.
 
 ## Rule model
+
+<likec4-view view-id="ruleTypeModel"></likec4-view>
 
 Every rule is a record:
 
@@ -128,6 +138,8 @@ test: byte-identical output before/after the type pass. Full design:
 [the v0.9 memory pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/memory_pass.md).
 
 ## DSL
+
+<likec4-view view-id="configModel"></likec4-view>
 
 YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) in the repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). Integration tests round-trip representative configs through a compliant validator so the schema and the engine's actual DSL stay in sync.
 
@@ -324,6 +336,10 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 
 ## Execution model
 
+The pipeline from `alint check` to output:
+
+<likec4-view view-id="checkFlow"></likec4-view>
+
 1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
 2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
 3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
@@ -337,9 +353,19 @@ Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
 
 Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; fact and rule evaluation are both parallelized; fixers run serially (they mutate the tree).
 
+Step 2 in detail: facts are evaluated once (in parallel, cached), then gate which rules run via their `when:` conditions.
+
+<likec4-view view-id="factsFlow"></likec4-view>
+
+Steps 5 to 7 in detail: dispatch partitions rules into cross-file (rule-major) and per-file, so each matched file's bytes are read exactly once (ADR-0003).
+
+<likec4-view view-id="dispatchFlow"></likec4-view>
+
 ## Crate layout
 
 alint is a Cargo workspace, the standard shape for Rust tools (rustc, cargo, tokio, ruff, biome, rust-analyzer, wasmtime, ...). The reasons apply here: pre-1.0 breaking changes in the core ripple through the graph, so every such change is one PR rather than a multi-repo release; one `Cargo.lock` guarantees consistent transitive deps; one CI run (`cargo test --workspace`) validates the full graph; contributors clone once.
+
+<likec4-view view-id="cliComponents"></likec4-view>
 
 ### Building block view
 
@@ -414,6 +440,8 @@ Unpublished crates still ship inside the binary and can be promoted later. The r
 
 ## Plugin model
 
+<likec4-view view-id="pluginModel"></likec4-view>
+
 Two tiers, introduced across the roadmap:
 
 - **`command` rule kind** (shipped). The rule shells out per matched file. Exit code is the verdict; stdout/stderr is the message. Environment variables expose path, rule id, level, vars, and facts. Simple, scriptable, language-agnostic.
@@ -422,6 +450,8 @@ Two tiers, introduced across the roadmap:
 Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
 
 ## Output formats
+
+<likec4-view view-id="outputFormats"></likec4-view>
 
 Selected via `--format`:
 

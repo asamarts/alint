@@ -8,6 +8,10 @@ sidebar:
 
 `alint check` renders the same findings in eight output formats. Select one with `--format <name>`.
 
+A single `Report` fans out to each format:
+
+<likec4-view view-id="outputFormats"></likec4-view>
+
 | Format | Aliases | For |
 | --- | --- | --- |
 | `human` | `pretty`, `text` | The default. Colorized, grouped by file, for reading in a terminal. |
