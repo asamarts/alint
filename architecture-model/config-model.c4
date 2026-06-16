@@ -1,0 +1,59 @@
+// The .alint.yml config DSL as a LikeC4 domain map: the entities and how they
+// relate. Field-level detail (types, cardinalities, per-kind options) lives in
+// the generated JSON-schema reference, not here (ADR-0005, decision 1a).
+//
+// The Config entity's top-level keys are gated against the root `properties` of
+// schemas/v1/config.json by `gen-model --check`, so a new (or renamed) top-level
+// config key fails CI until this map is updated. The container relationships
+// rules/facts/extends -> entity follow the schema's $ref structure; the
+// rule -> paths_spec / scope_filter / fix edges reflect the RuleSpec record in
+// alint-core (config.rs), not the schema (its base `rule` $def carries no such
+// $refs; the per-kind branches do).
+
+specification {
+  element domain
+  element entity
+  element field
+}
+
+model {
+  configDsl = domain 'Config DSL' 'The .alint.yml domain model: entities and relationships' {
+
+    config = entity 'Config' 'Top-level .alint.yml document' {
+      f_version = field 'version'
+      f_extends = field 'extends'
+      f_facts = field 'facts'
+      f_rules = field 'rules'
+      f_vars = field 'vars'
+      f_ignore = field 'ignore'
+      f_respect_gitignore = field 'respect_gitignore'
+      f_fix_size_limit = field 'fix_size_limit'
+      f_nested_configs = field 'nested_configs'
+      f_templates = field 'templates'
+      f_allow_out_of_root = field 'allow_out_of_root'
+    }
+
+    rule = entity 'RuleSpec' 'A rule record: id, kind, level, message, policy_url, when, ...'
+    fact = entity 'FactSpec' 'A repository fact, evaluated once per run, referenced from when:'
+    extendsEntry = entity 'ExtendsEntry' 'An inherited config: local path, https (SRI), or bundled'
+    pathsSpec = entity 'PathsSpec' 'The path scope: a glob, a list (with !negation), or include/exclude'
+    scopeFilter = entity 'ScopeFilter' 'Per-file gate: has_ancestor and/or changed_since'
+    fix = entity 'FixSpec' 'A fixer block; at most one op per rule kind'
+  }
+
+  // rules/facts/extends -> entity follow the schema $refs; rule -> paths /
+  // scope_filter / fix reflect the RuleSpec record (alint-core config.rs).
+  config -> rule 'rules[]'
+  config -> fact 'facts[]'
+  config -> extendsEntry 'extends[]'
+  rule -> pathsSpec 'paths'
+  rule -> scopeFilter 'scope_filter'
+  rule -> fix 'fix'
+}
+
+views {
+  view configModel of configDsl {
+    title 'Config DSL domain model'
+    include *
+  }
+}
