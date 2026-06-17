@@ -39,11 +39,13 @@ alint check --format gitlab   # GitLab Code Quality
 alint check --format agent    # LLM-shaped JSON with per-violation `agent_instruction`
 ```
 
+The [`agent` format](/docs/reference/output-formats/agent/) has a dedicated reference covering its full report shape.
+
 Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` internal error. Warnings do not fail by default — use `--fail-on-warning` to flip that.
 
 ## Where to next
 
-- [Bundled Rulesets](/docs/bundled-rulesets/) — nineteen one-line baselines covering Rust, Python, Go, Node, Java, monorepos, GitHub Actions hardening, agent hygiene, license compliance, and more.
+- [Bundled Rulesets](/docs/bundled-rulesets/) — 22 one-line baselines covering Rust, Python, Go, Node, Java, monorepos, GitHub Actions hardening, agent hygiene, license compliance, and more.
 - [Cookbook](/docs/cookbook/) — copy-pasteable patterns for real-world repo-maintenance tasks.
 - [Configuration](/docs/configuration/) — full `.alint.yml` field reference.
 - [Concepts](/docs/concepts/) — the rule model, scopes, when-expressions, composition.

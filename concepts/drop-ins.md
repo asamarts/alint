@@ -1,5 +1,5 @@
 ---
-title: Drop-in configs (`.alint.d/*.yml`)
+title: 'Drop-in configs (.alint.d/*.yml)'
 description: Auto-discovered alongside the top-level `.alint.yml`, merged alphabetically. The `/etc/*.d/` shape applied to alint configs — stage `00-base.yml` for ops defaults, `99-local.yml` for developer overrides.
 sidebar:
   order: 7

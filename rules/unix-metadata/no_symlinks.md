@@ -16,3 +16,8 @@ Flag tracked paths that are symbolic links. Symlinks are a portability footgun: 
     file_remove: {}   # unlinks the symlink; target is untouched
 ```
 
+## Options
+
+_This rule takes no kind-specific options._
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

@@ -17,3 +17,8 @@ Flag the presence of `.gitmodules` at the repo root — always, regardless of `p
 
 Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.git/modules/` are still on the user.
 
+## Options
+
+_This rule takes no kind-specific options._
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

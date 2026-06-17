@@ -15,3 +15,10 @@ Cap line length in characters (not bytes — code points). Optional `tab_width` 
   level: info
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_width` | integer (>= 1) | yes |  | Maximum number of Unicode scalar values (chars) allowed per line. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

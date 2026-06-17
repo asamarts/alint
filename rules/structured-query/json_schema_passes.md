@@ -28,3 +28,11 @@ Check-only — fixing schema violations is a "the user knows what value belongs 
 
 ---
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `format` | one of `json` \| `yaml` \| `yml` \| `toml` |  |  | Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml). |
+| `schema_path` | string | yes |  | Path to a JSON Schema file relative to the lint root. The schema must itself be JSON even when validating YAML / TOML targets. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

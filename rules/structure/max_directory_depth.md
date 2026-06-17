@@ -15,3 +15,10 @@ Tree depth from repo root may not exceed `max`. A shallow depth stops deeply-nes
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_depth` | integer (>= 1) | yes |  | Maximum allowed path depth (number of `/`-separated components). |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

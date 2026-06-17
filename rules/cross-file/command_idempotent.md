@@ -32,3 +32,14 @@ top-level config.
   message: "run `cargo fmt` — code is not formatter-clean"
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `command` | list of string | yes |  | Checker argv (no shell), run in its --check / idempotence mode; exit 0 = clean. |
+| `files_from` | one of `none` \| `stdout` \| `stderr` |  | `none` | On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation). |
+| `files_pattern` | string |  | `null` | Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers). |
+| `timeout` | integer (>= 1) |  | `null` | Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted. |
+| `workdir` | string |  | `null` | Checker cwd, relative to the lint root (default: lint root). |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

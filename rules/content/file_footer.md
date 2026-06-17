@@ -18,3 +18,11 @@ Last `lines` lines of each file in scope must match a regex. Mirror of `file_hea
 
 Fix: `file_append` — append a declared `content`. With no fix declared, violations are unfixable.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `lines` | integer (>= 1) |  | `20` | Number of trailing lines to consider. |
+| `pattern` | string | yes |  | Rust regex. The last `lines` lines of each file must match. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

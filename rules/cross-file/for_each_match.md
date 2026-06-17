@@ -19,3 +19,11 @@ For each line matching `select` (a regex), the line must satisfy the nested `req
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `require` | object | yes |  | Predicates applied to each selected line; at least one of `matches` / `forbid` / `equal` is required. |
+| `select` | string | yes |  | Regex; a line is a checked element iff it matches. Named captures are available to `require.equal`. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

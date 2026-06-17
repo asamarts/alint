@@ -15,3 +15,10 @@ File contents must NOT match a regex.
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `pattern` | string | yes |  | Rust regex. File contents must NOT match. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

@@ -1,5 +1,5 @@
 ---
-title: 'Variable interpolation (`{{env.X}}`)'
+title: 'Variable interpolation ({{env.X}})'
 description: 'Reference environment variables from any string-typed config field with {{env.NAME}}, with a default(...) fallback. Resolved once at config load. The when: language gains an env.X namespace.'
 sidebar:
   order: 9

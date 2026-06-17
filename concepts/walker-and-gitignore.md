@@ -1,11 +1,13 @@
 ---
-title: The walker and `.gitignore`
+title: The walker and .gitignore
 description: How alint discovers files, what `.gitignore` filters out by default, and how rules like `file_absent` / `dir_absent` interpret git state.
 sidebar:
   order: 5
 ---
 
 Every alint run starts the same way: walk the repo, build an in-memory index of files, then evaluate rules against that index. The walker is a thin wrapper around the [`ignore`](https://docs.rs/ignore/) crate (the same crate that powers `ripgrep`), and its filtering behaviour is the most common source of confusion when a rule "doesn't fire when I expected it to."
+
+<likec4-view view-id="walkerFlow"></likec4-view>
 
 ## What the walker sees by default
 

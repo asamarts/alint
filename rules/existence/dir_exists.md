@@ -17,3 +17,10 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 
 **Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `git_tracked_only` | git tracked only |  |  |  |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

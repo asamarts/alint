@@ -24,3 +24,11 @@ An optional `since: <git-ref>` scopes the check to denied paths that changed in 
 
 Outside a git repo (or when `git` isn't on `PATH`) the rule silently no-ops — the rule's intent only makes sense inside a tracked working tree. Check-only — `git rm --cached` is too destructive to automate.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `denied` | list of string | yes |  | Globset patterns no tracked path may match. Both whole-path patterns (`secrets/**`) and basename-only patterns (`*.env`) work. |
+| `since` | string |  | `null` | Optional git ref. When set, only denied paths that changed in the `<since>...HEAD` diff are flagged, catches a secret added in a PR even if HEAD's tree still tracks an older one. Accepts the `{{env.X}}` interpolation, e.g. `since: "{{env.ALINT_BASE_SHA \| default('origin/main')}}"`. |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

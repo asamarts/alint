@@ -19,3 +19,14 @@ The lines between a `start` / `end` marker pair must stay sorted (and, with `uni
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `comparator` | one of `lexical` \| `lexical-ci` \| `numeric` |  | `lexical` | Comparator used to order entries: lexical (default), lexical-ci, or numeric. |
+| `end` | string |  | `null` | Marker line closing a block. Optional - omit to run the block to EOF. |
+| `select` | string |  | `null` | Regex; when set, only lines inside a block matching it are sortable entries (others, such as comments or group headers, pass through). The sectioned / keep-sorted-subset shape. |
+| `start` | string |  | `null` | Marker line opening a block (matched on the trimmed line). Optional - omit to anchor the block at the start of the file. |
+| `unique` | boolean |  | `false` | When true, also forbid duplicate (equal) entries within a block. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

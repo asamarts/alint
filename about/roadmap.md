@@ -220,7 +220,6 @@ v0.5 prioritizes the next rung: tighter monorepo ergonomics
 for workspace-tier and OSS-polyglot adopters.
 
 ## v0.1: MVP (shipped)
-<!-- roadmap-public: blurb="The smallest adoptable scope: the walker, config loader, the core file, content, and naming primitives, and human plus JSON output." -->
 
 The smallest scope that is usefully adoptable.
 
@@ -235,7 +234,6 @@ The smallest scope that is usefully adoptable.
 - ✅ Dogfood `.alint.yml` exercising the tool against its own repo.
 
 ## v0.2: Cross-file and composition (shipped)
-<!-- roadmap-public: blurb="Cross-file primitives like pair and for_each_dir, the facts system, the when expression language, extends with SRI, and the fix subcommand." -->
 
 - Cross-file primitives: ✅ `pair`, ✅ `for_each_dir`, ✅ `for_each_file`, ✅ `every_matching_has`, ✅ `dir_contains`, ✅ `dir_only_contains`, ✅ `unique_by`. **(complete)**
 - Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`, ✅ `file_content_matches`, ✅ `git_branch`, ✅ `custom` (security-gated; only allowed in the top-level config, never in `extends:`); ⏳ `detect: linguist`, ⏳ `detect: askalono`, both likely v0.5 alongside bundled rulesets.
@@ -248,7 +246,6 @@ The smallest scope that is usefully adoptable.
 - ✅ Official GitHub Action (`action.yml` at repo root; composite action wrapping `install.sh`).
 
 ## v0.3: Hygiene, portable metadata, byte fingerprints (shipped)
-<!-- roadmap-public: blurb="Text and Unicode hygiene, encoding and byte-fingerprint rules, portable-name and Unix-metadata checks, and the first content auto-fixers." -->
 
 The v0.3 cut shifted scope mid-cycle. The originally-planned
 "structured content" family (JSON/YAML/TOML path queries) was
@@ -271,7 +268,6 @@ points in real repos.
 **Deferred to v0.4**: structured-query primitives (`json_path_*`, `yaml_path_*`, `toml_path_*`, `json_schema_passes`), `file_footer`, `file_max_lines`, `file_shebang`, opt-in nested `.alint.yml` discovery for monorepos, `markdown` / `junit` / `gitlab` output formats, `alint facts` subcommand for debugging `when` clauses.
 
 ## v0.4: Bundled rulesets + pre-commit (shipped)
-<!-- roadmap-public: blurb="One-line adoption through bundled rulesets and pre-commit hooks, with the oss-baseline, rust, node, and monorepo sets landing first." -->
 
 Pulled forward from what was v0.5: **bundled rulesets** are the
 single biggest adoption lever, turning "write 20 rules" into
@@ -319,7 +315,6 @@ for v0.5 landed here.
   round out the content family. Catalogue at ~55 rule kinds.
 
 ## v0.5: Monorepo scale + plugins v1 + remaining distribution
-<!-- roadmap-public: blurb="Monorepo ergonomics such as changed mode, scope filters, and workspace overlays, the command plugin tier, and the remaining install channels." -->
 
 The v0.4.x cuts cleared most of the original v0.5 scope (structured-query, ecosystem rulesets, `alint facts`, Docker, Homebrew, first git-aware primitive). What remains, plus new monorepo-scale work surfaced by the 2026-04 monorepo positioning analysis.
 
@@ -474,7 +469,6 @@ built on the existing primitive set, no new rule kinds needed.
   deferred (needs `numeric_sequence` primitive).
 
 ## v0.6: Agent-era bundled rulesets and output
-<!-- roadmap-public: blurb="The agent-hygiene and agent-context bundled rulesets, plus an agent output format for tools that read alint inside a self-correction loop." -->
 
 Two bundled rulesets aimed at the most common AI-coding
 leftovers, plus a new output format for agents consuming alint
@@ -516,7 +510,6 @@ analysis, secret-entropy scanning, AGENTS.md export. All of
 those land in v0.7 or later.
 
 ## v0.7: New rule kinds for agentic problems (shipped)
-<!-- roadmap-public: blurb="Heuristic rule kinds markdown_paths_resolve, commented_out_code, and git_blame_age, with the suggest and export-agents-md subcommands." -->
 
 Targeted rule-kind additions that close the gaps Tier-1
 exposed. Each got a short design doc before implementation
@@ -565,7 +558,6 @@ open questions before code started, then was flipped to
   single source of truth.
 
 ## v0.8: Comprehensive test + bench foundation (shipped)
-<!-- roadmap-public: blurb="The test and benchmark floor: per-kind coverage, cross-platform CI, an 85 percent coverage gate, and nightly mutation testing." -->
 
 Five sub-phases (v0.8.2 → v0.8.5) building the
 test/bench/rot-prevention foundation that engine
@@ -723,7 +715,6 @@ that lets engine work land without regressing user-visible
 behaviour.
 
 ## v0.9: Engine optimization
-<!-- roadmap-public: blurb="Parallel walker, a memory-footprint pass, the per-file dispatch flip, and cross-file fast paths that cut 1M-file runs from minutes to seconds." -->
 
 (Was v0.8 sub-themes 2-4 in the pre-2026-04-28 plan;
 displaced by the v0.8 test/bench foundation. Per-feature
@@ -859,7 +850,6 @@ detail in [CHANGELOG.md](https://github.com/asamarts/alint/blob/main/CHANGELOG.m
   preflight + pre-push hook bundle.
 
 ## v0.10: Case-study coverage push
-<!-- roadmap-public: blurb="Eight case-study-validated rule kinds and the apache/governance and dotnet rulesets, with three pre-release security retirements." -->
 
 The 8 rule kinds + 2 bundled rulesets the case-study
 aggregation demand-validated. Splits out from the original v0.10
@@ -893,7 +883,6 @@ in [`examples/README.md`](https://github.com/asamarts/alint/blob/main/examples/R
 and [`docs/development/launch-evidence.md`](https://github.com/asamarts/alint/blob/main/docs/development/launch-evidence.md).
 
 ## v0.11: LSP + DSL polish
-<!-- roadmap-public: blurb="The alint lsp language server with in-editor diagnostics and quick-fixes, scope generalisation, the commit-validation family, and env interpolation." -->
 
 **Shipped in v0.11.0** (2026-05-28): the `alint lsp` language server (the new `alint-lsp` crate) wired across the VS Code, JetBrains, Zed, Neovim, Sublime, Emacs, and Helix integrations, the `git_commit_*` commit-validation family, `scope_filter.changed_since:`, and `{{env.X}}` interpolation. The detail below was the cut's plan; `has_sibling` / `has_descendant` were deferred to v0.12.
 
@@ -1029,7 +1018,6 @@ carried into the v0.12 cut (per-item status below).**
   `skip-broken-symlinks` / `permissive` modes.
 
 ## v0.12: Real-world coverage expansion (100+ repos) + gap rule kinds
-<!-- roadmap-public: blurb="New kinds file_graph, for_each_match, cross_file, and pair_changed_together, generated_file_fresh mutating mode, a path-confinement security cut, and the php ruleset." -->
 
 **v0.12.0 shipped** (2026-06-07) a large first cut of this scope. New rule kinds that landed: `file_graph` (file-dependency-graph firewalls plus cycle / orphan / dangling-edge checks, the top demand-ranked kind of the 111-repo study), `for_each_match` (a per-line predicate quantifier), `cross_file` (a unifying value-relation kind that subsumes `cross_file_value_equals` and adds `subset` / `superset` / `set_equals` / `identical` / `resolves`), `git_commit_subject_matches`, `changeset_requires_path`, and `pair_changed_together`. Also shipped: `generated_file_fresh`'s in-place `outputs:` mode, markerless `ordered_block`, the `php@v1` bundled ruleset (21 → 22), JSONC-tolerant structured parsing, the `cross_file` `normalize:` promotion, and `import_gate` presets for Scala / Java / Dart / Nix, plus a security cycle that confines every config-declared path to the repo root and fixes a git argument-injection in `since:` reaching back to v0.9.21. Per-item status is tagged inline below. The 100+ repo study (111 repos done) and the still-open gap kinds continue in the v0.12 line.
 
@@ -1184,7 +1172,6 @@ Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/m
   so the kind now covers it directly.
 
 ## Engineering foundations: spec-driven development
-<!-- roadmap-public: blurb="A drift-elimination program on main: schema, facts, and architecture generated and gated, plus a Kani-verified path-confinement proof." -->
 
 A drift-elimination program run on `main` after v0.12 — a foundations track, not a
 user-facing version cut, so it interleaves with the release cadence rather than
@@ -1225,7 +1212,6 @@ alint's `prose-no-em-dash` rule, dogfooded on the site's prose — caught drift 
 very change introduced, and it was fixed before the next release.
 
 ## v0.13: WASM plugins
-<!-- roadmap-public: blurb="A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry." -->
 
 Bumped one slot to make room for the v0.12 real-world-coverage cut;
 otherwise unchanged from the previous post-v0.11 scope.
@@ -1243,7 +1229,6 @@ otherwise unchanged from the previous post-v0.11 scope.
   bundled, to keep the binary lean.
 
 ## v1.0: Stability
-<!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
 
 - DSL schema committed; semver on `version: 1`.
 - Plugin ABI committed.

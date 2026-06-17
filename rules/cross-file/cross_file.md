@@ -51,3 +51,15 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
   level: error
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `allow_missing_target` | boolean |  |  |  |
+| `normalize` | one of `none` \| `trim` \| `lower` \| `semver-major` \| `semver-minor` or list of one of `none` \| `trim` \| `lower` \| `semver-major` \| `semver-minor` |  |  | A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band (each token's leading digits, leading non-digits stripped) — the protobuf / pnpm version-format reconcile. |
+| `relation` | one of `equals` \| `subset` \| `superset` \| `set_equals` \| `identical` \| `resolves` |  |  |  |
+| `skip_header_lines` | integer (>= 0) |  |  |  |
+| `source` | object | yes |  |  |
+| `targets` | object or list of object |  |  |  |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

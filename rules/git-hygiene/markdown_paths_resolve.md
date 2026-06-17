@@ -30,3 +30,11 @@ By default the rule skips backticked tokens containing template-variable markers
 
 Check-only — auto-fixing a stale path means guessing the new location, which is unsafe.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `ignore_template_vars` | boolean |  | `true` | When true (default), skip backticked tokens containing `{{ ... }}`, `${ ... }`, or `<...>` template-variable markers. These are placeholders, not real paths. |
+| `prefixes` | list of string | yes |  | Whitelist of path-shape prefixes to validate. A backticked token must start with one of these to be considered a path candidate. No defaults — every project's layout differs and the user must declare which prefixes mark a path. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

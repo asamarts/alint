@@ -17,3 +17,10 @@ Assert every file in scope either has the `+x` bit set (`require: true`) or does
 
 No fix op — chmod auto-apply is deferred.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `require` | boolean | yes |  | `true` → +x must be set; `false` → +x must NOT be set. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

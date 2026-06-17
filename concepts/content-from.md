@@ -1,11 +1,15 @@
 ---
-title: '`content_from:` for fix ops'
+title: 'content_from: for fix ops'
 description: Reference fix-op body content from a file path instead of inlining it in YAML. Paths resolve relative to the lint root; bytes are read at fix-apply time.
 sidebar:
   order: 8
 ---
 
 The three content-providing fix ops — `file_create`, `file_prepend`, `file_append` — accept a `content_from: <path>` field as an alternative to inline `content:`. The path resolves relative to the lint root and is read when `alint fix` actually runs, so the source file's bytes flow into the target without round-tripping through YAML.
+
+Where `content_from:` is read during `alint fix`:
+
+<likec4-view view-id="fixFlow"></likec4-view>
 
 ## When to reach for it
 

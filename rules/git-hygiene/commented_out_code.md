@@ -29,3 +29,13 @@ Doc-comment blocks (`///`, `//!`, `/** */`) are skipped automatically. Files who
 
 Heuristic, with a non-zero false-positive surface — defaults are `warning`-level only, never `error`. Tune `threshold` per codebase: lower widens the catch (more FPs), higher narrows it. Check-only — auto-removing commented-out code is destructive.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `language` | one of `auto` \| `rust` \| `typescript` \| `javascript` \| `python` \| `go` \| `java` \| `c` \| `cpp` \| `ruby` \| `shell` |  | `auto` | `auto` (default) infers the comment-marker set from each file's extension. Explicit override useful for embedded DSLs or cases where the extension lies. |
+| `min_lines` | integer (>= 2) |  | `3` | Minimum consecutive comment-line count for a block to be considered. 1-2 line comments are almost always prose; 3+ starts looking like dead code. Default 3. |
+| `skip_leading_lines` | integer (>= 0) |  | `30` | Skip blocks whose first line is at or before this line number. Default 30 - covers typical license headers without false-positive flagging them as commented-out code. |
+| `threshold` | number (0..1) |  | `0.5` | Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

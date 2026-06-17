@@ -10,6 +10,10 @@ This doc supplements (does not replace)
 `docs/design/v0.9/coverage-and-dogfood.md`, which captures
 the *why*. This doc captures the *what to do*.
 
+The four-step workflow every new rule kind, ruleset, or alias goes through:
+
+<likec4-view view-id="addRuleKindFlow"></likec4-view>
+
 ## Two-layer enforcement
 
 | Layer | Tool | Catches |
@@ -37,6 +41,38 @@ at test time.
 5. Run `cargo test -p alint-e2e -- --no-fail-fast`. Every
    `coverage_audit_*` should pass.
 ```
+
+If the kind carries options, derive its schema branch from the Rust `Options`
+struct rather than hand-editing `schemas/v1/config.json`: add
+`#[derive(schemars::JsonSchema)]` to the struct (with `///` field docs and any
+`#[schemars(range/length/regex)]` constraints), register it in
+`alint-rules/src/lib.rs::migrated_option_schemas()`, then run
+`cargo run -p xtask -- gen-schema` to regenerate the schema (root + the in-crate
+copy). CI and preflight run `gen-schema --check`, which fails if the committed
+schema drifts from the Rust types. See ADR-0001 and
+`docs/design/spec-driven-development.md`. Kinds with deeply nested option shapes
+stay hand-written in the schema (omit them from `migrated_option_schemas`).
+
+Your `///` field docs and constraints are not just for the schema: `xtask
+docs-export` reads the type-derived `$defs/rule_<kind>` branch and renders a
+`## Options` table (name / type / required / default / description) into the
+rule's alint.org page automatically. Write the field doc once on the Rust struct
+and it surfaces in the published reference - no separate options list to
+maintain. The `committed_schema_every_branch_renders_a_clean_table` test in
+`xtask` fails if a new option shape can't be classified into a clean table cell.
+
+Adding a new rule kind also moves a surface-area count, so regenerate the
+contract: `cargo run -p xtask -- gen-facts` refreshes the committed `facts.json`
+(version + the six headline counts + catalogue lists that the README, docs, and
+alint.org render from). CI + the docs script run `gen-facts --check` and fail if
+`facts.json` drifts. The same applies when you add a family, bundled ruleset,
+fixer, output format, or subcommand. See `docs/design/facts-json.md`.
+
+If you add or remove a *crate* (or an intra-workspace dependency), run
+`cargo run -p xtask -- gen-arch` to refresh the committed crate dependency graph
+(`docs/design/architecture/crate-graph.md`) and update the C4 model
+(`docs/design/architecture/workspace.dsl`); `gen-arch --check` gates both. See
+`docs/design/architecture-as-code.md`.
 
 ### Family-directory conventions
 
@@ -237,6 +273,14 @@ This is opt-in — most rule additions don't need it.
   the ruleset's first three lines don't match the docs-export
   parser's expected header shape. See the rule's `message:` in
   `.alint.yml` for the exact pattern.
+
+## Keeping docs in lockstep
+
+The generated contracts (facts, schema, rules, the architecture model) flow to
+alint.org and are gated against drift, so a new rule kind's docs can't silently
+fall out of sync:
+
+<likec4-view view-id="docsAsCodeFlow"></likec4-view>
 
 ## Related docs
 

@@ -3,6 +3,10 @@ title: 'alint lsp'
 description: 'Start the alint language server, speaking LSP over stdio. alint lsp CLI reference and flags.'
 ---
 
+How `alint lsp` serves an editor over LSP:
+
+<likec4-view view-id="lspFlow"></likec4-view>
+
 ```
 Start the alint language server, speaking LSP over stdio. Editor integrations (VS Code, Zed, Neovim, and others) spawn this and drive it via the Language Server Protocol; it is not meant to be run interactively. Publishes diagnostics for the workspace's `.alint.yml` rules on document open and save
 

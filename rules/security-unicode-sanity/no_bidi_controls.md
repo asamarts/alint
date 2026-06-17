@@ -16,3 +16,8 @@ Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). Defe
     file_strip_bidi: {}
 ```
 
+## Options
+
+_This rule takes no kind-specific options._
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

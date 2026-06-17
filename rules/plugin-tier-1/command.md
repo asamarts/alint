@@ -38,3 +38,11 @@ Environment threaded into the child:
 
 ---
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `command` | list of string | yes |  | Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends. |
+| `timeout` | integer (>= 1) |  | `null` | Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

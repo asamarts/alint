@@ -6,6 +6,8 @@ sidebar:
   label: 'Plugin (tier 1)'
 ---
 
-Rule kinds in the **Plugin (tier 1)** family. Each entry below has its own page with options, an example, and any auto-fix support.
+Rule kinds in the **Plugin (tier 1)** family. Each rule below links to its own page with options, an example, and any auto-fix support.
 
-- [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file.
+| Rule | Description |
+| --- | --- |
+| [`command`](/docs/rules/plugin-tier-1/command/) | Shell out to an external CLI per matched file. |

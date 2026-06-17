@@ -17,3 +17,13 @@ The `algorithm` digest (`sha256` default / `sha512`) of every file matching `sou
   level: error
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `algorithm` | one of `sha256` \| `sha512` |  | `sha256` | Digest algorithm (default: sha256). |
+| `format` | one of `contains` \| `sums-line` |  | `contains` | How the digest must appear in `target`: `contains` = hex substring anywhere (default); `sums-line` = a `<hex> [*]<path>` line whose path token is the source's path. |
+| `source` | string | yes |  | Literal path or glob selecting the file(s) whose content is hashed (one check per match). |
+| `target` | string | yes |  | The single file that must carry the digest (a `.sum` / `SHA256SUMS` / a file with an embedded hash). |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

@@ -17,6 +17,14 @@ Byte-level prefix / suffix check. Works on any bytes (binary safe, unlike `file_
 
 Check-only: a fix would risk silently duplicating a near-matching prefix. Pair with `file_prepend` / `file_append` explicitly if you want auto-repair.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `prefix` | string | yes |  | Required prefix, matched byte-for-byte. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
 ## See also
 
 - [`file_ends_with`](/docs/rules/content/file_ends_with/)

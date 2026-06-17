@@ -17,3 +17,13 @@ Forbid imports whose **extracted target** matches a `forbid` regex, within the `
   level: error
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `allow` | list of string |  | `[]` | File globs inside the scope that are exempt from the gate. |
+| `forbid` | string | yes |  | Regex tested against the extracted import target. |
+| `import_pattern` | string |  | `null` | Explicit import-line regex (capture group 1 = target). Overrides the `language` preset. |
+| `language` | one of `go` \| `python` \| `rust` \| `js` \| `scala` \| `java` \| `dart` \| `nix` \| `generic` |  |  | Built-in import-line pattern preset (capture group 1 = the imported target). Omit to require an explicit `import_pattern`. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

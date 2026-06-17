@@ -8,6 +8,65 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-17
+
+This release turns the documented surface into generated, drift-proof contracts.
+The config JSON Schema is now derived from the Rust option types, powering a
+per-rule `## Options` table on every reference page; `facts.json` and
+`roadmap.json` publish the surface-area counts and the public roadmap as
+machine-readable artifacts; the path-confinement boundary from v0.12.0 gains a
+Kani-model-checked proof and proptest properties; and the architecture is
+documented as a single interactive LikeC4 model on alint.org, exported to Mermaid
+for the GitHub repository.
+
+### Added
+
+- **`facts.json`: a machine-readable surface-area contract.** A generated,
+  committed manifest (alint version; the rule-kind / family / bundled-ruleset /
+  auto-fix-op / output-format / subcommand counts; and catalogue lists) shipped
+  into the docs bundle at a stable URL, so the README, docs, and alint.org render
+  these numbers from one source instead of restating them in prose. Generated and
+  drift-gated by `xtask gen-facts --check`.
+- **`roadmap.json`: a machine-readable public-roadmap contract.** A generated,
+  committed phase list (version, title, kind, and a one-line blurb) parsed from
+  the `roadmap-public` markers in `docs/design/ROADMAP.md` and shipped into the
+  docs bundle, so alint.org's `/roadmap/` page renders a data-driven timeline
+  instead of a hand-maintained one (status is derived by the consumer from the
+  released version). Generated and drift-gated by `xtask gen-roadmap --check`,
+  which also forbids AI-content signals (em dashes, smart quotes) in the
+  published blurbs.
+- **Interactive architecture diagrams on alint.org.** The system, container,
+  component, and flow views are generated from a single
+  [LikeC4](https://likec4.dev) model and rendered as interactive web components,
+  with the crate dependency graph extracted from `cargo metadata`. The same model
+  is exported to static Mermaid for the GitHub repository. CI gates the model
+  against the code (crate set, config keys, rule catalogue, embedded view ids).
+
+### Changed
+
+- **Every rule reference page on alint.org now carries a generated `## Options`
+  table** (name / type / required / default / description), derived from the
+  type-driven JSON Schema rather than hand-maintained prose, so the documented
+  options cannot drift from the engine.
+- **The config JSON Schema is now generated from the Rust option types** (via
+  `schemars`) instead of being hand-maintained, so the published schema and the
+  engine cannot drift; a freshness gate keeps the committed schema in sync.
+
+### Fixed
+
+- **`cross_file` `SemverMajor` normalization is now idempotent**, so normalizing
+  an already-normalized value is stable.
+- **`file_graph` and `cross_file` violation messages now emit forward-slash
+  paths**, for consistent output across platforms.
+- **The GitHub Action emits its `sarif-file` output even when the check finds
+  violations**, so a failing run still uploads SARIF to Code Scanning.
+
+### Security
+
+- **A Kani-model-checked proof and proptest properties now verify the
+  path-confinement boundary** introduced in v0.12.0 (the untrusted-`extends:`
+  threat model), turning that guarantee into a machine-checked invariant.
+
 ## [0.12.0] - 2026-06-07
 
 The case-study-driven rule-kind expansion, paired with a security cycle that
@@ -5781,7 +5840,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/asamarts/alint/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/asamarts/alint/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/asamarts/alint/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/asamarts/alint/compare/v0.10.2...v0.11.0

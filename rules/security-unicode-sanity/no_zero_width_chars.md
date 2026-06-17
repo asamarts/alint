@@ -18,3 +18,8 @@ Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leadin
 
 ---
 
+## Options
+
+_This rule takes no kind-specific options._
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

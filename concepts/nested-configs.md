@@ -3,6 +3,8 @@ title: 'Nested .alint.yml (monorepo layering)'
 description: 'alint concept: nested .alint.yml (monorepo layering).'
 ---
 
+<likec4-view view-id="monorepoNesting"></likec4-view>
+
 Opt into per-subtree configs by setting `nested_configs: true` on the root `.alint.yml`:
 
 ```yaml

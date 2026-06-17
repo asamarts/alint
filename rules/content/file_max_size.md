@@ -15,3 +15,10 @@ File must be at most `max_bytes` in size. Catches accidental large-blob commits.
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_bytes` | integer (>= 0) | yes |  | Maximum allowed file size in bytes. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

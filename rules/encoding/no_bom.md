@@ -18,3 +18,8 @@ Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer st
 
 ---
 
+## Options
+
+_This rule takes no kind-specific options._
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

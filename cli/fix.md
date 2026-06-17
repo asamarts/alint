@@ -3,6 +3,10 @@ title: 'alint fix'
 description: 'Apply automatic fixes for violations whose rules declare one. alint fix CLI reference and flags.'
 ---
 
+How `alint fix` applies fixes and re-checks:
+
+<likec4-view view-id="fixFlow"></likec4-view>
+
 ```
 Apply automatic fixes for violations whose rules declare one
 

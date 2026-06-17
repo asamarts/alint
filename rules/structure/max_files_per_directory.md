@@ -15,3 +15,10 @@ Per-directory fanout may not exceed `max_files`. Useful for vendor directories t
   level: warning
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_files` | integer (>= 1) | yes |  | Maximum number of in-scope files allowed as immediate children of any one directory (non-recursive). |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

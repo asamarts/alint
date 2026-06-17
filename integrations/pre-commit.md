@@ -10,12 +10,16 @@ alint ships a [pre-commit](https://pre-commit.com/) hook definition. Add it to y
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.12.0
+    rev: v0.13.0
     hooks:
       - id: alint
 ```
 
 The `alint` hook runs `alint check` against the repo's `.alint.yml` on every commit, blocking commits whose changes introduce errors.
+
+The commit gate, plus the manual fix hook:
+
+<likec4-view view-id="preCommitFlow"></likec4-view>
 
 ## Auto-fix on demand
 
@@ -32,7 +36,7 @@ Pin to a tagged release. Updating the `rev:` is how you upgrade alint:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.12.0
+    rev: v0.13.0
     hooks:
       - id: alint
         # Pass extra args here if you need to:

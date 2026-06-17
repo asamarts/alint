@@ -7,6 +7,8 @@ sidebar:
 
 alint ships as a single static Rust binary — no runtime, no JVM, nothing else to install. Pick whichever path matches your environment.
 
+<likec4-view view-id="distributionFlow"></likec4-view>
+
 ## install.sh (Linux + macOS + Windows tarballs)
 
 ```bash
@@ -33,7 +35,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.12.0 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.13.0 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -42,7 +44,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.12.0`).
+Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.13.0`).
 
 ## crates.io
 

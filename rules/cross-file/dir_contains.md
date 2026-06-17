@@ -15,3 +15,11 @@ Every directory matching `select:` must contain files matching every glob in `re
   level: error
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `require` | string or list of string | yes |  | Basename glob(s) — every dir matching `select` must have at least one child matching each. |
+| `select` | string | yes |  |  |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

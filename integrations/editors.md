@@ -14,6 +14,8 @@ auto-fixable rules.
 All editor surfaces are versioned in lockstep with the `alint` binary,
 so every channel ships the same release.
 
+<likec4-view view-id="editorArch"></likec4-view>
+
 ## Tier 1 — packaged extension, marketplace install
 
 | Editor | Install | Notes |
@@ -39,6 +41,11 @@ These rely on a generic LSP client the editor already has; the alint
 repo ships a tested config snippet you copy in.
 
 ## What the server provides
+
+How an open, change, or save in your editor drives a check and publishes
+diagnostics:
+
+<likec4-view view-id="lspFlow"></likec4-view>
 
 - **Diagnostics on save and on change.** Every `.alint.yml` violation in
   your active file lands as an editor diagnostic with the rule ID and

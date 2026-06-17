@@ -11,6 +11,10 @@ Most linters check the code inside files; alint checks the files themselves. The
 
 When [Repolinter](https://github.com/todogroup/repolinter) was archived in early 2026 it took a piece of the OSS-baseline checking tooling with it; alint's `oss-baseline@v1` ruleset is a strict superset of Repolinter's default rules for users migrating in. See the [Repolinter-alternative landing](/repolinter-alternative/) and the [step-by-step migration guide](/migrating-from/repolinter/) for the full mapping.
 
+alint in its environment, the actors and systems it works with:
+
+<likec4-view view-id="index"></likec4-view>
+
 ## Non-goals
 
 alint is deliberately **not**:

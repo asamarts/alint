@@ -7,6 +7,8 @@ sidebar:
 
 The Concepts section is the conceptual foundation that the rest of the docs assume. Skim it once; come back when something downstream confuses you.
 
+<likec4-view view-id="catalogueOverview"></likec4-view>
+
 ## What alint is
 
 alint is a static Rust binary that lints the *shape* of a repository. Where ESLint lints code and Semgrep lints semantics, alint lints the things in between — required files (READMEs, LICENSEs, SECURITY.md), filename conventions, content patterns, the values inside `package.json` / `Cargo.toml` / GitHub workflows, and cross-file relationships like "every package has a README" or "every header has a matching source file."

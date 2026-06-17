@@ -17,3 +17,10 @@ File contents must contain at least one match for a regex.
 
 Fix: `file_append` — append declared content.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `pattern` | string | yes |  | Rust regex. File contents must match. |
+
+Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

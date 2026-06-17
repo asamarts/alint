@@ -3,6 +3,10 @@ title: 'alint check'
 description: 'Run linters against the current (or given) directory. Default command. alint check CLI reference and flags.'
 ---
 
+The pipeline `alint check` runs:
+
+<likec4-view view-id="checkFlow"></likec4-view>
+
 ```
 Run linters against the current (or given) directory. Default command
 

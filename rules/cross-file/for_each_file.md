@@ -43,6 +43,16 @@ The `iter` namespace exposes:
 
 `when_iter:` composes with the rule's outer `when:` (whole-rule gate, evaluated once) and with each nested rule's `when:` (which now also sees the same `iter.*` context). Same field is available on `for_each_file` and `every_matching_has`.
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `require` | list of nested rule | yes |  | Nested rules evaluated against each matched file. |
+| `select` | string or list of string | yes |  | Glob(s) selecting the files to iterate — a single glob, or a list with `!`-prefixed excludes. |
+| `when_iter` | string |  |  | Per-iteration `when:` filter — see rule_for_each_dir.when_iter. `iter.has_file(...)` always evaluates to false on file iteration; useful predicates here include `iter.basename`, `iter.ext`, `iter.parent_name`. |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
 ## See also
 
 - [`for_each_dir`](/docs/rules/cross-file/for_each_dir/)

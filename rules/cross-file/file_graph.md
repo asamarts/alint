@@ -68,3 +68,12 @@ Assemble the repo's *file → file* reference graph and assert a global structur
       marker: 'sha256:([0-9a-f]{64})'
 ```
 
+## Options
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `edges` | object | yes |  | Exactly one edge extractor: `from_content` (content references → the reference-graph modes) or `derive_target` (a name template → `fresh` codegen-freshness or `no_dangling` derived-sibling existence). |
+| `nodes` | string | yes |  | Glob selecting the graph's node files. |
+| `require` | one of `acyclic` \| `no_dangling` \| `no_orphans` or object | yes |  | A bare-string mode (`acyclic` \| `no_dangling` \| `no_orphans`), or a map for a configured mode (`{ forbidden_edges: [{from,to}] }`, `{ no_orphans: { roots: [...] } }`, or `{ fresh: { hash, marker } }`). `no_dangling` = every path-shaped edge resolves to an existing path (with `edges.derive_target`, each node's derived sibling must exist — e.g. every `X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` = no node is unreferenced except those matching a `roots` glob; `fresh` (needs `edges.derive_target`) = the derived output carries the source's current `hash` digest, captured by `marker` (group 1). |
+
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
