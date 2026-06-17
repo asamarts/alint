@@ -12,27 +12,30 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.12.0** (2026-06-07). The case-study-driven rule-kind
-expansion paired with a security cycle. New kinds: `file_graph`
-(file-dependency-graph firewalls + cycle / orphan / dangling checks),
-`for_each_match` (a per-line predicate quantifier), a unified `cross_file`
-value-relation kind, `pair_changed_together` (a co-change gate), and
-`generated_file_fresh` mutating / in-place mode, plus markerless
-`ordered_block`, a `php@v1` bundled ruleset, JSONC-tolerant structured parsing,
-and more `import_gate` presets. Security: every config-declared path a rule
-reads or resolves is now confined to the repo root (the untrusted-`extends:`
-threat model), with `allow_out_of_root:` as the explicit top-level opt-in, the
-walker pruning symlinks that escape the tree, and a fixed git
-argument-injection in the `since:` range mode (write/truncate of an arbitrary
-out-of-tree file; affected releases back to v0.9.21).
+**Latest release: v0.13.0** (2026-06-17). The spec-driven-development program
+landed as a release: the config JSON Schema is now generated from the Rust
+option types (powering the per-rule options docs), `facts.json` and
+`roadmap.json` publish the surface-area counts and the public roadmap as
+machine-readable contracts, the crate-dependency graph and the architecture are
+a single LikeC4 model rendered interactively on alint.org (and exported to
+Mermaid for GitHub), and the v0.12.0 path-confinement boundary gains a
+Kani-verified proof. All are generated and regenerate-and-diff gated, and
+alint.org renders its headline counts from `facts.json`. See the
+[Engineering foundations](#engineering-foundations-spec-driven-development)
+section below.
 
-**Since v0.12, a spec-driven-development program shipped to `main`** (engineering
-foundations, not a version cut): the config schema, the per-rule options docs, a
-`facts.json` surface-area contract, the crate-dependency graph + C4 model, and a
-Kani-verified path-confinement proof are all now generated and regenerate-and-diff
-gated, and alint.org renders its headline counts from `facts.json`. See the
-[Engineering foundations](#engineering-foundations-spec-driven-development) section
-below.
+**v0.12.0** (2026-06-07). The case-study-driven rule-kind expansion paired with
+a security cycle. New kinds: `file_graph` (file-dependency-graph firewalls +
+cycle / orphan / dangling checks), `for_each_match` (a per-line predicate
+quantifier), a unified `cross_file` value-relation kind, `pair_changed_together`
+(a co-change gate), and `generated_file_fresh` mutating / in-place mode, plus
+markerless `ordered_block`, a `php@v1` bundled ruleset, JSONC-tolerant structured
+parsing, and more `import_gate` presets. Security: every config-declared path a
+rule reads or resolves is now confined to the repo root (the untrusted-`extends:`
+threat model), with `allow_out_of_root:` as the explicit top-level opt-in, the
+walker pruning symlinks that escape the tree, and a fixed git argument-injection
+in the `since:` range mode (write/truncate of an arbitrary out-of-tree file;
+affected releases back to v0.9.21).
 
 **v0.11.1** (2026-05-31)
 was a JetBrains-plugin patch that
