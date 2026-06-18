@@ -66,7 +66,7 @@ indicatif = "0.18"
 portable-pty = "0.9"
 serde_json_path = "0.7"
 toml = "1.1"
-roxmltree = "0.20"
+roxmltree = "0.21"
 
 # LSP server, slated for v0.11. Crate-choice rationale (`tower-lsp`
 # over `lsp-server`) is in `docs/design/v0.11/lsp_server.md`.
