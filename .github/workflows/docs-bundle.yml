@@ -36,7 +36,7 @@ jobs:
     name: Build + push docs bundle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history + tags: the bundle is built from the latest
           # *release* tag (next step), not the ref that triggered the

@@ -35,7 +35,7 @@ jobs:
       examples: ${{ steps.detect.outputs.examples }}
       editors: ${{ steps.detect.outputs.editors }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: detect
@@ -52,7 +52,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -67,7 +67,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -82,7 +82,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -97,7 +97,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -112,7 +112,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -127,7 +127,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -149,7 +149,7 @@ jobs:
       && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.docs == 'true')
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -166,7 +166,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -182,7 +182,7 @@ jobs:
       && needs.changes.outputs.bench == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -210,7 +210,7 @@ jobs:
       # job's `needs:` so a failed gate is reflected in the aggregate Summary.
       DET_PERF_ADVISORY: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -234,7 +234,7 @@ jobs:
       && needs.changes.outputs.examples == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -253,7 +253,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: ci/scripts/shell-tests.sh
 
   # ── Editor extensions ─────────────────────────────────────────────
@@ -270,7 +270,7 @@ jobs:
       && needs.changes.outputs.editors == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
@@ -315,7 +315,7 @@ jobs:
       - editors
     runs-on: [self-hosted, linux, alint]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - env:
           RUST_CHANGED: ${{ needs.changes.outputs.rust }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs }}

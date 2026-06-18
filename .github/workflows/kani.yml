@@ -24,7 +24,7 @@ jobs:
   kani:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run Kani proofs
         uses: model-checking/kani-github-action@v1
         with:

@@ -31,7 +31,7 @@ jobs:
     name: VS Code extension (headless)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
       - name: Build alint from this branch
@@ -55,7 +55,7 @@ jobs:
     name: Neovim LSP smoke (headless)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
       - name: Build alint from this branch
@@ -76,7 +76,7 @@ jobs:
     name: Tier-2 editor configs (static)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # python3 (tomllib) is preinstalled; emacs is needed to byte-compile
       # the elisp config.
       - name: Install Emacs
@@ -88,7 +88,7 @@ jobs:
     name: JetBrains LSP e2e (headless)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
       - name: Build alint from this branch
