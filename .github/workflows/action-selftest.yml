@@ -89,6 +89,6 @@ jobs:
           # CLI understands the repo's current `.alint.yml` —
           # bump when adding rule kinds the pinned version won't
           # recognize. Convention: track the previous minor
-          # (i.e. when HEAD is 0.9.X+1, this sits at v0.9.X) so
+          # (i.e. when HEAD is 0.X+1, this sits at v0.X) so
           # the test catches CLI/.alint.yml drift one release out.
-          version: v0.9.21
+          version: v0.12.0

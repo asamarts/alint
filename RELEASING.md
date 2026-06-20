@@ -91,7 +91,7 @@ points are explicit.
 
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
-| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood. Self-hosted Linux. | ~5 min |
+| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit, deny, build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
 | `release.yml` | tag push only | preflight gate → cross-platform build matrix → GitHub Release → ghcr.io Docker → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
@@ -176,12 +176,15 @@ Helix / Eclipse are docs-only (config snippets): nothing to publish.
 
 ## Bench-record review (the human gate)
 
-> **Regression detection is now the deterministic `perf-gate` CI job**
+> **Regression detection is the deterministic `perf-gate` CI job**
 > (`ci/scripts/det-perf-gate.sh`, per-PR; design:
 > [`docs/design/deterministic-perf-gating.md`](docs/design/deterministic-perf-gating.md)).
 > It compares Valgrind instruction/cache/branch counts PR-vs-merge-base and is
 > **load-immune**, so it catches regressions deterministically where wall-clock
-> `bench-scale` cannot. The 2026-06 investigation proved the contaminated shared
+> `bench-scale` cannot. It runs **advisory today** (`DET_PERF_ADVISORY=1` in
+> `ci.yml`: it annotates but cannot fail the build, and is excluded from the
+> `summary` gate); flip it to enforcing by setting `DET_PERF_ADVISORY=0` and
+> adding `perf-gate` to `summary.needs`. The 2026-06 investigation proved the contaminated shared
 > runner makes wall-clock regression %s unreliable (v0.11.1 AND v0.12.0 both
 > contaminated; see
 > [`docs/benchmarks/investigations/2026-06-v0.12-perf-validation/`](docs/benchmarks/investigations/2026-06-v0.12-perf-validation/)).
@@ -277,8 +280,8 @@ HISTORY.md (the cross-version table is release-tag-only).
 contains a critical bug:
 
 1. Yank from crates.io via `cargo yank --version <x.y.z> -p alint`
-   (and the workspace member crates: `alint-core`, `alint-dsl`,
-   `alint-rules`, `alint-output`).
+   (and every published library crate, per `ci/scripts/publish-crates.sh`:
+   `alint-core`, `alint-rules`, `alint-output`, `alint-dsl`, `alint-lsp`).
 2. Mark the npm package as `npm deprecate "@asamarts/alint@<x.y.z>"
    "Yanked: <reason>; upgrade to <x.y.z+1>"`.
 3. Delete the GitHub Release (the asset tarballs stay accessible via

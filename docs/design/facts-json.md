@@ -42,7 +42,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
 ```json
 {
   "format_version": 1,
-  "alint_version": "0.12.0",
+  "alint_version": "0.13.0",
   "counts": {
     "rule_kinds": 89,
     "families": 13,
