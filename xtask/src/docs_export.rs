@@ -763,6 +763,54 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
 /// `title` is the bare kind name so URLs and Starlight headings
 /// match what the user types in `.alint.yml`. The page body is
 /// the H3's content plus a "See also" footer for paired rules.
+/// A multi-kind H3 (the structured-query family's `*_path_equals` /
+/// `*_path_matches` groups) shares one example body across every kind's
+/// page — a single block with one rule per kind. Without help, all four
+/// pages lead with the first kind's rule (`json_path_equals`), so they
+/// read like un-edited clones. Bring the rule whose `kind:` matches this
+/// page to the front of the first fenced block so each page leads with
+/// its own kind. No-op for single-rule examples, when the page's kind
+/// isn't a standalone entry, or when it's already first.
+fn lead_example_with_kind(body: &str, kind: &str) -> String {
+    let Some(open) = body.find("```yaml") else {
+        return body.to_string();
+    };
+    let after_fence = open + "```yaml".len();
+    let Some(nl) = body[after_fence..].find('\n') else {
+        return body.to_string();
+    };
+    let content_start = after_fence + nl + 1;
+    let Some(close_rel) = body[content_start..].find("```") else {
+        return body.to_string();
+    };
+    let close = content_start + close_rel;
+
+    // Rule entries are separated by blank lines.
+    let entries: Vec<&str> = body[content_start..close].split("\n\n").collect();
+    if entries.len() < 2 {
+        return body.to_string();
+    }
+    let kind_line = format!("kind: {kind}");
+    let Some(pos) = entries
+        .iter()
+        .position(|e| e.lines().any(|l| l.trim() == kind_line))
+    else {
+        return body.to_string();
+    };
+    if pos == 0 {
+        return body.to_string();
+    }
+    let mut reordered = entries.clone();
+    let chosen = reordered.remove(pos);
+    reordered.insert(0, chosen);
+    format!(
+        "{}{}{}",
+        &body[..content_start],
+        reordered.join("\n\n"),
+        &body[close..]
+    )
+}
+
 // Page-rendering inputs are all distinct scalars/slices; a struct
 // would just relocate the argument list without simplifying callers.
 #[allow(clippy::too_many_arguments)]
@@ -788,7 +836,8 @@ fn emit_rule_page(
     let _ = writeln!(&mut page, "  order: {sidebar_order}");
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page);
-    page.push_str(body.trim_start_matches('\n'));
+    let body = lead_example_with_kind(body.trim_start_matches('\n'), kind);
+    page.push_str(&body);
     // Authoritative options table, derived from the type-generated
     // JSON Schema (ADR-0001). Injected between the hand-written
     // prose and the "See also" footer so every rule page carries a
@@ -1841,6 +1890,121 @@ fn count_canonical_bundled_rulesets() -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `lead_example_with_kind` brings the matching-kind rule to the
+    /// front of a multi-variant example, and is a no-op otherwise.
+    #[test]
+    fn lead_example_reorders_multivariant_block() {
+        let body = "\
+```yaml
+- id: a
+  kind: json_path_equals
+  level: error
+
+- id: b
+  kind: yaml_path_equals
+  level: error
+```
+";
+        // yaml page: the yaml rule moves to the front.
+        let out = lead_example_with_kind(body, "yaml_path_equals");
+        let first_kind = out
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("kind: "))
+            .unwrap();
+        assert_eq!(first_kind, "yaml_path_equals");
+        // json page: already first → unchanged.
+        assert_eq!(lead_example_with_kind(body, "json_path_equals"), body);
+        // single-rule example → unchanged.
+        let single = "```yaml\n- id: x\n  kind: file_exists\n```\n";
+        assert_eq!(lead_example_with_kind(single, "file_exists"), single);
+    }
+
+    /// Generate the structured-query rule pages and assert each one's
+    /// first example leads with its OWN kind. Catches the templated-
+    /// clone bug the external evaluation flagged: the four
+    /// `*_path_equals` (and `*_path_matches`) pages all showed
+    /// `kind: json_path_*` because the multi-kind H3's single example
+    /// was fanned out verbatim. Scoped to these families — other
+    /// multi-kind H3s (`for_each_dir`/`for_each_file`, the file_*
+    /// content aliases) deliberately share one example demonstrating
+    /// the group, which reads correctly.
+    #[test]
+    fn structured_query_pages_lead_with_their_own_kind() {
+        const FAMILY_KINDS: &[&str] = &[
+            "json_path_equals",
+            "yaml_path_equals",
+            "toml_path_equals",
+            "xml_path_equals",
+            "json_path_matches",
+            "yaml_path_matches",
+            "toml_path_matches",
+            "xml_path_matches",
+        ];
+        let workspace = crate::bench_release::workspace_root().expect("workspace_root");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        generate_rules_pages(&workspace, tmp.path()).expect("generate rules pages");
+
+        let rules_dir = tmp.path().join("rules");
+        let mut pages: Vec<std::path::PathBuf> = Vec::new();
+        collect_md(&rules_dir, &mut pages);
+        assert!(!pages.is_empty(), "no rule pages were generated");
+
+        let mut checked = 0usize;
+        let mut mismatches: Vec<String> = Vec::new();
+        for page in &pages {
+            let stem = page.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if !FAMILY_KINDS.contains(&stem) {
+                continue;
+            }
+            let text = fs::read_to_string(page).unwrap();
+            // First `kind:` inside the first fenced yaml block.
+            let Some(open) = text.find("```yaml") else {
+                continue;
+            };
+            let after = &text[open..];
+            let Some(close) = after[7..].find("```") else {
+                continue;
+            };
+            let block = &after[7..7 + close];
+            let Some(first_kind) = block.lines().find_map(|l| l.trim().strip_prefix("kind: "))
+            else {
+                continue;
+            };
+            checked += 1;
+            if first_kind != stem {
+                mismatches.push(format!(
+                    "{}: first example shows `kind: {first_kind}` but the page is `{stem}`",
+                    page.display()
+                ));
+            }
+        }
+        assert_eq!(
+            checked,
+            FAMILY_KINDS.len(),
+            "expected to check all {} structured-query pages, checked {checked} \
+             (a page or its example went missing)",
+            FAMILY_KINDS.len()
+        );
+        assert!(
+            mismatches.is_empty(),
+            "rule page(s) whose lead example names the wrong kind \
+             (templated-clone regression):\n{}",
+            mismatches.join("\n")
+        );
+    }
+
+    fn collect_md(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_md(&path, out);
+            } else if path.extension().is_some_and(|e| e == "md") {
+                out.push(path);
+            }
+        }
+    }
 
     /// Pin the `CLI_REFERENCE_SUBCMDS` list against the `enum
     /// Command` variants in `crates/alint/src/main.rs`. If the

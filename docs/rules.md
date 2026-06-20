@@ -351,6 +351,13 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
   path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
   matches: '^\d'
   level: error
+
+- id: crate-version-is-semver
+  kind: toml_path_matches
+  paths: "crates/*/Cargo.toml"
+  path: "$.package.version"
+  matches: '^\d+\.\d+\.\d+$'
+  level: error
 ```
 
 ### `json_schema_passes`
