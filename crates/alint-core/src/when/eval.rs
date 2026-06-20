@@ -236,6 +236,8 @@ fn cmp_ord<T: PartialOrd>(a: &T, b: &T, op: CmpOp) -> bool {
         CmpOp::Le => a <= b,
         CmpOp::Gt => a > b,
         CmpOp::Ge => a >= b,
-        _ => unreachable!(),
+        // Only the four ordering ops are ever routed here; equality and
+        // membership ops are handled by the caller before this point.
+        other => unreachable!("cmp_ord called with non-ordering op: {other:?}"),
     }
 }

@@ -22,6 +22,9 @@ alint-rules.workspace = true
 tower-lsp.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# parking_lot::Mutex: a panic in any async handler must not poison the
+# shared state and take down the whole language-server session.
+parking_lot.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

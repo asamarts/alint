@@ -142,6 +142,7 @@ dependencies = [
  "alint-core",
  "alint-dsl",
  "alint-rules",
+ "parking_lot",
  "tempfile",
  "tokio",
  "tower-lsp",

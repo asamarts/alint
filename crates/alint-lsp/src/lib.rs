@@ -29,9 +29,10 @@
 //! The "add rule to ignore" action is deferred to a later slice of the
 //! LSP epic.
 
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
@@ -159,7 +160,7 @@ impl Backend {
     /// longer have findings. Runs on open and save.
     async fn check_and_publish(&self) {
         let (root, open) = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock();
             (
                 state.root.clone(),
                 state.open.iter().cloned().collect::<Vec<_>>(),
@@ -173,7 +174,7 @@ impl Backend {
             Ok(Ok(Some((session, by_path)))) => {
                 let config_uri = Url::from_file_path(&session.config_path).ok();
                 let to_publish = {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = self.state.lock();
                     state.session = Some(session);
                     cache_and_collect(&mut state, &open, &by_path)
                 };
@@ -187,7 +188,7 @@ impl Backend {
             Ok(Ok(None)) => {
                 // No `.alint.yml` — clear any stale diagnostics.
                 let to_publish = {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = self.state.lock();
                     state.session = None;
                     cache_and_collect(&mut state, &open, &FindingsByPath::new())
                 };
@@ -237,7 +238,7 @@ impl Backend {
     /// preserved so they don't flicker away while typing — they refresh
     /// on the next save. `version` ties the diagnostics to the edit.
     async fn reeval_file(&self, uri: Url, text: String, version: i32) {
-        let session = self.state.lock().unwrap().session.clone();
+        let session = self.state.lock().session.clone();
         let Some(session) = session else {
             return; // No cached session yet — open/save will populate it.
         };
@@ -268,7 +269,7 @@ impl Backend {
             Ok(Ok(by_path)) => {
                 let per_file = by_path.get(&abs_key).cloned().unwrap_or_default();
                 let diagnostics = {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = self.state.lock();
                     // Keep cross-file findings from the last full run;
                     // replace the per-file ones with the fresh results.
                     let mut merged: Vec<Finding> = state
@@ -287,7 +288,7 @@ impl Backend {
             }
             Ok(Err(Error::FileNotInIndex { .. })) => {
                 // Excluded from linting (or not yet walked) — clear.
-                self.state.lock().unwrap().diagnostics.remove(&uri);
+                self.state.lock().diagnostics.remove(&uri);
                 self.client
                     .publish_diagnostics(uri, Vec::new(), Some(version))
                     .await;
@@ -321,7 +322,7 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
         if let Some(root) = workspace_root(&params) {
-            self.state.lock().unwrap().root = Some(root);
+            self.state.lock().root = Some(root);
         }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -351,7 +352,7 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             state.open.insert(params.text_document.uri.clone());
             state
                 .documents
@@ -370,7 +371,6 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         self.state
             .lock()
-            .unwrap()
             .documents
             .insert(uri.clone(), change.text.clone());
         self.reeval_file(uri, change.text, version).await;
@@ -392,7 +392,7 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             state.open.remove(&uri);
             state.diagnostics.remove(&uri);
             state.documents.remove(&uri);
@@ -406,7 +406,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
 
         let findings = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock();
             state.diagnostics.get(&uri).cloned()
         };
         let Some(findings) = findings else {
@@ -453,7 +453,7 @@ impl LanguageServer for Backend {
         }
 
         let (session, findings, text) = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock();
             (
                 state.session.clone(),
                 state.diagnostics.get(&uri).cloned(),
