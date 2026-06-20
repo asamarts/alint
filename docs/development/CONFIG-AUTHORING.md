@@ -86,6 +86,7 @@ both rejected by serde.
 ```yaml
 - id: golangci-lint
   kind: command
+  paths: "**/*.go"
   command: ["golangci-lint", "run", "{dir}/..."]
   timeout: 600                           # ← integer seconds
 ```
@@ -275,6 +276,7 @@ dotted, and other non-identifier keys must use bracket notation —
 in **any** segment, top-level or inside a filter expression.
 
 **Wrong (top-level):**
+<!-- alint:ignore-example -->
 ```yaml
 - id: provider-package-name
   kind: yaml_path_matches
@@ -293,6 +295,7 @@ in **any** segment, top-level or inside a filter expression.
 ```
 
 **Wrong (inside a filter):**
+<!-- alint:ignore-example -->
 ```yaml
 - id: dependabot-actions-grouped
   kind: yaml_path_matches
@@ -761,6 +764,7 @@ istio's per-chart container-image hub is the canonical example.
 JSONPath positions per file. A single shared `path:` can't reach both.
 
 **Wrong (one shared JSONPath misses half the files):**
+<!-- alint:ignore-example -->
 ```yaml
 - id: image-hub-pinned
   kind: cross_file_value_equals
@@ -809,6 +813,7 @@ stitched into one file, helm-chart-rendered output) trip a runtime
 verdict.
 
 **Wrong (rule fires runtime error on multi-doc files):**
+<!-- alint:ignore-example -->
 ```yaml
 - id: release-note-kind-enum
   kind: yaml_path_equals
@@ -824,9 +829,8 @@ that doesn't need YAML parsing):**
 - id: release-note-kind-enum
   kind: file_content_matches
   paths: "releasenotes/notes/*.yaml"
-  pattern: '^kind: (feature|bug-fix|breaking-change|security)$'
-  multiline: true
-  level: warn
+  pattern: '(?m)^kind: (feature|bug-fix|breaking-change|security)$'
+  level: warning
 ```
 
 The v0.10 design candidate is a `multi_doc_mode:` knob: `error` (the
@@ -935,7 +939,7 @@ When writing a new rule, start from the closest pattern below.
 
 ```yaml
 - id: my-rule
-  kind: file_content_matches              # or file_content_forbidden, file_header, file_footer
+  kind: file_header                        # or file_content_matches, file_content_forbidden, file_footer
   paths:
     include: ["src/**/*.py"]
     exclude: ["src/**/_generated/**"]
@@ -944,7 +948,7 @@ When writing a new rule, start from the closest pattern below.
   pattern: '^# Copyright'
   level: error
   message: "Every Python file under src/ must have a copyright header."
-  fix:                                     # optional
+  fix:                                     # optional (file_header / file_create kinds; file_content_matches is check-only)
     file_prepend:
       content: "# Copyright (c) ...\n"
 ```

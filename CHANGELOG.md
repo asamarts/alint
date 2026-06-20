@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected config examples that the loader (and the JSON schema) reject:
+  `docs/design/ARCHITECTURE.md` (`query:`/`pattern:` → `path:`/`matches:`,
+  map-keyed `rules:` → a list, a `sha256:`/`path:` `extends` mapping → SRI
+  URL-fragment + bare-string form, phantom `detect:`/`primary_language`/
+  `count_contributors` facts removed, `custom: {command:}` → `argv:`, WASM
+  plugin tier relabelled v0.13 → v0.14) and `docs/rules.md`
+  (`max:` → `max_width`/`max_depth`, `unique_by` `paths:` → `select:`).
+- Added the `agent` format to the README `--format` example block (it listed
+  seven of the eight formats) and removed the stale "Planned rulesets (v0.5)"
+  section from `docs/rules.md` (all five shipped).
+
+### Internal
+
+- New drift gates so the doc-vs-schema and stale-status classes can't recur:
+  `coverage_audit_doc_examples` loads every fenced config example in the
+  hand-written docs through the real config loader, and
+  `coverage_audit_planned_rulesets` fails if a "Planned" section names a
+  ruleset already in `facts.json`.
+
 ## [0.13.0] - 2026-06-17
 
 This release turns the documented surface into generated, drift-proof contracts.

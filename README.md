@@ -206,6 +206,7 @@ alint check --format github   # GitHub Actions workflow commands
 alint check --format markdown # GFM, suited to PR comments / mkdocs
 alint check --format junit    # JUnit XML, the de-facto CI test report
 alint check --format gitlab   # GitLab Code Quality JSON (Code Climate spec)
+alint check --format agent    # LLM-shaped JSON; agent_instruction + fix_command per violation
 ```
 
 Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` internal error. Warnings do not fail by default; use `--fail-on-warning` to flip that.

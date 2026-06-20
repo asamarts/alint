@@ -174,7 +174,7 @@ Content SHA-256 must equal the expected digest. Rules-as-tripwire for generated 
 - id: schema-frozen
   kind: file_hash
   paths: "schemas/v1/config.json"
-  sha256: "b7d0...c2e1"   # 64 hex chars
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"   # 64 hex chars
   level: error
 ```
 
@@ -459,7 +459,7 @@ Cap line length in characters (not bytes — code points). Optional `tab_width` 
 - id: docs-80-col
   kind: line_max_width
   paths: "docs/**/*.md"
-  max: 80
+  max_width: 80
   level: info
 ```
 
@@ -556,13 +556,13 @@ Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer st
 
 ### `max_directory_depth`
 
-Tree depth from repo root may not exceed `max`. A shallow depth stops deeply-nested imports and keeps CI path globs sane.
+Tree depth from repo root may not exceed `max_depth`. A shallow depth stops deeply-nested imports and keeps CI path globs sane.
 
 ```yaml
 - id: shallow-tree
   kind: max_directory_depth
   paths: "**"
-  max: 6
+  max_depth: 6
   level: warning
 ```
 
@@ -1305,7 +1305,7 @@ No two files matching `select` may share the value of `key` (a path template; to
 ```yaml
 - id: unique-basenames
   kind: unique_by
-  paths: "src/**/*.rs"
+  select: "src/**/*.rs"
   key: "{stem}"
   level: warning
 ```
@@ -1387,6 +1387,7 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 
 `fix_size_limit` is a top-level config field:
 
+<!-- alint:ignore-example -->
 ```yaml
 version: 1
 fix_size_limit: 1048576   # 1 MiB — the default; `null` disables
@@ -1759,13 +1760,3 @@ At load time, alint walks the tree (respecting `.gitignore` + `ignore:`), picks 
 - Every rule in a nested config must have a path-like scope field (`paths`, `select`, or `primary`). Rules without any (e.g. `no_submodules`, which is hardcoded to repo root) can't be nested.
 - Absolute paths and `..`-prefixed globs are rejected — they'd escape the subtree the config is supposed to confine.
 - Rule-id collisions across configs are rejected with a clear error. Per-subtree overrides aren't supported yet; if you want to disable a root rule under one subtree, use a `when:` gate on the root rule for now.
-
-### Planned rulesets (v0.5)
-
-- `alint://bundled/python@v1` — `pyproject.toml`, no `__pycache__`, no committed venv.
-- `alint://bundled/java@v1` — Maven / Gradle manifest, standard source layout.
-- `alint://bundled/go@v1` — `go.mod`, `go.sum`, no committed `vendor/` without the official workflow.
-- `alint://bundled/compliance/reuse@v1` — FSFE REUSE specification (SPDX headers + `LICENSES/`).
-- `alint://bundled/compliance/apache-2@v1` — Apache 2.0 headers + `NOTICE` file.
-
-Until those ship, you can compose any of them yourself by pairing `extends:` against an HTTPS URL (with SHA-256 SRI) or a local path.
