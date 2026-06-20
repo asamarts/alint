@@ -74,13 +74,13 @@
       "blurb": "New kinds file_graph, for_each_match, cross_file, and pair_changed_together, generated_file_fresh mutating mode, a path-confinement security cut, and the php ruleset."
     },
     {
-      "version": null,
+      "version": "0.13",
       "title": "Engineering foundations: spec-driven development",
-      "kind": "foundations",
+      "kind": "release",
       "blurb": "A drift-elimination program on main: schema, facts, and architecture generated and gated, plus a Kani-verified path-confinement proof."
     },
     {
-      "version": "0.13",
+      "version": "0.14",
       "title": "WASM plugins",
       "kind": "release",
       "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry."

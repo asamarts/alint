@@ -21,7 +21,7 @@ a single LikeC4 model rendered interactively on alint.org (and exported to
 Mermaid for GitHub), and the v0.12.0 path-confinement boundary gains a
 Kani-verified proof. All are generated and regenerate-and-diff gated, and
 alint.org renders its headline counts from `facts.json`. See the
-[Engineering foundations](#engineering-foundations-spec-driven-development)
+[Engineering foundations](#v013-engineering-foundations-spec-driven-development)
 section below.
 
 **v0.12.0** (2026-06-07). The case-study-driven rule-kind expansion paired with
@@ -179,8 +179,9 @@ on it for adoption, they can lint without it.
   dependency allowlist, and the ASF compliance-bundle over-fire
   fix.
 
-- **v0.13, WASM plugins.** Bumped one slot to make room for
-  v0.12. `wasmtime` host, signed plugin registry, blessed
+- **v0.14, WASM plugins.** Bumped again to make room for the
+  engineering-foundations program, which took the v0.13.0 cut.
+  `wasmtime` host, signed plugin registry, blessed
   examples (mock-ratio checker, near-dup detector,
   debug-statement stripper).
 
@@ -1171,11 +1172,12 @@ Design pass: [`asf_bundle_overfire.md`](https://github.com/asamarts/alint/blob/m
   in-place `outputs:` mode to `generated_file_fresh` for that mutating pattern,
   so the kind now covers it directly.
 
-## Engineering foundations: spec-driven development
+## v0.13: Engineering foundations: spec-driven development
 
-A drift-elimination program run on `main` after v0.12 — a foundations track, not a
-user-facing version cut, so it interleaves with the release cadence rather than
-occupying a slot. The premise an anti-drift linter has to honour itself — *alint's
+A drift-elimination program run on `main` after v0.12. Conceived as a foundations
+track interleaved with the release cadence, it grew substantial enough to be cut
+as the v0.13.0 release, so it owns that slot on the timeline. The premise an
+anti-drift linter has to honour itself — *alint's
 own claims can't drift from the tool* — now holds end to end. Six workstreams
 shipped, each artifact regenerate-and-diff gated:
 
@@ -1211,10 +1213,10 @@ two of the project's own drift gates — the site's version-pin consistency chec
 alint's `prose-no-em-dash` rule, dogfooded on the site's prose — caught drift that
 very change introduced, and it was fixed before the next release.
 
-## v0.13: WASM plugins
+## v0.14: WASM plugins
 
-Bumped one slot to make room for the v0.12 real-world-coverage cut;
-otherwise unchanged from the previous post-v0.11 scope.
+Bumped again to make room for the engineering-foundations program, which
+took the v0.13.0 cut; otherwise unchanged from the previous post-v0.11 scope.
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT
   interface. Plugins receive their config *post-interpolation*
