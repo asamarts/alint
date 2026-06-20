@@ -154,6 +154,12 @@ enum Command {
         /// `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
+        /// Restrict the run to the named rule id(s) from the
+        /// effective config (repeatable). Other rules are skipped
+        /// entirely. An id that matches no loaded rule is an error,
+        /// so typos fail loudly rather than silently linting nothing.
+        #[arg(long, value_name = "RULE_ID")]
+        only: Vec<String>,
     },
     /// List all rules loaded from the effective config.
     List,
@@ -178,6 +184,13 @@ enum Command {
         /// Base ref for `--changed`. Implies `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
+        /// Restrict the fix pass to the named rule id(s) from the
+        /// effective config (repeatable). This is the command the
+        /// `agent` output format emits per fixable violation
+        /// (`alint fix --only <rule-id>`). An id that matches no
+        /// loaded rule is an error.
+        #[arg(long, value_name = "RULE_ID")]
+        only: Vec<String>,
     },
     /// Evaluate every `facts:` entry in the effective config and
     /// print the resolved value. Debugging aid for `when:` clauses.
@@ -406,13 +419,15 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         path: PathBuf::from("."),
         changed: false,
         base: None,
+        only: Vec::new(),
     });
     match command {
         Command::Check {
             path,
             changed,
             base,
-        } => cmd_check(&path, &ChangedMode::new(changed, base), &cli),
+            only,
+        } => cmd_check(&path, &ChangedMode::new(changed, base), &only, &cli),
         Command::List => cmd_list(&cli),
         Command::Explain { rule_id } => cmd_explain(&rule_id, &cli),
         Command::Fix {
@@ -420,7 +435,14 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             dry_run,
             changed,
             base,
-        } => cmd_fix(&path, dry_run, &ChangedMode::new(changed, base), &cli),
+            only,
+        } => cmd_fix(
+            &path,
+            dry_run,
+            &ChangedMode::new(changed, base),
+            &only,
+            &cli,
+        ),
         Command::Facts { path } => cmd_facts(&path, &cli),
         Command::Init { path, monorepo } => cmd_init(&path, monorepo),
         Command::ExportAgentsMd {
@@ -620,10 +642,46 @@ impl ChangedMode {
     }
 }
 
-fn cmd_check(path: &Path, changed: &ChangedMode, cli: &Cli) -> Result<ExitCode> {
+/// Filter loaded rule entries to the ids named in `--only` (a no-op
+/// when `only` is empty). Every `--only` id must match a loaded rule;
+/// an unmatched id is an error so a typo fails loudly instead of
+/// silently selecting nothing. Shared by `check` and `fix`.
+fn apply_only_filter(
+    entries: Vec<alint_core::RuleEntry>,
+    only: &[String],
+) -> Result<Vec<alint_core::RuleEntry>> {
+    if only.is_empty() {
+        return Ok(entries);
+    }
+    let wanted: std::collections::HashSet<&str> = only.iter().map(String::as_str).collect();
+    let present: std::collections::HashSet<&str> = entries.iter().map(|e| e.rule.id()).collect();
+    let mut missing: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|id| !present.contains(id))
+        .collect();
+    if !missing.is_empty() {
+        missing.sort_unstable();
+        bail!(
+            "no rule with id {} found in the effective config (passed via --only)",
+            missing
+                .iter()
+                .map(|id| format!("{id:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(entries
+        .into_iter()
+        .filter(|e| wanted.contains(e.rule.id()))
+        .collect())
+}
+
+fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
-    let rule_count = loaded.entries.len();
-    let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
+    let entries = apply_only_filter(loaded.entries, only)?;
+    let rule_count = entries.len();
+    let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
     if let Some(set) = changed.resolve(path)? {
@@ -694,9 +752,16 @@ fn report_notes_to_stderr(report: &alint_core::Report, show_notes: bool) {
     }
 }
 
-fn cmd_fix(path: &Path, dry_run: bool, changed: &ChangedMode, cli: &Cli) -> Result<ExitCode> {
+fn cmd_fix(
+    path: &Path,
+    dry_run: bool,
+    changed: &ChangedMode,
+    only: &[String],
+    cli: &Cli,
+) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
-    let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
+    let entries = apply_only_filter(loaded.entries, only)?;
+    let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
         .with_fix_size_limit(loaded.fix_size_limit);
@@ -741,6 +806,21 @@ fn cmd_list(cli: &Cli) -> Result<ExitCode> {
     use alint_output::style;
 
     let loaded = load_rules(Path::new("."), cli)?;
+
+    // `list` honours --format for machine consumers: `json` emits a
+    // stable rule-inventory envelope (the effective rule set, post
+    // extends/overrides). Any other machine format is an explicit
+    // error rather than a silent fall-through to human output.
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    match format {
+        Format::Human => {}
+        Format::Json => return list_json(&loaded),
+        _ => bail!(
+            "`alint list` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+    }
+
     let (mut out, opts) = render_env(cli)?;
     if loaded.entries.is_empty() {
         writeln!(out, "(no rules loaded from config)")?;
@@ -776,6 +856,30 @@ fn cmd_list(cli: &Cli) -> Result<ExitCode> {
         }
         writeln!(out)?;
     }
+    out.flush().ok();
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Stable machine-readable rule inventory for `alint list --format json`.
+/// Carries the effective rule set (after `extends:`/overrides) so fleet
+/// tooling can diff "what rules are effective here" across repos. The
+/// `schema_version` mirrors the `check --format json` envelope.
+fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
+    let rules: Vec<serde_json::Value> = loaded
+        .entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.rule.id(),
+                "level": entry.rule.level().as_str(),
+                "policy_url": entry.rule.policy_url(),
+                "conditional": entry.when.is_some(),
+            })
+        })
+        .collect();
+    let doc = serde_json::json!({ "schema_version": 1, "rules": rules });
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
     out.flush().ok();
     Ok(ExitCode::SUCCESS)
 }
@@ -910,6 +1014,20 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         bail!("no rule with id {rule_id:?} found in the effective config");
     };
     let rule = &entry.rule;
+
+    // `explain` honours --format for machine consumers, matching `list`:
+    // `json` emits the rule's wire-shape; any other machine format is an
+    // explicit error rather than silently printing the human block.
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    match format {
+        Format::Human => {}
+        Format::Json => return explain_json(entry),
+        _ => bail!(
+            "`alint explain` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+    }
+
     let (mut out, opts) = render_env(cli)?;
     let dim = style::DIM;
     let docs = style::DOCS;
@@ -939,9 +1057,25 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     // v0.9.20: dropped the `debug: {rule:?}` line. The internal Debug
     // repr dumped per-rule-kind state (regex automaton, compiled
     // matchers, etc.) — useful for alint developers, noise for end
-    // users (24+ KB for some rule kinds). Use `--format json` on
-    // `alint check` if you need the wire-shape, or read the rule's
+    // users (24+ KB for some rule kinds). Use `--format json` (here or
+    // on `alint check`) if you need the wire-shape, or read the rule's
     // YAML config block.
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Machine-readable single-rule shape for `alint explain <id> --format
+/// json`. Parallels each entry of the `list --format json` inventory.
+fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
+    let doc = serde_json::json!({
+        "schema_version": 1,
+        "id": entry.rule.id(),
+        "level": entry.rule.level().as_str(),
+        "policy_url": entry.rule.policy_url(),
+        "conditional": entry.when.is_some(),
+    });
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
+    out.flush().ok();
     Ok(ExitCode::SUCCESS)
 }
 
