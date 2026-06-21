@@ -37,15 +37,24 @@ generated fingerprint file, separate from `.alint.yml`:
 - `alint baseline` writes `.alint-baseline.json` (default path): a
   `schema_version`-gated, deterministically sorted list of the current
   violations, each reduced to a fingerprint with an occurrence count.
+- The baseline is applied only on **explicit opt-in**: a `baseline: <path>` key
+  in `.alint.yml` (persistent) or a `--baseline <file>` flag (override). alint
+  does NOT silently auto-detect a baseline file, so suppression is never active
+  just because a file exists.
 - `alint check --baseline <file>` suppresses every current violation whose
   fingerprint is present (up to its recorded count) and reports only new
   violations; suppressed findings do not count toward the exit code.
 - The fingerprint is `rule_id + path + content`, hashed with SHA-256, and
   **excludes the line and column number**. For a line-anchored violation the
   content is the exact bytes of the offending line; for a file-level violation it
-  is the path alone; for a repository-level violation it is the rule's message.
-  This re-triggers when the offending code is edited, survives unrelated line
-  motion, and keeps duplicate occurrences honest via per-fingerprint counts.
+  is the path alone; for a repository-level (no-path / cross-file) violation it is
+  a stable **structural key the rule supplies** (e.g. the sorted set of involved
+  paths) via a new `Violation.baseline_key` field — not the message, so a
+  rule-kind reword cannot re-baseline it. This re-triggers when the offending
+  code is edited, survives unrelated line motion, and keeps duplicate occurrences
+  honest via per-fingerprint counts.
+- A stale entry (the fixed/edited case) warns and re-tightens but does not fail
+  the build by default; `--strict-baseline` opts into failing on stale.
 - Suppression is a deterministic, order-preserving post-evaluation transform on
   the `Report`, between `Engine::run` and the formatters (the same layer as the
   notes partition and the `--only` filter). It introduces no rule kind and no
@@ -66,11 +75,11 @@ baseline does not churn on every edit.
 
 Harder / costs: a new committed artifact that must be reviewed in PRs and can, if
 abused, mask a real finding (mitigated by stale-entry warnings, `--show-baselined`,
-and PR review). Repository-level violations are fingerprinted on message text, so
-a rule-kind reword re-baselines them (rare, version-coupled, visible). File
+and PR review). Every no-path-emitting cross-file / repo-level rule kind must
+supply a structural `baseline_key` before this ships (the chief rule-side cost,
+chosen over message-keying to make repo-level fingerprints reword-proof). File
 renames re-trigger the moved file's baselined violations (path is part of the
-identity). These are accepted for v1 and tracked as open questions in the design
-doc.
+identity). These are accepted for v1 and tracked in the design doc.
 
 ## Considered Options
 
@@ -82,6 +91,13 @@ doc.
   would not re-trigger and a new occurrence could be silently absorbed up to the
   count. We adopt the count model *per content-fingerprint* instead to keep
   precision and duplicate tolerance.
+- **Message-keyed repo-level fingerprints** (the simpler no-path option): rejected
+  in favour of a rule-supplied structural key, because hashing the message text
+  re-baselines a cross-file violation whenever its message is reworded. The
+  structural key costs a per-kind hook but makes repo-level entries reword-proof.
+- **Silent auto-detect of `.alint-baseline.json`**: rejected as a default —
+  suppression must be an explicit, reviewable opt-in (config key or flag), never
+  triggered by a file's mere presence.
 - **Line-number-keyed fingerprints**: rejected because every insert above an
   entry would churn the baseline.
 - **Diff-only `--new-from-rev`** (golangci-lint model): this is essentially the
