@@ -39,7 +39,7 @@ The clarity of these non-goals is itself a feature.
 ## Design principles
 
 1. **The repository tree is the input.** Every rule sees a unified file/directory index. The walk happens once per invocation.
-2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](/docs/rules/) lists every kind by family.
+2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](https://alint.org/docs/rules/) lists every kind by family.
 3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
 4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism.
 5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
@@ -155,9 +155,10 @@ For editor autocomplete, reference the schema via the YAML language server pragm
 version: 1
 
 extends:
-  - url: https://raw.githubusercontent.com/example/rulesets/base.yaml
-    sha256: "a1b2..."           # optional subresource integrity
-  - path: ./team-policy.alint.yml
+  # Optional subresource integrity is a `#sha256-<hex>` URL fragment.
+  - url: "https://raw.githubusercontent.com/example/rulesets/base.yaml#sha256-0000000000000000000000000000000000000000000000000000000000000000"
+  # A local path is a bare string entry.
+  - ./team-policy.alint.yml
 
 ignore:
   - "target/**"
@@ -200,7 +201,7 @@ rules:
 
 ### Rule families
 
-Rules are grouped into thirteen families. Every kind shares the record shape above; what differs is the predicate. Not every kind ships in every release. The full, always-current catalogue, with a one-line summary per kind, lives at [the rule reference](/docs/rules/).
+Rules are grouped into thirteen families. Every kind shares the record shape above; what differs is the predicate. Not every kind ships in every release. The full, always-current catalogue, with a one-line summary per kind, lives at [the rule reference](https://alint.org/docs/rules/).
 
 - **Existence** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`): a path must, or must not, be present.
 - **Content** (`file_content_matches`, `file_header`, `file_hash`, `file_max_size`, `file_max_lines`, `file_is_text`, `file_shebang`, ...): assertions over a file's bytes or lines.
@@ -283,7 +284,7 @@ paths: {include: ["src/**"], exclude: ["**/*.test.*"]}     # explicit pair
 
 Facts are declarative properties of the repository, evaluated once per run and cached. `when` clauses gate rules on facts.
 
-Fact kinds include `any_file_exists`, `all_files_exist`, `file_content_matches`, `detect: linguist` (primary languages), `detect: askalono` (SPDX license), `count_files`, `count_contributors`, `git_branch`, and `custom: {command: [...]}` (shell out, JSON stdout → value).
+Fact kinds are `any_file_exists`, `all_files_exist`, `count_files`, `file_content_matches`, `git_branch`, and `custom: {argv: [...]}` (shell out, stdout → value). Language/license detectors (`detect: linguist`, `detect: askalono`) are deferred — see the planned `alint-facts` crate below.
 
 The `when` expression language is deliberately bounded:
 
@@ -295,9 +296,9 @@ No user-defined functions, no recursion, no I/O. Examples:
 
 ```yaml
 when: facts.has_rust
-when: facts.primary_language in ["Rust", "Go"]
+when: facts.release_branch in ["main", "release"]
 when: facts.has_rust and not facts.is_workspace_member
-when: count_files("**/*.java") > 0
+when: facts.java_file_count > 0
 ```
 
 ### Closest-ancestor scoping (`scope_filter:`, v0.9.6+)
@@ -423,7 +424,7 @@ alint/
 
 **Planned additions (see [ROADMAP.md](./ROADMAP.md)):**
 
-- `crates/alint-plugin/`: WASM plugin host (roadmap v0.13; the tier-1 `command` plugin already lives in `alint-rules`).
+- `crates/alint-plugin/`: WASM plugin host (roadmap v0.14; the tier-1 `command` plugin already lives in `alint-rules`).
 - `crates/alint-facts/`: currently subsumed by `alint-core::facts`; promotion to its own crate is deferred until the language and license detectors (`detect: linguist`, `detect: askalono`) land.
 
 ### Publishing intent (crates.io)
@@ -445,7 +446,7 @@ Unpublished crates still ship inside the binary and can be promoted later. The r
 Two tiers, introduced across the roadmap:
 
 - **`command` rule kind** (shipped). The rule shells out per matched file. Exit code is the verdict; stdout/stderr is the message. Environment variables expose path, rule id, level, vars, and facts. Simple, scriptable, language-agnostic.
-- **`wasm` plugin kind** (roadmap v0.13). Plugins will implement a stable WIT interface, receive file bytes + metadata, and return a structured result. Distributed as `.wasm` blobs referenced by URL with SRI. Sandboxed, deterministic, no network by default (opt-in capability).
+- **`wasm` plugin kind** (roadmap v0.14). Plugins will implement a stable WIT interface, receive file bytes + metadata, and return a structured result. Distributed as `.wasm` blobs referenced by URL with SRI. Sandboxed, deterministic, no network by default (opt-in capability).
 
 Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
 
@@ -488,20 +489,21 @@ facts:
     any_file_exists: ["benches/**/*.rs"]
 
 rules:
-  # Override an inherited rule.
-  readme-exists:
+  # Override an inherited rule (field-merge by id: the inherited
+  # `oss-readme-exists` keeps its `kind`, this narrows its `paths`).
+  - id: oss-readme-exists
     paths: ["README.md", "README.adoc"]
 
   # Disable an inherited rule.
-  no-todo-comments:
+  - id: rust-sources-snake-case
     level: off
 
   # New rules.
   - id: cargo-members-are-kebab
     kind: toml_path_matches
     paths: "Cargo.toml"
-    query: "$.workspace.members[*]"
-    pattern: "^[a-z][a-z0-9-]+$"
+    path: "$.workspace.members[*]"
+    matches: "^[a-z][a-z0-9-]+$"
     level: error
 
   - id: crates-have-readme
@@ -532,6 +534,6 @@ A new rule kind typically needs:
 1. A `Rule` impl in `crates/alint-rules/src/<kind>.rs`.
 2. Registration in `register_builtin` in `crates/alint-rules/src/lib.rs`.
 3. Unit tests alongside the impl (snapshot harness in `alint-testkit`).
-4. A docs entry so the kind appears in the [rule reference](/docs/rules/).
+4. A docs entry so the kind appears in the [rule reference](https://alint.org/docs/rules/).
 5. An entry in the Full Example section if the kind is commonly used.
 6. If the primitive shifts from "planned" to "shipped," an update in [ROADMAP.md](./ROADMAP.md).
