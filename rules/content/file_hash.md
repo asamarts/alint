@@ -11,7 +11,7 @@ Content SHA-256 must equal the expected digest. Rules-as-tripwire for generated 
 - id: schema-frozen
   kind: file_hash
   paths: "schemas/v1/config.json"
-  sha256: "b7d0...c2e1"   # 64 hex chars
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"   # 64 hex chars
   level: error
 ```
 

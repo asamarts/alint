@@ -8,6 +8,13 @@ sidebar:
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
 ```yaml
+- id: rust-edition-2024
+  kind: toml_path_equals
+  paths: "crates/*/Cargo.toml"
+  path: "$.package.edition"
+  equals: "2024"
+  level: warning
+
 - id: require-mit-license
   kind: json_path_equals
   paths: "packages/*/package.json"
@@ -21,13 +28,6 @@ Query a structured document with a JSONPath expression and assert every match de
   path: "$.permissions.contents"
   equals: "read"
   level: error
-
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning
 
 - id: csproj-targets-net8
   kind: xml_path_equals

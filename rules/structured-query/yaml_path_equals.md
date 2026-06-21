@@ -8,18 +8,18 @@ sidebar:
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
 ```yaml
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
 - id: workflow-contents-read
   kind: yaml_path_equals
   paths: ".github/workflows/*.yml"
   path: "$.permissions.contents"
   equals: "read"
+  level: error
+
+- id: require-mit-license
+  kind: json_path_equals
+  paths: "packages/*/package.json"
+  path: "$.license"
+  equals: "MIT"
   level: error
 
 - id: rust-edition-2024

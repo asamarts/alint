@@ -8,6 +8,14 @@ sidebar:
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
 ```yaml
+- id: crate-version-is-semver
+  kind: toml_path_matches
+  paths: "crates/*/Cargo.toml"
+  path: "$.package.version"
+  matches: '^\d+\.\d+\.\d+$'
+  level: error
+
+
 - id: semver-version
   kind: json_path_matches
   paths: "packages/*/package.json"
@@ -27,8 +35,7 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
   paths: "**/*.csproj"
   path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
   matches: '^\d'
-  level: error
-```
+  level: error```
 
 ## Options
 

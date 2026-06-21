@@ -79,7 +79,7 @@ alint ships 89 rule kinds across 13 families (78 distinct rule behaviors plus 11
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
-- [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max`. _(Structure)_
+- [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max_depth`. _(Structure)_
 - [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max_files`. _(Structure)_
 - [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) — Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). _(Security / Unicode sanity)_
 - [`no_bom`](/docs/rules/encoding/no_bom/) — Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. _(Encoding)_

@@ -10,7 +10,7 @@ No two files matching `select` may share the value of `key` (a path template; to
 ```yaml
 - id: unique-basenames
   kind: unique_by
-  paths: "src/**/*.rs"
+  select: "src/**/*.rs"
   key: "{stem}"
   level: warning
 ```

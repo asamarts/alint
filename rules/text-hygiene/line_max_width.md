@@ -11,7 +11,7 @@ Cap line length in characters (not bytes — code points). Optional `tab_width` 
 - id: docs-80-col
   kind: line_max_width
   paths: "docs/**/*.md"
-  max: 80
+  max_width: 80
   level: info
 ```
 

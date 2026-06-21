@@ -8,6 +8,14 @@ sidebar:
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
 ```yaml
+- id: csproj-targets-net8
+  kind: xml_path_equals
+  paths: "**/*.csproj"
+  path: "$.Project.PropertyGroup.TargetFramework"
+  equals: "net8.0"
+  level: error
+
+
 - id: require-mit-license
   kind: json_path_equals
   paths: "packages/*/package.json"
@@ -27,15 +35,7 @@ Query a structured document with a JSONPath expression and assert every match de
   paths: "crates/*/Cargo.toml"
   path: "$.package.edition"
   equals: "2024"
-  level: warning
-
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-```
+  level: warning```
 
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
