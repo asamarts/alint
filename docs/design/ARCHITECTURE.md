@@ -37,7 +37,7 @@ The clarity of these non-goals is itself a feature.
 ## Design principles
 
 1. **The repository tree is the input.** Every rule sees a unified file/directory index. The walk happens once per invocation.
-2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](/docs/rules/) lists every kind by family.
+2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](https://alint.org/docs/rules/) lists every kind by family.
 3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
 4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism.
 5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
@@ -199,7 +199,7 @@ rules:
 
 ### Rule families
 
-Rules are grouped into thirteen families. Every kind shares the record shape above; what differs is the predicate. Not every kind ships in every release. The full, always-current catalogue, with a one-line summary per kind, lives at [the rule reference](/docs/rules/).
+Rules are grouped into thirteen families. Every kind shares the record shape above; what differs is the predicate. Not every kind ships in every release. The full, always-current catalogue, with a one-line summary per kind, lives at [the rule reference](https://alint.org/docs/rules/).
 
 - **Existence** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`): a path must, or must not, be present.
 - **Content** (`file_content_matches`, `file_header`, `file_hash`, `file_max_size`, `file_max_lines`, `file_is_text`, `file_shebang`, ...): assertions over a file's bytes or lines.
@@ -532,6 +532,6 @@ A new rule kind typically needs:
 1. A `Rule` impl in `crates/alint-rules/src/<kind>.rs`.
 2. Registration in `register_builtin` in `crates/alint-rules/src/lib.rs`.
 3. Unit tests alongside the impl (snapshot harness in `alint-testkit`).
-4. A docs entry so the kind appears in the [rule reference](/docs/rules/).
+4. A docs entry so the kind appears in the [rule reference](https://alint.org/docs/rules/).
 5. An entry in the Full Example section if the kind is commonly used.
 6. If the primitive shifts from "planned" to "shipped," an update in [ROADMAP.md](./ROADMAP.md).

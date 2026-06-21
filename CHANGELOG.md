@@ -18,14 +18,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Added the `agent` format to the README `--format` example block (it listed
   seven of the eight formats) and removed the stale "Planned rulesets (v0.5)"
   section from `docs/rules.md` (all five shipped).
+- The `*_path_equals` / `*_path_matches` rule reference pages no longer all
+  show `kind: json_path_*`: each page's example now leads with its own kind,
+  and the `*_path_matches` example gained the missing `toml_path_matches`
+  variant.
+- Fixed documentation links that dead-end for a reader browsing on GitHub:
+  a broken `crates/alint-core/src/when.rs` link (now the `when/` module),
+  the `/docs/rules/` cross-links in `ARCHITECTURE.md` (now absolute
+  `https://alint.org` URLs), and a "full reference at alint.org" banner on
+  the GitHub view of `docs/rules.md`.
 
 ### Internal
 
-- New drift gates so the doc-vs-schema and stale-status classes can't recur:
-  `coverage_audit_doc_examples` loads every fenced config example in the
-  hand-written docs through the real config loader, and
-  `coverage_audit_planned_rulesets` fails if a "Planned" section names a
-  ruleset already in `facts.json`.
+- New drift gates so the doc-vs-schema, stale-status, generated-page, and
+  dead-link classes can't recur: `coverage_audit_doc_examples` loads every
+  fenced config example in the hand-written docs through the real config
+  loader; `coverage_audit_planned_rulesets` fails if a "Planned" section
+  names a ruleset already in `facts.json`; `structured_query_pages_lead_with_their_own_kind`
+  asserts each generated structured-query page leads with its own kind; and
+  `coverage_audit_doc_links` checks repo-doc links resolve (no broken
+  relative links, no GitHub-dead root-absolute links).
 
 ## [0.13.0] - 2026-06-17
 

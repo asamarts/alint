@@ -1,5 +1,11 @@
 # alint rule catalogue
 
+> **Reading this on GitHub?** This file is the source for the rendered
+> rule reference at <https://alint.org/docs/rules/>, where every rule
+> gets its own page with a generated options table. The root-absolute
+> cross-links below (e.g. `/docs/concepts/...`) resolve there, not on
+> GitHub — open the site for the full, navigable reference.
+
 The full list of rule kinds shipped in alint, organised by family.
 Each rule is one line in your `.alint.yml` under `rules:` — see
 [ARCHITECTURE.md §DSL](design/ARCHITECTURE.md#dsl) for the common

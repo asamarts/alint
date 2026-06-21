@@ -404,7 +404,7 @@ when_iter: 'not iter.path matches "node_modules"'
 (Or — better — use the rule's `paths:` exclude list to filter out
 those paths entirely, before `when_iter:` even fires.)
 
-Source: `crates/alint-core/src/when.rs`.
+Source: `crates/alint-core/src/when/`.
 
 ### 13. `file_content_matches` / `file_content_forbidden`: regex `^` and `$` anchor file-start / file-end by default, NOT line-start / line-end
 
@@ -1242,5 +1242,5 @@ adds a smoke-test fixture audit that closes that gap.
 - [alint.org/docs/rules/](https://alint.org/docs/rules/) — per-rule documentation
 - [`crates/alint-rules/src/<kind>.rs`](../../crates/alint-rules/src/) — canonical schema (the `struct Options` block in each file)
 - [`crates/alint-core/src/config.rs`](../../crates/alint-core/src/config.rs) — top-level `RuleSpec`, `FixSpec`, `NestedRuleSpec` schemas
-- [`crates/alint-core/src/when.rs`](../../crates/alint-core/src/when.rs) — `when:` / `when_iter:` expression language
+- [`crates/alint-core/src/when/`](../../crates/alint-core/src/when/) — `when:` / `when_iter:` expression language
 - [`crates/alint-core/src/scope_filter.rs`](../../crates/alint-core/src/scope_filter.rs) — `scope_filter:` semantics
