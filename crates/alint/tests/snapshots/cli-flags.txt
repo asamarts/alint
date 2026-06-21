@@ -26,6 +26,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-notes
   --width <COLS>
@@ -74,6 +75,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-notes
   --width <COLS>

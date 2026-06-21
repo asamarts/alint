@@ -71,6 +71,14 @@ struct AgentViolation<'a> {
     /// availability, and policy URL — see `build_agent_instruction`.
     agent_instruction: String,
     fix_available: bool,
+    /// Exact argv (after the `alint` program name) an agent can run to
+    /// auto-fix this single violation, present iff `fix_available`.
+    /// Lets an agent execute the fix programmatically instead of
+    /// parsing the command out of the English `agent_instruction` —
+    /// and is checked by a CLI-parse regression test, so it can never
+    /// name a flag the binary doesn't accept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix_command: Option<Vec<&'a str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     policy_url: Option<&'a str>,
 }
@@ -104,6 +112,9 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 human_message: v.message.as_ref(),
                 agent_instruction: build_agent_instruction(r, v),
                 fix_available: r.is_fixable,
+                fix_command: r
+                    .is_fixable
+                    .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
                 policy_url: r.policy_url.as_deref(),
             });
         }

@@ -57,7 +57,8 @@ A report is a single JSON object. This example has three violations: one path-bo
       "file": "src/config.ts",
       "human_message": "File does not end with a newline.",
       "agent_instruction": "warning: File does not end with a newline. To resolve: edit src/config.ts — or run `alint fix --only final-newline` to apply the auto-fix.",
-      "fix_available": true
+      "fix_available": true,
+      "fix_command": ["fix", "--only", "final-newline"]
     },
     {
       "rule_id": "lockfiles-only-one",
@@ -98,6 +99,7 @@ A report is a single JSON object. This example has three violations: one path-bo
 | `human_message` | string | yes | The rule's message verbatim. Mirror of `message` in `--format json`. |
 | `agent_instruction` | string | yes | Templated remediation phrasing (see below). |
 | `fix_available` | boolean | yes | `true` when the source rule declares an autofix. |
+| `fix_command` | array of strings | no | Present iff `fix_available`. Exact argv (after `alint`) to auto-fix this one violation — e.g. `["fix", "--only", "final-newline"]`. Run it programmatically instead of parsing the command out of `agent_instruction`. |
 | `file` | string | no | Repo-relative path. Absent for tree-wide (cross-file) violations. |
 | `line` | integer | no | 1-based line, when the rule reports one. |
 | `column` | integer | no | 1-based column, when the rule reports one. |

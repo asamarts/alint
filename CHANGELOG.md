@@ -6,8 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
+  named rule id(s) from the effective config. An id that matches no loaded rule
+  is an error, so typos fail loudly. This is the command the `agent` output
+  format emits per fixable violation (`alint fix --only <rule-id>`), which
+  previously named a flag that did not exist.
+- `fix_command` field on `check --format agent` violations: the exact argv
+  (e.g. `["fix", "--only", "<id>"]`) to auto-fix a single violation, present
+  iff `fix_available`. Lets an agent run the fix programmatically instead of
+  parsing the command out of the English `agent_instruction`.
+
 ### Fixed
 
+- `alint list --format json` and `alint explain <id> --format json` now emit a
+  stable JSON envelope (a rule inventory and a single-rule shape) instead of
+  silently printing the human output with a success exit code. An unsupported
+  `--format` for these commands is now an explicit error rather than a silent
+  human fall-through.
+- The `agent` output format no longer instructs agents to run
+  `alint fix --only <id>` when no such flag existed; `--only` now exists, and a
+  regression test parses every command the agent format emits against the real
+  CLI so a dead command can't reappear.
 - Corrected config examples that the loader (and the JSON schema) reject:
   `docs/design/ARCHITECTURE.md` (`query:`/`pattern:` → `path:`/`matches:`,
   map-keyed `rules:` → a list, a `sha256:`/`path:` `extends` mapping → SRI
