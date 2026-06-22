@@ -35,6 +35,15 @@ pub struct Violation {
     /// into [`RuleResult::notes`] at result-assembly time, so the flag
     /// never reaches a formatter and pass/fail logic is unaffected.
     pub is_note: bool,
+    /// Optional stable structural identity for baseline fingerprinting
+    /// ([`crate::baseline`]). A rule sets this when its violation is not
+    /// uniquely identified by `(path, offending-line content)` — e.g. a
+    /// structured-query rule (the JSONPath/value), a cross-file rule (the
+    /// sorted involved paths), or a first-offender / threshold rule (the
+    /// path). `None` (the default) means "use the offending line's
+    /// content" (see [`crate::baseline::violation_fingerprint`]). It
+    /// never affects rendering or pass/fail.
+    pub baseline_key: Option<Cow<'static, str>>,
 }
 
 impl Violation {
@@ -45,6 +54,7 @@ impl Violation {
             line: None,
             column: None,
             is_note: false,
+            baseline_key: None,
         }
     }
 
@@ -74,6 +84,15 @@ impl Violation {
     pub fn with_location(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
+        self
+    }
+
+    /// Set the baseline fingerprint key — the rule's stable structural
+    /// identity for this violation. See [`Violation::baseline_key`] and
+    /// [`crate::baseline::violation_fingerprint`].
+    #[must_use]
+    pub fn with_baseline_key(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+        self.baseline_key = Some(key.into());
         self
     }
 }

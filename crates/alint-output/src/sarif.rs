@@ -283,6 +283,7 @@ mod tests {
                     line: Some(7),
                     column: Some(3),
                     is_note: false,
+                    baseline_key: None,
                 }],
                 notes: Vec::new(),
                 is_fixable: false,

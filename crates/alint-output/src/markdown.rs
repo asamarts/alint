@@ -363,6 +363,7 @@ mod tests {
                     line: Some(12),
                     column: Some(4),
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -385,6 +386,7 @@ mod tests {
                         line: None,
                         column: None,
                         is_note: false,
+                        baseline_key: None,
                     }],
                 ),
                 rule(
@@ -396,6 +398,7 @@ mod tests {
                         line: None,
                         column: None,
                         is_note: false,
+                        baseline_key: None,
                     }],
                 ),
             ],
@@ -523,6 +526,7 @@ mod tests {
                     line: Some(7),
                     column: None,
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -539,6 +543,7 @@ mod tests {
             line: Some(1),
             column: Some(1),
             is_note: false,
+            baseline_key: None,
         };
         let v2 = Violation {
             path: Some(Path::new("a.rs").into()),
@@ -546,6 +551,7 @@ mod tests {
             line: Some(2),
             column: Some(1),
             is_note: false,
+            baseline_key: None,
         };
         let r1 = Report {
             results: vec![rule("r1", Level::Error, vec![v1.clone(), v2.clone()])],
@@ -578,6 +584,7 @@ mod tests {
                             line: Some(1),
                             column: None,
                             is_note: false,
+                            baseline_key: None,
                         },
                         status: FixStatus::Applied("removed 3 trailing spaces".into()),
                     },
@@ -588,6 +595,7 @@ mod tests {
                             line: None,
                             column: None,
                             is_note: false,
+                            baseline_key: None,
                         },
                         status: FixStatus::Unfixable,
                     },

@@ -16,6 +16,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::rule::Violation;
+
 /// The baseline file format this binary reads and writes. A file with
 /// any other version is rejected (§3.9): a newer file may use a
 /// fingerprint scheme this binary computes differently, so silently
@@ -65,6 +67,23 @@ pub fn violation_fingerprint(
         hasher.update(component);
     }
     to_hex(&hasher.finalize())
+}
+
+/// Fingerprint a [`Violation`] directly (a convenience over
+/// [`violation_fingerprint`] that reads the violation's fields). `rule_id`
+/// is passed separately because it lives on the owning `RuleResult`, not
+/// the violation. `file_bytes` is the violation's file content, consulted
+/// only for the line-content discriminator.
+#[must_use]
+pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> String {
+    violation_fingerprint(
+        rule_id,
+        v.path.as_deref(),
+        v.line,
+        v.baseline_key.as_deref(),
+        &v.message,
+        file_bytes,
+    )
 }
 
 /// Normalise a path to a stable, forward-slashed string so a fingerprint
@@ -454,6 +473,40 @@ mod tests {
             Baseline::load(&bad_entry),
             Err(BaselineError::Parse { what: "entry", .. })
         ));
+    }
+
+    #[test]
+    fn fingerprint_violation_wrapper_reads_fields_incl_baseline_key() {
+        use std::path::Path as P;
+        // Wrapper agrees with the decomposed call for a line violation.
+        let v = Violation::new("msg")
+            .with_path(P::new("a.rs"))
+            .with_location(2, 1);
+        let bytes = b"x\nbad\ny";
+        assert_eq!(
+            fingerprint("r", &v, Some(bytes)),
+            fp("r", Some("a.rs"), Some(2), None, "msg", Some(bytes))
+        );
+        // A baseline_key overrides the line content.
+        let keyed = Violation::new("msg")
+            .with_path(P::new("a.rs"))
+            .with_location(2, 1)
+            .with_baseline_key("$.license");
+        assert_eq!(
+            fingerprint("r", &keyed, Some(bytes)),
+            fp(
+                "r",
+                Some("a.rs"),
+                Some(2),
+                Some("$.license"),
+                "msg",
+                Some(bytes)
+            )
+        );
+        assert_ne!(
+            fingerprint("r", &keyed, Some(bytes)),
+            fingerprint("r", &v, Some(bytes))
+        );
     }
 
     #[test]

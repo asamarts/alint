@@ -134,6 +134,7 @@ mod tests {
                     line: Some(12),
                     column: Some(4),
                     is_note: false,
+                    baseline_key: None,
                 }],
                 notes: Vec::new(),
                 is_fixable: false,

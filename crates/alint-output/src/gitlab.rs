@@ -180,6 +180,7 @@ mod tests {
                     line: Some(12),
                     column: Some(4),
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -266,6 +267,7 @@ mod tests {
                     line: Some(0),
                     column: None,
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -285,6 +287,7 @@ mod tests {
                     line: Some(7),
                     column: None,
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -313,6 +316,7 @@ mod tests {
                     line: Some(line),
                     column: None,
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };
@@ -363,6 +367,7 @@ mod tests {
                     line: Some(1),
                     column: None,
                     is_note: false,
+                    baseline_key: None,
                 }],
             )],
         };

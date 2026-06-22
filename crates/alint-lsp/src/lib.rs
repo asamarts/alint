@@ -854,6 +854,7 @@ mod tests {
             line,
             column,
             is_note: false,
+            baseline_key: None,
         }
     }
 
