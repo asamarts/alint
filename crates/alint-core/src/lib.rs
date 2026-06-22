@@ -3,6 +3,7 @@
 //! See `docs/design/ARCHITECTURE.md` in the alint repository for the
 //! rule model, execution order, and crate layout rationale.
 
+pub mod baseline;
 mod config;
 pub mod did_you_mean;
 mod engine;
