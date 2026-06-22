@@ -727,6 +727,10 @@ fn apply_only_filter(
 
 fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
+    // The `baseline:` config key, resolved against the repo root being checked.
+    // The `--baseline` flag (used as given) overrides it; either one turns on
+    // baseline suppression. No silent auto-detect of `.alint-baseline.json`.
+    let config_baseline = loaded.baseline.as_ref().map(|b| path.join(b));
     let entries = apply_only_filter(loaded.entries, only)?;
     let rule_count = entries.len();
     let mut engine = Engine::from_entries(entries, loaded.registry)
@@ -754,7 +758,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
-    let report = if let Some(baseline_path) = &cli.baseline {
+    let effective_baseline = cli.baseline.clone().or(config_baseline);
+    let report = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         let mut reader = FileReader::new(path);
         let applied =
@@ -919,7 +924,18 @@ fn cmd_baseline(
     let new_baseline =
         Baseline::from_fingerprints(Some(env!("CARGO_PKG_VERSION").to_string()), items);
 
-    let out_path = output.map_or_else(|| path.join(".alint-baseline.json"), Path::to_path_buf);
+    // Output path precedence: --output (as given) > `baseline:` config key
+    // (resolved against the repo root) > the default `.alint-baseline.json`.
+    // So `alint baseline` and `alint check` agree on the same file by default.
+    let out_path = output.map_or_else(
+        || {
+            loaded
+                .baseline
+                .as_ref()
+                .map_or_else(|| path.join(".alint-baseline.json"), |b| path.join(b))
+        },
+        Path::to_path_buf,
+    );
 
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
@@ -1378,6 +1394,8 @@ struct LoadedConfig {
     respect_gitignore: bool,
     extra_ignores: Vec<String>,
     fix_size_limit: Option<u64>,
+    /// The `baseline:` config key (the raw repo-root-relative path), if set.
+    baseline: Option<PathBuf>,
 }
 
 /// Load the effective config from disk and instantiate every rule,
@@ -1558,6 +1576,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         respect_gitignore: config.respect_gitignore,
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
+        baseline: config.baseline,
     })
 }
 

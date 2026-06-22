@@ -3502,6 +3502,10 @@
         }
       ]
     },
+    "baseline": {
+      "description": "Path to a committed baseline file (see `alint baseline`), resolved relative to the repo root. When set, `alint check` suppresses every violation recorded in it and gates only on NEW ones, so CI need not pass `--baseline`. The `--baseline` flag overrides this. Honored only from the user's own top-level config: a `baseline:` reaching the loader from an `extends:`'d or nested config is refused, because a ruleset must not choose which findings the gate suppresses. There is no silent auto-detect — suppression is always an explicit opt-in.",
+      "type": "string"
+    },
     "extends": {
       "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends. **Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it. **Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately. Remote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead.",
       "items": {

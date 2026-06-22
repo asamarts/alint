@@ -198,3 +198,90 @@ fn strict_baseline_fails_on_stale_entries() {
     );
     assert_eq!(code(&strict), 1, "strict: stale fails the build");
 }
+
+/// A `baseline:` config key makes suppression active with no `--baseline`
+/// flag, and `alint baseline` writes to that same path by default — so the
+/// writer and reader never split-brain.
+#[test]
+fn config_key_baseline_suppresses_without_the_flag() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         baseline: .alint-baseline.json\n\
+         rules:\n\
+         \x20 - id: needs-newline\n\
+         \x20   kind: final_newline\n\
+         \x20   paths: [\"**/*.txt\"]\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("a.txt"), "no newline").unwrap();
+
+    // With the config key set but no baseline file yet, `check` is a hard
+    // error (exit 2) — a forgotten `alint baseline` must not silently run
+    // ungated. You bootstrap with `alint baseline` (which writes), below.
+    assert_eq!(
+        code(&run(root, &["check"])),
+        2,
+        "config key + missing file → hard error, not a silent un-suppressed pass",
+    );
+
+    // `alint baseline` (no --output) writes to the config-key path.
+    assert_eq!(code(&run(root, &["baseline"])), 0);
+    assert!(
+        root.join(".alint-baseline.json").is_file(),
+        "baseline written to the config-key path by default",
+    );
+
+    // `alint check` with NO --baseline flag now honors the config key.
+    assert_eq!(
+        code(&run(root, &["check"])),
+        0,
+        "config-key baseline suppresses without the flag",
+    );
+
+    // A NEW violation still surfaces.
+    std::fs::write(root.join("b.txt"), "also no newline").unwrap();
+    assert_eq!(code(&run(root, &["check"])), 1, "new violation still gates");
+}
+
+/// The `--baseline` flag overrides the `baseline:` config key; and when only
+/// the config key is in effect and its file is missing, that's the same hard
+/// error as a missing `--baseline` (proving the key is actually consulted).
+#[test]
+fn baseline_flag_overrides_the_config_key() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         baseline: does-not-exist.json\n\
+         rules:\n\
+         \x20 - id: needs-newline\n\
+         \x20   kind: final_newline\n\
+         \x20   paths: [\"**/*.txt\"]\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("a.txt"), "no newline").unwrap();
+
+    // A real baseline at a different path.
+    assert_eq!(code(&run(root, &["baseline", "--output", "real.json"])), 0);
+
+    // --baseline real.json overrides the (missing) config-key path → suppressed.
+    assert_eq!(
+        code(&run(root, &["check", "--baseline", "real.json"])),
+        0,
+        "the flag overrides the config key",
+    );
+
+    // Without the flag, the config key (a missing file) is consulted → the
+    // documented hard error (exit 2), never a silent un-suppressed run.
+    assert_eq!(
+        code(&run(root, &["check"])),
+        2,
+        "config key points at a missing file → hard error, proving it's consulted",
+    );
+}

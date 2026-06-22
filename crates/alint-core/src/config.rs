@@ -66,6 +66,16 @@ pub struct Config {
     /// `docs/design/v0.12/allow_out_of_root.md`.
     #[serde(skip)]
     pub allow_out_of_root: AllowOutOfRoot,
+    /// Resolved `baseline:` path — the committed baseline file that `check`
+    /// suppresses against when no `--baseline` flag is given (the flag
+    /// overrides it). Like `allow_out_of_root`, set by the loader from the
+    /// user's *top-level* config only (rejected from `extends:` and nested
+    /// configs); `#[serde(skip)]` so a bundled/inherited `Config` can never
+    /// carry it. A trusted top-level input like `-c`, resolved relative to the
+    /// repo root and not subject to read-path confinement. See
+    /// `docs/design/baseline.md` §2.3.
+    #[serde(skip)]
+    pub baseline: Option<PathBuf>,
 }
 
 // Returning `Option<u64>` (rather than bare `u64`) keeps the

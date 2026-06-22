@@ -204,6 +204,13 @@ pub(crate) struct RawConfig {
     /// `Config`. See `docs/design/v0.12/allow_out_of_root.md`.
     #[serde(default)]
     allow_out_of_root: alint_core::AllowOutOfRoot,
+    /// `baseline:` — path to a committed baseline file `check` suppresses
+    /// against (the YAML-facing form). Top-level-only: the loader rejects a
+    /// value from any `extends:`'d/nested config, and `finalize()` carries the
+    /// surviving (top-level) value onto `Config`. See
+    /// `docs/design/baseline.md` §2.3.
+    #[serde(default)]
+    baseline: Option<std::path::PathBuf>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -262,6 +269,7 @@ impl RawConfig {
             fix_size_limit: self.fix_size_limit,
             nested_configs: self.nested_configs,
             allow_out_of_root: self.allow_out_of_root,
+            baseline: self.baseline,
         })
     }
 }
@@ -489,6 +497,22 @@ pub fn reject_allow_out_of_root_in(allow: &alint_core::AllowOutOfRoot, source: &
     Ok(())
 }
 
+/// Reject a `baseline:` in an inherited ruleset. Like
+/// [`reject_allow_out_of_root_in`], the baseline path is a trusted top-level
+/// input: an `extends:`'d ruleset that pointed the gate at its own baseline
+/// could silently suppress findings the user never reviewed. `source` names
+/// the offending config. See `docs/design/baseline.md` §2.3.
+pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -> Result<()> {
+    if baseline.is_some() {
+        return Err(Error::Other(format!(
+            "`baseline:` is only allowed in the user's top-level config; \
+             declaring it in an extended config ({source}) is refused because it would \
+             let a ruleset choose which findings the gate suppresses"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_rule_filter(
     rules: Vec<serde_yaml_ng::Mapping>,
     entry: &alint_core::ExtendsEntry,
@@ -603,6 +627,9 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     } else {
         b.allow_out_of_root
     };
+    // `baseline:` is top-level-only (an `extends:`'d value is rejected upstream
+    // by `reject_baseline_in`); the later (child) config wins when it sets one.
+    let baseline = b.baseline.or(a.baseline);
 
     let mut ignore = a.ignore;
     ignore.extend(b.ignore);
@@ -697,6 +724,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         fix_size_limit,
         nested_configs,
         allow_out_of_root,
+        baseline,
     }
 }
 
@@ -970,6 +998,42 @@ rules:
         let cfg = load(&tmp.path().join(".alint.yml")).unwrap();
         assert!(cfg.allow_out_of_root.allows("any", "pair_hash"));
         assert!(!cfg.allow_out_of_root.allows("any", "json_schema_passes"));
+    }
+
+    #[test]
+    fn top_level_baseline_is_honored() {
+        // The `baseline:` key in the user's own top-level config resolves
+        // onto `Config` (the CLI then suppresses against it).
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.yml"),
+            "version: 1\nbaseline: .alint-baseline.json\nrules: []\n",
+        )
+        .unwrap();
+        let cfg = load(&tmp.path().join(".alint.yml")).unwrap();
+        assert_eq!(
+            cfg.baseline.as_deref(),
+            Some(std::path::Path::new(".alint-baseline.json"))
+        );
+    }
+
+    #[test]
+    fn extends_with_baseline_is_rejected() {
+        // Security: an inherited ruleset must not choose which findings the
+        // gate suppresses — only the user's own top-level config sets it.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("base.yml"),
+            "version: 1\nbaseline: sneaky.json\nrules: []\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.yml"),
+            "version: 1\nextends: [./base.yml]\nrules: []\n",
+        )
+        .unwrap();
+        let err = load(&tmp.path().join(".alint.yml")).unwrap_err();
+        assert!(err.to_string().contains("baseline"), "{err}");
     }
 
     #[test]
@@ -1699,6 +1763,24 @@ rules:
             paths_dbg.contains("packages/foo/README.md"),
             "expected scoped path, got: {paths_dbg}"
         );
+    }
+
+    #[test]
+    fn nested_baseline_is_rejected() {
+        // A nested config may not declare `baseline:` — it's a trusted,
+        // root-only input (a subtree must not pick what the gate suppresses).
+        let tmp = tempfile::tempdir().unwrap();
+        let root_cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+        let pkg_dir = tmp.path().join("packages/foo");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join(".alint.yml"),
+            "version: 1\nbaseline: sneaky.json\nrules: []\n",
+        )
+        .unwrap();
+        let err = load(&root_cfg).unwrap_err();
+        assert!(err.to_string().contains("baseline"), "{err}");
     }
 
     #[test]

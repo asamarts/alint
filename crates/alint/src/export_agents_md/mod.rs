@@ -285,6 +285,7 @@ mod tests {
             fix_size_limit: None,
             nested_configs: false,
             allow_out_of_root: alint_core::AllowOutOfRoot::default(),
+            baseline: None,
         }
     }
 

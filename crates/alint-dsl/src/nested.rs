@@ -171,6 +171,12 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              both are root-only in this release"
         )));
     }
+    if config.baseline.is_some() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `baseline:` — the baseline is a \
+             trusted, root-only input; declare it in the top-level config"
+        )));
+    }
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

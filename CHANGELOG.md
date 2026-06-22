@@ -24,8 +24,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of churning), while structured-query, cross-file, first-offender and
   multi-per-line rules declare a precise `baseline_key`; a coverage-audit
   collision-invariant (`coverage_audit_baseline_safety`) enforces the boundary
-  for every kind. (The `baseline:` config key and per-format SARIF suppression
-  marking land in follow-ups; see `docs/design/baseline.md` / ADR-0006.)
+  for every kind. A `baseline: <path>` key in `.alint.yml` persists the baseline
+  so CI need not pass `--baseline` (the flag overrides it); like
+  `allow_out_of_root`, it is honored only from the user's own top-level config —
+  never from an `extends:`'d or nested config — so a published ruleset can't
+  choose what the gate suppresses, and a config key pointing at a missing file is
+  the same hard error as a missing `--baseline` (never a silent ungated run).
+  (Per-format SARIF suppression marking is the remaining follow-up; see
+  `docs/design/baseline.md` / ADR-0006.)
 - `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
   named rule id(s) from the effective config. An id that matches no loaded rule
   is an error, so typos fail loudly. This is the command the `agent` output
