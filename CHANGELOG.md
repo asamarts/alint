@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Baseline mode** (`alint baseline` + `alint check --baseline <file>`): snapshot
+  the current violations into a committed `.alint-baseline.json`, then gate only
+  on NEW violations — the one-step way to adopt alint as a blocking merge gate on
+  a large legacy repo. The baseline is matched on a content/structural fingerprint
+  (not line numbers), so it survives benign code motion and re-triggers when the
+  offending code is edited; per-fingerprint counts keep duplicates honest. A
+  missing or unsupported-`schema_version` baseline is a hard error, never a silent
+  no-op. `--show-baselined` lists the suppressed findings; `--strict-baseline`
+  fails when the baseline has stale entries (fixed findings); `alint baseline`
+  refuses to grandfather new debt on regeneration without `--accept-new`. (The
+  `baseline:` config key, per-format SARIF suppression marking, and the per-rule
+  `baseline_key` audit land in follow-ups; see `docs/design/baseline.md` /
+  ADR-0006.)
 - `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
   named rule id(s) from the effective config. An id that matches no loaded rule
   is an error, so typos fail loudly. This is the command the `agent` output

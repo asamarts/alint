@@ -18,4 +18,7 @@ Options:
       --no-docs          Suppress per-violation `docs:` URLs in human output. Useful for narrow terminals, screen recordings, and CI logs where long URLs disrupt visual alignment. URLs remain in JSON / SARIF / GitHub / markdown output regardless
       --progress <WHEN>  When to render progress on stderr for slow operations (currently `alint suggest`). `auto` (the default) renders when stderr is a TTY; `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON / YAML output on stdout stays byte-clean [default: auto] [possible values: auto, always, never]
   -q, --quiet            Suppress progress and any stderr summary lines. Alias for `--progress=never` plus suppression of the "found N proposals in Ts" footer that `suggest` prints
+      --baseline <FILE>  Suppress violations recorded in the given baseline file (see `alint baseline`), reporting only new ones. Pre-existing findings are grandfathered so `check` can gate a legacy repo on new violations only. A missing or unreadable baseline is an error (never a silent no-op)
+      --strict-baseline  With `--baseline`, fail (exit 1) when the baseline has stale entries (recorded findings that no longer fire — usually because they were fixed). Forces the committed baseline to stay exactly accurate. Off by default: fixing things never fails the build
+      --show-baselined   With `--baseline`, list the suppressed (baselined) findings on stderr in full, rather than just a one-line count. Parallels `--show-notes`
   -h, --help             Print help

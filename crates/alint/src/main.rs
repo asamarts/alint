@@ -127,6 +127,27 @@ struct Cli {
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
 
+    /// Suppress violations recorded in the given baseline file (see
+    /// `alint baseline`), reporting only new ones. Pre-existing
+    /// findings are grandfathered so `check` can gate a legacy repo on
+    /// new violations only. A missing or unreadable baseline is an
+    /// error (never a silent no-op).
+    #[arg(long, global = true, value_name = "FILE")]
+    baseline: Option<PathBuf>,
+
+    /// With `--baseline`, fail (exit 1) when the baseline has stale
+    /// entries (recorded findings that no longer fire — usually because
+    /// they were fixed). Forces the committed baseline to stay exactly
+    /// accurate. Off by default: fixing things never fails the build.
+    #[arg(long, global = true)]
+    strict_baseline: bool,
+
+    /// With `--baseline`, list the suppressed (baselined) findings on
+    /// stderr in full, rather than just a one-line count. Parallels
+    /// `--show-notes`.
+    #[arg(long, global = true)]
+    show_baselined: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -191,6 +212,28 @@ enum Command {
         /// loaded rule is an error.
         #[arg(long, value_name = "RULE_ID")]
         only: Vec<String>,
+    },
+    /// Snapshot the current violations into a baseline file, so a later
+    /// `alint check --baseline <file>` fails only on NEW violations.
+    /// The one-step way to adopt alint as a blocking gate on a legacy
+    /// repo: `alint baseline` (commit it), then gate on the delta. The
+    /// baseline is whole-tree; `--changed` is not accepted.
+    Baseline {
+        /// Root of the repository to snapshot. Defaults to the current
+        /// directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Where to write the baseline. Default: `.alint-baseline.json`
+        /// at the repo root.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Allow the regenerated baseline to grandfather violations not
+        /// already present in the existing file. Without it, `alint
+        /// baseline` refuses to ADD new entries (and prints a `+N / -M`
+        /// summary) so re-running it to prune fixed entries can't
+        /// silently accept new debt. Stale-entry removal never needs it.
+        #[arg(long)]
+        accept_new: bool,
     },
     /// Evaluate every `facts:` entry in the effective config and
     /// print the resolved value. Debugging aid for `when:` clauses.
@@ -443,6 +486,11 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             &only,
             &cli,
         ),
+        Command::Baseline {
+            path,
+            output,
+            accept_new,
+        } => cmd_baseline(&path, output.as_deref(), accept_new, &cli),
         Command::Facts { path } => cmd_facts(&path, &cli),
         Command::Init { path, monorepo } => cmd_init(&path, monorepo),
         Command::ExportAgentsMd {
@@ -703,6 +751,23 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
 
     let report = engine.run(path, &index).context("running rules")?;
 
+    // Baseline suppression (when --baseline is in effect): grandfather
+    // recorded violations, leaving only new ones to format + gate on.
+    let mut strict_stale_fail = false;
+    let report = if let Some(baseline_path) = &cli.baseline {
+        let baseline = load_baseline(baseline_path)?;
+        let mut reader = FileReader::new(path);
+        let applied =
+            alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
+        report_baseline_summary(&applied, cli);
+        if cli.strict_baseline && !applied.stale.is_empty() {
+            strict_stale_fail = true;
+        }
+        applied.live
+    } else {
+        report
+    };
+
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let (mut out, opts) = render_env(cli)?;
     format
@@ -720,12 +785,179 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
 
     tracing::debug!(rules = rule_count, "done");
 
-    let exit = if report.has_errors() || (cli.fail_on_warning && report.has_warnings()) {
+    let exit = if report.has_errors()
+        || (cli.fail_on_warning && report.has_warnings())
+        || strict_stale_fail
+    {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
     };
     Ok(exit)
+}
+
+/// Caches file reads while fingerprinting a report's violations: the
+/// line-content discriminator ([`alint_core::baseline`]) needs the
+/// offending file's bytes, and a file usually carries several
+/// violations.
+struct FileReader<'a> {
+    root: &'a Path,
+    cache: std::collections::HashMap<PathBuf, Option<Vec<u8>>>,
+}
+
+impl<'a> FileReader<'a> {
+    fn new(root: &'a Path) -> Self {
+        Self {
+            root,
+            cache: std::collections::HashMap::new(),
+        }
+    }
+
+    fn fingerprint(&mut self, rule_id: &str, v: &alint_core::Violation) -> String {
+        let bytes = match v.path.as_ref() {
+            Some(p) => self
+                .cache
+                .entry(p.to_path_buf())
+                .or_insert_with(|| std::fs::read(self.root.join(p)).ok())
+                .as_deref(),
+            None => None,
+        };
+        alint_core::baseline::fingerprint(rule_id, v, bytes)
+    }
+}
+
+/// Load + parse a baseline file. A missing file or a parse / schema
+/// error is a hard error (exit 2), never a silent "suppress nothing".
+fn load_baseline(path: &Path) -> Result<alint_core::baseline::Baseline> {
+    let text = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "reading baseline file {} (run `alint baseline` to create it)",
+            path.display()
+        )
+    })?;
+    alint_core::baseline::Baseline::load(&text)
+        .map_err(|e| anyhow::anyhow!("invalid baseline file {}: {e}", path.display()))
+}
+
+/// Stderr summary for a baseline-applied run: the suppressed count (or
+/// the full list with `--show-baselined`) and any stale-entry warning.
+fn report_baseline_summary(applied: &alint_core::baseline::AppliedBaseline, cli: &Cli) {
+    if !cli.quiet && applied.suppressed_total > 0 {
+        eprintln!(
+            "alint: {} baselined violation(s) suppressed",
+            applied.suppressed_total
+        );
+    }
+    if cli.show_baselined {
+        for s in &applied.suppressed {
+            match &s.violation.path {
+                Some(p) => eprintln!(
+                    "  baselined: {}: [{}] {}",
+                    p.display(),
+                    s.rule_id,
+                    s.violation.message
+                ),
+                None => eprintln!("  baselined: [{}] {}", s.rule_id, s.violation.message),
+            }
+        }
+    }
+    if !cli.quiet && !applied.stale.is_empty() {
+        let n = applied.stale.len();
+        eprintln!(
+            "alint: {n} baseline entr{} no longer fire{}; run `alint baseline` to re-tighten{}",
+            if n == 1 { "y" } else { "ies" },
+            if n == 1 { "s" } else { "" },
+            if cli.strict_baseline {
+                " (failing build: --strict-baseline)"
+            } else {
+                ""
+            }
+        );
+    }
+}
+
+/// `alint baseline`: snapshot the current violations into a baseline
+/// file. Whole-tree only (the subcommand doesn't accept `--changed`).
+fn cmd_baseline(
+    path: &Path,
+    output: Option<&Path>,
+    accept_new: bool,
+    cli: &Cli,
+) -> Result<ExitCode> {
+    use alint_core::baseline::{Baseline, FingerprintedViolation};
+
+    let loaded = load_rules(path, cli)?;
+    let engine = Engine::from_entries(loaded.entries, loaded.registry)
+        .with_facts(loaded.facts)
+        .with_vars(loaded.vars);
+    let walk_opts = WalkOptions {
+        respect_gitignore: if cli.no_gitignore {
+            false
+        } else {
+            loaded.respect_gitignore
+        },
+        extra_ignores: loaded.extra_ignores,
+    };
+    let index = walk(path, &walk_opts).context("walking repository")?;
+    let report = engine.run(path, &index).context("running rules")?;
+
+    let mut reader = FileReader::new(path);
+    let mut items: Vec<FingerprintedViolation> = Vec::new();
+    for result in &report.results {
+        for v in &result.violations {
+            items.push(FingerprintedViolation {
+                rule_id: result.rule_id.to_string(),
+                path: v
+                    .path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().replace('\\', "/")),
+                fingerprint: reader.fingerprint(&result.rule_id, v),
+                message: Some(v.message.to_string()),
+            });
+        }
+    }
+    let new_baseline =
+        Baseline::from_fingerprints(Some(env!("CARGO_PKG_VERSION").to_string()), items);
+
+    let out_path = output.map_or_else(|| path.join(".alint-baseline.json"), Path::to_path_buf);
+
+    // Regeneration guard: refuse to grandfather NEW debt without
+    // --accept-new. Pruning stale entries is always allowed.
+    if out_path.exists() && !accept_new {
+        let existing = load_baseline(&out_path)?;
+        let old: std::collections::HashSet<&str> = existing
+            .entries
+            .iter()
+            .map(|e| e.fingerprint.as_str())
+            .collect();
+        let new: std::collections::HashSet<&str> = new_baseline
+            .entries
+            .iter()
+            .map(|e| e.fingerprint.as_str())
+            .collect();
+        let added = new.difference(&old).count();
+        let removed = old.difference(&new).count();
+        if added > 0 {
+            bail!(
+                "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \
+                 fix them, or pass --accept-new to accept them into the baseline",
+                out_path.display()
+            );
+        }
+    }
+
+    std::fs::write(&out_path, new_baseline.to_jsonl())
+        .with_context(|| format!("writing baseline {}", out_path.display()))?;
+    if !cli.quiet {
+        let n = new_baseline.entries.len();
+        eprintln!(
+            "alint: wrote {} ({n} entr{}, {} occurrence(s))",
+            out_path.display(),
+            if n == 1 { "y" } else { "ies" },
+            new_baseline.total()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Surface informational notes (non-violation findings) on stderr so
