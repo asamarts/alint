@@ -16,6 +16,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::report::Report;
 use crate::rule::Violation;
 
 /// The baseline file format this binary reads and writes. A file with
@@ -270,6 +271,121 @@ pub struct FingerprintedViolation {
     pub message: Option<String>,
 }
 
+/// A violation suppressed by the baseline, with the id of the rule that
+/// produced it. Kept so `--show-baselined` and the SARIF formatter can
+/// render suppressed findings without re-deriving them.
+#[derive(Debug, Clone)]
+pub struct SuppressedViolation {
+    pub rule_id: std::sync::Arc<str>,
+    pub violation: Violation,
+}
+
+/// The result of applying a baseline to a [`Report`].
+#[derive(Debug, Clone)]
+pub struct AppliedBaseline {
+    /// The report with baselined violations removed — only **new**
+    /// violations remain, so the exit code and the primary formatter
+    /// output reflect the delta. (Per-format "mark not remove" — keeping
+    /// suppressed results in SARIF — is wired in a later slice using
+    /// [`Self::suppressed`].)
+    pub live: Report,
+    /// Every suppressed violation (for `--show-baselined` / SARIF marking).
+    pub suppressed: Vec<SuppressedViolation>,
+    /// Baseline entries that matched fewer occurrences than recorded
+    /// (the issue was fixed or its discriminator changed); `count` is the
+    /// unfilled remainder. Surfaced as a warning (or a failure under
+    /// `--strict-baseline`).
+    pub stale: Vec<BaselineEntry>,
+    /// Total suppressed occurrences (sum across all fingerprints).
+    pub suppressed_total: u64,
+}
+
+/// Apply a baseline to a report: suppress up to each fingerprint's
+/// recorded `count` of matching violations and surface the rest as live.
+///
+/// Pure and deterministic: within each rule, violations are matched in a
+/// stable `(path, line, column, message)` order, so *which* of several
+/// byte-identical occurrences is left live (when the baseline count is
+/// below the current count) does not depend on the engine's parallel
+/// collection order. `fingerprint_of(rule_id, violation)` is supplied by
+/// the caller, which holds the file bytes the line-content discriminator
+/// needs (typically `|rid, v| fingerprint(rid, v, file_bytes_for(v))`).
+pub fn apply<F>(report: &Report, baseline: &Baseline, mut fingerprint_of: F) -> AppliedBaseline
+where
+    F: FnMut(&str, &Violation) -> String,
+{
+    use std::collections::HashMap;
+
+    // Remaining suppression budget per fingerprint, drawn down as we go.
+    let mut remaining: HashMap<&str, u32> = baseline
+        .entries
+        .iter()
+        .map(|e| (e.fingerprint.as_str(), e.count))
+        .collect();
+
+    let mut suppressed = Vec::new();
+    let mut suppressed_total = 0u64;
+    let mut live_results = Vec::with_capacity(report.results.len());
+
+    for result in &report.results {
+        // Stable match order so suppression is deterministic regardless
+        // of the engine's parallel collection order.
+        let mut ordered: Vec<&Violation> = result.violations.iter().collect();
+        ordered.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+
+        let mut live = Vec::new();
+        for v in ordered {
+            let fp = fingerprint_of(&result.rule_id, v);
+            if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
+                *count -= 1;
+                suppressed_total += 1;
+                suppressed.push(SuppressedViolation {
+                    rule_id: result.rule_id.clone(),
+                    violation: v.clone(),
+                });
+            } else {
+                live.push(v.clone());
+            }
+        }
+
+        let mut r = result.clone();
+        r.violations = live;
+        live_results.push(r);
+    }
+
+    let stale = baseline
+        .entries
+        .iter()
+        .filter_map(|e| {
+            let unfilled = remaining.get(e.fingerprint.as_str()).copied().unwrap_or(0);
+            (unfilled > 0).then(|| BaselineEntry {
+                count: unfilled,
+                ..e.clone()
+            })
+        })
+        .collect();
+
+    AppliedBaseline {
+        live: Report {
+            results: live_results,
+        },
+        suppressed,
+        stale,
+        suppressed_total,
+    }
+}
+
+/// Deterministic match-order key for a violation: by path, then line,
+/// column, and message. Used only to order suppression, not the hash.
+fn order_key(v: &Violation) -> (Option<String>, usize, usize, &str) {
+    (
+        v.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        v.line.unwrap_or(0),
+        v.column.unwrap_or(0),
+        v.message.as_ref(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,5 +631,146 @@ mod tests {
         let b = Baseline::load(&text).unwrap();
         assert!(b.entries.is_empty());
         assert_eq!(b.total(), 0);
+    }
+
+    // ─── apply (the suppression transform) ──────────────────────────
+
+    use crate::Level;
+    use crate::report::Report;
+    use crate::rule::RuleResult;
+
+    /// A report with one rule emitting violations `(message, line)`.
+    fn report(rule: &str, level: Level, vs: &[(&str, Option<usize>)]) -> Report {
+        let raw = vs
+            .iter()
+            .map(|(m, line)| {
+                let v = Violation::new((*m).to_string()).with_path(Path::new("f.rs"));
+                match line {
+                    Some(l) => v.with_location(*l, 1),
+                    None => v,
+                }
+            })
+            .collect();
+        Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from(rule),
+                level,
+                None,
+                raw,
+                false,
+            )],
+        }
+    }
+
+    fn entry(fp: &str, count: u32) -> BaselineEntry {
+        BaselineEntry {
+            rule_id: "r".into(),
+            path: None,
+            fingerprint: fp.into(),
+            count,
+            message: None,
+        }
+    }
+
+    // Stub fingerprinter: each distinct message is its own fingerprint;
+    // identical messages collide (the count/tie-break case). Decouples
+    // the transform test from the hash.
+    fn by_message(_rule: &str, v: &Violation) -> String {
+        v.message.to_string()
+    }
+
+    #[test]
+    fn apply_suppresses_up_to_count_then_reports_new() {
+        let rep = report(
+            "r",
+            Level::Error,
+            &[("X", Some(1)), ("X", Some(2)), ("X", Some(3))],
+        );
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("X", 2)],
+        };
+        let out = apply(&rep, &base, by_message);
+        assert_eq!(out.suppressed_total, 2);
+        assert_eq!(out.live.total_violations(), 1, "the 3rd X is new");
+        assert!(out.stale.is_empty());
+    }
+
+    #[test]
+    fn apply_reports_unbaselined_as_new() {
+        let rep = report("r", Level::Error, &[("Y", Some(1))]);
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("X", 5)],
+        };
+        let out = apply(&rep, &base, by_message);
+        assert_eq!(out.suppressed_total, 0);
+        assert_eq!(out.live.total_violations(), 1);
+        // X matched nothing → stale with its full count.
+        assert_eq!(out.stale.len(), 1);
+        assert_eq!(out.stale[0].count, 5);
+    }
+
+    #[test]
+    fn apply_detects_partial_stale() {
+        let rep = report("r", Level::Error, &[("X", Some(1))]);
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("X", 3)],
+        };
+        let out = apply(&rep, &base, by_message);
+        assert_eq!(out.suppressed_total, 1);
+        assert_eq!(out.live.total_violations(), 0);
+        assert_eq!(out.stale.len(), 1);
+        assert_eq!(out.stale[0].count, 2, "unfilled remainder");
+    }
+
+    #[test]
+    fn apply_tiebreak_is_deterministic_by_line() {
+        // Same message (same fp), three lines, baseline count 1.
+        let rep = report(
+            "r",
+            Level::Error,
+            &[("X", Some(50)), ("X", Some(1)), ("X", Some(10))],
+        );
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("X", 1)],
+        };
+        let out = apply(&rep, &base, by_message);
+        assert_eq!(out.suppressed_total, 1);
+        // The lowest-ordered occurrence (line 1) is suppressed; lines
+        // 10 and 50 remain live, in sorted order.
+        let live_lines: Vec<usize> = out.live.results[0]
+            .violations
+            .iter()
+            .map(|v| v.line.unwrap())
+            .collect();
+        assert_eq!(live_lines, vec![10, 50]);
+        assert_eq!(out.suppressed[0].violation.line, Some(1));
+    }
+
+    #[test]
+    fn apply_empty_baseline_leaves_everything_live() {
+        let rep = report("r", Level::Error, &[("X", Some(1)), ("Y", Some(2))]);
+        let out = apply(&rep, &Baseline::default(), by_message);
+        assert_eq!(out.suppressed_total, 0);
+        assert_eq!(out.live.total_violations(), 2);
+        assert!(out.stale.is_empty());
+    }
+
+    #[test]
+    fn apply_suppressing_all_errors_clears_the_exit_signal() {
+        let rep = report("r", Level::Error, &[("X", Some(1))]);
+        assert!(rep.has_errors());
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("X", 1)],
+        };
+        let out = apply(&rep, &base, by_message);
+        assert!(
+            !out.live.has_errors(),
+            "a fully-baselined error report must exit clean"
+        );
     }
 }
