@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/missing-aaa", "crates/missing-bbb"]

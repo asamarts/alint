@@ -442,7 +442,15 @@ impl RegistryPathsResolveRule {
             .message
             .clone()
             .unwrap_or_else(|| format!("{}: entry {entry:?} {reason}", registry.display()));
-        Violation::new(msg).with_path(registry.to_path_buf())
+        // One manifest can enumerate many failing entries → key on the
+        // registry, the offending entry, and the machine reason so a new
+        // broken entry isn't masked by an existing one.
+        Violation::new(msg)
+            .with_path(registry.to_path_buf())
+            .with_baseline_key(format!(
+                "entry\u{0}{}\u{0}{entry}\u{0}{reason}",
+                crate::slash(registry)
+            ))
     }
 }
 

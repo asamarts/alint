@@ -98,7 +98,10 @@ impl PerFileRule for MarkdownPathsResolveRule {
             violations.push(
                 Violation::new(msg)
                     .with_path(std::sync::Arc::<Path>::from(path))
-                    .with_location(cand.line, cand.column),
+                    .with_location(cand.line, cand.column)
+                    // Several unresolved links can sit on one line, so
+                    // line-content collapses them. Key on the link target.
+                    .with_baseline_key(cand.token.clone()),
             );
         }
         Ok(violations)

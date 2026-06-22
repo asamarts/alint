@@ -368,7 +368,9 @@ impl GeneratedFileFreshRule {
             .message
             .clone()
             .unwrap_or_else(|| format!("generated_file_fresh `{}`: {desc}", self.id));
-        Violation::new(msg)
+        // No path to anchor on; key on a stable identity so the fingerprint
+        // doesn't fall through to the volatile message (anti-panic) branch.
+        Violation::new(msg).with_baseline_key("generated-file-fresh-generator-failure")
     }
 }
 

@@ -600,7 +600,16 @@ impl CrossFileRule {
                         crate::slash(src),
                     )
                 });
-                out.push(Violation::new(msg).with_path(src.to_path_buf()));
+                out.push(
+                    // One source can declare many unresolved paths → key on
+                    // the source and the specific declared entry.
+                    Violation::new(msg)
+                        .with_path(src.to_path_buf())
+                        .with_baseline_key(format!(
+                            "resolves\u{0}{}\u{0}{entry}",
+                            crate::slash(src)
+                        )),
+                );
             }
         }
     }
@@ -726,7 +735,15 @@ impl CrossFileRule {
                 self.source_file,
             )
         });
-        Violation::new(msg).with_path(target.to_path_buf())
+        Violation::new(msg)
+            .with_path(target.to_path_buf())
+            // One query can match several target values → key on the target
+            // and the specific failing value so they don't collapse to one
+            // fingerprint (which would mask a genuinely new mismatch).
+            .with_baseline_key(format!(
+                "equals\u{0}{}\u{0}{target_value}",
+                crate::slash(target)
+            ))
     }
 }
 

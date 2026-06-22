@@ -1,0 +1,10 @@
+version: 1
+# Two unresolved backticked paths on the SAME line: line-content alone collapses
+# them (identical offending line), so the rule keys on the link target. The two
+# findings must have distinct fingerprints.
+rules:
+  - id: md-links-resolve
+    kind: markdown_paths_resolve
+    paths: README.md
+    prefixes: ["src/"]
+    level: error

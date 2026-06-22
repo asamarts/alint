@@ -541,7 +541,17 @@ impl FileGraphRule {
                 pat.to_glob,
             )
         });
-        Violation::new(msg).with_path(src.to_path_buf())
+        Violation::new(msg)
+            .with_path(src.to_path_buf())
+            // A node can have forbidden edges to several targets → key on the
+            // source, the offending target, and the prohibition pattern.
+            .with_baseline_key(format!(
+                "forbidden\u{0}{}\u{0}{}\u{0}{}=>{}",
+                crate::slash(src),
+                crate::slash(target),
+                pat.from_glob,
+                pat.to_glob
+            ))
     }
 
     fn cycle_violation(&self, nodes: &[PathBuf], cycle: &[usize]) -> Violation {
@@ -557,7 +567,14 @@ impl FileGraphRule {
             .message
             .clone()
             .unwrap_or_else(|| format!("dependency cycle ({} files): {rendered}", cycle.len()));
-        Violation::new(msg).with_path(nodes[cycle[0]].clone())
+        // A cycle is a SET of files; key on the sorted member set so a new
+        // file joining the cycle changes the fingerprint (anchoring on one
+        // member would mask the larger cycle).
+        let mut members: Vec<String> = cycle.iter().map(|&i| crate::slash(&nodes[i])).collect();
+        members.sort();
+        Violation::new(msg)
+            .with_path(nodes[cycle[0]].clone())
+            .with_baseline_key(format!("cycle\u{0}{}", members.join("\u{0}")))
     }
 
     fn dangling_violation(&self, src: &Path, target: &Path) -> Violation {
@@ -568,7 +585,15 @@ impl FileGraphRule {
                 crate::slash(target),
             )
         });
-        Violation::new(msg).with_path(src.to_path_buf())
+        Violation::new(msg)
+            .with_path(src.to_path_buf())
+            // A node can reference several dangling targets → key on the
+            // source and the specific unresolved target.
+            .with_baseline_key(format!(
+                "dangling\u{0}{}\u{0}{}",
+                crate::slash(src),
+                crate::slash(target)
+            ))
     }
 
     fn orphan_violation(&self, node: &Path) -> Violation {

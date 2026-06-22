@@ -1,9 +1,30 @@
 # Design doc: baseline mode (grandfathering existing violations)
 
-Status: Draft (v2, after an adversarial review pass). (Draft | Implemented in <commit> | Superseded by <doc>.)
+Status: Draft (v3, after an implementation-time audit). (Draft | Implemented in <commit> | Superseded by <doc>.)
 Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) — **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics).
 Demand evidence: External adoption evaluation, §4.1 — *"the single feature that makes ESLint/RuboCop/etc. adoptable on legacy code, and its absence is the #1 thing that stops a team from flipping alint on as a merge gate."* Reproduced firsthand against alint 0.13.0.
 Target version: Phase 4, unscheduled (post-v0.14). Draft for review; resolve §7 before implementation and move it under the assigned `docs/design/vX.Y/` directory then.
+
+> **v3 changelog (implementation-time audit).** Running the (then-draft)
+> fingerprint against the *whole firing scenario corpus* (all 89 registered
+> kinds) showed the v2 model over-scoped the per-rule key: its §6 predicate
+> ("line-anchored-unique **or** keyed") demands a `baseline_key` on ~50 path-only
+> rules (`file_exists`, `dir_exists`, …) that are **already** uniquely and stably
+> identified by `(rule_id, path)`. v3 (a) makes the **default discriminator for a
+> path-bearing, key-less, line-less violation empty** — its identity is
+> `(rule_id, path)`, and the message is **no longer hashed** (§3.1); this finally
+> makes the message *literally* non-load-bearing (the v2 goal) and fixes
+> threshold churn (`file_max_lines` no longer re-fires as the file grows) for free
+> with **no** per-rule key; (b) **narrows** the explicit-key requirement to the
+> ~15 kinds whose identity genuinely isn't `(rule_id, path)`: structured-query
+> (multiple per file / volatile matched value), cross-file & no-path (would
+> collapse under the empty default), first-offender (cross-edit churn), and
+> line-collision (`markdown_paths_resolve`); (c) recasts the §6 gate as a
+> **structural collision-invariant** — *no two distinct live violations of a kind
+> may share a fingerprint, and none may fall through to the message* — checked
+> across the corpus plus targeted multi-finding fixtures, so it can't false-green
+> a kind whose fixture happens not to exercise the unsafe shape. See ADR-0006
+> (amended).
 
 > **v2 changelog.** A review found the v1 fingerprint model did not fit several
 > shipped rules (`structured_path` emits N path-only violations per file;
@@ -140,33 +161,40 @@ M3 / §3.4).
 
 `Violation` gains an optional `baseline_key: Option<Cow<'static, str>>`. It is the
 rule's declaration of *what makes this violation distinct* — used as the
-fingerprint discriminator (§3.1) in preference to the offending-line content. v1
-scoped this to no-path violations; the review showed that is insufficient, so in
-v2 **any** rule whose `(path, offending-line-content)` is not a unique, stable
-identity must set it:
+fingerprint discriminator (§3.1) in preference to the default. v1 scoped this to
+no-path violations; v2 over-corrected to "any rule whose `(path, line-content)`
+isn't a unique identity." v3 (the implementation-time audit) restores the right
+scope: with the **default discriminator now `(rule_id, path)`** for a path-bearing
+violation (§3.1 branch 3), a rule sets `baseline_key` **only** when its identity
+genuinely isn't `(rule_id, path)` — i.e. when it emits *more than one* finding per
+`(rule_id, path)`, has *no* path, or is a *first-offender* line rule:
 
 - **Structured-query** (`json/yaml/toml/xml_path_*`): emit N path-only violations
-  per file, distinguished only by the query — so `rule_id + path` would collapse
-  different findings and suppress a genuinely new one. Key = the JSONPath +
-  operator (+ expected value for `_equals`). *(This was the headline review bug.)*
-- **Threshold / whole-file** (`file_max_lines`, `file_min_lines`,
-  `max_directory_depth`, …): path-only, the magnitude is in the message. Key =
-  the path (the accepted finding is "this file/dir is over/under the limit";
-  it staying over the limit is the same accepted finding — see the "ratchet"
-  note in §4). The threshold value is deliberately *not* in the key.
+  per file, so the empty default would collapse them — and the message embeds the
+  matched *value*, which churns. Key = the JSONPath + operator (+ expected value
+  for `_equals`). *(This was the headline review bug.)*
+- **No-path / cross-file** (`lockfiles-only-one`, `pair`, `pair_hash`,
+  `file_graph`, `unique_by`, `registry_paths_resolve`, `cross_file`,
+  `cross_file_value_equals`, `dir_absent`, `generated_file_fresh`): no single
+  `path`, or several findings per path, so the default would collapse them.
+  Key = the sorted set of involved repo-relative paths (or the per-finding path).
 - **First-offender line rules** (`no_trailing_whitespace`, `line_endings`):
   report only the first offending line per file. Their identity is `(rule, file)`,
   not a line's content (content-hashing churns when the first offender is fixed
   and the second surfaces). Key = the path.
-- **No-path / cross-file** (`lockfiles-only-one`, `pair`, `file_graph`,
-  `unique_by`, `registry_paths_resolve`, `cross_file`): key = the sorted set of
-  involved repo-relative paths.
+- **Line-collision** (`markdown_paths_resolve`): emits several findings on one
+  line (e.g. two broken links), so line-content alone collapses them. Key = the
+  per-finding target (the unresolved path/link).
 
-Rules whose violations *are* uniquely identified by `(path, offending-line)` —
-the line-content rules like `for_each_match`, `commented_out_code`,
-`line_max_width` — need **not** set a key; the default content discriminator
-(§3.1) covers them. A coverage-audit test (§6) enforces the boundary so a new
-kind can't silently fall into an unsafe default.
+What **no longer** needs a key (v3): **threshold / whole-file** rules
+(`file_max_lines`, `file_min_lines`, `max_directory_depth`, …) — the empty default
+makes their identity `(rule_id, path)`, stable as the magnitude grows (the "same
+accepted finding"; see the "ratchet" note in §4), with the volatile magnitude no
+longer in the hash. And the bulk of **single-finding path-only** rules
+(`file_exists`, `dir_exists`, `file_hash`, `file_content_matches`, …) and the
+**line-content** rules (`for_each_match`, `commented_out_code`, `line_max_width`):
+the default discriminator (§3.1) covers them. The §6 collision-invariant enforces
+the boundary so a new kind can't silently fall into an unsafe default.
 
 ## 3. Semantics
 
@@ -192,10 +220,17 @@ per violation, in order:
    line's content with its trailing `\r?\n` stripped** (so CRLF↔LF conversion
    doesn't churn the whole repo's baseline; line *number* is excluded so inserts
    above don't churn). The line bytes are hashed as raw bytes (non-UTF-8 safe).
-3. else (path, no line, no key) the **normalised message** — a last-resort
-   fallback. The §6 audit ensures rules don't *rely* on this (every kind that
-   needs a discriminator beyond shape supplies a `baseline_key`); it exists only
-   so an un-audited path can't panic.
+3. else, for a **path-bearing** violation (`path.is_some()`, no line, no key), the
+   **empty discriminator** — its identity is `(rule_id, path)` alone (v3). The
+   message is deliberately **not** hashed: it is frequently volatile (a magnitude
+   like `file_max_lines`' line count, a structured-query matched value, command
+   output), and `path` (already hashed as component 2) uniquely identifies a
+   rule that emits one finding per path. A rule that emits *multiple* findings per
+   `(rule_id, path)`, or no path at all, must instead set a `baseline_key` (§2.4).
+4. else (no path, no line, no key) the **normalised message** — a last-resort
+   **anti-panic** fallback only. The §6 audit forbids any kind from relying on it
+   (such a violation must set a `baseline_key`); it exists so an un-audited kind
+   collapses *loudly* (caught by the §6 collision-invariant) rather than panicking.
 
 `column` is never in the hash (line-granular is the right churn/precision balance).
 `level` is never in the hash (§4 — a baseline accepts the *finding*, not its
@@ -362,9 +397,11 @@ By failure mode:
   (and the new SARIF `partialFingerprints`) onto it. The message-keyed GitLab
   scheme is *less* stable (rewords churn it) and has the `|` collision; unifying
   fixes both and gives the tool a single fingerprint definition.
-- **`Violation.baseline_key`** (§2.4): the chief rule-side work is auditing the
-  kinds that need a key (structured-query, threshold, first-offender,
-  cross-file/no-path) and setting it; line-content kinds are untouched.
+- **`Violation.baseline_key`** (§2.4): with the v3 path-shape default, the
+  rule-side work is setting a key on only the ~15 kinds whose identity isn't
+  `(rule_id, path)` — structured-query, cross-file/no-path, first-offender, and
+  line-collision. Threshold, single-finding path-only, and line-content kinds are
+  untouched (the default covers them).
 - **Content access (review H6).** `FileEntry` caches no content (`walker.rs`); the
   branch-2 line discriminator requires reading the offending file. Mitigations:
   (a) only files that produced a *line-anchored, key-less* violation are read; (b)
@@ -398,12 +435,21 @@ spaces don't collide); `is_note` never fingerprinted; full-hash (no truncation);
 JSON-Lines round-trip + `schema_version` gate + malformed/empty handling;
 deterministic sort/serialization.
 
-**Coverage-audit test (anti-drift floor):** for every registered rule kind, run
-it against a violating fixture and assert each violation is *baseline-safe* —
-either it is line-anchored with content that uniquely identifies it, or it sets
-`baseline_key`. A kind that emits path-only or first-offender or multi-per-file
-violations without a key fails the audit. This is the gate that would have caught
-the v1 `structured_path`/`file_max_lines` holes.
+**Coverage-audit test — the structural collision-invariant (anti-drift floor):**
+for every registered rule kind, run it against the firing scenario corpus (and
+targeted multi-finding fixtures), fingerprint every emitted violation, and assert
+two things hold per kind: **(i)** no two *distinct* live violations share a
+fingerprint (a collision is a silent mis-suppression — the structured-query /
+line-collision failure mode), and **(ii)** no violation falls through to the
+message anti-panic branch (§3.1 branch 4) — every no-path/no-line violation must
+carry a `baseline_key`. Because the invariant is checked on the *actual emitted
+violations* rather than asserting a hand-maintained per-kind classification, it
+can't drift out of sync with the rules; the only maintenance is ensuring each
+multi-emitting kind has a fixture that exercises its multi-finding shape (a
+`FIRST_OFFENDER`/cross-edit allowlist, like the existing `NATIVE_FIRES_ALLOWLIST`,
+pins the kinds whose churn is only visible across edits). This is the gate that
+would have caught the v1 `structured_path` hole and the v2 `markdown_paths_resolve`
+collision.
 
 e2e (`crates/alint-e2e`), firing + silent pairs (constitution 8): suppressed
 (baselined-only → 0 reported, exit 0); new detected (added → exit 1, baselined

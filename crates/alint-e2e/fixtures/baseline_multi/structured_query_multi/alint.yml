@@ -1,0 +1,12 @@
+version: 1
+# `$.scripts[*]` matches every script value; two of them fail the regex, so the
+# rule emits two path-only findings on package.json. They must carry distinct
+# fingerprints (query + matched value), else a genuinely new failing script
+# would be masked once the file is baselined.
+rules:
+  - id: scripts-echo-only
+    kind: json_path_matches
+    paths: package.json
+    path: "$.scripts[*]"
+    matches: "^echo "
+    level: error

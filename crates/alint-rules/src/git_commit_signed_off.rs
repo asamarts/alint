@@ -76,7 +76,8 @@ impl Rule for GitCommitSignedOffRule {
                 let msg = self.message_override.clone().unwrap_or_else(|| {
                     format_commit_violation(commit, "is missing a `Signed-off-by:` trailer")
                 });
-                violations.push(Violation::new(msg));
+                // No path; one finding per commit → key on the commit id.
+                violations.push(Violation::new(msg).with_baseline_key(commit.sha.clone()));
             }
         }
         Ok(violations)

@@ -68,7 +68,11 @@ impl PerFileRule for NoTrailingWhitespaceRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line_no, 1),
+                .with_location(line_no, 1)
+                // First-offender rule: only the first bad line is reported, so
+                // line-content churns when it's fixed and the next surfaces.
+                // The file is the unit of accepted debt → key on the path.
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }

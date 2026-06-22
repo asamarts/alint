@@ -168,37 +168,49 @@ impl GitCommitMessageRule {
         if let Some(re) = &self.pattern
             && !re.is_match(&commit.message)
         {
-            violations.push(self.make_violation(format_msg(
-                commit,
-                subject,
-                &format!("commit message does not match pattern `{}`", re.as_str()),
-            )));
+            violations.push(self.make_violation(
+                format_msg(
+                    commit,
+                    subject,
+                    &format!("commit message does not match pattern `{}`", re.as_str()),
+                ),
+                format!("{}\u{0}pattern", commit.sha),
+            ));
         }
 
         if let Some(max) = self.subject_max_length
             && subject.chars().count() > max
         {
-            violations.push(self.make_violation(format_msg(
-                commit,
-                subject,
-                &format!(
-                    "commit subject is {} chars; max allowed is {max}",
-                    subject.chars().count(),
+            violations.push(self.make_violation(
+                format_msg(
+                    commit,
+                    subject,
+                    &format!(
+                        "commit subject is {} chars; max allowed is {max}",
+                        subject.chars().count(),
+                    ),
                 ),
-            )));
+                format!("{}\u{0}subject_max_length", commit.sha),
+            ));
         }
 
         if self.requires_body && body.trim().is_empty() {
-            violations.push(self.make_violation(format_msg(
-                commit,
-                subject,
-                "commit message has no body; this rule requires one",
-            )));
+            violations.push(self.make_violation(
+                format_msg(
+                    commit,
+                    subject,
+                    "commit message has no body; this rule requires one",
+                ),
+                format!("{}\u{0}requires_body", commit.sha),
+            ));
         }
     }
 
-    fn make_violation(&self, default_msg: String) -> Violation {
-        Violation::new(self.message_override.clone().unwrap_or(default_msg))
+    fn make_violation(&self, default_msg: String, key: String) -> Violation {
+        // A single commit can trip several checks (pattern / length / body),
+        // and there is no path, so the baseline key combines the commit's
+        // stable id with the check kind (and never the volatile message).
+        Violation::new(self.message_override.clone().unwrap_or(default_msg)).with_baseline_key(key)
     }
 }
 

@@ -1,0 +1,14 @@
+version: 1
+# One node references two missing imports → two no_dangling findings anchored on
+# the same source node. They must carry distinct fingerprints (source + target),
+# else a newly-broken import would be masked by an already-baselined one.
+rules:
+  - id: proto-imports-resolve
+    kind: file_graph
+    nodes: "proto/**/*.proto"
+    edges:
+      from_content:
+        extract: { regex: 'import\s+"([^"]+)"' }
+        resolve: relative_to_repo_root
+    require: no_dangling
+    level: error

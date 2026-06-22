@@ -88,7 +88,8 @@ impl GitCommitSubjectMatchesRule {
                 &format!("subject does not match `{}`", self.matches.as_str()),
             )
         });
-        Some(Violation::new(msg))
+        // No path; one finding per commit → key on the commit id.
+        Some(Violation::new(msg).with_baseline_key(commit.sha.clone()))
     }
 }
 

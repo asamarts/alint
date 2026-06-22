@@ -75,7 +75,8 @@ impl Rule for GitCommitGpgSignedRule {
                         "is not signed (or its signature did not verify)",
                     )
                 });
-                violations.push(Violation::new(msg));
+                // No path; one finding per commit → key on the commit id.
+                violations.push(Violation::new(msg).with_baseline_key(commit.sha.clone()));
             }
         }
         Ok(violations)

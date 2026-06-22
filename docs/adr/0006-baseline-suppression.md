@@ -11,6 +11,14 @@ decision-makers: alint maintainers
 Accepted (2026-06-21). The design doc (`docs/design/baseline.md`) stays Draft
 until the implementation lands; this records that the decision itself is settled.
 
+**Amended (2026-06-22, design v3 — implementation-time audit).** Running the
+fingerprint against the whole firing corpus showed the discriminator should
+**default to `(rule_id, path)`** for a path-bearing violation (the message is *not*
+hashed), rather than demanding a `baseline_key` on every path-only rule. This
+fixes threshold churn for free and narrows the explicit-key requirement to the
+~15 kinds whose identity genuinely isn't `(rule_id, path)`. The Decision and
+Consequences below are updated in place; see the design doc's v3 changelog.
+
 ## Context
 
 alint cannot be adopted as a blocking merge gate on a large existing codebase.
@@ -50,16 +58,19 @@ generated fingerprint file, separate from `.alint.yml`:
   and column number and the level**. The discriminator is, in order: a
   rule-supplied `Violation.baseline_key` if set; else, for a line-anchored
   violation, the offending line's content with its trailing `\r?\n` stripped (so
-  line motion and CRLF↔LF conversion don't churn); else a last-resort normalised
-  message. **Any** rule whose `(path, line-content)` is not a unique, stable
-  identity must set `baseline_key` — structured-query (the JSONPath/value),
-  threshold and first-offender rules (the path), and cross-file rules (the sorted
-  involved-path set) — enforced by a coverage-audit test. This re-triggers on
-  edit, survives benign motion, keeps duplicates honest via per-fingerprint
-  counts, and is reword-proof. (v1 keyed line rules on content and only no-path
-  rules on a structural key; a review showed that masks new findings for
-  `structured_path`/`file_max_lines`/first-offender rules — hence the
-  generalization.)
+  line motion and CRLF↔LF conversion don't churn); else, for a path-bearing
+  violation, **empty — so its identity is `(rule_id, path)` and the volatile
+  message is not hashed** (v3); else (no path, no line) a last-resort anti-panic
+  message. A rule sets `baseline_key` **only** when its identity isn't
+  `(rule_id, path)`: structured-query (the JSONPath/value — many findings per
+  file), cross-file/no-path (the sorted involved-path set), first-offender line
+  rules (the path), and line-collision (the per-finding target) — enforced by a
+  coverage-audit collision-invariant. Threshold rules (`file_max_lines`, …) need
+  **no** key: the empty default keeps them stable as the magnitude grows. This
+  re-triggers on edit, survives benign motion, keeps duplicates honest via
+  per-fingerprint counts, and is reword-proof. (v1 keyed only no-path rules; v2
+  over-corrected to "key every non-line-content rule"; the v3 audit showed the
+  `(rule_id, path)` default is both safe and far smaller.)
 - This is **one** fingerprint definition for the whole tool: the existing
   `gitlab.rs` cross-run-dedup fingerprint (keyed on the message) is migrated onto
   it, and SARIF gains it as `partialFingerprints`.
@@ -93,9 +104,9 @@ baseline does not churn on every edit.
 Harder / costs: a new committed artifact, reviewed in PRs (made reviewable by an
 advisory, non-matching `message` per entry) and capable, if abused, of masking a
 real finding (mitigated by stale warnings, `--show-baselined`, and review). The
-chief rule-side cost is auditing every kind whose violation isn't uniquely
-identified by `(path, line-content)` — structured-query, threshold, first-offender,
-and cross-file kinds — and giving it a `baseline_key`, gated by a coverage test.
+chief rule-side cost is giving a `baseline_key` to the ~15 kinds whose identity
+isn't `(rule_id, path)` — structured-query, cross-file/no-path, first-offender,
+and line-collision — gated by the coverage-audit collision-invariant.
 Marking-not-removing means each formatter handles suppression explicitly (SARIF in
 particular). Two footguns are designed out: `alint baseline` rejects `--changed`
 (a changed-scope baseline would be silently partial) and refuses to grandfather
@@ -120,11 +131,15 @@ are not supported.
   only as a never-load-bearing last-resort fallback; the rule-supplied
   `baseline_key` is the real discriminator.
 - **Shape-inferred discriminator only** (line-content for line rules, path for
-  file-level, no per-rule key) — the v1 design: rejected because real rules break
-  the shape assumption (`structured_path` emits many path-only violations per
-  file distinguished only by the query; `file_max_lines` is path-only with the
-  magnitude in the message), so a different new finding would be silently
-  suppressed. The generalized per-violation `baseline_key` fixes this.
+  file-level, no per-rule key) — the v1 design: rejected *as the sole mechanism*
+  because some rules break the shape assumption (`structured_path` emits many
+  path-only violations per file distinguished only by the query), silently
+  suppressing a different new finding. v3's resolution is a **hybrid**: shape
+  inference is the *default* (`(rule_id, path)` for path-bearing violations — which
+  correctly handles `file_max_lines` and the bulk of path-only rules), with a
+  per-violation `baseline_key` overriding it for the ~15 kinds that genuinely
+  emit multiple findings per path or have none. Pure shape-inference was too
+  little; v2's "key everything non-line-content" was too much.
 - **Remove (not mark) suppressed violations** before formatting — the v1 design:
   rejected because for SARIF it makes GitHub Code Scanning close the alert and
   reopen it when the finding resurfaces (flapping). Marking with

@@ -98,7 +98,15 @@ impl Rule for UniqueByRule {
             paths.sort();
             let anchor = paths[0].clone();
             let msg = self.format_message(&key, &paths);
-            violations.push(Violation::new(msg).with_path(anchor));
+            // The finding is "these files share a key"; key on the duplicate
+            // key + the sorted path SET so a new colliding file is detected
+            // (anchoring on one path alone would mask a new group member).
+            let group: Vec<String> = paths.iter().map(crate::slash).collect();
+            violations.push(
+                Violation::new(msg)
+                    .with_path(anchor)
+                    .with_baseline_key(format!("{key}\u{0}{}", group.join("\u{0}"))),
+            );
         }
         Ok(violations)
     }

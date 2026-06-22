@@ -4,11 +4,14 @@
 //! Design: [`docs/design/baseline.md`](../../../docs/design/baseline.md),
 //! [ADR-0006](../../../docs/adr/0006-baseline-suppression.md).
 //!
-//! This module is the dependency-free core (slice 1): the fingerprint
-//! function and the file (de)serialization. The report-suppression
-//! transform, the `Violation.baseline_key` field, the per-rule key
-//! audit, and the CLI/formatter wiring land in later slices. Nothing
-//! here is wired into `check`/`fix` yet, so it changes no behavior.
+//! This module is the dependency-free core: the fingerprint function
+//! ([`violation_fingerprint`]), the JSON-Lines baseline file
+//! ([`Baseline`]), and the report-suppression transform ([`apply`]). The
+//! per-violation [`Violation::baseline_key`] is set by the rules whose
+//! identity isn't `(rule_id, path)`; the boundary is enforced by the
+//! `coverage_audit_baseline_safety` collision-invariant in `alint-e2e`.
+//! `check --baseline` wires this in between `Engine::run` and the
+//! formatters (see `crates/alint/src/main.rs`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -36,7 +39,13 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// 2. else, for a line-anchored violation, the offending line's content
 ///    with any trailing `\r?\n` stripped (so line *number* and CRLF↔LF
 ///    don't churn the baseline) — read from `file_bytes`;
-/// 3. else, the trimmed message (a last-resort fallback).
+/// 3. else, for a **path-bearing** violation, **empty** — so the identity is
+///    `(rule_id, path)` alone (v3). The (often volatile) message is *not*
+///    hashed; `path` already disambiguates a rule that emits one finding per
+///    path. A rule that emits several findings per `(rule_id, path)`, or has no
+///    path, must set `baseline_key` instead (enforced by the coverage audit).
+/// 4. else (no path, no line, no key), the trimmed message — a last-resort
+///    *anti-panic* fallback only; the audit forbids a kind from relying on it.
 ///
 /// `line` / `column` numbers and the violation `level` are never hashed.
 /// `path` is normalised to forward slashes; pass `None` for repo-level
@@ -57,7 +66,13 @@ pub fn violation_fingerprint(
         key.as_bytes()
     } else if let Some(content) = line.and_then(|n| file_bytes.and_then(|b| offending_line(b, n))) {
         content
+    } else if path.is_some() {
+        // v3: path-bearing, key-less, line-less → identity is (rule_id, path).
+        // The message is deliberately not hashed (it is frequently volatile);
+        // multi-finding / no-path rules set `baseline_key` instead.
+        b""
     } else {
+        // No path, no line, no key: anti-panic fallback only.
         message.trim().as_bytes()
     };
 
@@ -472,12 +487,48 @@ mod tests {
     }
 
     #[test]
-    fn message_fallback_when_no_line_no_key() {
-        let a = fp("r", Some("a.rs"), None, None, "multiple lockfiles", None);
-        let b = fp("r", Some("a.rs"), None, None, "multiple lockfiles", None);
-        let c = fp("r", Some("a.rs"), None, None, "something else", None);
-        assert_eq!(a, b);
+    fn path_shape_default_ignores_message() {
+        // v3: a path-bearing, key-less, line-less violation's identity is
+        // (rule_id, path); the (volatile) message is NOT hashed. Two
+        // different messages on the same path → the SAME fingerprint.
+        let a = fp(
+            "r",
+            Some("a.rs"),
+            None,
+            None,
+            "has 320 lines (max 300)",
+            None,
+        );
+        let b = fp(
+            "r",
+            Some("a.rs"),
+            None,
+            None,
+            "has 999 lines (max 300)",
+            None,
+        );
+        assert_eq!(a, b, "message must not affect a path-only fingerprint");
+        // A different path → a different fingerprint.
+        let c = fp(
+            "r",
+            Some("b.rs"),
+            None,
+            None,
+            "has 320 lines (max 300)",
+            None,
+        );
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn message_fallback_only_when_no_path() {
+        // The message is the discriminator ONLY for a no-path, no-line,
+        // no-key violation (the anti-panic branch).
+        let a = fp("r", None, None, None, "multiple lockfiles", None);
+        let b = fp("r", None, None, None, "multiple lockfiles", None);
+        let c = fp("r", None, None, None, "something else", None);
+        assert_eq!(a, b);
+        assert_ne!(a, c, "no-path violations still distinguish by message");
     }
 
     #[test]
@@ -501,8 +552,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_line_falls_through_to_message() {
-        // line points past EOF → no content → message fallback (no panic).
+    fn missing_line_falls_through_to_path_identity() {
+        // line points past EOF → no content → path identity (v3), no panic.
         let a = fp(
             "r",
             Some("a.rs"),
@@ -513,6 +564,16 @@ mod tests {
         );
         let b = fp("r", Some("a.rs"), None, None, "msg", None);
         assert_eq!(a, b);
+        // The message is irrelevant in this branch (path identity wins).
+        let c = fp(
+            "r",
+            Some("a.rs"),
+            Some(99),
+            None,
+            "different message",
+            Some(b"only\none\n"),
+        );
+        assert_eq!(a, c);
     }
 
     fn item(rule: &str, path: Option<&str>, fp: &str) -> FingerprintedViolation {

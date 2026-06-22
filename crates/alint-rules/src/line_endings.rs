@@ -88,7 +88,11 @@ impl PerFileRule for LineEndingsRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line_no, 1),
+                .with_location(line_no, 1)
+                // First-offender rule: only the first mismatched line is
+                // reported, so line-content churns when it's fixed and the
+                // next surfaces. Key on the path (the file is the debt unit).
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }

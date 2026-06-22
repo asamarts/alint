@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+import "proto/missing-one.proto";
+import "proto/missing-two.proto";
+
+message A {}

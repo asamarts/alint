@@ -17,10 +17,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   missing or unsupported-`schema_version` baseline is a hard error, never a silent
   no-op. `--show-baselined` lists the suppressed findings; `--strict-baseline`
   fails when the baseline has stale entries (fixed findings); `alint baseline`
-  refuses to grandfather new debt on regeneration without `--accept-new`. (The
-  `baseline:` config key, per-format SARIF suppression marking, and the per-rule
-  `baseline_key` audit land in follow-ups; see `docs/design/baseline.md` /
-  ADR-0006.)
+  refuses to grandfather new debt on regeneration without `--accept-new`.
+  Per-rule baseline identity is audited so a fingerprint can't silently mask a
+  new finding: a path-bearing violation defaults to a `(rule, path)` identity
+  (so threshold rules like `file_max_lines` stay grandfathered as the file grows
+  instead of churning), while structured-query, cross-file, first-offender and
+  multi-per-line rules declare a precise `baseline_key`; a coverage-audit
+  collision-invariant (`coverage_audit_baseline_safety`) enforces the boundary
+  for every kind. (The `baseline:` config key and per-format SARIF suppression
+  marking land in follow-ups; see `docs/design/baseline.md` / ADR-0006.)
 - `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
   named rule id(s) from the effective config. An id that matches no loaded rule
   is an error, so typos fail loudly. This is the command the `agent` output

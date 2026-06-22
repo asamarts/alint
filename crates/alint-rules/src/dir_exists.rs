@@ -62,7 +62,11 @@ impl Rule for DirExistsRule {
                     self.patterns.join(", ")
                 )
             });
-            Ok(vec![Violation::new(msg)])
+            // No path (no matching directory exists), so key on the pattern
+            // set rather than relying on the volatile message fingerprint.
+            Ok(vec![
+                Violation::new(msg).with_baseline_key(self.patterns.join(",")),
+            ])
         }
     }
 }

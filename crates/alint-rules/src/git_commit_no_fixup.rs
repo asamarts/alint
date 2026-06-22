@@ -71,7 +71,8 @@ impl Rule for GitCommitNoFixupRule {
                         "is a fixup/squash/amend commit; rebase with `--autosquash` before merging",
                     )
                 });
-                violations.push(Violation::new(msg));
+                // No path; one finding per commit → key on the commit id.
+                violations.push(Violation::new(msg).with_baseline_key(commit.sha.clone()));
             }
         }
         Ok(violations)

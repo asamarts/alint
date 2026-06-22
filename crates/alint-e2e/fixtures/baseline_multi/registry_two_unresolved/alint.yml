@@ -1,0 +1,12 @@
+version: 1
+# One manifest enumerates two unresolved members → two path-only findings on
+# Cargo.toml. They must carry distinct fingerprints (registry + entry), else a
+# newly-broken member would be masked by an already-baselined one.
+rules:
+  - id: members-resolve
+    kind: registry_paths_resolve
+    source: Cargo.toml
+    extract: { toml: "$.workspace.members[*]" }
+    expect: dir
+    must_contain: Cargo.toml
+    level: error

@@ -432,11 +432,34 @@ impl PerFileRule for StructuredPathRule {
         for m in matches.iter() {
             if let Some(v) = check_match(m, &self.op) {
                 let base = self.message.clone().unwrap_or(v);
-                violations.push(Violation::new(base).with_path(std::sync::Arc::<Path>::from(path)));
+                // Baseline identity: the query + operator + the specific
+                // matched value. One JSONPath can match N nodes (e.g.
+                // `$.scripts[*]`), so without a key the N path-only
+                // violations would collapse to one fingerprint and mask a
+                // genuinely new failing node; and a reworded `message:`
+                // must not churn the baseline. (v3 audit, §2.4.)
+                violations.push(
+                    Violation::new(base)
+                        .with_path(std::sync::Arc::<Path>::from(path))
+                        .with_baseline_key(match_baseline_key(&self.path_src, &self.op, m)),
+                );
             }
         }
         Ok(violations)
     }
+}
+
+/// A reword-proof baseline identity for one failing match: the query source,
+/// the operator (with its expected value / regex), and the specific matched
+/// value. Distinct failing nodes from one query get distinct keys (no
+/// masking); two nodes that fail with the *same* value collapse to a count
+/// (legitimate). Independent of the rendered `message`, so a reword is inert.
+fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
+    let op_descr = match op {
+        Op::Equals(expected) => format!("== {}", short_render(expected)),
+        Op::Matches(re) => format!("=~ {}", re.as_str()),
+    };
+    format!("{path_src} {op_descr} :: got {}", short_render(m))
 }
 
 /// Return `Some(message)` if the match fails the op; `None` if it passes.

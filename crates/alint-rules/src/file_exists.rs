@@ -176,7 +176,12 @@ impl Rule for FileExistsRule {
                     self.describe_patterns()
                 )
             });
-            Ok(vec![Violation::new(message)])
+            // No path (the file is absent by definition), so without a key
+            // the fingerprint would hash the volatile message. Key on the
+            // pattern set — the rule's stable structural identity.
+            Ok(vec![
+                Violation::new(message).with_baseline_key(self.describe_patterns()),
+            ])
         }
     }
 
