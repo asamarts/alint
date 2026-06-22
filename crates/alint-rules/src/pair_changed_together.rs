@@ -86,7 +86,11 @@ impl Rule for PairChangedTogetherRule {
                 self.since, self.if_changed, self.then_changed,
             )
         });
-        Ok(vec![Violation::new(msg)])
+        // No path (a repo-level co-change finding) → a fixed key so the
+        // fingerprint doesn't fall through to the volatile message.
+        Ok(vec![
+            Violation::new(msg).with_baseline_key("pair-changed-together"),
+        ])
     }
 }
 

@@ -429,10 +429,18 @@ fn evaluate_one_per_file_rule(
     };
     match pf.evaluate_file(ctx, literal, &bytes) {
         Ok(vs) => vs,
-        Err(e) => vec![Violation::new(format!(
-            "{parent_id}: nested rule #{nested_i} error on {}: {e}",
-            literal.display()
-        ))],
+        Err(e) => vec![
+            // No path; the message embeds a volatile error string, so key on
+            // the (dir, nested-rule index) identity instead of the message.
+            Violation::new(format!(
+                "{parent_id}: nested rule #{nested_i} error on {}: {e}",
+                literal.display()
+            ))
+            .with_baseline_key(format!(
+                "for-each-dir-nested-error\u{0}{}\u{0}{nested_i}",
+                crate::slash(literal)
+            )),
+        ],
     }
 }
 

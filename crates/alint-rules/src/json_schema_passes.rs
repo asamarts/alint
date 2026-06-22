@@ -134,7 +134,12 @@ impl Rule for JsonSchemaPassesRule {
                 // violation, then we're done. Per-file
                 // validation against a broken schema would
                 // dump the same error N times.
-                violations.push(Violation::new(msg.clone()));
+                // No path (a repo-level schema-load failure) → a fixed key so
+                // the fingerprint doesn't fall through to the volatile message.
+                violations.push(
+                    Violation::new(msg.clone())
+                        .with_baseline_key("json-schema-passes-schema-unusable"),
+                );
                 return Ok(violations);
             }
         };
@@ -198,7 +203,19 @@ impl Rule for JsonSchemaPassesRule {
                 // it via the `instance_path()` accessor method.
                 let detail = format!("schema violation at `{}`: {error}", error.instance_path());
                 let msg = self.message.clone().unwrap_or(detail);
-                violations.push(Violation::new(msg).with_path(entry.path.clone()));
+                // One document can fail N schema constraints; without a key the
+                // N path-only findings collapse to one fingerprint and a new
+                // schema violation would be masked. Key on the (data location,
+                // schema constraint) pair — stable and reword-proof.
+                violations.push(
+                    Violation::new(msg)
+                        .with_path(entry.path.clone())
+                        .with_baseline_key(format!(
+                            "schema\u{0}{}\u{0}{}",
+                            error.instance_path(),
+                            error.schema_path()
+                        )),
+                );
             }
         }
         Ok(violations)

@@ -67,9 +67,14 @@ struct Finding {
     fp: String,
     message: String,
     line: Option<usize>,
+    /// True when the violation sets an explicit `baseline_key`.
+    keyed: bool,
     /// True when the violation would fall to the message anti-panic branch
     /// (no path, no line, no `baseline_key`).
     message_reliant: bool,
+    /// True when the violation sets an EMPTY `baseline_key` — which aliases the
+    /// path-only default discriminator and is never intentional.
+    empty_key: bool,
 }
 
 /// Parse a scenario's `given.config:` YAML into an id → kind map so a
@@ -146,7 +151,9 @@ fn findings_of(
                 fp: fingerprint(r.rule_id.as_ref(), v, bytes.as_deref()),
                 message: v.message.to_string(),
                 line: v.line,
+                keyed: v.baseline_key.is_some(),
                 message_reliant: v.path.is_none() && v.line.is_none() && v.baseline_key.is_none(),
+                empty_key: v.baseline_key.as_deref() == Some(""),
             });
         }
     }
@@ -248,12 +255,17 @@ fn every_kind_emits_baseline_safe_fingerprints() {
 
     let mut collisions: Vec<String> = Vec::new();
     let mut message_reliant: BTreeSet<String> = BTreeSet::new();
+    let mut empty_keys: BTreeSet<String> = BTreeSet::new();
 
     for findings in &runs {
-        // (ii) message-reliance: any no-path/no-line/no-key violation.
         for f in findings {
+            // (ii) message-reliance: any no-path/no-line/no-key violation.
             if f.message_reliant {
                 message_reliant.insert(format!("{} — {:?}", f.kind, truncate(&f.message)));
+            }
+            // (iii) an empty key aliases the path-only default; never intended.
+            if f.empty_key {
+                empty_keys.insert(format!("{} — {:?}", f.kind, truncate(&f.message)));
             }
         }
         // (i) masking collision: group this run's findings by fingerprint.
@@ -266,13 +278,17 @@ fn every_kind_emits_baseline_safe_fingerprints() {
             if msgs.len() < 2 {
                 continue; // identical messages → legitimate count-collapse
             }
-            // Allowed: line-anchored findings on DISTINCT lines with identical
-            // offending content (same fingerprint ⇒ same content) — the message
-            // differs only by line number. Anything else masks a finding.
+            // Allowed ONLY for KEY-LESS line-anchored findings on distinct
+            // lines: there the fingerprint discriminator IS the line content, so
+            // a shared fingerprint guarantees identical content and the message
+            // differs only by line number. A KEYED group that collides is the
+            // rule's own (possibly too-coarse) key choice and must be flagged —
+            // line+key fingerprints on the key, ignoring content.
             let all_lined = group.iter().all(|f| f.line.is_some());
+            let none_keyed = group.iter().all(|f| !f.keyed);
             let lines: BTreeSet<usize> = group.iter().filter_map(|f| f.line).collect();
             let distinct_lines = lines.len() == group.len();
-            if all_lined && distinct_lines {
+            if all_lined && distinct_lines && none_keyed {
                 continue;
             }
             let kind = &group[0].kind;
@@ -296,7 +312,7 @@ fn every_kind_emits_baseline_safe_fingerprints() {
         fired.len(),
     );
 
-    if collisions.is_empty() && message_reliant.is_empty() {
+    if collisions.is_empty() && message_reliant.is_empty() && empty_keys.is_empty() {
         return;
     }
 
@@ -317,6 +333,17 @@ fn every_kind_emits_baseline_safe_fingerprints() {
             message_reliant.len(),
         );
         for m in &message_reliant {
+            let _ = writeln!(report, "  - {m}");
+        }
+    }
+    if !empty_keys.is_empty() {
+        let _ = writeln!(
+            report,
+            "\n(iii) violations with an EMPTY baseline_key (aliases the path-only \
+             default; use a real key or none) ({}):",
+            empty_keys.len(),
+        );
+        for m in &empty_keys {
             let _ = writeln!(report, "  - {m}");
         }
     }

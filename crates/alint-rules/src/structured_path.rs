@@ -454,12 +454,18 @@ impl PerFileRule for StructuredPathRule {
 /// value. Distinct failing nodes from one query get distinct keys (no
 /// masking); two nodes that fail with the *same* value collapse to a count
 /// (legitimate). Independent of the rendered `message`, so a reword is inert.
+///
+/// The value is rendered in **full** (not `short_render`, which truncates at
+/// 80 chars for human messages): a truncated value would collapse two distinct
+/// long values sharing an 80-char prefix into one fingerprint — a masking bug.
+/// `Value`'s `Display` is compact JSON with control characters escaped, so a
+/// value can never contain a literal `\0` and forge the NUL separators.
 fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
     let op_descr = match op {
-        Op::Equals(expected) => format!("== {}", short_render(expected)),
+        Op::Equals(expected) => format!("== {expected}"),
         Op::Matches(re) => format!("=~ {}", re.as_str()),
     };
-    format!("{path_src} {op_descr} :: got {}", short_render(m))
+    format!("{path_src}\u{0}{op_descr}\u{0}got {m}")
 }
 
 /// Return `Some(message)` if the match fails the op; `None` if it passes.

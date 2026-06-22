@@ -1,0 +1,11 @@
+version: 1
+# One document fails two schema constraints at different locations → two
+# path-only findings on data.json. They must carry distinct fingerprints
+# (data-location + schema-constraint), else a genuinely new schema violation
+# would be masked once the file is baselined.
+rules:
+  - id: data-conforms
+    kind: json_schema_passes
+    paths: data.json
+    schema_path: schema.json
+    level: error

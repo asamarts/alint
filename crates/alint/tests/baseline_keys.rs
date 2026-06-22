@@ -37,7 +37,7 @@ fn write(dir: &Path, rel: &str, content: &str) {
 
 /// A new structured-query finding on an already-baselined file must NOT be
 /// masked by the baseline (the v1 `structured_path` hole). The key is the
-/// JSONPath + matched value, so a different failing script is a distinct
+/// `JSONPath` + matched value, so a different failing script is a distinct
 /// fingerprint.
 #[test]
 fn structured_query_new_finding_is_not_masked() {

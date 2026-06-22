@@ -94,7 +94,11 @@ impl Rule for ChangesetRequiresPathRule {
                 self.since, self.add_glob,
             )
         });
-        Ok(vec![Violation::new(msg)])
+        // No path (a repo-level changeset finding) → a fixed key so the
+        // fingerprint doesn't fall through to the volatile message.
+        Ok(vec![
+            Violation::new(msg).with_baseline_key("changeset-requires-path"),
+        ])
     }
 }
 
