@@ -1,7 +1,7 @@
 # Design doc: baseline mode (grandfathering existing violations)
 
 Status: Draft (v2, after an adversarial review pass). (Draft | Implemented in <commit> | Superseded by <doc>.)
-Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) (new persistent suppression mechanism; affects pass/fail semantics).
+Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) — **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics).
 Demand evidence: External adoption evaluation, §4.1 — *"the single feature that makes ESLint/RuboCop/etc. adoptable on legacy code, and its absence is the #1 thing that stops a team from flipping alint on as a merge gate."* Reproduced firsthand against alint 0.13.0.
 Target version: Phase 4, unscheduled (post-v0.14). Draft for review; resolve §7 before implementation and move it under the assigned `docs/design/vX.Y/` directory then.
 

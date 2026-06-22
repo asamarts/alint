@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-21
 decision-makers: alint maintainers
 ---
@@ -8,7 +8,8 @@ decision-makers: alint maintainers
 
 ## Status
 
-Proposed. (One of: Proposed | Accepted | Rejected | Deprecated | Superseded by ADR-NNNN.)
+Accepted (2026-06-21). The design doc (`docs/design/baseline.md`) stays Draft
+until the implementation lands; this records that the decision itself is settled.
 
 ## Context
 
