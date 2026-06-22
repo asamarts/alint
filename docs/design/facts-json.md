@@ -11,7 +11,7 @@ Pages because the consumer and producer disagreed on a hand-counted number.
 
 alint asserts its own surface area as prose in many places — the README sentence
 ("89 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix
-ops, 8 output formats", "10 subcommands"), `docs/site/about/index.md`, and the
+ops, 8 output formats", "11 subcommands"), `docs/site/about/index.md`, and the
 alint.org marketing site (a separate, private repo). Every one of these is a
 hand-maintained number that drifts the instant a rule kind, fixer, formatter, or
 subcommand lands without someone editing the copy.
@@ -49,7 +49,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
     "output_formats": 8,
-    "subcommands": 10
+    "subcommands": 11
   },
   "rule_kinds": ["commented_out_code", "cross_file", "..."],
   "families": ["Existence", "Content", "..."],

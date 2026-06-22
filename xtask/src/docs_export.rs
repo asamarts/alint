@@ -33,6 +33,7 @@ use crate::{build_release_binary, git_sha, now_iso, walkdir_plain, workspace_roo
 pub(crate) const CLI_REFERENCE_SUBCMDS: &[&str] = &[
     "check",
     "fix",
+    "baseline",
     "list",
     "explain",
     "facts",

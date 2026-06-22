@@ -7,7 +7,7 @@
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
     "output_formats": 8,
-    "subcommands": 10
+    "subcommands": 11
   },
   "rule_kinds": [
     "changeset_requires_path",
@@ -150,6 +150,7 @@
     "sarif"
   ],
   "subcommands": [
+    "baseline",
     "check",
     "explain",
     "export-agents-md",
