@@ -24,6 +24,13 @@ jobs:
   coverage:
     name: cargo-llvm-cov
     runs-on: [self-hosted, linux, alint]
+    # Self-fail fast if the runner ever hangs again, instead of sitting at the
+    # 360-min GitHub default and holding the single self-hosted runner. 90 min
+    # comfortably covers a cold-cache, parallelism-capped instrumented build
+    # (typical warm runs finish in minutes); well under bench's 360 / mutants'
+    # 240. The pids-limit + CARGO_BUILD_JOBS fixes should keep hangs from
+    # recurring — this is the belt-and-suspenders net.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
