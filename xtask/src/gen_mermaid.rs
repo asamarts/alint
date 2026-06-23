@@ -104,6 +104,13 @@ fn generate_mmd(root: &Path, out_dir: &Path) -> Result<()> {
             &format!("likec4@{LIKEC4_VERSION}"),
             "gen",
             "mermaid",
+            // Pin the wasm layouter. likec4 auto-detects a container and there
+            // flips `--use-dot` to true (shelling out to a `dot` binary the
+            // slim runner image doesn't ship) — which fails, and would anyway
+            // diverge from the committed wasm-laid-out diagrams. `--no-use-dot`
+            // forces wasm everywhere (local + CI), so the gate is reproducible
+            // and dependency-free. See docs/design/architecture-diagrams.md.
+            "--no-use-dot",
             MODEL_DIR,
             "-o",
         ])
