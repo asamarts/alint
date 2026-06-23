@@ -31,6 +31,13 @@ echo "==> Starting runner container: ${CONTAINER_NAME}"
 podman run -d \
     --name "${CONTAINER_NAME}" \
     --restart unless-stopped \
+    `# Raise the PID ceiling well above podman's 2048 default: a parallel` \
+    `# 'cargo llvm-cov --workspace' build spawns thousands of rustc/test` \
+    `# tasks (cgroup-v2 counts threads too) and intermittently exhausted` \
+    `# 2048, starving the runner agent of forks -> it dropped offline` \
+    `# mid-coverage and the job hung. 16384 is 8x headroom, still a` \
+    `# fork-bomb guard. See ci/scripts/coverage.sh.` \
+    --pids-limit 16384 \
     -e GITHUB_REPO_URL="${GITHUB_REPO_URL}" \
     -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
     -e RUNNER_NAME="${RUNNER_NAME:-alint-runner}" \
