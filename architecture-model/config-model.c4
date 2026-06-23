@@ -31,6 +31,7 @@ model {
       f_nested_configs = field 'nested_configs'
       f_templates = field 'templates'
       f_allow_out_of_root = field 'allow_out_of_root'
+      f_baseline = field 'baseline'
     }
 
     rule = entity 'RuleSpec' 'A rule record: id, kind, level, message, policy_url, when, ...'
