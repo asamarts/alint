@@ -23,6 +23,20 @@ OUT_DIR="${ALINT_COVERAGE_OUT:-target/coverage}"
 # report. `xtask/` excludes the whole xtask crate.
 EXCLUDE_REGEX='xtask/'
 
+# Cap build parallelism to bound peak memory. The instrumented `--workspace`
+# build of the big test crates (proptest + full `-C instrument-coverage`)
+# otherwise OOM-killed rustc (exit 137) on the shared self-hosted CI host when
+# a cold cache forced a full parallel compile under co-tenant load. Half the
+# cores roughly halves peak RSS while keeping the (off-critical-path) coverage
+# build reasonably fast. Override `CARGO_BUILD_JOBS` if you have RAM headroom.
+if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
+  _ncpu="$(nproc 2>/dev/null || echo 4)"
+  CARGO_BUILD_JOBS=$(( _ncpu / 2 ))
+  [[ "$CARGO_BUILD_JOBS" -lt 1 ]] && CARGO_BUILD_JOBS=1
+fi
+export CARGO_BUILD_JOBS
+echo "==> CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} (bounding peak memory)"
+
 if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
   echo "==> Installing cargo-llvm-cov"
   cargo install cargo-llvm-cov --locked
