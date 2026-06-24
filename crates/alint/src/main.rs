@@ -759,7 +759,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
     let effective_baseline = cli.baseline.clone().or(config_baseline);
-    let report = if let Some(baseline_path) = &effective_baseline {
+    let (report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         let mut reader = FileReader::new(path);
         let applied =
@@ -768,16 +768,30 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
         if cli.strict_baseline && !applied.stale.is_empty() {
             strict_stale_fail = true;
         }
-        applied.live
+        let marks = build_baseline_marks(&applied);
+        (applied.live, Some(marks))
     } else {
-        report
+        (report, None)
     };
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let (mut out, opts) = render_env(cli)?;
-    format
-        .write_with_options(&report, &mut out, opts)
-        .context("writing output")?;
+    // SARIF and JSON render baselined findings (marked / counted) so Code
+    // Scanning dismisses rather than re-opens them; every other format ignores
+    // the baseline and emits only the live (new) findings.
+    match (format, baseline_marks.as_ref()) {
+        (Format::Sarif, Some(marks)) => {
+            alint_output::write_sarif_with_baseline(&report, Some(marks), &mut out)
+        }
+        (Format::Json, Some(marks)) => alint_output::write_json_with_baseline(
+            &report,
+            Some(marks),
+            cli.show_baselined,
+            &mut out,
+        ),
+        _ => format.write_with_options(&report, &mut out, opts),
+    }
+    .context("writing output")?;
     out.flush().ok();
 
     // Informational notes (non-violation findings) — surfaced on
@@ -828,6 +842,44 @@ impl<'a> FileReader<'a> {
             None => None,
         };
         alint_core::baseline::fingerprint(rule_id, v, bytes)
+    }
+}
+
+/// Build the per-result baseline marks the SARIF/JSON formatters consume:
+/// each live violation's fingerprint (parallel to the result's `violations`)
+/// and the suppressed findings grouped onto their producing rule.
+fn build_baseline_marks(
+    applied: &alint_core::baseline::AppliedBaseline,
+) -> alint_output::BaselineMarks {
+    use std::collections::HashMap;
+
+    let mut by_rule: HashMap<&str, Vec<alint_output::SuppressedFinding>> = HashMap::new();
+    for s in &applied.suppressed {
+        by_rule
+            .entry(s.rule_id.as_ref())
+            .or_default()
+            .push(alint_output::SuppressedFinding {
+                violation: s.violation.clone(),
+                fingerprint: s.fingerprint.clone(),
+            });
+    }
+    let per_result = applied
+        .live
+        .results
+        .iter()
+        .enumerate()
+        .map(|(i, rr)| alint_output::ResultMarks {
+            live_fingerprints: applied
+                .live_fingerprints
+                .get(i)
+                .cloned()
+                .unwrap_or_default(),
+            suppressed: by_rule.remove(rr.rule_id.as_ref()).unwrap_or_default(),
+        })
+        .collect();
+    alint_output::BaselineMarks {
+        per_result,
+        suppressed_total: applied.suppressed_total,
     }
 }
 

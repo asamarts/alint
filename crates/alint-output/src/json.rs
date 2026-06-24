@@ -4,11 +4,18 @@ use std::path::Path;
 use alint_core::{FixReport, FixStatus, Level, Report};
 use serde::Serialize;
 
+use crate::BaselineMarks;
+
 #[derive(Serialize)]
 struct JsonReport<'a> {
     schema_version: u32,
     summary: Summary,
     results: Vec<JsonResult<'a>>,
+    /// The baselined (suppressed) findings, included only under
+    /// `--show-baselined`; omitted otherwise so non-baseline output stays
+    /// byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baselined: Option<Vec<JsonBaselined<'a>>>,
 }
 
 #[derive(Serialize)]
@@ -18,6 +25,24 @@ struct Summary {
     total_violations: usize,
     has_errors: bool,
     has_warnings: bool,
+    /// Occurrences suppressed by the baseline this run, when one is in effect.
+    /// Absent without `--baseline` so the envelope is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baselined_suppressed: Option<u64>,
+}
+
+/// A baselined finding in the JSON envelope's `baselined` list.
+#[derive(Serialize)]
+struct JsonBaselined<'a> {
+    id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a Path>,
+    message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
+    fingerprint: &'a str,
 }
 
 #[derive(Serialize)]
@@ -51,12 +76,25 @@ struct JsonViolation<'a> {
 }
 
 pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
+    write_json_with_baseline(report, None, false, w)
+}
+
+/// JSON with baseline awareness: the summary gains a `baselined_suppressed`
+/// count, and (under `show_baselined`) the envelope gains a `baselined` list of
+/// the suppressed findings. Without a baseline the envelope is byte-identical.
+pub fn write_json_with_baseline(
+    report: &Report,
+    baseline: Option<&BaselineMarks>,
+    show_baselined: bool,
+    w: &mut dyn Write,
+) -> std::io::Result<()> {
     let summary = Summary {
         failing_rules: report.failing_rules(),
         passing_rules: report.passing_rules(),
         total_violations: report.total_violations(),
         has_errors: report.has_errors(),
         has_warnings: report.has_warnings(),
+        baselined_suppressed: baseline.map(|b| b.suppressed_total),
     };
     let results: Vec<JsonResult<'_>> = report
         .results
@@ -89,10 +127,32 @@ pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 .collect(),
         })
         .collect();
+    let baselined = if show_baselined {
+        baseline.map(|b| {
+            report
+                .results
+                .iter()
+                .zip(&b.per_result)
+                .flat_map(|(rr, m)| {
+                    m.suppressed.iter().map(move |sf| JsonBaselined {
+                        id: rr.rule_id.as_ref(),
+                        path: sf.violation.path.as_deref(),
+                        message: sf.violation.message.as_ref(),
+                        line: sf.violation.line,
+                        column: sf.violation.column,
+                        fingerprint: sf.fingerprint.as_str(),
+                    })
+                })
+                .collect()
+        })
+    } else {
+        None
+    };
     let out = JsonReport {
         schema_version: 1,
         summary,
         results,
+        baselined,
     };
     serde_json::to_writer_pretty(&mut *w, &out)?;
     writeln!(w)?;
@@ -221,5 +281,58 @@ mod tests {
             !out.contains("\"notes\""),
             "empty notes must be omitted: {out}"
         );
+    }
+
+    #[test]
+    fn baseline_adds_suppressed_count_and_list() {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let r = RuleResult::new(
+            "no-todo".into(),
+            Level::Error,
+            None,
+            vec![Violation::new("new")],
+            false,
+        );
+        let report = Report { results: vec![r] };
+        let marks = BaselineMarks {
+            per_result: vec![ResultMarks {
+                live_fingerprints: vec!["fp-live".into()],
+                suppressed: vec![SuppressedFinding {
+                    violation: Violation::new("old"),
+                    fingerprint: "fp-supp".into(),
+                }],
+            }],
+            suppressed_total: 1,
+        };
+        let mut buf = Vec::new();
+        write_json_with_baseline(&report, Some(&marks), true, &mut buf).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["summary"]["baselined_suppressed"], 1);
+        let baselined = v["baselined"].as_array().unwrap();
+        assert_eq!(baselined.len(), 1);
+        assert_eq!(baselined[0]["id"], "no-todo");
+        assert_eq!(baselined[0]["message"], "old");
+        assert_eq!(baselined[0]["fingerprint"], "fp-supp");
+
+        // Without `--show-baselined` the list is omitted but the count stays.
+        let mut buf2 = Vec::new();
+        write_json_with_baseline(&report, Some(&marks), false, &mut buf2).unwrap();
+        let v2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
+        assert_eq!(v2["summary"]["baselined_suppressed"], 1);
+        assert!(v2.get("baselined").is_none());
+    }
+
+    #[test]
+    fn no_baseline_omits_suppressed_fields() {
+        let r = RuleResult::new(
+            "r".into(),
+            Level::Error,
+            None,
+            vec![Violation::new("v")],
+            false,
+        );
+        let out = render(&Report { results: vec![r] });
+        assert!(!out.contains("baselined_suppressed"), "{out}");
+        assert!(!out.contains("\"baselined\""), "{out}");
     }
 }

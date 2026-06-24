@@ -285,3 +285,49 @@ fn baseline_flag_overrides_the_config_key() {
         "config key points at a missing file → hard error, proving it's consulted",
     );
 }
+
+/// `check --baseline --format sarif` MARKS baselined findings (suppressions +
+/// baselineState:unchanged) instead of dropping them, so GitHub Code Scanning
+/// dismisses rather than closes-then-reopens the alert. A fully-baselined repo
+/// still exits 0 — the exit code is gated on live findings only.
+#[test]
+fn sarif_marks_baselined_findings_not_removed() {
+    let d = fixture();
+    let root = d.path();
+    assert_eq!(
+        code(&run(root, &["baseline"])),
+        0,
+        "snapshot the 2 findings"
+    );
+
+    let out = run(
+        root,
+        &[
+            "check",
+            "--baseline",
+            ".alint-baseline.json",
+            "--format",
+            "sarif",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "fully-baselined → exit 0 (gated on live only)"
+    );
+    let sarif = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        sarif.matches("\"baselineState\": \"unchanged\"").count(),
+        2,
+        "both baselined findings are emitted + marked, not removed:\n{sarif}",
+    );
+    assert_eq!(
+        sarif.matches("\"kind\": \"external\"").count(),
+        2,
+        "each baselined finding carries an external suppression",
+    );
+    assert!(
+        sarif.contains("\"partialFingerprints\""),
+        "fingerprints present for Code Scanning correlation",
+    );
+}

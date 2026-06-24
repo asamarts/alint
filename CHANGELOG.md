@@ -30,8 +30,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never from an `extends:`'d or nested config — so a published ruleset can't
   choose what the gate suppresses, and a config key pointing at a missing file is
   the same hard error as a missing `--baseline` (never a silent ungated run).
-  (Per-format SARIF suppression marking is the remaining follow-up; see
-  `docs/design/baseline.md` / ADR-0006.)
+  For **SARIF**, baselined findings are *marked, not removed* — re-emitted with
+  `suppressions: [{ kind: "external" }]` + `baselineState: "unchanged"` +
+  `partialFingerprints`, so GitHub Code Scanning dismisses (rather than
+  closes-then-reopens) the alert; live findings carry `baselineState: "new"` + a
+  fingerprint for run-to-run correlation. The `json` envelope gains a
+  `baselined_suppressed` count (and the suppressed list under `--show-baselined`).
+  See `docs/design/baseline.md` / ADR-0006.
 - `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
   named rule id(s) from the effective config. An id that matches no loaded rule
   is an error, so typos fail loudly. This is the command the `agent` output

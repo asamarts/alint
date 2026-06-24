@@ -293,6 +293,10 @@ pub struct FingerprintedViolation {
 pub struct SuppressedViolation {
     pub rule_id: std::sync::Arc<str>,
     pub violation: Violation,
+    /// The matched baseline fingerprint — emitted as SARIF
+    /// `partialFingerprints` so Code Scanning correlation aligns with the
+    /// baseline.
+    pub fingerprint: String,
 }
 
 /// The result of applying a baseline to a [`Report`].
@@ -300,9 +304,8 @@ pub struct SuppressedViolation {
 pub struct AppliedBaseline {
     /// The report with baselined violations removed — only **new**
     /// violations remain, so the exit code and the primary formatter
-    /// output reflect the delta. (Per-format "mark not remove" — keeping
-    /// suppressed results in SARIF — is wired in a later slice using
-    /// [`Self::suppressed`].)
+    /// output reflect the delta. SARIF re-emits the suppressed findings
+    /// "marked not removed" (see [`Self::suppressed`] + [`Self::live_fingerprints`]).
     pub live: Report,
     /// Every suppressed violation (for `--show-baselined` / SARIF marking).
     pub suppressed: Vec<SuppressedViolation>,
@@ -313,6 +316,11 @@ pub struct AppliedBaseline {
     pub stale: Vec<BaselineEntry>,
     /// Total suppressed occurrences (sum across all fingerprints).
     pub suppressed_total: u64,
+    /// Fingerprints of the **live** violations, parallel to
+    /// [`live`](Self::live)`.results` (outer) and each result's `violations`
+    /// (inner, in the same deterministic order `apply` emits them). Lets SARIF
+    /// stamp `partialFingerprints` on new findings without recomputing them.
+    pub live_fingerprints: Vec<Vec<String>>,
 }
 
 /// Apply a baseline to a report: suppress up to each fingerprint's
@@ -341,6 +349,7 @@ where
     let mut suppressed = Vec::new();
     let mut suppressed_total = 0u64;
     let mut live_results = Vec::with_capacity(report.results.len());
+    let mut live_fingerprints: Vec<Vec<String>> = Vec::with_capacity(report.results.len());
 
     for result in &report.results {
         // Stable match order so suppression is deterministic regardless
@@ -349,6 +358,7 @@ where
         ordered.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
 
         let mut live = Vec::new();
+        let mut live_fps = Vec::new();
         for v in ordered {
             let fp = fingerprint_of(&result.rule_id, v);
             if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
@@ -357,15 +367,18 @@ where
                 suppressed.push(SuppressedViolation {
                     rule_id: result.rule_id.clone(),
                     violation: v.clone(),
+                    fingerprint: fp,
                 });
             } else {
                 live.push(v.clone());
+                live_fps.push(fp);
             }
         }
 
         let mut r = result.clone();
         r.violations = live;
         live_results.push(r);
+        live_fingerprints.push(live_fps);
     }
 
     let stale = baseline
@@ -387,6 +400,7 @@ where
         suppressed,
         stale,
         suppressed_total,
+        live_fingerprints,
     }
 }
 
