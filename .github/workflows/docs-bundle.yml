@@ -159,7 +159,11 @@ jobs:
           # ephemeral ubuntu-latest runner (the VM is discarded), but correct
           # hygiene and safe if the job ever moves to a persistent host.
           trap 'git worktree remove --force "$main_tree" >/dev/null 2>&1 || true; rm -rf "$main_tree"' EXIT
-          ( cd "$main_tree" && cargo run -q -p xtask -- docs-export --out "$main_tree/_bundle" )
+          # --rules-only: the bridge reads only rules/ below, so skip the rest of
+          # the export — most importantly the CLI-reference step's `cargo build
+          # --release -p alint`, which this second (cold) build would otherwise
+          # redo from scratch on top of the tag build above.
+          ( cd "$main_tree" && cargo run -q -p xtask -- docs-export --rules-only --out "$main_tree/_bundle" )
           refreshed=0
           while IFS= read -r page; do
             src="${main_tree}/_bundle/${page#target/docs-bundle/}"

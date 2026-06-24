@@ -85,7 +85,7 @@ fn copy_c4_model(workspace: &Path, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
+pub(crate) fn docs_export(out: Option<PathBuf>, check: bool, rules_only: bool) -> Result<()> {
     let workspace = workspace_root()?;
     let target_dir = out.unwrap_or_else(|| workspace.join("target/docs-bundle"));
 
@@ -109,6 +109,20 @@ pub(crate) fn docs_export(out: Option<PathBuf>, check: bool) -> Result<()> {
     };
 
     eprintln!("[xtask] docs-export → {}", target_dir.display());
+
+    if rules_only {
+        // The docs-bundle rule-page bridge overlays ONLY the per-rule
+        // reference pages from main, so generate just those and skip the rest
+        // of the export — most importantly step 5 (`generate_cli_reference`),
+        // which builds the alint release binary. That redundant build is the
+        // bulk of the bridge's cost, and the bridge never reads its output.
+        generate_rules_pages(&workspace, &target_dir)?;
+        eprintln!(
+            "[xtask] docs-export --rules-only wrote {}/rules",
+            target_dir.display()
+        );
+        return Ok(());
+    }
 
     // 1. Hand-written long-form prose, copied verbatim.
     copy_site_tree(&workspace, &target_dir)?;

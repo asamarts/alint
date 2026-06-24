@@ -234,6 +234,13 @@ enum Commands {
         /// bundle.
         #[arg(long)]
         check: bool,
+        /// Generate ONLY the per-rule reference pages (`rules/`), skipping the
+        /// rest of the bundle — most importantly the CLI-reference step, which
+        /// builds the alint release binary. Used by the docs-bundle rule-page
+        /// bridge, which overlays only those pages from main; the redundant
+        /// release build was the bulk of that bridge's cost.
+        #[arg(long)]
+        rules_only: bool,
     },
     /// Render the public roadmap from canonical `docs/design/ROADMAP.md`,
     /// stripping `<!-- alint:internal-start -->` /
@@ -334,7 +341,11 @@ fn main() -> Result<()> {
         Commands::BenchGate { results, baseline } => {
             bench::gate::run(&results, baseline.as_deref())
         }
-        Commands::DocsExport { out, check } => docs_export::docs_export(out, check),
+        Commands::DocsExport {
+            out,
+            check,
+            rules_only,
+        } => docs_export::docs_export(out, check, rules_only),
         Commands::GenPublicRoadmap {
             input,
             output,
