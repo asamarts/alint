@@ -185,26 +185,41 @@ pub struct Baseline {
 impl Baseline {
     /// Build a baseline by aggregating fingerprinted violations: entries
     /// with the same fingerprint collapse into one with a `count`. The
-    /// advisory `rule_id`/`path`/`message` come from the first
-    /// occurrence of each fingerprint. Output entries are sorted for a
-    /// deterministic, merge-friendly file.
+    /// advisory `rule_id`/`path` are invariant within a fingerprint; the
+    /// advisory `message` is the lexicographically smallest of the group, so
+    /// the file is byte-identical across regenerations regardless of the
+    /// order the engine collected violations in. Output entries are sorted
+    /// for a deterministic, merge-friendly file.
     pub fn from_fingerprints<I>(alint_version: Option<String>, items: I) -> Self
     where
         I: IntoIterator<Item = FingerprintedViolation>,
     {
-        // Group by fingerprint, preserving first-seen advisory fields.
+        // Group by fingerprint. `rule_id` and `path` are invariant within a
+        // fingerprint (both are hashed into it), but the advisory `message`
+        // is NOT — a path-identity or shared-key group can collapse
+        // violations whose messages differ, and `items` arrives in the
+        // engine's collection order. Pin the lexicographically smallest
+        // message so the committed file is byte-identical across
+        // regenerations even if that order ever shifts.
         let mut by_fp: BTreeMap<String, BaselineEntry> = BTreeMap::new();
         for item in items {
-            by_fp
-                .entry(item.fingerprint.clone())
-                .and_modify(|e| e.count += 1)
-                .or_insert(BaselineEntry {
-                    rule_id: item.rule_id,
-                    path: item.path,
-                    fingerprint: item.fingerprint,
-                    count: 1,
-                    message: item.message,
-                });
+            if let Some(e) = by_fp.get_mut(&item.fingerprint) {
+                e.count += 1;
+                if item.message < e.message {
+                    e.message = item.message;
+                }
+            } else {
+                by_fp.insert(
+                    item.fingerprint.clone(),
+                    BaselineEntry {
+                        rule_id: item.rule_id,
+                        path: item.path,
+                        fingerprint: item.fingerprint,
+                        count: 1,
+                        message: item.message,
+                    },
+                );
+            }
         }
         let mut entries: Vec<BaselineEntry> = by_fp.into_values().collect();
         entries.sort_by(|a, b| {
@@ -255,14 +270,29 @@ impl Baseline {
             });
         }
 
-        let mut entries = Vec::new();
+        // Collapse duplicate fingerprints by SUMMING counts. A freshly
+        // written baseline has none (`from_fingerprints` dedups), but the
+        // file is line-oriented to be merge-friendly: a git merge of two
+        // baselines that each recorded the same finding — or a hand-edit —
+        // can leave two entries with one fingerprint. Summing keeps the
+        // suppression budget the total (not the last writer's) and gives
+        // `apply`/`stale` the one-entry-per-fingerprint invariant they
+        // assume. First-appearance order and the first entry's advisory
+        // fields win.
+        let mut entries: Vec<BaselineEntry> = Vec::new();
+        let mut pos: BTreeMap<String, usize> = BTreeMap::new();
         for line in lines {
             let entry: BaselineEntry =
                 serde_json::from_str(line).map_err(|source| BaselineError::Parse {
                     what: "entry",
                     source,
                 })?;
-            entries.push(entry);
+            if let Some(&i) = pos.get(&entry.fingerprint) {
+                entries[i].count = entries[i].count.saturating_add(entry.count);
+            } else {
+                pos.insert(entry.fingerprint.clone(), entries.len());
+                entries.push(entry);
+            }
         }
         Ok(Self {
             alint_version: header.alint_version,
@@ -353,9 +383,11 @@ where
 
     for result in &report.results {
         // Stable match order so suppression is deterministic regardless
-        // of the engine's parallel collection order.
+        // of the engine's parallel collection order. `sort_by_cached_key`
+        // computes each key once (one path allocation per violation) rather
+        // than on every comparison.
         let mut ordered: Vec<&Violation> = result.violations.iter().collect();
-        ordered.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+        ordered.sort_by_cached_key(|v| order_key(v));
 
         let mut live = Vec::new();
         let mut live_fps = Vec::new();
@@ -708,6 +740,44 @@ mod tests {
         assert_eq!(b.total(), 0);
     }
 
+    #[test]
+    fn load_sums_duplicate_fingerprints() {
+        // Two entries with the SAME fingerprint (e.g. a git merge of two
+        // baselines that each recorded the finding) must SUM, not
+        // last-writer-wins, so the suppression budget is the total.
+        let text = format!(
+            "{{\"schema_version\":{SCHEMA_VERSION}}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"ff\",\"count\":2}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"ff\",\"count\":3}}\n"
+        );
+        let b = Baseline::load(&text).unwrap();
+        assert_eq!(b.entries.len(), 1, "duplicates collapse to one entry");
+        assert_eq!(b.entries[0].count, 5, "counts sum (2 + 3)");
+        assert_eq!(b.total(), 5);
+    }
+
+    #[test]
+    fn from_fingerprints_advisory_message_is_order_independent() {
+        // A path-identity group collapses violations whose messages differ;
+        // the committed advisory message must not depend on input order.
+        let mk = |msg: &str| FingerprintedViolation {
+            rule_id: "r".into(),
+            path: Some("a.rs".into()),
+            fingerprint: "shared".into(),
+            message: Some(msg.into()),
+        };
+        let one = Baseline::from_fingerprints(None, vec![mk("zeta"), mk("alpha")]);
+        let two = Baseline::from_fingerprints(None, vec![mk("alpha"), mk("zeta")]);
+        assert_eq!(one, two, "advisory message must not depend on input order");
+        assert_eq!(one.entries.len(), 1);
+        assert_eq!(one.entries[0].count, 2);
+        assert_eq!(
+            one.entries[0].message.as_deref(),
+            Some("alpha"),
+            "the lexicographically smallest message is pinned"
+        );
+    }
+
     // ─── apply (the suppression transform) ──────────────────────────
 
     use crate::Level;
@@ -847,5 +917,79 @@ mod tests {
             !out.live.has_errors(),
             "a fully-baselined error report must exit clean"
         );
+    }
+
+    #[test]
+    fn apply_honors_summed_budget_from_merged_duplicates() {
+        // A merged baseline with the same fingerprint twice (2 + 3) must
+        // suppress all five occurrences, not just the last writer's three.
+        let text = format!(
+            "{{\"schema_version\":{SCHEMA_VERSION}}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"X\",\"count\":2}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"X\",\"count\":3}}\n"
+        );
+        let base = Baseline::load(&text).unwrap();
+        let rep = report(
+            "r",
+            Level::Error,
+            &[
+                ("X", Some(1)),
+                ("X", Some(2)),
+                ("X", Some(3)),
+                ("X", Some(4)),
+                ("X", Some(5)),
+            ],
+        );
+        let out = apply(&rep, &base, by_message);
+        assert_eq!(out.suppressed_total, 5, "summed budget suppresses all five");
+        assert_eq!(out.live.total_violations(), 0);
+        assert!(out.stale.is_empty());
+    }
+
+    #[test]
+    fn apply_live_fingerprints_align_with_live_violations() {
+        // Two rules, each with one suppressed + one live finding. Every
+        // stored live fingerprint must equal recomputing it on the SAME
+        // live violation it sits beside — the invariant the SARIF/JSON
+        // formatters rely on via positional indexing.
+        let lined = |m: &str, l: usize| {
+            Violation::new(m.to_string())
+                .with_path(Path::new("f.rs"))
+                .with_location(l, 1)
+        };
+        let r1 = RuleResult::new(
+            std::sync::Arc::from("r1"),
+            Level::Error,
+            None,
+            vec![lined("A", 1), lined("B", 2)],
+            false,
+        );
+        let r2 = RuleResult::new(
+            std::sync::Arc::from("r2"),
+            Level::Error,
+            None,
+            vec![lined("C", 1), lined("D", 2)],
+            false,
+        );
+        let rep = Report {
+            results: vec![r1, r2],
+        };
+        // Baseline A and C (by_message fingerprints) → B and D stay live.
+        let base = Baseline {
+            alint_version: None,
+            entries: vec![entry("A", 1), entry("C", 1)],
+        };
+        let out = apply(&rep, &base, by_message);
+        for (ri, rr) in out.live.results.iter().enumerate() {
+            for (vi, v) in rr.violations.iter().enumerate() {
+                assert_eq!(
+                    out.live_fingerprints[ri][vi],
+                    by_message(&rr.rule_id, v),
+                    "live_fingerprints[{ri}][{vi}] must match its own violation"
+                );
+            }
+        }
+        assert_eq!(out.live.results[0].violations[0].message.as_ref(), "B");
+        assert_eq!(out.live.results[1].violations[0].message.as_ref(), "D");
     }
 }

@@ -129,13 +129,15 @@ split-brain onto different files; resolves review M5).
   violations and silently omit the rest of the legacy tree, producing a baseline
   that suppresses an arbitrary subset (review H3/H4). Whole-tree only.
 - **Regeneration guard.** If a baseline file already exists, `alint baseline`
-  computes the delta and **refuses to add fingerprints not already present unless
-  `--accept-new` is passed**; it always prints `+N would be grandfathered /
-  -M stale removed`. *Pruning stale entries is always safe and happens without
-  the flag; accepting NEW debt is explicit.* This closes the happy-path footgun
-  where re-running `baseline` (which §3.4 may prompt) silently grandfathers
-  everything introduced since the last run (review H5). First-time creation (no
-  existing file) writes freely.
+  computes the delta and **refuses to grandfather new violation _occurrences_
+  unless `--accept-new` is passed** — a brand-new fingerprint *or* a higher
+  `count` on an existing one (both are fresh debt). It always prints
+  `+N would be grandfathered / -M stale removed` (N/M counted in occurrences).
+  *Pruning stale entries is always safe and happens without the flag; accepting
+  NEW debt is explicit.* This closes the happy-path footgun where re-running
+  `baseline` (which §3.4 may prompt) silently grandfathers everything introduced
+  since the last run (review H5). First-time creation (no existing file) writes
+  freely.
 - Exits 0 on success; 2 on a write/IO failure (§3.9).
 
 ### 2.3 `alint check --baseline <file>` — enforce only the delta
@@ -260,6 +262,12 @@ occurrence is reported. Distinct content/keys are never confused — this is the
 narrowest possible masking window and is the price of line-content (vs
 line-number) keying.
 
+`Baseline::load` **sums** the counts of any duplicate fingerprints it reads, so a
+file with two entries for one fingerprint (e.g. a git merge of two branches that
+each ran `alint baseline` for the same finding, or a hand-edit) suppresses the
+*total*, not the last writer's count. A freshly written file never has duplicates
+(`from_fingerprints` collapses them), so loading and re-writing is idempotent.
+
 ### 3.3 Enforcement pass (`check --baseline`)
 
 A deterministic **post-evaluation report transform**, between `Engine::run` and
@@ -285,19 +293,29 @@ Determinism: suppression is a pure function of `(sorted Report, baseline)`.
 Suppression *marks* violations rather than deleting them, so each formatter can
 do the right thing for its consumer (review C2):
 
-- **human / json / agent / markdown / junit / gitlab** — omit suppressed
-  violations from the primary output (with `--show-baselined`, human/json list
-  them separately). This matches "report only new."
 - **sarif** — emit suppressed results **with `result.suppressions: [{ "kind":
-  "external" }]`** (and `baselineState: "unchanged"`). Removing them instead would
-  make GitHub Code Scanning mark the alert *fixed* and then *reopen* it when the
-  finding resurfaces — alert flapping in the exact blocking-gate scenario this
-  feature targets. Marking keeps the alert open-but-dismissed. The SARIF emitter
-  also gains `partialFingerprints` (the baseline fingerprint) so Code Scanning's
-  own correlation aligns with alint's.
+  "external" }]`** (and `baselineState: "unchanged"`; live results get
+  `baselineState: "new"`). Removing them instead would make GitHub Code Scanning
+  mark the alert *fixed* and then *reopen* it when the finding resurfaces — alert
+  flapping in the exact blocking-gate scenario this feature targets. Marking keeps
+  the alert open-but-dismissed. Every result also carries `partialFingerprints`
+  (the baseline fingerprint) so Code Scanning's own correlation aligns with
+  alint's.
+- **json** — omit suppressed findings from `results` (so the gate sees only new),
+  but the envelope carries a `summary.baselined_suppressed` count, and a
+  fingerprinted `baselined` list under `--show-baselined`.
+- **human** — omit from the primary output; print the suppressed **count** on
+  stderr (the full list under `--show-baselined`).
+- **github / gitlab / junit / markdown / agent** — emit the live (new) findings
+  only, with **no suppressed-count signal in the artifact**. This is deliberate:
+  these formats gate or annotate on new findings, and a synthetic "N suppressed"
+  record has no natural representation in their schemas. A consumer that needs the
+  suppressed count should select `json` or `sarif`.
 
-The `json` envelope gains a `baselined_suppressed` count (and the suppressed list
-under `--show-baselined`) so machine consumers see the suppression happened.
+Only **sarif** and **json** are baseline-aware (they consume the per-result marks
+the CLI threads in via `BaselineMarks`); the rest receive the already-filtered
+live report and are oblivious to the baseline. The exit code is gated on the live
+findings only, in every format.
 
 ### 3.4 `fix` and the baseline
 

@@ -331,3 +331,112 @@ fn sarif_marks_baselined_findings_not_removed() {
         "fingerprints present for Code Scanning correlation",
     );
 }
+
+/// `check --baseline --format json` carries the suppressed count in the
+/// envelope and the live findings in `results` — exercising the JSON
+/// dispatch arm (`write_json_with_baseline`) that the SARIF test doesn't.
+#[test]
+fn json_baseline_reports_suppressed_count() {
+    let d = fixture();
+    let root = d.path();
+    assert_eq!(code(&run(root, &["baseline"])), 0);
+
+    // Fully baselined → exit 0, the envelope still reports the 2 suppressed.
+    let out = run(
+        root,
+        &[
+            "check",
+            "--baseline",
+            ".alint-baseline.json",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(code(&out), 0, "fully baselined → exit 0");
+    let json = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        json.contains("\"baselined_suppressed\": 2"),
+        "suppressed count in the envelope:\n{json}",
+    );
+
+    // A new finding surfaces in `results`; the suppressed count is unchanged.
+    std::fs::write(root.join("c.txt"), "another TODO\n").unwrap();
+    let out2 = run(
+        root,
+        &[
+            "check",
+            "--baseline",
+            ".alint-baseline.json",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(code(&out2), 1, "a new finding fails the gate");
+    let json2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(json2.contains("\"baselined_suppressed\": 2"), "{json2}");
+    assert!(
+        json2.contains("c.txt"),
+        "the new finding is in results:\n{json2}"
+    );
+}
+
+/// `alint baseline` is byte-identical across regenerations of an unchanged
+/// tree — the committed file must never churn (e.g. on advisory fields), or
+/// CI diffs would flap. Guards the determinism `from_fingerprints` enforces.
+#[test]
+fn baseline_regeneration_is_byte_identical() {
+    let d = fixture();
+    let root = d.path();
+    assert_eq!(code(&run(root, &["baseline", "--output", "one.json"])), 0);
+    assert_eq!(code(&run(root, &["baseline", "--output", "two.json"])), 0);
+    let one = std::fs::read(root.join("one.json")).unwrap();
+    let two = std::fs::read(root.join("two.json")).unwrap();
+    assert_eq!(
+        one, two,
+        "two regenerations of the same tree must be byte-identical",
+    );
+}
+
+/// Regenerating must refuse a higher OCCURRENCE count on an
+/// already-baselined fingerprint — that's fresh debt, not just new
+/// fingerprints — unless `--accept-new` is given.
+#[test]
+fn regeneration_refuses_count_increase_on_existing_fingerprint() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    // `for_each_match` flags every selected line (no per-finding key), so two
+    // IDENTICAL offending lines share a fingerprint and collapse to a count.
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+         \x20 - id: fem\n\
+         \x20   kind: for_each_match\n\
+         \x20   paths: [\"**/*.txt\"]\n\
+         \x20   select: \"BAD\"\n\
+         \x20   require:\n\
+         \x20     forbid: [\"BAD\"]\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    // One offending line → its fingerprint is recorded with count 1.
+    std::fs::write(root.join("a.txt"), "BAD\n").unwrap();
+    assert_eq!(code(&run(root, &["baseline"])), 0);
+
+    // A second IDENTICAL offending line → same fingerprint, count now 2.
+    std::fs::write(root.join("a.txt"), "BAD\nBAD\n").unwrap();
+    let refused = run(root, &["baseline"]);
+    assert_eq!(
+        code(&refused),
+        2,
+        "a higher count on an existing finding is fresh debt",
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("grandfather 1 new violation"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr),
+    );
+
+    // --accept-new takes it.
+    assert_eq!(code(&run(root, &["baseline", "--accept-new"])), 0);
+}

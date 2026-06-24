@@ -455,4 +455,60 @@ mod tests {
         assert!(r.get("suppressions").is_none());
         assert!(r.get("partialFingerprints").is_none());
     }
+
+    #[test]
+    fn live_fingerprints_attach_to_their_own_result() {
+        use crate::{BaselineMarks, ResultMarks};
+        // Two rules, each with one live finding carrying a DISTINCT
+        // fingerprint. The marks are positionally indexed, so a desync would
+        // stamp fp-a1 onto rule-b's finding — this pins each to its own.
+        let report = Report {
+            results: vec![
+                RuleResult {
+                    rule_id: "rule-a".into(),
+                    level: Level::Error,
+                    policy_url: None,
+                    violations: vec![Violation::new("a1").with_path(Path::new("a.txt"))],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                },
+                RuleResult {
+                    rule_id: "rule-b".into(),
+                    level: Level::Error,
+                    policy_url: None,
+                    violations: vec![Violation::new("b1").with_path(Path::new("b.txt"))],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                },
+            ],
+        };
+        let marks = BaselineMarks {
+            per_result: vec![
+                ResultMarks {
+                    live_fingerprints: vec!["fp-a1".into()],
+                    suppressed: Vec::new(),
+                },
+                ResultMarks {
+                    live_fingerprints: vec!["fp-b1".into()],
+                    suppressed: Vec::new(),
+                },
+            ],
+            suppressed_total: 0,
+        };
+        let mut buf = Vec::new();
+        write_sarif_with_baseline(&report, Some(&marks), &mut buf).unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        let results = v["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        let by_msg = |m: &str| {
+            results
+                .iter()
+                .find(|r| r["message"]["text"] == m)
+                .unwrap_or_else(|| panic!("no result for {m}"))
+        };
+        assert_eq!(by_msg("a1")["ruleId"], "rule-a");
+        assert_eq!(by_msg("a1")["partialFingerprints"]["alint/v1"], "fp-a1");
+        assert_eq!(by_msg("b1")["ruleId"], "rule-b");
+        assert_eq!(by_msg("b1")["partialFingerprints"]["alint/v1"], "fp-b1");
+    }
 }

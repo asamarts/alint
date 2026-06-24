@@ -755,6 +755,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
 
     let report = engine.run(path, &index).context("running rules")?;
 
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
@@ -768,13 +770,16 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
         if cli.strict_baseline && !applied.stale.is_empty() {
             strict_stale_fail = true;
         }
-        let marks = build_baseline_marks(&applied);
-        (applied.live, Some(marks))
+        // Only SARIF and JSON consume the marks; building them clones every
+        // suppressed finding, so skip that work for the formats that ignore
+        // the baseline and emit only the live (new) findings.
+        let marks =
+            matches!(format, Format::Sarif | Format::Json).then(|| build_baseline_marks(&applied));
+        (applied.live, marks)
     } else {
         (report, None)
     };
 
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let (mut out, opts) = render_env(cli)?;
     // SARIF and JSON render baselined findings (marked / counted) so Code
     // Scanning dismisses rather than re-opens them; every other format ignores
@@ -992,19 +997,30 @@ fn cmd_baseline(
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
     if out_path.exists() && !accept_new {
+        use std::collections::HashMap;
         let existing = load_baseline(&out_path)?;
-        let old: std::collections::HashSet<&str> = existing
+        // Compare by OCCURRENCE, not just fingerprint identity: a higher count
+        // on an already-baselined finding is fresh debt too, and must not slip
+        // in silently. Both baselines are dup-free (load + from_fingerprints
+        // dedup), so each fingerprint maps to exactly one count.
+        let old_counts: HashMap<&str, u32> = existing
             .entries
             .iter()
-            .map(|e| e.fingerprint.as_str())
+            .map(|e| (e.fingerprint.as_str(), e.count))
             .collect();
-        let new: std::collections::HashSet<&str> = new_baseline
+        let new_counts: HashMap<&str, u32> = new_baseline
             .entries
             .iter()
-            .map(|e| e.fingerprint.as_str())
+            .map(|e| (e.fingerprint.as_str(), e.count))
             .collect();
-        let added = new.difference(&old).count();
-        let removed = old.difference(&new).count();
+        let added: u64 = new_counts
+            .iter()
+            .map(|(fp, &c)| u64::from(c.saturating_sub(old_counts.get(fp).copied().unwrap_or(0))))
+            .sum();
+        let removed: u64 = old_counts
+            .iter()
+            .map(|(fp, &c)| u64::from(c.saturating_sub(new_counts.get(fp).copied().unwrap_or(0))))
+            .sum();
         if added > 0 {
             bail!(
                 "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \
