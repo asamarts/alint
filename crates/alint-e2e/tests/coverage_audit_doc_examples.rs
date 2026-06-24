@@ -56,6 +56,21 @@ struct Block {
     preamble: String,
 }
 
+/// Whether a trimmed line opens a yaml fence — the bare ```` ```yaml ```` /
+/// ```` ```yml ```` OR a decorated fence with an info string
+/// (```` ```yaml title="x" ````). Matching only the bare form silently
+/// dropped decorated fences from the gate.
+fn is_yaml_open_fence(trimmed: &str) -> bool {
+    for tag in ["```yaml", "```yml"] {
+        if let Some(rest) = trimmed.strip_prefix(tag) {
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Extract ```yaml / ```yml fenced blocks with their preceding context.
 fn yaml_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<&str> = text.lines().collect();
@@ -63,7 +78,7 @@ fn yaml_blocks(text: &str) -> Vec<Block> {
     let mut i = 0;
     while i < lines.len() {
         let trimmed = lines[i].trim_start();
-        if trimmed == "```yaml" || trimmed == "```yml" {
+        if is_yaml_open_fence(trimmed) {
             let start_line = i + 1;
             let preamble = lines[i.saturating_sub(6)..i].join("\n").to_lowercase();
             let mut body = String::new();
@@ -87,38 +102,39 @@ fn yaml_blocks(text: &str) -> Vec<Block> {
 /// Is this block a deliberate teaching counter-example or a
 /// future/design shape we shouldn't hold to the current schema?
 fn is_deliberately_invalid(b: &Block) -> bool {
-    const MARKERS: &[&str] = &[
-        "wrong:",
-        "alint:ignore-example",
-        "design candidate",
-        "designed shape",
-        "not yet",
-        "roadmap",
-        "future",
-        "won't load",
-        "would fail",
-        "invalid",
-    ];
+    // ONLY explicit, unambiguous opt-outs — the two conventions the module
+    // doc declares. Soft prose words (`future`, `roadmap`, `invalid`, …) used
+    // to live here, but they matched any block whose preamble merely mentioned
+    // such a word, silently exempting valid examples from the gate. A
+    // deliberate counter-example must now be marked, not merely adjacent to a
+    // suggestive sentence.
+    const MARKERS: &[&str] = &["wrong:", "alint:ignore-example"];
     MARKERS.iter().any(|m| b.preamble.contains(m))
 }
+
+/// Top-level config keys (column 0) that mark a block as a (partial) config.
+/// MUST track every top-level field the loader accepts — a missing key makes a
+/// doc block using only that key invisible to the gate; the
+/// `top_keys_track_the_loader` test enforces this against the loader's own
+/// `deny_unknown_fields` field list.
+const TOP_KEYS: &[&str] = &[
+    "version:",
+    "rules:",
+    "extends:",
+    "facts:",
+    "vars:",
+    "templates:",
+    "nested_configs:",
+    "ignore:",
+    "respect_gitignore:",
+    "fix_size_limit:",
+    "allow_out_of_root:",
+    "baseline:",
+];
 
 /// Normalise a block into a full `.alint.yml` document, or `None` if it
 /// isn't a config example (when-expression, output JSON, shell, ...).
 fn to_config(body: &str) -> Option<String> {
-    // A top-level config key in column 0 marks a (partial) config doc.
-    const TOP_KEYS: &[&str] = &[
-        "version:",
-        "rules:",
-        "extends:",
-        "facts:",
-        "vars:",
-        "templates:",
-        "nested_configs:",
-        "ignore:",
-        "respect_gitignore:",
-        "fix_size_limit:",
-        "allow_out_of_root:",
-    ];
     let has_top_key = body
         .lines()
         .any(|l| TOP_KEYS.iter().any(|k| l.starts_with(k)));
@@ -151,6 +167,34 @@ fn to_config(body: &str) -> Option<String> {
         return Some(format!("version: 1\nrules:\n{indented}"));
     }
     None
+}
+
+/// Whether the config's `extends:` references a network (http/https) URL,
+/// which `alint_dsl::load` would resolve over the wire. ONLY those blocks are
+/// skipped — the previous `config.contains("https://")` matched the whole
+/// block, so any example merely mentioning an `https://` `policy_url:` (or an
+/// SRI-pinned `extends` — the exact shape this gate was added to validate) was
+/// silently dropped. A config that doesn't parse here returns `false` so the
+/// loader still runs and reports the structural error.
+fn has_network_extends(config: &str) -> bool {
+    let Ok(doc) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(config) else {
+        return false;
+    };
+    let entry_is_network = |e: &serde_yaml_ng::Value| {
+        let url = match e {
+            serde_yaml_ng::Value::String(s) => Some(s.as_str()),
+            serde_yaml_ng::Value::Mapping(m) => m
+                .get(serde_yaml_ng::Value::String("url".into()))
+                .and_then(serde_yaml_ng::Value::as_str),
+            _ => None,
+        };
+        url.is_some_and(|u| u.starts_with("http://") || u.starts_with("https://"))
+    };
+    match doc.get("extends") {
+        Some(serde_yaml_ng::Value::Sequence(seq)) => seq.iter().any(entry_is_network),
+        Some(other) => entry_is_network(other),
+        None => false,
+    }
 }
 
 /// Inject a synthetic `level: error` into any rule that omits it.
@@ -192,12 +236,17 @@ fn every_doc_config_example_loads() {
     let mut skipped_deliberate = 0usize;
     let mut skipped_network = 0usize;
 
+    let mut per_file_blocks: Vec<(&str, usize)> = Vec::new();
+
     for rel in DOC_FILES {
         let path = root.join(rel);
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
-        for block in yaml_blocks(&text) {
+        let blocks = yaml_blocks(&text);
+        per_file_blocks.push((rel, blocks.len()));
+
+        for block in blocks {
             if is_deliberately_invalid(&block) {
                 skipped_deliberate += 1;
                 continue;
@@ -206,10 +255,11 @@ fn every_doc_config_example_loads() {
                 skipped_non_config += 1;
                 continue;
             };
-            // `extends:` against an HTTPS URL would resolve over the
-            // network; we can't validate those offline. Bundled
-            // (`alint://`) extends load fine.
-            if config.contains("http://") || config.contains("https://") {
+            // Skip ONLY blocks whose `extends:` resolves over the network
+            // (see `has_network_extends`). Bundled (`alint://`) extends — and
+            // any block that merely mentions an `https://` `policy_url:` — load
+            // fine and stay in the gate.
+            if has_network_extends(&config) {
                 skipped_network += 1;
                 continue;
             }
@@ -244,9 +294,20 @@ fn every_doc_config_example_loads() {
          {skipped_non_config} non-config, {skipped_deliberate} deliberate-invalid, \
          {skipped_network} network-extends skipped"
     );
+    // A broken extractor (a fence-syntax change, a bad classifier) would
+    // silently drop blocks toward zero while a single survivor kept
+    // `validated > 0` green. Require every governed doc to still yield blocks,
+    // plus a meaningful global floor.
+    for (rel, n) in &per_file_blocks {
+        assert!(
+            *n > 0,
+            "no fenced yaml blocks extracted from {rel} — the fence extractor likely broke"
+        );
+    }
     assert!(
-        validated > 0,
-        "no doc config examples were validated — did the extractor break?"
+        validated >= 20,
+        "only {validated} doc config example(s) validated (far below the usual count) \
+         — the extractor or classifier likely regressed"
     );
 
     if !failures.is_empty() {
@@ -261,4 +322,43 @@ fn every_doc_config_example_loads() {
         }
         panic!("{msg}");
     }
+}
+
+/// `TOP_KEYS` (the config-block classifier) must list every top-level field
+/// the loader accepts, or a doc example using only a newly-added key (as
+/// `baseline:` was this cycle) is silently classified non-config and escapes
+/// the gate. Derive the authoritative set from the loader's own
+/// `deny_unknown_fields` error so this can't drift unnoticed.
+#[test]
+fn top_keys_track_the_loader() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join(".alint.yml");
+    std::fs::write(&cfg, "version: 1\n__definitely_not_a_key__: 1\n").unwrap();
+    let err = alint_dsl::load(&cfg)
+        .expect_err("an unknown top-level field must be rejected")
+        .to_string();
+    // "... expected one of `version`, `extends`, `ignore`, ..." → the
+    // backtick-quoted names after "expected one of" are the valid fields.
+    let tail = err
+        .split_once("expected one of")
+        .map_or(err.as_str(), |(_, rest)| rest);
+    let loader_fields: Vec<String> = tail
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(|name| format!("{name}:"))
+        .collect();
+    assert!(
+        loader_fields.len() >= 10,
+        "could not parse the loader's field list (got {loader_fields:?}) from: {err}"
+    );
+    let missing: Vec<&String> = loader_fields
+        .iter()
+        .filter(|f| !TOP_KEYS.contains(&f.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "TOP_KEYS is missing loader field(s) {missing:?} — a doc example using \
+         only one of these would be silently skipped by the gate; add them to TOP_KEYS",
+    );
 }

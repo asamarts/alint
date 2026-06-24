@@ -29,10 +29,20 @@ EXCLUDE_REGEX='xtask/'
 # a cold cache forced a full parallel compile under co-tenant load. Half the
 # cores roughly halves peak RSS while keeping the (off-critical-path) coverage
 # build reasonably fast. Override `CARGO_BUILD_JOBS` if you have RAM headroom.
+#
+# MATCHED PAIR: this cap and the container's --pids-limit (ci/runner/setup.sh)
+# must move together — raising pids alone just turns the fork-starvation hang
+# into this OOM. setup.sh asserts the pids ceiling at container creation.
 if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
   _ncpu="$(nproc 2>/dev/null || echo 4)"
   CARGO_BUILD_JOBS=$(( _ncpu / 2 ))
   [[ "$CARGO_BUILD_JOBS" -lt 1 ]] && CARGO_BUILD_JOBS=1
+  # Absolute ceiling: `nproc` sees the HOST's cores (the container has no cgroup
+  # CPU/RAM limit), so on a many-core box `nproc/2` is still large and the
+  # instrumented build can OOM under co-tenant load. Cap at a RAM-derived
+  # ceiling (the ~62 GB host runs ~8 instrumented rustc with co-tenant
+  # headroom). Lower this if exit-137s recur.
+  [[ "$CARGO_BUILD_JOBS" -gt 8 ]] && CARGO_BUILD_JOBS=8
 fi
 export CARGO_BUILD_JOBS
 echo "==> CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} (bounding peak memory)"

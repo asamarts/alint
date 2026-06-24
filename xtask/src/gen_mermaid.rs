@@ -12,9 +12,10 @@
 //! GitHub and alint.org galleries can't drift apart; the diagram bodies come
 //! from the model. `gen-mermaid --check` byte-gates the committed result.
 //!
-//! Like `likec4 validate` (`ci/scripts/likec4.sh`), this needs Node/`npx`; until
-//! the self-hosted runner ships Node, `--check` loudly SKIPS rather than failing
-//! CI. The likec4 version is pinned for reproducibility.
+//! Like `likec4 validate` (`ci/scripts/likec4.sh`), this needs Node/`npx`. The
+//! self-hosted CI runner ships Node 22 (since #90), so `--check` is a live,
+//! enforced byte-gate there; only a local dev box without Node falls back to a
+//! loud SKIP. The likec4 version is pinned for reproducibility.
 
 use std::fs;
 use std::path::Path;
@@ -38,7 +39,7 @@ pub fn run(check: bool) -> Result<()> {
                 "[gen-mermaid] WARN: Node/npx not found - SKIPPING {DIAGRAMS_MD} freshness check."
             );
             println!(
-                "[gen-mermaid] Add Node >= 20 to ci/Containerfile and rebuild the runner to enable this gate."
+                "[gen-mermaid] Install Node >= 20 to run this gate locally (CI's runner already has it)."
             );
             return Ok(());
         }

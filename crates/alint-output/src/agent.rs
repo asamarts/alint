@@ -77,6 +77,11 @@ struct AgentViolation<'a> {
     /// parsing the command out of the English `agent_instruction` —
     /// and is checked by a CLI-parse regression test, so it can never
     /// name a flag the binary doesn't accept.
+    ///
+    /// Scope note: this is always whole-tree (`fix --only <id>`). When the
+    /// producing `check` ran under `--changed`, the suggested fix is *not*
+    /// scoped to the diff — an agent that wants to stay within its changed
+    /// set should add `--changed` (and `--base <ref>`) itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     fix_command: Option<Vec<&'a str>>,
     #[serde(skip_serializing_if = "Option::is_none")]

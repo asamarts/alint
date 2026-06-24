@@ -32,5 +32,6 @@ Options:
       --baseline <FILE>  Suppress violations recorded in the given baseline file (see `alint baseline`), reporting only new ones. Pre-existing findings are grandfathered so `check` can gate a legacy repo on new violations only. A missing or unreadable baseline is an error (never a silent no-op)
       --strict-baseline  With `--baseline`, fail (exit 1) when the baseline has stale entries (recorded findings that no longer fire — usually because they were fixed). Forces the committed baseline to stay exactly accurate. Off by default: fixing things never fails the build
       --show-baselined   With `--baseline`, list the suppressed (baselined) findings on stderr in full, rather than just a one-line count. Parallels `--show-notes`
+      --only <RULE_ID>   Restrict the run to the named rule id(s) from the effective config (repeatable). Other rules are skipped entirely. An id that matches no loaded rule is an error, so typos fail loudly rather than silently linting nothing. Applies to `check` and `fix` (the `agent` format emits `fix --only <rule-id>`); a no-op for other subcommands. Global so the default `alint --only <id>` (bare `check`) works like `alint check`
   -h, --help             Print help
   -V, --version          Print version

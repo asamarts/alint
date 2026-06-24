@@ -9,6 +9,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -49,6 +50,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -67,6 +69,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -107,6 +110,7 @@
   --fail-on-warning
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -126,6 +130,7 @@
   --monorepo
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -147,6 +152,7 @@
   --include-bundled
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --progress <WHEN>
   --show-baselined
   --show-notes
@@ -167,6 +173,7 @@
   --inline
   --no-docs
   --no-gitignore
+  --only <RULE_ID>
   --output <PATH>
   --progress <WHEN>
   --section-title <TEXT>

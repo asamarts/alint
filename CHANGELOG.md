@@ -53,6 +53,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **LSP server robustness.** The `alint lsp` server held its shared state behind
+  a `std::sync::Mutex` accessed via `.lock().unwrap()` at every site, so a panic
+  in any one async handler poisoned the lock and wedged the whole session
+  (every subsequent request panicked). It now uses a non-poisoning
+  `parking_lot::Mutex`, so a single handler panic can't cascade into a dead
+  server; the editor session survives.
 - `alint list --format json` and `alint explain <id> --format json` now emit a
   stable JSON envelope (a rule inventory and a single-rule shape) instead of
   silently printing the human output with a success exit code. An unsupported

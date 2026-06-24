@@ -154,6 +154,11 @@ jobs:
           git fetch --quiet origin main
           main_tree="$(mktemp -d)"
           git worktree add --quiet --detach "$main_tree" origin/main
+          # Clean up the worktree + temp dir on EXIT so a failure in the
+          # docs-export below can't leak a registered worktree. Harmless on this
+          # ephemeral ubuntu-latest runner (the VM is discarded), but correct
+          # hygiene and safe if the job ever moves to a persistent host.
+          trap 'git worktree remove --force "$main_tree" >/dev/null 2>&1 || true; rm -rf "$main_tree"' EXIT
           ( cd "$main_tree" && cargo run -q -p xtask -- docs-export --out "$main_tree/_bundle" )
           refreshed=0
           while IFS= read -r page; do
@@ -163,7 +168,6 @@ jobs:
               refreshed=$((refreshed + 1))
             fi
           done < <(find target/docs-bundle/rules -type f -name '*.md')
-          git worktree remove --force "$main_tree"
           echo "Refreshed ${refreshed} rule reference page(s) from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Refresh cross-version trajectory from main's bench results

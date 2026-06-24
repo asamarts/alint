@@ -788,6 +788,8 @@ distinct value-location, asserting the literal hub string):**
 The v0.10 design candidate is a `value_extractor:` block that takes a
 `{path-pattern: extractor-expression}` mapping so one rule can scope to
 the right path per file. Designed shape:
+
+<!-- alint:ignore-example -->
 ```yaml
 - id: image-hub-pinned
   kind: cross_file_value_equals

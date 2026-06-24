@@ -13,7 +13,6 @@ Options:
       --base <REF>       Base ref for `--changed`. Implies `--changed`
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes
-      --only <RULE_ID>   Restrict the fix pass to the named rule id(s) from the effective config (repeatable). This is the command the `agent` output format emits per fixable violation (`alint fix --only <rule-id>`). An id that matches no loaded rule is an error
       --show-notes       List informational notes (non-violation findings, e.g. entries a rule skipped rather than failed on) in full on stderr. By default only a one-line count is shown
       --color <WHEN>     When to emit ANSI color codes in human output. `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the `human` format; `json` / `sarif` / `github` / `markdown` / `junit` / `gitlab` / `agent` are always plain bytes [default: auto] [possible values: auto, always, never]
       --ascii            Force ASCII glyphs in human output (e.g. `x` instead of `✗`). Auto-enabled when `TERM=dumb`
@@ -25,4 +24,5 @@ Options:
       --baseline <FILE>  Suppress violations recorded in the given baseline file (see `alint baseline`), reporting only new ones. Pre-existing findings are grandfathered so `check` can gate a legacy repo on new violations only. A missing or unreadable baseline is an error (never a silent no-op)
       --strict-baseline  With `--baseline`, fail (exit 1) when the baseline has stale entries (recorded findings that no longer fire — usually because they were fixed). Forces the committed baseline to stay exactly accurate. Off by default: fixing things never fails the build
       --show-baselined   With `--baseline`, list the suppressed (baselined) findings on stderr in full, rather than just a one-line count. Parallels `--show-notes`
+      --only <RULE_ID>   Restrict the run to the named rule id(s) from the effective config (repeatable). Other rules are skipped entirely. An id that matches no loaded rule is an error, so typos fail loudly rather than silently linting nothing. Applies to `check` and `fix` (the `agent` format emits `fix --only <rule-id>`); a no-op for other subcommands. Global so the default `alint --only <id>` (bare `check`) works like `alint check`
   -h, --help             Print help

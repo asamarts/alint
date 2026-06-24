@@ -138,6 +138,15 @@ struct State {
 #[derive(Debug)]
 struct Backend {
     client: Client,
+    /// Shared server state behind a `parking_lot::Mutex` (no poisoning), so a
+    /// panic in one async handler can't permanently wedge the session the way
+    /// a poisoned `std::sync::Mutex` would. Note the trade-off: `parking_lot`
+    /// has no poison signal, so if a handler panics *while holding the guard*,
+    /// the lock simply releases and the next handler reads whatever partial
+    /// state the panic left — the session survives (good for an editor) but
+    /// consistency-on-panic is NOT guaranteed. Critical sections are kept tiny
+    /// and infallible (map inserts/clones) to keep that window closed; the
+    /// engine runs off-lock inside `spawn_blocking`.
     state: Mutex<State>,
 }
 

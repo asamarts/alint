@@ -419,14 +419,27 @@ fn generate_rules_pages(
         });
     }
 
-    // Warn about any registered kind that rules.md doesn't
-    // document. Aliases (declared inline in their canonical
-    // H3's `(alias: …)`) are exempt — they ride on the
-    // canonical page rather than getting their own.
-    for kind in &known_kinds {
-        if !kind_to_family.contains_key(kind) && !aliases.contains(kind) {
-            eprintln!("[xtask] WARN: rule kind '{kind}' is registered but missing from rules.md");
-        }
+    // Hard-fail on any registered kind that rules.md doesn't document. A new
+    // kind must ship a reference page — docs-export can't generate one for an
+    // undocumented kind, so it would silently ship page-less. Promoted from a
+    // soft WARN to match the missing-example gate below. Aliases (declared
+    // inline in their canonical H3's `(alias: …)`) are exempt. Sorted for a
+    // deterministic message (`known_kinds` is a `HashSet`).
+    let mut undocumented: Vec<&str> = known_kinds
+        .iter()
+        .filter(|k| !kind_to_family.contains_key(*k) && !aliases.contains(*k))
+        .map(String::as_str)
+        .collect();
+    undocumented.sort_unstable();
+    if !undocumented.is_empty() {
+        anyhow::bail!(
+            "{} registered rule kind(s) missing from docs/rules.md:\n  - {}\n\n\
+             Add an H3 section (with a ```yaml example) under the right family \
+             heading in docs/rules.md, or declare it as an alias on its \
+             canonical rule's H3 `(alias: …)`.",
+            undocumented.len(),
+            undocumented.join("\n  - "),
+        );
     }
 
     // Hard-fail on any per-rule H3 that lacks a ```yaml usage

@@ -148,6 +148,15 @@ struct Cli {
     #[arg(long, global = true)]
     show_baselined: bool,
 
+    /// Restrict the run to the named rule id(s) from the effective config
+    /// (repeatable). Other rules are skipped entirely. An id that matches no
+    /// loaded rule is an error, so typos fail loudly rather than silently
+    /// linting nothing. Applies to `check` and `fix` (the `agent` format emits
+    /// `fix --only <rule-id>`); a no-op for other subcommands. Global so the
+    /// default `alint --only <id>` (bare `check`) works like `alint check`.
+    #[arg(long, global = true, value_name = "RULE_ID")]
+    only: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -175,12 +184,6 @@ enum Command {
         /// `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
-        /// Restrict the run to the named rule id(s) from the
-        /// effective config (repeatable). Other rules are skipped
-        /// entirely. An id that matches no loaded rule is an error,
-        /// so typos fail loudly rather than silently linting nothing.
-        #[arg(long, value_name = "RULE_ID")]
-        only: Vec<String>,
     },
     /// List all rules loaded from the effective config.
     List,
@@ -205,13 +208,6 @@ enum Command {
         /// Base ref for `--changed`. Implies `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
-        /// Restrict the fix pass to the named rule id(s) from the
-        /// effective config (repeatable). This is the command the
-        /// `agent` output format emits per fixable violation
-        /// (`alint fix --only <rule-id>`). An id that matches no
-        /// loaded rule is an error.
-        #[arg(long, value_name = "RULE_ID")]
-        only: Vec<String>,
     },
     /// Snapshot the current violations into a baseline file, so a later
     /// `alint check --baseline <file>` fails only on NEW violations.
@@ -462,15 +458,13 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         path: PathBuf::from("."),
         changed: false,
         base: None,
-        only: Vec::new(),
     });
     match command {
         Command::Check {
             path,
             changed,
             base,
-            only,
-        } => cmd_check(&path, &ChangedMode::new(changed, base), &only, &cli),
+        } => cmd_check(&path, &ChangedMode::new(changed, base), &cli.only, &cli),
         Command::List => cmd_list(&cli),
         Command::Explain { rule_id } => cmd_explain(&rule_id, &cli),
         Command::Fix {
@@ -478,12 +472,11 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             dry_run,
             changed,
             base,
-            only,
         } => cmd_fix(
             &path,
             dry_run,
             &ChangedMode::new(changed, base),
-            &only,
+            &cli.only,
             &cli,
         ),
         Command::Baseline {
@@ -1179,7 +1172,9 @@ fn cmd_list(cli: &Cli) -> Result<ExitCode> {
 /// Stable machine-readable rule inventory for `alint list --format json`.
 /// Carries the effective rule set (after `extends:`/overrides) so fleet
 /// tooling can diff "what rules are effective here" across repos. The
-/// `schema_version` mirrors the `check --format json` envelope.
+/// Shares the integer `schema_version: 1` with the other JSON envelopes but is
+/// a DISTINCT shape — the `kind` field discriminates so a consumer can tell a
+/// rule inventory from a rule definition or a check report.
 fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
     let rules: Vec<serde_json::Value> = loaded
         .entries
@@ -1193,7 +1188,7 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
             })
         })
         .collect();
-    let doc = serde_json::json!({ "schema_version": 1, "rules": rules });
+    let doc = serde_json::json!({ "schema_version": 1, "kind": "rule-inventory", "rules": rules });
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
     out.flush().ok();
@@ -1384,6 +1379,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
 fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
     let doc = serde_json::json!({
         "schema_version": 1,
+        "kind": "rule",
         "id": entry.rule.id(),
         "level": entry.rule.level().as_str(),
         "policy_url": entry.rule.policy_url(),

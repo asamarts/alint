@@ -19,6 +19,15 @@ set -a; source "$ENV_FILE"; set +a
 RUNNER_IMAGE="${RUNNER_IMAGE:-alint-runner}"
 CONTAINER_NAME="${CONTAINER_NAME:-alint-runner}"
 
+# The container PID ceiling — one half of a MATCHED PAIR with the coverage
+# build-job cap (ci/scripts/coverage.sh). A parallel `cargo llvm-cov
+# --workspace` build exhausts podman's 2048 default and the runner hangs; but
+# raising pids ALONE just converts the hang into an OOM-kill, so coverage.sh
+# also caps CARGO_BUILD_JOBS. BOTH must stay. The post-run check below fails
+# loudly if a future teardown/re-register drops the flag (a documented
+# regression class).
+PIDS_LIMIT="16384"
+
 echo "==> Building runner image: ${RUNNER_IMAGE}"
 podman build -t "${RUNNER_IMAGE}" -f "${CI_DIR}/Containerfile" "${CI_DIR}"
 
@@ -31,13 +40,9 @@ echo "==> Starting runner container: ${CONTAINER_NAME}"
 podman run -d \
     --name "${CONTAINER_NAME}" \
     --restart unless-stopped \
-    `# Raise the PID ceiling well above podman's 2048 default: a parallel` \
-    `# 'cargo llvm-cov --workspace' build spawns thousands of rustc/test` \
-    `# tasks (cgroup-v2 counts threads too) and intermittently exhausted` \
-    `# 2048, starving the runner agent of forks -> it dropped offline` \
-    `# mid-coverage and the job hung. 16384 is 8x headroom, still a` \
-    `# fork-bomb guard. See ci/scripts/coverage.sh.` \
-    --pids-limit 16384 \
+    `# PID ceiling — 8x podman's 2048 default, still a fork-bomb guard. See` \
+    `# the PIDS_LIMIT definition above (matched pair with coverage.sh).` \
+    --pids-limit "${PIDS_LIMIT}" \
     -e GITHUB_REPO_URL="${GITHUB_REPO_URL}" \
     -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
     -e RUNNER_NAME="${RUNNER_NAME:-alint-runner}" \
@@ -46,5 +51,15 @@ podman run -d \
     -v alint-runner-cargo-cache:/usr/local/cargo/registry \
     -v alint-runner-cargo-target:/home/runner/_work/_target \
     "${RUNNER_IMAGE}"
+
+# Fail loudly if the PID ceiling didn't take — a re-register that drops
+# --pids-limit silently reintroduces the coverage hang (see PIDS_LIMIT above).
+_actual_pids="$(podman inspect --format '{{.HostConfig.PidsLimit}}' "${CONTAINER_NAME}" 2>/dev/null || echo '?')"
+if [[ "${_actual_pids}" != "${PIDS_LIMIT}" ]]; then
+    echo "ERROR: ${CONTAINER_NAME} PidsLimit is '${_actual_pids}', expected ${PIDS_LIMIT}." >&2
+    echo "       The coverage build will hang; recreate with --pids-limit ${PIDS_LIMIT}." >&2
+    exit 1
+fi
+echo "==> Verified PidsLimit=${PIDS_LIMIT}"
 
 echo "==> Runner started. Check status with: podman logs -f ${CONTAINER_NAME}"
