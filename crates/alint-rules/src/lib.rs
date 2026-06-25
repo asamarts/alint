@@ -341,7 +341,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("git_commit_gpg_signed", git_commit_gpg_signed::build);
     registry.register("git_blame_age", git_blame_age::build);
     registry.register("changeset_requires_path", changeset_requires_path::build);
-    registry.register("file_is_text", file_is_text::build);
+    registry.register_optionless("file_is_text", file_is_text::build);
     registry.register("is_text", file_is_text::build);
 
     registry.register("filename_case", filename_case::build);
@@ -368,39 +368,39 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("command_idempotent", command_idempotent::build);
 
     // Text-hygiene family (short names — no `file_` prefix).
-    registry.register("no_trailing_whitespace", no_trailing_whitespace::build);
-    registry.register("final_newline", final_newline::build);
+    registry.register_optionless("no_trailing_whitespace", no_trailing_whitespace::build);
+    registry.register_optionless("final_newline", final_newline::build);
     registry.register("line_endings", line_endings::build);
     registry.register("line_max_width", line_max_width::build);
 
     // Security / Unicode sanity.
-    registry.register(
+    registry.register_optionless(
         "no_merge_conflict_markers",
         no_merge_conflict_markers::build,
     );
-    registry.register("no_bidi_controls", no_bidi_controls::build);
-    registry.register("no_zero_width_chars", no_zero_width_chars::build);
+    registry.register_optionless("no_bidi_controls", no_bidi_controls::build);
+    registry.register_optionless("no_zero_width_chars", no_zero_width_chars::build);
 
     // Encoding + content fingerprint.
     registry.register("file_is_ascii", file_is_ascii::build);
-    registry.register("no_bom", no_bom::build);
+    registry.register_optionless("no_bom", no_bom::build);
     registry.register("file_hash", file_hash::build);
 
     // Structure / layout.
     registry.register("max_directory_depth", max_directory_depth::build);
     registry.register("max_files_per_directory", max_files_per_directory::build);
-    registry.register("no_empty_files", no_empty_files::build);
+    registry.register_optionless("no_empty_files", no_empty_files::build);
 
     // Cross-platform / portable metadata.
-    registry.register("no_case_conflicts", no_case_conflicts::build);
-    registry.register("no_illegal_windows_names", no_illegal_windows_names::build);
+    registry.register_optionless("no_case_conflicts", no_case_conflicts::build);
+    registry.register_optionless("no_illegal_windows_names", no_illegal_windows_names::build);
 
     // Unix metadata + git.
-    registry.register("no_symlinks", no_symlinks::build);
+    registry.register_optionless("no_symlinks", no_symlinks::build);
     registry.register("executable_bit", executable_bit::build);
-    registry.register("executable_has_shebang", executable_has_shebang::build);
-    registry.register("shebang_has_executable", shebang_has_executable::build);
-    registry.register("no_submodules", no_submodules::build);
+    registry.register_optionless("executable_has_shebang", executable_has_shebang::build);
+    registry.register_optionless("shebang_has_executable", shebang_has_executable::build);
+    registry.register_optionless("no_submodules", no_submodules::build);
 
     // Hygiene + byte fingerprint.
     registry.register("indent_style", indent_style::build);

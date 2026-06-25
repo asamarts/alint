@@ -111,7 +111,7 @@ struct Cli {
     /// (currently `alint suggest`). `auto` (the default)
     /// renders when stderr is a TTY; `always` forces; `never`
     /// silences. Progress always lives on stderr — `--format`
-    /// JSON / YAML output on stdout stays byte-clean.
+    /// JSON output on stdout stays byte-clean.
     #[arg(
         long,
         global = true,
@@ -131,7 +131,9 @@ struct Cli {
     /// `alint baseline`), reporting only new ones. Pre-existing
     /// findings are grandfathered so `check` can gate a legacy repo on
     /// new violations only. A missing or unreadable baseline is an
-    /// error (never a silent no-op).
+    /// error (never a silent no-op). The path is resolved relative to
+    /// the current directory (not the checked PATH); the `baseline:`
+    /// config key, by contrast, resolves against the repo root.
     #[arg(long, global = true, value_name = "FILE")]
     baseline: Option<PathBuf>,
 
@@ -459,6 +461,13 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         changed: false,
         base: None,
     });
+    // `--only` is global so the bare default `alint --only <id>` (= check)
+    // works, but it only has meaning for check/fix. On any other subcommand a
+    // (possibly typo'd) `--only` was silently ignored; reject it loudly, matching
+    // the flag's own "typos fail loudly" contract.
+    if !cli.only.is_empty() && !matches!(command, Command::Check { .. } | Command::Fix { .. }) {
+        bail!("`--only` only applies to `check` and `fix`");
+    }
     match command {
         Command::Check {
             path,
@@ -718,7 +727,23 @@ fn apply_only_filter(
         .collect())
 }
 
+/// Reject a PATH that isn't a directory. `check`/`fix`/`baseline` operate on a
+/// repository ROOT (a directory); given a single file they would walk nothing
+/// and exit 0 — a silent false "all passed". Fail loudly instead.
+fn require_directory(path: &Path) -> Result<()> {
+    if !path.is_dir() {
+        bail!(
+            "{} is {}, but `check`/`fix`/`baseline` take a repository root (a \
+             directory), not a single file",
+            path.display(),
+            if path.exists() { "a file" } else { "not found" },
+        );
+    }
+    Ok(())
+}
+
 fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> Result<ExitCode> {
+    require_directory(path)?;
     let loaded = load_rules(path, cli)?;
     // The `baseline:` config key, resolved against the repo root being checked.
     // The `--baseline` flag (used as given) overrides it; either one turns on
@@ -729,9 +754,13 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
-    if let Some(set) = changed.resolve(path)? {
-        engine = engine.with_changed_paths(set);
-    }
+    let changed_active = match changed.resolve(path)? {
+        Some(set) => {
+            engine = engine.with_changed_paths(set);
+            true
+        }
+        None => false,
+    };
 
     let effective_gitignore = if cli.no_gitignore {
         false
@@ -759,8 +788,15 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
         let mut reader = FileReader::new(path);
         let applied =
             alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
-        report_baseline_summary(&applied, cli);
-        if cli.strict_baseline && !applied.stale.is_empty() {
+        // Stale-entry detection is only valid on a FULL run. When `--changed`
+        // or `--only` restricts what was evaluated, a baseline entry for an
+        // out-of-scope file/rule legitimately "doesn't fire this run" but is
+        // NOT stale (the finding still exists, it just wasn't checked).
+        // Reporting/failing on those red-lights the documented
+        // `--changed --baseline --strict-baseline` PR-gate recipe.
+        let scoped = changed_active || !only.is_empty();
+        report_baseline_summary(&applied, cli, !scoped);
+        if cli.strict_baseline && !scoped && !applied.stale.is_empty() {
             strict_stale_fail = true;
         }
         // Only SARIF and JSON consume the marks; building them clones every
@@ -896,7 +932,13 @@ fn load_baseline(path: &Path) -> Result<alint_core::baseline::Baseline> {
 
 /// Stderr summary for a baseline-applied run: the suppressed count (or
 /// the full list with `--show-baselined`) and any stale-entry warning.
-fn report_baseline_summary(applied: &alint_core::baseline::AppliedBaseline, cli: &Cli) {
+/// `report_stale` is false on a scoped (`--changed`/`--only`) run, where
+/// out-of-scope entries can't be judged stale (see `cmd_check`).
+fn report_baseline_summary(
+    applied: &alint_core::baseline::AppliedBaseline,
+    cli: &Cli,
+    report_stale: bool,
+) {
     if !cli.quiet && applied.suppressed_total > 0 {
         eprintln!(
             "alint: {} baselined violation(s) suppressed",
@@ -916,7 +958,7 @@ fn report_baseline_summary(applied: &alint_core::baseline::AppliedBaseline, cli:
             }
         }
     }
-    if !cli.quiet && !applied.stale.is_empty() {
+    if report_stale && !cli.quiet && !applied.stale.is_empty() {
         let n = applied.stale.len();
         eprintln!(
             "alint: {n} baseline entr{} no longer fire{}; run `alint baseline` to re-tighten{}",
@@ -941,6 +983,7 @@ fn cmd_baseline(
 ) -> Result<ExitCode> {
     use alint_core::baseline::{Baseline, FingerprintedViolation};
 
+    require_directory(path)?;
     let loaded = load_rules(path, cli)?;
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
@@ -1068,6 +1111,7 @@ fn cmd_fix(
     only: &[String],
     cli: &Cli,
 ) -> Result<ExitCode> {
+    require_directory(path)?;
     let loaded = load_rules(path, cli)?;
     let entries = apply_only_filter(loaded.entries, only)?;
     let mut engine = Engine::from_entries(entries, loaded.registry)
@@ -1185,6 +1229,7 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
                 "level": entry.rule.level().as_str(),
                 "policy_url": entry.rule.policy_url(),
                 "conditional": entry.when.is_some(),
+                "fixable": entry.rule.fixer().is_some(),
             })
         })
         .collect();
@@ -1211,6 +1256,15 @@ fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
         alint_core::evaluate_facts(&loaded.facts, path, &index).context("evaluating facts")?;
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    // `facts` has only a human and a json shape; reject other formats rather
+    // than silently degrading them to human (matching `list`/`explain`).
+    match format {
+        Format::Human | Format::Json => {}
+        _ => bail!(
+            "`alint facts` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+    }
     let (mut out, _opts) = render_env(cli)?;
     render_facts(&loaded.facts, &values, format, &mut out)?;
     out.flush().ok();
@@ -1290,7 +1344,7 @@ fn render_facts_json(
             })
         })
         .collect();
-    let doc = serde_json::json!({ "facts": entries });
+    let doc = serde_json::json!({ "schema_version": 1, "kind": "facts", "facts": entries });
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
     Ok(())
 }
@@ -1384,6 +1438,7 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "level": entry.rule.level().as_str(),
         "policy_url": entry.rule.policy_url(),
         "conditional": entry.when.is_some(),
+        "fixable": entry.rule.fixer().is_some(),
     });
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;

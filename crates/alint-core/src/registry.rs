@@ -7,11 +7,16 @@ use crate::rule::Rule;
 
 pub type RuleBuilder = fn(&RuleSpec) -> Result<Box<dyn Rule>>;
 
+/// Internal storage form: a boxed builder, so `register_optionless` can wrap a
+/// plain [`RuleBuilder`] with option-validation. `Send + Sync` because the
+/// registry is shared across the engine's worker threads.
+type BoxedBuilder = Box<dyn Fn(&RuleSpec) -> Result<Box<dyn Rule>> + Send + Sync>;
+
 /// Map from `kind` string → factory function. Built-in rule crates register
 /// themselves here at startup, and plugin rules (in later phases) will too.
 #[derive(Default)]
 pub struct RuleRegistry {
-    builders: HashMap<String, RuleBuilder>,
+    builders: HashMap<String, BoxedBuilder>,
 }
 
 impl std::fmt::Debug for RuleRegistry {
@@ -28,7 +33,22 @@ impl RuleRegistry {
     }
 
     pub fn register(&mut self, kind: &str, builder: RuleBuilder) {
-        self.builders.insert(kind.to_string(), builder);
+        self.builders.insert(kind.to_string(), Box::new(builder));
+    }
+
+    /// Register an OPTION-LESS rule kind — one that takes no kind-specific
+    /// options. Wraps the builder so any leftover field on the spec is rejected
+    /// ([`RuleSpec::deny_unknown_options`]): a typo'd option must fail loudly,
+    /// not silently no-op, the same way every option-bearing kind rejects
+    /// unknown fields via its `deserialize_options::<Options>()`.
+    pub fn register_optionless(&mut self, kind: &str, builder: RuleBuilder) {
+        self.builders.insert(
+            kind.to_string(),
+            Box::new(move |spec: &RuleSpec| {
+                spec.deny_unknown_options()?;
+                builder(spec)
+            }),
+        );
     }
 
     pub fn build(&self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {

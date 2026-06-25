@@ -85,7 +85,6 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 - id: docs-dir-exists
   kind: dir_exists
   paths: "docs"
-  root_only: true
   level: error
 ```
 

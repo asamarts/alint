@@ -354,6 +354,14 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
              or `requires_body: true`",
         ));
     }
+    // `subject_max_length: 0` would fail every commit (a 0-char subject is
+    // impossible); the JSON schema declares `minimum: 1`, so enforce it at load.
+    if opts.subject_max_length == Some(0) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "git_commit_message `subject_max_length` must be >= 1 (0 rejects every commit)",
+        ));
+    }
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,

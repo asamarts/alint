@@ -579,6 +579,20 @@ impl RuleSpec {
         ))?)
     }
 
+    /// Reject any leftover option key on this spec — for rule kinds that take
+    /// NO kind-specific options. Option-bearing kinds reject unknown fields via
+    /// their `deserialize_options::<Options>()` (a `deny_unknown_fields`
+    /// struct); this is the equivalent loud failure for option-less kinds,
+    /// used by `RuleRegistry::register_optionless`. Without it, a typo'd option
+    /// on an option-less rule silently no-ops.
+    pub fn deny_unknown_options(&self) -> crate::error::Result<()> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct NoOptions {}
+        self.deserialize_options::<NoOptions>()
+            .map(|_: NoOptions| ())
+    }
+
     /// Parse and validate this spec's optional `scope_filter:`
     /// field into a built [`ScopeFilter`](crate::ScopeFilter).
     /// Returns `Ok(None)` when the spec has no `scope_filter`
@@ -718,7 +732,26 @@ impl NestedRuleSpec {
             git_tracked_only: false,
             respect_gitignore: None,
             scope_filter: self.scope_filter.clone(),
-            extra: crate::template::render_mapping(self.extra.clone(), tokens),
+            // `NestedRuleSpec` doesn't name `id`/`level` (synthesized from the
+            // parent) or the top-level-only `fix`/git toggles, so a nested
+            // config that supplies them leaves them in `extra`. Strip them
+            // before they reach the leaf rule's option set — they are not
+            // options, and would otherwise trip the leaf's unknown-option
+            // validation (a deny-unknown-fields `Options` struct, or an
+            // option-less rule's `deny_unknown_options`).
+            extra: {
+                const PARENT_FIELDS: &[&str] = &[
+                    "id",
+                    "level",
+                    "fix",
+                    "git_tracked_only",
+                    "respect_gitignore",
+                ];
+                crate::template::render_mapping(self.extra.clone(), tokens)
+                    .into_iter()
+                    .filter(|(k, _)| k.as_str().is_none_or(|s| !PARENT_FIELDS.contains(&s)))
+                    .collect()
+            },
         }
     }
 }

@@ -440,3 +440,91 @@ fn regeneration_refuses_count_increase_on_existing_fingerprint() {
     // --accept-new takes it.
     assert_eq!(code(&run(root, &["baseline", "--accept-new"])), 0);
 }
+
+/// CLASS GUARD: stale-entry detection (and its `--strict-baseline` failure) is
+/// only valid on a FULL run. A SCOPED run — `--only` (this test) or `--changed`
+/// (the next) — leaves out-of-scope baseline entries unevaluated; they are NOT
+/// stale and must not red-light the build. Full-scope stale detection is still
+/// asserted by `strict_baseline_fails_on_stale_entries`.
+#[test]
+fn only_scoped_run_does_not_false_fail_strict_baseline() {
+    let d = fixture();
+    let root = d.path();
+    assert_eq!(code(&run(root, &["baseline"])), 0); // grandfather both findings
+
+    // `--only no-todo`: `needs-newline` never runs, so its baseline entry is
+    // out of scope — unmatched, but NOT stale.
+    let out = run(
+        root,
+        &[
+            "check",
+            "--baseline",
+            ".alint-baseline.json",
+            "--only",
+            "no-todo",
+            "--strict-baseline",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        code(&out),
+        0,
+        "an out-of-scope entry must not fail --strict-baseline: {stderr}",
+    );
+    assert!(
+        !stderr.contains("no longer fire"),
+        "no stale warning should fire under --only: {stderr}",
+    );
+}
+
+/// The `--changed --baseline --strict-baseline` PR-gate recipe: a PR touching
+/// only an unrelated clean file must pass, not red-light on legacy entries
+/// outside the diff.
+#[test]
+fn changed_scoped_run_does_not_false_fail_strict_baseline() {
+    let d = fixture();
+    let root = d.path();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .expect("git");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-qm",
+        "init",
+    ]);
+    assert_eq!(code(&run(root, &["baseline"])), 0); // grandfather the legacy findings
+
+    // A PR adds an unrelated CLEAN file; --changed evaluates only it.
+    std::fs::write(root.join("new.txt"), "clean\n").unwrap();
+    let out = run(
+        root,
+        &[
+            "check",
+            ".",
+            "--changed",
+            "--baseline",
+            ".alint-baseline.json",
+            "--strict-baseline",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        code(&out),
+        0,
+        "legacy entries outside the --changed diff must not fail the gate: {stderr}",
+    );
+    assert!(
+        !stderr.contains("no longer fire"),
+        "no stale warning should fire under --changed: {stderr}",
+    );
+}

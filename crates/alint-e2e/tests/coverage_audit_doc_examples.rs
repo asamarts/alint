@@ -27,6 +27,7 @@
 //! are skipped by classification. The test prints validated/skipped
 //! counts so coverage stays visible.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -360,5 +361,92 @@ fn top_keys_track_the_loader() {
         missing.is_empty(),
         "TOP_KEYS is missing loader field(s) {missing:?} — a doc example using \
          only one of these would be silently skipped by the gate; add them to TOP_KEYS",
+    );
+}
+
+/// CLASS GUARD: every rule kind must REJECT an unknown option, not silently
+/// swallow it. Reuses the same one-valid-example-per-kind doc corpus as
+/// `every_doc_config_example_loads`: for each rule that builds cleanly, inject
+/// a bogus option into its `extra` and assert the rebuild now FAILS. Catches
+/// the whole class — a builder that `.unwrap_or(default)`s its option-parse, or
+/// that (being option-less) never validates `extra` at all, lets a typo'd
+/// option through as a silent no-op, defeating `validate-config` and the
+/// "schema is the contract" guarantee.
+#[test]
+fn every_rule_kind_rejects_an_unknown_option() {
+    // KNOWN exceptions: the existence family accepts an unknown option today
+    // because it also accepts `root_only` (used in bundled rulesets + docs) but
+    // never implemented it as a validated `Options` struct — it silently ignores
+    // it. Strict option validation for them depends on first implementing
+    // `root_only` parity with `file_exists` (a feature, tracked separately). They
+    // are allow-listed here; a NEW swallower beyond this set still fails the test.
+    const KNOWN_OPTION_SWALLOWERS: &[&str] = &["dir_absent", "dir_exists", "file_absent"];
+
+    let root = repo_root();
+    let registry = alint_rules::builtin_registry();
+    let mut swallowers: BTreeSet<String> = BTreeSet::new();
+    let mut probed: BTreeSet<String> = BTreeSet::new();
+
+    for rel in DOC_FILES {
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        for block in yaml_blocks(&text) {
+            if is_deliberately_invalid(&block) {
+                continue;
+            }
+            let Some(config) = to_config(&block.body) else {
+                continue;
+            };
+            if has_network_extends(&config) {
+                continue;
+            }
+            let config = inject_default_levels(&config);
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join(".alint.yml"), &config).unwrap();
+            let Ok(cfg) = alint_dsl::load(&dir.path().join(".alint.yml")) else {
+                continue;
+            };
+            for spec in &cfg.rules {
+                if matches!(spec.level, alint_core::Level::Off) {
+                    continue;
+                }
+                // Only probe rules that build cleanly, so a failure under the
+                // probe is attributable to the injected option (not e.g. a
+                // missing required field in a terse doc fragment).
+                if registry.build(spec).is_err() {
+                    continue;
+                }
+                let mut bogus = spec.clone();
+                bogus.extra.insert(
+                    serde_yaml_ng::Value::String("__alint_unknown_option_probe__".into()),
+                    serde_yaml_ng::Value::Bool(true),
+                );
+                probed.insert(spec.kind.clone());
+                if registry.build(&bogus).is_ok() {
+                    swallowers.insert(spec.kind.clone());
+                }
+            }
+        }
+    }
+
+    assert!(
+        probed.len() >= 30,
+        "only probed {} kind(s) for unknown-option rejection — the doc corpus or \
+         extractor likely regressed",
+        probed.len(),
+    );
+
+    let unexpected: Vec<&String> = swallowers
+        .iter()
+        .filter(|k| !KNOWN_OPTION_SWALLOWERS.contains(&k.as_str()))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "{} rule kind(s) SILENTLY ACCEPT an unknown option (every other kind rejects \
+         it): {unexpected:?}\nEach must validate its options — propagate \
+         `deserialize_options()` instead of `.unwrap_or(default)`, or register via \
+         `register_optionless` if it takes none.",
+        unexpected.len(),
     );
 }

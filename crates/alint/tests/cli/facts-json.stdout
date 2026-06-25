@@ -10,5 +10,7 @@
       "kind": "any_file_exists",
       "value": false
     }
-  ]
+  ],
+  "kind": "facts",
+  "schema_version": 1
 }

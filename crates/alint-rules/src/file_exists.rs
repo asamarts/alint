@@ -200,9 +200,10 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     };
     let patterns = patterns_of(paths);
     let scope = Scope::from_paths_spec(paths)?;
-    let opts: Options = spec
-        .deserialize_options()
-        .unwrap_or(Options { root_only: false });
+    // Propagate (not swallow) the deserialize error so a typo'd / unknown
+    // option fails loudly, like every other rule kind. `root_only` is
+    // `#[serde(default)]`, so an option-less spec still deserializes fine.
+    let opts: Options = spec.deserialize_options()?;
     // The fast path needs every pattern to be a plain relative
     // path (no glob metacharacters, no `!` exclude). v0.9.11:
     // `git_tracked_only` no longer disqualifies the fast path
