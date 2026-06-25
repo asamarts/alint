@@ -3,8 +3,18 @@
 use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation,
 };
+use serde::Deserialize;
 
 use crate::fixers::FileRemoveFixer;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Options {
+    /// When `true`, only forbid matches directly at the repo root; a nested
+    /// file with the same name is allowed. Mirrors `file_exists`'s `root_only`.
+    #[serde(default)]
+    root_only: bool,
+}
 
 #[derive(Debug)]
 pub struct FileAbsentRule {
@@ -14,6 +24,7 @@ pub struct FileAbsentRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    root_only: bool,
     /// When `true`, only fire on entries that are also tracked
     /// in git's index. Outside a git repo or with no rules
     /// opting in, the tracked-set is `None` and every entry
@@ -57,6 +68,11 @@ impl Rule for FileAbsentRule {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
+            // `root_only`: only a match directly at the repo root is forbidden;
+            // a nested file with the same name is allowed.
+            if self.root_only && crate::is_nested(&entry.path) {
+                continue;
+            }
             let msg = self.message.clone().unwrap_or_else(|| {
                 let tracked = if self.git_tracked_only {
                     " and tracked in git"
@@ -87,6 +103,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "file_absent requires a `paths` field",
         ));
     };
+    let opts: Options = spec.deserialize_options()?;
     let fixer = match &spec.fix {
         Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
         Some(other) => {
@@ -104,6 +121,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
+        root_only: opts.root_only,
         git_tracked_only: spec.git_tracked_only,
         fixer,
     }))
@@ -260,6 +278,48 @@ scope_filter:
         assert!(
             err.contains("file_absent"),
             "expected message to name the cross-file kind, got: {err}",
+        );
+    }
+
+    #[test]
+    fn root_only_forbids_only_root_level_matches() {
+        let rule = build(&spec_yaml(
+            "id: t\nkind: file_absent\npaths: \"**/notes.md\"\nlevel: error\nroot_only: true\n",
+        ))
+        .unwrap();
+        let idx = index(&["notes.md", "sub/notes.md"]);
+        assert_eq!(
+            rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap().len(),
+            1,
+            "root_only forbids only the root-level notes.md, not the nested one",
+        );
+        // Without root_only, both matches fire.
+        let plain = build(&spec_yaml(
+            "id: t\nkind: file_absent\npaths: \"**/notes.md\"\nlevel: error\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            plain
+                .evaluate(&ctx(Path::new("/fake"), &idx))
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn build_accepts_root_only_and_rejects_unknown_option() {
+        assert!(
+            build(&spec_yaml(
+                "id: t\nkind: file_absent\npaths: [\"x\"]\nlevel: error\nroot_only: true\n",
+            ))
+            .is_ok()
+        );
+        assert!(
+            build(&spec_yaml(
+                "id: t\nkind: file_absent\npaths: [\"x\"]\nlevel: error\nbogus: 1\n",
+            ))
+            .is_err()
         );
     }
 }

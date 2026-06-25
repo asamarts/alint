@@ -1,6 +1,17 @@
 //! `dir_absent` — no directory matching `paths` may exist.
 
 use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Options {
+    /// When `true`, only forbid a directory directly at the repo root; a nested
+    /// directory with the same name is allowed. Mirrors `file_exists`'s
+    /// `root_only`.
+    #[serde(default)]
+    root_only: bool,
+}
 
 #[derive(Debug)]
 pub struct DirAbsentRule {
@@ -10,6 +21,7 @@ pub struct DirAbsentRule {
     message: Option<String>,
     scope: Scope,
     patterns: Vec<String>,
+    root_only: bool,
     /// When `true`, only fire on directories that contain at
     /// least one git-tracked file. The canonical use case is
     /// "don't let `target/` be committed" — with this flag set,
@@ -47,6 +59,11 @@ impl Rule for DirAbsentRule {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
+            // `root_only`: only a directory directly at the repo root is
+            // forbidden; a nested directory with the same name is allowed.
+            if self.root_only && crate::is_nested(&entry.path) {
+                continue;
+            }
             let msg = self.message.clone().unwrap_or_else(|| {
                 let tracked = if self.git_tracked_only {
                     " and has tracked content"
@@ -78,6 +95,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // (only fire on `dist/`/`build/` whose ancestor chain contains
     // a `package.json`, so polyglot monorepos with non-JS dirs of
     // the same name don't see false positives).
+    let opts: Options = spec.deserialize_options()?;
     Ok(Box::new(DirAbsentRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -85,6 +103,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_spec(spec)?,
         patterns: patterns_of(paths),
+        root_only: opts.root_only,
         git_tracked_only: spec.git_tracked_only,
     }))
 }
@@ -214,5 +233,47 @@ scope_filter:
         let spec = spec_yaml(yaml);
         let rule = build(&spec).expect("scope_filter must be accepted on dir_absent");
         assert_eq!(rule.id(), "t");
+    }
+
+    #[test]
+    fn root_only_forbids_only_a_root_level_directory() {
+        let rule = build(&spec_yaml(
+            "id: t\nkind: dir_absent\npaths: \"**/target\"\nlevel: error\nroot_only: true\n",
+        ))
+        .unwrap();
+        let idx = index_with_dirs(&[("target", true), ("a/target", true)]);
+        assert_eq!(
+            rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap().len(),
+            1,
+            "root_only forbids only the root-level target/",
+        );
+        // Without root_only, both fire.
+        let plain = build(&spec_yaml(
+            "id: t\nkind: dir_absent\npaths: \"**/target\"\nlevel: error\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            plain
+                .evaluate(&ctx(Path::new("/fake"), &idx))
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn build_accepts_root_only_and_rejects_unknown_option() {
+        assert!(
+            build(&spec_yaml(
+                "id: t\nkind: dir_absent\npaths: \"target\"\nlevel: error\nroot_only: true\n",
+            ))
+            .is_ok()
+        );
+        assert!(
+            build(&spec_yaml(
+                "id: t\nkind: dir_absent\npaths: \"target\"\nlevel: error\nbogus: 1\n",
+            ))
+            .is_err()
+        );
     }
 }

@@ -1017,6 +1017,11 @@
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a directory directly at the repository root is forbidden.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1065,6 +1070,11 @@
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a directory directly at the repository root satisfies the rule.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1188,6 +1198,11 @@
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a file directly at the repository root is forbidden.",
+          "type": "boolean"
         }
       },
       "required": [

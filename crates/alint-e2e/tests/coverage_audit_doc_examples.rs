@@ -374,14 +374,6 @@ fn top_keys_track_the_loader() {
 /// "schema is the contract" guarantee.
 #[test]
 fn every_rule_kind_rejects_an_unknown_option() {
-    // KNOWN exceptions: the existence family accepts an unknown option today
-    // because it also accepts `root_only` (used in bundled rulesets + docs) but
-    // never implemented it as a validated `Options` struct — it silently ignores
-    // it. Strict option validation for them depends on first implementing
-    // `root_only` parity with `file_exists` (a feature, tracked separately). They
-    // are allow-listed here; a NEW swallower beyond this set still fails the test.
-    const KNOWN_OPTION_SWALLOWERS: &[&str] = &["dir_absent", "dir_exists", "file_absent"];
-
     let root = repo_root();
     let registry = alint_rules::builtin_registry();
     let mut swallowers: BTreeSet<String> = BTreeSet::new();
@@ -437,16 +429,12 @@ fn every_rule_kind_rejects_an_unknown_option() {
         probed.len(),
     );
 
-    let unexpected: Vec<&String> = swallowers
-        .iter()
-        .filter(|k| !KNOWN_OPTION_SWALLOWERS.contains(&k.as_str()))
-        .collect();
     assert!(
-        unexpected.is_empty(),
+        swallowers.is_empty(),
         "{} rule kind(s) SILENTLY ACCEPT an unknown option (every other kind rejects \
-         it): {unexpected:?}\nEach must validate its options — propagate \
+         it): {swallowers:?}\nEach must validate its options — propagate \
          `deserialize_options()` instead of `.unwrap_or(default)`, or register via \
          `register_optionless` if it takes none.",
-        unexpected.len(),
+        swallowers.len(),
     );
 }

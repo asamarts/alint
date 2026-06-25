@@ -217,6 +217,7 @@ DirAbsentRule {
     patterns: [
         "**/target",
     ],
+    root_only: false,
     git_tracked_only: false,
 }
 
@@ -247,6 +248,7 @@ DirExistsRule {
     patterns: [
         "docs/**",
     ],
+    root_only: false,
     git_tracked_only: false,
 }
 
@@ -323,6 +325,7 @@ FileAbsentRule {
         "**/Cargo.lock.bak",
         "**/package-lock.json.bak",
     ],
+    root_only: false,
     git_tracked_only: false,
     fixer: Some(
         FileRemoveFixer,

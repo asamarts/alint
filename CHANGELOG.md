@@ -53,6 +53,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`root_only:` now works on `file_absent` / `dir_exists` / `dir_absent`.** The
+  option was documented as the existence-family counterpart of `file_exists`'s
+  `root_only` and used in a bundled ruleset, but the three sibling rules silently
+  ignored it (so a "forbid `notes.md` at the repo root only" rule actually
+  forbade it at every depth). They now honor it — only paths directly at the
+  repository root are considered — with the option validated and published in the
+  config schema, like `file_exists`.
 - **LSP server robustness.** The `alint lsp` server held its shared state behind
   a `std::sync::Mutex` accessed via `.lock().unwrap()` at every site, so a panic
   in any one async handler poisoned the lock and wedged the whole session

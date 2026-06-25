@@ -30,6 +30,15 @@ pub(crate) fn slash(path: impl AsRef<std::path::Path>) -> String {
     path.as_ref().display().to_string().replace('\\', "/")
 }
 
+/// True when `path` names something NESTED — more than one path component,
+/// i.e. not directly at the repository root. The existence family
+/// (`file_exists`/`file_absent`/`dir_exists`/`dir_absent`) uses this to honour
+/// their `root_only:` option: when set, only root-level paths are considered.
+#[must_use]
+pub(crate) fn is_nested(path: &std::path::Path) -> bool {
+    path.components().count() != 1
+}
+
 #[cfg(test)]
 mod slash_tests {
     #[test]
