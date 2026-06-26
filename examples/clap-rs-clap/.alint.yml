@@ -253,7 +253,7 @@ rules:
     require:
       - kind: toml_path_matches
         paths: "{path}/Cargo.toml"
-        path: "$.package.metadata.docs.rs.rustdoc-args[*]"
+        path: "$.package.metadata.docs.rs['rustdoc-args'][*]"
         matches: '^--generate-link-to-definition$'
         if_present: true
     level: info
