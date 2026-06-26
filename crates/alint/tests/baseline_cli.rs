@@ -49,6 +49,20 @@ fn code(o: &Output) -> i32 {
 }
 
 #[test]
+fn baseline_rejects_a_non_human_format() {
+    // `baseline` writes the baseline file plus a human summary and has no
+    // machine-readable report output, so a non-default `--format` is rejected
+    // rather than silently ignored.
+    let d = fixture();
+    let out = run(d.path(), &["baseline", "--format", "json"]);
+    assert_eq!(code(&out), 2, "non-human --format is rejected");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("does not support"), "stderr: {stderr}");
+    // The default (human) format still writes successfully.
+    assert_eq!(code(&run(d.path(), &["baseline"])), 0, "human still works");
+}
+
+#[test]
 fn baseline_then_check_grandfathers_existing_and_gates_on_new() {
     let d = fixture();
     let root = d.path();

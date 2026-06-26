@@ -154,8 +154,10 @@ struct Cli {
     /// (repeatable). Other rules are skipped entirely. An id that matches no
     /// loaded rule is an error, so typos fail loudly rather than silently
     /// linting nothing. Applies to `check` and `fix` (the `agent` format emits
-    /// `fix --only <rule-id>`); a no-op for other subcommands. Global so the
-    /// default `alint --only <id>` (bare `check`) works like `alint check`.
+    /// `fix --only <rule-id>`); rejected on any other subcommand. Global so the
+    /// bare `alint --only <id>` lints the current directory like
+    /// `alint check --only <id>` — to lint a different path, use the explicit
+    /// form `alint check --only <id> <path>`.
     #[arg(long, global = true, value_name = "RULE_ID")]
     only: Vec<String>,
 
@@ -984,6 +986,17 @@ fn cmd_baseline(
     use alint_core::baseline::{Baseline, FingerprintedViolation};
 
     require_directory(path)?;
+    // `baseline` writes the baseline file plus a human summary; it has no
+    // machine-readable report output, so a non-default `--format` would be
+    // silently ignored. Reject it rather than no-op (the same fail-loudly
+    // contract `--only` follows on subcommands that don't honor it).
+    if cli.format != "human" {
+        anyhow::bail!(
+            "`baseline` does not support `--format {}` — it writes the baseline file and a \
+             human summary; drop `--format` (use `--quiet` to silence the summary)",
+            cli.format
+        );
+    }
     let loaded = load_rules(path, cli)?;
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
@@ -1070,11 +1083,12 @@ fn cmd_baseline(
         .with_context(|| format!("writing baseline {}", out_path.display()))?;
     if !cli.quiet {
         let n = new_baseline.entries.len();
+        let total = new_baseline.total();
         eprintln!(
-            "alint: wrote {} ({n} entr{}, {} occurrence(s))",
+            "alint: wrote {} ({n} entr{}, {total} occurrence{})",
             out_path.display(),
             if n == 1 { "y" } else { "ies" },
-            new_baseline.total()
+            if total == 1 { "" } else { "s" },
         );
     }
     Ok(ExitCode::SUCCESS)

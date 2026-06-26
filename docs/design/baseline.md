@@ -3,7 +3,9 @@
 Status: Implemented. Shipped across the slice series (engine, fingerprint, CLI),
 the per-rule `baseline_key` audit (v3), the `baseline:` config key, and the
 per-format SARIF suppression marking + JSON `baselined_suppressed` (§3.8 — the
-final piece). (Draft | Implemented | Superseded by <doc>.)
+final piece). One sub-item is still outstanding: the `gitlab.rs` fingerprint is
+not yet unified onto `violation_fingerprint` (§5, §7). (Draft | Implemented |
+Superseded by <doc>.)
 Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) — **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics).
 Demand evidence: External adoption evaluation, §4.1 — *"the single feature that makes ESLint/RuboCop/etc. adoptable on legacy code, and its absence is the #1 thing that stops a team from flipping alint on as a merge gate."* Reproduced firsthand against alint 0.13.0.
 Target version: Phase 4, unscheduled (post-v0.14). Draft for review; resolve §7 before implementation and move it under the assigned `docs/design/vX.Y/` directory then.
@@ -35,8 +37,9 @@ Target version: Phase 4, unscheduled (post-v0.14). Draft for review; resolve §7
 > line-ending / trailing-whitespace rules report only the first offender). v2
 > (a) **generalizes the per-rule `baseline_key`** to any violation, not just
 > no-path ones (§2.4, §3.1); (b) makes suppression **mark-not-remove** so SARIF
-> doesn't flap GitHub Code Scanning alerts (§3.3, §3.8); (c) **unifies the
-> fingerprint** with the one that already ships in `gitlab.rs` (§5); (d) corrects
+> doesn't flap GitHub Code Scanning alerts (§3.3, §3.8); (c) introduces a single
+> `violation_fingerprint` in `alint-core`, used by the SARIF `partialFingerprints`
+> (the `gitlab.rs` migration onto it is still outstanding — §5); (d) corrects
 > the false path-confinement claim and specifies the real `extends:`/nested
 > enforcement (§5); (e) guards `baseline --changed` and wholesale regeneration
 > (§2.2); (f) switches the file to **JSON Lines** for merge-friendliness and adds
@@ -197,8 +200,9 @@ makes their identity `(rule_id, path)`, stable as the magnitude grows (the "same
 accepted finding"; see the "ratchet" note in §4), with the volatile magnitude no
 longer in the hash. And the bulk of **single-finding path-only** rules
 (`file_exists`, `dir_exists`, `file_hash`, `file_content_matches`, …) and the
-**line-content** rules (`for_each_match`, `commented_out_code`, `line_max_width`):
-the default discriminator (§3.1) covers them. The §6 collision-invariant enforces
+**line-content** rules (`for_each_match`, `commented_out_code`, and the
+first-offender `line_max_width` — one finding per file, on the first over-wide
+line): the default discriminator (§3.1) covers them. The §6 collision-invariant enforces
 the boundary so a new kind can't silently fall into an unsafe default.
 
 ## 3. Semantics
@@ -414,10 +418,16 @@ By failure mode:
 - **Unify the fingerprint (review H1).** `gitlab.rs` already ships
   `fingerprint(rule_id|path|message)` (SHA-256, bare `|` separator) for GitLab
   Code Quality cross-run dedup. v2 introduces **one** `violation_fingerprint` in
-  `alint-core` (length-prefixed, discriminator-based) and migrates `gitlab.rs`
-  (and the new SARIF `partialFingerprints`) onto it. The message-keyed GitLab
-  scheme is *less* stable (rewords churn it) and has the `|` collision; unifying
-  fixes both and gives the tool a single fingerprint definition.
+  `alint-core` (length-prefixed, discriminator-based); the SARIF
+  `partialFingerprints` use it. **The `gitlab.rs` migration onto it is NOT yet
+  done** — `gitlab.rs` still emits the legacy message-keyed fingerprint, which is
+  line-unstable (code motion churns it) and differs from the SARIF/baseline
+  fingerprint for the same finding. Completing it needs the engine to attach
+  precomputed fingerprints to the report — the formatter has no file bytes to
+  compute the line-content discriminator (§3.1 case 2) — which is the same
+  plumbing that would let SARIF emit `partialFingerprints` without `--baseline`.
+  Deferred to a focused follow-up. The message-keyed GitLab scheme is *less*
+  stable (rewords churn it) and has the `|` collision; unifying will fix both.
 - **`Violation.baseline_key`** (§2.4): with the v3 path-shape default, the
   rule-side work is setting a key on only the ~15 kinds whose identity isn't
   `(rule_id, path)` — structured-query, cross-file/no-path, first-offender, and
@@ -509,12 +519,14 @@ only files that already produced such a violation, cached per file).
 6. **Hash truncation — RESOLVED (2026-06-21): no truncation,** full 64-hex
    SHA-256. A fingerprint collision is a silent mis-suppression; the readability
    that motivated truncation is provided by the advisory `message` field (§2.1).
-7. **Fingerprint unification with `gitlab.rs` (and SARIF)** — RESOLVED in
-   direction (§5: one `violation_fingerprint` in alint-core, migrate gitlab +
-   add to SARIF). Open detail: whether changing gitlab's existing fingerprint is
-   a breaking change for any consumer relying on the old `|message` hash (likely
-   fine — it's cross-run dedup, and stability *improves*); confirm before the
-   migration lands.
+7. **Fingerprint unification with `gitlab.rs` (and SARIF)** — PARTIALLY DONE.
+   The single `violation_fingerprint` lives in alint-core and the SARIF
+   `partialFingerprints` use it; **the `gitlab.rs` migration is still
+   outstanding** — it ships the legacy message-keyed hash, which is line-unstable
+   and distinct from the SARIF/baseline fingerprint for the same finding (§5).
+   Open detail still applies: changing gitlab's fingerprint is a benign change
+   for consumers relying on the old `|message` hash (stability *improves*);
+   confirm before the migration lands.
 8. **No-regression "ratchet" + level-aware re-surfacing** — out of scope v1, but
    the two most-requested likely follow-ups (prevent a threshold getting *worse*;
    re-surface a grandfathered finding when its rule is escalated to `error`).

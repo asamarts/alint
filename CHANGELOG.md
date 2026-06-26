@@ -75,6 +75,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   out-of-root grant was never honored from a nested config (confinement always
   held), but it now fails loudly for parity, so a subtree can't appear to grant
   itself reads outside the repo root.
+- **`alint baseline` now rejects a non-default `--format` instead of silently
+  ignoring it.** `baseline` writes the baseline file plus a human summary and has
+  no machine-readable report output, so `baseline --format json` (etc.) was a
+  no-op; it now errors and points you to drop the flag.
+- **`filename_regex` no longer doubles a redundant anchor in its violation
+  message.** The rule auto-anchors with `^…$`, so a pattern written as `^test_`
+  rendered as `/^^test_$/`; it now shows the effective `/^test_$/`.
+- The `--only` flag's help said it was "a no-op for other subcommands"; it is
+  actually rejected there, and the bare `alint --only <id>` form lints the
+  current directory (for a path, use `alint check --only <id> <path>`). The help
+  text now says so, and the `alint baseline` summary pluralizes "occurrence"
+  correctly for a single occurrence.
 - **`root_only:` now works on `file_absent` / `dir_exists` / `dir_absent`.** The
   option was documented as the existence-family counterpart of `file_exists`'s
   `root_only` and used in a bundled ruleset, but the three sibling rules silently
@@ -120,6 +132,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Internal
 
+- Corrected `docs/design/baseline.md`: the `gitlab.rs` fingerprint is documented
+  as still using the legacy message-keyed scheme — the unification onto
+  `violation_fingerprint` landed for the SARIF `partialFingerprints` but the
+  GitLab migration is deferred (it needs precomputed fingerprints threaded to the
+  formatter) — and `line_max_width` is reclassified as a first-offender rule.
 - New drift gates so the doc-vs-schema, stale-status, generated-page, and
   dead-link classes can't recur: `coverage_audit_doc_examples` loads every
   fenced config example in the hand-written docs through the real config
