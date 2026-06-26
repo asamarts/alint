@@ -53,6 +53,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The `is_text` rule kind no longer silently accepts unknown options.** The
+  `is_text` alias of `file_is_text` was registered without the
+  `deny_unknown_options` wrapper its canonical name carries, so a typo'd option
+  on an `is_text` rule was swallowed instead of failing the build (every other
+  kind, the canonical `file_is_text` included, already rejected it). A
+  registry-driven coverage test now probes **every** registered kind — aliases
+  included — so an alias can't diverge from its canonical kind again.
+- **`validate-config` (and `check`) now structurally validate nested `require:`
+  rules.** `for_each_dir` / `for_each_file` / `every_matching_has` build their
+  nested rules lazily per matched entry, so a nested rule with an unknown kind,
+  an unknown option, or a missing required field passed `validate-config` clean
+  and was caught by `check` only when the selector matched at least one entry
+  (with a selector matching nothing, never). Each rule now dry-builds its nested
+  specs at load, so these errors surface immediately — honoring
+  `validate-config`'s "is the config loadable?" contract.
+- **A nested config declaring `allow_out_of_root:` is now rejected, not silently
+  dropped.** Every other trusted root-only key (`extends`, `facts`, `vars`,
+  `ignore`/`nested_configs`, `baseline`) already errored when set in a nested
+  `.alint.yml`; `allow_out_of_root` parsed and was ignored without feedback. The
+  out-of-root grant was never honored from a nested config (confinement always
+  held), but it now fails loudly for parity, so a subtree can't appear to grant
+  itself reads outside the repo root.
 - **`root_only:` now works on `file_absent` / `dir_exists` / `dir_absent`.** The
   option was documented as the existence-family counterpart of `file_exists`'s
   `root_only` and used in a bundled ruleset, but the three sibling rules silently

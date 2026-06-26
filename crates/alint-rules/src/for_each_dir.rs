@@ -105,6 +105,10 @@ impl Rule for ForEachDirRule {
         true
     }
 
+    fn validate_nested(&self, registry: &alint_core::RuleRegistry) -> Result<()> {
+        validate_nested_require(&self.id, self.level, &self.require, registry)
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
             &self.id,
@@ -159,6 +163,35 @@ pub(crate) fn compile_nested_require(
         .enumerate()
         .map(|(idx, spec)| CompiledNestedSpec::compile(spec, parent_id, idx))
         .collect()
+}
+
+/// Dry-build each nested `require:` spec against the registry so a
+/// nested rule with an unknown kind, an unknown option, or a missing
+/// required field fails at config-load time — not lazily on the first
+/// matching iteration, and not silently when the selector matches
+/// nothing. Shared by `for_each_dir`, `for_each_file`, and
+/// `every_matching_has` via their `Rule::validate_nested` impls.
+///
+/// A placeholder path token set is used: only structural errors
+/// (kind / option / required-field) surface here — the per-iteration
+/// path *values* are irrelevant to whether a nested spec builds.
+pub(crate) fn validate_nested_require(
+    parent_id: &str,
+    level: Level,
+    require: &[CompiledNestedSpec],
+    registry: &alint_core::RuleRegistry,
+) -> Result<()> {
+    let tokens = alint_core::template::PathTokens::from_path(std::path::Path::new("_"));
+    for (idx, compiled) in require.iter().enumerate() {
+        let synthesized = compiled.spec.instantiate(parent_id, idx, level, &tokens);
+        registry.build(&synthesized).map_err(|e| {
+            Error::rule_config(
+                parent_id,
+                format!("nested rule #{idx} (`{}`): {e}", compiled.spec.kind),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Compile a `when_iter:` source string into a `WhenExpr` at
@@ -537,6 +570,36 @@ mod tests {
         let r = rule("components/*", vec![require_file_exists("{dir}/index.tsx")]);
         let v = eval_with(&r, &[("src", true), ("src/foo", true)]);
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn validate_nested_rejects_unknown_kind_and_option() {
+        let reg = registry();
+
+        // A valid nested rule validates clean.
+        let good = rule("src/*", vec![require_file_exists("{path}/mod.rs")]);
+        assert!(good.validate_nested(&reg).is_ok());
+
+        // Unknown nested KIND → Err naming the kind. The selector deliberately
+        // matches nothing: `validate_nested` runs at load, before any walk, so
+        // a nested typo is caught even when no directory would be iterated
+        // (the gap where `check` previously reported "passed").
+        let bad_kind: NestedRuleSpec =
+            serde_yaml_ng::from_str("kind: totally_fake_kind\npaths: \"{path}/x\"\n").unwrap();
+        let r = rule("matches-nothing/*", vec![bad_kind]);
+        let err = r.validate_nested(&reg).unwrap_err().to_string();
+        assert!(err.contains("totally_fake_kind"), "{err}");
+
+        // Unknown nested OPTION → Err.
+        let bad_opt: NestedRuleSpec =
+            serde_yaml_ng::from_str("kind: file_exists\npaths: \"{path}/x\"\nbogusopt: true\n")
+                .unwrap();
+        let r = rule("src/*", vec![bad_opt]);
+        let err = r.validate_nested(&reg).unwrap_err().to_string();
+        assert!(
+            err.contains("bogusopt") || err.contains("unknown field"),
+            "{err}"
+        );
     }
 
     #[test]

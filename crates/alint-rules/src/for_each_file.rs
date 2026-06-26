@@ -25,7 +25,7 @@ use serde::Deserialize;
 
 use crate::for_each_dir::{
     IterateMode, SelectSpec, compile_nested_require, evaluate_for_each, parse_when_iter,
-    resolve_select,
+    resolve_select, validate_nested_require,
 };
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +53,10 @@ pub struct ForEachFileRule {
 
 impl Rule for ForEachFileRule {
     alint_core::rule_common_impl!();
+
+    fn validate_nested(&self, registry: &alint_core::RuleRegistry) -> Result<()> {
+        validate_nested_require(&self.id, self.level, &self.require, registry)
+    }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(

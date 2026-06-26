@@ -1784,6 +1784,28 @@ rules:
     }
 
     #[test]
+    fn nested_allow_out_of_root_is_rejected() {
+        // A nested config may not declare `allow_out_of_root:` — the
+        // out-of-root escape hatch is a trusted, root-only grant (a subtree
+        // must not grant itself reads outside the repo root). Parallels
+        // `nested_baseline_is_rejected`; both close the silent-drop gap where
+        // the key parsed into the config but was ignored without feedback,
+        // unlike every other root-only key.
+        let tmp = tempfile::tempdir().unwrap();
+        let root_cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+        let pkg_dir = tmp.path().join("packages/foo");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join(".alint.yml"),
+            "version: 1\nallow_out_of_root: true\nrules: []\n",
+        )
+        .unwrap();
+        let err = load(&root_cfg).unwrap_err();
+        assert!(err.to_string().contains("allow_out_of_root"), "{err}");
+    }
+
+    #[test]
     fn nested_discovery_ignored_when_flag_is_false() {
         let tmp = tempfile::tempdir().unwrap();
         let root_cfg = tmp.path().join(".alint.yml");

@@ -130,6 +130,62 @@ fn fixture_covers_every_registered_rule_kind() {
     }
 }
 
+/// Every registered rule kind — **including aliases** — must reject an
+/// unknown option at load. Drives the loader (not just the schema) off
+/// `all_kinds.yaml`, which `fixture_covers_every_registered_rule_kind`
+/// guarantees holds one building entry per registered kind. Guards against
+/// an alias registered via `register` instead of `register_optionless` (the
+/// v0.13 `is_text` regression): the doc-example probe in alint-e2e's
+/// `coverage_audit_doc_examples` misses such aliases because no documentation
+/// example uses them, so only a registry-driven probe catches the divergence.
+#[test]
+fn every_registered_kind_rejects_an_unknown_option() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/all_kinds.yaml");
+    let config = alint_dsl::load(&path).expect("all_kinds.yaml loads");
+    let registry = alint_rules::builtin_registry();
+
+    let mut swallowers: Vec<String> = Vec::new();
+    let mut probed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for spec in &config.rules {
+        // Only probe specs that build cleanly, so a build failure under the
+        // probe is attributable to the injected option, not a terse entry.
+        if registry.build(spec).is_err() {
+            continue;
+        }
+        let mut bogus = spec.clone();
+        bogus.extra.insert(
+            serde_yaml_ng::Value::String("__alint_unknown_option_probe__".into()),
+            serde_yaml_ng::Value::Bool(true),
+        );
+        probed.insert(spec.kind.clone());
+        if registry.build(&bogus).is_ok() {
+            swallowers.push(spec.kind.clone());
+        }
+    }
+    swallowers.sort();
+    swallowers.dedup();
+    assert!(
+        swallowers.is_empty(),
+        "rule kind(s) SILENTLY ACCEPT an unknown option (register via \
+         `register_optionless` if the kind takes none, else propagate \
+         `deserialize_options()`): {swallowers:?}",
+    );
+
+    // Completeness: every registered kind must have been probed, so a newly
+    // added kind or alias can't slip the check by lacking a building fixture
+    // entry. `fixture_covers_every_registered_rule_kind` guarantees presence;
+    // this asserts the entry builds and was actually probed.
+    let registered: std::collections::BTreeSet<String> =
+        registry.known_kinds().map(str::to_string).collect();
+    let unprobed: Vec<&String> = registered.difference(&probed).collect();
+    assert!(
+        unprobed.is_empty(),
+        "registered kind(s) not probed for unknown-option rejection — their \
+         `all_kinds.yaml` entry must build cleanly: {unprobed:?}",
+    );
+}
+
 #[test]
 fn accepts_dogfood_config() {
     // The repo's own `.alint.yml` lives outside this crate; load it at

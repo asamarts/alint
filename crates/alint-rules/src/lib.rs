@@ -351,7 +351,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("git_blame_age", git_blame_age::build);
     registry.register("changeset_requires_path", changeset_requires_path::build);
     registry.register_optionless("file_is_text", file_is_text::build);
-    registry.register("is_text", file_is_text::build);
+    registry.register_optionless("is_text", file_is_text::build);
 
     registry.register("filename_case", filename_case::build);
     registry.register("filename_regex", filename_regex::build);

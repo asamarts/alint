@@ -177,6 +177,13 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              trusted, root-only input; declare it in the top-level config"
         )));
     }
+    if !config.allow_out_of_root.is_confined() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `allow_out_of_root:` — the out-of-root \
+             escape hatch is a trusted, root-only grant; declare it in the top-level \
+             config. (It is ignored here, never silently honored.)"
+        )));
+    }
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

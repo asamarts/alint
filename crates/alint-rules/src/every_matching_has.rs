@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use crate::for_each_dir::{
     IterateMode, SelectSpec, compile_nested_require, evaluate_for_each, parse_when_iter,
-    resolve_select,
+    resolve_select, validate_nested_require,
 };
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +47,10 @@ pub struct EveryMatchingHasRule {
 
 impl Rule for EveryMatchingHasRule {
     alint_core::rule_common_impl!();
+
+    fn validate_nested(&self, registry: &alint_core::RuleRegistry) -> Result<()> {
+        validate_nested_require(&self.id, self.level, &self.require, registry)
+    }
 
     fn requires_full_index(&self) -> bool {
         // Cross-file: every entry matching `select` must satisfy

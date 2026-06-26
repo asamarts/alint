@@ -1592,8 +1592,13 @@ fn validate_config_inner(config_path: &Path) -> Result<usize> {
         if matches!(spec.level, alint_core::Level::Off) {
             continue;
         }
-        registry
+        let rule = registry
             .build(spec)
+            .with_context(|| format!("building rule {:?}", spec.id))?;
+        // Structurally validate any nested `require:` sub-rules (unknown
+        // kind / option / missing field) — the cross-file iteration rules
+        // build these lazily, so without this they slip past validate-config.
+        rule.validate_nested(&registry)
             .with_context(|| format!("building rule {:?}", spec.id))?;
         if let Some(when_src) = &spec.when {
             alint_core::when::parse(when_src)
@@ -1673,6 +1678,11 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         }
         let mut rule = registry
             .build(spec)
+            .with_context(|| format!("building rule {:?}", spec.id))?;
+        // Structurally validate nested `require:` sub-rules at load, so a
+        // typo'd nested kind/option fails here rather than lazily mid-walk
+        // (or never, when the selector matches no entries).
+        rule.validate_nested(&registry)
             .with_context(|| format!("building rule {:?}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (parsed from
         // the user's own config only — never from `extends:`). A rule

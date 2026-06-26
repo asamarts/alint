@@ -331,6 +331,22 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     /// `docs/design/v0.12/allow_out_of_root.md`.
     fn set_allow_out_of_root(&mut self, _allow: bool) {}
 
+    /// Validate this rule's nested sub-rules (the `require:` block of
+    /// `for_each_dir` / `for_each_file` / `every_matching_has`) against the
+    /// registry at config-load time. Default no-op — most rules have none.
+    ///
+    /// The cross-file iteration rules store their nested specs and build
+    /// them lazily, once per matched iteration, so a nested rule with an
+    /// unknown kind, an unknown option, or a missing required field would
+    /// otherwise slip past `validate-config` entirely — and past `check`
+    /// too whenever the selector matches no entries. Overriders dry-build
+    /// each nested spec here (with placeholder path tokens) so those
+    /// structural errors surface at load. The loader calls this post-build
+    /// at both the `validate-config` and `check` build sites.
+    fn validate_nested(&self, _registry: &RuleRegistry) -> Result<()> {
+        Ok(())
+    }
+
     /// In `--changed` mode, return `true` to evaluate this rule
     /// against the **full** [`FileIndex`] rather than the
     /// changed-only filtered subset. Default `false` (per-file
