@@ -67,7 +67,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and was caught by `check` only when the selector matched at least one entry
   (with a selector matching nothing, never). Each rule now dry-builds its nested
   specs at load, so these errors surface immediately — honoring
-  `validate-config`'s "is the config loadable?" contract.
+  `validate-config`'s "is the config loadable?" contract. The new validation
+  immediately caught a real latent bug: the `examples/clap-rs-clap` config had a
+  nested `toml_path_matches` with an invalid JSONPath
+  (`$.package.metadata.docs.rs.rustdoc-args[*]` — the dashed `rustdoc-args` key
+  needs bracket notation, `['rustdoc-args']`), now fixed.
 - **A nested config declaring `allow_out_of_root:` is now rejected, not silently
   dropped.** Every other trusted root-only key (`extends`, `facts`, `vars`,
   `ignore`/`nested_configs`, `baseline`) already errored when set in a nested
@@ -132,6 +136,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Internal
 
+- The post-v0.12 audit fixes each ship with a regression test (a registry-driven
+  unknown-option probe over every kind, nested-`require:` and nested
+  `allow_out_of_root` rejection, the `baseline --format` guard, and the
+  `filename_regex` message). Workspace line coverage is 91.05%, above the 85% CI
+  floor.
 - Corrected `docs/design/baseline.md`: the `gitlab.rs` fingerprint is documented
   as still using the legacy message-keyed scheme — the unification onto
   `violation_fingerprint` landed for the SARIF `partialFingerprints` but the
