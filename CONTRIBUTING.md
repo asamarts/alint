@@ -52,7 +52,7 @@ cargo test --workspace            # ~5s
 cargo run -p alint -- check       # dogfood: alint lints itself
 ```
 
-Rust 1.85+ required (the workspace MSRV — `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
+Rust 1.85+ required (the workspace MSRV: `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
 
 ### Pre-push checklist
 
@@ -186,7 +186,7 @@ a content rule that fans out over `**/*.rs`.
 
 `main` is protected; PRs require:
 
-- Passing the PR CI workflows: `ci.yml` (preflight — fmt/clippy/test/docs/version-pins/dogfood, plus the `bench-smoke` and advisory `perf-gate` jobs) and `cross-platform.yml` (Linux/macOS/Windows tests). (`release.yml` is tag-triggered only and does not gate PRs.)
+- Passing the PR CI workflows: `ci.yml` (preflight: fmt/clippy/test/docs/version-pins/dogfood, plus the `bench-smoke` and advisory `perf-gate` jobs) and `cross-platform.yml` (Linux/macOS/Windows tests). (`release.yml` is tag-triggered only and does not gate PRs.)
 - One approving review (currently a single-maintainer project; this is the
   spot to call out if you'd like to be added as a co-maintainer)
 

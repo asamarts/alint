@@ -36,7 +36,7 @@ alint fix --dry-run
 alint fix
 ```
 
-Most bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_python`, …), so listing one for an ecosystem you don't have is a silent no-op; the compliance and Apache-governance sets (`reuse`, `apache-2`, `apache/governance`) and `agent-hygiene` carry no fact gate and always fire — extending them is itself the opt-in. See [docs/rules.md](docs/rules.md) for the full rule catalogue and [alint.org](https://alint.org) for narrative docs.
+Most bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_python`, …), so listing one for an ecosystem you don't have is a silent no-op; the compliance and Apache-governance sets (`reuse`, `apache-2`, `apache/governance`) and `agent-hygiene` carry no fact gate and always fire, so extending them is itself the opt-in. See [docs/rules.md](docs/rules.md) for the full rule catalogue and [alint.org](https://alint.org) for narrative docs.
 
 ## Core capabilities
 
@@ -243,7 +243,7 @@ Twenty-two rulesets ship in the binary, with zero network round-trip, pinned to 
 
 - **`compliance/reuse@v1`**: FSFE [REUSE Specification](https://reuse.software/) compliance: top-level `LICENSES/` directory + every source file declares both `SPDX-License-Identifier:` and `SPDX-FileCopyrightText:` in its first ~10 lines.
 - **`compliance/apache-2@v1`**: Apache-2.0 compliance: LICENSE contains the Apache 2.0 text, root NOTICE file present, and every source file carries the canonical "Licensed under the Apache License, Version 2.0" header.
-- **`apache/governance@v1`**: Apache Top-Level-Project (TLP) governance discipline — the release-artefact + governance baseline that arrow / spark / airflow each re-implement by hand. Rule ids are namespaced `apache-gov-*`, so it composes with `compliance/apache-2@v1` (license redistribution) without collision; severities are tiered (legally load-bearing artefacts `error`, release discipline `warning`, nice-to-haves `info`).
+- **`apache/governance@v1`**: Apache Top-Level-Project (TLP) governance discipline: the release-artefact + governance baseline that arrow / spark / airflow each re-implement by hand. Rule ids are namespaced `apache-gov-*`, so it composes with `compliance/apache-2@v1` (license redistribution) without collision; severities are tiered (legally load-bearing artefacts `error`, release discipline `warning`, nice-to-haves `info`).
 
 **Namespaced utilities**
 
@@ -255,7 +255,7 @@ Twenty-two rulesets ship in the binary, with zero network round-trip, pinned to 
 
 **Agent-aware**
 
-- **`agent-hygiene@v1`**: AI-coding-era cruft that shows up disproportionately in agent-authored commits — versioned-duplicate filenames, scratch / planning docs, AI-affirmation prose, debug residue (`debugger;` in non-test source), and model-attributed TODO markers. Composes with the hygiene rulesets; fires on every repo (no fact gate).
+- **`agent-hygiene@v1`**: AI-coding-era cruft that shows up disproportionately in agent-authored commits: versioned-duplicate filenames, scratch / planning docs, AI-affirmation prose, debug residue (`debugger;` in non-test source), and model-attributed TODO markers. Composes with the hygiene rulesets; fires on every repo (no fact gate).
 - **`agent-context@v1`**: hygiene for the agent-instruction files coding agents read each session (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `GEMINI.md`): existence, stale-reference, stub, and a ~200-300-line bloat guard. Gated with `when: facts.has_agent_context`, so it's a silent no-op in repos that ship no agent-context file.
 
 All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets).
