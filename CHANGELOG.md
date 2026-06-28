@@ -71,6 +71,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
   could use `base`. A second `--config` is now a hard error pointing at
   `extends:` for composition, and the help text is corrected. (H4)
+- **SARIF file paths are now valid URI references.** `artifactLocation.uri`
+  emitted the raw OS path, so a `\`-separated path on Windows broke GitHub
+  Code Scanning's repo-file mapping, and a path containing a space / `#` /
+  `%` was non-conformant. Paths are now forward-slashed and percent-encoded
+  per RFC 3986 (plain-ASCII paths are unchanged). (M9)
+- **The baseline flags fail loudly off `check`.** `--baseline`,
+  `--strict-baseline`, and `--show-baselined` are global but only `check`
+  honored them; on `fix` / `list` / `baseline` / … they were silently
+  ignored, breaking the flag's "a missing baseline is an error, never a
+  silent no-op" contract. They're now rejected on any subcommand but
+  `check` (the `baseline` subcommand writes via its own `--output`). (M12)
 - **The `is_text` rule kind no longer silently accepts unknown options.** The
   `is_text` alias of `file_is_text` was registered without the
   `deny_unknown_options` wrapper its canonical name carries, so a typo'd option

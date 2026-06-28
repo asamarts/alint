@@ -53,7 +53,7 @@ three classes at once.
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M6/M7 done; M2–M5,M8 deferred) |
-| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[ ]` |
+| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M12 done; M10,M11,M13,M14 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[ ]` |
 | 7 | alint.org drift | W1–W7 | `[ ]` |
 
@@ -359,13 +359,19 @@ format is already neutralized). Wants its own focused pass. Tracked.
 
 ## Phase 5 — MEDIUM: output / CLI / baseline
 
-### M9 — SARIF `artifactLocation.uri` is a raw OS path `[ ]`
+### M9 — SARIF `artifactLocation.uri` is a raw OS path `[x]`
 **Where:** `output/sarif.rs:122`. Not percent-encoded/forward-slashed →
 non-conformant for spaces/`#`/`%`; `\`-separated on Windows breaks
-GitHub Code-Scanning file mapping. **Fix:** normalize to `/` and
-percent-encode per RFC 3986 uri-reference.
+GitHub Code-Scanning file mapping. **Done:** a `path_to_uri` helper
+slashes `\`→`/` and percent-encodes space/`#`/`%`/controls/non-ASCII per
+RFC 3986; plain-ASCII paths are unchanged (existing snapshots stable);
+unit-tested.
 
-### M10 — GitLab fingerprint omits line; ADR-0006 overclaims unification `[ ]`
+### M10 — GitLab fingerprint omits line; ADR-0006 overclaims unification `[-]`
+**Deferred:** the code half (add `line` to the gitlab fingerprint) is
+small, but it pairs with the ADR-0006 / `baseline.md` reconciliation and
+the deferred gitlab fingerprint-unification work (baseline.md §5/§7); do
+together so the fingerprint isn't changed twice. Tracked.
 **Where:** `output/gitlab.rs:115` (`SHA256(rule_id|path|message)`,
 excludes line). Distinct findings with identical messages collapse →
 count disagrees with json/junit/sarif. `docs/adr/0006:74` claims this
@@ -374,27 +380,40 @@ include line (and/or a per-occurrence discriminator) in the gitlab
 fingerprint; reconcile ADR-0006 §Decision with `baseline.md` (the
 unification is deferred, not done — say so).
 
-### M11 — exit codes: documented `3` never produced; `2` overloaded `[ ]`
+### M11 — exit codes: documented `3` never produced; `2` overloaded `[-]`
+**Deferred (doc-coordination):** the README half overlaps the parallel
+doc-drift pass; §Open decisions leans "document the real 2-code contract"
+(a 2/3 split is a public-contract change, low value). Do after the doc
+branch merges.
 **Where:** README:212 documents `3` (internal); `main.rs:380` funnels
 every `anyhow` error to exit `2`. **Fix:** either implement distinct
 exit codes (`2` config, `3` internal) or correct the README + the
 in-code `validate-config` doc-comment (`main.rs:1543`) to the actual
 contract. Decision recorded in §Open decisions.
 
-### M12 — `--baseline` family silently ignored on non-`check` subcommands `[ ]`
+### M12 — `--baseline` family silently ignored on non-`check` subcommands `[x]`
 **Where:** only `cmd_check` reads `cli.baseline` (`main.rs:787`); `fix`/
 `list`/`baseline`/… accept the flag and ignore it, violating its
-"missing baseline is an error" contract. **Fix:** reject the baseline
-flags on subcommands that don't support them (mirror the `--only`
-rejection at `main.rs:470`), or wire them where they're meaningful.
+"missing baseline is an error" contract. **Done:** `--baseline` /
+`--strict-baseline` / `--show-baselined` are rejected on every subcommand
+except `check` (the `baseline` subcommand writes via its own `--output`,
+not this flag), mirroring the `--only` rejection; trycmd-tested.
 
-### M13 — global `--format` bypasses per-subcommand value gate by position `[ ]`
+### M13 — global `--format` bypasses per-subcommand value gate by position `[-]`
+**Deferred:** validate `--format` against each subcommand's allowed set in
+the handler (fail loudly regardless of position) — clean but multi-site;
+next CLI pass.
 **Where:** global `--format` is an unrestricted `String` (`main.rs:54`);
 `alint --format sarif validate-config` → exit 0, silently ignored.
 **Fix:** validate `--format` against the subcommand's allowed set in the
 handler (fail loudly on an unsupported value regardless of position).
 
-### M14 — baseline first-offender masking under-disclosed `[ ]`
+### M14 — baseline first-offender masking under-disclosed `[-]`
+**Deferred (doc + decision):** the disclosure note lands in
+`docs/design/baseline.md` §4, which the parallel doc-drift pass touches —
+do after merge. The keying question (switch `line_max_width` /
+`file_content_forbidden` to a path key, or keep + document the fail-closed
+churn) is the open decision below.
 **Where:** first-offender/first-match kinds (`no_trailing_whitespace`,
 `line_endings`, `line_max_width`, `file_content_forbidden`) emit only the
 first offender per file, so a *new* same-file offense is never emitted

@@ -481,6 +481,19 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             cli.config.len()
         );
     }
+    // The baseline flags only affect `check`; on every other subcommand they
+    // were silently ignored, breaking the flag's own "a missing baseline is an
+    // error, never a silent no-op" contract. Reject them loudly off `check`,
+    // matching `--only`. (The `baseline` subcommand writes via its own
+    // `--output`, not this flag.)
+    if (cli.baseline.is_some() || cli.strict_baseline || cli.show_baselined)
+        && !matches!(command, Command::Check { .. })
+    {
+        bail!(
+            "`--baseline`, `--strict-baseline`, and `--show-baselined` apply only to \
+             `check` (the `baseline` subcommand writes via `--output`)"
+        );
+    }
     match command {
         Command::Check {
             path,

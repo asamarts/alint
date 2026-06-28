@@ -1,0 +1,8 @@
+bin.name = "alint"
+# M12: the baseline flags only affect `check`; on other subcommands they were
+# silently ignored (breaking "a missing baseline is never a silent no-op").
+# Now rejected loudly before any config load — no fixtures needed.
+args = ["--baseline", "bl.json", "list"]
+status.code = 2
+fs.sandbox = true
+stderr = "[..]apply only to `check`[..]"

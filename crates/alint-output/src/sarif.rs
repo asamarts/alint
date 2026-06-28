@@ -106,6 +106,50 @@ fn level_to_sarif(l: Level) -> &'static str {
     }
 }
 
+/// Render a repo-relative path as a SARIF `uri-reference` (RFC 3986):
+/// forward-slash separators (a Windows `\` otherwise breaks GitHub Code
+/// Scanning's repo-file mapping) and percent-encoding of every byte that
+/// isn't URI-path-safe (space, `#`, `%`, controls, non-ASCII), so a path
+/// like `src/a b#c.rs` neither mis-parses nor fails a format-asserting
+/// SARIF validator.
+fn path_to_uri(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' | '/' => out.push('/'),
+            'A'..='Z'
+            | 'a'..='z'
+            | '0'..='9'
+            | '-'
+            | '.'
+            | '_'
+            | '~'
+            | '!'
+            | '$'
+            | '&'
+            | '\''
+            | '('
+            | ')'
+            | '*'
+            | '+'
+            | ','
+            | ';'
+            | '='
+            | ':'
+            | '@' => out.push(ch),
+            other => {
+                use std::fmt::Write as _;
+                let mut buf = [0u8; 4];
+                for b in other.encode_utf8(&mut buf).bytes() {
+                    let _ = write!(out, "%{b:02X}");
+                }
+            }
+        }
+    }
+    out
+}
+
 /// A SARIF result with the shared fields filled in (no baseline annotations).
 fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
     let region = if v.line.is_some() || v.column.is_some() {
@@ -120,7 +164,7 @@ fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
         vec![SarifLocation {
             physical_location: SarifPhysicalLocation {
                 artifact_location: SarifArtifactLocation {
-                    uri: path.display().to_string(),
+                    uri: path_to_uri(path),
                 },
                 region,
             },
@@ -253,6 +297,16 @@ mod tests {
     use alint_core::{Report, RuleResult, Violation};
     use serde_json::Value;
     use std::path::Path;
+
+    #[test]
+    fn path_to_uri_slashes_and_percent_encodes() {
+        // Plain ASCII paths are unchanged (keeps existing snapshots stable).
+        assert_eq!(path_to_uri(Path::new("src/lib.rs")), "src/lib.rs");
+        // Windows-style separators become `/` (GitHub Code Scanning mapping).
+        assert_eq!(path_to_uri(Path::new("src\\a\\b.rs")), "src/a/b.rs");
+        // Space / `#` / `%` are percent-encoded per RFC 3986 uri-reference.
+        assert_eq!(path_to_uri(Path::new("a b#c%d.rs")), "a%20b%23c%25d.rs");
+    }
 
     fn render(report: &Report) -> Value {
         let mut buf = Vec::new();
