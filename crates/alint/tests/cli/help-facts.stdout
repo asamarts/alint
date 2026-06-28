@@ -6,7 +6,7 @@ Arguments:
   [PATH]  Root of the repository to evaluate facts against [default: .]
 
 Options:
-  -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
+  -c, --config <CONFIG>  Path to a config file
   -f, --format <FORMAT>  Output format [default: human]
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes

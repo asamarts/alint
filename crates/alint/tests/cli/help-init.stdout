@@ -6,7 +6,7 @@ Arguments:
   [PATH]  Root of the repository to write the config into. Defaults to the current directory [default: .]
 
 Options:
-  -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
+  -c, --config <CONFIG>  Path to a config file
       --monorepo         Detect workspace shape (Cargo `[workspace]`, pnpm-workspace.yaml, or `package.json` `workspaces`) and add the corresponding `monorepo@v1` + `monorepo/<flavor>-workspace@v1` overlays. `nested_configs: true` is set on the generated config so each subdirectory can layer its own `.alint.yml` on top
   -f, --format <FORMAT>  Output format [default: human]
       --no-gitignore     Disable .gitignore handling (overrides config)

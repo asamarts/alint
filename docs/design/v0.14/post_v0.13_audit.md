@@ -51,7 +51,7 @@ three classes at once.
 |---|---|---|---|
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
-| 3 | HIGH — correctness | H3, H4 | `[ ]` |
+| 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[ ]` |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[ ]` |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[ ]` |
@@ -213,7 +213,7 @@ both return a parse/eval error, not a crash.
 
 ## Phase 3 — HIGH: correctness
 
-### H3 — byte-level fixers corrupt binaries; in-place writes non-atomic `[ ]`
+### H3 — byte-level fixers corrupt binaries; in-place writes non-atomic `[x]`
 
 **Severity:** High (data loss / corruption of user files). **Where:**
 binary-unsafe raw-byte fixers: `fixers/hygiene.rs:237`
@@ -239,7 +239,7 @@ fixer. Reconcile `FileAppendFinalNewlineFixer::apply` with `fix_edit`
 (skipped); an atomic-write unit test; idempotence `[fix, fix]` byte-equal
 tree.
 
-### H4 — `--config` "later overrides earlier" is false `[ ]`
+### H4 — `--config` "later overrides earlier" is false `[x]`
 
 **Severity:** High (silent wrong-config; help text actively misleads).
 **Where:** help text `crates/alint/src/main.rs:49`; consumers read

@@ -46,7 +46,7 @@ const ALINT_LONG_VERSION: &str = concat!(
 // would obscure, not clarify.
 #[allow(clippy::struct_excessive_bools)]
 struct Cli {
-    /// Path to a config file (repeatable; later overrides earlier).
+    /// Path to a config file.
     #[arg(long, short = 'c', global = true)]
     config: Vec<PathBuf>,
 
@@ -469,6 +469,17 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
     // the flag's own "typos fail loudly" contract.
     if !cli.only.is_empty() && !matches!(command, Command::Check { .. } | Command::Fix { .. }) {
         bail!("`--only` only applies to `check` and `fix`");
+    }
+    // `--config` is single-valued in effect: every consumer reads the first
+    // entry, so a second `-c` was silently dropped while the help text wrongly
+    // promised "later overrides earlier". Reject multiple rather than silently
+    // pick one — layering configs is what `extends:` is for.
+    if cli.config.len() > 1 {
+        bail!(
+            "`--config` may be given at most once (got {}); compose configs with an \
+             `extends:` chain instead of repeating `-c`",
+            cli.config.len()
+        );
     }
     match command {
         Command::Check {

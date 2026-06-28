@@ -6,7 +6,7 @@ Arguments:
   [PATH]  Root of the repository to scan. Defaults to the current directory [default: .]
 
 Options:
-  -c, --config <CONFIG>     Path to a config file (repeatable; later overrides earlier)
+  -c, --config <CONFIG>     Path to a config file
   -f, --format <FORMAT>     Output format. `human` (default) is colorised for terminals; `yaml` is a paste-ready config snippet; `json` is a stable shape suitable for agent consumption [default: human] [possible values: human, yaml, json]
       --confidence <LEVEL>  Lower bound on signal strength for proposals. `low` is broadest (helpful when prospecting); `high` is strict (only ecosystem-marker hits and equivalents) [default: medium] [possible values: low, medium, high]
       --include-bundled     Include bundled-ruleset suggestions even if the existing `.alint.yml` already extends them

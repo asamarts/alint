@@ -6,7 +6,7 @@ Arguments:
   [PATH]  Root of the repository to operate on [default: .]
 
 Options:
-  -c, --config <CONFIG>  Path to a config file (repeatable; later overrides earlier)
+  -c, --config <CONFIG>  Path to a config file
       --dry-run          Print what would be done without writing anything
       --changed          Restrict the fix pass to files in the working-tree diff (see `alint check --changed`). Cross-file + existence rules still see the full tree
   -f, --format <FORMAT>  Output format [default: human]

@@ -1,9 +1,10 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use alint_core::{
     ContentSourceSpec, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation,
 };
+
+use crate::io::{looks_binary, write_atomic};
 
 /// UTF-8 byte-order mark. Preserved across prepend operations so
 /// editors that rely on it don't break.
@@ -170,6 +171,12 @@ impl Fixer for FilePrependFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not prepending content",
+                path.display()
+            )));
+        }
         let mut out = Vec::with_capacity(existing.len() + prepend.len());
         if existing.starts_with(UTF8_BOM) {
             out.extend_from_slice(UTF8_BOM);
@@ -179,7 +186,7 @@ impl Fixer for FilePrependFixer {
             out.extend_from_slice(&prepend);
             out.extend_from_slice(&existing);
         }
-        std::fs::write(&abs, &out).map_err(|source| Error::Io {
+        write_atomic(&abs, &out).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -254,17 +261,19 @@ impl Fixer for FileAppendFixer {
                 path.display()
             )));
         }
-        if let Some(skip) = alint_core::check_fix_size(&abs, path, ctx)? {
-            return Ok(skip);
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not appending content",
+                path.display()
+            )));
         }
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&abs)
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
-        f.write_all(&payload).map_err(|source| Error::Io {
+        let mut out = existing;
+        out.extend_from_slice(&payload);
+        write_atomic(&abs, &out).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;

@@ -1,7 +1,8 @@
-use std::io::Write;
 use std::path::Path;
 
 use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
+
+use crate::io::{looks_binary, write_atomic};
 
 /// Strips trailing space/tab on every line of each violating
 /// file. Preserves original line endings (LF stays LF, CRLF
@@ -44,7 +45,7 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
                 path.display()
             )));
         }
-        std::fs::write(&abs, trimmed.as_bytes()).map_err(|source| Error::Io {
+        write_atomic(&abs, trimmed.as_bytes()).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -110,17 +111,28 @@ impl Fixer for FileAppendFinalNewlineFixer {
                 path.display()
             )));
         }
-        if let Some(skip) = alint_core::check_fix_size(&abs, path, ctx)? {
-            return Ok(skip);
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        // Match `fix_edit`: nothing to do for an empty or already-terminated
+        // file (the rule shouldn't flag these, but stay consistent and
+        // idempotent), and never append to a binary.
+        if existing.is_empty() || existing.ends_with(b"\n") {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already ends with a newline",
+                path.display()
+            )));
         }
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&abs)
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
-        f.write_all(b"\n").map_err(|source| Error::Io {
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not appending a newline",
+                path.display()
+            )));
+        }
+        let mut out = existing;
+        out.push(b'\n');
+        write_atomic(&abs, &out).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -202,6 +214,12 @@ impl Fixer for FileNormalizeLineEndingsFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not rewriting line endings",
+                path.display()
+            )));
+        }
         let normalized = normalize_line_endings(&existing, self.target);
         if normalized == existing {
             return Ok(FixOutcome::Skipped(format!(
@@ -210,7 +228,7 @@ impl Fixer for FileNormalizeLineEndingsFixer {
                 self.target.name()
             )));
         }
-        std::fs::write(&abs, &normalized).map_err(|source| Error::Io {
+        write_atomic(&abs, &normalized).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -305,7 +323,7 @@ impl Fixer for FileCollapseBlankLinesFixer {
                 path.display()
             )));
         }
-        std::fs::write(&abs, collapsed.as_bytes()).map_err(|source| Error::Io {
+        write_atomic(&abs, collapsed.as_bytes()).map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -455,6 +473,28 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("x.txt")).unwrap(),
             "hello\n"
+        );
+    }
+
+    #[test]
+    fn byte_level_fixers_skip_binary_files() {
+        // H3 regression: a byte-level fixer must not corrupt a binary file
+        // caught by a `paths: "**"` glob — a lone \n here would otherwise
+        // gain a \r and the NUL bytes would survive a line-ending rewrite.
+        let tmp = TempDir::new().unwrap();
+        let binary: &[u8] = b"\x00\x01\x02\nPNGish\x00\xff\n\x00";
+        std::fs::write(tmp.path().join("blob.bin"), binary).unwrap();
+        let outcome = FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf)
+            .apply(
+                &Violation::new("eol").with_path(std::path::Path::new("blob.bin")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(_)));
+        assert_eq!(
+            std::fs::read(tmp.path().join("blob.bin")).unwrap(),
+            binary,
+            "a binary file must be byte-identical after the fixer skips it"
         );
     }
 

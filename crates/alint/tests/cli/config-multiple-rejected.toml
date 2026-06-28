@@ -1,0 +1,7 @@
+bin.name = "alint"
+# H4: a second `-c` was silently dropped (consumers read only the first). It
+# is now rejected loudly before any config is loaded — no fixtures needed.
+args = ["-c", "a.yml", "-c", "b.yml", "list"]
+status.code = 2
+fs.sandbox = true
+stderr = "[..]may be given at most once[..]"

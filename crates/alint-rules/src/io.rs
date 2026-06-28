@@ -59,6 +59,52 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
     }
 }
 
+/// Whether `bytes` look like binary content (per `content_inspector`,
+/// sampling the same leading window as `file_is_text`). The byte-level
+/// fixers consult this and refuse to rewrite a binary file — a line-ending,
+/// BOM, final-newline, or prepend/append edit on a binary corrupts it.
+pub fn looks_binary(bytes: &[u8]) -> bool {
+    let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
+    classify_bytes(window) == Classification::Binary
+}
+
+/// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
+/// file, copy the original's permissions onto it (so an existing mode —
+/// notably the executable bit — survives), `fsync`, then rename it over
+/// `path`. Unlike `std::fs::write` (open-truncate-then-write), a crash or
+/// I/O error mid-write leaves the original intact rather than truncated or
+/// destroyed. The temp is a sibling so the rename is atomic on the same
+/// filesystem, and it is cleaned up on failure. (Manual temp, no `tempfile`
+/// runtime dependency — matching the extends cache.)
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Unique sibling name: the pid distinguishes concurrent processes, the
+    // atomic counter distinguishes concurrent threads in this process.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
+    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        // Preserve the original file's mode when it exists (a rewrite).
+        if let Ok(meta) = std::fs::metadata(path) {
+            f.set_permissions(meta.permissions())?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()
+    };
+    if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Hard cap on a single whole-file read by the cross-file /
 /// structured rule kinds (`registry_paths_resolve`,
 /// `cross_file_value_equals`, `pair_hash`, `generated_file_fresh`).
@@ -140,5 +186,40 @@ mod tests {
             Err(ReadCapError::Io(_)) => {}
             _ => panic!("a missing path must be an Io error"),
         }
+    }
+
+    #[test]
+    fn looks_binary_distinguishes_binary_from_text() {
+        assert!(looks_binary(b"\x00\x01\x02\x00binary\x00data\x00"));
+        assert!(!looks_binary(b"plain text\nmore text\n"));
+    }
+
+    #[test]
+    fn write_atomic_replaces_content_preserves_mode_and_leaves_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f.txt");
+        std::fs::write(&p, b"old contents").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        write_atomic(&p, b"new").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o755,
+                "the executable bit must survive an atomic write"
+            );
+        }
+        // No sibling temp file left behind.
+        let leaked = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .any(|e| e.file_name().to_string_lossy().contains("alint-fix"));
+        assert!(!leaked, "atomic write leaked a temp file");
     }
 }

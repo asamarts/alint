@@ -53,6 +53,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Auto-fixers no longer corrupt binaries or risk truncation on failure.**
+  The byte-level fixers (`line_endings`, `no_bom`, `final_newline`, and the
+  `file_prepend` / `file_append` content injectors) rewrote raw bytes with no
+  binary guard, so a `paths: "**"` glob could corrupt a matched binary file
+  (a CRLF rewrite inserting `\r` into a `.png`, a stray final `\n`, a stripped
+  leading BOM-shaped byte). They now skip files detected as binary. Separately,
+  every content-rewriting fixer wrote in-place via `std::fs::write`
+  (open-truncate-then-write), so a crash or `ENOSPC` mid-write could leave the
+  original truncated or lost; writes now go through a shared atomic helper
+  (sibling temp + `fsync` + rename, preserving the file mode). `final_newline`'s
+  on-disk path is reconciled with its editor path (it no longer double-appends
+  to an already-terminated or empty file). (H3)
+- **`--config` is honest about being single-valued.** The flag help promised
+  "repeatable; later overrides earlier", but every consumer read only the
+  first `-c`, so a second was silently dropped — and worse, was position-
+  sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
+  could use `base`. A second `--config` is now a hard error pointing at
+  `extends:` for composition, and the help text is corrected. (H4)
 - **The `is_text` rule kind no longer silently accepts unknown options.** The
   `is_text` alias of `file_is_text` was registered without the
   `deny_unknown_options` wrapper its canonical name carries, so a typo'd option

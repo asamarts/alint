@@ -3,7 +3,7 @@ Generate (or maintain a section of) `AGENTS.md` from the active rule set, so the
 Usage: alint[EXE] export-agents-md [OPTIONS]
 
 Options:
-  -c, --config <CONFIG>       Path to a config file (repeatable; later overrides earlier)
+  -c, --config <CONFIG>       Path to a config file
       --output <PATH>         Output destination. Without `--inline`, the file is overwritten. Omit for stdout
       --inline                Splice the generated section between `<!-- alint:start -->` and `<!-- alint:end -->` markers in `--output PATH`. Markers are auto- created (with a stderr warning) when the target file lacks them
       --no-gitignore          Disable .gitignore handling (overrides config)
