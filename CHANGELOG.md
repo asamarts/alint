@@ -195,6 +195,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   offset 80, which panics when a codepoint straddles that boundary —
   crashing the whole parallel `check` run (and the LSP server). It now
   truncates on a char boundary. (H2)
+- **Remote `extends:` no longer follows redirects (SSRF hardening).** ureq's
+  defaults (up to 10 redirects, downgrade to `http` allowed on a redirect hop)
+  let a pinned-but-malicious HTTPS host `302` a fetch to
+  `http://169.254.169.254/…` (cloud metadata) or any internal address. The
+  fetcher now refuses redirects outright; an `extends:` URL is SRI-pinned to
+  specific content, so it must point at the final resource and a redirect
+  surfaces as a clear error. (M1)
+- **A non-UTF-8 commit can no longer bypass commit linting.** `parse_commit_log`
+  silently dropped any commit whose author name, email, or message was not
+  valid UTF-8, so a contributor could dodge `git_commit_subject_matches` /
+  author-allowlist / forbidden-pattern checks by using non-UTF-8 metadata.
+  Commits are now lossily decoded and still linted. (M6)
+- **`git_blame_age` no longer panics on a crafted author timestamp.** A commit
+  carrying a 19-digit author-time (parses as `u64`, overflows `SystemTime` on
+  `+`) aborted the run; the addition is now checked and a malformed timestamp
+  is dropped. (M7)
 
 ### Internal
 

@@ -2,8 +2,9 @@
 //!
 //! Uses `ureq` with `rustls` so the binary stays self-contained
 //! (no OS-native TLS linking). Request shape is deliberately
-//! austere — one-shot GET, timeouts, no redirects beyond the
-//! default, no caching (the cache lives a layer up).
+//! austere — one-shot GET, timeouts, no redirects (an `extends:`
+//! URL is SRI-pinned, so it must point at the final resource — this
+//! also closes redirect-based SSRF), no caching (cache is a layer up).
 
 use std::io::Read;
 use std::time::Duration;
@@ -36,6 +37,15 @@ impl Fetcher {
             // (mapped to our Status variant below) rather than as
             // an opaque Error from .call().
             .http_status_as_error(false)
+            // SSRF hardening: refuse to follow redirects. The loader already
+            // rejects a plain-`http://` initial URL, so the only way to reach
+            // `http://169.254.169.254/…` (cloud metadata) or an internal host
+            // is a 302 from the pinned host — ureq would otherwise follow up
+            // to 10. An `extends:` URL is SRI-pinned to specific content, so it
+            // must point at the final resource; a redirect now surfaces as a
+            // clear status error (pin the final URL) instead of a blind
+            // second request.
+            .max_redirects(0)
             .build()
             .into();
         let response = agent.get(url).call().map_err(|e| FetchError::Request {

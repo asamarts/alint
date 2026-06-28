@@ -52,7 +52,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[ ]` |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M6/M7 done; M2–M5,M8 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[ ]` |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[ ]` |
 | 7 | alint.org drift | W1–W7 | `[ ]` |
@@ -262,67 +262,98 @@ single `-c` is unaffected.
 
 ## Phase 4 — MEDIUM: security cluster
 
-### M1 — SSRF via redirects to internal addresses `[ ]`
+### M1 — SSRF via redirects to internal addresses `[x]`
 **Where:** `extends/fetcher.rs:33`. ureq defaults `https_only:false`,
 `max_redirects:10`; loader validates only the initial URL
 (`loader.rs:86`). A pinned-but-malicious https host can 302 →
 `http://169.254.169.254/…` / internal IPs. SRI gates the body → blind
-SSRF. **Fix:** set `https_only(true)` on the agent + a redirect
-scheme/host policy (reject non-https and private/link-local hops), or
-disable cross-origin redirects entirely.
+SSRF. **Done:** set `max_redirects(0)` on the agent. The loader already
+rejects a plain-`http://` initial URL, so refusing *all* redirects closes
+the redirect-to-internal vector — and doesn't break the http mock tests
+the way `https_only(true)` would. An `extends:` URL is SRI-pinned to
+specific content, so it must be the final resource; a redirect now
+surfaces as a clear status error.
 
-### M2 — `extends:` target paths are unconfined `[ ]`
+### M2 — `extends:` target paths are unconfined `[-]`
 **Where:** `loader.rs:192` (`resolve_relative`). `extends:
 [/etc/hostname]` or `../../x` is read and YAML-parse errors echo content
 → exfil. **Fix:** confine local extends-target resolution to the repo
 root (reuse `normalize_confined`), subject to the same top-level-only
-trust as `allow_out_of_root`.
+trust as `allow_out_of_root`. **Deferred (design call):** confining
+`extends:` would break a legitimate monorepo `extends: [../shared/base.yml]`
+unless `allow_out_of_root` is honored here too, and the exploit needs an
+attacker-controlled local config already inside a trusted chain (narrow).
+Wants the confine-vs-`allow_out_of_root` decision; a lighter alternative
+is to stop echoing file content in extends parse errors. Tracked for the
+focused extends pass.
 
-### M3 — per-file reads bypass the 256 MiB OOM guard `[ ]`
+### M3 — per-file reads bypass the 256 MiB OOM guard `[-]`
 **Where:** `structured_path.rs:365,376`, `core/engine.rs:499`,
 `core/rule.rs:490` (raw `std::fs::read`). The per-file family
 (`file_hash`, `import_gate`, all `*_path_*`) can be OOM'd by one in-tree
 multi-GB file; only cross-file kinds call `read_capped`. **Fix:** route
 per-file reads through `read_capped` (stat-then-read), emitting the
-over-cap violation the guard already defines.
+over-cap violation the guard already defines. **Deferred:** the cap +
+`read_capped` live in `alint-rules`, but `engine.rs`/`rule.rs` are in
+`alint-core` (which can't depend on `alint-rules`), so the fix needs the
+cap hoisted to `alint-core` and a consistent over-cap outcome across all
+four read sites (the index already carries `size`, so no extra stat).
+Touches the dispatch hot path — wants its own pass. Self-limiting (needs
+a committed multi-GB file).
 
-### M4 — `no_symlinks` misses directory + escaping symlinks `[ ]`
+### M4 — `no_symlinks` misses directory + escaping symlinks `[-]`
 **Where:** `no_symlinks.rs:29` (iterates `index.files()`, which excludes
 dir entries; the walker prunes escaping symlinks pre-index). **Fix:**
 detect symlinks via `symlink_metadata` during the walk and surface them
 to `no_symlinks` (a dedicated symlink list on the index, or have the rule
 re-stat candidate paths), so dir symlinks and root-escaping symlinks are
-flagged.
+flagged. **Deferred:** needs a walker/`FileIndex` change — a per-entry
+`is_symlink` flag plus recording dir-symlinks and the root-escaping
+symlinks the walker currently prunes. Core + determinism-sensitive;
+wants its own pass.
 
-### M5 — `git_no_denied_paths` denylist is root-anchored `[ ]`
+### M5 — `git_no_denied_paths` denylist is root-anchored `[-]`
 **Where:** `git_no_denied_paths.rs:99`. For a *secrets* control,
 `*.pem`/`id_rsa` match only repo root, so `secrets/server.pem` evades.
 **Fix:** auto-anchor bare/`*` denied patterns to `**/` (or emit a
 loud build-time warning when a denied pattern lacks `**/`), documented as
 a security-control default distinct from the general glob footgun.
+**Deferred (semantics call):** auto-anchoring silently changes glob
+matching for everyone (a user who wrote `*.env` expecting root-only would
+suddenly match any depth). Wants a decision on auto-anchor vs
+warn-at-build vs doc-only before landing. Tracked.
 
-### M6 — non-UTF-8 git data silently collapses checks `[ ]`
+### M6 — non-UTF-8 git data silently collapses checks `[~]`
 **Where:** `core/git.rs:60,135` (one non-UTF-8 path → whole tracked/
 changed set bails to `None`), `git.rs:431` (non-UTF-8 commit field drops
 the commit from range checks → commit-message-lint bypass). **Fix:**
 keep paths as `OsStr`/bytes and drop only the offending entry; for commit
 fields, `from_utf8_lossy` (fail-closed/visible) rather than silently
-skip the whole commit.
+skip the whole commit. **Done:** the commit-lint **bypass** (`git.rs:431`)
+— the security-relevant half — now lossily decodes each commit field, so
+a non-UTF-8 author/message can no longer dodge linting (regression test
+updated). **Deferred:** the tracked/changed-path collapse (`git.rs:60,135`)
+is a `HashSet<String>` → would need an `OsStr`/bytes refactor of the path
+sets; lower impact (makes `git_tracked_only` over-permissive, not a
+bypass). Tracked.
 
-### M7 — `SystemTime` overflow panic on crafted commit timestamp `[ ]`
+### M7 — `SystemTime` overflow panic on crafted commit timestamp `[x]`
 **Where:** `core/git.rs:582` (`UNIX_EPOCH + Duration::from_secs(secs)`).
 A 19-digit author-time panics. Reachable via `git_blame_age` on an
-untrusted repo. **Fix:** `checked_add` and skip the malformed block
-(matching the adjacent posture).
+untrusted repo. **Done:** `UNIX_EPOCH.checked_add(...)`; on overflow the
+block is dropped (matching the adjacent posture), no panic.
 
-### M8 — terminal-escape injection in the human formatter `[ ]`
+### M8 — terminal-escape injection in the human formatter `[-]`
 **Severity:** Medium (needs a TTY / `--color=always`; CI formats are
 already safe). **Where:** `output/human.rs:85,162,331,360,446`
 (unsanitized paths/messages). A repo file named with `\x1b[…]` can hide
 findings or forge an "all passed" banner when a human lints an untrusted
 repo. **Fix:** a control-char/ANSI sanitizer applied to all attacker-
 controlled spans (paths, messages, snippets) on the human/compact/fix
-paths; preserve intentional styling emitted by alint itself.
+paths; preserve intentional styling emitted by alint itself. **Deferred:**
+needs a shared sanitizer across three render paths with care not to strip
+alint's own styling; conditional on a TTY / `--color=always` (every CI
+format is already neutralized). Wants its own focused pass. Tracked.
 
 ---
 

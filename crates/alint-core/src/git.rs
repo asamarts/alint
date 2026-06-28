@@ -433,14 +433,16 @@ fn parse_commit_log(stdout: &[u8]) -> Vec<CommitRecord> {
         else {
             continue;
         };
-        let (Ok(sha), Ok(name), Ok(email), Ok(msg)) = (
-            std::str::from_utf8(sha_bytes),
-            std::str::from_utf8(name_bytes),
-            std::str::from_utf8(email_bytes),
-            std::str::from_utf8(msg_bytes),
-        ) else {
-            continue;
-        };
+        // Lossily decode rather than dropping the whole commit on any
+        // non-UTF-8 field: silently skipping a commit lets a contributor
+        // bypass commit linting (conventional-subject / author-allowlist /
+        // forbidden-pattern) just by using a non-UTF-8 author name or message.
+        // With a lossy decode the commit is still linted; the sha is always
+        // hex so it is unaffected.
+        let sha = String::from_utf8_lossy(sha_bytes);
+        let name = String::from_utf8_lossy(name_bytes);
+        let email = String::from_utf8_lossy(email_bytes);
+        let msg = String::from_utf8_lossy(msg_bytes);
         // `--format=%B` ends every body with a trailing newline.
         let message = msg.trim_end_matches('\n').to_string();
         out.push(CommitRecord {
@@ -579,7 +581,12 @@ fn parse_porcelain(text: &str) -> Vec<BlameLine> {
         match key {
             "author-time" => {
                 if let Ok(secs) = value.parse::<u64>() {
-                    author_time = Some(UNIX_EPOCH + Duration::from_secs(secs));
+                    // `checked_add`: a crafted commit can carry a 19-digit
+                    // author-time that parses as u64 but overflows SystemTime
+                    // (which panics on `+`). On overflow, leave the time unset
+                    // — matching the "drop the malformed block" posture
+                    // elsewhere in the parser — instead of aborting the run.
+                    author_time = UNIX_EPOCH.checked_add(Duration::from_secs(secs));
                 }
             }
             // SHA header: 40 hex digits + space + 3 numbers. We
@@ -987,14 +994,22 @@ filename a.rs
     }
 
     #[test]
-    fn parse_commit_log_skips_record_with_invalid_utf8() {
-        // A record whose message field is invalid UTF-8. The parser
-        // drops the malformed record rather than panicking.
+    fn parse_commit_log_lossily_decodes_invalid_utf8_rather_than_dropping() {
+        // A record whose message field is invalid UTF-8. The parser must NOT
+        // drop it — silently skipping the commit would let a contributor
+        // bypass commit linting (conventional-subject / author-allowlist /
+        // forbidden-pattern) just by using a non-UTF-8 message or author.
+        // It now lossily decodes so the commit is still linted; the sha is
+        // always hex, so it survives intact.
         let mut raw: Vec<u8> = b"abc1234\0N\0n@x.test\0".to_vec();
         raw.extend_from_slice(&[0xff, 0xfe, 0xfd]); // invalid UTF-8
         raw.push(0x1e);
         let records = parse_commit_log(&raw);
-        assert!(records.is_empty());
+        assert_eq!(records.len(), 1, "the commit must be parsed, not dropped");
+        assert_eq!(records[0].sha, "abc1234");
+        assert_eq!(records[0].author_name, "N");
+        // The invalid bytes become U+FFFD replacement chars (not silently lost).
+        assert!(records[0].message.contains('\u{FFFD}'));
     }
 
     #[test]
