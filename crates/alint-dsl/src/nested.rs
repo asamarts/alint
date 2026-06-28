@@ -184,6 +184,25 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              config. (It is ignored here, never silently honored.)"
         )));
     }
+    if !config.templates.is_empty() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `templates:` — templates are a root-only \
+             concept (a nested template would be silently dropped, and could otherwise \
+             smuggle a spawning rule into the subtree); declare them in the top-level \
+             config"
+        )));
+    }
+    // A nested config is untrusted in exactly the way an `extends:`'d
+    // ruleset is — a subtree `.alint.yml` may be authored by anyone who
+    // can open a PR against the monorepo — so it may not introduce a
+    // process-spawning rule. `kind: command` / `command_idempotent` /
+    // `generated_file_fresh` are confined to the user's own top-level
+    // config; without this gate a nested `.alint.yml` declaring
+    // `kind: command` achieved arbitrary code execution on `alint check`
+    // (the C2 RCE bypass). Mirrors the `extends:` gate; spawning templates
+    // are refused wholesale just above, and `finalize` re-checks the
+    // expanded rule set as a backstop.
+    crate::reject_command_rules_in(&config.rules, &source)?;
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

@@ -49,7 +49,7 @@ three classes at once.
 
 | Phase | Theme | Findings | Status |
 |---|---|---|---|
-| 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[ ]` |
+| 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[ ]` |
 | 3 | HIGH — correctness | H3, H4 | `[ ]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[ ]` |
@@ -66,7 +66,7 @@ explicitly deferred.
 
 ## Phase 1 — CRITICAL: spawn-gate RCE bypasses
 
-### C1 — `extends:`'d ruleset gets RCE via `templates:` `[ ]`
+### C1 — `extends:`'d ruleset gets RCE via `templates:` `[x]`
 
 **Severity:** Critical. **Where:** `crates/alint-dsl/src/lib.rs:465`
 (`reject_command_rules_in` inspects only `rules[].kind`),
@@ -107,7 +107,7 @@ kinds directly at load time as defense-in-depth.
 PoC above is rejected with the spawn-gate error; the same template used
 from the **top-level** config still works.
 
-### C2 — nested `subdir/.alint.yml` gets RCE `[ ]`
+### C2 — nested `subdir/.alint.yml` gets RCE `[x]`
 
 **Severity:** Critical (precondition: `nested_configs: true`, opt-in, +
 attacker can write a subtree config — untrusted monorepo PR, vendored

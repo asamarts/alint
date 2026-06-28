@@ -134,6 +134,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `https://alint.org` URLs), and a "full reference at alint.org" banner on
   the GitHub view of `docs/rules.md`.
 
+### Security
+
+- **Closed two RCE bypasses of the `extends:`/nested spawn gate.** The gate
+  that confines process-spawning rule kinds (`command`,
+  `command_idempotent`, `generated_file_fresh`) to the user's own top-level
+  config inspected only `rules[].kind` at each inherited source, so two
+  paths slipped past it: (1) an `extends:`'d ruleset could hide a spawning
+  kind in a `templates:` block and reference it from a `kind`-less
+  `extends_template:` rule that expands into a `command` rule *after* the
+  gate runs — meaning a single SRI-pinned `extends:` line could run
+  arbitrary code; and (2) a nested `subdir/.alint.yml` (under
+  `nested_configs: true`) was never spawn-gated at all, so any subtree
+  config — addable via an untrusted monorepo PR, vendored dir, or submodule
+  — could declare `kind: command` and execute on `alint check`. Fix: a
+  spawning kind may no longer appear in *any* `templates:` block (enforced
+  source-agnostically in `finalize`, and earlier with the offending ruleset
+  named); nested configs are now spawn-gated like `extends:` and may not
+  declare `templates:`. A spawning kind in a top-level `rules:` entry — the
+  intended, allowed case — is unchanged. Five regression tests encode both
+  PoCs plus the allowed paths. See `docs/design/v0.14/post_v0.13_audit.md`
+  (C1, C2).
+
 ### Internal
 
 - The post-v0.12 audit fixes each ship with a regression test (a registry-driven
