@@ -258,6 +258,26 @@ use case appears.
 **Test:** `-c a -c b` exits with a clear "multiple --config" error; a
 single `-c` is unaffected.
 
+### H6 — untrusted fork-PR code runs on the persistent self-hosted runner `[-]`
+
+**Severity:** High. **Action required — a GitHub setting + workflow change,
+not a code fix I can land.** **Where:** `.github/workflows/ci.yml` +
+`coverage.yml` trigger on `pull_request` with every job `runs-on:
+[self-hosted, linux, alint]`, and there is no in-workflow
+`head.repo.fork == false` guard. A fork PR that edits `ci/scripts/*.sh`
+would run arbitrary code on the maintainer's persistent box (SSH keys,
+`gh`/cargo creds, cache/bench poisoning) — GitHub's documented
+"self-hosted + public repo" hazard.
+
+**Fix (maintainer):** (1) In the repo, set *Settings → Actions → Fork pull
+request workflows from outside collaborators* to **Require approval for all
+outside collaborators** (the public-repo default — first-time contributors
+only — is insufficient). (2) Ideally move the PR lanes to ephemeral /
+GitHub-hosted runners, reserving the self-hosted box for `push`/tag/bench.
+**Status:** flagged — the approval setting is the one to verify *now*; I can
+draft the runner split if wanted, but the setting is a GitHub-UI change only
+the maintainer can make.
+
 ---
 
 ## Phase 4 — MEDIUM: security cluster
