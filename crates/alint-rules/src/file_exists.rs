@@ -134,9 +134,14 @@ impl Rule for FileExistsRule {
                 // oracle reachable from an `extends:`'d ruleset.
                 if bypass_walker_for_ignored
                     && let Some(confined) = crate::pathsafe::normalize_confined(p)
-                    && ctx.root.join(&confined).is_file()
                 {
-                    return true;
+                    // normalize_confined is symlink-blind; verify the literal
+                    // doesn't stat through an in-repo symlink out of the tree
+                    // (an existence oracle reachable from an extends'd ruleset).
+                    let abs = ctx.root.join(&confined);
+                    if crate::pathsafe::resolved_within_root(&abs, ctx.root) && abs.is_file() {
+                        return true;
+                    }
                 }
                 false
             })

@@ -498,7 +498,7 @@ impl CrossFileRule {
     /// dropping `skip_header_lines` leading lines) must equal the
     /// source file's. Binary-accurate; `normalize` does not apply.
     fn check_identical(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
-        let Some(src) = crate::pathsafe::normalize_confined(Path::new(&self.source_file)) else {
+        let Some(src) = confined_rel(ctx, Path::new(&self.source_file)) else {
             out.push(Self::violation(
                 Path::new(&self.source_file),
                 "source file escapes the repo root",
@@ -523,7 +523,7 @@ impl CrossFileRule {
             return;
         }
         for target in &paths {
-            let Some(target) = crate::pathsafe::normalize_confined(target) else {
+            let Some(target) = confined_rel(ctx, target) else {
                 out.push(Self::violation(target, "target file escapes the repo root"));
                 continue;
             };
@@ -793,13 +793,23 @@ fn read_cap_reason(what: &str, e: &crate::io::ReadCapError) -> String {
     }
 }
 
+/// Lexically confine `rel`, then verify it doesn't escape the root through
+/// an in-repo symlink once joined — `normalize_confined` is symlink-blind,
+/// so `link/secret` (with `link -> /etc`) would otherwise read out of the
+/// tree. `None` on either escape; the caller reports "escapes the repo
+/// root". Used by every cross-file *read* path.
+fn confined_rel(ctx: &Context<'_>, rel: &Path) -> Option<PathBuf> {
+    let p = crate::pathsafe::normalize_confined(rel)?;
+    crate::pathsafe::resolved_within_root(&ctx.root.join(&p), ctx.root).then_some(p)
+}
+
 /// Read a tree-relative path as text (the index stores paths, not
 /// contents, so the cross-file rules read the file themselves).
 fn read_rel(ctx: &Context<'_>, rel: &Path) -> Result<String, crate::io::ReadCapError> {
     // Confine to the repo root before any read — an absolute or
-    // root-escaping `source.file` / `targets[].file` must never read a
-    // file outside the tree.
-    let Some(rel) = crate::pathsafe::normalize_confined(rel) else {
+    // root-escaping (lexically or via symlink) `source.file` /
+    // `targets[].file` must never read a file outside the tree.
+    let Some(rel) = confined_rel(ctx, rel) else {
         return Err(crate::io::ReadCapError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "path escapes the repo root",

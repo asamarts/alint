@@ -124,26 +124,27 @@ impl Rule for PairHashRule {
         // before reading it: an absolute / `../../` `target:` reads a
         // file outside the repo root only when the user's top-level
         // config opted this rule into `allow_out_of_root`.
-        let target_rel = match crate::pathsafe::confine(target_path, self.allow_out_of_root) {
-            crate::pathsafe::Confined::In(p) => p,
-            crate::pathsafe::Confined::AllowedEscape(p) => {
-                violations.push(
-                    Violation::new(crate::pathsafe::out_of_root_note(target_path))
-                        .as_note()
+        let target_rel =
+            match crate::pathsafe::confine_read(target_path, ctx.root, self.allow_out_of_root) {
+                crate::pathsafe::Confined::In(p) => p,
+                crate::pathsafe::Confined::AllowedEscape(p) => {
+                    violations.push(
+                        Violation::new(crate::pathsafe::out_of_root_note(target_path))
+                            .as_note()
+                            .with_path(std::sync::Arc::<Path>::from(target_path)),
+                    );
+                    p
+                }
+                crate::pathsafe::Confined::Denied => {
+                    return Ok(vec![
+                        Violation::new(format!(
+                            "pair_hash target {:?} escapes the repo root",
+                            self.target
+                        ))
                         .with_path(std::sync::Arc::<Path>::from(target_path)),
-                );
-                p
-            }
-            crate::pathsafe::Confined::Denied => {
-                return Ok(vec![
-                    Violation::new(format!(
-                        "pair_hash target {:?} escapes the repo root",
-                        self.target
-                    ))
-                    .with_path(std::sync::Arc::<Path>::from(target_path)),
-                ]);
-            }
-        };
+                    ]);
+                }
+            };
         let b_bytes = match crate::io::read_capped(&ctx.root.join(&target_rel)) {
             Ok(b) => b,
             Err(crate::io::ReadCapError::TooLarge(n)) => {

@@ -50,7 +50,7 @@ three classes at once.
 | Phase | Theme | Findings | Status |
 |---|---|---|---|
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
-| 2 | HIGH — security | H1, H2, H5 | `[ ]` |
+| 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[ ]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[ ]` |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[ ]` |
@@ -139,7 +139,7 @@ the historical `gff` shape in one place. Belt-and-suspenders: also call
 
 ## Phase 2 — HIGH: security
 
-### H1 — path confinement is lexical-only; in-repo symlinks escape root `[ ]`
+### H1 — path confinement is lexical-only; in-repo symlinks escape root `[x]`
 
 **Severity:** High. **Where:** `crates/alint-rules/src/pathsafe.rs:24`
 (`normalize_confined`, pure-lexical, doc comment line 2 claims "a rule
@@ -171,7 +171,7 @@ overclaims.
 out-of-root (or honored only under `allow_out_of_root`), not silently
 read.
 
-### H2 — process crash on crafted multibyte value (structured-query) `[ ]`
+### H2 — process crash on crafted multibyte value (structured-query) `[x]`
 
 **Severity:** High. **Where:**
 `crates/alint-rules/src/structured_path.rs:512` (`short_render`:
@@ -191,7 +191,7 @@ untrusted strings).
 **Test:** a value of 78 ASCII bytes + a 2-byte char that fails its op
 renders without panic; add to `structured_path` tests.
 
-### H5 — `when:` expression has no recursion depth guard `[ ]`
+### H5 — `when:` expression has no recursion depth guard `[x]`
 
 **Severity:** High. **Where:** `crates/alint-core/src/when/parser.rs:137`
 (parse recursion), `when/eval.rs:42-55` (left-recursive eval on

@@ -5,14 +5,28 @@ use regex::Regex;
 
 // ─── Parser ──────────────────────────────────────────────────────────
 
+/// Maximum `(`/`[`/call-args nesting depth the parser will descend.
+/// `parse_expr` is mutually recursive through `parse_primary`, so nesting
+/// depth == parse recursion depth; an adversarial `when:` from an
+/// untrusted `extends:` ruleset (e.g. `"(".repeat(1_000_000)`) would
+/// otherwise overflow the parser stack — an uncatchable abort, the
+/// strongest determinism violation. 256 is orders of magnitude beyond any
+/// real expression; the evaluator carries a matching `MAX_EVAL_DEPTH`.
+const MAX_DEPTH: usize = 256;
+
 pub(super) struct Parser {
     tokens: Vec<(Tok, usize)>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
     pub(super) fn new(tokens: Vec<(Tok, usize)>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            depth: 0,
+        }
     }
 }
 
@@ -50,7 +64,19 @@ impl Parser {
     }
 
     pub(super) fn parse_expr(&mut self) -> Result<WhenExpr, WhenError> {
-        self.parse_or()
+        // Bound recursion before descending: `parse_primary` re-enters
+        // `parse_expr` for every `(`, `[` and call-arg list, so this is the
+        // single re-entry point. Deep input fails loudly here instead of
+        // overflowing the stack. Decrement on the way out so sibling
+        // sub-expressions (list items, call args) don't accumulate depth.
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(self.err("expression nests too deeply (max depth 256)"));
+        }
+        let result = self.parse_or();
+        self.depth -= 1;
+        result
     }
 
     fn parse_or(&mut self) -> Result<WhenExpr, WhenError> {

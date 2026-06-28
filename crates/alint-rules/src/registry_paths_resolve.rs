@@ -153,7 +153,8 @@ impl Rule for RegistryPathsResolveRule {
             // Confine the (config-author-controlled) registry path before
             // reading it (the glob-source arm yields in-tree index paths,
             // for which this is a no-op).
-            let Some(registry_rel) = self.confine_source(registry_rel, &mut violations) else {
+            let Some(registry_rel) = self.confine_source(registry_rel, ctx.root, &mut violations)
+            else {
                 continue;
             };
             let abs = ctx.root.join(&registry_rel);
@@ -396,8 +397,13 @@ impl RegistryPathsResolveRule {
     /// Returns the path to read; `None` (with a violation or note already
     /// pushed to `out`) when the source escapes the root and isn't
     /// permitted. The declared *entries* stay confined regardless.
-    fn confine_source(&self, rel: PathBuf, out: &mut Vec<Violation>) -> Option<PathBuf> {
-        match crate::pathsafe::confine(&rel, self.allow_out_of_root) {
+    fn confine_source(
+        &self,
+        rel: PathBuf,
+        root: &Path,
+        out: &mut Vec<Violation>,
+    ) -> Option<PathBuf> {
+        match crate::pathsafe::confine_read(&rel, root, self.allow_out_of_root) {
             crate::pathsafe::Confined::In(p) => Some(p),
             crate::pathsafe::Confined::AllowedEscape(p) => {
                 out.push(

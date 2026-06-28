@@ -104,7 +104,11 @@ impl Rule for JsonSchemaPassesRule {
         // read: an absolute / `../../` `schema_path:` reads outside the
         // repo root only when the user's top-level config opted this rule
         // into `allow_out_of_root`.
-        let schema_rel = match crate::pathsafe::confine(&self.schema_path, self.allow_out_of_root) {
+        let schema_rel = match crate::pathsafe::confine_read(
+            &self.schema_path,
+            ctx.root,
+            self.allow_out_of_root,
+        ) {
             crate::pathsafe::Confined::In(p) => p,
             crate::pathsafe::Confined::AllowedEscape(p) => {
                 violations.push(

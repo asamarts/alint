@@ -4,7 +4,25 @@ use crate::scope::Scope;
 
 // ─── Evaluator ───────────────────────────────────────────────────────
 
+/// Maximum evaluator recursion depth. A `when:` AST can be arbitrarily
+/// tall — deep parens, or a long left-nested `and`/`or` chain (built
+/// iteratively by the parser but walked recursively here on tree height)
+/// — so a crafted expression from an untrusted `extends:` ruleset would
+/// overflow the stack (small on a rayon worker) and abort the process.
+/// Bail loudly past this. Mirrors the parser's `MAX_DEPTH`.
+const MAX_EVAL_DEPTH: usize = 256;
+
 pub(super) fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> {
+    eval_at(e, env, 0)
+}
+
+fn eval_at(e: &WhenExpr, env: &WhenEnv<'_>, depth: usize) -> Result<Value, WhenError> {
+    if depth > MAX_EVAL_DEPTH {
+        return Err(WhenError::Eval(
+            "expression nests too deeply to evaluate (max depth 256)".into(),
+        ));
+    }
+    let depth = depth + 1;
     match e {
         WhenExpr::Literal(v) => Ok(v.clone()),
         WhenExpr::Ident { ns, name } => match ns {
@@ -31,35 +49,35 @@ pub(super) fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> 
             }
         },
         WhenExpr::Call { ns, method, args } => match ns {
-            Namespace::Iter => eval_iter_call(method, args, env),
+            Namespace::Iter => eval_iter_call(method, args, env, depth),
             // Parser rejects calls on non-iter namespaces, but be
             // defensive in case the AST is hand-built somewhere.
             _ => Err(WhenError::Eval(format!(
                 "function-call evaluation not supported on namespace {ns:?}"
             ))),
         },
-        WhenExpr::Not(inner) => Ok(Value::Bool(!eval(inner, env)?.truthy())),
+        WhenExpr::Not(inner) => Ok(Value::Bool(!eval_at(inner, env, depth)?.truthy())),
         WhenExpr::And(l, r) => {
-            let lv = eval(l, env)?;
+            let lv = eval_at(l, env, depth)?;
             if !lv.truthy() {
                 return Ok(Value::Bool(false));
             }
-            Ok(Value::Bool(eval(r, env)?.truthy()))
+            Ok(Value::Bool(eval_at(r, env, depth)?.truthy()))
         }
         WhenExpr::Or(l, r) => {
-            let lv = eval(l, env)?;
+            let lv = eval_at(l, env, depth)?;
             if lv.truthy() {
                 return Ok(Value::Bool(true));
             }
-            Ok(Value::Bool(eval(r, env)?.truthy()))
+            Ok(Value::Bool(eval_at(r, env, depth)?.truthy()))
         }
         WhenExpr::Cmp { left, op, right } => {
-            let lv = eval(left, env)?;
-            let rv = eval(right, env)?;
+            let lv = eval_at(left, env, depth)?;
+            let rv = eval_at(right, env, depth)?;
             Ok(Value::Bool(apply_cmp(&lv, *op, &rv)?))
         }
         WhenExpr::Matches { left, pattern } => {
-            let lv = eval(left, env)?;
+            let lv = eval_at(left, env, depth)?;
             match lv {
                 Value::String(s) => Ok(Value::Bool(pattern.is_match(&s))),
                 other => Err(WhenError::Eval(format!(
@@ -71,7 +89,7 @@ pub(super) fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> 
         WhenExpr::List(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
-                out.push(eval(item, env)?);
+                out.push(eval_at(item, env, depth)?);
             }
             Ok(Value::List(out))
         }
@@ -118,7 +136,12 @@ fn eval_iter_value(name: &str, iter: Option<&IterEnv<'_>>) -> Value {
 /// just `has_file`); arity / arg-type errors surface as
 /// [`WhenError::Eval`] at evaluation time so a parse-clean
 /// expression with bad args still reports clearly.
-fn eval_iter_call(method: &str, args: &[WhenExpr], env: &WhenEnv<'_>) -> Result<Value, WhenError> {
+fn eval_iter_call(
+    method: &str,
+    args: &[WhenExpr],
+    env: &WhenEnv<'_>,
+    depth: usize,
+) -> Result<Value, WhenError> {
     match method {
         "has_file" => {
             if args.len() != 1 {
@@ -127,7 +150,7 @@ fn eval_iter_call(method: &str, args: &[WhenExpr], env: &WhenEnv<'_>) -> Result<
                     args.len()
                 )));
             }
-            let pattern = match eval(&args[0], env)? {
+            let pattern = match eval_at(&args[0], env, depth)? {
                 Value::String(s) => s,
                 other => {
                     return Err(WhenError::Eval(format!(

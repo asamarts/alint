@@ -506,10 +506,17 @@ fn check_match(m: &Value, op: &Op) -> Option<String> {
 /// dumping a whole object when the mismatch is on a sub-key.
 fn short_render(v: &Value) -> String {
     let raw = v.to_string();
-    if raw.len() <= 80 {
-        raw
-    } else {
-        format!("{}…", &raw[..80])
+    // Truncate on a char boundary, not a byte index: `raw` is the JSON
+    // rendering of an untrusted matched value (serde_json does not escape
+    // non-ASCII), so a fixed byte slice `&raw[..80]` can split a multibyte
+    // codepoint and panic. With no catch_unwind on the per-file path that
+    // aborts the whole parallel `check` run (and the LSP server).
+    // `char_indices().nth(80)` yields the byte offset of the 81st char:
+    // `None` (≤ 80 chars) returns the string whole; otherwise we slice at
+    // that guaranteed-valid boundary.
+    match raw.char_indices().nth(80) {
+        None => raw,
+        Some((boundary, _)) => format!("{}…", &raw[..boundary]),
     }
 }
 
@@ -719,6 +726,20 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
 mod tests {
     use super::*;
     use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn short_render_truncates_on_a_char_boundary_without_panicking() {
+        // Regression: `short_render` byte-sliced `&raw[..80]`, which panics
+        // when an untrusted matched value puts a multibyte codepoint across
+        // byte 80 — crashing the whole parallel run (and the LSP). 78 ASCII
+        // + `é`s: serde_json quotes the string, so the byte-80 boundary
+        // lands mid-`é`. Must truncate (with the ellipsis), not abort.
+        let value = Value::String(format!("{}{}", "a".repeat(78), "é".repeat(8)));
+        let rendered = short_render(&value);
+        assert!(rendered.ends_with('…'), "expected truncation: {rendered}");
+        // A short non-ASCII value is returned whole (quoted JSON rendering).
+        assert_eq!(short_render(&Value::String("café".to_string())), "\"café\"");
+    }
 
     // ─── JSONC tolerance ──────────────────────────────────────
 

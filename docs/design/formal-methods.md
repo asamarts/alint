@@ -15,14 +15,24 @@ the ROI of heavy formal methods is low and concentrated. But two things are wort
 more than example-based tests:
 
 1. **Behaviour specs that can't drift** — properties that hold for *all* inputs
-   (idempotent normalisation, a confined path never escaping the root), checked
-   in CI on every run.
-2. **A real proof on the security-critical core** — the confinement policy is a
-   trust boundary; "we tested some paths" is weaker than "no bounded input
-   escapes."
+   (idempotent normalisation, a *lexically* confined path never escaping the
+   root), checked in CI on every run.
+2. **A real proof on the security-critical core** — the *lexical* confinement
+   policy is a trust boundary; "we tested some paths" is weaker than "no bounded
+   input escapes."
 
 Without these, normalisation stability is assumed, and the confinement guarantee
 rests on a handful of hand-picked test strings.
+
+**Scope (important).** The property and the Kani proof both cover the **lexical**
+policy only — `normalize_confined` over `.`/`..`/absolute components. They
+deliberately do **not** model the filesystem, so they say nothing about symlinks:
+a lexically-confined `link/x` still resolves outside the root if `link` is an
+in-repo symlink pointing out of the tree. That second layer is enforced at
+*runtime* by `confine_read` / `resolved_within_root` (canonicalise and re-check
+containment before any config-derived read), not by the proof. Read "no bounded
+input escapes" as "no bounded input escapes *the lexical policy*" — the
+filesystem layer is guarded by code + tests, not by Kani.
 
 ## 2. What we adopt (and what we don't)
 

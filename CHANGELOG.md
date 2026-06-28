@@ -155,6 +155,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   intended, allowed case — is unchanged. Five regression tests encode both
   PoCs plus the allowed paths. See `docs/design/v0.14/post_v0.13_audit.md`
   (C1, C2).
+- **Path confinement now follows symlinks for config-derived reads.**
+  `normalize_confined` is purely lexical, so an in-repo symlink (`link ->
+  /etc`) let a lexically-confined `link/secret` escape the repo root at
+  read time and bypass the `allow_out_of_root` gate — a content/existence
+  disclosure oracle reachable from an `extends:`'d ruleset (notably
+  `json_schema_passes`, which echoes schema-compile errors into a
+  violation). Every config-derived read (`json_schema_passes`, `pair_hash`,
+  `cross_file`, `registry_paths_resolve`, and the `file_exists`
+  gitignore-bypass stat) now resolves symlinks and re-verifies containment
+  before reading; an escape is reported as out-of-root and honored only
+  under a top-level `allow_out_of_root`. The Kani proof and its prose are
+  corrected to scope the guarantee to the *lexical* policy (the filesystem
+  layer is guarded by code + tests, not the proof). (H1)
+- **`when:` expressions are depth-bounded.** A crafted `when:` from an
+  untrusted `extends:` ruleset — deeply nested parens, or a long flat
+  `a and a and …` chain — could overflow the parser or evaluator stack (an
+  uncatchable abort). Both now fail loudly past a generous depth cap. (H5)
+- **Structured-query rules no longer panic on a multibyte value.** The
+  `*_path_*` error renderer byte-sliced an untrusted matched value at
+  offset 80, which panics when a codepoint straddles that boundary —
+  crashing the whole parallel `check` run (and the LSP server). It now
+  truncates on a char boundary. (H2)
 
 ### Internal
 
