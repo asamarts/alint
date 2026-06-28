@@ -33,6 +33,7 @@ leads the cut.
 | Doc | Scope |
 |---|---|
 | [`post_v0.13_audit.md`](./post_v0.13_audit.md) | The full audit findings + the phased remediation plan + per-finding status. The living checklist for the cut. |
+| [`ci-fork-pr-isolation.md`](./ci-fork-pr-isolation.md) | Proposal (H6 follow-up): route untrusted fork-PR CI to ephemeral GitHub-hosted runners, keeping it off the self-hosted box. Spec to review before a workflow change lands. |
 
 ## Release shape
 

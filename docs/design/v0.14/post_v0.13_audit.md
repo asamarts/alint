@@ -274,9 +274,11 @@ request workflows from outside collaborators* to **Require approval for all
 outside collaborators** (the public-repo default — first-time contributors
 only — is insufficient). (2) Ideally move the PR lanes to ephemeral /
 GitHub-hosted runners, reserving the self-hosted box for `push`/tag/bench.
-**Status:** flagged — the approval setting is the one to verify *now*; I can
-draft the runner split if wanted, but the setting is a GitHub-UI change only
-the maintainer can make.
+**Status:** the approval setting was applied by the maintainer (2026-06-28),
+closing the immediate hole. The durable defence-in-depth fix — routing
+fork-PR CI to ephemeral runners — is specced in
+[`ci-fork-pr-isolation.md`](./ci-fork-pr-isolation.md) (proposed; no
+workflow change has landed yet).
 
 ---
 
