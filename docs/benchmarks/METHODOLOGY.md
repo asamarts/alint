@@ -38,7 +38,7 @@ So we split:
   per-bench rationale lives in [`micro/README.md`](micro/README.md).
 - **hyperfine macro-benches** measure the actual CLI as
   users will invoke it, across controlled synthetic trees,
-  and publish per-platform numbers. 8 scenarios (S1-S8)
+  and publish per-platform numbers. 14 scenarios (S1-S14)
   under `xtask/src/bench/scenarios/`; catalogue in
   [`macro/README.md`](macro/README.md).
 
@@ -200,18 +200,27 @@ later won't require touching the bench code.
 
 ## Regression gates
 
-Two gates run in CI:
+The CI bench jobs (per PR, `ci.yml`) are **not** the wall-clock
+`bench-compare`:
 
-1. **Per-PR**: `xtask bench-compare --before <floor> --after
-   target/criterion --threshold 10` against the v0.7.0
-   floor under
-   [`micro/results/linux-x86_64/v0.7.0/criterion/`](micro/results/linux-x86_64/v0.7.0/). Catches any micro-bench whose mean
-   has grown more than 10 % vs the v0.7.0 publication.
-2. **Per-release** (manual, before tag): `xtask bench-scale`
-   at the publication-grade matrix; eyeball the headline
-   cells in [`HISTORY.md`](HISTORY.md). Anything > 20 %
-   drift gets an investigation under
-   [`investigations/`](investigations/).
+1. **`bench-smoke`** — a fast hyperfine smoke check that the macro
+   harness still runs end-to-end. **Non-gating** (a perf smoke check,
+   not a correctness gate).
+2. **`perf-gate`** — the deterministic gungraun gate
+   (`ci/scripts/det-perf-gate.sh`): instruction-count `Ir` (+2%) and
+   `EstimatedCycles` (+5%) vs the PR's merge-base, load-immune so it
+   runs on the self-hosted runner regardless of co-tenants. **Advisory
+   today** (`DET_PERF_ADVISORY=1` — it annotates, doesn't fail); see
+   [`../design/deterministic-perf-gating.md`](../design/deterministic-perf-gating.md).
+
+`xtask bench-compare` (micro vs the v0.7.0 floor) is a **local** helper,
+not wired into any workflow. Wall-clock regression is gated
+**per-release** (manual, before tag) by `xtask bench-gate`
+(cross-version `min_ms`; the publish criterion in `RELEASING.md`),
+trustworthy only on a verified-quiet box — `bench-record.yml`'s
+`xtask bench-scale` matrix (S1-S14 × {1k,10k,100k,1m} × {full,changed})
+is otherwise characterization. Anything > 20 % drift gets an
+investigation under [`investigations/`](investigations/).
 
 Per-phase gating during a release cut (e.g. v0.9.x's four
 phases) compared each phase against the prior phase's

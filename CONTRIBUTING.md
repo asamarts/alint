@@ -52,7 +52,7 @@ cargo test --workspace            # ~5s
 cargo run -p alint -- check       # dogfood: alint lints itself
 ```
 
-Rust 1.95+ required (see `rust-toolchain.toml`).
+Rust 1.85+ required (the workspace MSRV — `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
 
 ### Pre-push checklist
 
@@ -69,7 +69,7 @@ Under the hood it runs:
 ci/scripts/fmt.sh                          # cargo fmt --check
 ci/scripts/clippy.sh                       # cargo clippy --workspace --all-targets -- -D warnings
 ci/scripts/test.sh                         # cargo test --workspace + bash CLI tests
-ci/scripts/docs.sh                         # cargo doc -D warnings + docs-export/gen-schema/gen-facts/gen-arch --check
+ci/scripts/docs.sh                         # cargo doc -D warnings + docs-export/gen-schema/gen-facts/gen-roadmap/gen-arch/gen-model --check + likec4 validate + gen-mermaid --check
 ci/scripts/check-version-pins.sh           # README/SECURITY/docs/site install snippets + npm pin to workspace version
 ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= workspace.package.version
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
@@ -186,7 +186,7 @@ a content rule that fans out over `**/*.rs`.
 
 `main` is protected; PRs require:
 
-- Passing `release.yml`-equivalent CI (preflight + cross-platform tests)
+- Passing the PR CI workflows: `ci.yml` (preflight — fmt/clippy/test/docs/version-pins/dogfood, plus the `bench-smoke` and advisory `perf-gate` jobs) and `cross-platform.yml` (Linux/macOS/Windows tests). (`release.yml` is tag-triggered only and does not gate PRs.)
 - One approving review (currently a single-maintainer project; this is the
   spot to call out if you'd like to be added as a co-maintainer)
 

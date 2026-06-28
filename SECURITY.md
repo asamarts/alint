@@ -42,7 +42,7 @@ In scope:
 
 - The `alint` CLI binary and all crates published from this repo
   (`alint`, `alint-core`, `alint-rules`, `alint-dsl`, `alint-output`,
-  `alint-testkit`)
+  `alint-lsp`)
 - The bundled rulesets compiled into the binary
 - The official GitHub Action (`asamarts/alint`)
 - The Docker image (`ghcr.io/asamarts/alint`)

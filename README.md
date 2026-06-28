@@ -36,14 +36,14 @@ alint fix --dry-run
 alint fix
 ```
 
-Bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_python`, …), so listing one for an ecosystem you don't have is a silent no-op. See [docs/rules.md](docs/rules.md) for the full rule catalogue and [alint.org](https://alint.org) for narrative docs.
+Most bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has_python`, …), so listing one for an ecosystem you don't have is a silent no-op; the compliance and Apache-governance sets (`reuse`, `apache-2`, `apache/governance`) and `agent-hygiene` carry no fact gate and always fire — extending them is itself the opt-in. See [docs/rules.md](docs/rules.md) for the full rule catalogue and [alint.org](https://alint.org) for narrative docs.
 
 ## Core capabilities
 
 - **89 rule kinds** across 13 families: existence, content, naming, structured query (RFC 9535 JSONPath over JSON/YAML/TOML/XML), text hygiene, security/unicode, encoding, structure, portable metadata, Unix metadata, git hygiene, cross-file relations, plugin (`command` shellout). Full reference: [`docs/rules.md`](docs/rules.md).
-- **22 bundled rulesets**: `oss-baseline` (a strict superset of [Repolinter](https://github.com/todogroup/repolinter)'s default ruleset for users migrating from that tool, archived 2026-02), language sets (`rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`), `ci/github-actions`, monorepo overlays (`cargo-workspace`, `pnpm-workspace`, `yarn-workspace`), hygiene (`no-tracked-artifacts`, `lockfiles`), tooling (`editorconfig`), docs (`adr`), compliance (`reuse`, `apache-2`), `apache/governance` (Apache TLP governance discipline), agent (`hygiene`, `context`). Built into the binary, no network round-trip; ecosystem-gated, so listing one for an absent ecosystem is a silent no-op.
+- **22 bundled rulesets**: `oss-baseline` (a strict superset of [Repolinter](https://github.com/todogroup/repolinter)'s default ruleset for users migrating from that tool, archived 2026-02), language sets (`rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`), `ci/github-actions`, the base `monorepo` set plus workspace overlays (`cargo-workspace`, `pnpm-workspace`, `yarn-workspace`), hygiene (`no-tracked-artifacts`, `lockfiles`), tooling (`editorconfig`), docs (`adr`), compliance (`reuse`, `apache-2`), `apache/governance` (Apache TLP governance discipline), agent (`hygiene`, `context`). Built into the binary, no network round-trip; the language and workspace sets are fact-gated (a silent no-op for an absent ecosystem), while the compliance (`reuse`, `apache-2`), Apache-governance, and `agent-hygiene` sets carry no fact gate and always fire.
 - **Auto-fix**: 12 ops covering content edits (whitespace, newlines, line endings, BOM/bidi/zero-width strip, blank-line collapse) and path ops (create/remove/rename/prepend/append). Preview with `alint fix --dry-run`. Configurable `fix_size_limit` (default 1 MiB) skips oversize files rather than rewriting them.
-- **Conditional rules**: a bounded `when:` expression language (boolean logic, comparisons, `matches`, `in`) gates rules on *facts* evaluated once per run (`any_file_exists`, `all_files_exist`, `count_files`).
+- **Conditional rules**: a bounded `when:` expression language (boolean logic, comparisons, `matches`, `in`) gates rules on *facts* evaluated once per run (predicate kinds: `all_files_exist`, `any_file_exists`, `count_files`, `file_content_matches`, `git_branch`, `custom`).
 - **Composition**: `extends:` pulls in other configs by local path, HTTPS URL (SRI-pinned), or `alint://bundled/<name>@<rev>`. Children override field-by-field. Monorepos can opt into `nested_configs: true` for auto-discovered subtree-scoped `.alint.yml` files.
 - **11 subcommands**: `check` (default; supports `--changed` for PR-fast-path linting), `fix`, `baseline` (snapshot current violations so `check --baseline` gates only on new ones), `init` (auto-detect ecosystem + scaffold), `validate-config` (parse-only; for editor LSP / pre-commit / fail-fast CI), `explain <rule>`, `list`, `suggest` (scan for antipatterns and propose rules), `facts` (debug `when:` clauses), `export-agents-md` (sync `AGENTS.md` from active rules), `lsp` (language server over stdio for editor integrations).
 - **8 output formats**: `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
@@ -143,7 +143,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.13.0`).
+Also published: `:<major>.<minor>` (e.g. `:0.13`) and the raw git tag (`:v0.13.0`).
 
 ## Quick start
 
@@ -239,10 +239,11 @@ Twenty-two rulesets ship in the binary, with zero network round-trip, pinned to 
 - **`monorepo/pnpm-workspace@v1`**: pnpm workspaces. Gated by `facts.is_pnpm_workspace` (root `pnpm-workspace.yaml` exists). Verifies the `packages:` declaration and per-member README + `name`.
 - **`monorepo/yarn-workspace@v1`**: Yarn / npm workspaces. Gated by `facts.is_yarn_workspace` (root `package.json` has `"workspaces"`). Per-member README + `name`, scoped to `{packages,apps}/*`.
 
-**License compliance** (no fact gate; extending signals intent)
+**Compliance & governance** (no fact gate; extending signals intent)
 
 - **`compliance/reuse@v1`**: FSFE [REUSE Specification](https://reuse.software/) compliance: top-level `LICENSES/` directory + every source file declares both `SPDX-License-Identifier:` and `SPDX-FileCopyrightText:` in its first ~10 lines.
 - **`compliance/apache-2@v1`**: Apache-2.0 compliance: LICENSE contains the Apache 2.0 text, root NOTICE file present, and every source file carries the canonical "Licensed under the Apache License, Version 2.0" header.
+- **`apache/governance@v1`**: Apache Top-Level-Project (TLP) governance discipline — the release-artefact + governance baseline that arrow / spark / airflow each re-implement by hand. Rule ids are namespaced `apache-gov-*`, so it composes with `compliance/apache-2@v1` (license redistribution) without collision; severities are tiered (legally load-bearing artefacts `error`, release discipline `warning`, nice-to-haves `info`).
 
 **Namespaced utilities**
 
@@ -251,6 +252,11 @@ Twenty-two rulesets ship in the binary, with zero network round-trip, pinned to 
 - **`tooling/editorconfig@v1`**: root `.editorconfig` + `.gitattributes` with line-ending normalization.
 - **`docs/adr@v1`**: MADR-style Architecture Decision Records under `docs/adr/`: `NNNN-kebab-title.md` filename + required `## Status` / `## Context` / `## Decision` sections.
 - **`ci/github-actions@v1`**: GitHub Actions hardening guided by OpenSSF Scorecard: workflow-level `permissions.contents: read`, pin third-party actions to full commit SHAs, every workflow declares a `name:`. Scoped to `.github/workflows/*.y{,a}ml`, so it no-ops in repos that don't use GitHub Actions.
+
+**Agent-aware**
+
+- **`agent-hygiene@v1`**: AI-coding-era cruft that shows up disproportionately in agent-authored commits — versioned-duplicate filenames, scratch / planning docs, AI-affirmation prose, debug residue (`debugger;` in non-test source), and model-attributed TODO markers. Composes with the hygiene rulesets; fires on every repo (no fact gate).
+- **`agent-context@v1`**: hygiene for the agent-instruction files coding agents read each session (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `GEMINI.md`): existence, stale-reference, stub, and a ~200-300-line bloat guard. Gated with `when: facts.has_agent_context`, so it's a silent no-op in repos that ship no agent-context file.
 
 All rulesets ship with non-blocking defaults (`info` / `warning` for recommendations, `error` only for unambiguous bugs). Override severity or scope by redeclaring the rule id in your own `.alint.yml`, or disable with `level: off`. Per-ruleset rule lists in [docs/rules.md](docs/rules.md#bundled-rulesets).
 
@@ -271,7 +277,7 @@ All inputs (all optional):
   with:
     version: v0.13.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
-    format: github         # human | json | sarif | github | markdown | junit | gitlab (default: github)
+    format: github         # human | json | sarif | github | markdown | junit | gitlab | agent (default: github)
     config: |              # extra config path(s), one per line
       .alint.yml
     fail-on-warning: false

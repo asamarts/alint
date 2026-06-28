@@ -5,23 +5,20 @@ How fast is alint, how do we measure it, and where do the numbers live.
 ## TL;DR — current published numbers
 
 `linux-x86_64` (AMD Ryzen 9 3900X 12-core / 62 GB / ext4 / rustc 1.95).
-Latest published release: **v0.9.6** (2026-05-02). Working baseline
-for the next release: **v0.9.6-postfix** (post-release `scope_filter:`
-runtime fix, see CHANGELOG `[Unreleased]`).
+Latest published release: **v0.13.0** (2026-06-17). Headline full-run
+wall-times at 1M files (sourced from [`HISTORY.md`](HISTORY.md)):
 
-| Workload | v0.9.5 | v0.9.6 published | v0.9.6-postfix |
-|---|---:|---:|---:|
-| 100k S3 full (hyperfine) | — | 1135.27 ms | 1169.97 ms |
-| 100k S6 full (hyperfine) | — | 1221.27 ms | **1066.68 ms** (-12.7 %) |
-| 100k S9 full (hyperfine) | — | 738.58 ms | **691.83 ms** (-6.3 %) |
-| 1M S3 full (hyperfine) | 11.194 s | (not captured at 1M) | (not captured at 1M) |
-| 1M S3 changed (hyperfine) | 6.728 s | (not captured at 1M) | (not captured at 1M) |
+| Workload (1M, full) | v0.13.0 |
+|---|---:|
+| S3 workspace bundle | 11.82 s ± 0.06 |
+| S6 per-file content fan-out | 11.57 s ± 0.27 |
+| S7 cross-file relational | 15.41 s ± 0.13 |
+| S9 nested polyglot | 7.48 s ± 0.11 |
 
-S9 (nested polyglot, new in v0.9.6) — see [`macro/results/linux-x86_64/v0.9.6/`](macro/results/linux-x86_64/v0.9.6/)
-and [`macro/results/linux-x86_64/v0.9.6-postfix/`](macro/results/linux-x86_64/v0.9.6-postfix/)
-for the post-fix re-capture (the released v0.9.6 binary's `scope_filter:` field was a runtime no-op; the postfix numbers reflect the gate actually firing).
-
-Source: [`macro/results/linux-x86_64/v0.9.6-postfix/`](macro/results/linux-x86_64/v0.9.6-postfix/) (working baseline) and [`macro/results/linux-x86_64/v0.9.5/`](macro/results/linux-x86_64/v0.9.5/) (prior 1M-scale baseline).
+The full per-scenario, per-size trajectory (every release × 1k/10k/100k/1M ×
+full/changed) lives in [`HISTORY.md`](HISTORY.md); per-version raw snapshots
+under [`macro/results/linux-x86_64/v0.13.0/`](macro/results/linux-x86_64/v0.13.0/)
+and [`micro/results/linux-x86_64/v0.13.0/`](micro/results/linux-x86_64/v0.13.0/).
 
 ## Layout
 
@@ -36,7 +33,7 @@ docs/benchmarks/
 │   ├── README.md        — what each of the 12 micro-benches measures
 │   └── results/<arch>/<version>/criterion/   — published snapshots
 │
-├── macro/               — hyperfine bench-scale (S1-S9, full e2e wall-time)
+├── macro/               — hyperfine bench-scale (S1-S14, full e2e wall-time)
 │   ├── README.md        — what each scenario tests + tool matrix
 │   └── results/<arch>/<version>/             — published snapshots
 │
@@ -73,10 +70,17 @@ Cross-machine comparisons require like-for-like fingerprints — see
 
 ## Regression gate
 
-Every release runs `xtask bench-compare --threshold 10` against the v0.7.0
-floor under [`micro/results/linux-x86_64/v0.7.0/criterion/`](micro/results/linux-x86_64/v0.7.0/). Per-phase deltas (commit-by-commit
-during the v0.9 cut) compare against the prior phase's snapshot under
-[`archive/v0.9-development-baselines/`](archive/).
+Per PR, CI runs two bench jobs (`ci.yml`): `bench-smoke` — a fast hyperfine
+smoke check that the macro harness still runs end-to-end (**non-gating**) — and
+`perf-gate`, the deterministic gungraun gate (`ci/scripts/det-perf-gate.sh`: `Ir`
++2% / `EstimatedCycles` +5% vs the PR's merge-base), currently **advisory**
+(`DET_PERF_ADVISORY=1`, so it annotates rather than fails). Wall-clock regression
+is gated per-release by `xtask bench-gate` (cross-version `min_ms`; the publish
+criterion in [`../../RELEASING.md`](../../RELEASING.md)), trustworthy only on a
+verified-quiet box; `xtask bench-compare` against the v0.7.0 micro floor under
+[`micro/results/linux-x86_64/v0.7.0/criterion/`](micro/results/linux-x86_64/v0.7.0/)
+is a local helper, not wired into any workflow. See [`METHODOLOGY.md`](METHODOLOGY.md)
+and [`../design/deterministic-perf-gating.md`](../design/deterministic-perf-gating.md).
 
 A new release tag MUST land with a fresh `macro/results/<arch>/<version>/`
 snapshot. The bench-coverage soft warning at

@@ -6,11 +6,12 @@ will too.
 
 ## Project status
 
-- **Version:** v0.9.x. Pre-1.0; the DSL, plugin ABI, and `alint-core`
-  public API are not yet committed to semver-major stability. Minor
-  releases (`0.9.X` → `0.9.Y`) may include breaking changes; patch
-  releases (`0.9.X.Y` → `0.9.X.Z`) preserve compat. v1.0 ships when
-  the surface stops moving; see [`docs/design/ROADMAP.md`](docs/design/ROADMAP.md).
+- **Version:** v0.13.0. Pre-1.0; the DSL, plugin ABI, and `alint-core`
+  public API are not yet committed to semver-major stability. Versioning
+  is plain semver `x.y.z`: pre-1.0, a minor bump (`0.y` → `0.(y+1)`) may
+  carry breaking changes and a patch bump (`0.y.z` → `0.y.(z+1)`)
+  preserves compatibility. v1.0 ships when the surface stops moving; see
+  [`docs/design/ROADMAP.md`](docs/design/ROADMAP.md).
 - **Maintainership:** single-maintainer
   ([asamarts](https://github.com/asamarts)). The maintainer reviews
   every PR and cuts every release. Multi-maintainer governance arrives

@@ -8,7 +8,7 @@ not yet unified onto `violation_fingerprint` (§5, §7). (Draft | Implemented |
 Superseded by <doc>.)
 Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) — **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics).
 Demand evidence: External adoption evaluation, §4.1 — *"the single feature that makes ESLint/RuboCop/etc. adoptable on legacy code, and its absence is the #1 thing that stops a team from flipping alint on as a merge gate."* Reproduced firsthand against alint 0.13.0.
-Target version: Phase 4, unscheduled (post-v0.14). Draft for review; resolve §7 before implementation and move it under the assigned `docs/design/vX.Y/` directory then.
+Status detail: Implemented and merged to `main` (#88–#94, 2026-06-24); landed after the v0.13.0 cut, so it ships in the next release. All of §7 is RESOLVED except Q7 (`gitlab.rs` fingerprint unification), a tracked deferred follow-up (§5, §7).
 
 > **v3 changelog (implementation-time audit).** Running the (then-draft)
 > fingerprint against the *whole firing scenario corpus* (all 89 registered

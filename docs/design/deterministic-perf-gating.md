@@ -62,12 +62,17 @@ very-high deltas — RECALIBRATED 2026-06-08 to diagnostic-only + an `EstimatedC
 
 ## Automation — load-immune per-PR CI gate
 
-New `ci.yml` job `perf-gate` (gated on `changes.outputs.rust`), on a **GitHub-hosted
-runner** (load-immune ⇒ no self-hosted quiescence): install pinned valgrind →
-`cargo bench --bench det_engine --bench det_check` → gungraun compares vs the
-committed baseline → **fails the PR** on an `Ir` breach. Each bench runs once ⇒ fast.
-Regressions caught at PR time, deterministically — not 5 h later in a contaminated
-tag bench.
+`ci.yml` job `perf-gate` (gated on `changes.outputs.rust`, PRs only), on the
+**self-hosted runner** (`[self-hosted, linux, alint]`): the gate is itself
+load-immune, so co-tenant noise doesn't matter and no GitHub-hosted quiescence is
+needed. Install pinned valgrind → build + bench the **merge-base** and the PR head
+(`cargo bench --bench det_engine --bench det_check`) → gungraun compares the two
+**in-CI** (no committed baseline; the raw output is ~18 MB) → on an `Ir` /
+`EstimatedCycles` breach it emits a `::warning` and **exits 0** — advisory while
+`DET_PERF_ADVISORY=1`. Flip `DET_PERF_ADVISORY=0` to make a breach fail the PR
+once the `Ir` limit is calibrated against real PR noise. Each bench runs once ⇒
+fast; regressions surface at PR time, deterministically — not 5 h later in a
+contaminated tag bench.
 
 ## Drift control
 
@@ -82,10 +87,12 @@ regeneration is an explicit, documented trigger:
 | gungraun + its runner | pinned dev-dep + `cargo install gungraun-runner --version =X` | gungraun bump |
 | input tree | seed `0xA11E47` | frozen |
 
-Baselines live committed under `docs/benchmarks/deterministic/<rustc>-<valgrind>/`
-(keyed by the pinning fingerprint, reusing the `Fingerprint` struct) so a
-toolchain/valgrind bump yields a NEW baseline dir, never a silent shift. The bench
-Docker image gains pinned valgrind for reproducibility anywhere.
+There is **no committed baseline**: the gate builds and benches the PR's
+merge-base in the same CI run and compares against it (same-env, zero drift —
+chosen because the raw gungraun output is ~18 MB). A toolchain/valgrind bump
+therefore moves both sides together rather than silently invalidating a stored
+baseline. The bench Docker image still gains pinned valgrind for reproducibility
+anywhere.
 
 ## Relationship to wall-clock bench
 

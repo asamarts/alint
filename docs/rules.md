@@ -855,7 +855,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@v0.9.21
+        uses: asamarts/alint@v0.13.0
 ```
 
 ### `git_commit_signed_off`

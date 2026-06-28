@@ -41,8 +41,8 @@ xtask bench-scale --include-1m
 xtask bench-scale --include-1m --sizes 1m --scenarios S3 --modes full \
     --warmup 1 --runs 2
 
-# All scenarios (S1-S8) at every size, both modes
-xtask bench-scale --include-1m --scenarios S1,S2,S3,S4,S5,S6,S7,S8
+# All scenarios (S1-S14) at every size, both modes
+xtask bench-scale --include-1m --scenarios S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14
 
 # Compare against ls-lint and grep on the scenarios they support
 xtask bench-scale --tools all
@@ -83,16 +83,18 @@ exits non-zero when any paired benchmark's mean has grown past the
 threshold:
 
 ```sh
-# Compare against the v0.7.0 floor every release ships gated against
+# Compare against the v0.7.0 micro floor (local helper — no workflow runs this)
 xtask bench-compare \
     --before docs/benchmarks/micro/results/linux-x86_64/v0.7.0/criterion \
     --after  target/criterion \
     --threshold 10
 ```
 
-CI runs this against the v0.7.0 floor on every push. A per-phase delta
-(commit-by-commit during a release cut) compares against the prior phase's
-snapshot under [`archive/v0.9-development-baselines/`](archive/) — see
+No workflow runs `bench-compare`; CI's per-PR bench jobs are `bench-smoke`
+(a non-gating hyperfine smoke check) and `perf-gate` (the advisory deterministic
+gungraun gate — see [`METHODOLOGY.md`](METHODOLOGY.md) § Regression gates).
+A per-phase delta (commit-by-commit during a release cut) compares against the
+prior phase's snapshot under [`archive/v0.9-development-baselines/`](archive/) — see
 the v0.9 design pass for the convention.
 
 ## Publishing benches

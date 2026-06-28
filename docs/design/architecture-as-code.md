@@ -1,6 +1,6 @@
 # Design doc: architecture diagrams as code (Phase 4 / WS3)
 
-Status: Implemented (`xtask gen-arch` + committed `crate-graph.md` + `workspace.dsl`, Phase 4).
+Status: Implemented (`xtask gen-arch` + committed `crate-graph.md` + `workspace.dsl`, Phase 4). **Partly superseded by [`architecture-diagrams.md`](architecture-diagrams.md) / [ADR-0005](../adr/0005-adopt-likec4-for-architecture-diagrams.md) (LikeC4):** the crate graph is now the generated `crate-graph.gen.c4` rendered as the `crateGraph` LikeC4 view (the Mermaid is subsumed), `crate-graph.md` is now a thin `crateGraph`-embed-plus-table page, and the hand-modeled Structurizr `workspace.dsl` is retained only through the transition. `xtask gen-arch` (and its `--check` gate) still generate and gate both files.
 Decisions: ADR-0001 (spec-driven development). WS3 of `spec-driven-development.md`.
 Demand evidence: the hand-drawn ASCII crate tree in `ARCHITECTURE.md` is the only
 structural picture today; it lists directories, not the dependency graph, and is

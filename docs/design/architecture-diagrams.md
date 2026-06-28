@@ -1,14 +1,15 @@
 # Design doc: architecture diagrams as a LikeC4 model (WS3, follow-on)
 
-Status: Implemented (pending merge + deploy). The single LikeC4 model (40 views:
-20 structural, 20 dynamic), the generated `*.gen.c4` fragments and their drift
-gates, the config-DSL domain map, the alint.org web-component embedding with
-light/dark sync, and the GitHub-facing Mermaid gallery (`DIAGRAMS.md`) have all
-shipped. The crate dependency graph is now a generated LikeC4 fragment
-(`crate-graph.gen.c4`) rendered as the `crateGraph` view, subsuming the old
-Mermaid. Remaining: a runner rebuild (Node) flips `likec4 validate` and
-`gen-mermaid --check` from skip to hard gate, and `workspace.dsl` retires once
-the model fully subsumes it.
+Status: Implemented + deployed (#69 alint / #10 alint.org, squash-merged 2026-06-16;
+docs-bundle bridge fixes #70/#71). The single LikeC4 model (40 views: 20 structural,
+20 dynamic), the generated `*.gen.c4` fragments and their drift gates, the config-DSL
+domain map, the alint.org web-component embedding with light/dark sync, and the
+GitHub-facing Mermaid gallery (`DIAGRAMS.md`) are all live. The crate dependency graph
+is now a generated LikeC4 fragment (`crate-graph.gen.c4`) rendered as the `crateGraph`
+view, subsuming the old Mermaid. The Node-22 runner rebuild shipped (#90, 2026-06-23),
+so `likec4 validate` and `gen-mermaid --check` (run with `--no-use-dot` to force the
+wasm layouter) are now real hard CI gates rather than skips. Remaining: `workspace.dsl`
+retires once the LikeC4 model fully subsumes it.
 
 Decisions: ADR-0005 (adopt LikeC4 for architecture diagrams). Builds on ADR-0001
 (spec-driven development) and extends `architecture-as-code.md` (WS3), which
@@ -103,9 +104,9 @@ the LikeC4 model subsumes it. `crate-graph.md` is now a thin page (the
     sets that `facts.json` derives from.
 
 `likec4 validate` needs Node on the runner (ADR-0005 chose alint-repo gating, not
-alint.org). `ci/Containerfile` gains Node 22; until the runner is rebuilt,
-`likec4.sh` detects the missing Node and skips with a loud warning rather than
-failing CI.
+alint.org). The runner ships Node 22 (`ci/Containerfile`, rebuilt #90, 2026-06-23),
+so `likec4.sh` now runs the validation as a hard gate; its missing-Node
+skip-with-loud-warning path remains only as a fallback.
 
 ## 5. Targets
 
@@ -213,8 +214,10 @@ diagram.
 
 ## 8. Open items
 
-- Rebuild the kbox runner image with Node 22 to flip `likec4.sh`
-  (`likec4 validate`) and `gen-mermaid --check` from skip to hard gate.
+- ~~Rebuild the kbox runner image with Node 22 to flip `likec4.sh`
+  (`likec4 validate`) and `gen-mermaid --check` from skip to hard gate.~~ **Done
+  (#90, 2026-06-23):** the runner ships Node 22 and both are live hard gates
+  (`gen-mermaid` runs `--no-use-dot` to force the wasm layouter).
 - Retire `workspace.dsl` (Structurizr) once the LikeC4 model fully subsumes it.
   (`crate-graph.md`'s diagram is already the generated `crateGraph` view; only
   its crate-by-tier table and `workspace.dsl` remain from the pre-LikeC4 setup.)
