@@ -54,8 +54,8 @@ three classes at once.
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M6/M7 done; M2–M5,M8 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M12 done; M10,M11,M13,M14 deferred) |
-| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[ ]` |
-| 7 | alint.org drift | W1–W7 | `[ ]` |
+| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 done; D11 + L/dogfood deferred) |
+| 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
 Phases land security-first. Each is one atomic commit (or a small group)
 with a forward `Next: Phase N` pointer, per the phased-rollout
@@ -430,36 +430,38 @@ the churn). Likely a doc + small keying change, not a deep redesign.
 
 Doc drift (D):
 
-- `[ ]` **D1** README:222 "Twenty-two rulesets" enumerates only 19 —
+- `[x]` **D1** README:222 "Twenty-two rulesets" enumerates only 19 —
   missing `apache/governance`, `agent-hygiene`, `agent-context`. README:44
   bullet enumerates 21. Add the three; reconcile both lists to 22.
-- `[ ]` **D2** `CONTRIBUTING.md:55` MSRV "Rust 1.95+" vs `Cargo.toml`
+- `[x]` **D2** `CONTRIBUTING.md:55` MSRV "Rust 1.95+" vs `Cargo.toml`
   `rust-version = "1.85"`. Fix to 1.85.
-- `[ ]` **D3** `SECURITY.md:43` published-crate list wrong both ways
+- `[x]` **D3** `SECURITY.md:43` published-crate list wrong both ways
   (lists `alint-testkit` `publish=false`; omits `alint-lsp`). Sync to
   `ci/scripts/publish-crates.sh`.
-- `[ ]` **D4** `GOVERNANCE.md:9` stale "Version: v0.9.x" + bogus
+- `[x]` **D4** `GOVERNANCE.md:9` stale "Version: v0.9.x" + bogus
   four-component versioning. Update to current + semver.
-- `[ ]` **D5** `docs/benchmarks/README.md:8` "Latest published v0.9.6";
+- `[x]` **D5** `docs/benchmarks/README.md:8` "Latest published v0.9.6";
   METHODOLOGY/RUNNING claim a per-push `bench-compare` gate no workflow
   runs; "8 scenarios" is 14. Refresh.
-- `[ ]` **D6** `docs/design/deterministic-perf-gating.md:65-85`
+- `[x]` **D6** `docs/design/deterministic-perf-gating.md:65-85`
   §Automation overstates the gate (contradicts its own §Findings:
   advisory `::warning exit 0`, self-hosted, no committed-baseline dir).
-- `[ ]` **D7** `docs/design/baseline.md:11` stale "Draft… post-v0.14"
+- `[x]` **D7** `docs/design/baseline.md:11` stale "Draft… post-v0.14"
   footer vs "Status: Implemented." Remove the draft footer.
-- `[ ]` **D8** README:39,44 "ecosystem-gated → silent no-op"
+- `[x]` **D8** README:39,44 "ecosystem-gated → silent no-op"
   overgeneralizes (5 rulesets are ungated; README:242 says so). Qualify.
-- `[ ]` **D9** `docs/rules.md:858` Action pin `@v0.9.21`; README:146
+- `[x]` **D9** `docs/rules.md:858` Action pin `@v0.9.21`; README:146
   docker `:0.10`; README:274 format list omits `agent`; README:46 lists
   3 of 6 fact predicates. Bump/complete.
-- `[ ]` **D10** ARCHITECTURE.md / architecture-diagrams.md /
+- `[x]` **D10** ARCHITECTURE.md / architecture-diagrams.md /
   architecture-as-code.md describe the pre-LikeC4 Mermaid crate-graph and
   "pending merge/deploy" / "runner rebuild" state that already shipped
   (#69-71, #90). Refresh + add superseded pointers.
-- `[ ]` **D11** CHANGELOG: missing v0.4.3–v0.4.8 entries; em-dash vs
-  hyphen header separator drift. Backfill/normalize (or note the gap).
-- `[ ]` **D12** `CONTRIBUTING.md:72` `docs.sh` gate list under-counts;
+- `[-]` **D11** CHANGELOG: missing v0.4.3–v0.4.8 entries; em-dash vs
+  hyphen header separator drift. **Deferred:** a historical CHANGELOG
+  backfill, low value, and kept off-limits during the doc pass so the
+  `[Unreleased]` audit entries weren't disturbed. Tracked.
+- `[x]` **D12** `CONTRIBUTING.md:72` `docs.sh` gate list under-counts;
   `:189` "release.yml-equivalent CI" misnomer (PR gate is ci.yml).
 
 LOW correctness cleanup (L):
@@ -505,44 +507,60 @@ LOW correctness cleanup (L):
 
 Dogfooding (Dog):
 
-- `[ ]` **Dog1** `.alint.yml` exercises 27/89 kinds with zero cross-file,
+- `[-]` **Dog1** `.alint.yml` exercises 27/89 kinds with zero cross-file,
   structured-query, or git-hygiene rules (the flagship families) and
   doesn't extend `monorepo/cargo-workspace` despite being a 9-crate
   workspace. Add a representative dogfood slice of each flagship family
   (it doubles as living proof + regression coverage on real content).
-- `[ ]` **Dog2** two files exceed `rust-file-max-lines` (downgraded to
+  **Deferred:** a quality/credibility improvement, not a defect; wants a
+  deliberate dogfood-config expansion.
+- `[-]` **Dog2** two files exceed `rust-file-max-lines` (downgraded to
   `warning`, so the self-lint isn't green): `crates/alint-dsl/src/lib.rs`
   (~2059) and `xtask/src/docs_export.rs` (~2131). Split them, or
   re-baseline the threshold with a recorded justification (the config
-  comment already invited exactly this).
+  comment already invited exactly this). **Deferred:** a file-split refactor
+  (or a recorded threshold bump) — a focused change, tracked.
 
 ---
 
 ## Phase 7 — alint.org drift (site repo)
 
-Tracked here for a single source of truth; lands in the alint.org repo.
+Tracked here for a single source of truth; lives in the alint.org repo.
+**Landed** on branch `audit/post-v0.13-drift` (separate repo, not pushed):
+W1–W5 + W7 — `npm run build` (200 pages), `check-version-pins.sh`, and
+`check-internal-links.mjs` all green. Notable judgment calls: W1 used the
+repo's own `{alint.rulesets}` interpolation + an explicit gate pin (the
+"widen the matcher" idea false-positived on `2. Bundled …` list markers
+and `ruleset (15 rules)`); W4 mapped `cross_file_value_equals` →
+`cross_file.rs` per the registry (not `structured_path.rs`). The agent also
+noted the docs-bundle `subcommands=10` vs facts.json `11` — that's correct
+(`baseline` is the 11th and ships in v0.14, so the v0.13.0-tag bundle shows
+10); no action.
 
-- `[ ]` **W1** `src/pages/compare.astro:204` bundled-ruleset count "21" →
+- `[x]` **W1** `src/pages/compare.astro:204` bundled-ruleset count "21" →
   22 (facts.json). Also widen the count gate so it catches noun-before-
   digit table headers (`extract_counts_near_noun` is case-sensitive,
   digit-then-noun only).
-- `[ ]` **W2** `src/content/blog/introducing-alint.md:116` "The current
+- `[x]` **W2** `src/content/blog/introducing-alint.md:116` "The current
   release is v0.11" → v0.13.0; teach the bumper/gate the "current
   release" phrasing (currently only "latest release" is anchored).
-- `[ ]` **W3** `src/pages/api/rulesets.json.ts:29` regex omits `apache`
+- `[x]` **W3** `src/pages/api/rulesets.json.ts:29` regex omits `apache`
   → `apache/governance` emits a non-resolvable URI + 404 source link. Add
   `apache` to `NESTED_PREFIX_RE`.
-- `[ ]` **W4** `src/pages/api/rules.json.ts:148` `sourceUrlOf` 404s for
+- `[x]` **W4** `src/pages/api/rules.json.ts:148` `sourceUrlOf` 404s for
   19/89 kinds (aliases + shared-file structured-query kinds). Map aliases
   and shared files to their real source path.
-- `[ ]` **W5** `.gitignore` omits the synced `src/content/docs/docs/
+- `[x]` **W5** `.gitignore` omits the synced `src/content/docs/docs/
   reference/` dir (untracked after every sync; a stray `git add -A` would
   commit regeneratable files). Add it next to the other synced subtrees.
-- `[ ]` **W6** Drift-gate blind spots: no coverage for families /
+- `[~]` **W6** Drift-gate blind spots: no coverage for families /
   case-study / examples counts; "current release" phrasing; API
   endpoints; and `deploy.yml` doesn't run the gates (merge-only). Add
-  guards or document the residual risk in marketing/STATE.md.
-- `[ ]` **W7** Case studies are point-in-time (alint v0.9.17, "future
+  guards or document the residual risk in marketing/STATE.md. **Partial:**
+  the "current release" anchor (W2) and the compare-row pin (W1) are now
+  covered; the families/case-study/examples count gates, the API-endpoint
+  gate, and the deploy-time gating remain. Tracked.
+- `[x]` **W7** Case studies are point-in-time (alint v0.9.17, "future
   tense" for now-shipped kinds). Add a visible "as of vX" banner or a
   revalidation note so they don't read as current-catalogue claims.
 
