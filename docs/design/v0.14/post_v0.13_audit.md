@@ -590,11 +590,16 @@ noted the docs-bundle `subcommands=10` vs facts.json `11` — that's correct
 
 ## Themes / root causes
 
-1. **Spawn gate enumerates at one pre-expansion choke point.** Three
-   bypasses to date (`gff`, templates, nested). Keystone fix: gate the
-   *finalized* rule set by provenance. Prefer a capability check that
-   can't be routed around (post-expansion) over an ever-growing
-   enumerate-and-reject list.
+1. **Spawn gate enumerates at one pre-expansion choke point.** *Four*
+   bypasses to date (`gff`, templates, nested, and the `require:` block of
+   `for_each_*`/`every_matching_has` — the last found in pre-merge review:
+   a nested rule spec buried in a parent rule's options, which a top-level
+   *or* post-`finalize` scan both miss). The fix had to scan the raw rule
+   mappings recursively, before instantiation. Lesson: a spawning kind can
+   hide anywhere a rule spec can nest (templates, nested configs, `require:`
+   options); the gate must walk every such site, not just top-level
+   `rules[].kind`. Prefer a capability check that can't be routed around
+   over an ever-growing enumerate-and-reject list.
 2. **Lexical-only confinement + symlink-following reads.** `pathsafe` is
    lexical by design but several callers do real reads through the
    joined path, and the walker's index-pruning doesn't cover the

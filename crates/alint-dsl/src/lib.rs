@@ -487,17 +487,40 @@ pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "c
 /// whole spawning-kind set, not only `kind: command`.)
 pub fn reject_command_rules_in(rules: &[Mapping], source: &str) -> Result<()> {
     for rule in rules {
-        let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-        if SPAWNING_RULE_KINDS.contains(&kind) {
-            let id = rule
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("(unknown)");
-            return Err(Error::Other(format!(
-                "rule {id:?}: `kind: {kind}` spawns a process and is only allowed in the \
-                 user's top-level config; declaring one in an extended config ({source}) \
-                 is refused because it would let a ruleset run arbitrary code"
-            )));
+        reject_spawning_in_rule(rule, source)?;
+    }
+    Ok(())
+}
+
+/// Reject a spawning `kind` in `rule` OR in any of its nested `require:`
+/// specs, recursively. `for_each_dir` / `for_each_file` /
+/// `every_matching_has` carry a `require:` block of nested rules
+/// (`Vec<NestedRuleSpec>`) whose `kind`/`command` flatten into the parent
+/// rule's options — a third spawn vector the top-level `kind` check (and a
+/// post-`finalize` scan) would miss, since the nested spec is buried in the
+/// parent's options and never becomes a top-level `RuleSpec`. We must scan
+/// the raw mappings here, before instantiation, at every depth. (If a new
+/// rule kind ever adds another `Vec<NestedRuleSpec>` option field, gate it
+/// here too.)
+fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
+    let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    if SPAWNING_RULE_KINDS.contains(&kind) {
+        let id = rule
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unknown)");
+        return Err(Error::Other(format!(
+            "rule {id:?}: `kind: {kind}` spawns a process and is only allowed in the \
+             user's top-level config; declaring one in an extended config ({source}) — \
+             including inside a `require:` block — is refused because it would let a \
+             ruleset run arbitrary code"
+        )));
+    }
+    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
+        for nested in require {
+            if let Some(nested_map) = nested.as_mapping() {
+                reject_spawning_in_rule(nested_map, source)?;
+            }
         }
     }
     Ok(())
@@ -1957,6 +1980,48 @@ rules:
         .unwrap();
         let err = load(&root_cfg).unwrap_err().to_string();
         assert!(err.contains("templates"), "{err}");
+    }
+
+    #[test]
+    fn load_rejects_spawning_kind_nested_in_a_require_block() {
+        // Third spawn vector (found in adversarial review): `for_each_dir` /
+        // `for_each_file` / `every_matching_has` carry a `require:` block of
+        // nested rules whose `kind` flattens into the parent's options. An
+        // extends:'d ruleset could hide a `command` there — the top-level
+        // `kind` check (and a post-finalize scan) miss it, so the gate must
+        // recurse into `require:`.
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base.yml");
+        let child = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &base,
+            "version: 1\nrules:\n  - id: pwn\n    kind: for_each_dir\n    select: \"**/\"\n    require:\n      - kind: command\n        command: [\"sh\", \"-c\", \"echo pwn\"]\n        level: error\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+        let err = load(&child).unwrap_err().to_string();
+        assert!(err.contains("command"), "kind not named: {err}");
+        assert!(err.contains("arbitrary code"), "{err}");
+    }
+
+    #[test]
+    fn nested_config_rejects_spawning_kind_in_a_require_block() {
+        // The same `require:` vector via a nested `.alint.yml` (under
+        // nested_configs). The spawn gate runs before scoping, so it catches
+        // the buried `command`.
+        let tmp = tempfile::tempdir().unwrap();
+        let root_cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+        let pkg_dir = tmp.path().join("packages/foo");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: pwn\n    kind: for_each_dir\n    select: \"**/\"\n    require:\n      - kind: command\n        command: [\"sh\", \"-c\", \"echo pwn\"]\n        level: error\n    level: error\n",
+        )
+        .unwrap();
+        let err = load(&root_cfg).unwrap_err().to_string();
+        assert!(err.contains("command"), "{err}");
+        assert!(err.contains("arbitrary code"), "{err}");
     }
 
     #[test]

@@ -62,7 +62,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every content-rewriting fixer wrote in-place via `std::fs::write`
   (open-truncate-then-write), so a crash or `ENOSPC` mid-write could leave the
   original truncated or lost; writes now go through a shared atomic helper
-  (sibling temp + `fsync` + rename, preserving the file mode). `final_newline`'s
+  (sibling temp + `fsync` + rename, preserving the file mode — and writing
+  *through* an in-tree symlink so the link survives, not the rename clobbering
+  it into a regular file). `final_newline`'s
   on-disk path is reconciled with its editor path (it no longer double-appends
   to an already-terminated or empty file). (H3)
 - **`--config` is honest about being single-valued.** The flag help promised
@@ -165,25 +167,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
-- **Closed two RCE bypasses of the `extends:`/nested spawn gate.** The gate
+- **Closed three RCE bypasses of the `extends:`/nested spawn gate.** The gate
   that confines process-spawning rule kinds (`command`,
   `command_idempotent`, `generated_file_fresh`) to the user's own top-level
-  config inspected only `rules[].kind` at each inherited source, so two
+  config inspected only `rules[].kind` at each inherited source, so three
   paths slipped past it: (1) an `extends:`'d ruleset could hide a spawning
   kind in a `templates:` block and reference it from a `kind`-less
   `extends_template:` rule that expands into a `command` rule *after* the
   gate runs — meaning a single SRI-pinned `extends:` line could run
-  arbitrary code; and (2) a nested `subdir/.alint.yml` (under
+  arbitrary code; (2) a nested `subdir/.alint.yml` (under
   `nested_configs: true`) was never spawn-gated at all, so any subtree
   config — addable via an untrusted monorepo PR, vendored dir, or submodule
-  — could declare `kind: command` and execute on `alint check`. Fix: a
-  spawning kind may no longer appear in *any* `templates:` block (enforced
-  source-agnostically in `finalize`, and earlier with the offending ruleset
-  named); nested configs are now spawn-gated like `extends:` and may not
-  declare `templates:`. A spawning kind in a top-level `rules:` entry — the
-  intended, allowed case — is unchanged. Five regression tests encode both
-  PoCs plus the allowed paths. See `docs/design/v0.14/post_v0.13_audit.md`
-  (C1, C2).
+  — could declare `kind: command` and execute on `alint check`; and (3) the
+  `require:` block of `for_each_dir` / `for_each_file` / `every_matching_has`
+  carries *nested* rule specs whose `kind` flattens into the parent rule's
+  options, which neither the top-level check nor a post-`finalize` scan
+  inspects (found in pre-merge review). Fix: a spawning kind may no longer
+  appear in *any* `templates:` block (enforced source-agnostically in
+  `finalize`, and earlier with the offending ruleset named); nested configs
+  are now spawn-gated like `extends:` and may not declare `templates:`; and
+  the gate recurses into `require:` blocks at the raw-mapping level (the only
+  place that catches the nested kind, which never becomes a top-level rule).
+  A spawning kind in a top-level `rules:` entry — the intended, allowed case
+  — is unchanged. Seven regression tests encode the three PoCs plus the
+  allowed paths. See `docs/design/v0.14/post_v0.13_audit.md` (C1, C2, and the
+  `require:` vector).
 - **Path confinement now follows symlinks for config-derived reads.**
   `normalize_confined` is purely lexical, so an in-repo symlink (`link ->
   /etc`) let a lexically-confined `link/secret` escape the repo root at

@@ -82,6 +82,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // Unique sibling name: the pid distinguishes concurrent processes, the
     // atomic counter distinguishes concurrent threads in this process.
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // Write THROUGH a symlink to its (canonical) target, preserving the link —
+    // matching the prior `fs::write`/append behavior. A bare temp+rename on the
+    // link path would replace the link NODE with a regular file, silently
+    // diverging it from its target (common for a symlinked LICENSE / README in
+    // a monorepo). `canonicalize` needs the target to exist, which it does:
+    // every caller has just read the file via `read_for_fix`.
+    let resolved = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
+        _ => path.to_path_buf(),
+    };
+    let path = resolved.as_path();
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -221,5 +232,29 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .any(|e| e.file_name().to_string_lossy().contains("alint-fix"));
         assert!(!leaked, "atomic write leaked a temp file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_writes_through_a_symlink_preserving_the_link() {
+        // Regression: a bare temp+rename would replace the symlink NODE with a
+        // regular file, diverging it from its target. write_atomic must write
+        // THROUGH to the target (as the old fs::write did), link intact.
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, b"old").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+        write_atomic(&link, b"new").unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the symlink must survive (not be clobbered into a regular file)"
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"new", "target updated");
+        assert_eq!(std::fs::read(&link).unwrap(), b"new", "reads through link");
     }
 }
