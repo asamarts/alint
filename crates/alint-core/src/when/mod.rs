@@ -520,9 +520,22 @@ mod tests {
     fn deeply_nested_input_is_a_parse_error_not_a_stack_overflow() {
         // Untrusted `extends:` rulesets reach the `when:` parser; deeply
         // nested parens must fail loudly here, never overflow the parser
-        // stack (an uncatchable abort).
-        let src = format!("{}true{}", "(".repeat(10_000), ")".repeat(10_000));
-        let err = parse(&src).unwrap_err();
+        // stack (an uncatchable abort). Run on a deliberately small (1 MiB)
+        // stack so this asserts the depth cap is low enough for a constrained
+        // stack — a rayon worker, or a debug build on a macOS test thread —
+        // not only the 8 MiB main thread. (Regression: this overflowed on
+        // macOS CI at depth 256; the parser's six-frame-per-level recursion
+        // through the large `parse_primary` is the cost driver.)
+        let err = std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| {
+                let src = format!("{}true{}", "(".repeat(10_000), ")".repeat(10_000));
+                parse(&src)
+            })
+            .unwrap()
+            .join()
+            .expect("parser must not overflow a 1 MiB stack")
+            .unwrap_err();
         assert!(matches!(err, WhenError::Parse { .. }), "{err:?}");
     }
 

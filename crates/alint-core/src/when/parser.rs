@@ -10,9 +10,14 @@ use regex::Regex;
 /// depth == parse recursion depth; an adversarial `when:` from an
 /// untrusted `extends:` ruleset (e.g. `"(".repeat(1_000_000)`) would
 /// otherwise overflow the parser stack — an uncatchable abort, the
-/// strongest determinism violation. 256 is orders of magnitude beyond any
-/// real expression; the evaluator carries a matching `MAX_EVAL_DEPTH`.
-const MAX_DEPTH: usize = 256;
+/// strongest determinism violation. The cap is deliberately conservative:
+/// one nesting level spans six mutually-recursive frames (the large
+/// `parse_primary` among them), and a *debug* build on a small (~2 MiB)
+/// test / rayon-worker stack overflows well before a few hundred levels —
+/// so 64 (still orders of magnitude beyond any real expression) is the safe
+/// ceiling, not a higher round number. The evaluator carries a matching
+/// `MAX_EVAL_DEPTH`.
+const MAX_DEPTH: usize = 64;
 
 pub(super) struct Parser {
     tokens: Vec<(Tok, usize)>,
@@ -72,7 +77,7 @@ impl Parser {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             self.depth -= 1;
-            return Err(self.err("expression nests too deeply (max depth 256)"));
+            return Err(self.err("expression nests too deeply (max depth 64)"));
         }
         let result = self.parse_or();
         self.depth -= 1;

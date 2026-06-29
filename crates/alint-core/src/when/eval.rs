@@ -9,8 +9,10 @@ use crate::scope::Scope;
 /// iteratively by the parser but walked recursively here on tree height)
 /// — so a crafted expression from an untrusted `extends:` ruleset would
 /// overflow the stack (small on a rayon worker) and abort the process.
-/// Bail loudly past this. Mirrors the parser's `MAX_DEPTH`.
-const MAX_EVAL_DEPTH: usize = 256;
+/// Bail loudly past this. 64 is far beyond any real expression and stays
+/// safe even for a debug build on a small (~2 MiB) stack. Mirrors the
+/// parser's `MAX_DEPTH`.
+const MAX_EVAL_DEPTH: usize = 64;
 
 pub(super) fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> {
     eval_at(e, env, 0)
@@ -19,7 +21,7 @@ pub(super) fn eval(e: &WhenExpr, env: &WhenEnv<'_>) -> Result<Value, WhenError> 
 fn eval_at(e: &WhenExpr, env: &WhenEnv<'_>, depth: usize) -> Result<Value, WhenError> {
     if depth > MAX_EVAL_DEPTH {
         return Err(WhenError::Eval(
-            "expression nests too deeply to evaluate (max depth 256)".into(),
+            "expression nests too deeply to evaluate (max depth 64)".into(),
         ));
     }
     let depth = depth + 1;
