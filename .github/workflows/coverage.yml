@@ -23,6 +23,13 @@ env:
 jobs:
   coverage:
     name: cargo-llvm-cov
+    # SECURITY (audit H6): never run on the self-hosted box for a fork PR.
+    # Coverage needs the box's pids-limit / CARGO_BUILD_JOBS tuning (a hosted
+    # instrumented build OOMs/hangs) and its Codecov secret is withheld from
+    # forks anyway. The ALINT_COVERAGE_FLOOR gate still runs on push-to-main
+    # and on every same-repo (collaborator) PR. See
+    # docs/design/v0.14/ci-fork-pr-isolation.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, linux, alint]
     # Self-fail fast if the runner ever hangs again, instead of sitting at the
     # 360-min GitHub default and holding the single self-hosted runner. 90 min

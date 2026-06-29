@@ -24,20 +24,43 @@ env:
 # ─────────────────────────────────────────────────────────────────────
 jobs:
 
-  # ── Change detection ──────────────────────────────────────────────
+  # ── Change detection + runner routing ─────────────────────────────
+  # SECURITY (audit H6): this entry job runs on ubuntu-latest, never the
+  # self-hosted box — it's the first job a fork PR reaches and it checks out
+  # (untrusted) PR code. It routes every downstream job's runner from the
+  # IMMUTABLE `head.repo.fork` context: a fork PR → ephemeral ubuntu-latest;
+  # anything trusted (push / tag / same-repo PR) → the warm self-hosted box.
+  # The decision is taken from context, NOT from a checked-out script — see
+  # docs/design/v0.14/ci-fork-pr-isolation.md.
   changes:
     name: Detect Changes
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.detect.outputs.rust }}
       docs: ${{ steps.detect.outputs.docs }}
       bench: ${{ steps.detect.outputs.bench }}
       examples: ${{ steps.detect.outputs.examples }}
       editors: ${{ steps.detect.outputs.editors }}
+      runner: ${{ steps.route.outputs.runner }}
+      untrusted: ${{ steps.route.outputs.untrusted }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Routing runs FIRST and writes to its OWN step output, which the
+      # (untrusted) detect step below cannot touch — so a fork's
+      # detect-changes.sh can never force the downstream jobs onto the box.
+      - id: route
+        env:
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ "$IS_FORK" = "true" ]; then
+            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'untrusted=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
+            echo 'untrusted=false' >> "$GITHUB_OUTPUT"
+          fi
       - id: detect
         env:
           GH_EVENT: ${{ github.event_name }}
@@ -50,7 +73,7 @@ jobs:
     name: Format
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -65,7 +88,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -80,7 +103,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -95,7 +118,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -110,7 +133,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -125,7 +148,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -147,13 +170,21 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.docs == 'true')
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: ci-docs
+      # Ephemeral fork-PR path only: the box's runner image already ships
+      # Node 22, but a fresh ubuntu-latest needs it so docs.sh's
+      # `likec4 validate` + `gen-mermaid --check` gates run (they fetch
+      # likec4 via `npx -y likec4@<pin>`). Skipped on the box.
+      - if: needs.changes.outputs.untrusted == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
       # Load-bearing for schema/parser/contract correctness; must catch drift
       # on a PR, not only post-merge.
       - run: ci/scripts/docs.sh
@@ -164,7 +195,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -177,10 +208,13 @@ jobs:
   bench-smoke:
     name: Bench Smoke
     needs: [changes, build]
+    # `untrusted != 'true'` keeps this box-only job off fork PRs (they route
+    # to ubuntu-latest, where a bench job is meaningless).
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.bench == 'true'
-    runs-on: [self-hosted, linux, alint]
+      && needs.changes.outputs.untrusted != 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -199,11 +233,13 @@ jobs:
   perf-gate:
     name: Perf Gate (deterministic)
     needs: [changes, build]
+    # `untrusted != 'true'` keeps this box-only (Valgrind) job off fork PRs.
     if: >-
       !cancelled() && !failure()
       && github.event_name == 'pull_request'
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+      && needs.changes.outputs.untrusted != 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     env:
       # Advisory: a perf regression annotates but does not fail the job. When
       # flipping this to "0" (enforcing), also add `perf-gate` to the `summary`
@@ -232,7 +268,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.examples == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -251,7 +287,7 @@ jobs:
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.rust == 'true'
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - run: ci/scripts/shell-tests.sh
@@ -313,7 +349,7 @@ jobs:
       - examples
       - shell-tests
       - editors
-    runs-on: [self-hosted, linux, alint]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@v7
       - env:
