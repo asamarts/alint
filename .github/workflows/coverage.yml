@@ -29,7 +29,7 @@ jobs:
     # forks anyway. The ALINT_COVERAGE_FLOOR gate still runs on push-to-main
     # and on every same-repo (collaborator) PR. See
     # docs/design/v0.14/ci-fork-pr-isolation.md.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, alint]
     # Self-fail fast if the runner ever hangs again, instead of sitting at the
     # 360-min GitHub default and holding the single self-hosted runner. 90 min

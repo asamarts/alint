@@ -50,16 +50,22 @@ jobs:
       # Routing runs FIRST and writes to its OWN step output, which the
       # (untrusted) detect step below cannot touch — so a fork's
       # detect-changes.sh can never force the downstream jobs onto the box.
+      # Trust is decided by full_name equality and fails CLOSED: a non-PR
+      # event (push/tag), or a PR whose head repo IS this repo (a collaborator
+      # branch), is trusted → self-hosted. A fork — OR a null/absent head.repo
+      # (a deleted/detached fork) — is untrusted → ephemeral ubuntu-latest.
+      # (`== github.repository`, not the `fork` bit, so it also stays correct
+      # were this repo itself a fork.)
       - id: route
         env:
-          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+          IS_TRUSTED: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "$IS_FORK" = "true" ]; then
-            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=true' >> "$GITHUB_OUTPUT"
-          else
+          if [ "$IS_TRUSTED" = "true" ]; then
             echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
             echo 'untrusted=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'untrusted=true' >> "$GITHUB_OUTPUT"
           fi
       - id: detect
         env:
@@ -349,7 +355,10 @@ jobs:
       - examples
       - shell-tests
       - editors
-    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    # Defensive default: `summary` is `if: always()`, so it evaluates runs-on
+    # even when `changes` is cancelled before the route step (empty `runner`);
+    # fall back to ubuntu-latest so a clean cancel can't fail on fromJSON('').
+    runs-on: ${{ needs.changes.outputs.runner && fromJSON(needs.changes.outputs.runner) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - env:
