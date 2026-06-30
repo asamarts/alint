@@ -52,7 +52,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M6/M7 done; M2–M5,M8 deferred) |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7 done; M3,M4,M8 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M12 done; M10,M11,M13,M14 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 done; D11 + L/dogfood deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
@@ -296,18 +296,25 @@ the way `https_only(true)` would. An `extends:` URL is SRI-pinned to
 specific content, so it must be the final resource; a redirect now
 surfaces as a clear status error.
 
-### M2 — `extends:` target paths are unconfined `[-]`
-**Where:** `loader.rs:192` (`resolve_relative`). `extends:
-[/etc/hostname]` or `../../x` is read and YAML-parse errors echo content
-→ exfil. **Fix:** confine local extends-target resolution to the repo
-root (reuse `normalize_confined`), subject to the same top-level-only
-trust as `allow_out_of_root`. **Deferred (design call):** confining
-`extends:` would break a legitimate monorepo `extends: [../shared/base.yml]`
-unless `allow_out_of_root` is honored here too, and the exploit needs an
-attacker-controlled local config already inside a trusted chain (narrow).
-Wants the confine-vs-`allow_out_of_root` decision; a lighter alternative
-is to stop echoing file content in extends parse errors. Tracked for the
-focused extends pass.
+### M2 — `extends:` target paths are unconfined `[x]`
+**Where:** `loader.rs` (`resolve_relative` / `load_recursive`). `extends:
+[/etc/hostname]` or `../../x` was read and YAML-parse errors echo content
+→ exfil. **Decision (user):** *Confine + `allow_out_of_root`.*
+**Done:** `load_recursive` now threads a confinement root — the top-level
+config's directory — and a new `confine_extends_target` rejects any local
+`extends:` target that resolves outside it. Both sides are `canonicalize`d,
+so `..`, `.`, and symlinks are resolved (a symlink inside the tree pointing
+out is caught too); a missing target defers to the existing not-found error
+rather than being mislabelled an escape. The boundary is the config's *dir*
+(not the lint root), so a `-c` pointing at an external bundle still works
+while a sub-config in the chain can't escape that bundle. The top-level
+`allow_out_of_root: true` (the blanket `All` form only — a `Selective`
+allowlist names rule kinds/ids and has no meaning for an extends *path*)
+lifts it for the whole chain; sub-configs still can't set the flag
+(`reject_allow_out_of_root_in`). Nested configs reject `extends:` outright,
+so no confinement is needed there. Tests: 4 unit (`confine_*`) + 2
+integration (`local_extends_outside_lint_root_is_rejected`,
+`local_extends_out_of_root_allowed_with_top_level_flag`).
 
 ### M3 — per-file reads bypass the 256 MiB OOM guard `[-]`
 **Where:** `structured_path.rs:365,376`, `core/engine.rs:499`,

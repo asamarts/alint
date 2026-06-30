@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alint_core::{Error, Result};
+use alint_core::{AllowOutOfRoot, Error, Result};
 
 use crate::extends;
 use crate::{
@@ -49,6 +49,7 @@ pub(crate) fn load_recursive(
     path: &Path,
     visiting: &mut std::collections::HashSet<PathBuf>,
     opts: &LoadOptions,
+    confine: Option<&Path>,
 ) -> Result<RawConfig> {
     let canonical = path.canonicalize().map_err(|source| Error::Io {
         path: path.to_path_buf(),
@@ -77,6 +78,20 @@ pub(crate) fn load_recursive(
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 
+    // Local `extends:` targets stay within the lint tree (the confinement
+    // boundary the loader was handed — the top-level config's directory),
+    // so a shared ruleset committed to the repo cannot smuggle in a local
+    // `extends: ../../../../etc/shadow` to read arbitrary files off the
+    // host. The top-level `allow_out_of_root: true` lifts it for the whole
+    // chain — the same blanket escape that lifts per-rule read confinement.
+    // A `Selective` allowlist names rule kinds/ids and has no meaning for an
+    // extends *path*, so only the `All` form opens this gate. (Sub-configs
+    // can't set the flag: `reject_allow_out_of_root_in` fires below.)
+    let confine = match &config.allow_out_of_root {
+        AllowOutOfRoot::All => None,
+        _ => confine,
+    };
+
     let mut merged = RawConfig {
         version: config.version,
         ..RawConfig::default()
@@ -94,7 +109,8 @@ pub(crate) fn load_recursive(
             load_bundled(spec)?
         } else {
             let target = resolve_relative(&source_dir, url);
-            load_recursive(&target, visiting, opts)?
+            confine_extends_target(&target, url, confine)?;
+            load_recursive(&target, visiting, opts, confine)?
         };
         // Extended configs cannot introduce `custom:` facts or
         // `kind: command` rules — both spawn arbitrary processes
@@ -190,11 +206,87 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
     Ok(config)
 }
 
+/// Reject a local `extends:` target that resolves outside the confinement
+/// root. `confine == None` means confinement is disabled — either a
+/// programmatic caller that handed the loader no root, or a top-level config
+/// that opted out via `allow_out_of_root: true`.
+///
+/// Both sides are canonicalized, so `..`, `.`, and symlinks are resolved: a
+/// symlink that lives inside the tree but points out is caught too. A
+/// canonicalize failure (most often a missing target) is deliberately *not*
+/// treated as an escape — there is nothing to read, so it is left for
+/// [`load_recursive`] to surface with its existing not-found error.
+fn confine_extends_target(target: &Path, entry: &str, confine: Option<&Path>) -> Result<()> {
+    let Some(root) = confine else { return Ok(()) };
+    let (Ok(canon_root), Ok(canon_target)) = (root.canonicalize(), target.canonicalize()) else {
+        return Ok(());
+    };
+    if !canon_target.starts_with(&canon_root) {
+        return Err(Error::Other(format!(
+            "`extends:` target {entry:?} resolves to {} which is outside the lint root {}; \
+             a local `extends:` chain must stay within the linted tree. Set \
+             `allow_out_of_root: true` on the top-level config to override.",
+            canon_target.display(),
+            canon_root.display(),
+        )));
+    }
+    Ok(())
+}
+
 fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
     let candidate = Path::new(entry);
     if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
         source_dir.join(candidate)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confine_none_disables_the_check() {
+        // A programmatic caller (or `allow_out_of_root: true`) hands `None`:
+        // even a blatant escape target is permitted.
+        assert!(confine_extends_target(Path::new("/etc/shadow"), "/etc/shadow", None).is_ok());
+    }
+
+    #[test]
+    fn confine_missing_target_is_not_an_escape() {
+        // A non-existent target can't be canonicalized; it is left for the
+        // caller's not-found path, NOT reported as out-of-root (nothing to read).
+        let tmp = tempfile::tempdir().unwrap();
+        let res = confine_extends_target(
+            &tmp.path().join("nope.yml"),
+            "../nope.yml",
+            Some(tmp.path()),
+        );
+        assert!(
+            res.is_ok(),
+            "missing target must defer to the not-found path"
+        );
+    }
+
+    #[test]
+    fn confine_rejects_target_outside_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let outside = tmp.path().join("outside.yml");
+        std::fs::write(&outside, "x").unwrap();
+        let err = confine_extends_target(&outside, "../outside.yml", Some(&root))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("outside the lint root"), "{err}");
+    }
+
+    #[test]
+    fn confine_allows_target_inside_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inside = tmp.path().join("base.yml");
+        std::fs::write(&inside, "x").unwrap();
+        assert!(confine_extends_target(&inside, "./base.yml", Some(tmp.path())).is_ok());
     }
 }

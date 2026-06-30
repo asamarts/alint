@@ -221,6 +221,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fetcher now refuses redirects outright; an `extends:` URL is SRI-pinned to
   specific content, so it must point at the final resource and a redirect
   surfaces as a clear error. (M1)
+- **Local `extends:` targets are confined to the config's directory.** A local
+  `extends: ../../../../etc/shadow` (or an absolute path) in a shared ruleset
+  committed to the repo was read off the host, and a YAML-parse error could
+  echo file content back — a read/exfil oracle. The loader now rejects any
+  local `extends:` target that resolves outside the top-level config's
+  directory; both sides are canonicalized so `..` and symlinks (an in-tree
+  symlink pointing out) are caught. A top-level `allow_out_of_root: true`
+  lifts it for the whole chain (the same blanket escape that lifts per-rule
+  read confinement); `extends:`'d and nested configs still cannot grant it. (M2)
 - **A non-UTF-8 commit can no longer bypass commit linting.** `parse_commit_log`
   silently dropped any commit whose author name, email, or message was not
   valid UTF-8, so a contributor could dodge `git_commit_subject_matches` /

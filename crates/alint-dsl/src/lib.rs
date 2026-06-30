@@ -78,7 +78,18 @@ pub fn load(path: &Path) -> Result<Config> {
 /// fetcher.
 pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     let mut visiting = std::collections::HashSet::new();
-    let mut raw = loader::load_recursive(path, &mut visiting, opts)?;
+    // Confinement boundary for local `extends:` targets — the top-level
+    // config's directory. A local extends chain (e.g. a shared ruleset
+    // committed to the repo) may not escape this tree to read arbitrary
+    // local files; `allow_out_of_root: true` on the top-level config lifts
+    // it. The top-level config itself is trusted and unchecked (it may sit
+    // anywhere, e.g. a `-c` outside the linted tree); only the *targets* it
+    // pulls in are confined.
+    let confine_root = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let mut raw = loader::load_recursive(path, &mut visiting, opts, Some(&confine_root))?;
 
     // `.alint.d/*.yml` drop-ins — auto-discovered next to the
     // top-level config and merged in alphabetical order. The
@@ -100,7 +111,8 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
         .unwrap_or_else(|| Path::new("."))
         .join(".alint.d");
     for drop_in_path in collect_drop_ins(&drop_in_dir)? {
-        let drop_in = loader::load_recursive(&drop_in_path, &mut visiting, opts)?;
+        let drop_in =
+            loader::load_recursive(&drop_in_path, &mut visiting, opts, Some(&confine_root))?;
         raw = merge(raw, drop_in);
     }
 
@@ -1073,6 +1085,51 @@ rules:
         let cfg = load(&tmp.path().join(".alint.yml")).unwrap();
         assert!(cfg.allow_out_of_root.allows("any", "pair_hash"));
         assert!(!cfg.allow_out_of_root.allows("any", "json_schema_passes"));
+    }
+
+    #[test]
+    fn local_extends_outside_lint_root_is_rejected() {
+        // M2 (security): a local `extends:` target may not escape the
+        // top-level config's directory to read arbitrary files off the host.
+        // Layout: tmp/secret.yml (out of the config's tree) + tmp/repo/.alint.yml
+        // that climbs to it with `../secret.yml`.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("secret.yml"), "version: 1\nrules: []\n").unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(
+            repo.join(".alint.yml"),
+            "version: 1\nextends: [../secret.yml]\nrules: []\n",
+        )
+        .unwrap();
+        let err = load(&repo.join(".alint.yml")).unwrap_err().to_string();
+        assert!(err.contains("outside the lint root"), "{err}");
+        assert!(err.contains("secret.yml"), "{err}");
+    }
+
+    #[test]
+    fn local_extends_out_of_root_allowed_with_top_level_flag() {
+        // M2: the same blanket `allow_out_of_root: true` that lifts per-rule
+        // read confinement also lifts the local-extends boundary — for users
+        // who deliberately keep a shared ruleset beside (not inside) the tree.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("shared.yml"),
+            "version: 1\nrules:\n  - id: inherited\n    kind: file_exists\n    paths: INHERITED.md\n    level: warning\n",
+        )
+        .unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(
+            repo.join(".alint.yml"),
+            "version: 1\nallow_out_of_root: true\nextends: [../shared.yml]\nrules: []\n",
+        )
+        .unwrap();
+        let cfg = load(&repo.join(".alint.yml")).unwrap();
+        assert!(
+            cfg.rules.iter().any(|r| r.id == "inherited"),
+            "extends resolved"
+        );
     }
 
     #[test]
