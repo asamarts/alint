@@ -186,10 +186,13 @@ genuinely isn't `(rule_id, path)` — i.e. when it emits *more than one* finding
   `cross_file_value_equals`, `dir_absent`, `generated_file_fresh`): no single
   `path`, or several findings per path, so the default would collapse them.
   Key = the sorted set of involved repo-relative paths (or the per-finding path).
-- **First-offender line rules** (`no_trailing_whitespace`, `line_endings`):
-  report only the first offending line per file. Their identity is `(rule, file)`,
-  not a line's content (content-hashing churns when the first offender is fixed
-  and the second surfaces). Key = the path.
+- **First-offender / first-match rules** (`no_trailing_whitespace`,
+  `line_endings`, `line_max_width`, `file_content_forbidden`): report only the
+  first offending line (or first match) per file. Their identity is
+  `(rule, file)`, not a line's content (content-hashing churns when the first
+  offender is fixed and the second surfaces, or when the offending line is
+  edited but stays an offense). Key = the path. The trade-off — a *file-level*
+  acceptance window, wider than content-keying — is disclosed in §4.
 - **Line-collision** (`markdown_paths_resolve`): emits several findings on one
   line (e.g. two broken links), so line-content alone collapses them. Key = the
   per-finding target (the unresolved path/link).
@@ -200,9 +203,12 @@ makes their identity `(rule_id, path)`, stable as the magnitude grows (the "same
 accepted finding"; see the "ratchet" note in §4), with the volatile magnitude no
 longer in the hash. And the bulk of **single-finding path-only** rules
 (`file_exists`, `dir_exists`, `file_hash`, `file_content_matches`, …) and the
-**line-content** rules (`for_each_match`, `commented_out_code`, and the
-first-offender `line_max_width` — one finding per file, on the first over-wide
-line): the default discriminator (§3.1) covers them. The §6 collision-invariant enforces
+**line-content** rules (`for_each_match`, `commented_out_code` — several
+findings per file, each on its own line): the default discriminator (§3.1)
+covers them. (The first-offender `line_max_width` / `file_content_forbidden`
+were previously grouped here on a "one finding per file" rationale; v3.1 moves
+them to the path-keyed first-offender bucket above for consistency with the
+other first-offender rules — see §4.) The §6 collision-invariant enforces
 the boundary so a new kind can't silently fall into an unsafe default.
 
 ## 3. Semantics
@@ -262,9 +268,11 @@ with fingerprint *F* suppresses `min(k, baseline[F].count)`; any beyond that are
 Residual masking (documented, accepted): at or below the recorded count, a *new*
 violation whose content is byte-identical to a baselined one is indistinguishable
 from the old and stays suppressed; only the `(count+1)`th such identical
-occurrence is reported. Distinct content/keys are never confused — this is the
-narrowest possible masking window and is the price of line-content (vs
-line-number) keying.
+occurrence is reported. Distinct content/keys are never confused — for
+content-keyed rules this is the narrowest possible masking window and is the
+price of line-content (vs line-number) keying. (The path-keyed first-offender
+rules of §2.4 deliberately accept a *wider*, file-level window instead — see
+§4.)
 
 `Baseline::load` **sums** the counts of any duplicate fingerprints it reads, so a
 file with two entries for one fingerprint (e.g. a git merge of two branches that
@@ -384,6 +392,19 @@ By failure mode:
   editing the offending line's own content (or a rule's structural key) re-fires.
   A sweeping reformat that rewrites offending lines re-fires them — acceptable and
   arguably correct (re-run `alint baseline` to re-accept).
+- **First-offender rules accept a *file-level* window.** The path-keyed
+  first-offender / first-match rules (`no_trailing_whitespace`, `line_endings`,
+  `line_max_width`, `file_content_forbidden`; §2.4) emit at most one finding per
+  file and are keyed on the path, so once a file is baselined for one of them
+  the *rule is suppressed for that file* — a later offense on a **different**
+  line is masked, not just a byte-identical recurrence. This is wider than the
+  content-keyed window of §3.2, and is the deliberate price of not churning
+  every time the first offending line is edited (the alternative, content
+  keying, re-fires on any edit to that line even when it stays an offense). It
+  is bounded: the window is one rule × one file, the baseline diff names the
+  file, `--show-baselined` lists it, and re-running `alint baseline` after the
+  file is cleaned drops the entry. Choose the rule's `level`/scope accordingly
+  if a per-line guarantee matters more than churn-freedom.
 - **Threshold rules and the "ratchet" gap.** A baselined `file_max_lines` keyed on
   path stays suppressed as the file grows further (the magnitude isn't in the
   key). This is correct *baseline* semantics — you accepted "this file is over the

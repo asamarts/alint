@@ -53,7 +53,7 @@ three classes at once.
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
-| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M12 done; M10,M11,M13,M14 deferred) |
+| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 done; D11 + L/dogfood deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
@@ -462,21 +462,27 @@ export-agents-md's non-`human` default — a deliberate CLI change, own pass.
 **Fix:** validate `--format` against the subcommand's allowed set in the
 handler (fail loudly on an unsupported value regardless of position).
 
-### M14 — baseline first-offender masking under-disclosed `[-]`
-**Deferred (doc + decision):** the disclosure note lands in
-`docs/design/baseline.md` §4, which the parallel doc-drift pass touches —
-do after merge. The keying question (switch `line_max_width` /
-`file_content_forbidden` to a path key, or keep + document the fail-closed
-churn) is the open decision below.
+### M14 — baseline first-offender masking under-disclosed `[x]`
+**Decision (user):** *Doc + path-key the two kinds.*
 **Where:** first-offender/first-match kinds (`no_trailing_whitespace`,
 `line_endings`, `line_max_width`, `file_content_forbidden`) emit only the
-first offender per file, so a *new* same-file offense is never emitted
-once baselined. `docs/design/baseline.md:266` calls the masking window
-"narrowest possible"; §4 doesn't list this for the content-keyed pair.
-**Fix:** document the file-level acceptance window honestly in
-`baseline.md` §4; assess whether `line_max_width`/`file_content_forbidden`
-should switch to a path key for consistency with the other two (or accept
-the churn). Likely a doc + small keying change, not a deep redesign.
+first offender per file. The first two were already path-keyed; the latter
+two fell to the default *line-content* discriminator — inconsistent, and
+churny (editing the offending line re-fires). **Done (code):**
+`line_max_width` + `file_content_forbidden` now set
+`.with_baseline_key(crate::slash(path))`, mirroring the other two, so all
+four share a `(rule, file)` identity. Compatible with the dynamic
+`coverage_audit_baseline_safety` invariant (non-empty key, no collision,
+not message-reliant) — audit still green. **Done (docs):** reconciled the
+self-contradiction in `baseline.md` §2.4 (it listed `line_max_width` as
+both a path-keyed first-offender candidate *and* a content-keyed
+"default covers it" rule) — moved both kinds to the first-offender bucket;
+§3.2 now scopes "narrowest possible window" to content-keyed rules; §4
+gains an explicit **file-level acceptance window** disclosure for the
+path-keyed first-offender rules (honest about the wider-than-content
+window + why it's the right trade vs. churn). Test:
+`line_max_width_first_offender_keyed_on_file_no_content_churn` proves the
+edit-the-offending-line case no longer re-fires.
 
 ---
 

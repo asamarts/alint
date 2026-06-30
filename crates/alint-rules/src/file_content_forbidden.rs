@@ -83,7 +83,12 @@ impl PerFileRule for FileContentForbiddenRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line, 1),
+                .with_location(line, 1)
+                // First-match rule: the baseline identity is the *file*, not the
+                // matched line's content (which would churn on any edit to that
+                // line). Mirrors `no_trailing_whitespace`/`line_endings` (M14).
+                // See `docs/design/baseline.md` §4.
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }

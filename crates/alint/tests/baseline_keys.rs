@@ -169,3 +169,36 @@ fn first_offender_keyed_on_file_survives_the_first_fix() {
         "a fully-fixed baselined finding warns as stale: {stderr}",
     );
 }
+
+/// `line_max_width` is a first-offender rule keyed on the file (M14): once
+/// baselined, editing the over-wide line's *content* (while it stays over-wide)
+/// must NOT churn — the path, not the line content, is the identity. Before M14
+/// the default line-content discriminator would re-fire on this edit.
+#[test]
+fn line_max_width_first_offender_keyed_on_file_no_content_churn() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 1\n\
+         rules:\n\
+         \x20 - id: max-width\n\
+         \x20   kind: line_max_width\n\
+         \x20   paths: [\"*.txt\"]\n\
+         \x20   max_width: 10\n\
+         \x20   level: error\n",
+    );
+    write(root, "code.txt", "0123456789ABCDEF\n"); // 16 chars > 10
+    assert_eq!(code(&run(root, &["check"])), 1, "dirty before baseline");
+    assert_eq!(code(&run(root, &["baseline"])), 0, "snapshot it");
+
+    // Edit the over-wide line's CONTENT (still over-wide). A content key would
+    // churn (re-fire); the path key keeps it suppressed.
+    write(root, "code.txt", "FEDCBA9876543210\n");
+    assert_eq!(
+        code(&run(root, &["check", "--baseline", ".alint-baseline.json"])),
+        0,
+        "path-keyed: editing the over-wide line's content must not re-fire",
+    );
+}
