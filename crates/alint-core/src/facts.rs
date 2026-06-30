@@ -20,6 +20,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use std::io::Read as _;
+use std::time::{Duration, Instant};
+
 use regex::Regex;
 use serde::Deserialize;
 
@@ -134,8 +137,9 @@ impl FactKind {
 /// Fact-kind body for `custom`. Spawns `argv` as a child process
 /// rooted at the repo; the process's stdout (trimmed of trailing
 /// whitespace) becomes the fact's `String` value. A non-zero
-/// exit code resolves to the empty string; timeouts and spawn
-/// failures do the same. No shell is invoked — `argv` is passed
+/// exit code resolves to the empty string; a run past the 30s
+/// timeout (the child is killed) and spawn failures do the same.
+/// No shell is invoked — `argv` is passed
 /// to `execve` (or the platform equivalent) verbatim.
 ///
 /// Security: `custom` facts are only allowed in the user's own
@@ -266,27 +270,74 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
     }
 }
 
-/// Best-effort: spawn `argv` at `root`, capture stdout. Non-zero
-/// exit / spawn failures / unusable output → empty string.
+/// How long a `custom` fact's process may run before it is killed and the
+/// fact resolves to the empty string. Matches the `command` rule's default
+/// (30s) so the two trust-gated spawn paths behave consistently (L6).
+const CUSTOM_FACT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Best-effort: spawn `argv` at `root`, capture stdout. Non-zero exit / spawn
+/// failures / a run past [`CUSTOM_FACT_TIMEOUT`] / unusable output → empty
+/// string. stdout is drained on a thread so a chatty child can't deadlock on a
+/// full pipe while we wait on the deadline.
 fn run_custom(spec: &CustomFact, root: &Path) -> String {
+    run_custom_with_timeout(spec, root, CUSTOM_FACT_TIMEOUT)
+}
+
+/// [`run_custom`] with an injectable timeout so tests can exercise the
+/// deadline path without sleeping the full 30s.
+fn run_custom_with_timeout(spec: &CustomFact, root: &Path, timeout: Duration) -> String {
     let Some((program, args)) = spec.argv.split_first() else {
         return String::new();
     };
-    let output = std::process::Command::new(program)
+    let Ok(mut child) = std::process::Command::new(program)
         .args(args)
         .current_dir(root)
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(output) = output else {
+        .spawn()
+    else {
         return String::new();
     };
-    if !output.status.success() {
-        return String::new();
-    }
-    match std::str::from_utf8(&output.stdout) {
-        Ok(text) => text.trim_end().to_string(),
-        Err(_) => String::new(),
+
+    let mut out_pipe = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(p) = out_pipe.as_mut() {
+            // Custom facts are tiny by nature (a branch, a count); cap defensively.
+            let _ = p.take(1024 * 1024).read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let buf = reader.join().unwrap_or_default();
+                if !status.success() {
+                    return String::new();
+                }
+                return std::str::from_utf8(&buf)
+                    .map(|t| t.trim_end().to_string())
+                    .unwrap_or_default();
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = reader.join();
+                    return String::new();
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return String::new();
+            }
+        }
     }
 }
 
@@ -605,6 +656,34 @@ mod tests {
         let facts = parse("- id: bad\n  custom:\n    argv: [\"/bin/false\"]\n");
         let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
         assert_eq!(v.get("bad"), Some(&FactValue::String(String::new())));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_fact_times_out_to_empty_string() {
+        // L6: a hanging custom fact is killed at the deadline and resolves to
+        // the empty string (the doc's promise), rather than hanging the run.
+        let spec = CustomFact {
+            argv: vec!["sleep".to_string(), "30".to_string()],
+        };
+        let start = Instant::now();
+        let got = run_custom_with_timeout(&spec, Path::new("."), Duration::from_millis(150));
+        assert_eq!(got, "", "timed-out fact is empty");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "must return promptly at the deadline, not run the full sleep"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_fact_captures_before_timeout() {
+        // A fast command still returns its output under the injectable timeout.
+        let spec = CustomFact {
+            argv: vec!["echo".to_string(), "hi".to_string()],
+        };
+        let got = run_custom_with_timeout(&spec, Path::new("."), Duration::from_secs(5));
+        assert_eq!(got, "hi");
     }
 
     #[test]

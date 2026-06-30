@@ -96,6 +96,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   literals.** A dash in a comparison literal (`@.x == 'a.dashed-value'`) used
   to trigger the "use bracket notation" hint; quoted spans are now masked
   before the check. (L11)
+- **`custom` facts now honor a 30s timeout.** The doc promised that a timing-out
+  custom-fact command resolves to the empty string, but the implementation used
+  a blocking `Command::output()` with no timeout — a hanging command froze the
+  run. It now drains output on a thread and kills the child at the deadline
+  (matching the `command` rule's 30s default). (L6)
+- **`when:` `matches` on a missing fact is falsy, not an error.** `null == "x"`
+  was already falsy, but `<missing fact> matches "x"` hard-errored — an
+  inconsistency. A missing (null) left-hand side now evaluates to `false`; a
+  non-string *value* is still a config-type error. (L10)
 - **SARIF file paths are now valid URI references.** `artifactLocation.uri`
   emitted the raw OS path, so a `\`-separated path on Windows broke GitHub
   Code Scanning's repo-file mapping, and a path containing a space / `#` /

@@ -420,6 +420,14 @@ mod tests {
     }
 
     #[test]
+    fn matches_on_missing_fact_is_false_not_error() {
+        // L10: a missing fact (Null) on the LHS of `matches` is falsy, mirroring
+        // how `null == "x"` is falsy — not a hard error. (`check` unwraps, so a
+        // regression here would panic.)
+        assert!(!check("facts.nonexistent_fact matches \"anything\""));
+    }
+
+    #[test]
     fn parentheses_override_precedence() {
         assert!(check(
             "(facts.is_node or facts.is_rust) and facts.n_files > 0"

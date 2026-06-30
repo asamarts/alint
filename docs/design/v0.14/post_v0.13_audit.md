@@ -553,8 +553,11 @@ LOW correctness cleanup (L):
   race a fixed `<sri>.yml.tmp`. The local-extends recursion is depth-capped
   (`MAX_EXTENDS_DEPTH = 64`, checked via `visiting.len()`) so a hostile deep
   acyclic chain errors instead of overflowing the stack. Tests added.
-- `[ ]` **L6** `custom` fact has no timeout despite the doc claiming one
-  (`facts.rs:134`); implement a timeout or fix the doc.
+- `[x]` **L6** `run_custom` now spawns + drains on a thread + waits on a
+  30s deadline (matching the `command` rule's default), killing the child and
+  resolving to the empty string on timeout — making the doc's long-standing
+  timeout claim true instead of weakening it. Output is also capped (1 MiB).
+  Tests (injectable timeout) cover both the timeout and the capture paths.
 - `[ ]` **L7** non-`NotFound` `fs::read` errors silently swallowed
   (`engine.rs:499`, `rule.rs:490`, `facts.rs:254`) — distinguish
   `NotFound` (skip) from real I/O errors (surface).
@@ -569,8 +572,10 @@ LOW correctness cleanup (L):
   *before* building the O(n*m) matrix — edit distance >= length diff, so this
   is correctness-preserving and bounds a hostile multi-KB field name (every
   real field is short -> no matrix built). Test added.
-- `[ ]` **L10** `eval.rs:61` `null matches …` hard-errors while `null ==`
-  is falsy — make `matches` on a missing fact falsy (or document).
+- `[x]` **L10** `matches` on a missing fact (Null LHS) is now falsy, mirroring
+  how `null == "x"` is falsy (`==`/`!=` are total) — instead of a hard error.
+  A non-string *value* (bool/int/list) is still a config-type error. The
+  more-lenient direction, so no previously-valid config breaks. Test added.
 - `[x]` **L11** the dashed-key hint now matches against a copy with quoted
   string literals masked to spaces (byte-length-preserving, escape-aware), so a
   dash *inside* a literal (`@.x == 'a.dashed-value'`) no longer triggers a
@@ -583,8 +588,14 @@ LOW correctness cleanup (L):
   follow-up. (`command.rs` already capped its own drain.)
 - `[ ]` **L13** `command.rs:112,153` no `--`/`./` guard before path
   tokens → leading-dash filenames become options. Insert `--` or `./`.
-- `[ ]` **L14** `scope.rs:45` empty `paths: []` is fail-open (match-all);
-  document, and consider warning.
+- `[x]` **L14** (decision: document + consider warn) Documented the empty /
+  exclude-only `paths` = match-all (fail-open) behavior authoritatively on the
+  `Scope` type + `matches` (the spec sites): an explicit `paths: []` applies to
+  the whole tree, not nothing. The exclude-only idiom (`["!vendor/**"]`) is
+  *intentionally* fail-open, so a load-time warning must target only the
+  truly-empty case — that needs an absent-vs-`[]` signal at the spec layer + a
+  load-warning channel the loader doesn't expose yet, so it's a tracked
+  follow-up (considered, deferred with reason).
 
 Dogfooding (Dog):
 

@@ -19,6 +19,18 @@ use crate::walker::FileIndex;
 /// `has_ancestor: Cargo.toml`). v0.9.10 moved it into `Scope` so
 /// `matches(&Path, &FileIndex)` honours it on every call automatically —
 /// the v0.9.6/v0.9.7/v0.9.9 silent-no-op bug class can no longer recur.
+///
+/// **Empty / exclude-only patterns are match-all (fail-open).** With no
+/// *include* pattern, the include check is skipped, so every non-excluded
+/// path matches. This is by design for the exclude-only idiom
+/// (`paths: ["!vendor/**"]` = "everything except vendor"), but it also means
+/// an explicit `paths: []` (no includes *and* no excludes) applies the rule to
+/// the **whole tree**, not to nothing — a foot-gun if `[]` was meant as "off."
+/// Prefer omitting `paths` for match-all, `level: off` to disable a rule, and
+/// real patterns otherwise. (L14: a load-time warning for the truly-empty case
+/// is a tracked follow-up — it needs an absent-vs-`[]` signal at the spec layer
+/// and a load-warning channel the loader doesn't yet expose, and must not
+/// false-warn the intentional exclude-only idiom.)
 #[derive(Debug, Clone)]
 pub struct Scope {
     include: GlobSet,
@@ -121,7 +133,8 @@ impl Scope {
 
     /// Returns `true` iff `path` is in scope:
     /// 1. Excluded patterns reject (dominant).
-    /// 2. Include patterns must match (skipped if no includes).
+    /// 2. Include patterns must match — **skipped if there are no includes**,
+    ///    so empty / exclude-only `paths` is match-all (see the type-level note).
     /// 3. `scope_filter` (if any) must match.
     ///
     /// The `index` argument is the engine's [`FileIndex`] —

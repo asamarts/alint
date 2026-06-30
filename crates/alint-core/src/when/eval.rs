@@ -82,6 +82,10 @@ fn eval_at(e: &WhenExpr, env: &WhenEnv<'_>, depth: usize) -> Result<Value, WhenE
             let lv = eval_at(left, env, depth)?;
             match lv {
                 Value::String(s) => Ok(Value::Bool(pattern.is_match(&s))),
+                // A missing fact (Null) matches nothing → falsy, mirroring how
+                // `null == "x"` is falsy (not an error). A non-string *value*
+                // (bool/int/list) is still a config-type error (L10).
+                Value::Null => Ok(Value::Bool(false)),
                 other => Err(WhenError::Eval(format!(
                     "`matches` left-hand side must be a string; got {}",
                     other.type_name()

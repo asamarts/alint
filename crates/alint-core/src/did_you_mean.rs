@@ -131,12 +131,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
     dp[n][m]
 }
 
-/// Find the closest expected field to `wrong` by Levenshtein
-/// distance, but only suggest if distance is ≤ 2 (otherwise the
-/// "suggestion" is more confusing than nothing).
 /// Largest edit distance we ever surface as a "did you mean" suggestion.
 const MAX_SUGGEST_DISTANCE: usize = 2;
 
+/// Find the closest expected field to `wrong` by Levenshtein distance, but only
+/// suggest if distance is ≤ [`MAX_SUGGEST_DISTANCE`] (otherwise the
+/// "suggestion" is more confusing than nothing).
 fn levenshtein_suggestion<'a>(wrong: &str, expected: &[&'a str]) -> Option<&'a str> {
     // Edit distance is >= the difference in length, and we only suggest within
     // `MAX_SUGGEST_DISTANCE`. So skip any candidate whose length differs by more
