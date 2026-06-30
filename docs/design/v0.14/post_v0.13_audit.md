@@ -526,9 +526,14 @@ Doc drift (D):
 
 LOW correctness cleanup (L):
 
-- `[ ]` **L1** `no_bidi_controls.rs:31` add U+200E/200F/061C (complete
-  the Trojan-Source set); `no_zero_width_chars.rs:25` add U+2060/U+180E;
-  decide ZWJ-in-grapheme handling for the strip fixer.
+- `[x]` **L1** `no_bidi_controls` now also flags U+061C/200E/200F (the
+  implicit directional marks — completes the Trojan-Source set, matching
+  rustc); `no_zero_width_chars` now also flags U+2060/U+180E. Both predicates
+  back the strip fixers, so detection + fix extend together. ZWJ-in-grapheme:
+  kept flagged (suspicious in source) with an honest doc note that the strip
+  fixer breaks legit emoji ZWJ sequences (scope away from such files);
+  grapheme-aware refinement noted as a future, not done (out of contained
+  scope). Tests added for all five new codepoints.
 - `[ ]` **L2** `no_case_conflicts.rs:38`, `case.rs:69`,
   `filename_case.rs:48` — ASCII-only case-folding misses real macOS/NTFS
   Unicode collisions; `file_ops.rs:112` rename guard false-positives

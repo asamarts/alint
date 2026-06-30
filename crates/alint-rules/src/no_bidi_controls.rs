@@ -14,6 +14,13 @@
 //!   - U+2068 FIRST STRONG ISOLATE
 //!   - U+2069 POP DIRECTIONAL ISOLATE
 //!
+//! Plus the implicit directional marks, which reorder neighbouring
+//! runs without an explicit embedding and so can still mislead a
+//! reader (rustc's Trojan-Source lint flags these too):
+//!   - U+061C ARABIC LETTER MARK
+//!   - U+200E LEFT-TO-RIGHT MARK
+//!   - U+200F RIGHT-TO-LEFT MARK
+//!
 //! Non-UTF-8 files are skipped (can't have these codepoints
 //! anyway without being invalid UTF-8).
 
@@ -26,10 +33,15 @@ use alint_core::{
 
 use crate::fixers::FileStripBidiFixer;
 
-/// Returns true if `c` is one of the nine Unicode bidi control
-/// characters.
+/// Returns true if `c` is one of the Unicode bidi control characters
+/// (the five explicit embeddings/overrides, the four isolates, and the
+/// three implicit directional marks ALM/LRM/RLM).
 pub fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    matches!(c,
+        '\u{061C}'                  // ALM
+        | '\u{200E}' | '\u{200F}'   // LRM, RLM
+        | '\u{202A}'..='\u{202E}'   // LRE, RLE, PDF, LRO, RLO
+        | '\u{2066}'..='\u{2069}') // LRI, RLI, FSI, PDI
 }
 
 #[derive(Debug)]
@@ -156,6 +168,16 @@ mod tests {
             let s = format!("a{c}b");
             let got = first_bidi(&s).unwrap();
             assert_eq!(got.2, cp);
+        }
+    }
+
+    #[test]
+    fn flags_implicit_directional_marks() {
+        // L1: ALM, LRM, RLM complete the Trojan-Source set (rustc flags these).
+        for &cp in &[0x061Cu32, 0x200E, 0x200F] {
+            let c = char::from_u32(cp).unwrap();
+            let got = first_bidi(&format!("a{c}b")).unwrap();
+            assert_eq!(got.2, cp, "codepoint U+{cp:04X} must be flagged");
         }
     }
 

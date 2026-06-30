@@ -5,10 +5,19 @@
 //!   - U+200B ZERO WIDTH SPACE
 //!   - U+200C ZERO WIDTH NON-JOINER
 //!   - U+200D ZERO WIDTH JOINER
+//!   - U+2060 WORD JOINER (the no-break sibling of U+200B)
+//!   - U+180E MONGOLIAN VOWEL SEPARATOR (renders zero-width)
 //!   - U+FEFF ZERO WIDTH NO-BREAK SPACE (BOM) — *but only when
 //!     not at byte position 0*. A leading BOM is `no_bom`'s
 //!     territory; this rule stays focused on body-internal ZWs
 //!     so the two rules don't double-report.
+//!
+//! Note on U+200D (ZWJ): it is flagged even though it joins emoji
+//! sequences (e.g. the family glyph 👨‍👩‍👧), because in source it is
+//! far more often an obfuscation vector than legitimate. The strip
+//! fixer therefore *will* break a literal emoji ZWJ sequence — scope
+//! the rule away from files that legitimately carry such emoji.
+//! (Grapheme-cluster-aware ZWJ handling is a possible future refinement.)
 
 use std::path::Path;
 
@@ -24,7 +33,7 @@ use crate::fixers::FileStripZeroWidthFixer;
 /// the file (the BOM case) — that's deliberately NOT flagged.
 pub fn is_flagged_zero_width(c: char, is_leading_feff: bool) -> bool {
     match c {
-        '\u{200B}' | '\u{200C}' | '\u{200D}' => true,
+        '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{180E}' => true,
         '\u{FEFF}' => !is_leading_feff,
         _ => false,
     }
@@ -145,6 +154,13 @@ mod tests {
     #[test]
     fn flags_zwj() {
         assert_eq!(first_zero_width("\u{200D}x").unwrap().2, 0x200D);
+    }
+
+    #[test]
+    fn flags_word_joiner_and_mongolian_vowel_separator() {
+        // L1: U+2060 (WORD JOINER) and U+180E complete the zero-width set.
+        assert_eq!(first_zero_width("a\u{2060}b").unwrap().2, 0x2060);
+        assert_eq!(first_zero_width("a\u{180E}b").unwrap().2, 0x180E);
     }
 
     #[test]

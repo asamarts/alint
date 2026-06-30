@@ -254,6 +254,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for a secrets control. Bare patterns are now auto-anchored to `**/<pattern>`
   (matching any depth, root included); explicit-path patterns
   (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
+- **Completed the Unicode control-character sets for the obfuscation rules.**
+  `no_bidi_controls` now also flags the implicit directional marks U+061C
+  (ALM), U+200E (LRM), and U+200F (RLM) — completing the Trojan-Source
+  (CVE-2021-42574) set that rustc's own lint covers; `no_zero_width_chars`
+  now also flags U+2060 (WORD JOINER) and U+180E. The strip fixers extend in
+  lockstep. Note: U+200D (ZWJ) stays flagged even though it joins emoji
+  sequences, so its strip fixer will break a literal emoji ZWJ sequence —
+  scope the rule away from files that legitimately carry such emoji. (L1)
 - **Human output neutralizes terminal escapes in untrusted text.** A repo
   file named with an `\x1b[…]` sequence — or a `kind: command` rule whose
   subprocess output carries ANSI codes — could clear the screen, hide
