@@ -279,7 +279,10 @@ mod tests {
         let huge = "x".repeat(50_000);
         let msg = format!("unknown field `{huge}`, expected one of `paths`, `level`");
         let out = enrich("file_exists", &msg);
-        assert!(!out.contains("did you mean"), "no suggestion for a huge field");
+        assert!(
+            !out.contains("did you mean"),
+            "no suggestion for a huge field"
+        );
     }
 
     #[test]

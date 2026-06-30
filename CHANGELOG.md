@@ -82,6 +82,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
   could use `base`. A second `--config` is now a hard error pointing at
   `extends:` for composition, and the help text is corrected. (H4)
+- **`file_header` / `file_footer` fixers no longer stack duplicates.** When a
+  configured header/footer's content didn't satisfy the rule's own pattern,
+  the violation never cleared, so each `--fix` re-prepended/appended it. The
+  prepend/append fixers now skip when the file already begins/ends with that
+  content (idempotent across runs). (L4)
+- **`{token}` path templates no longer re-substitute.** `render_path` ran a
+  sequence of `String::replace` passes, so a token that appeared in an earlier
+  substitution's value (e.g. a file literally named `a{ext}.c`, stem `a{ext}`)
+  was wrongly re-expanded by a later pass. It now does a single left-to-right
+  scan, emitting each value once. (L8)
+- **The JSONPath dashed-key hint no longer false-fires inside string
+  literals.** A dash in a comparison literal (`@.x == 'a.dashed-value'`) used
+  to trigger the "use bracket notation" hint; quoted spans are now masked
+  before the check. (L11)
 - **SARIF file paths are now valid URI references.** `artifactLocation.uri`
   emitted the raw OS path, so a `\`-separated path on Windows broke GitHub
   Code Scanning's repo-file mapping, and a path containing a space / `#` /

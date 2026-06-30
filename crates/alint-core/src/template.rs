@@ -66,17 +66,40 @@ impl PathTokens {
 /// Substitute `{token}` placeholders in a path-shaped template. Unknown
 /// tokens are preserved literally (so `"{unknown}"` renders as `"{unknown}"`).
 ///
-/// Multi-character tokens are replaced longest-first so future additions like
-/// `{stem_kebab}` do not accidentally match `{stem}` first.
+/// Substitution is a single left-to-right scan into a fresh buffer: each known
+/// `{token}` is replaced by its value, and that value is emitted as-is and
+/// never re-scanned. A repeated `String::replace` pass (the prior approach)
+/// re-substituted a token that appeared in an *earlier* substitution's value —
+/// so a repo file literally named `a{ext}.c` (stem `a{ext}`) had its embedded
+/// `{ext}` wrongly expanded by the later `{ext}` pass, yielding a bogus path
+/// for the forbidding rules (L8). Unknown `{tokens}` are preserved verbatim.
 pub fn render_path(template: &str, t: &PathTokens) -> String {
-    let mut out = template.to_string();
-    // Order matters: longest keys first.
-    out = out.replace("{parent_name}", &t.parent_name);
-    out = out.replace("{basename}", &t.basename);
-    out = out.replace("{path}", &t.path);
-    out = out.replace("{stem}", &t.stem);
-    out = out.replace("{dir}", &t.dir);
-    out = out.replace("{ext}", &t.ext);
+    // Longest-first only matters if one token is a prefix of another; none is,
+    // but the order is kept stable for clarity / future additions.
+    let tokens: [(&str, &str); 6] = [
+        ("{parent_name}", &t.parent_name),
+        ("{basename}", &t.basename),
+        ("{path}", &t.path),
+        ("{stem}", &t.stem),
+        ("{dir}", &t.dir),
+        ("{ext}", &t.ext),
+    ];
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let at_brace = &rest[open..];
+        if let Some((tok, val)) = tokens.iter().find(|(tok, _)| at_brace.starts_with(tok)) {
+            out.push_str(val);
+            rest = &at_brace[tok.len()..];
+        } else {
+            // A `{` that doesn't begin a known token: emit it literally and
+            // resume after it (preserves `{unknown}` verbatim).
+            out.push('{');
+            rest = &at_brace['{'.len_utf8()..];
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -192,6 +215,16 @@ mod tests {
     fn render_path_unknown_token_preserved() {
         let t = PathTokens::from_path(Path::new("a.c"));
         assert_eq!(render_path("{bogus}/{stem}.x", &t), "{bogus}/a.x");
+    }
+
+    #[test]
+    fn render_path_does_not_resubstitute_token_in_value() {
+        // L8: a file literally named `a{ext}.c` has stem `a{ext}`. The `{ext}`
+        // that comes FROM the path value must NOT be expanded by the `{ext}`
+        // substitution (the old repeated-replace pass produced `ac.h`).
+        let t = PathTokens::from_path(Path::new("a{ext}.c"));
+        assert_eq!(t.stem, "a{ext}");
+        assert_eq!(render_path("{stem}.h", &t), "a{ext}.h");
     }
 
     #[test]

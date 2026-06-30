@@ -542,10 +542,12 @@ LOW correctness cleanup (L):
 - `[ ]` **L3** `when/lexer.rs:136` `byte as char` lexes string literals
   as Latin-1 → non-ASCII `when:` comparisons silently never match. Decode
   UTF-8 properly.
-- `[ ]` **L4** `file_header`/`file_footer` append/prepend fixers don't
-  verify the regex is satisfied → can stack duplicates across `--fix`
-  runs (`file_starts_with` refuses a fixer for exactly this reason).
-  Make them verify-then-skip or refuse like the siblings.
+- `[x]` **L4** `FilePrependFixer`/`FileAppendFixer` (backing
+  `file_header`/`file_footer`) gained an idempotency guard: if the file
+  already begins/ends with exactly the content, the fixer skips instead of
+  stacking a duplicate on every `--fix` (the failure mode when the configured
+  content doesn't satisfy the rule's pattern, so the violation never clears).
+  Both the on-disk `apply` and the editor `fix_edit` paths. Tests added.
 - `[x]` **L5** Cache temp file is now PID+counter-unique (`extends/cache.rs`,
   + cleanup-on-failed-rename), so concurrent runs caching the same SRI don't
   race a fixed `<sri>.yml.tmp`. The local-extends recursion is depth-capped
@@ -556,9 +558,12 @@ LOW correctness cleanup (L):
 - `[ ]` **L7** non-`NotFound` `fs::read` errors silently swallowed
   (`engine.rs:499`, `rule.rs:490`, `facts.rs:254`) — distinguish
   `NotFound` (skip) from real I/O errors (surface).
-- `[ ]` **L8** `template.rs:71` `render_path` re-substitutes injected
-  `{ext}`/`{dir}` tokens from repo-named paths → wrong path for forbidding
-  rules. Single left-to-right scan into a fresh buffer.
+- `[x]` **L8** `render_path` now does a single left-to-right scan into a fresh
+  buffer (matching known `{token}`s by prefix), so a value substituted for one
+  token is never re-scanned for another — a repo file literally named
+  `a{ext}.c` (stem `a{ext}`) no longer has its embedded `{ext}` wrongly
+  expanded by the later `{ext}` pass. Unknown `{tokens}` still preserved. Test
+  added.
 - `[x]` **L9** `levenshtein_suggestion` skips any candidate whose length
   differs from the unknown field by more than `MAX_SUGGEST_DISTANCE` (2)
   *before* building the O(n*m) matrix — edit distance >= length diff, so this
@@ -566,8 +571,10 @@ LOW correctness cleanup (L):
   real field is short -> no matrix built). Test added.
 - `[ ]` **L10** `eval.rs:61` `null matches …` hard-errors while `null ==`
   is falsy — make `matches` on a missing fact falsy (or document).
-- `[ ]` **L11** `jsonpath_diagnostics.rs:34` dashed-key hint fires inside
-  string literals (cosmetic); skip quoted spans.
+- `[x]` **L11** the dashed-key hint now matches against a copy with quoted
+  string literals masked to spaces (byte-length-preserving, escape-aware), so a
+  dash *inside* a literal (`@.x == 'a.dashed-value'`) no longer triggers a
+  false hint; a genuine dashed key alongside a literal still does. Tests added.
 - `[x]` **L12** `spawn.rs` captures each child stream through `capture_capped`
   (64 MiB cap + drain-excess-to-sink, preserving the concurrent-drain
   no-deadlock property) so a runaway/compromised generator can't OOM the run.

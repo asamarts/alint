@@ -44,10 +44,16 @@ pub fn diagnose_path(path: &str) -> Option<String> {
     // Pitfall #10: dashed key after `.` segment (in any position —
     // top-level or inside a filter). RFC 9535 dot-notation requires
     // identifier-shape keys; dashed keys must use bracket notation.
-    if let Some(cap) = dashed_after_dot_re().captures(path)
+    //
+    // Match against a copy with quoted string literals masked to spaces, so a
+    // dashed key *inside* a literal (`@.x == 'a.dashed-value'`) doesn't trigger
+    // a false hint (L11). Masking preserves byte length, so the match range
+    // still indexes the original `path` for the real key text.
+    let masked = mask_quoted_spans(path);
+    if let Some(cap) = dashed_after_dot_re().captures(&masked)
         && let Some(key_match) = cap.get(1)
     {
-        let key = key_match.as_str();
+        let key = &path[key_match.range()];
         return Some(format!(
             "JSONPath dot-notation requires identifier-shape keys (RFC 9535). For dashed keys, use \
              bracket notation: `$['{key}']` instead of `$.{key}` (or `@['{key}']` instead of \
@@ -56,6 +62,46 @@ pub fn diagnose_path(path: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Replace the contents of single- or double-quoted spans in `s` with spaces,
+/// preserving the quote delimiters and the total byte length (each masked char
+/// becomes `len_utf8()` spaces). Backslash escapes inside a span are honored so
+/// an escaped quote doesn't end it early. Used to keep the dashed-key hint from
+/// firing on a dash that lives inside a string literal (L11).
+fn mask_quoted_spans(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for c in s.chars() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+                push_blank(&mut out, c);
+            } else if c == '\\' {
+                escaped = true;
+                push_blank(&mut out, c);
+            } else if c == q {
+                quote = None;
+                out.push(c);
+            } else {
+                push_blank(&mut out, c);
+            }
+        } else {
+            if c == '\'' || c == '"' {
+                quote = Some(c);
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Push `c.len_utf8()` spaces, so masking preserves byte offsets.
+fn push_blank(out: &mut String, c: char) {
+    for _ in 0..c.len_utf8() {
+        out.push(' ');
+    }
 }
 
 /// Build a complete error-message string for a `JSONPath` parse
@@ -108,6 +154,23 @@ mod tests {
     fn already_correct_bracket_notation_no_hint() {
         let path = "$['package-name']";
         assert!(diagnose_path(path).is_none());
+    }
+
+    #[test]
+    fn dashed_key_inside_string_literal_no_hint() {
+        // L11: the dash here is inside a comparison string literal, which is
+        // valid; the hint must not fire on it.
+        assert!(diagnose_path("$.foo[?@.bar == 'a.dashed-value']").is_none());
+        assert!(diagnose_path("$.items[?@.kind == \"x.y-z\"]").is_none());
+    }
+
+    #[test]
+    fn real_dashed_key_outside_literal_still_hints() {
+        // A genuine dashed key in the path is still diagnosed even when a
+        // string literal (with its own dash) is also present.
+        let hint = diagnose_path("$.foo[?@.real-key == 'a.dashed-value']")
+            .expect("should diagnose the real dashed key");
+        assert!(hint.contains("$['real-key']"), "hint: {hint}");
     }
 
     #[test]

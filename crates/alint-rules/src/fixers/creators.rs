@@ -177,6 +177,19 @@ impl Fixer for FilePrependFixer {
                 path.display()
             )));
         }
+        // Idempotency guard (L4): if the file already begins with exactly this
+        // content (after any BOM), prepending again would stack a duplicate on
+        // every `--fix` — which happens when the configured content doesn't
+        // satisfy the rule's own pattern, so the violation never clears.
+        // `file_starts_with` refuses a fixer outright for this reason; here we
+        // can at least no-op safely.
+        let body = existing.strip_prefix(UTF8_BOM).unwrap_or(&existing);
+        if body.starts_with(prepend.as_slice()) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already begins with the required content",
+                path.display()
+            )));
+        }
         let mut out = Vec::with_capacity(existing.len() + prepend.len());
         if existing.starts_with(UTF8_BOM) {
             out.extend_from_slice(UTF8_BOM);
@@ -196,6 +209,11 @@ impl Fixer for FilePrependFixer {
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
         let prepend = resolve_source_bytes(&self.source, root).ok()?;
+        // Idempotency guard (L4): already-present content is not re-prepended.
+        let body = bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes);
+        if body.starts_with(prepend.as_slice()) {
+            return None;
+        }
         let mut out = Vec::with_capacity(bytes.len() + prepend.len());
         if bytes.starts_with(UTF8_BOM) {
             out.extend_from_slice(UTF8_BOM);
@@ -271,6 +289,14 @@ impl Fixer for FileAppendFixer {
                 path.display()
             )));
         }
+        // Idempotency guard (L4): see FilePrependFixer — don't stack the footer
+        // on every `--fix` when the content doesn't satisfy the rule's pattern.
+        if existing.ends_with(payload.as_slice()) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already ends with the required content",
+                path.display()
+            )));
+        }
         let mut out = existing;
         out.extend_from_slice(&payload);
         write_atomic(&abs, &out).map_err(|source| Error::Io {
@@ -286,6 +312,10 @@ impl Fixer for FileAppendFixer {
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
         let payload = resolve_source_bytes(&self.source, root).ok()?;
+        // Idempotency guard (L4): already-present content is not re-appended.
+        if bytes.ends_with(payload.as_slice()) {
+            return None;
+        }
         let mut out = bytes.to_vec();
         out.extend_from_slice(&payload);
         Some(FixEdit::SetContent {
@@ -454,6 +484,28 @@ mod tests {
     }
 
     #[test]
+    fn file_prepend_is_idempotent_across_runs() {
+        // L4: a second `--fix` must NOT stack a duplicate header (the failure
+        // mode when the content doesn't satisfy the rule's pattern).
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("a.rs"), "fn main() {}\n").unwrap();
+        let fixer = FilePrependFixer::new("// Copyright 2026\n".into());
+        let v = Violation::new("missing header").with_path(std::path::Path::new("a.rs"));
+        let first = fixer.apply(&v, &make_ctx(&tmp, false)).unwrap();
+        assert!(matches!(first, FixOutcome::Applied(_)));
+        let second = fixer.apply(&v, &make_ctx(&tmp, false)).unwrap();
+        assert!(matches!(second, FixOutcome::Skipped(_)), "second run skips");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+            "// Copyright 2026\nfn main() {}\n",
+            "header not stacked"
+        );
+        // The editor path is idempotent too.
+        let bytes = std::fs::read(tmp.path().join("a.rs")).unwrap();
+        assert!(fixer.fix_edit(&v, &bytes, tmp.path()).is_none());
+    }
+
+    #[test]
     fn file_prepend_preserves_utf8_bom() {
         let tmp = TempDir::new().unwrap();
         // BOM + "hello\n"
@@ -511,6 +563,31 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("notes.md")).unwrap(),
             "# Notes\n\n## Section\n"
+        );
+    }
+
+    #[test]
+    fn file_append_is_idempotent_across_runs() {
+        // L4: a second `--fix` must NOT stack a duplicate footer.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("notes.md"), "# Notes\n").unwrap();
+        let fixer = FileAppendFixer::new("\n## Section\n".into());
+        let v = Violation::new("missing section").with_path(std::path::Path::new("notes.md"));
+        assert!(matches!(
+            fixer.apply(&v, &make_ctx(&tmp, false)).unwrap(),
+            FixOutcome::Applied(_)
+        ));
+        assert!(
+            matches!(
+                fixer.apply(&v, &make_ctx(&tmp, false)).unwrap(),
+                FixOutcome::Skipped(_)
+            ),
+            "second run skips"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("notes.md")).unwrap(),
+            "# Notes\n\n## Section\n",
+            "footer not stacked"
         );
     }
 
