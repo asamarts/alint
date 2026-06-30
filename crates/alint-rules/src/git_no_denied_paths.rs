@@ -120,6 +120,20 @@ impl Rule for GitNoDeniedPathsRule {
     }
 }
 
+/// Auto-anchor a *bare* denied pattern (one with no `/`) to match at any
+/// depth: `*.pem` → `**/*.pem`, `id_rsa` → `**/id_rsa`. A pattern that
+/// already names a path (`secrets/*.key`, `**/*.pem`) is taken as written.
+/// `**/` matches zero or more segments, so the anchored form still catches
+/// the root-level file. This is the secure default for a denylist: a bare
+/// `*.pem` should ban a `.pem` anywhere in the tree, not only at the root.
+fn anchor_denied_pattern(pattern: &str) -> std::borrow::Cow<'_, str> {
+    if pattern.contains('/') {
+        std::borrow::Cow::Borrowed(pattern)
+    } else {
+        std::borrow::Cow::Owned(format!("**/{pattern}"))
+    }
+}
+
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
@@ -140,7 +154,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
     let mut builder = GlobSetBuilder::new();
     for pattern in &opts.denied {
-        let glob = Glob::new(pattern).map_err(|e| {
+        // Auto-anchor a *bare* pattern (no `/`) so it matches at ANY depth.
+        // globset otherwise root-anchors it, so `*.pem` would miss
+        // `secrets/server.pem` — a dangerous default for a *security*
+        // denylist (M5). `denied_src` keeps the original spelling for the
+        // violation message.
+        let effective = anchor_denied_pattern(pattern);
+        let glob = Glob::new(&effective).map_err(|e| {
             Error::rule_config(&spec.id, format!("invalid denied pattern `{pattern}`: {e}"))
         })?;
         builder.add(glob);
@@ -163,6 +183,26 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anchor_denied_pattern_anchors_bare_to_any_depth() {
+        assert_eq!(anchor_denied_pattern("*.pem"), "**/*.pem");
+        assert_eq!(anchor_denied_pattern("id_rsa"), "**/id_rsa");
+        // explicit-path patterns are taken as written
+        assert_eq!(anchor_denied_pattern("secrets/*.key"), "secrets/*.key");
+        assert_eq!(anchor_denied_pattern("**/*.env"), "**/*.env");
+    }
+
+    #[test]
+    fn bare_pattern_denies_nested_path() {
+        // M5: a bare `*.pem` must ban a secret at any depth, not only root.
+        let mut b = GlobSetBuilder::new();
+        b.add(Glob::new(&anchor_denied_pattern("*.pem")).unwrap());
+        let set = b.build().unwrap();
+        assert!(set.is_match("secrets/server.pem"), "nested .pem denied");
+        assert!(set.is_match("server.pem"), "root .pem still denied");
+        assert!(!set.is_match("server.txt"));
+    }
 
     fn build_set(patterns: &[&str]) -> GlobSet {
         let mut b = GlobSetBuilder::new();
