@@ -262,6 +262,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lockstep. Note: U+200D (ZWJ) stays flagged even though it joins emoji
   sequences, so its strip fixer will break a literal emoji ZWJ sequence —
   scope the rule away from files that legitimately carry such emoji. (L1)
+- **Resource-exhaustion hardening (several spots).** A few unbounded
+  operations on attacker-influenced input are now capped: the `extends:`
+  chain has a depth cap (`MAX_EXTENDS_DEPTH = 64`) so a deeply-nested acyclic
+  chain errors instead of overflowing the recursion stack (L5); the remote-
+  `extends:` disk cache writes a PID-unique temp file instead of a fixed
+  `<sri>.yml.tmp` (no concurrent-run race) (L5); the "did you mean" suggester
+  skips length-mismatched candidates before building its edit-distance matrix,
+  bounding work on a multi-kilobyte unknown field name (L9); and a spawned
+  rule's captured stdout/stderr is capped at 64 MiB with the excess drained,
+  so a runaway generator can't OOM the run (L12). (L5, L9, L12)
 - **Human output neutralizes terminal escapes in untrusted text.** A repo
   file named with an `\x1b[…]` sequence — or a `kind: command` rule whose
   subprocess output carries ANSI codes — could clear the screen, hide

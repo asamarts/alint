@@ -12,6 +12,10 @@ use directories::ProjectDirs;
 
 use super::sri::Sri;
 
+/// Distinguishes concurrent temp files within this process (the PID
+/// distinguishes across processes). See [`Cache::put`] (L5).
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// On-disk cache rooted at `<cache-dir>/alint/rulesets/`.
 #[derive(Debug, Clone)]
 pub struct Cache {
@@ -80,15 +84,31 @@ impl Cache {
             source,
         })?;
         let final_path = self.entry_path(sri);
-        let tmp_path = final_path.with_extension("yml.tmp");
-        std::fs::write(&tmp_path, bytes).map_err(|source| CacheError::Io {
-            path: tmp_path.clone(),
-            source,
-        })?;
-        std::fs::rename(&tmp_path, &final_path).map_err(|source| CacheError::Io {
-            path: final_path,
-            source,
-        })?;
+        // Unique temp name (PID + atomic counter): two concurrent `alint` runs
+        // caching the same SRI must not write — and rename — the same fixed
+        // `<sri>.yml.tmp` underneath each other (L5). The content is identical
+        // (SRI-verified above), so the race was never corrupting, but a unique
+        // temp keeps each writer's rename atomic and independent.
+        let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_path = self.root.join(format!(
+            "{}.{}.{n}.yml.tmp",
+            sri.encoded(),
+            std::process::id()
+        ));
+        if let Err(source) = std::fs::write(&tmp_path, bytes) {
+            return Err(CacheError::Io {
+                path: tmp_path,
+                source,
+            });
+        }
+        if let Err(source) = std::fs::rename(&tmp_path, &final_path) {
+            // Don't leave our uniquely-named temp behind on a failed rename.
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(CacheError::Io {
+                path: final_path,
+                source,
+            });
+        }
         Ok(())
     }
 }

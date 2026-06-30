@@ -546,9 +546,11 @@ LOW correctness cleanup (L):
   verify the regex is satisfied → can stack duplicates across `--fix`
   runs (`file_starts_with` refuses a fixer for exactly this reason).
   Make them verify-then-skip or refuse like the siblings.
-- `[ ]` **L5** extends cache fixed `<sri>.yml.tmp` temp name races
-  concurrent runs (`extends/cache.rs:83`); unbounded acyclic local-extends
-  recursion (`loader.rs:48`). PID/rand-suffix the temp; add a depth cap.
+- `[x]` **L5** Cache temp file is now PID+counter-unique (`extends/cache.rs`,
+  + cleanup-on-failed-rename), so concurrent runs caching the same SRI don't
+  race a fixed `<sri>.yml.tmp`. The local-extends recursion is depth-capped
+  (`MAX_EXTENDS_DEPTH = 64`, checked via `visiting.len()`) so a hostile deep
+  acyclic chain errors instead of overflowing the stack. Tests added.
 - `[ ]` **L6** `custom` fact has no timeout despite the doc claiming one
   (`facts.rs:134`); implement a timeout or fix the doc.
 - `[ ]` **L7** non-`NotFound` `fs::read` errors silently swallowed
@@ -557,14 +559,21 @@ LOW correctness cleanup (L):
 - `[ ]` **L8** `template.rs:71` `render_path` re-substitutes injected
   `{ext}`/`{dir}` tokens from repo-named paths → wrong path for forbidding
   rules. Single left-to-right scan into a fresh buffer.
-- `[ ]` **L9** `did_you_mean.rs:105` levenshtein matrix unbounded on a
-  huge unknown-field name; cap input length.
+- `[x]` **L9** `levenshtein_suggestion` skips any candidate whose length
+  differs from the unknown field by more than `MAX_SUGGEST_DISTANCE` (2)
+  *before* building the O(n*m) matrix — edit distance >= length diff, so this
+  is correctness-preserving and bounds a hostile multi-KB field name (every
+  real field is short -> no matrix built). Test added.
 - `[ ]` **L10** `eval.rs:61` `null matches …` hard-errors while `null ==`
   is falsy — make `matches` on a missing fact falsy (or document).
 - `[ ]` **L11** `jsonpath_diagnostics.rs:34` dashed-key hint fires inside
   string literals (cosmetic); skip quoted spans.
-- `[ ]` **L12** `spawn.rs:89,96` unbounded `read_to_end` on child output
-  — cap with a loud over-cap note (trust-gated, so low risk).
+- `[x]` **L12** `spawn.rs` captures each child stream through `capture_capped`
+  (64 MiB cap + drain-excess-to-sink, preserving the concurrent-drain
+  no-deadlock property) so a runaway/compromised generator can't OOM the run.
+  Truncation past the generous cap is silent-but-bounded; surfacing it to the
+  caller (a user-facing note) needs `SpawnOutcome` plumbing — noted as a
+  follow-up. (`command.rs` already capped its own drain.)
 - `[ ]` **L13** `command.rs:112,153` no `--`/`./` guard before path
   tokens → leading-dash filenames become options. Insert `--` or `./`.
 - `[ ]` **L14** `scope.rs:45` empty `paths: []` is fail-open (match-all);

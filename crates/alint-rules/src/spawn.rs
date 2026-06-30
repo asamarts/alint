@@ -81,22 +81,10 @@ pub(crate) fn run_capturing(
     // Concurrent drain: the child can produce more than a pipe
     // buffer's worth before exiting, so reading only after exit
     // (capped or not) would deadlock or truncate.
-    let mut out_pipe = child.stdout.take();
-    let mut err_pipe = child.stderr.take();
-    let out_h = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = out_pipe.as_mut() {
-            let _ = p.read_to_end(&mut buf);
-        }
-        buf
-    });
-    let err_h = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = err_pipe.as_mut() {
-            let _ = p.read_to_end(&mut buf);
-        }
-        buf
-    });
+    let out_pipe = child.stdout.take();
+    let err_pipe = child.stderr.take();
+    let out_h = std::thread::spawn(move || capture_capped(out_pipe));
+    let err_h = std::thread::spawn(move || capture_capped(err_pipe));
 
     let start = Instant::now();
     loop {
@@ -131,4 +119,26 @@ pub(crate) fn run_capturing(
             }
         }
     }
+}
+
+/// Per-stream cap on captured child output (L12). The spawning kinds are
+/// trust-gated, so this is defense-in-depth: a runaway or compromised
+/// generator cannot OOM the run. Generous — every legitimate formatter diff /
+/// generated file is orders of magnitude smaller — yet bounded.
+const CAPTURE_CAP_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read up to [`CAPTURE_CAP_BYTES`] from `pipe`, then drain (discard) any
+/// excess so the child can finish writing and exit instead of blocking on a
+/// full pipe — preserving the concurrent-drain robustness while bounding
+/// memory. Truncation past the cap is silent but bounded (surfacing it to the
+/// caller would need `SpawnOutcome` plumbing; tracked as a follow-up). A `None`
+/// pipe yields an empty buffer.
+fn capture_capped(pipe: Option<impl std::io::Read>) -> Vec<u8> {
+    let Some(mut p) = pipe else {
+        return Vec::new();
+    };
+    let mut buf = Vec::new();
+    let _ = p.by_ref().take(CAPTURE_CAP_BYTES).read_to_end(&mut buf);
+    let _ = std::io::copy(&mut p, &mut std::io::sink());
+    buf
 }

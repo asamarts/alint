@@ -14,6 +14,11 @@ use crate::{
     reject_baseline_in, reject_command_rules_in, reject_spawning_templates_in,
 };
 
+/// Maximum depth of an `extends:` chain — a recursion-stack guard against a
+/// hostile deeply-nested (acyclic) chain. Generous: real compositions are a
+/// handful deep. See [`load_recursive`] (L5).
+const MAX_EXTENDS_DEPTH: usize = 64;
+
 /// Parse a local config file's `contents` into a [`RawConfig`],
 /// resolving `{{env.X}}` interpolation first. Shared by
 /// `load_recursive` and nested-config loading so every local config
@@ -59,6 +64,19 @@ pub(crate) fn load_recursive(
         return Err(Error::Other(format!(
             "cycle in `extends` chain at {}",
             canonical.display()
+        )));
+    }
+    // Bound the depth of an *acyclic* chain (the cycle guard above only catches
+    // repeats): a hostile repo could otherwise nest thousands of local configs
+    // each extending the next and overflow the recursion stack (L5). `visiting`
+    // holds exactly the ancestors on the current DFS path (balanced insert /
+    // remove), so its length is the current depth. The cap is far above any
+    // real composition (root → team → org → bundled is ~4).
+    if visiting.len() > MAX_EXTENDS_DEPTH {
+        return Err(Error::Other(format!(
+            "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
+             flatten the chain or split the ruleset",
+            canonical.display(),
         )));
     }
 
@@ -288,5 +306,38 @@ mod tests {
         let inside = tmp.path().join("base.yml");
         std::fs::write(&inside, "x").unwrap();
         assert!(confine_extends_target(&inside, "./base.yml", Some(tmp.path())).is_ok());
+    }
+
+    #[test]
+    fn extends_chain_depth_is_capped() {
+        // L5: an acyclic chain deeper than the cap is rejected (not a stack
+        // overflow). c0 -> c1 -> ... all within one dir (so confinement passes).
+        let tmp = tempfile::tempdir().unwrap();
+        let n = MAX_EXTENDS_DEPTH + 5;
+        for i in 0..n {
+            let body = if i + 1 < n {
+                format!("version: 1\nextends: [./c{}.yml]\nrules: []\n", i + 1)
+            } else {
+                "version: 1\nrules: []\n".to_string()
+            };
+            std::fs::write(tmp.path().join(format!("c{i}.yml")), body).unwrap();
+        }
+        let err = crate::load(&tmp.path().join("c0.yml"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("maximum depth"), "{err}");
+    }
+
+    #[test]
+    fn extends_chain_within_depth_cap_loads() {
+        // A short chain (well under the cap) still composes fine.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("base.yml"), "version: 1\nrules: []\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".alint.yml"),
+            "version: 1\nextends: [./base.yml]\nrules: []\n",
+        )
+        .unwrap();
+        assert!(crate::load(&tmp.path().join(".alint.yml")).is_ok());
     }
 }

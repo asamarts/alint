@@ -134,12 +134,22 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// Find the closest expected field to `wrong` by Levenshtein
 /// distance, but only suggest if distance is ≤ 2 (otherwise the
 /// "suggestion" is more confusing than nothing).
+/// Largest edit distance we ever surface as a "did you mean" suggestion.
+const MAX_SUGGEST_DISTANCE: usize = 2;
+
 fn levenshtein_suggestion<'a>(wrong: &str, expected: &[&'a str]) -> Option<&'a str> {
+    // Edit distance is >= the difference in length, and we only suggest within
+    // `MAX_SUGGEST_DISTANCE`. So skip any candidate whose length differs by more
+    // than that *before* building the O(n*m) matrix (L9): this bounds the work
+    // on a hostile multi-kilobyte unknown-field name — every real field name is
+    // short, so a huge `wrong` matches nothing and no matrix is ever built.
+    let wrong_len = wrong.chars().count();
     expected
         .iter()
+        .filter(|e| wrong_len.abs_diff(e.chars().count()) <= MAX_SUGGEST_DISTANCE)
         .map(|&e| (e, levenshtein(wrong, e)))
         .min_by_key(|&(_, d)| d)
-        .filter(|&(_, d)| d <= 2)
+        .filter(|&(_, d)| d <= MAX_SUGGEST_DISTANCE)
         .map(|(e, _)| e)
 }
 
@@ -259,6 +269,17 @@ mod tests {
         let msg = "unknown field `completely_random`, expected one of `paths`, `level`";
         let out = enrich("file_exists", msg);
         assert!(!out.contains("did you mean"), "out: {out}");
+    }
+
+    #[test]
+    fn huge_unknown_field_is_bounded_and_suggests_nothing() {
+        // L9: a hostile multi-kilobyte unknown field must not build a giant
+        // edit-distance matrix; it is length-mismatched from every real field
+        // by far more than the threshold, so it suggests nothing (and fast).
+        let huge = "x".repeat(50_000);
+        let msg = format!("unknown field `{huge}`, expected one of `paths`, `level`");
+        let out = enrich("file_exists", &msg);
+        assert!(!out.contains("did you mean"), "no suggestion for a huge field");
     }
 
     #[test]
