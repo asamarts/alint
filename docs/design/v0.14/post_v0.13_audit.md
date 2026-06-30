@@ -54,7 +54,7 @@ three classes at once.
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
-| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 done; D11 + L/dogfood deferred) |
+| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 done; L2 partial; D11 + Dog1/Dog2 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
 Phases land security-first. Each is one atomic commit (or a small group)
