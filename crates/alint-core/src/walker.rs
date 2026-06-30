@@ -8,6 +8,26 @@ use ignore::{
 
 use crate::error::{Error, Result};
 
+/// Read a walked file's bytes, returning `None` to skip it on any read error
+/// — but only *silently* when the file is genuinely gone (`NotFound`, the
+/// benign deleted-between-walk-and-read race). Any other error (permission
+/// denied, I/O failure) is logged at `warn` so it is observable with `-v` /
+/// `RUST_LOG`, instead of being indistinguishable from "file absent" (L7).
+///
+/// The run stays resilient (one unreadable file never aborts the whole lint),
+/// which is the long-standing per-file-read contract; this only makes the
+/// real-error case *loud* rather than silent.
+pub(crate) fn read_or_skip(path: &Path) -> Option<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
+            None
+        }
+    }
+}
+
 /// Debug-only tracing for `FileIndex` lazy index builds. Emits a
 /// `phase=index_build kind=<name> elapsed_us=N entries=M` event so
 /// `xtask bench-scale` profile runs and contributor debugging can

@@ -103,6 +103,25 @@ pub fn render_path(template: &str, t: &PathTokens) -> String {
     out
 }
 
+/// [`render_path`] for a **command argv** element. If substituting a path token
+/// turns a non-flag template into a leading-dash string, the matched repo file
+/// name is masquerading as an option to the spawned tool — e.g. a file named
+/// `--write` rendered from `{path}` would flip `prettier --check {path}` into a
+/// destructive `--write`. Prefix `./` so it is unambiguously a path (L13).
+///
+/// A template element the user *wrote* as a flag (`--check`, `--file={path}`)
+/// already starts with `-`, so it is left untouched — only a leading dash
+/// *introduced by substitution* is guarded.
+#[must_use]
+pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
+    let rendered = render_path(template, t);
+    if rendered.starts_with('-') && !template.starts_with('-') {
+        format!("./{rendered}")
+    } else {
+        rendered
+    }
+}
+
 /// Substitute `{{namespace.key}}` placeholders in a message template. The
 /// caller-supplied `resolve` closure returns the substituted value, or
 /// `None` to leave the placeholder literal.
@@ -225,6 +244,20 @@ mod tests {
         let t = PathTokens::from_path(Path::new("a{ext}.c"));
         assert_eq!(t.stem, "a{ext}");
         assert_eq!(render_path("{stem}.h", &t), "a{ext}.h");
+    }
+
+    #[test]
+    fn render_path_argv_guards_leading_dash_from_substitution() {
+        // L13: a repo file named like an option must not flip a trusted command.
+        let evil = PathTokens::from_path(Path::new("--write"));
+        assert_eq!(render_path_argv("{path}", &evil), "./--write");
+        // A flag the *user* wrote is left alone (it already starts with `-`).
+        let normal = PathTokens::from_path(Path::new("src/main.rs"));
+        assert_eq!(render_path_argv("--check", &normal), "--check");
+        // A path embedded after `=` keeps the dash inside the value (no option).
+        assert_eq!(render_path_argv("--file={path}", &evil), "--file=--write");
+        // The ordinary case is unchanged.
+        assert_eq!(render_path_argv("{path}", &normal), "src/main.rs");
     }
 
     #[test]

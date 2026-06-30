@@ -487,7 +487,7 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
             continue;
         }
         let full = ctx.root.join(&entry.path);
-        let Ok(bytes) = std::fs::read(&full) else {
+        let Some(bytes) = crate::walker::read_or_skip(&full) else {
             continue;
         };
         violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);

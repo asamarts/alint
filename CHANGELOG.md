@@ -105,6 +105,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was already falsy, but `<missing fact> matches "x"` hard-errored — an
   inconsistency. A missing (null) left-hand side now evaluates to `false`; a
   non-string *value* is still a config-type error. (L10)
+- **`when:` string literals are decoded as UTF-8.** The lexer cast each byte to
+  `char` (Latin-1), so a non-ASCII literal like `vars.x == "café"` was lexed as
+  mojibake and could never match. Multi-byte scalars now lex correctly. (L3)
+- **`no_case_conflicts` folds case the Unicode way.** It lowercased ASCII-only,
+  so `É.txt`/`é.txt` (and other non-ASCII case pairs) slipped past — yet a
+  case-insensitive filesystem folds them. It now uses Unicode `to_lowercase`,
+  the strict portable default. (L2)
+- **`command` argv is guarded against option-injection via filenames.** A repo
+  file named like a flag (e.g. `--write`) rendered from `{path}` could turn a
+  trusted `command: ["prettier", "--check", "{path}"]` into a destructive
+  `--write`. A path token that would render to a leading dash is now prefixed
+  with `./`; flags you wrote yourself are untouched. (L13)
+- **Unreadable files are reported, not silently skipped.** A non-`NotFound`
+  read error (permission denied, I/O) during the per-file walk was
+  indistinguishable from "file absent." Such errors are now logged at `warn`
+  (visible with `-v` / `RUST_LOG`); a genuinely-absent file still skips
+  silently and the run stays resilient. (L7)
 - **SARIF file paths are now valid URI references.** `artifactLocation.uri`
   emitted the raw OS path, so a `\`-separated path on Windows broke GitHub
   Code Scanning's repo-file mapping, and a path containing a space / `#` /

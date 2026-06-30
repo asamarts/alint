@@ -255,7 +255,7 @@ fn evaluate_one(spec: &FactSpec, root: &Path, index: &FileIndex) -> Result<FactV
                 if !scope.matches(&entry.path, index) {
                     return false;
                 }
-                let Ok(bytes) = std::fs::read(root.join(&entry.path)) else {
+                let Some(bytes) = crate::walker::read_or_skip(&root.join(&entry.path)) else {
                     return false;
                 };
                 let Ok(text) = std::str::from_utf8(&bytes) else {

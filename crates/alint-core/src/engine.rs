@@ -490,13 +490,13 @@ impl Engine {
                 if applicable.is_empty() {
                     return Vec::new();
                 }
-                // 2. Read once. Read failures (file deleted
-                // mid-walk, permission flake) skip the file
-                // silently — same shape as today's per-rule
-                // `let Ok(bytes) = std::fs::read(...) else
-                // continue;`.
+                // 2. Read once. A genuinely-absent file (deleted
+                // mid-walk) skips silently; a real read error
+                // (permission denied, I/O) is logged at `warn` so
+                // it isn't silently mistaken for "file absent"
+                // (L7). Either way the run stays resilient.
                 let abs = root.join(&file_entry.path);
-                let Ok(bytes) = std::fs::read(&abs) else {
+                let Some(bytes) = crate::walker::read_or_skip(&abs) else {
                     return Vec::new();
                 };
                 // 3. Dispatch. Every applicable rule sees the

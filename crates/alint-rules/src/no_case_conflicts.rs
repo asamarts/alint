@@ -34,8 +34,14 @@ impl Rule for NoCaseConflictsRule {
             let Some(as_str) = entry.path.to_str() else {
                 continue;
             };
+            // Unicode lowercasing (not ASCII-only): a case-insensitive
+            // filesystem folds `Ω.txt`/`ω.txt` and `É`/`é` too, so an
+            // ASCII-only fold would miss those real cross-platform collisions
+            // (L2). `to_lowercase` is the std Unicode fold — a strict, portable
+            // default for a "no case conflicts" convention (it may report a
+            // collision a specific OS fold table wouldn't, the safe direction).
             groups
-                .entry(as_str.to_ascii_lowercase())
+                .entry(as_str.to_lowercase())
                 .or_default()
                 .push(entry.path.clone());
         }
@@ -143,6 +149,22 @@ mod tests {
         let i = index(&["README.md", "readme.md", "Cargo.toml"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
         assert_eq!(v.len(), 2, "two collision members should fire");
+    }
+
+    #[test]
+    fn evaluate_fires_on_unicode_case_collision() {
+        // L2: a case-insensitive filesystem folds non-ASCII letters too, so
+        // `É.txt` and `é.txt` collide — an ASCII-only fold would miss this.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_case_conflicts\n\
+             paths: \"**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let i = index(&["É.txt", "é.txt", "Ω.md", "ω.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(v.len(), 4, "both Unicode case pairs collide");
     }
 
     #[test]

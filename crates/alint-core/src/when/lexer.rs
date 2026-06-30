@@ -133,8 +133,18 @@ pub(super) fn lex(src: &str) -> Result<Vec<(Tok, usize)>, WhenError> {
                         s.push(ch);
                         i += 2;
                     } else {
-                        s.push(bytes[i] as char);
-                        i += 1;
+                        // Decode the full UTF-8 scalar rather than casting one
+                        // byte to `char` (which interprets a multi-byte char as
+                        // Latin-1 mojibake, so a non-ASCII `when:` literal like
+                        // `== "café"` could never match) (L3). `src` is valid
+                        // UTF-8 and `i` sits on a char boundary here (every
+                        // branch advances by whole chars / ASCII bytes).
+                        let ch = src[i..]
+                            .chars()
+                            .next()
+                            .expect("i < len and on a UTF-8 boundary");
+                        s.push(ch);
+                        i += ch.len_utf8();
                     }
                 }
                 if i >= bytes.len() {
@@ -205,4 +215,38 @@ fn is_ident_cont(c: u8) -> bool {
 /// "unknown iter method" rather than silently coercing to false.
 pub(super) fn is_known_iter_method(name: &str) -> bool {
     matches!(name, "has_file")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn first_str(src: &str) -> String {
+        lex(src)
+            .unwrap()
+            .into_iter()
+            .find_map(|(t, _)| match t {
+                Tok::Str(s) => Some(s),
+                _ => None,
+            })
+            .expect("a string token")
+    }
+
+    #[test]
+    fn non_ascii_string_literal_lexes_as_utf8() {
+        // L3: a multi-byte char must lex as one scalar, not Latin-1 mojibake
+        // (the old `byte as char` produced "cafÃ©", so `== "café"` never matched).
+        assert_eq!(first_str("\"café\""), "café");
+        assert_eq!(first_str("\"naïve Москва\""), "naïve Москва");
+    }
+
+    #[test]
+    fn emoji_string_literal_lexes_as_utf8() {
+        assert_eq!(first_str("\"a🎉b\""), "a🎉b");
+    }
+
+    #[test]
+    fn escapes_still_work_alongside_unicode() {
+        assert_eq!(first_str("\"café\\n\""), "café\n");
+    }
 }

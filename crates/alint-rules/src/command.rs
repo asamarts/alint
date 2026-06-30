@@ -49,7 +49,7 @@ use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant};
 
-use alint_core::template::{PathTokens, render_path};
+use alint_core::template::{PathTokens, render_path_argv};
 use alint_core::{Context, Error, FactValue, Level, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
@@ -109,7 +109,13 @@ impl Rule for CommandRule {
                 continue;
             }
             let tokens = PathTokens::from_path(&entry.path);
-            let rendered: Vec<String> = self.argv.iter().map(|s| render_path(s, &tokens)).collect();
+            // `render_path_argv` (not `render_path`): guards against a repo
+            // filename rendered from `{path}` masquerading as an option (L13).
+            let rendered: Vec<String> = self
+                .argv
+                .iter()
+                .map(|s| render_path_argv(s, &tokens))
+                .collect();
             if let Outcome::Fail(msg) = run_one(
                 &rendered,
                 ctx.root,

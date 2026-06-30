@@ -534,14 +534,17 @@ LOW correctness cleanup (L):
   fixer breaks legit emoji ZWJ sequences (scope away from such files);
   grapheme-aware refinement noted as a future, not done (out of contained
   scope). Tests added for all five new codepoints.
-- `[ ]` **L2** `no_case_conflicts.rs:38`, `case.rs:69`,
-  `filename_case.rs:48` — ASCII-only case-folding misses real macOS/NTFS
-  Unicode collisions; `file_ops.rs:112` rename guard false-positives
-  case-only renames on case-insensitive FS. Use Unicode-aware folding;
-  special-case same-inode case-only renames.
-- `[ ]` **L3** `when/lexer.rs:136` `byte as char` lexes string literals
-  as Latin-1 → non-ASCII `when:` comparisons silently never match. Decode
-  UTF-8 properly.
+- `[~]` **L2** `no_case_conflicts` now folds with Unicode `to_lowercase`
+  (not ASCII-only), so `É`/`é` and `Ω`/`ω` collisions are caught — the strict,
+  portable default for a case-conflict detector (test added). **Deferred
+  (rest):** `case.rs`/`filename_case.rs` are *documented* as ASCII-scoped by
+  design (camel/pascal/snake are defined on ASCII letters), so Unicode-izing
+  them is a semantics change, not a bug fix; the `file_ops.rs` same-inode
+  rename special-case is filesystem-semantics needing cross-platform care.
+  Both want a deliberate pass.
+- `[x]` **L3** the `when:` lexer now decodes the full UTF-8 scalar instead of
+  casting one byte to `char` (Latin-1 mojibake), so a non-ASCII literal like
+  `== "café"` matches. Escapes still work; tests cover accents, Cyrillic, emoji.
 - `[x]` **L4** `FilePrependFixer`/`FileAppendFixer` (backing
   `file_header`/`file_footer`) gained an idempotency guard: if the file
   already begins/ends with exactly the content, the fixer skips instead of
@@ -558,9 +561,12 @@ LOW correctness cleanup (L):
   resolving to the empty string on timeout — making the doc's long-standing
   timeout claim true instead of weakening it. Output is also capped (1 MiB).
   Tests (injectable timeout) cover both the timeout and the capture paths.
-- `[ ]` **L7** non-`NotFound` `fs::read` errors silently swallowed
-  (`engine.rs:499`, `rule.rs:490`, `facts.rs:254`) — distinguish
-  `NotFound` (skip) from real I/O errors (surface).
+- `[x]` **L7** a shared `walker::read_or_skip` now skips a genuinely-absent
+  file silently (the benign deleted-mid-walk race) but logs any *other* read
+  error (permission/I-O) at `warn`, so it's observable with `-v`/`RUST_LOG`
+  instead of silently mistaken for "file absent". Used at all three sites
+  (`engine.rs`, `rule.rs`, `facts.rs`). The run stays resilient (no abort on
+  one bad file — the long-standing per-file-read contract), only louder.
 - `[x]` **L8** `render_path` now does a single left-to-right scan into a fresh
   buffer (matching known `{token}`s by prefix), so a value substituted for one
   token is never re-scanned for another — a repo file literally named
@@ -586,8 +592,12 @@ LOW correctness cleanup (L):
   Truncation past the generous cap is silent-but-bounded; surfacing it to the
   caller (a user-facing note) needs `SpawnOutcome` plumbing — noted as a
   follow-up. (`command.rs` already capped its own drain.)
-- `[ ]` **L13** `command.rs:112,153` no `--`/`./` guard before path
-  tokens → leading-dash filenames become options. Insert `--` or `./`.
+- `[x]` **L13** new `template::render_path_argv` (used by the `command` rule)
+  prefixes `./` when substituting a path token turns a *non-flag* argv template
+  into a leading-dash string — so a repo file named `--write` rendered from
+  `{path}` can't flip `prettier --check {path}` into a destructive `--write`.
+  A flag the user wrote (`--check`, `--file={path}`) is left untouched. Test
+  added; the sibling spawning kinds don't render paths into argv.
 - `[x]` **L14** (decision: document + consider warn) Documented the empty /
   exclude-only `paths` = match-all (fail-open) behavior authoritatively on the
   `Scope` type + `matches` (the spec sites): an explicit `paths: []` applies to
