@@ -403,18 +403,26 @@ slashes `\`→`/` and percent-encodes space/`#`/`%`/controls/non-ASCII per
 RFC 3986; plain-ASCII paths are unchanged (existing snapshots stable);
 unit-tested.
 
-### M10 — GitLab fingerprint omits line; ADR-0006 overclaims unification `[-]`
-**Deferred:** the code half (add `line` to the gitlab fingerprint) is
-small, but it pairs with the ADR-0006 / `baseline.md` reconciliation and
-the deferred gitlab fingerprint-unification work (baseline.md §5/§7); do
-together so the fingerprint isn't changed twice. Tracked.
-**Where:** `output/gitlab.rs:115` (`SHA256(rule_id|path|message)`,
-excludes line). Distinct findings with identical messages collapse →
-count disagrees with json/junit/sarif. `docs/adr/0006:74` claims this
-fingerprint was unified onto `violation_fingerprint`; it wasn't. **Fix:**
-include line (and/or a per-occurrence discriminator) in the gitlab
-fingerprint; reconcile ADR-0006 §Decision with `baseline.md` (the
-unification is deferred, not done — say so).
+### M10 — GitLab fingerprint omits line; ADR-0006 overclaims unification `[x]`
+**Where:** `output/gitlab.rs` (`SHA256(rule_id|path|message)`, excludes
+line). Distinct findings with identical rule+path+message collapse to one
+fingerprint — and the Code Climate spec requires *per-report uniqueness*,
+so GitLab silently drops the duplicates (a generic-message per-line rule
+firing on several lines of one file loses all but one). **Done (code):**
+added a per-report `occurrence` discriminator (0-based index among
+findings sharing `rule|path|message`) folded into the hash. This was
+chosen over including the *line* deliberately: the existing
+`fingerprint_independent_of_line_number` test encodes a real design goal
+(a finding that drifts up/down stays the same issue across runs), and the
+discriminator preserves it (single-occurrence findings keep a
+line-independent fingerprint) while still disambiguating true duplicates.
+New test `distinct_findings_same_message_get_distinct_fingerprints`; the
+two existing stability tests still pass. **Done (docs):** ADR-0006 §74
+claimed the gitlab fingerprint was migrated onto `violation_fingerprint`
+— it wasn't. Corrected to say SARIF integration shipped but the gitlab
+unification is **deferred** (report-fingerprint plumbing, `baseline.md`
+§5/§7), matching what `baseline.md` already states. The full unification
+remains the tracked follow-up.
 
 ### M11 — exit codes: documented `3` never produced; `2` overloaded `[-]`
 **Deferred (needs error-model work; maintainer chose to implement exit 3):**

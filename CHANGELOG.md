@@ -67,6 +67,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it into a regular file). `final_newline`'s
   on-disk path is reconciled with its editor path (it no longer double-appends
   to an already-terminated or empty file). (H3)
+- **GitLab Code Quality no longer drops duplicate findings.** The
+  `fingerprint` was `SHA256(rule_id|path|message)`, so two genuinely-distinct
+  findings sharing all three (a generic-message per-line rule firing on
+  several lines of one file) produced the same fingerprint — and the Code
+  Climate spec GitLab consumes requires per-report uniqueness, so GitLab
+  silently kept only one. The fingerprint now folds in a per-report
+  `occurrence` discriminator. The line number is still deliberately excluded,
+  so a finding that drifts up/down stays the same issue across runs; only true
+  duplicates are disambiguated. (M10)
 - **`--config` is honest about being single-valued.** The flag help promised
   "repeatable; later overrides earlier", but every consumer read only the
   first `-c`, so a second was silently dropped — and worse, was position-

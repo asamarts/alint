@@ -9,8 +9,8 @@
 //! objects, one per violation.
 //!
 //! Each issue carries: `description`, `check_name`,
-//! `fingerprint` (SHA-256 hex of `rule_id|path|message` for
-//! cross-run de-duplication), `severity` (one of
+//! `fingerprint` (SHA-256 hex of `rule_id|path|message|occurrence` for
+//! cross-run de-duplication; see [`fingerprint`]), `severity` (one of
 //! `info` / `minor` / `major` / `critical` / `blocker`), and
 //! `location.path` + `location.lines.begin`.
 //!
@@ -35,12 +35,18 @@ use sha2::{Digest, Sha256};
 
 pub fn write_gitlab(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     let mut issues: Vec<Issue> = Vec::new();
+    // Per-report occurrence counter keyed by the base `rule|path|message`
+    // tuple, so genuinely-distinct findings that share all three get distinct
+    // fingerprints (the Code Climate spec requires per-report uniqueness, else
+    // GitLab silently drops the duplicates). Deterministic: report iteration
+    // order is stable. (M10)
+    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for result in &report.results {
         if result.level == Level::Off {
             continue;
         }
         for violation in &result.violations {
-            issues.push(build_issue(result, violation));
+            issues.push(build_issue(result, violation, &mut seen));
         }
     }
     let json = serde_json::to_string_pretty(&issues)?;
@@ -69,16 +75,29 @@ struct Lines {
     begin: usize,
 }
 
-fn build_issue(result: &RuleResult, violation: &Violation) -> Issue {
+fn build_issue(
+    result: &RuleResult,
+    violation: &Violation,
+    seen: &mut std::collections::HashMap<String, u32>,
+) -> Issue {
     let path = violation
         .path
         .as_ref()
         .map_or_else(|| ".".to_string(), |p| p.display().to_string());
 
+    // Nth identical (rule, path, message) in this report — 0 for the first.
+    let key = format!("{}|{path}|{}", result.rule_id, violation.message);
+    let occurrence = {
+        let counter = seen.entry(key).or_insert(0);
+        let n = *counter;
+        *counter += 1;
+        n
+    };
+
     Issue {
         description: violation.message.to_string(),
         check_name: result.rule_id.to_string(),
-        fingerprint: fingerprint(&result.rule_id, &path, &violation.message),
+        fingerprint: fingerprint(&result.rule_id, &path, &violation.message, occurrence),
         severity: severity(result.level),
         location: Location {
             path,
@@ -106,19 +125,29 @@ fn severity(level: Level) -> &'static str {
 }
 
 /// Stable per-issue fingerprint for cross-run de-duplication.
-/// SHA-256 hex of `rule_id|path|message` — the line number is
-/// intentionally omitted so a violation that drifts up or down
-/// by a few lines stays the same issue from GitLab's
-/// perspective. Two violations of the same rule with the same
-/// message in the same file collide, which is the right shape:
-/// GitLab will treat them as one ongoing issue.
-fn fingerprint(rule_id: &str, path: &str, message: &str) -> String {
+/// SHA-256 hex of `rule_id|path|message|occurrence`. The line number is
+/// intentionally omitted so a violation that drifts up or down by a few
+/// lines stays the same issue from GitLab's perspective. `occurrence` is the
+/// 0-based index of this finding among others in the *same report* sharing
+/// the same `rule_id|path|message`, so two genuinely-distinct findings don't
+/// collapse to one fingerprint — the Code Climate spec requires per-report
+/// uniqueness, and a collision makes GitLab silently drop the duplicate
+/// (e.g. a generic-message per-line rule firing on several lines of one
+/// file). The single-occurrence common case keeps a line-independent
+/// fingerprint, so drift tolerance is preserved.
+///
+/// Note: this is *not* yet the `violation_fingerprint` used by baseline mode
+/// (ADR-0006); unifying the two needs report-fingerprint plumbing and is
+/// deferred — see `docs/design/baseline.md` §5/§7.
+fn fingerprint(rule_id: &str, path: &str, message: &str, occurrence: u32) -> String {
     let mut hasher = Sha256::new();
     hasher.update(rule_id.as_bytes());
     hasher.update(b"|");
     hasher.update(path.as_bytes());
     hasher.update(b"|");
     hasher.update(message.as_bytes());
+    hasher.update(b"|");
+    hasher.update(occurrence.to_le_bytes());
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(64);
     for byte in digest {
@@ -323,6 +352,31 @@ mod tests {
         let fp_a = parse(&render(&mk(7)))[0]["fingerprint"].clone();
         let fp_b = parse(&render(&mk(42)))[0]["fingerprint"].clone();
         assert_eq!(fp_a, fp_b);
+    }
+
+    #[test]
+    fn distinct_findings_same_message_get_distinct_fingerprints() {
+        // M10: two genuinely-distinct violations sharing rule+path+message
+        // (e.g. a generic-message per-line rule firing on two lines) must NOT
+        // collide — the Code Climate spec requires per-report uniqueness, and
+        // a collision makes GitLab drop the duplicate.
+        let mk_v = |line: usize| Violation {
+            path: Some(Path::new("a.rs").into()),
+            message: "forbidden pattern".into(),
+            line: Some(line),
+            column: None,
+            is_note: false,
+            baseline_key: None,
+        };
+        let report = Report {
+            results: vec![rule("no-pat", Level::Error, vec![mk_v(3), mk_v(9)])],
+        };
+        let arr = parse(&render(&report));
+        assert_eq!(arr.len(), 2, "both findings emitted");
+        assert_ne!(
+            arr[0]["fingerprint"], arr[1]["fingerprint"],
+            "distinct findings must have distinct fingerprints"
+        );
     }
 
     #[test]

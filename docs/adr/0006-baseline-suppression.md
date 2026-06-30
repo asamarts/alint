@@ -71,9 +71,13 @@ generated fingerprint file, separate from `.alint.yml`:
   per-fingerprint counts, and is reword-proof. (v1 keyed only no-path rules; v2
   over-corrected to "key every non-line-content rule"; the v3 audit showed the
   `(rule_id, path)` default is both safe and far smaller.)
-- This is **one** fingerprint definition for the whole tool: the existing
-  `gitlab.rs` cross-run-dedup fingerprint (keyed on the message) is migrated onto
-  it, and SARIF gains it as `partialFingerprints`.
+- This is *intended* as **one** fingerprint definition for the whole tool:
+  SARIF gains it as `partialFingerprints` (shipped). Migrating the existing
+  `gitlab.rs` cross-run-dedup fingerprint onto it is **deferred** — it needs
+  report-fingerprint plumbing (see `docs/design/baseline.md` §5/§7). Until
+  then `gitlab.rs` keeps its own `rule_id|path|message|occurrence` fingerprint
+  (the `occurrence` discriminator added in the post-v0.13 audit guarantees the
+  per-report uniqueness the Code Climate spec requires).
 - A stale entry (the fixed/edited case) warns and re-tightens but does not fail
   the build by default; `--strict-baseline` opts into failing on stale.
 - Suppression **marks rather than removes**: a deterministic, order-preserving
