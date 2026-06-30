@@ -13,11 +13,12 @@
 //!     so the two rules don't double-report.
 //!
 //! Note on U+200D (ZWJ): it is flagged even though it joins emoji
-//! sequences (e.g. the family glyph 👨‍👩‍👧), because in source it is
-//! far more often an obfuscation vector than legitimate. The strip
-//! fixer therefore *will* break a literal emoji ZWJ sequence — scope
-//! the rule away from files that legitimately carry such emoji.
-//! (Grapheme-cluster-aware ZWJ handling is a possible future refinement.)
+//! sequences (e.g. the multi-person "family" emoji, built by joining
+//! several person glyphs with ZWJ), because in source it is far more
+//! often an obfuscation vector than legitimate. The strip fixer
+//! therefore *will* break a literal emoji ZWJ sequence — scope the rule
+//! away from files that legitimately carry such emoji. (Grapheme-cluster-
+//! aware ZWJ handling is a possible future refinement.)
 
 use std::path::Path;
 
