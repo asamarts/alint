@@ -230,6 +230,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carrying a 19-digit author-time (parses as `u64`, overflows `SystemTime` on
   `+`) aborted the run; the addition is now checked and a malformed timestamp
   is dropped. (M7)
+- **`git_no_denied_paths` denylist patterns are anchored to any depth.** A
+  bare denied pattern (no `/`) like `*.pem` or `id_rsa` was root-anchored by
+  globset, so `secrets/server.pem` evaded the denylist — a dangerous default
+  for a secrets control. Bare patterns are now auto-anchored to `**/<pattern>`
+  (matching any depth, root included); explicit-path patterns
+  (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
 
 ### Internal
 

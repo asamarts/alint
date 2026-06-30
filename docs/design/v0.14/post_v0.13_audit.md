@@ -334,16 +334,15 @@ flagged. **Deferred:** needs a walker/`FileIndex` change — a per-entry
 symlinks the walker currently prunes. Core + determinism-sensitive;
 wants its own pass.
 
-### M5 — `git_no_denied_paths` denylist is root-anchored `[-]`
-**Where:** `git_no_denied_paths.rs:99`. For a *secrets* control,
-`*.pem`/`id_rsa` match only repo root, so `secrets/server.pem` evades.
-**Fix:** auto-anchor bare/`*` denied patterns to `**/` (or emit a
-loud build-time warning when a denied pattern lacks `**/`), documented as
-a security-control default distinct from the general glob footgun.
-**Deferred (semantics call):** auto-anchoring silently changes glob
-matching for everyone (a user who wrote `*.env` expecting root-only would
-suddenly match any depth). Wants a decision on auto-anchor vs
-warn-at-build vs doc-only before landing. Tracked.
+### M5 — `git_no_denied_paths` denylist is root-anchored `[x]`
+**Where:** `git_no_denied_paths.rs`. For a *secrets* control, `*.pem` /
+`id_rsa` matched only the repo root, so `secrets/server.pem` evaded.
+**Done (maintainer chose auto-anchor):** a bare denied pattern (no `/`) is
+rewritten to `**/<pattern>` so it bans a match at any depth; explicit-path
+patterns (`secrets/*.key`, `**/*.pem`) are taken as written; the violation
+message keeps the original spelling. The semantics change (a bare `*.env`
+now matches any depth) is the intended secure default for a denylist.
+Tested (`anchor_denied_pattern` + a nested-match check).
 
 ### M6 — non-UTF-8 git data silently collapses checks `[~]`
 **Where:** `core/git.rs:60,135` (one non-UTF-8 path → whole tracked/
@@ -403,10 +402,14 @@ fingerprint; reconcile ADR-0006 §Decision with `baseline.md` (the
 unification is deferred, not done — say so).
 
 ### M11 — exit codes: documented `3` never produced; `2` overloaded `[-]`
-**Deferred (doc-coordination):** the README half overlaps the parallel
-doc-drift pass; §Open decisions leans "document the real 2-code contract"
-(a 2/3 split is a public-contract change, low value). Do after the doc
-branch merges.
+**Deferred (needs error-model work; maintainer chose to implement exit 3):**
+a clean config-vs-internal split is NOT type-inferrable — `alint_core::Error::
+Other` is overloaded for *config* errors (the spawn-gate rejections, extends
+errors, cycle errors all use it), so mapping by variant would mislabel config
+as internal. Implementing exit 3 honestly needs an explicit `Error::Internal`
+variant tagged at the genuinely-internal sites (output-write failures, engine
+invariants) and `main()` classifying on it — a focused error-model change, not
+a funnel tweak. Tracked for a dedicated CLI/error pass.
 **Where:** README:212 documents `3` (internal); `main.rs:380` funnels
 every `anyhow` error to exit `2`. **Fix:** either implement distinct
 exit codes (`2` config, `3` internal) or correct the README + the
@@ -422,9 +425,15 @@ except `check` (the `baseline` subcommand writes via its own `--output`,
 not this flag), mirroring the `--only` rejection; trycmd-tested.
 
 ### M13 — global `--format` bypasses per-subcommand value gate by position `[-]`
-**Deferred:** validate `--format` against each subcommand's allowed set in
-the handler (fail loudly regardless of position) — clean but multi-site;
-next CLI pass.
+**Deferred (CLI-surface change; attempted + reverted):** the root cause is
+the *dual* `--format` — a global arg and a per-subcommand arg with the same
+long name. clap MERGES them, so `cli.format` already reflects the local value
+(`markdown` for export-agents-md, `yaml` for suggest); a naive "reject a
+non-default global format" gate fires on those subcommands' normal operation
+(it broke `export-agents-md-markdown` / `suggest-rust-yaml`, reverted). The
+real fix unifies the surface — drop the per-subcommand `--format`, validate
+the single global against each subcommand's allowed set, special-case
+export-agents-md's non-`human` default — a deliberate CLI change, own pass.
 **Where:** global `--format` is an unrestricted `String` (`main.rs:54`);
 `alint --format sarif validate-config` → exit 0, silently ignored.
 **Fix:** validate `--format` against the subcommand's allowed set in the
