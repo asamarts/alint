@@ -52,7 +52,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7 done; M3,M4,M8 deferred) |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M12 done; M10,M11,M13,M14 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 done; D11 + L/dogfood deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
@@ -371,17 +371,25 @@ A 19-digit author-time panics. Reachable via `git_blame_age` on an
 untrusted repo. **Done:** `UNIX_EPOCH.checked_add(...)`; on overflow the
 block is dropped (matching the adjacent posture), no panic.
 
-### M8 — terminal-escape injection in the human formatter `[-]`
-**Severity:** Medium (needs a TTY / `--color=always`; CI formats are
-already safe). **Where:** `output/human.rs:85,162,331,360,446`
-(unsanitized paths/messages). A repo file named with `\x1b[…]` can hide
-findings or forge an "all passed" banner when a human lints an untrusted
-repo. **Fix:** a control-char/ANSI sanitizer applied to all attacker-
-controlled spans (paths, messages, snippets) on the human/compact/fix
-paths; preserve intentional styling emitted by alint itself. **Deferred:**
-needs a shared sanitizer across three render paths with care not to strip
-alint's own styling; conditional on a TTY / `--color=always` (every CI
-format is already neutralized). Wants its own focused pass. Tracked.
+### M8 — terminal-escape injection in the human formatter `[x]`
+**Severity:** Medium. **Where:** `output/human.rs` (unsanitized
+paths/messages). A repo file named with `\x1b[…]` can hide findings or
+forge an "all passed" banner when a human lints an untrusted repo.
+**Done:** new `output/sanitize.rs` with `sanitize_terminal(&str) -> Cow`
+— replaces every control char (C0, DEL, C1) *except* the intentional `\n`
+(which `wrap_message` honors as a paragraph break) with a visible, inert
+`\xNN` escape; borrows unchanged on clean input so the common path
+allocates nothing. Applied to all attacker-controlled spans on the three
+render paths: the grouped section-header path label, the wrapped violation
+message (sanitized before `wrap_message`, so the embedded `kind: command`
+subprocess output is neutralized too), the compact `<path>` + `<message>`,
+and the fix `content` (sanitized whole — alint's styling is applied as
+separate tokens, never inside `content`). Runs unconditionally (not
+TTY-gated), so output is byte-identical to a terminal or a pipe — which
+also keeps the trycmd snapshots stable (verified: no drift). alint's own
+SGR is untouched. Tests: 5 unit (`sanitize::tests`) + 3 end-to-end
+(`*_format_neutralizes_terminal_escapes`, asserting a raw `\x1b[2J`
+clear-screen never survives while its `\x1b[2J` text form does).
 
 ---
 

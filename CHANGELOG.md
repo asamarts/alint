@@ -245,6 +245,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for a secrets control. Bare patterns are now auto-anchored to `**/<pattern>`
   (matching any depth, root included); explicit-path patterns
   (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
+- **Human output neutralizes terminal escapes in untrusted text.** A repo
+  file named with an `\x1b[…]` sequence — or a `kind: command` rule whose
+  subprocess output carries ANSI codes — could clear the screen, hide
+  findings below the fold, or forge an "all rules passed." banner when a
+  human lints an untrusted repo (alint's `anstream` stream passes raw bytes
+  through on a TTY, exactly where the escapes fire). The grouped, compact,
+  and fix renderers now replace every control char (except the intentional
+  newline) in attacker-controlled paths/messages with a visible `\xNN`
+  escape. alint's own styling is unaffected, machine formats (JSON/SARIF/…)
+  are unchanged, and clean output is byte-identical (no TTY-conditional
+  divergence). (M8)
 
 ### Internal
 

@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use alint_core::{FixReport, FixStatus, Level, Report, RuleResult, Violation};
 
+use crate::sanitize::sanitize_terminal;
 use crate::style::{self, GlyphSet, HumanOptions, write_hyperlink};
 
 // ---------------------------------------------------------------
@@ -82,7 +83,9 @@ pub fn write_human(report: &Report, w: &mut dyn Write, opts: HumanOptions) -> st
 
         let label = bucket.as_ref().map_or_else(
             || "Repository-level".to_string(),
-            |p| p.display().to_string(),
+            // The path is attacker-controlled (a repo file name) — neutralize
+            // any terminal escapes before it lands in the header (M8).
+            |p| sanitize_terminal(&p.display().to_string()).into_owned(),
         );
         write_section_header(w, &label, width, &opts.glyphs)?;
 
@@ -159,7 +162,11 @@ fn write_violation(
     // line and let the terminal handle any overflow).
     let dim = style::DIM;
     let total_width = opts.effective_width();
-    let lines = wrap_message(&violation.message, MSG_INDENT.len(), total_width);
+    // The message can embed a matched value or a `kind: command` rule's
+    // subprocess output — neutralize terminal escapes before wrapping, while
+    // preserving the intentional `\n` paragraph breaks wrap_message honors (M8).
+    let safe_message = sanitize_terminal(&violation.message);
+    let lines = wrap_message(&safe_message, MSG_INDENT.len(), total_width);
     let (first_line, rest) = lines
         .split_first()
         .map_or(("", &[][..]), |(f, r)| (f.as_str(), r));
@@ -325,10 +332,13 @@ fn write_human_compact(
             continue;
         }
         for v in &result.violations {
-            let path = v
-                .path
-                .as_ref()
-                .map_or_else(|| "<repo>".to_string(), |p| p.display().to_string());
+            // Path + message are attacker-controlled; neutralize terminal
+            // escapes for this single-line format (M8).
+            let path = v.path.as_ref().map_or_else(
+                || "<repo>".to_string(),
+                |p| sanitize_terminal(&p.display().to_string()).into_owned(),
+            );
+            let message = sanitize_terminal(&v.message);
             let line = v.line.unwrap_or(0);
             let col = v.column.unwrap_or(0);
             let (level_style, level_name) = match result.level {
@@ -359,8 +369,8 @@ fn write_human_compact(
             };
             writeln!(
                 w,
-                "{path}:{line}:{col}: {level_style}{level_name}{level_style:#}: {rule_style}{}{rule_style:#}: {}{fix_tag}",
-                result.rule_id, v.message,
+                "{path}:{line}:{col}: {level_style}{level_name}{level_style:#}: {rule_style}{}{rule_style:#}: {message}{fix_tag}",
+                result.rule_id,
             )?;
         }
     }
@@ -471,6 +481,10 @@ pub fn write_fix_human(
                     format!("{path_prefix}{} (no fixer)", item.violation.message),
                 ),
             };
+            // `content` embeds the attacker-controlled path + message (alint's
+            // own status prose is clean ASCII); styling is applied separately
+            // below, so sanitizing the whole string is safe (M8).
+            let content = sanitize_terminal(&content);
             let lines = wrap_message(&content, FIX_INDENT.len(), total_width);
             let (first_line, rest) = lines
                 .split_first()
@@ -623,5 +637,76 @@ mod tests {
         // so tokens up to 20 chars fit on one line.
         let out = wrap_message("twenty-char-token-ok", 14, 10);
         assert_eq!(out, vec!["twenty-char-token-ok".to_string()]);
+    }
+
+    // M8: the three human render paths must neutralize terminal escapes in
+    // attacker-controlled paths/messages. alint emits its own SGR (e.g.
+    // `\x1b[2m` dim) but never the clear-screen `\x1b[2J`, so a raw `\x1b[2J`
+    // in the output would be an injection that slipped through; its
+    // neutralized form `\x1b[2J` (literal text) proves the sanitizer ran.
+    const RAW_CLEAR: &str = "\x1b[2J\x1b[H";
+
+    fn evil_report() -> Report {
+        use std::path::PathBuf;
+        let v = Violation::new(format!("{RAW_CLEAR}forged: all rules passed."))
+            .with_path(PathBuf::from(format!("src/{RAW_CLEAR}evil.rs")));
+        Report {
+            results: vec![RuleResult::new(
+                "demo".into(),
+                Level::Error,
+                None,
+                vec![v],
+                false,
+            )],
+        }
+    }
+
+    fn assert_neutralized(out: &str) {
+        assert!(
+            !out.contains("\x1b[2J"),
+            "a raw clear-screen escape survived: {out:?}"
+        );
+        assert!(
+            out.contains("\\x1b[2J"),
+            "expected the neutralized \\x1b[2J text: {out:?}"
+        );
+    }
+
+    #[test]
+    fn human_format_neutralizes_terminal_escapes() {
+        let mut buf = Vec::new();
+        write_human(&evil_report(), &mut buf, HumanOptions::default()).unwrap();
+        assert_neutralized(&String::from_utf8(buf).unwrap());
+    }
+
+    #[test]
+    fn compact_format_neutralizes_terminal_escapes() {
+        let mut buf = Vec::new();
+        let opts = HumanOptions {
+            compact: true,
+            ..HumanOptions::default()
+        };
+        write_human(&evil_report(), &mut buf, opts).unwrap();
+        assert_neutralized(&String::from_utf8(buf).unwrap());
+    }
+
+    #[test]
+    fn fix_format_neutralizes_terminal_escapes() {
+        use std::path::PathBuf;
+        let v = Violation::new(format!("{RAW_CLEAR}forged"))
+            .with_path(PathBuf::from(format!("src/{RAW_CLEAR}evil.rs")));
+        let report = FixReport {
+            results: vec![alint_core::FixRuleResult {
+                rule_id: "demo".into(),
+                level: Level::Warning,
+                items: vec![alint_core::FixItem {
+                    violation: v,
+                    status: FixStatus::Unfixable,
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        assert_neutralized(&String::from_utf8(buf).unwrap());
     }
 }
