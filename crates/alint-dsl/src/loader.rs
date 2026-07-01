@@ -210,15 +210,13 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
     })?;
 
     let config: RawConfig = serde_yaml_ng::from_str(body).map_err(|e| {
-        Error::Other(format!(
-            "built-in ruleset '{spec}' failed to parse: {e}; \
-             this is a bug in alint — please file an issue"
-        ))
+        // A ruleset shipped *inside* the binary failing to parse is an alint
+        // bug, not the user's config — Internal → CLI exit 3 (M11).
+        Error::internal(format!("built-in ruleset '{spec}' failed to parse: {e}"))
     })?;
     if !config.extends.is_empty() {
-        return Err(Error::Other(format!(
-            "bundled ruleset '{spec}' declares its own `extends:`; \
-             this is a bug in alint"
+        return Err(Error::internal(format!(
+            "bundled ruleset '{spec}' declares its own `extends:`"
         )));
     }
     Ok(config)

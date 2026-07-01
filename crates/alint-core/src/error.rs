@@ -40,6 +40,15 @@ pub enum Error {
 
     #[error("{0}")]
     Other(String),
+
+    /// An error that is *not* the user's fault — an alint bug or an
+    /// unexpected internal invariant violation (a shipped bundled ruleset
+    /// that fails to parse, a serialization failure, …), as opposed to a
+    /// bad config / CLI usage (which is [`Error::Other`] and friends). The
+    /// CLI maps this to a distinct exit code (`3`) so a script can tell
+    /// "fix your config" (exit `2`) from "file an alint bug" (exit `3`).
+    #[error("internal error (this is a bug in alint): {0}")]
+    Internal(String),
 }
 
 impl Error {
@@ -59,6 +68,19 @@ impl Error {
             path: path.to_path_buf(),
         }
     }
+
+    /// Construct an [`Error::Internal`] — an alint bug / unexpected invariant,
+    /// not a user config error. Surfaces as CLI exit code `3` (M11).
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(message.into())
+    }
+
+    /// Whether this is an [`Error::Internal`] (an alint bug), used by the CLI
+    /// to pick exit code `3` rather than `2`.
+    #[must_use]
+    pub fn is_internal(&self) -> bool {
+        matches!(self, Self::Internal(_))
+    }
 }
 
 #[cfg(test)]
@@ -70,6 +92,17 @@ mod tests {
         let e1 = Error::rule_config("foo", "bad");
         let e2 = Error::rule_config(String::from("foo"), String::from("bad"));
         assert_eq!(e1.to_string(), e2.to_string());
+    }
+
+    #[test]
+    fn is_internal_distinguishes_internal_from_config_errors() {
+        // M11: only Internal is an alint bug (exit 3); Other/config errors
+        // are the user's to fix (exit 2).
+        assert!(Error::internal("boom").is_internal());
+        assert!(!Error::Other("bad config".into()).is_internal());
+        assert!(!Error::rule_config("r", "bad").is_internal());
+        // The message flags it as a bug so a user knows to report it.
+        assert!(Error::internal("boom").to_string().contains("bug in alint"));
     }
 
     #[test]

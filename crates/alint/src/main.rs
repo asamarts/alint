@@ -378,9 +378,26 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(e) => {
             eprintln!("alint: {e:#}");
-            ExitCode::from(2)
+            // Exit 3 for an internal alint error (a bug), 2 for a config /
+            // CLI-usage error the user can fix (M11).
+            if error_is_internal(&e) {
+                ExitCode::from(3)
+            } else {
+                ExitCode::from(2)
+            }
         }
     }
+}
+
+/// Whether the error chain carries an `alint_core::Error::Internal` — an alint
+/// bug, which the CLI reports as exit code `3` rather than the `2` used for a
+/// fixable config / usage error (M11).
+fn error_is_internal(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<alint_core::Error>()
+            .is_some_and(alint_core::Error::is_internal)
+    })
 }
 
 /// Install a custom panic hook that prints a pre-filled GitHub-issue
@@ -1756,6 +1773,26 @@ mod tests {
     use super::*;
     use alint_core::{FactKind, FactSpec, FactValue, FactValues, facts::OneOrMany};
     use alint_output::Format;
+
+    #[test]
+    fn error_is_internal_classifies_the_exit_code() {
+        // M11: an Internal error (alint bug) → exit 3; a config/usage error
+        // (Other, or a plain anyhow message) → exit 2.
+        let internal = anyhow::Error::new(alint_core::Error::internal("boom"));
+        assert!(error_is_internal(&internal));
+
+        let config = anyhow::Error::new(alint_core::Error::Other("bad config".into()));
+        assert!(!error_is_internal(&config));
+
+        let usage = anyhow::anyhow!("missing --config");
+        assert!(!error_is_internal(&usage));
+
+        // The chain is searched, so a `.context(...)`-wrapped internal error is
+        // still classified as internal (exit 3).
+        let wrapped =
+            anyhow::Error::new(alint_core::Error::internal("boom")).context("while loading config");
+        assert!(error_is_internal(&wrapped));
+    }
 
     #[test]
     fn url_encode_passes_through_unreserved_chars() {

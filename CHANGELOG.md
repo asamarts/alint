@@ -67,6 +67,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it into a regular file). `final_newline`'s
   on-disk path is reconciled with its editor path (it no longer double-appends
   to an already-terminated or empty file). (H3)
+- **Exit code `3` (internal error) is now actually produced.** The README
+  documented `3` for an internal alint error vs `2` for a config/usage error,
+  but every error funnelled to `2`, so a script could never tell "fix your
+  config" from "file an alint bug." A new internal-error class is tagged at the
+  genuinely-internal sites (a bundled ruleset shipped inside the binary failing
+  to parse), and the CLI now returns `3` for those and `2` for everything a user
+  can fix. (M11)
 - **`no_symlinks` now flags directory symlinks.** It scanned only file
   entries, so an in-tree symlink whose target is a *directory* (indexed as a
   dir entry when the walk follows it) slipped through. It now scans all indexed

@@ -53,7 +53,7 @@ three classes at once.
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 partial — dir symlinks done, escaping deferred) |
-| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
+| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M11/M12/M14 done; M13 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
@@ -438,20 +438,23 @@ unification is **deferred** (report-fingerprint plumbing, `baseline.md`
 §5/§7), matching what `baseline.md` already states. The full unification
 remains the tracked follow-up.
 
-### M11 — exit codes: documented `3` never produced; `2` overloaded `[-]`
-**Deferred (needs error-model work; maintainer chose to implement exit 3):**
-a clean config-vs-internal split is NOT type-inferrable — `alint_core::Error::
-Other` is overloaded for *config* errors (the spawn-gate rejections, extends
-errors, cycle errors all use it), so mapping by variant would mislabel config
-as internal. Implementing exit 3 honestly needs an explicit `Error::Internal`
-variant tagged at the genuinely-internal sites (output-write failures, engine
-invariants) and `main()` classifying on it — a focused error-model change, not
-a funnel tweak. Tracked for a dedicated CLI/error pass.
-**Where:** README:212 documents `3` (internal); `main.rs:380` funnels
-every `anyhow` error to exit `2`. **Fix:** either implement distinct
-exit codes (`2` config, `3` internal) or correct the README + the
-in-code `validate-config` doc-comment (`main.rs:1543`) to the actual
-contract. Decision recorded in §Open decisions.
+### M11 — exit codes: documented `3` never produced; `2` overloaded `[x]`
+**Decision (maintainer):** *implement exit 3.* **Where:** README:212
+documents `3` (internal); `main.rs:380` funnelled every error to exit `2`,
+so `3` was never produced. **Done:** added an explicit
+`alint_core::Error::Internal` variant (+ `internal()` / `is_internal()`)
+— distinct from the `Other`/config errors it can't be type-inferred from —
+and tagged the genuinely-internal sites (the two "bug in alint"
+bundled-ruleset failures in `loader.rs`, where a ruleset shipped *inside*
+the binary fails to parse or declares its own `extends:`). `main()` now
+searches the error chain (so a `.context(...)`-wrapped internal error is
+still caught) and returns exit `3` for an internal error, `2` for a
+fixable config / usage error. The README's `2 config / 3 internal`
+contract is now accurate (was aspirational). Tests: `is_internal`
+(core) + `error_is_internal_classifies_the_exit_code` (CLI, incl. the
+context-wrapped chain). Genuine internal errors are rare (bundled rulesets
+are tested), so `3` seldom fires — but the contract is now honestly wired
+rather than documented-but-dead.
 
 ### M12 — `--baseline` family silently ignored on non-`check` subcommands `[x]`
 **Where:** only `cmd_check` reads `cli.baseline` (`main.rs:787`); `fix`/
