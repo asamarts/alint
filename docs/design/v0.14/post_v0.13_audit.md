@@ -52,7 +52,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
@@ -316,19 +316,23 @@ so no confinement is needed there. Tests: 4 unit (`confine_*`) + 2
 integration (`local_extends_outside_lint_root_is_rejected`,
 `local_extends_out_of_root_allowed_with_top_level_flag`).
 
-### M3 — per-file reads bypass the 256 MiB OOM guard `[-]`
+### M3 — per-file reads bypass the 256 MiB OOM guard `[x]`
 **Where:** `structured_path.rs:365,376`, `core/engine.rs:499`,
 `core/rule.rs:490` (raw `std::fs::read`). The per-file family
-(`file_hash`, `import_gate`, all `*_path_*`) can be OOM'd by one in-tree
-multi-GB file; only cross-file kinds call `read_capped`. **Fix:** route
-per-file reads through `read_capped` (stat-then-read), emitting the
-over-cap violation the guard already defines. **Deferred:** the cap +
-`read_capped` live in `alint-rules`, but `engine.rs`/`rule.rs` are in
-`alint-core` (which can't depend on `alint-rules`), so the fix needs the
-cap hoisted to `alint-core` and a consistent over-cap outcome across all
-four read sites (the index already carries `size`, so no extra stat).
-Touches the dispatch hot path — wants its own pass. Self-limiting (needs
-a committed multi-GB file).
+(`file_hash`, `import_gate`, all `*_path_*`) could be OOM'd by one in-tree
+multi-GB file; only cross-file kinds called `read_capped`. **Done:** the
+256 MiB `MAX_ANALYZE_BYTES` cap is hoisted to `alint-core` (walker.rs) —
+one source of truth, `alint-rules`'s `io.rs` re-exports it. New
+`walker::read_capped_or_skip(path, size)` skips (loudly, at `warn`) a file
+whose *index* size exceeds the cap **before** reading — no extra `stat`,
+since the walk already recorded `FileEntry::size`. The two `alint-core`
+per-file loops (`engine.rs`, `rule.rs`) call it with `entry.size`; the two
+`structured_path.rs` reads (which lack an entry at one site) route through
+the existing stat-based `io::read_capped`. All four sites now bounded.
+Tests: `read_capped_or_skip_gates_on_the_passed_size` (proves the gate
+uses the passed size, so no multi-GB fixture is needed) + missing-file.
+Consistent with the L7 resilient-skip contract (one bad file never aborts
+the run).
 
 ### M4 — `no_symlinks` misses directory + escaping symlinks `[-]`
 **Where:** `no_symlinks.rs:29` (iterates `index.files()`, which excludes

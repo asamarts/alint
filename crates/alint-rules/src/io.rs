@@ -123,7 +123,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// of magnitude smaller — yet bounded so a hostile or accidental
 /// multi-GB file in a linted repo yields a clear violation
 /// instead of OOM-ing the run.
-pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
+///
+/// Re-exported from `alint-core` so the per-file engine/rule loops and these
+/// rule-level reads share one cap (M3).
+pub use alint_core::MAX_ANALYZE_BYTES;
 
 /// Failure of [`read_capped`]: the file exceeds
 /// [`MAX_ANALYZE_BYTES`] (carrying its size), or an ordinary I/O

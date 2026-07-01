@@ -44,5 +44,5 @@ pub use scope_filter::{
     ScopeFilter, ScopeFilterSpec, reject_scope_filter_on_cross_file,
     reject_scope_filter_with_reason,
 };
-pub use walker::{FileEntry, FileIndex, WalkOptions, walk};
+pub use walker::{FileEntry, FileIndex, MAX_ANALYZE_BYTES, WalkOptions, read_capped_or_skip, walk};
 pub use when::{WhenEnv, WhenError, WhenExpr};

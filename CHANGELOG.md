@@ -302,6 +302,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lockstep. Note: U+200D (ZWJ) stays flagged even though it joins emoji
   sequences, so its strip fixer will break a literal emoji ZWJ sequence —
   scope the rule away from files that legitimately carry such emoji. (L1)
+- **Per-file reads are bounded so a giant file can't OOM the run.** Only the
+  cross-file rule kinds capped their reads; the per-file engine/rule loops and
+  the structured-query kinds read whole files unbounded, so one committed
+  multi-GB blob could exhaust memory. The 256 MiB analysis cap now lives in
+  `alint-core` and gates every per-file read — the engine/rule loops skip an
+  over-cap file up front using the walk-time index size (no extra `stat`) and
+  log it at `warn`; the run stays resilient (one oversized file never aborts
+  the lint). (M3)
 - **Resource-exhaustion hardening (several spots).** A few unbounded
   operations on attacker-influenced input are now capped: the `extends:`
   chain has a depth cap (`MAX_EXTENDS_DEPTH = 64`) so a deeply-nested acyclic

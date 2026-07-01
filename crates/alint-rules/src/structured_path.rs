@@ -362,7 +362,9 @@ impl Rule for StructuredPathRule {
                     continue;
                 }
                 let full = ctx.root.join(literal);
-                let Ok(bytes) = std::fs::read(&full) else {
+                // Cap the read so a multi-GB file matched here can't OOM the
+                // run; over-cap or unreadable → skip (M3).
+                let Ok(bytes) = crate::io::read_capped(&full) else {
                     continue;
                 };
                 violations.extend(self.evaluate_file(ctx, literal, &bytes)?);
@@ -373,9 +375,9 @@ impl Rule for StructuredPathRule {
                     continue;
                 }
                 let full = ctx.root.join(&entry.path);
-                let Ok(bytes) = std::fs::read(&full) else {
-                    // permission / race — silent skip, like other
-                    // content rules
+                // Cap the read (multi-GB OOM guard, M3); permission / race /
+                // over-cap → silent skip, like other content rules.
+                let Ok(bytes) = crate::io::read_capped(&full) else {
                     continue;
                 };
                 violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);

@@ -490,13 +490,16 @@ impl Engine {
                 if applicable.is_empty() {
                     return Vec::new();
                 }
-                // 2. Read once. A genuinely-absent file (deleted
-                // mid-walk) skips silently; a real read error
-                // (permission denied, I/O) is logged at `warn` so
-                // it isn't silently mistaken for "file absent"
-                // (L7). Either way the run stays resilient.
+                // 2. Read once, skipping a file larger than the
+                // analysis cap (from the index size, no extra
+                // stat) so a multi-GB blob can't OOM the run (M3).
+                // A genuinely-absent file (deleted mid-walk) skips
+                // silently; a real read error (permission, I/O) or
+                // an over-cap file is logged at `warn` so it isn't
+                // silently mistaken for "file absent" (L7). Either
+                // way the run stays resilient.
                 let abs = root.join(&file_entry.path);
-                let Some(bytes) = crate::walker::read_or_skip(&abs) else {
+                let Some(bytes) = crate::walker::read_capped_or_skip(&abs, file_entry.size) else {
                     return Vec::new();
                 };
                 // 3. Dispatch. Every applicable rule sees the

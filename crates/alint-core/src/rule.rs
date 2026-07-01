@@ -487,7 +487,9 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
             continue;
         }
         let full = ctx.root.join(&entry.path);
-        let Some(bytes) = crate::walker::read_or_skip(&full) else {
+        // Skip a file larger than the analysis cap (index size, no extra
+        // stat) so a multi-GB blob can't OOM the run (M3).
+        let Some(bytes) = crate::walker::read_capped_or_skip(&full, entry.size) else {
             continue;
         };
         violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);

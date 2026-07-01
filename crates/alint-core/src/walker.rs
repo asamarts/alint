@@ -28,6 +28,32 @@ pub(crate) fn read_or_skip(path: &Path) -> Option<Vec<u8>> {
     }
 }
 
+/// Hard cap on a single whole-file read by the per-file engine/rule loops
+/// and the direct-read structured-query kinds. Generous — every realistic
+/// source / config / manifest is orders of magnitude smaller — yet bounded so
+/// a hostile or accidental multi-GB file in a linted repo is skipped instead
+/// of OOM-ing the run. Shared source of truth: `alint-rules`'s `read_capped`
+/// family re-exports this constant (M3).
+pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// [`read_or_skip`], but first skip (loudly) any file whose size — taken from
+/// the walk-time [`FileEntry::size`], so no extra `stat` — exceeds
+/// [`MAX_ANALYZE_BYTES`]. The per-file loops read the whole file into memory,
+/// so an uncapped read of a committed multi-GB blob would OOM the process; a
+/// bounded skip keeps the run alive and observable (M3).
+pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
+    if size > MAX_ANALYZE_BYTES {
+        tracing::warn!(
+            path = %path.display(),
+            size,
+            cap = MAX_ANALYZE_BYTES,
+            "skipping file larger than the analysis cap"
+        );
+        return None;
+    }
+    read_or_skip(path)
+}
+
 /// Debug-only tracing for `FileIndex` lazy index builds. Emits a
 /// `phase=index_build kind=<name> elapsed_us=N entries=M` event so
 /// `xtask bench-scale` profile runs and contributor debugging can
@@ -1127,5 +1153,30 @@ mod tests {
         let idx = synthetic_index(&[("deep/nested/a.rs", false), ("deep/nested/b.rs", false)]);
         let children = idx.children_of(Path::new("deep/nested"));
         assert_eq!(children.len(), 2);
+    }
+
+    #[test]
+    fn read_capped_or_skip_gates_on_the_passed_size() {
+        // M3: the cap uses the size argument (the walk-time index size), not
+        // the file — so a tiny, readable file "claimed" to be over the cap is
+        // skipped without reading, and one under the cap is read.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("small.txt");
+        std::fs::write(&p, b"tiny").unwrap();
+        assert!(
+            read_capped_or_skip(&p, MAX_ANALYZE_BYTES + 1).is_none(),
+            "over-cap size must skip"
+        );
+        assert_eq!(
+            read_capped_or_skip(&p, 4).unwrap(),
+            b"tiny",
+            "under-cap size must read"
+        );
+    }
+
+    #[test]
+    fn read_capped_or_skip_missing_file_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(read_capped_or_skip(&tmp.path().join("nope"), 0).is_none());
     }
 }
