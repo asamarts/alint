@@ -326,6 +326,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Internal
 
+- Expanded the dogfood config (`.alint.yml`) to exercise alint's flagship rule
+  families on its own tree (Dog1): structured-query (`toml`/`json`/`yaml_path_equals`
+  over `Cargo.toml`, the VS Code `package.json`, and `action.yml`), cross-file
+  (`registry_paths_resolve` on the `[workspace] members`), and git-hygiene
+  (`git_no_denied_paths` for secret-shaped files). Each was negative-tested to
+  confirm it fires when broken; the dogfood stays green (46/46).
 - Split the two source files over the self-lint's `rust-file-max-lines`
   threshold so the dogfood is fully green (Dog2, no behavior change):
   `alint-dsl/src/lib.rs`'s test module moved to `src/tests.rs`, and

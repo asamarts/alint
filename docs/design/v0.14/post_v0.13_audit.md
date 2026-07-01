@@ -54,7 +54,7 @@ three classes at once.
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
-| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog2 done; L2 partial; D11 + Dog1 deferred) |
+| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
 Phases land security-first. Each is one atomic commit (or a small group)
@@ -609,13 +609,20 @@ LOW correctness cleanup (L):
 
 Dogfooding (Dog):
 
-- `[-]` **Dog1** `.alint.yml` exercises 27/89 kinds with zero cross-file,
-  structured-query, or git-hygiene rules (the flagship families) and
-  doesn't extend `monorepo/cargo-workspace` despite being a 9-crate
-  workspace. Add a representative dogfood slice of each flagship family
-  (it doubles as living proof + regression coverage on real content).
-  **Deferred:** a quality/credibility improvement, not a defect; wants a
-  deliberate dogfood-config expansion.
+- `[x]` **Dog1** `.alint.yml` exercised no cross-file, structured-query, or
+  git-hygiene rules — the flagship families. **Done:** added a representative
+  slice, each asserting something genuinely true of this repo (verified by
+  negative-testing that every one *fires* when its assertion is broken):
+  **structured-query** across all three formats — `toml_path_equals`
+  (`$.workspace.resolver == "3"`), `json_path_equals` (the VS Code extension's
+  `$.publisher`), `yaml_path_equals` (`action.yml` `$.runs.using == composite`);
+  **cross-file** — `registry_paths_resolve` asserting every `[workspace]
+  members` entry resolves to a real directory (10 members); **git-hygiene** —
+  `git_no_denied_paths` forbidding secret-shaped tracked files (bare patterns,
+  exercising the M5 any-depth anchoring). Exercised kinds 27 → 32; the dogfood
+  stays fully green (46/46). Not extending `monorepo/cargo-workspace` wholesale:
+  its `member-has-readme` rule would warn on all 9 crates (no per-crate READMEs
+  yet) — a separate quality call, left as a follow-up.
 - `[x]` **Dog2** two files exceeded `rust-file-max-lines`. **Done (split, no
   logic change):** `alint-dsl/src/lib.rs` (2335, mostly a ~1500-line test
   module) → its test module moved to `alint-dsl/src/tests.rs`, leaving lib.rs

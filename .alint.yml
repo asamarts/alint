@@ -274,6 +274,57 @@ rules:
     max: 1
     level: warning
 
+  # --- Flagship families ----------------------------------------------------
+  # Dogfood slices of alint's headline rule families on its own tree, so the
+  # families that make alint more than a filename linter are proven on real
+  # content (and regress here first). Each asserts something genuinely true of
+  # this repo.
+  #
+  # Structured-query: read a value out of a structured file by path and assert
+  # it, precisely (not by a brittle regex). One per format to exercise the
+  # toml / json / yaml query engines.
+  - id: cargo-workspace-resolver-3
+    kind: toml_path_equals
+    paths: Cargo.toml
+    path: "$.workspace.resolver"
+    equals: "3"
+    level: error
+    message: "the workspace must pin resolver = \"3\" (the edition-2024 default)"
+
+  - id: vscode-extension-publisher
+    kind: json_path_equals
+    paths: editors/vscode/package.json
+    path: "$.publisher"
+    equals: "asamarts"
+    level: error
+    message: "the VS Code extension ships under the asamarts marketplace namespace"
+
+  - id: action-is-composite
+    kind: yaml_path_equals
+    paths: action.yml
+    path: "$.runs.using"
+    equals: "composite"
+    level: error
+    message: "the GitHub Action is a composite action (install + run, no Docker image)"
+
+  # Cross-file: derive paths from a manifest and assert they resolve on disk —
+  # the class of check that catches a members list drifting from the tree.
+  - id: workspace-members-resolve
+    kind: registry_paths_resolve
+    source: Cargo.toml
+    extract: { toml: "$.workspace.members[*]" }
+    expect: dir
+    level: error
+    message: "every [workspace] members entry must resolve to a real crate directory"
+
+  # Git-hygiene: no secret-shaped file may be tracked. Bare patterns (no `/`)
+  # auto-anchor to any depth, so a key committed in a subdir can't hide.
+  - id: no-tracked-secrets
+    kind: git_no_denied_paths
+    denied: [id_rsa, id_dsa, "*.pem", "*.p12", "*.pfx"]
+    level: error
+    message: "no private-key / secret-shaped file may be committed to the repository"
+
   # --- Bundled ruleset shape ---------------------------------------------
   # Each YAML under crates/alint-dsl/rulesets/v1/ is the source of truth for
   # one bundled ruleset AND the source of truth for that ruleset's docs page
