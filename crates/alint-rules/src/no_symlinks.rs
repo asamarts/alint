@@ -26,7 +26,14 @@ impl Rule for NoSymlinksRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        for entry in ctx.index.files() {
+        // Iterate ALL indexed entries, not just `files()`: a symlink whose
+        // target is a *directory* is indexed as a dir entry (the walk follows
+        // it), so a `files()`-only scan silently missed dir symlinks (M4). The
+        // per-entry `symlink_metadata` re-stat below is what actually decides —
+        // a regular directory is never flagged. (Symlinks whose target escapes
+        // the repo root are pruned by the walker before indexing and so are
+        // still not seen here; recording those is a tracked follow-up.)
+        for entry in &ctx.index.entries {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
@@ -154,6 +161,43 @@ mod tests {
         });
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "symlink should fire: {v:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evaluate_fires_on_directory_symlink_via_real_walk() {
+        // M4: a symlink whose target is a *directory* is indexed as a dir
+        // entry by the real walk, so a `files()`-only scan missed it. Uses the
+        // real walker (not a hand-built index) to prove the dir symlink is both
+        // indexed and flagged.
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("realdir")).unwrap();
+        std::fs::write(root.join("realdir/f.txt"), b"hi").unwrap();
+        symlink(root.join("realdir"), root.join("linkdir")).unwrap();
+
+        let idx = alint_core::walk(root, &alint_core::WalkOptions::default()).unwrap();
+        assert!(
+            idx.entries
+                .iter()
+                .any(|e| &*e.path == std::path::Path::new("linkdir")),
+            "the dir symlink must be indexed as an entry"
+        );
+
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: no_symlinks\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let v = rule.evaluate(&ctx(root, &idx)).unwrap();
+        assert!(
+            v.iter()
+                .any(|viol| viol.path.as_deref() == Some(std::path::Path::new("linkdir"))),
+            "the directory symlink must be flagged: {v:?}"
+        );
     }
 
     #[cfg(unix)]

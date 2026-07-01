@@ -52,7 +52,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 deferred) |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 partial — dir symlinks done, escaping deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
@@ -334,16 +334,26 @@ uses the passed size, so no multi-GB fixture is needed) + missing-file.
 Consistent with the L7 resilient-skip contract (one bad file never aborts
 the run).
 
-### M4 — `no_symlinks` misses directory + escaping symlinks `[-]`
-**Where:** `no_symlinks.rs:29` (iterates `index.files()`, which excludes
-dir entries; the walker prunes escaping symlinks pre-index). **Fix:**
-detect symlinks via `symlink_metadata` during the walk and surface them
-to `no_symlinks` (a dedicated symlink list on the index, or have the rule
-re-stat candidate paths), so dir symlinks and root-escaping symlinks are
-flagged. **Deferred:** needs a walker/`FileIndex` change — a per-entry
-`is_symlink` flag plus recording dir-symlinks and the root-escaping
-symlinks the walker currently prunes. Core + determinism-sensitive;
-wants its own pass.
+### M4 — `no_symlinks` misses directory + escaping symlinks `[~]`
+**Where:** `no_symlinks.rs:29` (iterated `index.files()`, which excludes
+dir entries; the walker prunes escaping symlinks pre-index). **Done (dir
+symlinks):** the rule now iterates *all* index entries (`index.entries`,
+not just `files()`) and re-stats each with `symlink_metadata`. An in-tree
+symlink-to-directory is indexed as a dir entry (the walk follows it), so
+it was silently missed before; it is now flagged. A regular directory is
+never flagged (the re-stat decides). Verified with a **real-walk** test
+(`evaluate_fires_on_directory_symlink_via_real_walk`) — not a hand-built
+index — that both indexes and flags the dir symlink; the dogfood's
+`no-tracked-symlinks` stays green. **Deferred (escaping symlinks):** a
+symlink whose target escapes the repo root is *pruned by the walker
+before indexing* (`filter_entry`, the path-confinement guard), so it never
+reaches the rule. Recording it — without re-enabling the out-of-tree read
+that H1/ADR-0004 close — needs a "yielded but non-readable" entry concept
+(detect in the visitor, `WalkState::Skip` to prevent descent, an
+`is_symlink` flag the per-file read path honors). That's a
+security-sensitive walk/read-path change that genuinely wants its own
+reviewed pass; rushing it risks reintroducing the confinement threat.
+Tracked.
 
 ### M5 — `git_no_denied_paths` denylist is root-anchored `[x]`
 **Where:** `git_no_denied_paths.rs`. For a *secrets* control, `*.pem` /

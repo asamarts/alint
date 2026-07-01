@@ -67,6 +67,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it into a regular file). `final_newline`'s
   on-disk path is reconciled with its editor path (it no longer double-appends
   to an already-terminated or empty file). (H3)
+- **`no_symlinks` now flags directory symlinks.** It scanned only file
+  entries, so an in-tree symlink whose target is a *directory* (indexed as a
+  dir entry when the walk follows it) slipped through. It now scans all indexed
+  entries and re-stats each. (A symlink whose target escapes the repo root is
+  pruned by the walker before indexing and is still not flagged — recording
+  those safely is a tracked follow-up.) (M4)
 - **GitLab Code Quality no longer drops duplicate findings.** The
   `fingerprint` was `SHA256(rule_id|path|message)`, so two genuinely-distinct
   findings sharing all three (a generic-message per-line rule firing on
