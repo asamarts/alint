@@ -53,7 +53,7 @@ three classes at once.
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 partial — dir symlinks done, escaping deferred) |
-| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M11/M12/M14 done; M13 deferred) |
+| 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[x]` (M9–M14 all done) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
@@ -464,20 +464,27 @@ rather than documented-but-dead.
 except `check` (the `baseline` subcommand writes via its own `--output`,
 not this flag), mirroring the `--only` rejection; trycmd-tested.
 
-### M13 — global `--format` bypasses per-subcommand value gate by position `[-]`
-**Deferred (CLI-surface change; attempted + reverted):** the root cause is
-the *dual* `--format` — a global arg and a per-subcommand arg with the same
-long name. clap MERGES them, so `cli.format` already reflects the local value
-(`markdown` for export-agents-md, `yaml` for suggest); a naive "reject a
-non-default global format" gate fires on those subcommands' normal operation
-(it broke `export-agents-md-markdown` / `suggest-rust-yaml`, reverted). The
-real fix unifies the surface — drop the per-subcommand `--format`, validate
-the single global against each subcommand's allowed set, special-case
-export-agents-md's non-`human` default — a deliberate CLI change, own pass.
-**Where:** global `--format` is an unrestricted `String` (`main.rs:54`);
-`alint --format sarif validate-config` → exit 0, silently ignored.
-**Fix:** validate `--format` against the subcommand's allowed set in the
-handler (fail loudly on an unsupported value regardless of position).
+### M13 — global `--format` bypasses per-subcommand value gate by position `[x]`
+**Where:** `alint --format sarif validate-config` → exit 0, silently
+emitting *human* output. **Done:** the earlier attempt failed because it
+used a *blanket* "reject a non-default global format" gate that fired on
+subcommands with their own `--format` default (broke
+`export-agents-md-markdown` / `suggest-rust-yaml`). The correct fix — the
+one `list` / `facts` / `explain` already use — is per-handler: validate
+the *effective* format (clap merges the global into the subcommand's
+value, so it's caught regardless of position) against **that** handler's
+allowed set and bail on an unsupported value. Only `validate-config`
+lacked this gate; it now rejects any format other than `human` / `json`
+(exit 2). Audited the rest: `check` renders all formats;
+`export-agents-md` / `suggest` parse into their **own** `OutputFormat`
+enum (which already rejects `sarif`); `fix` has a *documented* human
+fallback (agent → human is intentional). So the surface *unification* the
+prior note proposed turned out unnecessary — per-handler validation is the
+right shape. trycmd `validate-config-format-rejected`; verified both the
+global-position and subcommand-position invocations exit 2. (The M11 + M13
+additions pushed `main.rs` over the 2000-line self-lint threshold, so its
+test module was moved to `src/tests.rs` — Dog2-style — keeping the dogfood
+green.)
 
 ### M14 — baseline first-offender masking under-disclosed `[x]`
 **Decision (user):** *Doc + path-key the two kinds.*

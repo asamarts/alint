@@ -67,6 +67,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it into a regular file). `final_newline`'s
   on-disk path is reconciled with its editor path (it no longer double-appends
   to an already-terminated or empty file). (H3)
+- **`validate-config` rejects an output format it can't render.** `alint
+  --format sarif validate-config` (or `validate-config --format sarif`) silently
+  fell through to human output; it now fails loudly (exit 2) for any format
+  other than `human` / `json`, regardless of flag position — matching how
+  `list` / `facts` / `explain` already gate their formats. (M13)
 - **Exit code `3` (internal error) is now actually produced.** The README
   documented `3` for an internal alint error vs `2` for a config/usage error,
   but every error funnelled to `2`, so a script could never tell "fix your

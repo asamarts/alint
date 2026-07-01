@@ -1,0 +1,10 @@
+bin.name = "alint"
+# M13: an unsupported `--format` for validate-config now fails loudly (exit 2)
+# instead of silently falling through to human output. The value is caught
+# regardless of position — a global `--format sarif` before the subcommand is
+# merged into the subcommand's format by clap. The format gate runs before any
+# config is loaded, so no fixtures are needed.
+args = ["--format", "sarif", "validate-config"]
+status.code = 2
+fs.sandbox = true
+stderr = "[..]validate-config[..]supports only[..]human[..]json[..]"
