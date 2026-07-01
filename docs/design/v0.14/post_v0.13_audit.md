@@ -54,7 +54,7 @@ three classes at once.
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
 | 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M5/M6/M7/M8 done; M3,M4 deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[~]` (M9/M10/M12/M14 done; M11,M13 deferred) |
-| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 done; L2 partial; D11 + Dog1/Dog2 deferred) |
+| 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog2 done; L2 partial; D11 + Dog1 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
 
 Phases land security-first. Each is one atomic commit (or a small group)
@@ -616,12 +616,16 @@ Dogfooding (Dog):
   (it doubles as living proof + regression coverage on real content).
   **Deferred:** a quality/credibility improvement, not a defect; wants a
   deliberate dogfood-config expansion.
-- `[-]` **Dog2** two files exceed `rust-file-max-lines` (downgraded to
-  `warning`, so the self-lint isn't green): `crates/alint-dsl/src/lib.rs`
-  (~2059) and `xtask/src/docs_export.rs` (~2131). Split them, or
-  re-baseline the threshold with a recorded justification (the config
-  comment already invited exactly this). **Deferred:** a file-split refactor
-  (or a recorded threshold bump) — a focused change, tracked.
+- `[x]` **Dog2** two files exceeded `rust-file-max-lines`. **Done (split, no
+  logic change):** `alint-dsl/src/lib.rs` (2335, mostly a ~1500-line test
+  module) → its test module moved to `alint-dsl/src/tests.rs`, leaving lib.rs
+  at 836. `xtask/src/docs_export.rs` (2131, mostly code) → the ~213-line test
+  module to `docs_export/tests.rs` **and** the self-contained ~180-line
+  drift-gate count parsers to `docs_export/counts.rs` (the 5 `count_canonical_*`
+  entry points `pub(super)`, `write_manifest` calls them qualified), leaving
+  docs_export.rs at 1738. Verified: all crate tests pass, fmt + clippy clean,
+  **the dogfood is now fully green** (`✓ All 41 rule(s) passed`, no warnings),
+  and `docs-export` still emits the correct manifest counts (89/22/11/8/12).
 
 ---
 

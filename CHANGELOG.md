@@ -326,6 +326,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Internal
 
+- Split the two source files over the self-lint's `rust-file-max-lines`
+  threshold so the dogfood is fully green (Dog2, no behavior change):
+  `alint-dsl/src/lib.rs`'s test module moved to `src/tests.rs`, and
+  `xtask/src/docs_export.rs` split its tests + the drift-gate count parsers into
+  `docs_export/{tests,counts}.rs`. Verified the `docs-export` manifest counts
+  are unchanged.
 - The post-v0.12 audit fixes each ship with a regression test (a registry-driven
   unknown-option probe over every kind, nested-`require:` and nested
   `allow_out_of_root` rejection, the `baseline --format` guard, and the
