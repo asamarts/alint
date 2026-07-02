@@ -546,9 +546,9 @@ pub struct FileNormalizeLineEndingsFixSpec {}
 pub struct FileStripBidiFixSpec {}
 
 /// Empty marker. Behavior: remove every zero-width character
-/// (U+200B / U+200C / U+200D / U+FEFF) from the file's content,
-/// *except* a leading BOM (U+FEFF at position 0) — that's the
-/// responsibility of the `no_bom` rule.
+/// (U+200B / U+200C / U+200D / U+2060 / U+180E / U+FEFF) from the
+/// file's content, *except* a leading BOM (U+FEFF at position 0) —
+/// that's the responsibility of the `no_bom` rule.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileStripZeroWidthFixSpec {}

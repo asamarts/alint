@@ -103,6 +103,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
   could use `base`. A second `--config` is now a hard error pointing at
   `extends:` for composition, and the help text is corrected. (H4)
+- **A long flat `when:` chain fails loudly instead of aborting the process.**
+  The expression parser capped `(`/`[`/call nesting at depth 64, but a *flat*
+  chain — `a and a and …` (or `or`) — is parsed iteratively and never re-enters
+  the guarded recursion, so it slipped past the cap. An adversarial ~100k-operator
+  `when:` from an untrusted `extends:` ruleset built a deeply left-nested AST that
+  overflowed the stack on its recursive `Drop`/eval — an uncatchable abort, the
+  strongest determinism violation. Both chain loops now bound length the same way
+  nesting is bounded, so the chain fails with a normal parse error. (H5)
+- **The zero-width fixer strips the full set the rule flags.**
+  `no_zero_width_chars` flags U+2060 (WORD JOINER) and U+180E (MONGOLIAN VOWEL
+  SEPARATOR) alongside U+200B/C/D and body-internal U+FEFF, but the
+  `file_strip_zero_width` fixer hard-coded only the latter four — so a file
+  containing U+2060/U+180E was reported on every run yet never repaired, and
+  `--fix` never converged. Both fix paths now defer to the rule's own
+  `is_flagged_zero_width`, so detector and fixer can't drift apart again. (L1)
 - **`file_header` / `file_footer` fixers no longer stack duplicates.** When a
   configured header/footer's content didn't satisfy the rule's own pattern,
   the violation never cleared, so each `--fix` re-prepended/appended it. The

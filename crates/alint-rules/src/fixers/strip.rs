@@ -35,15 +35,21 @@ impl Fixer for FileStripBidiFixer {
     }
 }
 
-/// Strips zero-width characters (U+200B / U+200C / U+200D, plus
-/// body-internal U+FEFF — a leading BOM is preserved so
+/// Strips zero-width characters (U+200B / U+200C / U+200D / U+2060 /
+/// U+180E, plus body-internal U+FEFF — a leading BOM is preserved so
 /// `no_bom` can own that concern).
+///
+/// The flagged set is not hard-coded here: both fix paths defer to the
+/// detector's [`crate::no_zero_width_chars::is_flagged_zero_width`], so the
+/// fixer can never strip a narrower set than the rule flags — that skew
+/// made `--fix` non-convergent (U+2060 / U+180E were reported every run but
+/// never removed) until the two were unified.
 #[derive(Debug)]
 pub struct FileStripZeroWidthFixer;
 
 impl Fixer for FileStripZeroWidthFixer {
     fn describe(&self) -> String {
-        "strip zero-width characters (U+200B/C/D, body-internal U+FEFF)".to_string()
+        "strip zero-width characters (U+200B/C/D, U+2060, U+180E, body-internal U+FEFF)".to_string()
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -52,7 +58,10 @@ impl Fixer for FileStripZeroWidthFixer {
             "stripped zero-width chars from",
             violation,
             ctx,
-            |c| matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'),
+            // `is_leading_feff = false`: a leading BOM is already exempted by
+            // `preserve_leading_feff` in `filter_chars`, so the predicate only
+            // needs to flag body-internal U+FEFF.
+            |c| crate::no_zero_width_chars::is_flagged_zero_width(c, false),
             /* preserve_leading_feff = */ true,
         )
     }
@@ -61,7 +70,7 @@ impl Fixer for FileStripZeroWidthFixer {
         char_filter_edit(
             violation,
             bytes,
-            |c| matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'),
+            |c| crate::no_zero_width_chars::is_flagged_zero_width(c, false),
             true,
         )
     }
@@ -259,6 +268,49 @@ mod tests {
             panic!("expected SetContent");
         };
         assert_eq!(content, "\u{FEFF}ab".as_bytes());
+    }
+
+    #[test]
+    fn zero_width_fix_edit_strips_word_joiner_and_mongolian_vowel_sep() {
+        // Regression (L1): the detector flags U+2060 (WORD JOINER) and U+180E
+        // (MONGOLIAN VOWEL SEPARATOR), but the fixer used to hard-code only
+        // U+200B/C/D/FEFF, so a file containing 2060/180E was reported every
+        // run yet never repaired — `--fix` never converged.
+        let edit = FileStripZeroWidthFixer
+            .fix_edit(
+                &v(),
+                "a\u{2060}b\u{180E}c".as_bytes(),
+                std::path::Path::new("/r"),
+            )
+            .unwrap();
+        let FixEdit::SetContent { content, .. } = edit else {
+            panic!("expected SetContent");
+        };
+        assert_eq!(content, b"abc");
+    }
+
+    #[test]
+    fn zero_width_fix_converges_leaving_nothing_the_detector_flags() {
+        // The fix output must be a fixed point of the detector: run the fixer,
+        // then assert no surviving char is still flagged (a leading BOM aside).
+        // This is the invariant that keeps the fixer and rule from drifting.
+        let input = "\u{FEFF}x\u{200B}y\u{200C}z\u{200D}w\u{2060}v\u{180E}u\u{FEFF}t";
+        let edit = FileStripZeroWidthFixer
+            .fix_edit(&v(), input.as_bytes(), std::path::Path::new("/r"))
+            .unwrap();
+        let FixEdit::SetContent { content, .. } = edit else {
+            panic!("expected SetContent");
+        };
+        let out = std::str::from_utf8(&content).unwrap();
+        assert_eq!(out, "\u{FEFF}xyzwvut");
+        for (i, c) in out.chars().enumerate() {
+            let is_leading_feff = i == 0 && c == '\u{FEFF}';
+            assert!(
+                !crate::no_zero_width_chars::is_flagged_zero_width(c, is_leading_feff),
+                "fixer left a flagged char U+{:04X} at {i}",
+                c as u32
+            );
+        }
     }
 
     #[test]
