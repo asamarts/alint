@@ -542,3 +542,44 @@ fn changed_scoped_run_does_not_false_fail_strict_baseline() {
         "no stale warning should fire under --changed: {stderr}",
     );
 }
+
+#[test]
+fn baseline_file_is_excluded_from_the_walk() {
+    // Regression (E2E-found): alint's own committed `.alint-baseline.json` is
+    // JSON-Lines, so a broad-glob rule (`**/*.json`, or any `**` content rule)
+    // would lint it as a NEW violation the baseline can't contain — the
+    // canonical adopt-flow (check -> baseline -> check --baseline) then never
+    // reaches exit 0. The baseline file must be excluded from the walk.
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(root.join("package.json"), "{\"license\":\"BAD\"}\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+         \x20 - id: lic\n\
+         \x20   kind: json_path_equals\n\
+         \x20   paths: [\"**/*.json\"]\n\
+         \x20   path: \"$.license\"\n\
+         \x20   equals: \"MIT\"\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    assert_eq!(code(&run(root, &["check"])), 1, "dirty before baseline");
+    assert_eq!(code(&run(root, &["baseline"])), 0, "snapshot it");
+    let out = run(root, &["check", "--baseline", ".alint-baseline.json"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "adopt-flow must reach exit 0; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let compact = run(
+        root,
+        &["check", "--baseline", ".alint-baseline.json", "--compact"],
+    );
+    assert!(
+        !String::from_utf8_lossy(&compact.stdout).contains(".alint-baseline.json"),
+        "the baseline file must not be flagged"
+    );
+}

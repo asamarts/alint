@@ -40,6 +40,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file suppresses the total, not the last writer's count); regeneration is
   byte-identical across runs and its guard counts new *occurrences* (a higher
   count on an existing finding is fresh debt too, not just new fingerprints).
+  The baseline file is excluded from the walk, so a broad-glob content rule
+  (`**/*.json`, `line_max_width`, …) can't lint alint's own JSON-Lines artifact
+  as a new violation — the adopt-flow stays clean.
   See `docs/design/baseline.md` / ADR-0006.
 - `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
   named rule id(s) from the effective config. An id that matches no loaded rule
