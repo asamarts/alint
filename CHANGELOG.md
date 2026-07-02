@@ -112,6 +112,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
   could use `base`. A second `--config` is now a hard error pointing at
   `extends:` for composition, and the help text is corrected. (H4)
+- **The GitHub Action's `config:` input matches the single-valued `--config`.**
+  The action advertised "config file path(s), one per line" and emitted one
+  `--config` per line — but the H4 fix above made a second `--config` a hard
+  error, so any workflow passing two config paths broke (exit 2 from the
+  binary). The input is now documented as a single path pointing at `extends:`
+  for composition, and the action rejects more than one path itself with a clear
+  GitHub-annotated `::error::` rather than surfacing a raw CLI stderr. New
+  `action-selftest` jobs cover both the single-path happy path and the
+  multi-path rejection. (E2E sweep)
 - **A long flat `when:` chain fails loudly instead of aborting the process.**
   The expression parser capped `(`/`[`/call nesting at depth 64, but a *flat*
   chain — `a and a and …` (or `or`) — is parsed iteratively and never re-enters

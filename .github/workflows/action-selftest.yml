@@ -92,3 +92,41 @@ jobs:
           # (i.e. when HEAD is 0.X+1, this sits at v0.X) so
           # the test catches CLI/.alint.yml drift one release out.
           version: v0.12.0
+
+  action-config-single:
+    name: config input (single path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: alint check with an explicit config path
+        uses: ./
+        with:
+          # The repo lints clean against its own `.alint.yml` (the
+          # action-default job proves that via auto-discovery); passing it
+          # explicitly through the `config:` input exercises the
+          # single-`--config` path end to end.
+          config: .alint.yml
+
+  action-config-multi-rejected:
+    name: config input (multiple paths rejected)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: alint rejects two config paths
+        id: multi
+        continue-on-error: true
+        uses: ./
+        with:
+          # `--config` is single-valued; two paths must fail, not silently use
+          # the first. Regression guard that the action honors the CLI's H4
+          # contract (compose via `extends:`, not repeated `--config`).
+          config: |
+            .alint.yml
+            .alint.yml
+      - name: assert the action failed loudly
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.multi.outcome }}" != "failure" ]; then
+            echo "::error::action accepted two config paths; expected a hard failure (exit 2)" >&2
+            exit 1
+          fi

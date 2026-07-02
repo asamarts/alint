@@ -21,8 +21,11 @@ inputs:
     default: "."
   config:
     description: |
-      Extra config file path(s), one per line. Leave empty to let alint
-      auto-discover `.alint.yml` at the lint root.
+      A single extra config file path. Leave empty to let alint
+      auto-discover `.alint.yml` at the lint root. `--config` is
+      single-valued — to compose several configs, use `extends:` inside
+      your config rather than listing multiple paths here (passing more
+      than one is a hard error, matching the CLI).
     required: false
     default: ""
   format:
@@ -143,10 +146,21 @@ runs:
         cli_args=(--format "$ALINT_FORMAT")
 
         if [ -n "$ALINT_CONFIG" ]; then
+          # `--config` is single-valued (compose via `extends:` in the config,
+          # not repeated flags). The input can arrive multi-line from a YAML
+          # block scalar; accept a lone non-empty line and reject two — matching
+          # the CLI's hard error, but with a clearer GitHub-annotated message
+          # instead of a raw "second --config" stderr from the binary.
+          config_path=""
           while IFS= read -r cfg; do
             [ -z "$cfg" ] && continue
-            cli_args+=(--config "$cfg")
+            if [ -n "$config_path" ]; then
+              echo "::error::the alint action's \`config:\` input takes a single path; use \`extends:\` inside your config to compose several (alint's --config is single-valued)." >&2
+              exit 2
+            fi
+            config_path="$cfg"
           done <<< "$ALINT_CONFIG"
+          [ -n "$config_path" ] && cli_args+=(--config "$config_path")
         fi
 
         if [ "$ALINT_FAIL_ON_WARNING" = "true" ]; then
