@@ -193,10 +193,14 @@ mod tests {
         );
         let rule = build(&spec).unwrap();
         let v = rule.evaluate(&ctx(root, &idx)).unwrap();
-        assert!(
-            v.iter()
-                .any(|viol| viol.path.as_deref() == Some(std::path::Path::new("linkdir"))),
-            "the directory symlink must be flagged: {v:?}"
+        // Exactly one violation, on the symlink itself — proving BOTH that the
+        // dir symlink fires AND that the regular `realdir` and the descended
+        // `linkdir/f.txt` (also in the index) are NOT flagged.
+        assert_eq!(v.len(), 1, "only the dir symlink should fire: {v:?}");
+        assert_eq!(
+            v[0].path.as_deref(),
+            Some(std::path::Path::new("linkdir")),
+            "the flagged path must be the symlink"
         );
     }
 

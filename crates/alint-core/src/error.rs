@@ -42,12 +42,13 @@ pub enum Error {
     Other(String),
 
     /// An error that is *not* the user's fault — an alint bug or an
-    /// unexpected internal invariant violation (a shipped bundled ruleset
-    /// that fails to parse, a serialization failure, …), as opposed to a
-    /// bad config / CLI usage (which is [`Error::Other`] and friends). The
+    /// unexpected internal invariant violation, as opposed to a bad config /
+    /// CLI usage (which is [`Error::Other`] and friends). Currently produced
+    /// only when a bundled ruleset shipped *inside* the binary fails to parse
+    /// or declares its own `extends:` (see `alint-dsl`'s `load_bundled`). The
     /// CLI maps this to a distinct exit code (`3`) so a script can tell
     /// "fix your config" (exit `2`) from "file an alint bug" (exit `3`).
-    #[error("internal error (this is a bug in alint): {0}")]
+    #[error("internal error (this is a bug in alint, please file an issue): {0}")]
     Internal(String),
 }
 

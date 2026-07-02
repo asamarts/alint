@@ -1,6 +1,8 @@
-//! Unit tests for the `facts` subcommand's renderers. The full
-//! evaluation pipeline is exercised in the `trycmd` CLI
-//! snapshot tests under `tests/cli/facts-*`.
+//! Unit tests for `main` (the CLI binary) — the `facts` subcommand's
+//! renderers, the exit-code classifier, and friends. Extracted from
+//! `main.rs` to keep it under the self-lint's file-length threshold. The
+//! full evaluation pipelines are exercised in the `trycmd` CLI snapshot
+//! tests under `tests/cli/`.
 
 use super::*;
 use alint_core::{FactKind, FactSpec, FactValue, FactValues, facts::OneOrMany};

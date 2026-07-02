@@ -36,8 +36,8 @@ pub(crate) fn read_or_skip(path: &Path) -> Option<Vec<u8>> {
 /// family re-exports this constant (M3).
 pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// [`read_or_skip`], but first skip (loudly) any file whose size — taken from
-/// the walk-time [`FileEntry::size`], so no extra `stat` — exceeds
+/// Like `read_or_skip`, but first skip (loudly) any file whose size — taken
+/// from the walk-time [`FileEntry::size`], so no extra `stat` — exceeds
 /// [`MAX_ANALYZE_BYTES`]. The per-file loops read the whole file into memory,
 /// so an uncapped read of a committed multi-GB blob would OOM the process; a
 /// bounded skip keeps the run alive and observable (M3).

@@ -116,16 +116,18 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Hard cap on a single whole-file read by the cross-file /
-/// structured rule kinds (`registry_paths_resolve`,
-/// `cross_file_value_equals`, `pair_hash`, `generated_file_fresh`).
-/// Generous — every realistic manifest / generated file is orders
-/// of magnitude smaller — yet bounded so a hostile or accidental
-/// multi-GB file in a linted repo yields a clear violation
-/// instead of OOM-ing the run.
+/// Hard cap on a single whole-file read across the rule/engine read paths.
+/// Generous — every realistic manifest / source / generated file is orders of
+/// magnitude smaller — yet bounded so a hostile or accidental multi-GB file in
+/// a linted repo can't OOM the run. The over-cap *outcome* varies by read
+/// site: the cross-file kinds (`registry_paths_resolve`, `pair_hash`, …) and
+/// the `for_each` single-literal path yield a clear over-cap violation
+/// (fail-closed); the per-file engine/rule loops and the per-file content
+/// rules skip the file (fail-open, resilient — a file too big to analyze is
+/// left un-analyzed rather than failing the build), logging at `warn` where a
+/// `tracing` sink is available (the `alint-core` loops).
 ///
-/// Re-exported from `alint-core` so the per-file engine/rule loops and these
-/// rule-level reads share one cap (M3).
+/// Re-exported from `alint-core` so every read path shares one cap (M3).
 pub use alint_core::MAX_ANALYZE_BYTES;
 
 /// Failure of [`read_capped`]: the file exceeds

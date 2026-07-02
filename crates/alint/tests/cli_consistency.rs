@@ -83,7 +83,15 @@ fn only_is_rejected_on_subcommands_that_do_not_honor_it() {
 fn format_limited_subcommands_reject_unsupported_formats() {
     let d = fixture();
     let unsupported = ["sarif", "github", "junit", "gitlab", "markdown", "agent"];
-    let cases: &[&[&str]] = &[&["list"], &["facts"], &["explain", "r"]];
+    // `validate-config` is format-limited too (M13): the subcommand-position
+    // flag is rejected by clap's value parser; the global-position flag by the
+    // handler gate (covered by the `validate-config-format-rejected` trycmd).
+    let cases: &[&[&str]] = &[
+        &["list"],
+        &["facts"],
+        &["explain", "r"],
+        &["validate-config"],
+    ];
     for base in cases {
         for fmt in unsupported {
             let mut args: Vec<&str> = base.to_vec();

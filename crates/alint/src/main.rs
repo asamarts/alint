@@ -1719,7 +1719,16 @@ fn emit_validate_failure(
         eprintln!("alint: {err:#}");
         println!("✗ Config invalid");
     }
-    Ok(ExitCode::from(1))
+    // An internal error (an alint bug — e.g. a shipped bundled ruleset that
+    // fails to parse) is not the user's config being "invalid"; surface it as
+    // exit 3 to match main()'s classification, not the exit 1 used for a
+    // genuinely-invalid config (M11-F1). The error text (above) already names
+    // it as internal.
+    if error_is_internal(err) {
+        Ok(ExitCode::from(3))
+    } else {
+        Ok(ExitCode::from(1))
+    }
 }
 
 fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {

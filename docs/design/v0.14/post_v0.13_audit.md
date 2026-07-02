@@ -762,3 +762,72 @@ lexical policy). The roxmltree 0.20 pin is load-bearing — do not bump.
 3. **M14 baseline keying:** doc-only disclosure vs also switch
    `line_max_width`/`file_content_forbidden` to a path key. Leaning
    doc + keep keys (the churn is fail-closed). Confirm.
+
+---
+
+## Post-audit review (#110, M-cluster)
+
+Four independent adversarial reviewers + a first-principles pass audited the
+M-cluster PR (M3/M4/M11/M13). Real findings were fixed in the same PR; the
+rest are recorded here.
+
+**Fixed in review:**
+- **rustdoc private-intra-doc-link** — `read_capped_or_skip`'s doc linked the
+  `pub(crate)` `read_or_skip`; failed the `-D warnings` `Docs` job (which
+  bypasses check/clippy). Delinked. (The `cargo doc` preflight gap again.)
+- **M3-F1 (HIGH) — the "all read sites bounded" claim was incomplete.** The
+  four content rules (`file_content_forbidden`, `file_content_matches`,
+  `file_header`, `file_footer`) each have a *standalone* `evaluate()` with a
+  raw `std::fs::read`, reachable via `for_each_*` nesting when the nested rule
+  isn't a single literal (`for_each_dir.rs:375` → `nested_rule.evaluate(ctx)`)
+  — the exact OOM M3 set out to close. All four now read via `io::read_capped`,
+  skipping an over-cap file to match the engine batch (same rule, same outcome
+  nested or top-level).
+- **M4 test under-verified** — the dir-symlink test used `.any()`; tightened to
+  `assert_eq!(v.len(), 1)` + the path, proving the regular dir and the
+  descended child are *not* flagged.
+- **M11-F1 — `validate-config` violated the 2/3 contract.** It routed all load
+  errors to exit `1` ("Config invalid"), so an internal error there exited 1,
+  not 3. `emit_validate_failure` now returns 3 for an internal error.
+- **M11-F3/F4 docs** — `Error::Internal`'s doc no longer claims untagged
+  "serialization" sites; its Display restores "please file an issue" (exit 3 is
+  a returned error, so the panic hook's issue URL doesn't fire).
+- **M13 test coverage** — added `validate-config` to the systematic
+  `cli_consistency` format matrix (was only a single-format trycmd).
+- **Doc accuracy** — `io.rs` cap doc now states the over-cap outcome varies by
+  site (violation vs skip); M13 wording corrected (the *subcommand*-position
+  flag is rejected by clap's `PossibleValuesParser`, only the *global* position
+  needs the handler gate; `fix` still silently falls back sarif→human — a
+  pre-existing, separately-decidable behavior, now disclosed not hand-waved;
+  `main.rs` was already >2000 lines at M11, so the split isn't solely M13's).
+
+**Design decisions recorded (not bugs):**
+- **M3-F3 fail-open skip.** Over-cap files are *skipped* (fail-open) on the
+  engine/rule/content-rule paths — a linter leaves an un-analyzable file
+  un-analyzed rather than failing the build — vs the *violation* (fail-closed)
+  the cross-file/`for_each`-literal paths emit. The `alint-core` loops `warn`;
+  the `alint-rules` paths skip silently (no `tracing` dep). A security-relevant
+  residual (a secret inside a >256 MiB file evades a content scan) — accepted,
+  observable via `-v` on the core paths.
+
+**Deferred with corrected framing:**
+- **M4 escaping symlinks** — the review showed a *simpler* safe path than the
+  "read-path redesign" I first described: record escaping symlinks in a
+  **side-list** on `FileIndex` (kept out of `entries`, so no content rule can
+  `root.join()` through them), populated by the `filter_entry` prune;
+  `no_symlinks` consults it. No read-path change. Still deferred (a walker +
+  `FileIndex` + determinism-sort change), but tractable — a good next item.
+- **M3-F2 (TOCTOU)** — the size gate uses the walk-time index size, then does an
+  unbounded read; a file that grows past the cap between walk and read defeats
+  it. Narrow (needs concurrent growth mid-run); a static checkout is safe.
+- **M3-F7** — `generated_file_fresh.rs:300,436` have two uncapped whole-file
+  reads (its other reads use `read_capped`); a spawning kind, gated, out of
+  M3's stated scope but worth capping for consistency.
+
+**Adversarially verified NOT bugs:** symlink cap-bypass (index records the
+*target* size — probed), `--fix` on a dir symlink (`remove_file` unlinks the
+link node, no data loss), M4 determinism (entries are path-sorted), M11
+misclassification (only alint-controlled bundled bytes reach the `Internal`
+sites; a user's bad `extends:` URL stays `Other`/exit 2), the chain-search
+classifier, the exhaustive-match fallout of the new variant, the byte-identical
+`main.rs`→`tests.rs` move, and that no `status.code = 2` snapshot flips to 3.
