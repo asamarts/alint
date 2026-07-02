@@ -68,17 +68,27 @@ impl Parser {
         }
     }
 
+    /// Deepen the tracked expression depth by one and fail loudly past
+    /// `MAX_DEPTH`. The chain loops (`parse_or`/`parse_and`) call this per
+    /// operator so a long *flat* chain is bounded too — they're iterative and
+    /// never re-enter `parse_expr`, where the paren/bracket re-entry guard
+    /// lives (H5 flat-chain gap).
+    fn bump_depth(&mut self) -> Result<(), WhenError> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(self.err("expression nests too deeply (max depth 64)"));
+        }
+        Ok(())
+    }
+
     pub(super) fn parse_expr(&mut self) -> Result<WhenExpr, WhenError> {
         // Bound recursion before descending: `parse_primary` re-enters
         // `parse_expr` for every `(`, `[` and call-arg list, so this is the
         // single re-entry point. Deep input fails loudly here instead of
         // overflowing the stack. Decrement on the way out so sibling
         // sub-expressions (list items, call args) don't accumulate depth.
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            self.depth -= 1;
-            return Err(self.err("expression nests too deeply (max depth 64)"));
-        }
+        self.bump_depth()?;
         let result = self.parse_or();
         self.depth -= 1;
         result
@@ -88,6 +98,12 @@ impl Parser {
         let mut left = self.parse_and()?;
         while matches!(self.peek(), Some(Tok::KwOr)) {
             self.advance();
+            // Each `or` deepens the left-nested AST by one. Bound the chain
+            // here (this loop is iterative, so it doesn't re-enter `parse_expr`
+            // where the depth guard lives): a long flat `a or a or …` chain
+            // would otherwise build a tree that abandons the stack on its
+            // recursive Drop / eval later (H5 flat-chain gap).
+            self.bump_depth()?;
             let right = self.parse_and()?;
             left = WhenExpr::Or(Box::new(left), Box::new(right));
         }
@@ -98,6 +114,8 @@ impl Parser {
         let mut left = self.parse_not()?;
         while matches!(self.peek(), Some(Tok::KwAnd)) {
             self.advance();
+            // See `parse_or`: bound the flat `a and a and …` chain (H5).
+            self.bump_depth()?;
             let right = self.parse_not()?;
             left = WhenExpr::And(Box::new(left), Box::new(right));
         }

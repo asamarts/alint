@@ -548,22 +548,22 @@ mod tests {
     }
 
     #[test]
-    fn long_and_chain_is_an_eval_error_not_a_stack_overflow() {
+    fn long_flat_chain_is_a_parse_error_not_a_stack_overflow() {
         // A flat `a and a and …` chain parses iteratively but builds a tall
-        // left-nested tree; `eval` recurses on tree height, so a crafted
-        // chain must bail with an error rather than abort the process.
-        let chain = vec!["facts.x"; 10_000].join(" and ");
-        let expr = parse(&chain).expect("a flat and-chain parses");
-        let (facts, vars) = env();
-        let err = expr
-            .evaluate(&WhenEnv {
-                facts: &facts,
-                vars: &vars,
-                iter: None,
-                env: None,
-            })
-            .unwrap_err();
-        assert!(matches!(err, WhenError::Eval(_)), "{err:?}");
+        // left-nested tree that a later recursive Drop / eval would overflow
+        // the stack on (H5 flat-chain gap — `parse_or`/`parse_and` are `while`
+        // loops that never re-enter the `parse_expr` depth guard). The parser
+        // now bounds the chain length, so it fails loudly at PARSE — before the
+        // overflowing tree is ever built (only a ≤64-deep partial AST is dropped).
+        let chain = vec!["facts.x == 1"; 10_000].join(" and ");
+        let err = parse(&chain).unwrap_err();
+        assert!(matches!(err, WhenError::Parse { .. }), "{err:?}");
+        // And an `or`-chain is bounded the same way.
+        let or_chain = vec!["facts.x == 1"; 10_000].join(" or ");
+        assert!(matches!(
+            parse(&or_chain).unwrap_err(),
+            WhenError::Parse { .. }
+        ));
     }
 
     // ─── env namespace ───────────────────────────────────────────
