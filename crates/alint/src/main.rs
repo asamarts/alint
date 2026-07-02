@@ -1192,6 +1192,26 @@ fn cmd_fix(
     cli: &Cli,
 ) -> Result<ExitCode> {
     require_directory(path)?;
+    // Gate the output format *before* touching the tree: `fix` mutates files,
+    // so a format we can't render must fail here, not after the write. Only
+    // `human`, `json`, and `markdown` have dedicated fix-report renderers. The
+    // finding-oriented formats (SARIF / GitHub / JUnit / GitLab) and the
+    // check-side `agent` format would otherwise degrade *silently* to human
+    // output with exit 0 — a machine consumer asking for `sarif` and getting
+    // human text is the same trap M13 closed for `validate-config`. Fail loudly
+    // instead, and point `agent` at its real home: `check --format agent`
+    // (whose per-violation `fix_command` drives the agentic fix loop; `fix`
+    // itself has no agent report).
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    if !matches!(format, Format::Human | Format::Json | Format::Markdown) {
+        bail!(
+            "`alint fix` supports only `--format human`, `--format json`, or \
+             `--format markdown` (got {fmt:?}); the SARIF/GitHub/JUnit/GitLab/agent \
+             formats describe findings, not fixes — run `alint check --format {fmt}` \
+             for those",
+            fmt = cli.format,
+        );
+    }
     let loaded = load_rules(path, cli)?;
     let entries = apply_only_filter(loaded.entries, only)?;
     let mut engine = Engine::from_entries(entries, loaded.registry)
@@ -1217,7 +1237,6 @@ fn cmd_fix(
         .fix(path, &index, dry_run)
         .context("applying fixes")?;
 
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let (mut out, opts) = render_env(cli)?;
     format
         .write_fix_with_options(&report, &mut out, opts)

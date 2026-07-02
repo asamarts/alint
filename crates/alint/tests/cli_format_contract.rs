@@ -16,7 +16,15 @@
 //!   structured `fix_command` argv *and* any `` `alint …` `` command
 //!   inside an `agent_instruction` — must parse against the real CLI.
 //!
-//! Both gates drive the actual binary (`CARGO_BIN_EXE_alint`) so they
+//! * **G1c — `fix` never silently degrades an output format.** `fix`
+//!   only renders `human` / `json` / `markdown`; the finding-oriented
+//!   formats (SARIF / GitHub / `JUnit` / GitLab) and the check-side
+//!   `agent` format used to fall through to human text with a *success*
+//!   exit code. Because `fix` mutates the tree, the invariant is
+//!   stricter than for read-only subcommands: an unrenderable format
+//!   must fail (exit 2) *before* any file is touched.
+//!
+//! All gates drive the actual binary (`CARGO_BIN_EXE_alint`) so they
 //! exercise the same clap surface and renderers users hit.
 
 use std::path::{Path, PathBuf};
@@ -208,4 +216,59 @@ fn agent_format_only_emits_runnable_commands() {
         checked_prose,
         "fixture produced no agent_instruction with an `alint …` command"
     );
+}
+
+// ─── G1c — `fix` rejects formats it can't render, before mutating ───
+
+/// The finding-oriented formats (SARIF / GitHub / `JUnit` / GitLab) and the
+/// check-side `agent` format have no fix-report renderer. `fix` used to
+/// degrade them *silently* to human output with a success exit code; it must
+/// now fail loudly (exit 2). And because `fix` mutates the tree, the reject
+/// must land *before* any fix is applied — hence a non-dry-run invocation
+/// here, asserting the fixable file is left byte-for-byte untouched.
+#[test]
+fn fix_rejects_unrenderable_formats_without_mutating() {
+    let dir = fixture();
+    let bad = dir.path().join("bad.md");
+    let original = std::fs::read(&bad).unwrap();
+
+    for fmt in ["sarif", "github", "junit", "gitlab", "agent"] {
+        let out = run(dir.path(), &["fix", "--format", fmt]);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "`alint fix --format {fmt}` must exit 2, not silently degrade to human"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("supports only"),
+            "`alint fix --format {fmt}` should name the supported set; stderr: {stderr}"
+        );
+        assert_eq!(
+            std::fs::read(&bad).unwrap(),
+            original,
+            "`alint fix --format {fmt}` mutated the tree before rejecting the format"
+        );
+    }
+}
+
+/// Guard against over-rejection: the three formats `fix` *can* render must
+/// still pass the gate. `json` must additionally be real JSON on stdout.
+#[test]
+fn fix_accepts_its_renderable_formats() {
+    let dir = fixture();
+    for fmt in ["human", "json", "markdown"] {
+        let out = run(dir.path(), &["fix", "--dry-run", "--format", fmt]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("supports only"),
+            "`alint fix --format {fmt}` was wrongly rejected; stderr: {stderr}"
+        );
+        if fmt == "json" {
+            assert!(
+                serde_json::from_slice::<serde_json::Value>(&out.stdout).is_ok(),
+                "`alint fix --dry-run --format json` stdout was not JSON"
+            );
+        }
+    }
 }

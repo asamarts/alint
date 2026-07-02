@@ -75,6 +75,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fell through to human output; it now fails loudly (exit 2) for any format
   other than `human` / `json`, regardless of flag position — matching how
   `list` / `facts` / `explain` already gate their formats. (M13)
+- **`fix` rejects an output format it can't render, before touching files.**
+  `alint fix --format sarif` (or `github` / `junit` / `gitlab` / `agent`)
+  silently degraded to human output with a *success* exit code — those formats
+  describe findings, not fixes, and have no fix-report renderer. It now fails
+  loudly (exit 2), and because `fix` mutates the tree the gate runs *before* any
+  fix is applied, so a rejected format never leaves a half-fixed repo. `fix`
+  still renders `human` / `json` / `markdown`; the error points `agent` users at
+  `check --format agent`, whose per-violation `fix_command` drives the agentic
+  fix loop. (E2E sweep)
 - **Exit code `3` (internal error) is now actually produced.** The README
   documented `3` for an internal alint error vs `2` for a config/usage error,
   but every error funnelled to `2`, so a script could never tell "fix your
