@@ -125,11 +125,13 @@ version = "0.13.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
+ "alint-output",
  "alint-rules",
  "alint-testkit",
  "dir-test",
  "jsonschema",
  "proptest",
+ "roxmltree",
  "serde",
  "serde_json",
  "serde_yaml_ng",

@@ -84,6 +84,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still renders `human` / `json` / `markdown`; the error points `agent` users at
   `check --format agent`, whose per-violation `fix_command` drives the agentic
   fix loop. (E2E sweep)
+- **`json` / `agent` output survives a non-UTF-8 filename.** Both serialized the
+  violation path through serde's strict `&Path` impl, which *errors* on a
+  non-UTF-8 path (legal on Unix) — so a single oddly-named file made `alint
+  check --format json` (or `--format agent`) abort with `exit 2: "path contains
+  invalid UTF-8 characters"` while every other format rendered it fine. Both now
+  render the path lossily (invalid bytes → U+FFFD), consistent with SARIF /
+  GitLab / JUnit / GitHub / Markdown / human. Surfaced by a new weird-path ×
+  output-format matrix that renders a violation path carrying each format's
+  metacharacters, a control byte, and a non-UTF-8 byte through all eight
+  formats. (E2E sweep)
 - **Exit code `3` (internal error) is now actually produced.** The README
   documented `3` for an internal alint error vs `2` for a config/usage error,
   but every error funnelled to `2`, so a script could never tell "fix your

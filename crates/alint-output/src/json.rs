@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
@@ -5,6 +6,15 @@ use alint_core::{FixReport, FixStatus, Level, Report};
 use serde::Serialize;
 
 use crate::BaselineMarks;
+
+/// Render a violation path as a (possibly lossy) UTF-8 string. A repo file
+/// whose name isn't valid UTF-8 — legal on Unix — must not fail the whole
+/// document: serde's `&Path` serializer *errors* on non-UTF-8, so route
+/// through `to_string_lossy` (invalid bytes → U+FFFD) instead, matching
+/// every other renderer (SARIF, GitLab, `JUnit`, GitHub, human).
+fn lossy_path(path: Option<&Path>) -> Option<Cow<'_, str>> {
+    path.map(Path::to_string_lossy)
+}
 
 #[derive(Serialize)]
 struct JsonReport<'a> {
@@ -36,7 +46,7 @@ struct Summary {
 struct JsonBaselined<'a> {
     id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<&'a Path>,
+    path: Option<Cow<'a, str>>,
     message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
@@ -67,7 +77,7 @@ struct JsonResult<'a> {
 #[derive(Serialize)]
 struct JsonViolation<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<&'a Path>,
+    path: Option<Cow<'a, str>>,
     message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
@@ -109,7 +119,7 @@ pub fn write_json_with_baseline(
                 .violations
                 .iter()
                 .map(|v| JsonViolation {
-                    path: v.path.as_deref(),
+                    path: lossy_path(v.path.as_deref()),
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
@@ -119,7 +129,7 @@ pub fn write_json_with_baseline(
                 .notes
                 .iter()
                 .map(|v| JsonViolation {
-                    path: v.path.as_deref(),
+                    path: lossy_path(v.path.as_deref()),
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
@@ -136,7 +146,7 @@ pub fn write_json_with_baseline(
                 .flat_map(|(rr, m)| {
                     m.suppressed.iter().map(move |sf| JsonBaselined {
                         id: rr.rule_id.as_ref(),
-                        path: sf.violation.path.as_deref(),
+                        path: lossy_path(sf.violation.path.as_deref()),
                         message: sf.violation.message.as_ref(),
                         line: sf.violation.line,
                         column: sf.violation.column,
@@ -183,7 +193,7 @@ struct JsonFixRuleResult<'a> {
 #[derive(Serialize)]
 struct JsonFixItem<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<&'a Path>,
+    path: Option<Cow<'a, str>>,
     message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
@@ -211,7 +221,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
                         FixStatus::Unfixable => ("unfixable", None),
                     };
                     JsonFixItem {
-                        path: it.violation.path.as_deref(),
+                        path: lossy_path(it.violation.path.as_deref()),
                         message: it.violation.message.as_ref(),
                         line: it.violation.line,
                         column: it.violation.column,

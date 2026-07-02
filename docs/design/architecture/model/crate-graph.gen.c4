@@ -29,6 +29,7 @@ model {
   alint.cli.dsl -[dev]-> alint.cli.rules
   alint.tooling.e2e -[dev]-> alint.cli.core
   alint.tooling.e2e -[dev]-> alint.cli.dsl
+  alint.tooling.e2e -[dev]-> alint.cli.output
   alint.tooling.e2e -[dev]-> alint.cli.rules
   alint.tooling.e2e -[dev]-> alint.tooling.testkit
   alint.tooling.xtask -[dev]-> alint.cli.dsl

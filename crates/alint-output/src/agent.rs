@@ -23,6 +23,7 @@
 //! are non-breaking; field removals or semantic changes bump the
 //! version.
 
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
@@ -57,8 +58,12 @@ struct BySeverity {
 struct AgentViolation<'a> {
     rule_id: &'a str,
     severity: &'static str,
+    // Lossy UTF-8: a non-UTF-8 repo path (legal on Unix) must not error the
+    // whole document the way serde's `&Path` serializer does. Matches the
+    // human `agent_instruction` (built from `path.display()`) and every other
+    // renderer. Invalid bytes → U+FFFD.
     #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<&'a Path>,
+    file: Option<Cow<'a, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,7 +116,7 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
             violations.push(AgentViolation {
                 rule_id: r.rule_id.as_ref(),
                 severity: severity_str(r.level),
-                file: v.path.as_deref(),
+                file: v.path.as_deref().map(Path::to_string_lossy),
                 line: v.line,
                 column: v.column,
                 human_message: v.message.as_ref(),

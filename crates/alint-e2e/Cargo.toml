@@ -14,11 +14,13 @@ publish = false
 [dev-dependencies]
 alint-core.workspace = true
 alint-dsl.workspace = true
+alint-output.workspace = true
 alint-rules.workspace = true
 alint-testkit.workspace = true
 dir-test.workspace = true
 jsonschema.workspace = true
 proptest.workspace = true
+roxmltree.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
