@@ -356,11 +356,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `+`) aborted the run; the addition is now checked and a malformed timestamp
   is dropped. (M7)
 - **`git_no_denied_paths` denylist patterns are anchored to any depth.** A
-  bare denied pattern (no `/`) like `*.pem` or `id_rsa` was root-anchored by
-  globset, so `secrets/server.pem` evaded the denylist — a dangerous default
-  for a secrets control. Bare patterns are now auto-anchored to `**/<pattern>`
-  (matching any depth, root included); explicit-path patterns
-  (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
+  bare denied *literal* (no `/`, no wildcard) like `id_rsa` was root-anchored by
+  globset, so a tracked `secrets/id_rsa` evaded the denylist — a dangerous
+  default for a secrets control. (A bare *wildcard* like `*.pem` already crosses
+  `/` in globset, so it was never the gap — an earlier note over-generalised.)
+  Bare patterns are now auto-anchored to `**/<pattern>` (matching any depth,
+  root included — a no-op for wildcards, the real fix for literals); explicit-path
+  patterns (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
 - **Completed the Unicode control-character sets for the obfuscation rules.**
   `no_bidi_controls` now also flags the implicit directional marks U+061C
   (ALM), U+200E (LRM), and U+200F (RLM) — completing the Trojan-Source

@@ -125,7 +125,9 @@ impl Rule for GitNoDeniedPathsRule {
 /// already names a path (`secrets/*.key`, `**/*.pem`) is taken as written.
 /// `**/` matches zero or more segments, so the anchored form still catches
 /// the root-level file. This is the secure default for a denylist: a bare
-/// `*.pem` should ban a `.pem` anywhere in the tree, not only at the root.
+/// *literal* like `id_rsa` should ban that file anywhere in the tree, not only
+/// at the root — globset root-anchors a bare literal. (A bare *wildcard* like
+/// `*.pem` already spans depths in globset, so anchoring it is a no-op.)
 fn anchor_denied_pattern(pattern: &str) -> std::borrow::Cow<'_, str> {
     if pattern.contains('/') {
         std::borrow::Cow::Borrowed(pattern)
@@ -154,11 +156,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
     let mut builder = GlobSetBuilder::new();
     for pattern in &opts.denied {
-        // Auto-anchor a *bare* pattern (no `/`) so it matches at ANY depth.
-        // globset otherwise root-anchors it, so `*.pem` would miss
-        // `secrets/server.pem` — a dangerous default for a *security*
-        // denylist (M5). `denied_src` keeps the original spelling for the
-        // violation message.
+        // Auto-anchor a *bare* pattern (no `/`) to `**/…` so it matches at ANY
+        // depth. The real gap this closes is bare *literals*: globset anchors
+        // `id_rsa` to the repo root, so a tracked `secrets/id_rsa` would evade a
+        // *security* denylist (M5). A bare *wildcard* like `*.pem` already
+        // crosses `/` in globset (default `literal_separator = false`), so
+        // anchoring it is a harmless no-op that keeps the mental model uniform.
+        // The original spelling is kept for the violation message.
         let effective = anchor_denied_pattern(pattern);
         let glob = Glob::new(&effective).map_err(|e| {
             Error::rule_config(&spec.id, format!("invalid denied pattern `{pattern}`: {e}"))
@@ -213,18 +217,41 @@ mod tests {
     }
 
     #[test]
-    fn extension_glob_matches_root_basename() {
-        // `*.env` is a basename pattern: it matches `.env` at
-        // the repo root but not under subdirectories (globset's
-        // `*` doesn't cross `/`). Users who want recursive
-        // matching write `**/.env`.
-        let set = build_set(&["*.env"]);
-        assert!(!set.matches(std::path::Path::new(".env")).is_empty());
+    fn bare_wildcard_crosses_slashes_bare_literal_does_not() {
+        // The globset semantics behind M5 (default `literal_separator = false`):
+        // a bare *wildcard* `*.env` DOES cross `/`, so it already matches at any
+        // depth — it was never the M5 gap. A bare *literal* is what globset
+        // root-anchors, so `id_rsa` alone misses `secrets/id_rsa` — the real gap
+        // `anchor_denied_pattern` closes. (`config/.envrc` is unmatched by
+        // *suffix*, not by `/`.)
+        let wild = build_set(&["*.env"]);
         assert!(
-            set.matches(std::path::Path::new("config/.envrc"))
-                .is_empty()
+            !wild.matches(std::path::Path::new(".env")).is_empty(),
+            "root .env"
         );
-        assert!(set.matches(std::path::Path::new("README.md")).is_empty());
+        assert!(
+            !wild
+                .matches(std::path::Path::new("config/app.env"))
+                .is_empty(),
+            "*.env crosses / to a nested .env"
+        );
+        assert!(
+            wild.matches(std::path::Path::new("config/.envrc"))
+                .is_empty(),
+            "unmatched by suffix"
+        );
+        assert!(wild.matches(std::path::Path::new("README.md")).is_empty());
+
+        let lit = build_set(&["id_rsa"]);
+        assert!(
+            !lit.matches(std::path::Path::new("id_rsa")).is_empty(),
+            "root literal"
+        );
+        assert!(
+            lit.matches(std::path::Path::new("secrets/id_rsa"))
+                .is_empty(),
+            "a bare literal is root-anchored — the real M5 gap"
+        );
     }
 
     #[test]

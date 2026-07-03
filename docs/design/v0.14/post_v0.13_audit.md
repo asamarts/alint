@@ -355,15 +355,21 @@ security-sensitive walk/read-path change that genuinely wants its own
 reviewed pass; rushing it risks reintroducing the confinement threat.
 Tracked.
 
-### M5 — `git_no_denied_paths` denylist is root-anchored `[x]`
-**Where:** `git_no_denied_paths.rs`. For a *secrets* control, `*.pem` /
-`id_rsa` matched only the repo root, so `secrets/server.pem` evaded.
+### M5 — `git_no_denied_paths` denylist root-anchors bare literals `[x]`
+**Where:** `git_no_denied_paths.rs`. For a *secrets* control, a bare *literal*
+like `id_rsa` matched only the repo root, so a tracked `secrets/id_rsa` evaded.
+(Correction from the adversarial review of the fix: a bare *wildcard* like
+`*.pem` already crosses `/` under globset's default `literal_separator = false`,
+so it was never the gap — only bare literals are root-anchored. The original
+"`*.pem` matched only root" write-up over-generalised.)
 **Done (maintainer chose auto-anchor):** a bare denied pattern (no `/`) is
-rewritten to `**/<pattern>` so it bans a match at any depth; explicit-path
-patterns (`secrets/*.key`, `**/*.pem`) are taken as written; the violation
-message keeps the original spelling. The semantics change (a bare `*.env`
-now matches any depth) is the intended secure default for a denylist.
-Tested (`anchor_denied_pattern` + a nested-match check).
+rewritten to `**/<pattern>` so it bans a match at any depth — a no-op for
+wildcards, the real fix for literals; explicit-path patterns (`secrets/*.key`,
+`**/*.pem`) are taken as written; the violation message keeps the original
+spelling. Tested: `anchor_denied_pattern` unit +
+`bare_wildcard_crosses_slashes_bare_literal_does_not` (documents the real
+globset semantics) + the `git_no_denied_paths_fires_on_nested_secret` scenario,
+which uses `id_rsa` so reverting the anchoring turns it red.
 
 ### M6 — non-UTF-8 git data silently collapses checks `[~]`
 **Where:** `core/git.rs:60,135` (one non-UTF-8 path → whole tracked/
