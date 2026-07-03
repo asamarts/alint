@@ -179,11 +179,17 @@ on it for adoption, they can lint without it.
   dependency allowlist, and the ASF compliance-bundle over-fire
   fix.
 
-- **v0.14, WASM plugins.** Bumped again to make room for the
-  engineering-foundations program, which took the v0.13.0 cut.
-  `wasmtime` host, signed plugin registry, blessed
-  examples (mock-ratio checker, near-dup detector,
-  debug-statement stripper).
+- **v0.14, Security and correctness hardening.** Baseline /
+  grandfathering mode plus the post-v0.13 security + correctness audit
+  (two spawn-gate RCE bypasses closed, path confinement made
+  symlink-aware) and the follow-on e2e-sweep + adversarial-review
+  fixes. See `v0.14/README.md`.
+
+- **Future / backlog, WASM plugins.** A `wasm` plugin kind on a
+  `wasmtime` host with a stable WIT interface, a filesystem sandbox, a
+  signed plugin registry, and blessed examples (mock-ratio checker,
+  near-dup detector, debug-statement stripper). Unpinned from a
+  version until the engine work is scheduled.
 
 - **v1.0, Stability.** DSL committed, plugin ABI committed,
   `alint-core` public API frozen, docs site committed.
@@ -1213,22 +1219,27 @@ two of the project's own drift gates — the site's version-pin consistency chec
 alint's `prose-no-em-dash` rule, dogfooded on the site's prose — caught drift that
 very change introduced, and it was fixed before the next release.
 
-## v0.14: WASM plugins
+## v0.14: Security and correctness hardening
 
-Bumped again to make room for the engineering-foundations program, which
-took the v0.13.0 cut; otherwise unchanged from the previous post-v0.11 scope.
+The cut that re-grounds alint's trustworthy-governance claims in what the code
+actually guarantees. Two strands: baseline / grandfathering mode (adopt alint
+on a legacy repo as a blocking gate), and a 12-agent adversarial audit of alint
++ alint.org that closed two spawn-gate RCE bypasses (templates + nested
+configs, the recurring `gff` shape), made path confinement symlink-aware, and
+fixed a long tail of output / CLI / baseline correctness. A follow-on
+feature-by-feature e2e sweep and an adversarial review of the remediation
+closed seven more real bugs, each with a revert-sensitive regression test. See
+[`v0.14/README.md`](v0.14/README.md) and CHANGELOG `[Unreleased]`.
 
-- `wasm` plugin kind with a `wasmtime` host, stable WIT
-  interface. Plugins receive their config *post-interpolation*
-  per the v0.11 variable-expansion work, the host resolves
-  `{{env.X}}` references before passing the config dict to the
-  guest, so plugins never see (and can't accidentally exfiltrate)
-  the raw env namespace.
-- Plugin registry scaffolding with signature verification.
-- Bless a few canonical agent-aware semantic plugins
-  (mock-ratio checker, file-similarity / near-dup detector,
-  debug-statement auto-stripper) as documented examples, not
-  bundled, to keep the binary lean.
+- Baseline mode (`alint baseline` + `check --baseline`); design in ADR-0006.
+- Spawn gate re-run on the finalized, template-expanded rule set, tagged by
+  provenance (closes the templates + nested-config bypasses and the `gff`
+  class at once).
+- Path confinement resolves symlinks for config-derived reads; local
+  `extends:` targets confined to the config's directory.
+- Output / CLI / baseline hardening: non-UTF-8 paths no longer crash `json` /
+  `agent`, exit code 3 for internal errors, `fix --format` gated, SARIF /
+  GitLab / JUnit correctness, and the baseline artifact kept out of the walk.
 
 ## v1.0: Stability
 
@@ -1242,3 +1253,23 @@ took the v0.13.0 cut; otherwise unchanged from the previous post-v0.11 scope.
   deprecation-warning overlap window of one minor release is
   enough for a feature that shipped four days before its
   successor.
+
+## Future / backlog
+
+Scope that is real but deliberately unpinned from a numbered cut, sequenced
+against demand rather than a date.
+
+### WASM plugins
+
+Held the v0.14 slot until the security + correctness hardening pass took it;
+now unversioned until the engine work is scheduled.
+
+- `wasm` plugin kind with a `wasmtime` host, stable WIT interface. Plugins
+  receive their config *post-interpolation* per the v0.11 variable-expansion
+  work: the host resolves `{{env.X}}` references before passing the config
+  dict to the guest, so plugins never see (and can't accidentally exfiltrate)
+  the raw env namespace.
+- Plugin registry scaffolding with signature verification.
+- Bless a few canonical agent-aware semantic plugins (mock-ratio checker,
+  file-similarity / near-dup detector, debug-statement auto-stripper) as
+  documented examples, not bundled, to keep the binary lean.
