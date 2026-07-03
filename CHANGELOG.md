@@ -97,6 +97,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output-format matrix that renders a violation path carrying each format's
   metacharacters, a control byte, and a non-UTF-8 byte through all eight
   formats. (E2E sweep)
+- **Markdown output no longer splits a heading on a newline-in-path.** A file
+  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `## \`path\``
+  inline-code heading, orphaning the rest onto a following line. `md_inline_code`
+  now collapses those control chars to a space (inline code is single-line), and
+  the weird-path matrix asserts every Markdown heading stays complete. (review
+  follow-up)
 - **Exit code `3` (internal error) is now actually produced.** The README
   documented `3` for an internal alint error vs `2` for a config/usage error,
   but every error funnelled to `2`, so a script could never tell "fix your

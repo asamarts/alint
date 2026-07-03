@@ -1661,6 +1661,9 @@ struct LoadedConfig {
 ///   `&&` → `and` keyword hints, etc.)
 /// - `2` — invocation error (file missing, etc.) — propagated by
 ///   `main`'s top-level error handler.
+/// - `3` — internal error (e.g. a bundled ruleset shipped inside the binary
+///   fails to parse) — classified by `error_is_internal`, distinguishing an
+///   alint bug from a user-fixable config problem (M11).
 fn cmd_validate_config(path: Option<PathBuf>, format: &str, cli: &Cli) -> Result<ExitCode> {
     // Fail loudly on a format this subcommand can't render, rather than
     // silently falling through to human output (M13) — mirroring how

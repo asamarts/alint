@@ -669,7 +669,10 @@ fn nested_same_named_baseline_is_not_over_excluded() {
         String::from_utf8_lossy(&compact.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&compact.stdout).contains("sub/.alint-baseline.json"),
+        // Normalise separators — Windows reports `sub\.alint-baseline.json`.
+        String::from_utf8_lossy(&compact.stdout)
+            .replace('\\', "/")
+            .contains("sub/.alint-baseline.json"),
         "the nested file's TOPSECRET must be reported, not over-excluded"
     );
 }

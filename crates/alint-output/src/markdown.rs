@@ -293,7 +293,11 @@ fn md_escape(s: &str) -> String {
 /// disallowed by the schema. Net: this only matters for
 /// truly adversarial inputs.
 fn md_inline_code(s: &str) -> String {
-    s.replace('`', "ʼ")
+    // Inline code is single-line by definition: a `\n`/`\r` (legal in a path on
+    // Unix) would break out of the span and split the enclosing `## ` heading,
+    // so collapse them to a space. A backtick would close the span early, so
+    // swap in the modifier-letter look-alike.
+    s.replace(['\r', '\n'], " ").replace('`', "ʼ")
 }
 
 /// Escape a URL for use in a markdown link target.

@@ -109,6 +109,18 @@ fn assert_wellformed(label: &str, fmt_name: &str, fmt: Format, bytes: &[u8]) {
                 !text.contains('\u{0}'),
                 "[{fmt_name}/{label}] output contains a raw NUL byte"
             );
+            // Markdown: a control char in the path must not split the `## `
+            // heading — each heading line stays complete (ends with its
+            // `(count)` suffix). A bare "valid UTF-8 + no NUL" check misses a
+            // newline-in-path that splits `## \`a` / `b.txt\` (1)` across lines.
+            if matches!(fmt, Format::Markdown) {
+                for line in text.lines() {
+                    assert!(
+                        !line.starts_with("## ") || line.trim_end().ends_with(')'),
+                        "[{fmt_name}/{label}] a control char split a Markdown heading: {line:?}"
+                    );
+                }
+            }
         }
     }
 }
