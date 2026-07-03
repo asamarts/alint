@@ -1,6 +1,6 @@
 # Deterministic performance gating
 
-**Status:** IN PROGRESS (design approved 2026-06-07)
+**Status:** Implemented — advisory gate live (design approved 2026-06-07); flip to enforcing pending.
 
 ## Motivation
 

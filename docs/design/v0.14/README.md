@@ -1,6 +1,7 @@
 # v0.14 — Hardening pass
 
-Status: **In progress.** The v0.14 cut has two halves:
+Status: **In progress** — the hardening remediation is complete; the cut awaits
+its release mechanics. The v0.14 cut has three strands:
 
 1. **Baseline / grandfathering mode** — already landed on CHANGELOG
    `[Unreleased]` (slices 1–4, audit follow-ups #88–#94). Design:
@@ -12,6 +13,16 @@ Status: **In progress.** The v0.14 cut has two halves:
    presence of in-repo symlinks, and a long tail of correctness, output,
    CLI, doc-drift and site-drift findings. The remediation is tracked,
    finding-by-finding, in [`post_v0.13_audit.md`](./post_v0.13_audit.md).
+   **As of 2026-07-03 all CRITICAL + HIGH findings and the full M1–M14
+   cluster have landed**; only the deferred-with-rationale tail remains.
+3. **Post-v0.13 e2e sweep + adversarial-review remediation** (#111–#116) —
+   a feature-by-feature test of everything since v0.13 found five more real
+   bugs (baseline self-lint, a flat-`when:` DoS abort, a non-UTF-8 output
+   crash, a silent `fix --format` degrade, a non-convergent fixer), and an
+   adversarial review of that whole remediation found + fixed two more (the
+   baseline walk-exclusion was `check`-only and over-excluding; a vacuous
+   M5 regression test). Each fix ships with a revert-sensitive test; all
+   tracked in CHANGELOG `[Unreleased]`.
 
 ## Why a hardening pass headlines v0.14
 

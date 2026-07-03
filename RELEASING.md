@@ -77,7 +77,7 @@ points are explicit.
    **Why `Cargo.lock` is in the stage list.** When
    `[workspace.package].version` bumps, the workspace internal-crate
    entries in `Cargo.lock` (`alint`, `alint-core`, `alint-dsl`,
-   `alint-rules`, `alint-output`, `alint-bench`, `alint-e2e`,
+   `alint-rules`, `alint-output`, `alint-lsp`, `alint-bench`, `alint-e2e`,
    `alint-testkit`) need to track. `bump-version.sh` refreshes the
    lockfile via `cargo metadata --offline` as part of the bump; the
    refresh must be committed alongside `Cargo.toml`, or CI's

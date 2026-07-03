@@ -81,15 +81,21 @@
     },
     {
       "version": "0.14",
-      "title": "WASM plugins",
+      "title": "Security and correctness hardening",
       "kind": "release",
-      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry."
+      "blurb": "Baseline grandfathering mode plus the post-v0.13 security and correctness audit: two spawn-gate RCE bypasses closed, path confinement made symlink-aware, and the fail-loudly contract tightened across output, CLI, and baseline handling."
     },
     {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
       "blurb": "A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site."
+    },
+    {
+      "version": null,
+      "title": "Future / backlog",
+      "kind": "foundations",
+      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry, unpinned from a numbered release until the engine work is scheduled."
     }
   ]
 }

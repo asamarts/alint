@@ -43,6 +43,17 @@ point. The keystone fix re-runs the gate on the **finalized,
 template-expanded** rule set, tagged by provenance, which closes all
 three classes at once.
 
+**Remediation status (updated 2026-07-03).** Everything above **landed**: all
+CRITICAL (C1–C2) and HIGH (H1–H5) findings plus the full M1–M14 cluster. The
+only open items are the tracked deferrals — M4 escaping-symlink *detection*, M6
+tracked/changed-path collapse, M3-F2 (TOCTOU) + M3-F7, D11, L2, W6, and H6 —
+each with rationale inline. The findings below read as the audit originally
+recorded them (present-tense "is a bypass" = as-found, not as-shipped); the
+per-finding `[x]`/`[~]`/`[-]` markers and the phase plan are the live status.
+Follow-on work surfaced *after* this audit (the post-v0.13 e2e sweep and the
+adversarial review of the remediation, PRs #111–#116) is tracked in the
+CHANGELOG `[Unreleased]`, not here.
+
 ---
 
 ## Phase plan
@@ -52,7 +63,7 @@ three classes at once.
 | 1 | CRITICAL — spawn-gate RCE | C1, C2 | `[x]` |
 | 2 | HIGH — security | H1, H2, H5 | `[x]` |
 | 3 | HIGH — correctness | H3, H4 | `[x]` |
-| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M6/M7/M8 done; M4 partial — dir symlinks done, escaping deferred) |
+| 4 | MEDIUM — security cluster | M1–M8 | `[~]` (M1/M2/M3/M5/M7/M8 done; M4 partial — dir symlinks done, escaping deferred; M6 partial — commit-lint bypass closed, tracked/changed-path collapse deferred) |
 | 5 | MEDIUM — output / CLI / baseline | M9–M14 | `[x]` (M9–M14 all done) |
 | 6 | Docs + LOW cleanup + dogfooding (alint) | D1–D12, L1–L14 | `[~]` (D1–D10,D12 + L1,L3–L14 + Dog1/Dog2 done; L2 partial; D11 deferred) |
 | 7 | alint.org drift | W1–W7 | `[x]` (W1–W5,W7 done on the site branch; W6 partial) |
@@ -353,7 +364,10 @@ that H1/ADR-0004 close — needs a "yielded but non-readable" entry concept
 `is_symlink` flag the per-file read path honors). That's a
 security-sensitive walk/read-path change that genuinely wants its own
 reviewed pass; rushing it risks reintroducing the confinement threat.
-Tracked.
+Tracked. **The user-facing gap is now closed** (review follow-up, #116):
+`docs/rules.md`'s `no_symlinks` section documents that an escaping symlink is
+pruned pre-index and not flagged, so a reader adopting the rule as a guardrail
+isn't misled while the *detection* stays deferred.
 
 ### M5 — `git_no_denied_paths` denylist root-anchors bare literals `[x]`
 **Where:** `git_no_denied_paths.rs`. For a *secrets* control, a bare *literal*
