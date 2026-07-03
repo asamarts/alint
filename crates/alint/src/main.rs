@@ -794,7 +794,30 @@ fn baseline_walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
     let root_abs = root.canonicalize().ok()?;
     let base_abs = baseline.canonicalize().ok()?;
     let rel = base_abs.strip_prefix(&root_abs).ok()?;
-    Some(rel.to_string_lossy().replace('\\', "/"))
+    // Root-anchored (leading `/`): the walker turns this into an override
+    // `!/…` that matches ONLY the baseline at the repo root, never a same-named
+    // file in a subdirectory. Without the anchor a separator-less pattern
+    // matches at any depth, silently dropping a real violation in e.g.
+    // `sub/.alint-baseline.json`.
+    Some(format!("/{}", rel.to_string_lossy().replace('\\', "/")))
+}
+
+/// Append the [`baseline_walk_exclude`] pattern for `baseline` (when set) to
+/// `extra_ignores`, so `check` / `baseline` / `fix` all keep alint's own
+/// committed JSON-Lines artifact out of the walk. A broad-glob content rule
+/// (`**/*.json`, `line_max_width`, `no_trailing_whitespace`, …) would otherwise
+/// flag it — breaking the adopt-flow for `check`, making `baseline`
+/// regeneration see the artifact as fresh debt, and letting `fix` rewrite it.
+fn exclude_baseline_from_walk(
+    extra_ignores: &mut Vec<String>,
+    root: &Path,
+    baseline: Option<&Path>,
+) {
+    if let Some(bp) = baseline
+        && let Some(rel) = baseline_walk_exclude(root, bp)
+    {
+        extra_ignores.push(rel);
+    }
 }
 
 fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> Result<ExitCode> {
@@ -825,17 +848,9 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     } else {
         loaded.respect_gitignore
     };
-    // Exclude alint's own baseline file from the walk. It's a committed
-    // JSON-Lines artifact, so a broad-glob content rule (`**/*.json`,
-    // `line_max_width`, `no_trailing_whitespace`, …) would otherwise flag it as
-    // a NEW violation the baseline can't contain — breaking the canonical
-    // adopt-flow (`check` → `baseline` → `check --baseline` never reaches 0).
+    // Keep alint's own baseline artifact out of the walk (see the helper).
     let mut extra_ignores = loaded.extra_ignores;
-    if let Some(bp) = effective_baseline.as_deref()
-        && let Some(rel) = baseline_walk_exclude(path, bp)
-    {
-        extra_ignores.push(rel);
-    }
+    exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
     let walk_opts = WalkOptions {
         respect_gitignore: effective_gitignore,
         extra_ignores,
@@ -1064,16 +1079,34 @@ fn cmd_baseline(
         );
     }
     let loaded = load_rules(path, cli)?;
+
+    // Output path precedence: --output (as given) > `baseline:` config key
+    // (resolved against the repo root) > the default `.alint-baseline.json`.
+    // So `alint baseline` and `alint check` agree on the same file by default.
+    // Resolved up front so it can be excluded from the walk below — otherwise
+    // a regeneration re-lints the existing artifact and reports it as new debt.
+    let out_path = output.map_or_else(
+        || {
+            loaded
+                .baseline
+                .as_ref()
+                .map_or_else(|| path.join(".alint-baseline.json"), |b| path.join(b))
+        },
+        Path::to_path_buf,
+    );
+
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
+    let mut extra_ignores = loaded.extra_ignores;
+    exclude_baseline_from_walk(&mut extra_ignores, path, Some(&out_path));
     let walk_opts = WalkOptions {
         respect_gitignore: if cli.no_gitignore {
             false
         } else {
             loaded.respect_gitignore
         },
-        extra_ignores: loaded.extra_ignores,
+        extra_ignores,
     };
     let index = walk(path, &walk_opts).context("walking repository")?;
     let report = engine.run(path, &index).context("running rules")?;
@@ -1095,19 +1128,6 @@ fn cmd_baseline(
     }
     let new_baseline =
         Baseline::from_fingerprints(Some(env!("CARGO_PKG_VERSION").to_string()), items);
-
-    // Output path precedence: --output (as given) > `baseline:` config key
-    // (resolved against the repo root) > the default `.alint-baseline.json`.
-    // So `alint baseline` and `alint check` agree on the same file by default.
-    let out_path = output.map_or_else(
-        || {
-            loaded
-                .baseline
-                .as_ref()
-                .map_or_else(|| path.join(".alint-baseline.json"), |b| path.join(b))
-        },
-        Path::to_path_buf,
-    );
 
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
@@ -1227,9 +1247,17 @@ fn cmd_fix(
     } else {
         loaded.respect_gitignore
     };
+    // Keep the baseline artifact out of the walk so a broad content-fixer can't
+    // rewrite alint's own committed JSON-Lines file (mirrors `check`/`baseline`).
+    let effective_baseline = cli
+        .baseline
+        .clone()
+        .or_else(|| loaded.baseline.as_ref().map(|b| path.join(b)));
+    let mut extra_ignores = loaded.extra_ignores;
+    exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
     let walk_opts = WalkOptions {
         respect_gitignore: effective_gitignore,
-        extra_ignores: loaded.extra_ignores,
+        extra_ignores,
     };
 
     let index = walk(path, &walk_opts).context("walking repository")?;

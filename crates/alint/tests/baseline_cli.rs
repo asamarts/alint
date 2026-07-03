@@ -583,3 +583,93 @@ fn baseline_file_is_excluded_from_the_walk() {
         "the baseline file must not be flagged"
     );
 }
+
+#[test]
+fn baseline_regen_and_fix_also_exclude_the_artifact() {
+    // Regression (adversarial review of #111): the walk-exclusion was
+    // `check`-only. With a committed `baseline:` config key, `baseline`
+    // regeneration must not treat its own JSON-Lines artifact as fresh debt
+    // (was exit 2), and `fix` must not lint/rewrite it (was flagged).
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(root.join("package.json"), "{\"license\":\"BAD\"}\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         baseline: .alint-baseline.json\n\
+         rules:\n\
+         \x20 - id: lic\n\
+         \x20   kind: json_path_equals\n\
+         \x20   paths: [\"**/*.json\"]\n\
+         \x20   path: \"$.license\"\n\
+         \x20   equals: \"MIT\"\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    assert_eq!(code(&run(root, &["baseline"])), 0, "snapshot existing debt");
+    // Regeneration must stay exit 0 — the just-written artifact isn't new debt.
+    let regen = run(root, &["baseline"]);
+    assert_eq!(
+        code(&regen),
+        0,
+        "regen must not grandfather its own artifact; stderr={}",
+        String::from_utf8_lossy(&regen.stderr)
+    );
+    // fix must not mention / lint the artifact.
+    let fixout = run(root, &["fix", "--dry-run"]);
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&fixout.stdout),
+        String::from_utf8_lossy(&fixout.stderr)
+    );
+    assert!(
+        !combined.contains(".alint-baseline.json"),
+        "fix must not flag the baseline artifact; got:\n{combined}"
+    );
+}
+
+#[test]
+fn nested_same_named_baseline_is_not_over_excluded() {
+    // Regression (adversarial review of #111): the exclusion pattern was
+    // separator-less, so `!.alint-baseline.json` matched at ANY depth — a real
+    // violation in a nested file sharing the basename was silently dropped. The
+    // pattern is now root-anchored (`!/…`), so only the root artifact is skipped.
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\n\
+         baseline: .alint-baseline.json\n\
+         rules:\n\
+         \x20 - id: no-secret\n\
+         \x20   kind: file_content_forbidden\n\
+         \x20   paths: [\"**/*.json\"]\n\
+         \x20   pattern: \"TOPSECRET\"\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("data.txt"), "clean\n").unwrap();
+    assert_eq!(
+        code(&run(root, &["baseline"])),
+        0,
+        "empty baseline (clean tree)"
+    );
+    // A nested file that shares the basename, carrying a real secret.
+    std::fs::create_dir(root.join("sub")).unwrap();
+    std::fs::write(
+        root.join("sub/.alint-baseline.json"),
+        "{\"k\":\"TOPSECRET\"}\n",
+    )
+    .unwrap();
+    let compact = run(root, &["check", "--compact"]);
+    assert_eq!(
+        code(&compact),
+        1,
+        "the nested same-named file's violation must still fire; stderr={}",
+        String::from_utf8_lossy(&compact.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&compact.stdout).contains("sub/.alint-baseline.json"),
+        "the nested file's TOPSECRET must be reported, not over-excluded"
+    );
+}
