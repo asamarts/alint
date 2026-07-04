@@ -33,6 +33,5 @@ See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `git_tracked_only` | git tracked only |  |  |  |
-| `root_only` | boolean |  | `false` | If true, only a directory directly at the repository root is forbidden. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
