@@ -431,9 +431,29 @@ Each fix ships with a revert-sensitive regression test (repo convention).
   (unwrap x-since options/prose, narrow walked-back claims, write feature site docs, reconcile
   pins + STATE.md, confirm gates). D-b: the `root_only` CHANGELOG entry stays correctly under
   Fixed; the checklist gives it release-time visibility.
-- `[ ]` **Remaining:** P3 (optional bench-count contract), P4.2 (deferred, above), the §6
-  release-gated v0.14 work (baseline site docs, Kani-claim narrowing), the A3 mid-sentence
-  residual, and — optional — migrating the existence kinds to schemars (type-derived `x-since`
-  + fills their empty descriptions; P1.1 used the base-schema hand-edit route).
-- **Nothing is pushed/deployed** — both branches are local; the leaks stay live until the
-  engine branch merges to `main` (triggers `docs-bundle.yml` -> the site).
+- `[x]` **Existence kinds migrated to schemars + `x-since` type-derived (#118, merged).**
+  Replaces the P1.1 base-schema hand-edit route with `#[derive(JsonSchema)]` +
+  `#[schemars(extend("x-since"="0.14"))]`. `git_tracked_only` and the `file_exists`-only
+  `respect_gitignore` become kind-specific `Options` (ADR-0008), closing the last
+  RuleSpec-vs-schema divergence and filling the four kinds' empty option descriptions. An
+  adversarial pre-merge review caught + fixed a `respect_gitignore`-in-`rule_common`
+  fail-quietly (a `no_bom: {respect_gitignore: false}` that validated, loaded, and no-op'd).
+- `[x]` **A3 residual CLOSED (1c).** `no_zero_width_chars` U+2060/U+180E split into an
+  `alint:since=0.14` block (the released U+200B/C/D sentence stays); the `no_symlinks`
+  escaping-symlink caveat wrapped whole. Both stripped at 0.13.0, shown at 0.14.0 (verified
+  both directions).
+- `[x]` **root_only prose for `file_absent`/`dir_absent` (1b) — sentinel-gated NOW** (not
+  deferred to §6): each gains an `alint:since=0.14` paragraph mirroring `dir_exists`; behaviour
+  verified honored (build + evaluate), stripped pre-release.
+- `[x]` **E1 baseline site docs PRE-WRITTEN (1d).** A `concepts/baseline.md` guide + the
+  `baseline:` configuration-reference key (both tag-pinned, safe on main) + a sentinel-wrapped
+  output-formats note (reference/** is main-overlaid, so P-REF strips it pre-release). Nav
+  wiring + un-sentineling happen at the v0.14 cut.
+- `[ ]` **Remaining:** 2a (internal `docs_url` API gate) + 2b (case-study index-card count
+  interpolation) + housekeeping (3) land this session; then only P3 (optional bench contract),
+  P4.2's EXTERNAL `source_url` probe, and the §6 release-cut tail (Kani-claim narrowing, nav +
+  un-sentinel the pre-written v0.14 prose, pin bump) remain.
+- **Deployment:** the engine drift-prevention (P1/P-C4/P-REF/P2.1/P5) and the alint.org
+  immediate fixes (§4) merged to `main` in the prior session; #118 merged this session. The
+  next `docs-bundle.yml` push carries the description/strip fixes live (the binary
+  validation-tightening ships at the v0.14 cut).

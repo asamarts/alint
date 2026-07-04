@@ -65,6 +65,9 @@ No file matching `paths` may exist in the walked tree. The inverse of `file_exis
 
 Fix: `file_remove` — delete every violating file.
 
+<!-- alint:since=0.14 -->
+**Optional `root_only: true`** (like `file_exists`) restricts the check to the repository root: a file forbidden at the root does not fire on nested copies of the same name.
+<!-- /alint:since -->
 **Optional `git_tracked_only: true`** restricts the check to files in git's index. With it set, the rule fires only on tracked paths regardless of `.gitignore` state — closing the gap where a `git add -f`'d file slips past the walker's gitignore filter. Outside a git repo the rule becomes a silent no-op.
 
 ```yaml
@@ -106,6 +109,9 @@ Directory counterpart of `file_absent`. The match-and-fire semantics are the sam
   level: error
 ```
 
+<!-- alint:since=0.14 -->
+**Optional `root_only: true`** (like `dir_exists`) restricts the check to the repository root: a directory forbidden at the root does not fire on nested directories of the same name.
+<!-- /alint:since -->
 **Optional `git_tracked_only: true`** restricts the check to directories that contain at least one git-tracked file. With it set, a developer's locally-built `target/` (gitignored, no tracked content) doesn't trigger; a `target/` whose contents made it into git's index does. This is the canonical "don't let `target/` be committed" semantic.
 
 ```yaml
@@ -539,7 +545,11 @@ Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). Defe
 
 ### `no_zero_width_chars`
 
-Flag body-internal zero-width characters (U+200B, U+200C, U+200D, U+2060, U+180E, and non-leading U+FEFF). A leading U+FEFF is `no_bom`'s concern.
+Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). A leading U+FEFF is `no_bom`'s concern.
+
+<!-- alint:since=0.14 -->
+As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
+<!-- /alint:since -->
 
 ```yaml
 - id: no-zwsp
@@ -650,7 +660,9 @@ All rules in this family are no-ops on Windows — the +x bit and symlinks don't
 
 Flag tracked paths that are symbolic links. Symlinks are a portability footgun: Windows NTFS needs admin rights to create them, git-for-Windows can silently flatten them, CI runners vary.
 
+<!-- alint:since=0.14 -->
 Caveat: a symlink whose target escapes the repository root (`link -> /etc`) is pruned by the walker *before* indexing, so it is **not** flagged — the rule reports in-tree symlinks (to files or directories), not escaping ones. The escaping symlink can't be read out-of-root either (path confinement blocks that), so this is a reporting gap, not a disclosure one; recording escaping symlinks safely is a tracked follow-up.
+<!-- /alint:since -->
 
 ```yaml
 - id: no-symlinks
