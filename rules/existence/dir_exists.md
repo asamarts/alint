@@ -21,6 +21,6 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `git_tracked_only` | git tracked only |  |  |  |
+| `git_tracked_only` | boolean |  | `false` | Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.

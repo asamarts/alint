@@ -23,8 +23,8 @@ Fix: `file_create` — write a declared `content`. With an array of `paths`, the
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `git_tracked_only` | git tracked only |  |  |  |
-| `respect_gitignore` | per rule respect gitignore |  |  |  |
+| `git_tracked_only` | boolean |  | `false` | Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`. |
+| `respect_gitignore` | boolean |  | `null` | Per-rule override for the workspace `respect_gitignore` setting. When `false`, this rule's literal-path checks also stat the filesystem directly, so it sees files that are tracked AND `.gitignore`-masked (the bazel-style `.bazelversion` pattern — pitfall #18 in `docs/development/CONFIG-AUTHORING.md`). Honoured only by `file_exists` literal paths; glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`. |
 | `root_only` | boolean |  | `false` | If true, only files directly at the repository root satisfy the rule. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
