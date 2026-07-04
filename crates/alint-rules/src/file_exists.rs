@@ -21,6 +21,15 @@ struct Options {
     /// git repo. Default `false`.
     #[serde(default)]
     git_tracked_only: bool,
+    /// Per-rule override for the workspace `respect_gitignore` setting. When
+    /// `false`, this rule's literal-path checks also stat the filesystem
+    /// directly, so it sees files that are tracked AND `.gitignore`-masked
+    /// (the bazel-style `.bazelversion` pattern — pitfall #18 in
+    /// `docs/development/CONFIG-AUTHORING.md`). Honoured only by `file_exists`
+    /// literal paths; glob patterns fall through to the workspace setting.
+    /// Default: inherit the workspace `respect_gitignore`.
+    #[serde(default)]
+    respect_gitignore: Option<bool>,
 }
 
 crate::options_schema_for!(Options);
@@ -271,7 +280,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         literal_paths,
         root_only: opts.root_only,
         git_tracked_only: opts.git_tracked_only,
-        respect_gitignore: spec.respect_gitignore,
+        respect_gitignore: opts.respect_gitignore,
         fixer,
     }))
 }

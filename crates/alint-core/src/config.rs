@@ -285,34 +285,16 @@ pub struct RuleSpec {
     /// at build time.
     #[serde(default)]
     pub fix: Option<FixSpec>,
-    // `git_tracked_only` is NOT a RuleSpec field: it is a kind-specific option
-    // on the existence family (`file_exists`/`file_absent`/`dir_exists`/
-    // `dir_absent`), declared in each kind's `Options` struct so a rule of any
-    // other kind that sets it is rejected at load by `deny_unknown_fields`
-    // (ADR-0008). The engine reads the `Rule::git_tracked_mode()` trait method,
-    // never a RuleSpec field, so nothing here needs it.
-    /// Per-rule override for the workspace-level
-    /// `respect_gitignore:` setting. When `Some(false)`, this
-    /// rule treats `.gitignore`-listed files as if they were
-    /// untracked-but-on-disk: the rule sees them. The canonical
-    /// use case is the bazel-style "tracked AND gitignored"
-    /// pattern (a file like `.bazelversion` ships a default
-    /// upstream and contributors override it locally without
-    /// committing the override) — the workspace walker honours
-    /// the gitignore, so `file_exists` reports "no match"
-    /// against a file that's both on disk AND in `git ls-files`.
-    /// This per-rule knob lets that single rule see the file
-    /// without flipping the workspace-wide setting.
-    ///
-    /// Currently honoured by `file_exists` for literal-path
-    /// patterns (the common case the pitfall surfaced). Other
-    /// rule kinds + glob patterns fall through to the workspace
-    /// setting; future versions will broaden coverage.
-    ///
-    /// Default `None` (inherit the workspace `respect_gitignore`).
-    /// See `docs/development/CONFIG-AUTHORING.md` pitfall #18.
-    #[serde(default)]
-    pub respect_gitignore: Option<bool>,
+    // Neither `git_tracked_only` nor `respect_gitignore` is a RuleSpec field:
+    // both are kind-specific options (ADR-0008). `git_tracked_only` lives in
+    // each existence kind's `Options` struct (`file_exists`/`file_absent`/
+    // `dir_exists`/`dir_absent`) — the engine reads it via the
+    // `Rule::git_tracked_mode()` trait method, never a RuleSpec field.
+    // `respect_gitignore` lives only in `file_exists`'s `Options` — the sole
+    // kind that honours a per-rule override (the bazel-style "tracked AND
+    // gitignored" pitfall #18). Keeping both off `rule_common` means a rule of
+    // any other kind that sets either is rejected at load by
+    // `deny_unknown_fields`, rather than silently ignored.
     /// Per-file ancestor-manifest gate. When set, the rule
     /// only fires on files that have at least one ancestor
     /// directory (including the file's own directory)
@@ -717,13 +699,11 @@ impl NestedRuleSpec {
             policy_url: self.policy_url.clone(),
             when: self.when.clone(),
             fix: None,
-            // `respect_gitignore` is not exposed from a nested rule's parent
-            // spec (top-level-only for now). `git_tracked_only` is now a
-            // kind-specific option (ADR-0008), stripped from the nested `extra`
-            // via PARENT_FIELDS below, so a nested existence rule doesn't
-            // silently inherit it. If/when nested rules need either, plumb them
-            // through here (and, for git_tracked_only, drop it from PARENT_FIELDS).
-            respect_gitignore: None,
+            // `git_tracked_only` and `respect_gitignore` are both kind-specific
+            // options now (ADR-0008), stripped from the nested `extra` via
+            // PARENT_FIELDS below, so a nested existence rule doesn't silently
+            // inherit either. If/when nested rules need one, drop it from
+            // PARENT_FIELDS and let it flow into the leaf's option set.
             scope_filter: self.scope_filter.clone(),
             // `NestedRuleSpec` doesn't name `id`/`level` (synthesized from the
             // parent) or the top-level-only `fix`/git toggles, so a nested

@@ -126,7 +126,10 @@ rules:
   - id: bazel-version-file-shape
     kind: file_content_matches
     paths: ".bazelversion"
-    respect_gitignore: false
+    # No per-rule respect_gitignore here: that override is file_exists-only
+    # (ADR-0008). Content rules read the workspace walker, which hides the
+    # gitignored .bazelversion — so this shape check fires only where the file
+    # is walker-visible.
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+|-[a-zA-Z0-9.-]+)?\s*$'
     level: info
     message: >-
@@ -211,7 +214,9 @@ rules:
         extract: { regex: '(?m)^\s*bazel:\s*"?([0-9][^\s"]*)"?' }
     normalize: trim
     allow_missing_target: true
-    respect_gitignore: false      # source .bazelversion is gitignored
+    # The source .bazelversion is gitignored; the per-rule respect_gitignore
+    # override is file_exists-only (ADR-0008), so this comparison sees the
+    # source only where the walker does (allow_missing_target no-ops it otherwise).
     level: warning
     message: >-
       `.bazelversion` and the `.bazelci/presubmit.yml` `bazel:` pin should

@@ -266,7 +266,6 @@ mod tests {
             policy_url: None,
             when: None,
             fix: None,
-            respect_gitignore: None,
             scope_filter: None,
             extra: serde_yaml_ng::Mapping::new(),
         }

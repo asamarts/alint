@@ -662,10 +662,6 @@
         }
       ]
     },
-    "per_rule_respect_gitignore": {
-      "description": "Per-rule override for the workspace-level `respect_gitignore:` setting. When `false`, this rule treats `.gitignore`-listed files as if they were untracked-but-on-disk: the rule sees them. The canonical use case is the bazel-style \"tracked AND gitignored\" pattern (a file like `.bazelversion` ships a default upstream and contributors override it locally without committing the override) — the workspace walker honours the gitignore, so `file_exists` reports \"no match\" against a file that's both on disk AND in `git ls-files`. This per-rule knob lets that single rule see the file without flipping the workspace-wide setting. Currently honoured by `file_exists` for literal-path patterns; other rule kinds + glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`. See `docs/development/CONFIG-AUTHORING.md` pitfall #18.",
-      "type": "boolean"
-    },
     "rule": {
       "description": "A rule entry — either a kind-driven rule (with `kind` and the kind-specific fields) or a template instance (with `extends_template` referencing a template id and optional `vars` overrides).",
       "oneOf": [
@@ -867,9 +863,6 @@
           "description": "Link to a human-readable policy justification.",
           "format": "uri",
           "type": "string"
-        },
-        "respect_gitignore": {
-          "$ref": "#/$defs/per_rule_respect_gitignore"
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
@@ -1299,6 +1292,14 @@
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "respect_gitignore": {
+          "default": null,
+          "description": "Per-rule override for the workspace `respect_gitignore` setting. When `false`, this rule's literal-path checks also stat the filesystem directly, so it sees files that are tracked AND `.gitignore`-masked (the bazel-style `.bazelversion` pattern — pitfall #18 in `docs/development/CONFIG-AUTHORING.md`). Honoured only by `file_exists` literal paths; glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "root_only": {
           "default": false,
