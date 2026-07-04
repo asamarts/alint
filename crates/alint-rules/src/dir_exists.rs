@@ -3,14 +3,21 @@
 use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// When `true`, only a directory directly at the repo root satisfies the
-    /// rule. Mirrors `file_exists`'s `root_only`.
+    /// If true, only a directory directly at the repository root satisfies the
+    /// rule; a nested match does not.
+    #[schemars(extend("x-since" = "0.14"))]
     #[serde(default)]
     root_only: bool,
+    /// Restrict matches to directories that contain at least one git-tracked
+    /// file. No effect outside a git repo. Default `false`.
+    #[serde(default)]
+    git_tracked_only: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct DirExistsRule {
@@ -108,7 +115,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
         root_only: opts.root_only,
-        git_tracked_only: spec.git_tracked_only,
+        git_tracked_only: opts.git_tracked_only,
     }))
 }
 

@@ -7,14 +7,22 @@ use serde::Deserialize;
 
 use crate::fixers::FileRemoveFixer;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    /// When `true`, only forbid matches directly at the repo root; a nested
-    /// file with the same name is allowed. Mirrors `file_exists`'s `root_only`.
+    /// If true, only a file matching `paths` directly at the repository root is
+    /// forbidden; a nested match with the same name is allowed.
+    #[schemars(extend("x-since" = "0.14"))]
     #[serde(default)]
     root_only: bool,
+    /// Restrict matches to files tracked in git's index: entries present in the
+    /// walked tree but not in `git ls-files` are skipped. No effect outside a
+    /// git repo. Default `false`.
+    #[serde(default)]
+    git_tracked_only: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileAbsentRule {
@@ -122,7 +130,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_paths_spec(paths)?,
         patterns: patterns_of(paths),
         root_only: opts.root_only,
-        git_tracked_only: spec.git_tracked_only,
+        git_tracked_only: opts.git_tracked_only,
         fixer,
     }))
 }

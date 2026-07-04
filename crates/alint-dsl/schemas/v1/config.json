@@ -868,6 +868,9 @@
           "format": "uri",
           "type": "string"
         },
+        "respect_gitignore": {
+          "$ref": "#/$defs/per_rule_respect_gitignore"
+        },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
         },
@@ -1010,7 +1013,9 @@
     "rule_dir_absent": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "dir_absent"
@@ -1020,7 +1025,7 @@
         },
         "root_only": {
           "default": false,
-          "description": "If true, only a directory directly at the repository root is forbidden.",
+          "description": "If true, only a directory directly at the repository root is forbidden; a nested match with the same name is allowed.",
           "type": "boolean",
           "x-since": "0.14"
         }
@@ -1064,7 +1069,9 @@
     "rule_dir_exists": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "dir_exists"
@@ -1074,7 +1081,7 @@
         },
         "root_only": {
           "default": false,
-          "description": "If true, only a directory directly at the repository root satisfies the rule.",
+          "description": "If true, only a directory directly at the repository root satisfies the rule; a nested match does not.",
           "type": "boolean",
           "x-since": "0.14"
         }
@@ -1193,7 +1200,9 @@
     "rule_file_absent": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "file_absent"
@@ -1203,7 +1212,7 @@
         },
         "root_only": {
           "default": false,
-          "description": "If true, only a file directly at the repository root is forbidden.",
+          "description": "If true, only a file matching `paths` directly at the repository root is forbidden; a nested match with the same name is allowed.",
           "type": "boolean",
           "x-since": "0.14"
         }
@@ -1281,16 +1290,15 @@
     "rule_file_exists": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "file_exists"
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
-        },
-        "respect_gitignore": {
-          "$ref": "#/$defs/per_rule_respect_gitignore"
         },
         "root_only": {
           "default": false,

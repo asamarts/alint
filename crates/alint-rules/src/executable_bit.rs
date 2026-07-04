@@ -147,6 +147,27 @@ mod tests {
         assert!(build(&spec).is_err());
     }
 
+    /// ADR-0008: `git_tracked_only` is a kind-specific option on the existence
+    /// family only. A non-existence kind that receives it must reject it at load
+    /// (via the Options `deny_unknown_fields`) rather than silently ignore it.
+    /// This is the fail-loud the divergence used to lack; if it regresses (e.g.
+    /// `git_tracked_only` drifts back onto `RuleSpec`), this test fails.
+    #[test]
+    fn build_rejects_git_tracked_only_on_non_existence_kind() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             require: true\n\
+             git_tracked_only: true\n\
+             level: error\n",
+        );
+        assert!(
+            build(&spec).is_err(),
+            "git_tracked_only must be rejected on a non-existence kind (ADR-0008)"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn evaluate_fires_when_exec_required_but_missing() {

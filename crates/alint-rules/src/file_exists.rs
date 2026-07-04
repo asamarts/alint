@@ -10,12 +10,20 @@ use serde::Deserialize;
 
 use crate::fixers::FileCreateFixer;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    /// If true, only files directly at the repository root satisfy the rule.
     #[serde(default)]
     root_only: bool,
+    /// Restrict matches to files tracked in git's index: entries present in the
+    /// walked tree but not in `git ls-files` are skipped. No effect outside a
+    /// git repo. Default `false`.
+    #[serde(default)]
+    git_tracked_only: bool,
 }
+
+crate::options_schema_for!(Options);
 
 #[derive(Debug)]
 pub struct FileExistsRule {
@@ -262,7 +270,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         patterns,
         literal_paths,
         root_only: opts.root_only,
-        git_tracked_only: spec.git_tracked_only,
+        git_tracked_only: opts.git_tracked_only,
         respect_gitignore: spec.respect_gitignore,
         fixer,
     }))
