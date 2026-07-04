@@ -12,4 +12,4 @@ Rule kinds in the **Security / Unicode sanity** family. Each rule below links to
 | --- | --- |
 | [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) | Flag `<<<<<<< `, `=======`, `>>>>>>> `, `\|\|\|\|\|\|\| ` markers at the start of a line, almost always left over from an unresolved merge. |
 | [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) | Flag Trojan-Source bidi override characters (U+202A,202E, U+2066,2069). |
-| [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) | Flag body-internal zero-width characters (U+200B, U+200C, U+200D, U+2060, U+180E, and non-leading U+FEFF). |
+| [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) | Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). |
