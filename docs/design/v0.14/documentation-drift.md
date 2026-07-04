@@ -449,11 +449,34 @@ Each fix ships with a revert-sensitive regression test (repo convention).
   `baseline:` configuration-reference key (both tag-pinned, safe on main) + a sentinel-wrapped
   output-formats note (reference/** is main-overlaid, so P-REF strips it pre-release). Nav
   wiring + un-sentineling happen at the v0.14 cut.
-- `[ ]` **Remaining:** 2a (internal `docs_url` API gate) + 2b (case-study index-card count
-  interpolation) + housekeeping (3) land this session; then only P3 (optional bench contract),
-  P4.2's EXTERNAL `source_url` probe, and the §6 release-cut tail (Kani-claim narrowing, nav +
-  un-sentinel the pre-written v0.14 prose, pin bump) remain.
+- `[x]` **2a — API `docs_url` gate LANDED (alint.org #15) + caught a live bug.**
+  `check-internal-links.mjs` now also scans the prerendered `/api/*.json` endpoints'
+  internal `docs_url` (the HTML walk never saw them). It immediately flagged the 10
+  short-name aliases + `cross_file_value_equals`, whose `docs_url` 404 **live**
+  (`/docs/rules/content/content_matches/` → 404; aliases have no page of their own).
+  Fixed `docsUrlOf` to resolve aliases to the canonical kind's page; a fresh build has
+  100 API links all resolving. External `source_url` probing stays the deferred P4.2 tail.
+- `[-]` **2b — case-study index-card count interpolation: DEFERRED with rationale.**
+  Infeasible as specified. The card counts (golang/go "31 rules") are curated *narrative*
+  subsets that diverge ~2x from the study `rules:` frontmatter (64 = the effective total
+  incl. `extends:`) AND the authored `- id:` count (29); interpolating from `rules:` would
+  display the wrong number. Corrected the misleading `check-counts` allowlist reason; the
+  literal stays allowlisted.
+- `[ ]` **NEW finding — systemic case-study count divergence.** The `rules:` frontmatter
+  (rendered in each study's meta cell) runs ~2x the authored `- id:` count (golang-go 64/29,
+  kubernetes 49/25, turbo 88/34, tokio 74/31). It appears to mean "effective total incl.
+  `extends:`" but is unverified per-study. Making it a trustworthy contract needs an
+  extends-resolution + dedup pass (the P3 class); until then the meta cells + card narratives
+  are hand-curated. Tracked, not urgent.
+- `[x]` **3 — housekeeping DONE.** `.github-account=asamarts` marker added to alint.org (the
+  alint repo already had a tracked one); the work-stream branches (git-tracked-kind-option,
+  v0.14-doc-followups, v0.14-doc-drift) deleted in both repos.
+- `[ ]` **True remainder:** P3 (optional bench-count contract — now also subsumes the
+  case-study count reconciler above), P4.2's EXTERNAL `source_url` probe, and the §6
+  release-cut tail (Kani-claim narrowing, nav wiring + un-sentinel the pre-written v0.14
+  prose, pin bump).
 - **Deployment:** the engine drift-prevention (P1/P-C4/P-REF/P2.1/P5) and the alint.org
-  immediate fixes (§4) merged to `main` in the prior session; #118 merged this session. The
-  next `docs-bundle.yml` push carries the description/strip fixes live (the binary
-  validation-tightening ships at the v0.14 cut).
+  immediate fixes (§4) merged in the prior session; this session merged #118 (ADR-0008),
+  #119 (1b/1c/1d), and alint.org #15 (2a + alias fix). The alias-`docs_url` fix is live on
+  alint.org's `/api/rules.json`; the next `docs-bundle.yml` push carries the description/strip
+  fixes live (the binary validation-tightening ships at the v0.14 cut).
