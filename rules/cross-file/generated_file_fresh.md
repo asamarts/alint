@@ -34,7 +34,7 @@ A committed artefact must equal what a declared `command` generator produces, in
 |---|---|---|---|---|
 | `command` | list of string | yes |  | Generator argv (no shell). STDOUT mode: emit the file's contents to stdout. MUTATING mode: write the `outputs` in place. |
 | `file` | string |  |  | STDOUT mode: the committed generated file to verify against the generator's stdout. |
-| `normalize` | one of `none` \| `trim` \| `final-newline` |  |  |  |
+| `normalize` | one of `none` \| `trim` \| `final-newline` |  |  | Normalization applied before comparison to absorb trailing-newline churn: `none`, `trim`, or `final-newline`. |
 | `outputs` | string or list of string |  |  | MUTATING mode: the glob (or list of globs) the in-place generator rewrites; its presence selects the mutating mode. alint snapshots these, runs the generator, diffs, and restores them. |
 | `timeout` | integer (>= 1) |  |  | Generator timeout in seconds (default 120). On timeout the child is killed and one violation is emitted. |
 | `workdir` | string |  |  | Generator cwd, relative to the lint root (default: lint root). |

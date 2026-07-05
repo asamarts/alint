@@ -23,7 +23,7 @@ For every file or directory matching `select:`, every nested rule under `require
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `require` | list of nested rule | yes |  |  |
+| `require` | list of nested rule | yes |  | One or more nested rules that every file or directory matching `select` must satisfy. |
 | `select` | string or list of string | yes |  | Glob(s) selecting the files/dirs to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. ["packages/*", "!packages/internal"]). |
 | `when_iter` | string |  |  | Per-iteration `when:` filter — see rule_for_each_dir.when_iter. |
 

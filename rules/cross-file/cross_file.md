@@ -55,11 +55,11 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `allow_missing_target` | boolean |  |  |  |
+| `allow_missing_target` | boolean |  |  | When true, an absent target file or a missing extracted target value is tolerated instead of reported as drift. |
 | `normalize` | one of `none` \| `trim` \| `lower` \| `semver-major` \| `semver-minor` or list of one of `none` \| `trim` \| `lower` \| `semver-major` \| `semver-minor` |  |  | A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band (each token's leading digits, leading non-digits stripped) — the protobuf / pnpm version-format reconcile. |
-| `relation` | one of `equals` \| `subset` \| `superset` \| `set_equals` \| `identical` \| `resolves` |  |  |  |
-| `skip_header_lines` | integer (>= 0) |  |  |  |
-| `source` | object | yes |  |  |
-| `targets` | object or list of object |  |  |  |
+| `relation` | one of `equals` \| `subset` \| `superset` \| `set_equals` \| `identical` \| `resolves` |  |  | The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts exists on disk). |
+| `skip_header_lines` | integer (>= 0) |  |  | For the `identical` relation only: drop this many leading lines from both files before comparison, to ignore a differing license or generated header. |
+| `source` | object | yes |  | The file whose extracted value(s) form the reference side of the relation — a single `{ file, extract }`, or (set relations only) `{ files: <glob>, extract }` whose matches are unioned into one set. |
+| `targets` | object or list of object |  |  | The file(s) compared against the source, one relation check per target — a `{ files: <glob>, extract }` map or a list of `{ file, extract }` pins; omitted for the `resolves` relation (whose target is the filesystem). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
