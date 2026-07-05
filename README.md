@@ -161,6 +161,8 @@ alint suggest                       # human-readable proposal table
 alint suggest --format yaml         # paste-ready config snippet
 alint suggest --format json         # stable shape for agent consumption
 alint suggest --explain             # show file-level evidence per proposal
+alint suggest --confidence high     # raise the proposal threshold (low|medium|high; default medium)
+alint suggest --include-bundled     # also propose bundled rulesets you already extend
 ```
 
 For agent-driven workflows where `AGENTS.md` / `CLAUDE.md` / `.cursorrules` carries the directives the agent reads at session start, `alint export-agents-md` renders the active rule set as a markdown directive block. alint becomes the single source of truth, and the agent reads what alint enforces:

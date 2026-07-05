@@ -94,13 +94,23 @@ Release-aware documentation is enforced mechanically (ADR-0007; see
 checklist so the release-gated pieces land and nothing drifts:
 
 1. **Newly-released options and prose.** Any option gated with an `x-since` for
-   this version now ships. Drop its `x-since` keyword from
-   `schemas/v1/config.json` (then `gen-schema`), and unwrap its
-   `<!-- alint:since=X -->` prose in `docs/rules.md` / `docs/site/reference/**`.
-   The gates strip these pre-release and `--released-version` catches up at the
-   tag, so unwrapping is cosmetic, but it keeps the source honest. For v0.14:
-   `root_only` on `file_absent` / `dir_exists` / `dir_absent` (add its prose to
-   `file_absent` / `dir_absent`, which currently only carry it in the table).
+   this version now ships; unwrap it at the source. This is cosmetic (the gates
+   strip these pre-release and `--released-version` catches up at the tag), but
+   it keeps the source honest.
+   - **Schema `x-since`.** For a schemars-migrated kind the keyword is
+     type-derived, so remove the `#[schemars(extend("x-since" = "<ver>"))]`
+     attribute from the option's Rust struct, then run `gen-schema`. Editing
+     `schemas/v1/config.json` directly is silently reverted by `gen-schema` and
+     fails `--check`. For a hand-authored branch, drop the keyword from
+     `config.json`, then `gen-schema`.
+   - **Prose sentinels.** Unwrap every `<!-- alint:since=<ver> -->` block; grep
+     `alint:since` across `docs/rules.md` and `docs/site/reference/**` to find all.
+   For v0.14: remove `#[schemars(extend("x-since" = "0.14"))]` from
+   `crates/alint-rules/src/{file_absent,dir_absent,dir_exists}.rs` (`root_only`),
+   and unwrap the six `alint:since=0.14` blocks: five in `docs/rules.md`
+   (`root_only` on `file_absent`/`dir_absent`/`dir_exists`, plus
+   `no_zero_width_chars` and `no_symlinks`) and one in
+   `docs/site/reference/output-formats/index.md`.
 2. **Claims whose scope changed.** Narrow any published claim the cut walked
    back. The Kani proof is scoped to the *lexical* path-confinement policy since
    the post-v0.13 H1 fix, so `roadmap.json` / CHANGELOG wording must not imply

@@ -21,7 +21,7 @@ The image's `WORKDIR` is `/repo`, so the bind-mount lets alint see your repo as 
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.13.0 check
 ```
 
-Tags published per release: the exact git tag (`:v0.13.0`), the bare semver (`:0.13.0`), the `<major>.<minor>` channel (`:0.10`), and `:latest`.
+Tags published per release: the exact git tag (`:v0.13.0`), the bare semver (`:0.13.0`), the `<major>.<minor>` channel (`:0.13`), and `:latest`.
 
 ## Apply auto-fixes
 

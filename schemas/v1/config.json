@@ -883,6 +883,7 @@
       "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` — the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
       "properties": {
         "allow_missing_target": {
+          "description": "When true, an absent target file or a missing extracted target value is tolerated instead of reported as drift.",
           "type": "boolean"
         },
         "kind": {
@@ -918,6 +919,7 @@
           ]
         },
         "relation": {
+          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts exists on disk).",
           "enum": [
             "equals",
             "subset",
@@ -928,11 +930,13 @@
           ]
         },
         "skip_header_lines": {
+          "description": "For the `identical` relation only: drop this many leading lines from both files before comparison, to ignore a differing license or generated header.",
           "minimum": 0,
           "type": "integer"
         },
         "source": {
           "additionalProperties": false,
+          "description": "The file whose extracted value(s) form the reference side of the relation — a single `{ file, extract }`, or (set relations only) `{ files: <glob>, extract }` whose matches are unioned into one set.",
           "oneOf": [
             {
               "required": [
@@ -961,6 +965,7 @@
           "type": "object"
         },
         "targets": {
+          "description": "The file(s) compared against the source, one relation check per target — a `{ files: <glob>, extract }` map or a list of `{ file, extract }` pins; omitted for the `resolves` relation (whose target is the filesystem).",
           "oneOf": [
             {
               "additionalProperties": false,
@@ -1050,6 +1055,7 @@
           ]
         },
         "select": {
+          "description": "Glob selecting the directories to check.",
           "type": "string"
         }
       },
@@ -1123,6 +1129,7 @@
           "const": "every_matching_has"
         },
         "require": {
+          "description": "One or more nested rules that every file or directory matching `select` must satisfy.",
           "items": {
             "$ref": "#/$defs/nested_rule"
           },
@@ -1954,6 +1961,7 @@
           "const": "generated_file_fresh"
         },
         "normalize": {
+          "description": "Normalization applied before comparison to absorb trailing-newline churn: `none`, `trim`, or `final-newline`.",
           "enum": [
             "none",
             "trim",
@@ -3091,12 +3099,15 @@
           "type": "string"
         },
         "entries_are_globs": {
+          "description": "Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation.",
           "type": "boolean"
         },
         "exclude_query": {
+          "description": "A structured query selecting entries to subtract from the extracted list before resolution is checked.",
           "type": "string"
         },
         "expect": {
+          "description": "Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`.",
           "enum": [
             "any",
             "file",
@@ -3137,10 +3148,12 @@
           "const": "registry_paths_resolve"
         },
         "must_contain": {
+          "description": "When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation.",
           "type": "string"
         },
         "orphans": {
           "additionalProperties": false,
+          "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the \"new crate not wired into the workspace\" detector).",
           "properties": {
             "space": {
               "type": "string"
@@ -3198,9 +3211,11 @@
           "$ref": "#/$defs/level"
         },
         "message": {
+          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
           "type": "string"
         },
         "policy_url": {
+          "description": "Link to a human-readable policy justification.",
           "format": "uri",
           "type": "string"
         },
@@ -3216,6 +3231,7 @@
           "type": "object"
         },
         "when": {
+          "description": "Gate the rule on a fact-based expression (available from v0.2).",
           "type": "string"
         }
       },

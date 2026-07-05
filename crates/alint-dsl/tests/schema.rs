@@ -43,6 +43,61 @@ fn schema_is_well_formed_json() {
     let _: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA_V1).expect("valid JSON");
 }
 
+/// Every kind-specific rule option must render a non-blank Options-table cell on
+/// alint.org (that table is generated from this schema). An option with no
+/// `description` — inline, or on the `$ref` target it points to — ships as a
+/// blank cell: the class of bug that once left 16 fields empty. This gate fails
+/// the build if any rule-branch option would render blank, whether the schema is
+/// hand-authored (`"description"` in the branch) or schemars-derived (a `///`
+/// doc-comment on the `Options` field). The `kind` discriminator is exempt.
+#[test]
+fn every_rule_option_has_a_description() {
+    let schema: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA_V1).expect("valid JSON");
+    let defs = schema["$defs"].as_object().expect("schema has $defs");
+
+    let has_desc = |node: &serde_json::Value| {
+        node.get("description")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+
+    let mut gaps: Vec<String> = Vec::new();
+    for (branch_name, branch) in defs {
+        if !branch_name.starts_with("rule_") {
+            continue;
+        }
+        let Some(props) = branch
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        for (prop_name, prop) in props {
+            if prop_name == "kind" || has_desc(prop) {
+                continue; // the discriminator, or an inline description is present
+            }
+            // No inline description — a `$ref` is acceptable only if its target is described.
+            let ref_ok = prop
+                .get("$ref")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|r| r.rsplit('/').next())
+                .and_then(|target| defs.get(target))
+                .is_some_and(has_desc);
+            if !ref_ok {
+                gaps.push(format!("{branch_name}.{prop_name}"));
+            }
+        }
+    }
+
+    assert!(
+        gaps.is_empty(),
+        "these rule options have no description and would render as blank cells in \
+         alint.org's Options tables — add one (a `///` doc-comment on the schemars \
+         `Options` field, or a `\"description\"` in the hand-authored schema branch):\n  {}",
+        gaps.join("\n  "),
+    );
+}
+
 #[test]
 fn schema_compiles_as_draft_2020_12() {
     let _ = compile_schema();

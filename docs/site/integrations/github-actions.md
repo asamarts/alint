@@ -24,6 +24,7 @@ This runs `alint check --format github` against `.` and emits findings as `::err
   with:
     version: v0.13.0        # release tag; omit to follow the pinned action ref
     path: .                # directory to lint (default: .)
+    working-directory: .   # dir the action runs in (default: the runner workspace)
     format: github         # human | json | sarif | github (default)
     config: |              # extra config path(s), one per line
       .alint.yml

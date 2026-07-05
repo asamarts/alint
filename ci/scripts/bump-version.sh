@@ -98,6 +98,18 @@ for f in "${SNIPPET_FILES[@]}"; do
   fi
 done
 
+# 2a-bis. Docker `<major>.<minor>` channel tag (docker.md). The loop above only
+#   rewrites full-version pins (`:0.13.0`); the bare minor-channel tag (`:0.13`)
+#   has no patch component, so it never matched and silently rotted for several
+#   releases (shipped `:0.10` at v0.13.0). Rewrite it here. Ordering matters: the
+#   full-version pass already bumped `:0.13.0`, and the trailing `[^0-9.]|$`
+#   guard keeps this pass from re-matching a full pin.
+CUR_MINOR="${CUR%.*}"
+NEW_MINOR="${NEW%.*}"
+if [[ -f docs/site/integrations/docker.md ]]; then
+  sed -i -E "s#:${CUR_MINOR//./\\.}([^0-9.]|\$)#:${NEW_MINOR}\1#g" docs/site/integrations/docker.md
+fi
+
 # 2b. npm shim version. The package itself ships zero JS behaviour
 #     — it downloads the matching binary at install time — but
 #     `npm view @asamarts/alint version` reports whatever is in
