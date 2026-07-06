@@ -76,3 +76,12 @@ bash ci/scripts/likec4.sh
 # Run `cargo run -p xtask -- gen-mermaid` to refresh after a model change.
 echo "==> Running xtask gen-mermaid --check"
 cargo run -q -p xtask -- gen-mermaid --check
+
+# `strip-since.mjs` release-gates the main-overlaid reference docs in
+# docs-bundle.yml, stripping `<!-- alint:since=X -->` blocks newer than the
+# release tag so unreleased prose can't reach the bundle (or the live site). It
+# is a standalone port of strip_unreleased_prose (xtask/src/docs_export.rs);
+# these tests pin it byte-for-byte to the Rust semantics so the two can't drift.
+# Needs Node (set up by the Docs job).
+echo "==> Running node --test ci/scripts/strip-since.test.mjs"
+node --test ci/scripts/strip-since.test.mjs

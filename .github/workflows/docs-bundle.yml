@@ -103,16 +103,37 @@ jobs:
             docs/site/about/architecture-diagrams.md docs/site/concepts/how-it-works.md
           echo "Overlaid reference + design docs from origin/main ($(git rev-parse --short origin/main))."
 
+      - name: Release-gate the overlaid docs (strip unreleased since-blocks)
+        # The overlay above brings main's reference + design prose into the
+        # tag-built tree, and that prose may carry `<!-- alint:since=X -->` blocks
+        # staged for a FUTURE release (e.g. a v0.14 baseline note). The release
+        # TAG's docs-export (next step) predates the P-REF stripper, so it cannot
+        # gate them — without this step an unreleased block reaches the bundle
+        # AND the live site, and a link inside it to a not-yet-shipped page (a
+        # since-gated whole page the tag correctly omits) dangles the check-links
+        # gate. Strip here with a standalone port of strip_unreleased_prose, keyed
+        # to the release tag, so nothing newer than the released version ships.
+        # This lifts the former "reference overlay stays within released
+        # behaviour by convention" limitation: since-gated prose may now live in
+        # the overlaid docs and is gated mechanically. Idempotent once the tag's
+        # own docs-export gains the stripper. (ADR-0007; documentation-drift.md
+        # P-REF. The rule-page bridge below gates separately via MAIN's xtask.)
+        run: |
+          set -euo pipefail
+          node ci/scripts/strip-since.mjs --released-version "${BUNDLE_SOURCE#v}" \
+            docs/site/reference \
+            docs/site/about/architecture-diagrams.md \
+            docs/site/concepts/how-it-works.md \
+            docs/design/ARCHITECTURE.md \
+            docs/design/ROADMAP.md
+
       - name: Generate docs-bundle/
         # This runs the RELEASE TAG's docs-export, so it must NOT pass a flag the
-        # tag's xtask lacks. P-REF's `--released-version` (stripping unreleased
-        # `<!-- alint:since=X -->` blocks from the main-overlaid
-        # docs/site/reference) only exists from v0.14 on — and the tag's
-        # copy_site_tree has no stripper anyway — so reference-overlay
-        # release-gating activates once v0.14 is the release tag. Until then the
-        # reference overlay stays within released behaviour by convention. (The
-        # rule-page bridge below DOES gate, because it runs MAIN's docs-export
-        # from a worktree, where the flag exists.)
+        # tag's xtask lacks — the main-overlaid reference/design docs were already
+        # release-gated by the standalone stripper step above (the tag's
+        # copy_site_tree has no stripper of its own). The rule-page bridge below
+        # gates separately, because it runs MAIN's docs-export from a worktree
+        # where `--released-version` exists.
         run: cargo run -q -p xtask -- docs-export
         # Output lives at target/docs-bundle/.
 
