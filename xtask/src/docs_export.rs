@@ -1614,10 +1614,120 @@ pub(crate) fn cli_view(sub: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// The contiguous indented body of a top-level `--help` section (e.g.
+/// `"Commands:"` / `"Options:"`): the indented lines after the header, up to the
+/// next non-indented header. Blank lines are dropped.
+fn help_section_body<'a>(help: &'a str, header: &str) -> Vec<&'a str> {
+    let mut lines = help.lines();
+    for line in lines.by_ref() {
+        if line.trim_end() == header {
+            break;
+        }
+    }
+    let mut body = Vec::new();
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(char::is_whitespace) {
+            break; // reached the next section header
+        }
+        body.push(line);
+    }
+    body
+}
+
+/// Parse an indented clap `term  description` block (a `Commands:` or `Options:`
+/// body) into `(term, description)` pairs, folding wrapped continuation lines
+/// into the preceding description. clap puts each term at a shallow indent (2 or
+/// 6) and wraps its description at a deeper column, which is how we tell them
+/// apart.
+fn parse_help_definition_list(lines: &[&str]) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for line in lines {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if indent <= 6 {
+            let (term, desc) = trimmed.split_once("  ").unwrap_or((trimmed, ""));
+            entries.push((term.trim().to_string(), desc.trim().to_string()));
+        } else if let Some((_, desc)) = entries.last_mut() {
+            if !desc.is_empty() {
+                desc.push(' ');
+            }
+            desc.push_str(line.trim());
+        }
+    }
+    entries
+}
+
+/// Render the top-level `alint --help` as a formatted CLI landing page: the
+/// about blurb, the usage line, a Commands table (each linked to its subcommand
+/// page), and a Global-options table. Everything is parsed from the captured
+/// `--help`, so it can never drift from the binary. Returns `None` if the help
+/// doesn't parse into a sane shape (no options found) so the caller falls back
+/// to the raw help dump — a clap format change degrades to the old behaviour,
+/// never to garbage.
+fn format_top_help(help: &str) -> Option<String> {
+    let commands = parse_help_definition_list(&help_section_body(help, "Commands:"));
+    let options = parse_help_definition_list(&help_section_body(help, "Options:"));
+    if options.is_empty() {
+        return None;
+    }
+
+    let about = help
+        .lines()
+        .take_while(|l| !l.starts_with("Usage:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    let usage = help
+        .lines()
+        .find(|l| l.starts_with("Usage:"))
+        .unwrap_or_default();
+
+    let esc = |s: &str| s.replace('|', "\\|");
+    let known: std::collections::HashSet<&str> = CLI_REFERENCE_SUBCMDS.iter().copied().collect();
+
+    let mut out = String::new();
+    if !about.is_empty() {
+        let _ = writeln!(&mut out, "{about}\n");
+    }
+    if !usage.is_empty() {
+        let _ = writeln!(&mut out, "```\n{usage}\n```\n");
+    }
+    if !commands.is_empty() {
+        let _ = writeln!(&mut out, "## Commands\n");
+        let _ = writeln!(&mut out, "| Command | Description |");
+        let _ = writeln!(&mut out, "| --- | --- |");
+        for (cmd, desc) in &commands {
+            let name = cmd.split_whitespace().next().unwrap_or(cmd);
+            let cell = if known.contains(name) {
+                format!("[`{cmd}`](/docs/cli/{name}/)")
+            } else {
+                format!("`{cmd}`")
+            };
+            let _ = writeln!(&mut out, "| {cell} | {} |", esc(desc));
+        }
+        let _ = writeln!(&mut out);
+    }
+    let _ = writeln!(&mut out, "## Global options\n");
+    let _ = writeln!(&mut out, "These apply to every subcommand.\n");
+    let _ = writeln!(&mut out, "| Flag | Description |");
+    let _ = writeln!(&mut out, "| --- | --- |");
+    for (flag, desc) in &options {
+        let _ = writeln!(&mut out, "| `{}` | {} |", esc(flag), esc(desc));
+    }
+    let _ = writeln!(&mut out);
+    let _ = writeln!(&mut out, "<sub>Generated from `alint --help`.</sub>");
+
+    Some(out)
+}
+
 /// Build the alint binary in release mode, then capture
 /// `alint --help` and `alint <subcmd> --help` for each subcommand.
-/// Each captured help text becomes its own markdown page under
-/// `cli/<subcmd>.md`.
+/// The top-level help renders as a formatted landing page (`cli/index.md`);
+/// each subcommand's help becomes its own page under `cli/<subcmd>.md`.
 fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
     let bin = build_release_binary()?;
 
@@ -1637,9 +1747,15 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
     let _ = writeln!(&mut index, "  order: 1");
     let _ = writeln!(&mut index, "---");
     let _ = writeln!(&mut index);
-    let _ = writeln!(&mut index, "```");
-    index.push_str(&top);
-    let _ = writeln!(&mut index, "```");
+    // Prefer a formatted landing page (Commands + Global-options tables) parsed
+    // from `--help`; fall back to the raw dump if the help doesn't parse.
+    if let Some(body) = format_top_help(&top) {
+        index.push_str(&body);
+    } else {
+        let _ = writeln!(&mut index, "```");
+        index.push_str(&top);
+        let _ = writeln!(&mut index, "```");
+    }
     fs::write(cli_dir.join("index.md"), index)?;
 
     let subcmds = CLI_REFERENCE_SUBCMDS;

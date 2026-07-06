@@ -250,6 +250,52 @@ fn cli_reference_subcmds_match_command_enum() {
     );
 }
 
+/// The top-level `--help` renders as a formatted landing page: a Commands table
+/// (known subcommands linked, clap builtins plain), a Global-options table with
+/// wrapped descriptions folded into one cell, and a raw-dump fallback when the
+/// help doesn't parse. Everything comes from the captured `--help`, so it can't
+/// drift from the binary.
+#[test]
+fn format_top_help_renders_tables_and_falls_back() {
+    let sample = "\
+A monorepo linter.
+
+Usage: alint [OPTIONS] [COMMAND]
+
+Commands:
+  check    Lint the repository
+  fix      Auto-fix violations
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -c, --config <CONFIG>  Path to a config file
+      --no-gitignore     Disable .gitignore handling
+                         (overrides config)
+  -h, --help             Print help
+";
+    let out = format_top_help(sample).expect("well-formed help parses");
+    // Global-options table, with the wrapped continuation folded into one cell.
+    assert!(out.contains("## Global options"), "{out}");
+    assert!(
+        out.contains("| `-c, --config <CONFIG>` | Path to a config file |"),
+        "{out}"
+    );
+    assert!(
+        out.contains("Disable .gitignore handling (overrides config)"),
+        "{out}"
+    );
+    // Commands table: a known subcommand links to its page; a clap builtin does not.
+    assert!(out.contains("[`check`](/docs/cli/check/)"), "{out}");
+    assert!(out.contains("| `help` | Print this message"), "{out}");
+    assert!(
+        !out.contains("[`help`]"),
+        "clap builtin must not be linked: {out}"
+    );
+
+    // No Options section -> None, so the caller keeps the raw `--help` dump.
+    assert!(format_top_help("Usage: alint\n\nCommands:\n  check  Lint\n").is_none());
+}
+
 /// `PascalCase` -> `kebab-case`. `ExportAgentsMd` ->
 /// `export-agents-md`, matching clap's default conversion.
 fn pascal_to_kebab(ident: &str) -> String {
