@@ -120,6 +120,13 @@ jobs:
         # P-REF. The rule-page bridge below gates separately via MAIN's xtask.)
         run: |
           set -euo pipefail
+          # strip-since.mjs is main-tracked tooling absent from the release tag
+          # checked out above (the bundle is built from the tag), so pull just the
+          # script from main before running it — the same reason the rule-page
+          # bridge below runs MAIN's xtask from a worktree. origin/main was already
+          # fetched by the overlay step; fetch again so this step is self-contained.
+          git fetch --quiet origin main
+          git checkout origin/main -- ci/scripts/strip-since.mjs
           node ci/scripts/strip-since.mjs --released-version "${BUNDLE_SOURCE#v}" \
             docs/site/reference \
             docs/site/about/architecture-diagrams.md \
