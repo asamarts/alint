@@ -3,6 +3,7 @@ title: 'max_directory_depth'
 description: 'Tree depth from repo root may not exceed max_depth. alint max_directory_depth rule, structure family.'
 sidebar:
   order: 1
+categories: ['structure']
 ---
 
 Tree depth from repo root may not exceed `max_depth`. A shallow depth stops deeply-nested imports and keeps CI path globs sane.

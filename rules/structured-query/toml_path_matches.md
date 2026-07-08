@@ -3,6 +3,7 @@ title: 'toml_path_matches'
 description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
 sidebar:
   order: 7
+categories: ['structured-query']
 ---
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.

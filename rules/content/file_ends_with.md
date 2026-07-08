@@ -3,6 +3,7 @@ title: 'file_ends_with'
 description: 'Byte-level prefix / suffix check. alint file_ends_with rule, content family.'
 sidebar:
   order: 5
+categories: ['content']
 ---
 
 Byte-level prefix / suffix check. Works on any bytes (binary safe, unlike `file_header`).

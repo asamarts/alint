@@ -3,6 +3,7 @@ title: 'filename_regex'
 description: 'Basename matches a regex. alint filename_regex rule, naming family.'
 sidebar:
   order: 2
+categories: ['naming']
 ---
 
 Basename matches a regex. Use `stem: true` to match the stem only.

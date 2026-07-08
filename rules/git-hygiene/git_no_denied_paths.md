@@ -3,6 +3,7 @@ title: 'git_no_denied_paths'
 description: 'Fire when any tracked file matches a configured glob denylist. alint git_no_denied_paths rule, git hygiene family.'
 sidebar:
   order: 4
+categories: ['git-hygiene']
 ---
 
 Fire when any tracked file matches a configured glob denylist. The absence-axis companion of `git_tracked_only`: instead of asking "does this tracked path exist?", it asks "is anything tracked that matches my denylist?" One rule covers what would otherwise need one `file_absent` per pattern. Reports every matching denylist entry per offending path so a single file hitting two patterns surfaces both.

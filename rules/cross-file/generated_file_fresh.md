@@ -3,6 +3,7 @@ title: 'generated_file_fresh'
 description: 'A committed artefact must equal what a declared command generator produces, in one of two modes (exactly one of file / outputs).'
 sidebar:
   order: 8
+categories: ['cross-file']
 ---
 
 A committed artefact must equal what a declared `command` generator produces, in one of two modes (exactly one of `file` / `outputs`). **alint never leaves regenerated files behind** — it *verifies* freshness, it does not run codegen as a build step. Either mode runs a user-declared, maintainer-trusted process, so the kind is trust-gated to your own top-level config (same tier as the `command` rule). Single-shot, opt-in. Spawn-failure / non-zero exit / timeout are each a clear, distinct violation. `normalize` (`none` / `trim` / `final-newline`) absorbs trailing-newline churn.

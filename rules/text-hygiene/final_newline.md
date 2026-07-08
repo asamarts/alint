@@ -3,6 +3,7 @@ title: 'final_newline'
 description: 'File must end with a single \n. alint final_newline rule, text hygiene family.'
 sidebar:
   order: 2
+categories: ['text-hygiene']
 ---
 
 File must end with a single `\n`. Fixable via `file_append_final_newline`.

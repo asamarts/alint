@@ -3,6 +3,7 @@ title: 'json_path_equals'
 description: 'Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.'
 sidebar:
   order: 1
+categories: ['structured-query']
 ---
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.

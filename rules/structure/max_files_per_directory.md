@@ -3,6 +3,7 @@ title: 'max_files_per_directory'
 description: 'Per-directory fanout may not exceed max_files. alint max_files_per_directory rule, structure family.'
 sidebar:
   order: 2
+categories: ['structure']
 ---
 
 Per-directory fanout may not exceed `max_files`. Useful for vendor directories that accidentally grow to thousands of entries.

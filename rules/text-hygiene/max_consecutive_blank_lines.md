@@ -3,6 +3,7 @@ title: 'max_consecutive_blank_lines'
 description: 'Cap runs of blank lines to max. alint max_consecutive_blank_lines rule, text hygiene family.'
 sidebar:
   order: 6
+categories: ['text-hygiene']
 ---
 
 Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.

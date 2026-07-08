@@ -3,6 +3,7 @@ title: 'file_min_lines'
 description: 'File must have at least min_lines lines (\n-terminated, with an unterminated trailing segment counting as one more, wc -l semantics).'
 sidebar:
   order: 9
+categories: ['content']
 ---
 
 File must have at least `min_lines` lines (`\n`-terminated, with an unterminated trailing segment counting as one more — `wc -l` semantics). Use for "README has more than a title and a TODO".

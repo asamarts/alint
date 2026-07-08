@@ -3,6 +3,7 @@ title: 'dir_absent'
 description: 'Directory counterpart of file_absent. alint dir_absent rule, existence family.'
 sidebar:
   order: 4
+categories: ['existence']
 ---
 
 Directory counterpart of `file_absent`. The match-and-fire semantics are the same as `file_absent` — including the `.gitignore` interaction. A `dir_absent` rule with `paths: "**/target"` only fires when `target/` exists in the walked tree; if it's gitignored, the walker filters it out and the rule stays silent.

@@ -3,6 +3,7 @@ title: 'no_case_conflicts'
 description: 'Flag paths that differ only by case (e.g. alint no_case_conflicts rule, portable metadata family.'
 sidebar:
   order: 1
+categories: ['portable-metadata']
 ---
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.

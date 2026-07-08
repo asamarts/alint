@@ -3,6 +3,7 @@ title: 'dir_exists'
 description: 'Directory counterpart of file_exists. alint dir_exists rule, existence family.'
 sidebar:
   order: 3
+categories: ['existence']
 ---
 
 Directory counterpart of `file_exists`. Every match must correspond to a real directory in the walked tree.

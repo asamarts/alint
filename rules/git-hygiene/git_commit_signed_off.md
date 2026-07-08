@@ -3,6 +3,7 @@ title: 'git_commit_signed_off'
 description: 'Assert every commit in scope carries a DCO (Developer Certificate of Origin) Signed-off-by: trailer, required by every CNCF / Linux.'
 sidebar:
   order: 6
+categories: ['git-hygiene']
 ---
 
 Assert every commit in scope carries a DCO (Developer Certificate of Origin) `Signed-off-by:` trailer — required by every CNCF / Linux Foundation / kernel-style project. A commit lacking the trailer fires one violation, with the short SHA + subject snippet so you know which to amend (`git commit --amend -s` or `git rebase --signoff`).

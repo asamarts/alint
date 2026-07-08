@@ -3,6 +3,7 @@ title: 'file_header'
 description: 'The first N lines must match a regex (line-oriented). alint file_header rule, content family.'
 sidebar:
   order: 3
+categories: ['content']
 ---
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.

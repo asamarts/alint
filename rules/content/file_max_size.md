@@ -3,6 +3,7 @@ title: 'file_max_size'
 description: 'File must be at most max_bytes in size. alint file_max_size rule, content family.'
 sidebar:
   order: 7
+categories: ['content']
 ---
 
 File must be at most `max_bytes` in size. Catches accidental large-blob commits.

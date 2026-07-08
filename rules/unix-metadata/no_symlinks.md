@@ -3,6 +3,7 @@ title: 'no_symlinks'
 description: 'Flag tracked paths that are symbolic links. alint no_symlinks rule, unix metadata family.'
 sidebar:
   order: 1
+categories: ['unix-metadata']
 ---
 
 Flag tracked paths that are symbolic links. Symlinks are a portability footgun: Windows NTFS needs admin rights to create them, git-for-Windows can silently flatten them, CI runners vary.

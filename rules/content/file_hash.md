@@ -3,6 +3,7 @@ title: 'file_hash'
 description: 'Content SHA-256 must equal the expected digest. alint file_hash rule, content family.'
 sidebar:
   order: 6
+categories: ['content']
 ---
 
 Content SHA-256 must equal the expected digest. Rules-as-tripwire for generated / vendored files that should never drift.

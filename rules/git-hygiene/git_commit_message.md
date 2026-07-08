@@ -3,6 +3,7 @@ title: 'git_commit_message'
 description: 'Validate commit-message shape via regex, max-subject-length, or required-body. alint git_commit_message rule, git hygiene family.'
 sidebar:
   order: 5
+categories: ['git-hygiene']
 ---
 
 Validate commit-message shape via regex, max-subject-length, or required-body. At least one of the three must be set; combine all three for full Conventional-Commits-style enforcement. Subject length counts characters, not bytes (a 50-char emoji subject is 50, not 200).

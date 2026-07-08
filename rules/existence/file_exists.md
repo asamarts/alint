@@ -3,6 +3,7 @@ title: 'file_exists'
 description: 'Every glob match in paths must correspond to a real file. alint file_exists rule, existence family.'
 sidebar:
   order: 1
+categories: ['existence']
 ---
 
 Every glob match in `paths` must correspond to a real file. Use an array to accept any of several names.

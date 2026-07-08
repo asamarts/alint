@@ -3,6 +3,7 @@ title: 'indent_style'
 description: 'Every non-blank line indents with the configured style (tabs or spaces). alint indent_style rule, text hygiene family.'
 sidebar:
   order: 5
+categories: ['text-hygiene']
 ---
 
 Every non-blank line indents with the configured `style` (`tabs` or `spaces`). When `style: spaces`, optional `width` enforces a multiple.

@@ -3,6 +3,7 @@ title: 'no_illegal_windows_names'
 description: 'Reject path components Windows can''t represent:. alint no_illegal_windows_names rule, portable metadata family.'
 sidebar:
   order: 2
+categories: ['portable-metadata']
 ---
 
 Reject path components Windows can't represent:

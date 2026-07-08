@@ -3,6 +3,7 @@ title: 'no_empty_files'
 description: 'no_empty_files rule in alint''s structure family.'
 sidebar:
   order: 3
+categories: ['structure']
 ---
 
 Flag zero-byte files. Fixable via `file_remove`.

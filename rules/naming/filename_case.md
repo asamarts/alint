@@ -3,6 +3,7 @@ title: 'filename_case'
 description: 'Basename (stem only or full) matches a case convention: snake, kebab, pascal, camel, screaming-snake, flat, lower, upper.'
 sidebar:
   order: 1
+categories: ['naming']
 ---
 
 Basename (stem only or full) matches a case convention: `snake`, `kebab`, `pascal`, `camel`, `screaming-snake`, `flat`, `lower`, `upper`.

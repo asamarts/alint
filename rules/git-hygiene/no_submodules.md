@@ -3,6 +3,7 @@ title: 'no_submodules'
 description: 'Flag the presence of .gitmodules at the repo root, always, regardless of paths. alint no_submodules rule, git hygiene family.'
 sidebar:
   order: 1
+categories: ['git-hygiene']
 ---
 
 Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`. For general "file X must not exist" checks, use `file_absent`.

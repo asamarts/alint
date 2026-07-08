@@ -3,6 +3,7 @@ title: 'file_absent'
 description: 'No file matching paths may exist in the walked tree. alint file_absent rule, existence family.'
 sidebar:
   order: 2
+categories: ['existence']
 ---
 
 No file matching `paths` may exist in the walked tree. The inverse of `file_exists`.

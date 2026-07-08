@@ -3,6 +3,7 @@ title: 'file_content_matches'
 description: 'File contents must contain at least one match for a regex. alint file_content_matches rule, content family.'
 sidebar:
   order: 1
+categories: ['content']
 ---
 
 File contents must contain at least one match for a regex.

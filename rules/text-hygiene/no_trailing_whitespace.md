@@ -3,6 +3,7 @@ title: 'no_trailing_whitespace'
 description: 'No line may end with space or tab. alint no_trailing_whitespace rule, text hygiene family.'
 sidebar:
   order: 1
+categories: ['text-hygiene']
 ---
 
 No line may end with space or tab.

@@ -3,6 +3,7 @@ title: 'git_commit_no_fixup'
 description: 'Fail on residual fixup! / squash! / amend! commits left in scope, the ones git commit --fixup / --squash produce, meant to be collapsed by.'
 sidebar:
   order: 7
+categories: ['git-hygiene']
 ---
 
 Fail on residual `fixup!` / `squash!` / `amend!` commits left in scope — the ones `git commit --fixup` / `--squash` produce, meant to be collapsed by `git rebase --autosquash` before merging. Forgetting to rebase is the universal case; this rule catches the leftover so it doesn't land on the main branch.

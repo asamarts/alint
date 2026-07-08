@@ -3,6 +3,7 @@ title: 'command'
 description: 'Shell out to an external CLI per matched file. alint command rule, plugin (tier 1) family.'
 sidebar:
   order: 1
+categories: ['plugin-tier-1']
 ---
 
 Shell out to an external CLI per matched file. Exit `0` is a pass; non-zero is one violation whose message is the (truncated) stdout+stderr. Working directory is the repo root; stdin is closed.

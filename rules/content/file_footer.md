@@ -3,6 +3,7 @@ title: 'file_footer'
 description: 'Last lines lines of each file in scope must match a regex. alint file_footer rule, content family.'
 sidebar:
   order: 11
+categories: ['content']
 ---
 
 Last `lines` lines of each file in scope must match a regex. Mirror of `file_header` anchored at the end of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.

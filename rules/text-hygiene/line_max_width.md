@@ -3,6 +3,7 @@ title: 'line_max_width'
 description: 'Cap line length in characters (not bytes, code points). alint line_max_width rule, text hygiene family.'
 sidebar:
   order: 4
+categories: ['text-hygiene']
 ---
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
