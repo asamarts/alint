@@ -3,7 +3,7 @@ title: 'file_min_size'
 description: 'File must be at least min_bytes in size. alint file_min_size rule, content family.'
 sidebar:
   order: 8
-categories: ['content']
+categories: ['content', 'structure']
 ---
 
 File must be at least `min_bytes` in size. Catches placeholder / stub files that pass existence checks but add no information (a 0-byte `LICENSE`, a `README.md` with only a title).

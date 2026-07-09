@@ -11,17 +11,17 @@ alint ships 89 rule kinds across 13 families (78 distinct rule behaviors plus 11
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 14 rules
+- [Content](/docs/rules/content/) — 17 rules
 - [Structured query](/docs/rules/structured-query/) — 9 rules
-- [Naming](/docs/rules/naming/) — 2 rules
-- [Text hygiene](/docs/rules/text-hygiene/) — 6 rules
-- [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 3 rules
-- [Encoding](/docs/rules/encoding/) — 1 rule
-- [Structure](/docs/rules/structure/) — 3 rules
-- [Portable metadata](/docs/rules/portable-metadata/) — 2 rules
-- [Unix metadata](/docs/rules/unix-metadata/) — 4 rules
+- [Naming](/docs/rules/naming/) — 4 rules
+- [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
+- [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 13 rules
+- [Encoding](/docs/rules/encoding/) — 5 rules
+- [Structure](/docs/rules/structure/) — 9 rules
+- [Portable metadata](/docs/rules/portable-metadata/) — 4 rules
+- [Unix metadata](/docs/rules/unix-metadata/) — 5 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
-- [Cross-file](/docs/rules/cross-file/) — 16 rules
+- [Cross-file](/docs/rules/cross-file/) — 19 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical

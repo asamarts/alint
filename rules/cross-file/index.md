@@ -10,6 +10,9 @@ Rule kinds in the **Cross-file** family. Each rule below links to its own page w
 
 | Rule | Description |
 | --- | --- |
+| [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) | Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. |
+| [`changeset_requires_path`](/docs/rules/git-hygiene/changeset_requires_path/) | The `<since>...HEAD` diff must **add** (git status `A`) at least one path matching `add_glob:`, the "did you add a changelog entry?" gate. |
+| [`pair_changed_together`](/docs/rules/git-hygiene/pair_changed_together/) | If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range, the **co-change** gate. |
 | [`pair`](/docs/rules/cross-file/pair/) | For every file matching `primary`, a file matching the `partner` template must exist. |
 | [`pair_hash`](/docs/rules/cross-file/pair_hash/) | The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file, either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). |
 | [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) | A manifest file enumerates path entries; each must resolve to an on-disk artefact. |

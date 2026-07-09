@@ -24,3 +24,6 @@ Rule kinds in the **Content** family. Each rule below links to its own page with
 | [`file_shebang`](/docs/rules/content/file_shebang/) | First line of each file in scope must match the `shebang` regex. |
 | [`file_is_text`](/docs/rules/content/file_is_text/) | Content is detected as text (magic bytes + UTF-8 validity check), fails on binary files matched by `paths`. |
 | [`file_is_ascii`](/docs/rules/content/file_is_ascii/) | Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. |
+| [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) | Every file with `+x` set must begin with `#!`. |
+| [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) | Every file starting with `#!` must have `+x` set. |
+| [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) | Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). |

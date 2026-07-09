@@ -3,7 +3,7 @@ title: 'file_shebang'
 description: 'First line of each file in scope must match the shebang regex. alint file_shebang rule, content family.'
 sidebar:
   order: 12
-categories: ['content']
+categories: ['content', 'unix-metadata']
 ---
 
 First line of each file in scope must match the `shebang` regex. Pairs with `executable_has_shebang` (which checks shebang *presence* on `+x` files) — `file_shebang` checks shebang *shape*.

@@ -3,7 +3,7 @@ title: 'markdown_paths_resolve'
 description: 'Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo.'
 sidebar:
   order: 3
-categories: ['git-hygiene']
+categories: ['git-hygiene', 'cross-file']
 ---
 
 Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. Targets the AGENTS.md / CLAUDE.md / `.cursorrules` staleness problem: agent-context files reference paths in inline backticks (`` `src/api/users.ts` ``), and those paths drift as the codebase evolves. The `agent-context-no-stale-paths` rule shipped in v0.6 surfaces *candidates* via a regex; this rule does the precise existence check.

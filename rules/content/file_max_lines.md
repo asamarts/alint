@@ -3,7 +3,7 @@ title: 'file_max_lines'
 description: 'File must have at most max_lines lines, using the same accounting as file_min_lines. alint file_max_lines rule, content family.'
 sidebar:
   order: 10
-categories: ['content']
+categories: ['content', 'structure']
 ---
 
 File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. Catches the everything-module anti-pattern — a `lib.rs` / `index.ts` / `helpers.py` that grew unbounded.

@@ -3,7 +3,7 @@ title: 'line_endings'
 description: 'Every line ending matches target: lf or crlf. alint line_endings rule, text hygiene family.'
 sidebar:
   order: 3
-categories: ['text-hygiene']
+categories: ['text-hygiene', 'portable-metadata']
 ---
 
 Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single file fail.

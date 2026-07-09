@@ -10,6 +10,7 @@ Rule kinds in the **Unix metadata** family. Each rule below links to its own pag
 
 | Rule | Description |
 | --- | --- |
+| [`file_shebang`](/docs/rules/content/file_shebang/) | First line of each file in scope must match the `shebang` regex. |
 | [`no_symlinks`](/docs/rules/unix-metadata/no_symlinks/) | Flag tracked paths that are symbolic links. |
 | [`executable_bit`](/docs/rules/unix-metadata/executable_bit/) | Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`). |
 | [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) | Every file with `+x` set must begin with `#!`. |
