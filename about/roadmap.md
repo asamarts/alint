@@ -1203,8 +1203,9 @@ shipped, each artifact regenerate-and-diff gated:
   both gated by `gen-arch --check`.
 - **Pragmatic formal methods.** proptest properties as an always-on behaviour spec,
   plus a verified Kani bounded proof of the lexical path-confinement policy (the
-  component-sequence normalization; the symlink-aware runtime confinement is
-  enforced separately and covered by proptest + tests, not Kani).
+  component-sequence normalization; both cover the lexical layer only. The
+  symlink-aware runtime confinement is a separate canonicalize-and-recheck,
+  covered by integration tests, not the proof).
 - **Contract-consuming site.** alint.org reads `facts.json` through a typed loader,
   cross-checks at sync time that the bundled contract agrees with the site's own
   manifest, and renders its headline counts and roadmap claims from it — so the
