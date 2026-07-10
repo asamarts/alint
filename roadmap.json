@@ -77,7 +77,7 @@
       "version": "0.13",
       "title": "Engineering foundations: spec-driven development",
       "kind": "release",
-      "blurb": "A drift-elimination program on main: schema, facts, and architecture generated and gated, plus a Kani-verified path-confinement proof."
+      "blurb": "A drift-elimination program on main: schema, facts, and architecture generated and gated, plus a Kani-verified proof of the lexical path-confinement policy."
     },
     {
       "version": "0.14",
