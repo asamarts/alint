@@ -428,7 +428,7 @@ Ranked by leverage.
   (2026-04-26) as `xtask bench-scale`. Publishes
   hyperfine timings across (size × scenario × mode)
   matrix with hardware fingerprint; numbers under
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.5.7/`](https://github.com/asamarts/alint/tree/main/docs/benchmarks/macro/results/linux-x86_64/v0.5.7).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7/`](https://github.com/asamarts/alint/tree/main/docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7).
   1M-file size opt-in via `--include-1m`.
 - ✅ **Competitive comparisons**, shipped in v0.5.7
   (2026-04-26). Same harness now drives ls-lint,
@@ -675,7 +675,7 @@ impossible to ship.
   regresses past `--threshold` (default ±10%). PR-time
   gate-ready.
 - ✅ **Baseline against v0.7.0** captured at
-  `docs/benchmarks/micro/results/linux-x86_64/v0.7.0/` so v0.9 engine
+  `docs/benchmarks/micro/results/linux-x86_64-ryzen-3900x/v0.7.0/` so v0.9 engine
   work has a documented floor.
 - ✅ **Fixture-completeness test**:
   `alint-dsl/tests/schema.rs::fixture_covers_every_registered_rule_kind`
