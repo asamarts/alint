@@ -12,15 +12,19 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.13.0** (2026-06-17). The spec-driven-development program
-landed as a release: the config JSON Schema is now generated from the Rust
-option types (powering the per-rule options docs), `facts.json` and
-`roadmap.json` publish the surface-area counts and the public roadmap as
-machine-readable contracts, the crate-dependency graph and the architecture are
-a single LikeC4 model rendered interactively on alint.org (and exported to
-Mermaid for GitHub), and the v0.12.0 path-confinement boundary gains a
-Kani-verified proof of its lexical containment policy. All are generated and regenerate-and-diff gated, and
-alint.org renders its headline counts from `facts.json`. See the
+**Latest release: v0.14.0** (2026-07-18). The adoption release: `alint baseline`
+snapshots a repo's existing violations behind a content fingerprint, so `alint
+check` reports and gates only on new findings, making alint a drop-in blocking
+merge gate on an established codebase without a flag-day cleanup (for SARIF the
+suppressed findings are marked, not deleted, so GitHub Code Scanning dismisses
+them instead of flapping fixed-then-reopened). Rule kinds become many-to-many
+over categories, browsable with the new `alint rules list` / `alint rules
+categories` catalog commands; `--only <id>` runs a single rule; and a whole-repo
+security and correctness cycle closes an `extends:` trust-bypass, a YAML
+flow-scalar DoS, a bidi/zero-width fail-open, a symlink path-confinement escape,
+and a FIFO read hang. The v0.13 spec-driven-development foundations (generated,
+drift-proof `facts.json` / `roadmap.json` / schema / architecture contracts)
+remain in force; see the
 [Engineering foundations](#v013-engineering-foundations-spec-driven-development)
 section below.
 

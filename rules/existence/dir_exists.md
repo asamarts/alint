@@ -16,6 +16,8 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
   level: error
 ```
 
+**Optional `root_only: true`** (like `file_exists`) requires the match to be a
+directory directly at the repository root, not nested.
 **Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
 
 ## Options
@@ -23,5 +25,6 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `git_tracked_only` | boolean |  | `false` | Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`. |
+| `root_only` | boolean |  | `false` | If true, only a directory directly at the repository root satisfies the rule; a nested match does not. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
