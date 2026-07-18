@@ -1,24 +1,20 @@
 ---
-title: 'alint check'
-description: 'Run linters against the current (or given) directory. Default command. alint check CLI reference and flags.'
+title: 'alint baseline'
+description: 'Snapshot the current violations into a baseline file, so a later alint check --baseline <file> fails only on NEW. alint baseline CLI reference and flags.'
 ---
 
-The pipeline `alint check` runs:
-
-<likec4-view view-id="checkFlow"></likec4-view>
-
 ```
-Run linters against the current (or given) directory. Default command
+Snapshot the current violations into a baseline file, so a later `alint check --baseline <file>` fails only on NEW violations. The one-step way to adopt alint as a blocking gate on a legacy repo: `alint baseline` (commit it), then gate on the delta. The baseline is whole-tree; `--changed` is not accepted
 
-Usage: alint check [OPTIONS] [PATH]
+Usage: alint baseline [OPTIONS] [PATH]
 
 Arguments:
-  [PATH]  Root of the repository to lint. Defaults to the current directory [default: .]
+  [PATH]  Root of the repository to snapshot. Defaults to the current directory [default: .]
 
 Options:
   -c, --config <CONFIG>  Path to a config file
-      --changed          Restrict the check to files in the working-tree diff. Without `--base`, uses `git ls-files --modified --others --exclude-standard` (right shape for pre-commit). With `--base`, uses `git diff --name-only <base>...HEAD` (right shape for PR checks). Cross-file rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) and existence rules (`file_exists` et al.) still consult the full tree by definition
-      --base <REF>       Base ref for `--changed` (uses three-dot `<base>...HEAD`, i.e. merge-base diff). Implies `--changed`
+      --output <FILE>    Where to write the baseline. Default: `.alint-baseline.json` at the repo root
+      --accept-new       Allow the regenerated baseline to grandfather violations not already present in the existing file. Without it, `alint baseline` refuses to ADD new entries (and prints a `+N / -M` summary) so re-running it to prune fixed entries can't silently accept new debt. Stale-entry removal never needs it
   -f, --format <FORMAT>  Output format [default: human]
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes

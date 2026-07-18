@@ -8,6 +8,533 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-18
+
+The adoption release. **Baseline mode** (`alint baseline` + `alint check
+--baseline`) grandfathers a repo's existing violations behind a
+content-fingerprinted snapshot, so `alint check` reports and gates only on *new*
+findings — alint becomes a blocking merge gate on an established codebase without
+a flag-day cleanup, and for SARIF the suppressed findings are *marked, not
+deleted*, so GitHub Code Scanning dismisses them instead of flapping
+fixed-then-reopened. Rule kinds go **many-to-many over categories**, so a
+cross-cutting kind like `no_bidi_controls` surfaces under both Encoding and
+Security instead of hiding under one family, browsable with the new `alint rules
+list` / `alint rules categories` catalog commands. Alongside: `--only <id>` to
+run a single rule (the exact command the `agent` output format now emits per
+fixable finding), a more readable `--compact` output, and a whole-repo security
+and correctness cycle that closes an `extends:` trust-bypass, a YAML flow-scalar
+DoS, a bidi/zero-width fail-open, a symlink path-confinement escape, and a FIFO
+read hang.
+
+### Added
+
+- **Baseline mode** (`alint baseline` + `alint check --baseline <file>`): snapshot
+  the current violations into a committed `.alint-baseline.json`, then gate only
+  on NEW violations — the one-step way to adopt alint as a blocking merge gate on
+  a large legacy repo. The baseline is matched on a content/structural fingerprint
+  (not line numbers), so it survives benign code motion and re-triggers when the
+  offending code is edited; per-fingerprint counts keep duplicates honest. A
+  missing or unsupported-`schema_version` baseline is a hard error, never a silent
+  no-op. `--show-baselined` lists the suppressed findings; `--strict-baseline`
+  fails when the baseline has stale entries (fixed findings); `alint baseline`
+  refuses to grandfather new debt on regeneration without `--accept-new`.
+  Per-rule baseline identity is audited so a fingerprint can't silently mask a
+  new finding: a path-bearing violation defaults to a `(rule, path)` identity
+  (so threshold rules like `file_max_lines` stay grandfathered as the file grows
+  instead of churning), while structured-query, cross-file, first-offender and
+  multi-per-line rules declare a precise `baseline_key`; a coverage-audit
+  collision-invariant (`coverage_audit_baseline_safety`) enforces the boundary
+  for every kind. A `baseline: <path>` key in `.alint.yml` persists the baseline
+  so CI need not pass `--baseline` (the flag overrides it); like
+  `allow_out_of_root`, it is honored only from the user's own top-level config —
+  never from an `extends:`'d or nested config — so a published ruleset can't
+  choose what the gate suppresses, and a config key pointing at a missing file is
+  the same hard error as a missing `--baseline` (never a silent ungated run).
+  For **SARIF**, baselined findings are *marked, not removed* — re-emitted with
+  `suppressions: [{ kind: "external" }]` + `baselineState: "unchanged"` +
+  `partialFingerprints`, so GitHub Code Scanning dismisses (rather than
+  closes-then-reopens) the alert; live findings carry `baselineState: "new"` + a
+  fingerprint for run-to-run correlation. The `json` envelope gains a
+  `baselined_suppressed` count (and the suppressed list under `--show-baselined`).
+  Robustness: loading a baseline **sums** duplicate fingerprints (so a git-merged
+  file suppresses the total, not the last writer's count); regeneration is
+  byte-identical across runs and its guard counts new *occurrences* (a higher
+  count on an existing finding is fresh debt too, not just new fingerprints).
+  The baseline file is excluded from the walk by `check`, `baseline`, and
+  `fix` alike, so a broad-glob content rule (`**/*.json`, `line_max_width`, …)
+  can't lint alint's own JSON-Lines artifact as a new violation — the adopt-flow
+  stays clean, regeneration doesn't see the artifact as fresh debt, and `fix`
+  never rewrites it. The exclusion is root-anchored, so a same-named baseline in
+  a subdirectory is still linted (its real violations aren't silently dropped).
+  See `docs/design/baseline.md` / ADR-0006.
+- `--only <RULE_ID>` on `check` and `fix` (repeatable): restrict the run to the
+  named rule id(s) from the effective config. An id that matches no loaded rule
+  is an error, so typos fail loudly. This is the command the `agent` output
+  format emits per fixable violation (`alint fix --only <rule-id>`), which
+  previously named a flag that did not exist.
+- `fix_command` field on `check --format agent` violations: the exact argv
+  (e.g. `["fix", "--only", "<id>"]`) to auto-fix a single violation, present
+  iff `fix_available`. Lets an agent run the fix programmatically instead of
+  parsing the command out of the English `agent_instruction`.
+- **Many-to-many rule categories.** Every rule kind now belongs to one or more
+  categories (primary first), so cross-cutting kinds surface where users look for
+  them — `no_bidi_controls` is both Encoding and Security, `git_commit_gpg_signed`
+  both Git hygiene and Security — instead of hiding under a single family. Two new
+  config-independent catalog commands: `alint rules list` (browse every kind,
+  optionally `--category <slug>` or `--search <text>`) and `alint rules
+  categories` (the vocabulary: slug, title, and how many kinds each holds); and
+  `alint list --category <slug>` filters *this repo's* effective config by
+  category. The membership is one source of truth — a generated in-crate bridge
+  (`gen-categories`), validated against `docs/rules.md` + the registry and
+  drift-gated — published as `facts.json` `categories` (slug / title / order) and
+  `rule_categories` (kind → category slugs), which alint.org renders and
+  cross-checks so the site can't disagree with the tool. `docs/rules.md` gains a
+  `Categories:` line per kind, and the site's family pages list membership by
+  category. The category vocabulary stays the current 13 families; only the
+  membership becomes many-to-many. Design: `docs/design/rule-categories.md`; CLI
+  shape in ADR-0009.
+
+### Changed
+
+- **`--compact` output is more readable: the `:line:col` suffix is dropped for
+  findings that have no specific location, and the path prefix is colored.**
+  A repo-level or whole-file finding used to render `<repo>:0:0:` / `PLAN.md:0:0:`,
+  where the `:0:0` was noise that also misleadingly implied line 0 / column 0.
+  Located findings still emit the full `path:line:col:` an editor / grep jumps on;
+  only findings with no location drop it (`PLAN.md: warning: …`). The location
+  prefix is now magenta so each finding's start is visually distinct even without
+  the grouped format's per-file separators. Color is TTY-only (SGR is stripped
+  when piped), so `path:line:col` piping is unchanged.
+- **`git_tracked_only` and `respect_gitignore` are now kind-specific options,
+  rejected off the kinds that honor them (ADR-0008).** Both moved off the common
+  `RuleSpec` into per-kind options: `git_tracked_only` into the four existence
+  kinds (`file_exists` / `file_absent` / `dir_exists` / `dir_absent`), and the
+  per-rule `respect_gitignore` override into `file_exists` alone (the only kind
+  that honors it - the pitfall-#18 escape hatch). A rule that sets either field on
+  a kind that does not honor it now fails to load with a clean error instead of
+  silently ignoring it (the fail-loud the fields' doc-comments always promised).
+  This is a stricter load: configs that set `git_tracked_only` on a non-existence
+  kind, or `respect_gitignore` on any kind but `file_exists`, used to load and
+  no-op and now error. The workspace-level `respect_gitignore:` walker setting is
+  unaffected. The four existence kinds are now schemars-derived, which also fills
+  their previously-empty option descriptions.
+
+### Fixed
+
+- **Auto-fixers no longer corrupt binaries or risk truncation on failure.**
+  The byte-level fixers (`line_endings`, `no_bom`, `final_newline`, and the
+  `file_prepend` / `file_append` content injectors) rewrote raw bytes with no
+  binary guard, so a `paths: "**"` glob could corrupt a matched binary file
+  (a CRLF rewrite inserting `\r` into a `.png`, a stray final `\n`, a stripped
+  leading BOM-shaped byte). They now skip files detected as binary. Separately,
+  every content-rewriting fixer wrote in-place via `std::fs::write`
+  (open-truncate-then-write), so a crash or `ENOSPC` mid-write could leave the
+  original truncated or lost; writes now go through a shared atomic helper
+  (sibling temp + `fsync` + rename, preserving the file mode — and writing
+  *through* an in-tree symlink so the link survives, not the rename clobbering
+  it into a regular file). `final_newline`'s
+  on-disk path is reconciled with its editor path (it no longer double-appends
+  to an already-terminated or empty file). (H3)
+- **`validate-config` rejects an output format it can't render.** `alint
+  --format sarif validate-config` (or `validate-config --format sarif`) silently
+  fell through to human output; it now fails loudly (exit 2) for any format
+  other than `human` / `json`, regardless of flag position — matching how
+  `list` / `facts` / `explain` already gate their formats. (M13)
+- **`fix` rejects an output format it can't render, before touching files.**
+  `alint fix --format sarif` (or `github` / `junit` / `gitlab` / `agent`)
+  silently degraded to human output with a *success* exit code — those formats
+  describe findings, not fixes, and have no fix-report renderer. It now fails
+  loudly (exit 2), and because `fix` mutates the tree the gate runs *before* any
+  fix is applied, so a rejected format never leaves a half-fixed repo. `fix`
+  still renders `human` / `json` / `markdown`; the error points `agent` users at
+  `check --format agent`, whose per-violation `fix_command` drives the agentic
+  fix loop. (E2E sweep)
+- **`json` / `agent` output survives a non-UTF-8 filename.** Both serialized the
+  violation path through serde's strict `&Path` impl, which *errors* on a
+  non-UTF-8 path (legal on Unix) — so a single oddly-named file made `alint
+  check --format json` (or `--format agent`) abort with `exit 2: "path contains
+  invalid UTF-8 characters"` while every other format rendered it fine. Both now
+  render the path lossily (invalid bytes → U+FFFD), consistent with SARIF /
+  GitLab / JUnit / GitHub / Markdown / human. Surfaced by a new weird-path ×
+  output-format matrix that renders a violation path carrying each format's
+  metacharacters, a control byte, and a non-UTF-8 byte through all eight
+  formats. (E2E sweep)
+- **Markdown output no longer splits a heading on a newline-in-path.** A file
+  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `## \`path\``
+  inline-code heading, orphaning the rest onto a following line. `md_inline_code`
+  now collapses those control chars to a space (inline code is single-line), and
+  the weird-path matrix asserts every Markdown heading stays complete. (review
+  follow-up)
+- **Exit code `3` (internal error) is now actually produced.** The README
+  documented `3` for an internal alint error vs `2` for a config/usage error,
+  but every error funnelled to `2`, so a script could never tell "fix your
+  config" from "file an alint bug." A new internal-error class is tagged at the
+  genuinely-internal sites (a bundled ruleset shipped inside the binary failing
+  to parse), and the CLI now returns `3` for those and `2` for everything a user
+  can fix. (M11)
+- **`no_symlinks` now flags directory symlinks.** It scanned only file
+  entries, so an in-tree symlink whose target is a *directory* (indexed as a
+  dir entry when the walk follows it) slipped through. It now scans all indexed
+  entries and re-stats each. (A symlink whose target escapes the repo root is
+  pruned by the walker before indexing and is still not flagged — recording
+  those safely is a tracked follow-up.) (M4)
+- **GitLab Code Quality no longer drops duplicate findings.** The
+  `fingerprint` was `SHA256(rule_id|path|message)`, so two genuinely-distinct
+  findings sharing all three (a generic-message per-line rule firing on
+  several lines of one file) produced the same fingerprint — and the Code
+  Climate spec GitLab consumes requires per-report uniqueness, so GitLab
+  silently kept only one. The fingerprint now folds in a per-report
+  `occurrence` discriminator. The line number is still deliberately excluded,
+  so a finding that drifts up/down stays the same issue across runs; only true
+  duplicates are disambiguated. (M10)
+- **`--config` is honest about being single-valued.** The flag help promised
+  "repeatable; later overrides earlier", but every consumer read only the
+  first `-c`, so a second was silently dropped — and worse, was position-
+  sensitive across the subcommand boundary, so `-c base.yml -c override.yml`
+  could use `base`. A second `--config` is now a hard error pointing at
+  `extends:` for composition, and the help text is corrected. (H4)
+- **The GitHub Action's `config:` input matches the single-valued `--config`.**
+  The action advertised "config file path(s), one per line" and emitted one
+  `--config` per line — but the H4 fix above made a second `--config` a hard
+  error, so any workflow passing two config paths broke (exit 2 from the
+  binary). The input is now documented as a single path pointing at `extends:`
+  for composition, and the action rejects more than one path itself with a clear
+  GitHub-annotated `::error::` rather than surfacing a raw CLI stderr. New
+  `action-selftest` jobs cover both the single-path happy path and the
+  multi-path rejection. (E2E sweep)
+- **A long flat `when:` chain fails loudly instead of aborting the process.**
+  The expression parser capped `(`/`[`/call nesting at depth 64, but a *flat*
+  chain — `a and a and …` (or `or`) — is parsed iteratively and never re-enters
+  the guarded recursion, so it slipped past the cap. An adversarial ~100k-operator
+  `when:` from an untrusted `extends:` ruleset built a deeply left-nested AST that
+  overflowed the stack on its recursive `Drop`/eval — an uncatchable abort, the
+  strongest determinism violation. Both chain loops now bound length the same way
+  nesting is bounded, so the chain fails with a normal parse error. (H5)
+- **The zero-width fixer strips the full set the rule flags.**
+  `no_zero_width_chars` flags U+2060 (WORD JOINER) and U+180E (MONGOLIAN VOWEL
+  SEPARATOR) alongside U+200B/C/D and body-internal U+FEFF, but the
+  `file_strip_zero_width` fixer hard-coded only the latter four — so a file
+  containing U+2060/U+180E was reported on every run yet never repaired, and
+  `--fix` never converged. Both fix paths now defer to the rule's own
+  `is_flagged_zero_width`, so detector and fixer can't drift apart again. (L1)
+- **`file_header` / `file_footer` fixers no longer stack duplicates.** When a
+  configured header/footer's content didn't satisfy the rule's own pattern,
+  the violation never cleared, so each `--fix` re-prepended/appended it. The
+  prepend/append fixers now skip when the file already begins/ends with that
+  content (idempotent across runs). (L4)
+- **`{token}` path templates no longer re-substitute.** `render_path` ran a
+  sequence of `String::replace` passes, so a token that appeared in an earlier
+  substitution's value (e.g. a file literally named `a{ext}.c`, stem `a{ext}`)
+  was wrongly re-expanded by a later pass. It now does a single left-to-right
+  scan, emitting each value once. (L8)
+- **The JSONPath dashed-key hint no longer false-fires inside string
+  literals.** A dash in a comparison literal (`@.x == 'a.dashed-value'`) used
+  to trigger the "use bracket notation" hint; quoted spans are now masked
+  before the check. (L11)
+- **`custom` facts now honor a 30s timeout.** The doc promised that a timing-out
+  custom-fact command resolves to the empty string, but the implementation used
+  a blocking `Command::output()` with no timeout — a hanging command froze the
+  run. It now drains output on a thread and kills the child at the deadline
+  (matching the `command` rule's 30s default). (L6)
+- **`when:` `matches` on a missing fact is falsy, not an error.** `null == "x"`
+  was already falsy, but `<missing fact> matches "x"` hard-errored — an
+  inconsistency. A missing (null) left-hand side now evaluates to `false`; a
+  non-string *value* is still a config-type error. (L10)
+- **`when:` string literals are decoded as UTF-8.** The lexer cast each byte to
+  `char` (Latin-1), so a non-ASCII literal like `vars.x == "café"` was lexed as
+  mojibake and could never match. Multi-byte scalars now lex correctly. (L3)
+- **`no_case_conflicts` folds case the Unicode way.** It lowercased ASCII-only,
+  so `É.txt`/`é.txt` (and other non-ASCII case pairs) slipped past — yet a
+  case-insensitive filesystem folds them. It now uses Unicode `to_lowercase`,
+  the strict portable default. (L2)
+- **`filename_case` `--fix` converges on non-ASCII names.** The `lower`/`upper`
+  conventions case-folded ASCII-only while the check was Unicode-aware, so a name
+  like `RÉSUMÉ.md` "fixed" to a form the check still rejected and re-fired every
+  run. `convert` now folds with Unicode `to_lowercase` / `to_uppercase`, so the
+  fixed name is a fixed point of the check. (W4)
+- **`command` argv is guarded against option-injection via filenames.** A repo
+  file named like a flag (e.g. `--write`) rendered from `{path}` could turn a
+  trusted `command: ["prettier", "--check", "{path}"]` into a destructive
+  `--write`. A path token that would render to a leading dash is now prefixed
+  with `./`; flags you wrote yourself are untouched. (L13)
+- **Unreadable files are reported, not silently skipped.** A non-`NotFound`
+  read error (permission denied, I/O) during the per-file walk was
+  indistinguishable from "file absent." Such errors are now logged at `warn`
+  (visible with `-v` / `RUST_LOG`); a genuinely-absent file still skips
+  silently and the run stays resilient. (L7)
+- **SARIF file paths are now valid URI references.** `artifactLocation.uri`
+  emitted the raw OS path, so a `\`-separated path on Windows broke GitHub
+  Code Scanning's repo-file mapping, and a path containing a space / `#` /
+  `%` was non-conformant. Paths are now forward-slashed and percent-encoded
+  per RFC 3986 (plain-ASCII paths are unchanged). (M9)
+- **The baseline flags fail loudly off `check`.** `--baseline`,
+  `--strict-baseline`, and `--show-baselined` are global but only `check`
+  honored them; on `fix` / `list` / `baseline` / … they were silently
+  ignored, breaking the flag's "a missing baseline is an error, never a
+  silent no-op" contract. They're now rejected on any subcommand but
+  `check` (the `baseline` subcommand writes via its own `--output`). (M12)
+- **The `is_text` rule kind no longer silently accepts unknown options.** The
+  `is_text` alias of `file_is_text` was registered without the
+  `deny_unknown_options` wrapper its canonical name carries, so a typo'd option
+  on an `is_text` rule was swallowed instead of failing the build (every other
+  kind, the canonical `file_is_text` included, already rejected it). A
+  registry-driven coverage test now probes **every** registered kind — aliases
+  included — so an alias can't diverge from its canonical kind again.
+- **`validate-config` (and `check`) now structurally validate nested `require:`
+  rules.** `for_each_dir` / `for_each_file` / `every_matching_has` build their
+  nested rules lazily per matched entry, so a nested rule with an unknown kind,
+  an unknown option, or a missing required field passed `validate-config` clean
+  and was caught by `check` only when the selector matched at least one entry
+  (with a selector matching nothing, never). Each rule now dry-builds its nested
+  specs at load, so these errors surface immediately — honoring
+  `validate-config`'s "is the config loadable?" contract. The new validation
+  immediately caught a real latent bug: the `examples/clap-rs-clap` config had a
+  nested `toml_path_matches` with an invalid JSONPath
+  (`$.package.metadata.docs.rs.rustdoc-args[*]` — the dashed `rustdoc-args` key
+  needs bracket notation, `['rustdoc-args']`), now fixed.
+- **A nested config declaring `allow_out_of_root:` is now rejected, not silently
+  dropped.** Every other trusted root-only key (`extends`, `facts`, `vars`,
+  `ignore`/`nested_configs`, `baseline`) already errored when set in a nested
+  `.alint.yml`; `allow_out_of_root` parsed and was ignored without feedback. The
+  out-of-root grant was never honored from a nested config (confinement always
+  held), but it now fails loudly for parity, so a subtree can't appear to grant
+  itself reads outside the repo root.
+- **`alint baseline` now rejects a non-default `--format` instead of silently
+  ignoring it.** `baseline` writes the baseline file plus a human summary and has
+  no machine-readable report output, so `baseline --format json` (etc.) was a
+  no-op; it now errors and points you to drop the flag.
+- **`filename_regex` no longer doubles a redundant anchor in its violation
+  message.** The rule auto-anchors with `^…$`, so a pattern written as `^test_`
+  rendered as `/^^test_$/`; it now shows the effective `/^test_$/`.
+- The `--only` flag's help said it was "a no-op for other subcommands"; it is
+  actually rejected there, and the bare `alint --only <id>` form lints the
+  current directory (for a path, use `alint check --only <id> <path>`). The help
+  text now says so, and the `alint baseline` summary pluralizes "occurrence"
+  correctly for a single occurrence.
+- **`root_only:` now works on `file_absent` / `dir_exists` / `dir_absent`.** The
+  option was documented as the existence-family counterpart of `file_exists`'s
+  `root_only` and used in a bundled ruleset, but the three sibling rules silently
+  ignored it. They now honor it — `root_only: true` restricts a glob that would
+  otherwise match at any depth (e.g. `**/NOTES.md`) to paths directly at the
+  repository root — with the option validated and published in the config schema,
+  like `file_exists`. (The bundled usages pin bare filenames, which already match
+  only the root, so their behavior is unchanged.)
+- **LSP server robustness.** The `alint lsp` server held its shared state behind
+  a `std::sync::Mutex` accessed via `.lock().unwrap()` at every site, so a panic
+  in any one async handler poisoned the lock and wedged the whole session
+  (every subsequent request panicked). It now uses a non-poisoning
+  `parking_lot::Mutex`, so a single handler panic can't cascade into a dead
+  server; the editor session survives.
+- `alint list --format json` and `alint explain <id> --format json` now emit a
+  stable JSON envelope (a rule inventory and a single-rule shape) instead of
+  silently printing the human output with a success exit code. An unsupported
+  `--format` for these commands is now an explicit error rather than a silent
+  human fall-through.
+- The `agent` output format no longer instructs agents to run
+  `alint fix --only <id>` when no such flag existed; `--only` now exists, and a
+  regression test parses every command the agent format emits against the real
+  CLI so a dead command can't reappear.
+- Corrected config examples that the loader (and the JSON schema) reject:
+  `docs/design/ARCHITECTURE.md` (`query:`/`pattern:` → `path:`/`matches:`,
+  map-keyed `rules:` → a list, a `sha256:`/`path:` `extends` mapping → SRI
+  URL-fragment + bare-string form, phantom `detect:`/`primary_language`/
+  `count_contributors` facts removed, `custom: {command:}` → `argv:`, WASM
+  plugin tier relabelled v0.13 → v0.14) and `docs/rules.md`
+  (`max:` → `max_width`/`max_depth`, `unique_by` `paths:` → `select:`).
+- Added the `agent` format to the README `--format` example block (it listed
+  seven of the eight formats) and removed the stale "Planned rulesets (v0.5)"
+  section from `docs/rules.md` (all five shipped).
+- The `*_path_equals` / `*_path_matches` rule reference pages no longer all
+  show `kind: json_path_*`: each page's example now leads with its own kind,
+  and the `*_path_matches` example gained the missing `toml_path_matches`
+  variant.
+- Fixed documentation links that dead-end for a reader browsing on GitHub:
+  a broken `crates/alint-core/src/when.rs` link (now the `when/` module),
+  the `/docs/rules/` cross-links in `ARCHITECTURE.md` (now absolute
+  `https://alint.org` URLs), and a "full reference at alint.org" banner on
+  the GitHub view of `docs/rules.md`.
+
+### Security
+
+- **Closed three RCE bypasses of the `extends:`/nested spawn gate.** The gate
+  that confines process-spawning rule kinds (`command`,
+  `command_idempotent`, `generated_file_fresh`) to the user's own top-level
+  config inspected only `rules[].kind` at each inherited source, so three
+  paths slipped past it: (1) an `extends:`'d ruleset could hide a spawning
+  kind in a `templates:` block and reference it from a `kind`-less
+  `extends_template:` rule that expands into a `command` rule *after* the
+  gate runs — meaning a single SRI-pinned `extends:` line could run
+  arbitrary code; (2) a nested `subdir/.alint.yml` (under
+  `nested_configs: true`) was never spawn-gated at all, so any subtree
+  config — addable via an untrusted monorepo PR, vendored dir, or submodule
+  — could declare `kind: command` and execute on `alint check`; and (3) the
+  `require:` block of `for_each_dir` / `for_each_file` / `every_matching_has`
+  carries *nested* rule specs whose `kind` flattens into the parent rule's
+  options, which neither the top-level check nor a post-`finalize` scan
+  inspects (found in pre-merge review). Fix: a spawning kind may no longer
+  appear in *any* `templates:` block (enforced source-agnostically in
+  `finalize`, and earlier with the offending ruleset named); nested configs
+  are now spawn-gated like `extends:` and may not declare `templates:`; and
+  the gate recurses into `require:` blocks at the raw-mapping level (the only
+  place that catches the nested kind, which never becomes a top-level rule).
+  A spawning kind in a top-level `rules:` entry — the intended, allowed case
+  — is unchanged. Seven regression tests encode the three PoCs plus the
+  allowed paths. See `docs/design/v0.14/post_v0.13_audit.md` (C1, C2, and the
+  `require:` vector).
+- **Path confinement now follows symlinks for config-derived reads.**
+  `normalize_confined` is purely lexical, so an in-repo symlink (`link ->
+  /etc`) let a lexically-confined `link/secret` escape the repo root at
+  read time and bypass the `allow_out_of_root` gate — a content/existence
+  disclosure oracle reachable from an `extends:`'d ruleset (notably
+  `json_schema_passes`, which echoes schema-compile errors into a
+  violation). Every config-derived read (`json_schema_passes`, `pair_hash`,
+  `cross_file`, `registry_paths_resolve`, and the `file_exists`
+  gitignore-bypass stat) now resolves symlinks and re-verifies containment
+  before reading; an escape is reported as out-of-root and honored only
+  under a top-level `allow_out_of_root`. The Kani proof and its prose are
+  corrected to scope the guarantee to the *lexical* policy (the filesystem
+  layer is guarded by code + tests, not the proof). (H1)
+- **`when:` expressions are depth-bounded.** A crafted `when:` from an
+  untrusted `extends:` ruleset — deeply nested parens, or a long flat
+  `a and a and …` chain — could overflow the parser or evaluator stack (an
+  uncatchable abort). Both now fail loudly past a generous depth cap. (H5)
+- **Structured-query rules no longer panic on a multibyte value.** The
+  `*_path_*` error renderer byte-sliced an untrusted matched value at
+  offset 80, which panics when a codepoint straddles that boundary —
+  crashing the whole parallel `check` run (and the LSP server). It now
+  truncates on a char boundary. (H2)
+- **Remote `extends:` no longer follows redirects (SSRF hardening).** ureq's
+  defaults (up to 10 redirects, downgrade to `http` allowed on a redirect hop)
+  let a pinned-but-malicious HTTPS host `302` a fetch to
+  `http://169.254.169.254/…` (cloud metadata) or any internal address. The
+  fetcher now refuses redirects outright; an `extends:` URL is SRI-pinned to
+  specific content, so it must point at the final resource and a redirect
+  surfaces as a clear error. (M1)
+- **Local `extends:` targets are confined to the config's directory.** A local
+  `extends: ../../../../etc/shadow` (or an absolute path) in a shared ruleset
+  committed to the repo was read off the host, and a YAML-parse error could
+  echo file content back — a read/exfil oracle. The loader now rejects any
+  local `extends:` target that resolves outside the top-level config's
+  directory; both sides are canonicalized so `..` and symlinks (an in-tree
+  symlink pointing out) are caught. A top-level `allow_out_of_root: true`
+  lifts it for the whole chain (the same blanket escape that lifts per-rule
+  read confinement); `extends:`'d and nested configs still cannot grant it. (M2)
+- **A non-UTF-8 commit can no longer bypass commit linting.** `parse_commit_log`
+  silently dropped any commit whose author name, email, or message was not
+  valid UTF-8, so a contributor could dodge `git_commit_subject_matches` /
+  author-allowlist / forbidden-pattern checks by using non-UTF-8 metadata.
+  Commits are now lossily decoded and still linted. (M6)
+- **`git_blame_age` no longer panics on a crafted author timestamp.** A commit
+  carrying a 19-digit author-time (parses as `u64`, overflows `SystemTime` on
+  `+`) aborted the run; the addition is now checked and a malformed timestamp
+  is dropped. (M7)
+- **`git_no_denied_paths` denylist patterns are anchored to any depth.** A
+  bare denied *literal* (no `/`, no wildcard) like `id_rsa` was root-anchored by
+  globset, so a tracked `secrets/id_rsa` evaded the denylist — a dangerous
+  default for a secrets control. (A bare *wildcard* like `*.pem` already crosses
+  `/` in globset, so it was never the gap — an earlier note over-generalised.)
+  Bare patterns are now auto-anchored to `**/<pattern>` (matching any depth,
+  root included — a no-op for wildcards, the real fix for literals); explicit-path
+  patterns (`secrets/*.key`, `**/*.pem`) are taken as written. (M5)
+- **Completed the Unicode control-character sets for the obfuscation rules.**
+  `no_bidi_controls` now also flags the implicit directional marks U+061C
+  (ALM), U+200E (LRM), and U+200F (RLM) — completing the Trojan-Source
+  (CVE-2021-42574) set that rustc's own lint covers; `no_zero_width_chars`
+  now also flags U+2060 (WORD JOINER) and U+180E. The strip fixers extend in
+  lockstep. Note: U+200D (ZWJ) stays flagged even though it joins emoji
+  sequences, so its strip fixer will break a literal emoji ZWJ sequence —
+  scope the rule away from files that legitimately carry such emoji. (L1)
+- **Per-file reads are bounded so a giant file can't OOM the run.** Only the
+  cross-file rule kinds capped their reads; the per-file engine/rule loops and
+  the structured-query kinds read whole files unbounded, so one committed
+  multi-GB blob could exhaust memory. The 256 MiB analysis cap now lives in
+  `alint-core` and gates every per-file read — the engine/rule loops skip an
+  over-cap file up front using the walk-time index size (no extra `stat`) and
+  log it at `warn`; the run stays resilient (one oversized file never aborts
+  the lint). (M3)
+- **Resource-exhaustion hardening (several spots).** A few unbounded
+  operations on attacker-influenced input are now capped: the `extends:`
+  chain has a depth cap (`MAX_EXTENDS_DEPTH = 64`) so a deeply-nested acyclic
+  chain errors instead of overflowing the recursion stack (L5); the remote-
+  `extends:` disk cache writes a PID-unique temp file instead of a fixed
+  `<sri>.yml.tmp` (no concurrent-run race) (L5); the "did you mean" suggester
+  skips length-mismatched candidates before building its edit-distance matrix,
+  bounding work on a multi-kilobyte unknown field name (L9); and a spawned
+  rule's captured stdout/stderr is capped at 64 MiB with the excess drained,
+  so a runaway generator can't OOM the run (L12). (L5, L9, L12)
+- **Human output neutralizes terminal escapes in untrusted text.** A repo
+  file named with an `\x1b[…]` sequence — or a `kind: command` rule whose
+  subprocess output carries ANSI codes — could clear the screen, hide
+  findings below the fold, or forge an "all rules passed." banner when a
+  human lints an untrusted repo (alint's `anstream` stream passes raw bytes
+  through on a TTY, exactly where the escapes fire). The grouped, compact,
+  and fix renderers now replace every control char (except the intentional
+  newline) in attacker-controlled paths/messages with a visible `\xNN`
+  escape. alint's own styling is unaffected, machine formats (JSON/SARIF/…)
+  are unchanged, and clean output is byte-identical (no TTY-conditional
+  divergence). (M8)
+- **An inherited ruleset can no longer lift path-confinement before its own
+  `extends:` resolves.** The loader derived `extends:`-target confinement from
+  `allow_out_of_root: true` at every recursion level, but the rejection of that
+  flag in a non-top-level config fired only *after* the sub-config had already
+  resolved its own `extends:`. So an inherited (untrusted) ruleset could set the
+  flag and read an out-of-root target — hang on a FIFO, slurp a large file, or
+  probe host paths as an existence oracle — before the reject could fire. Only
+  the user's own top-level config (and trust-equivalent `.alint.d/` drop-ins) may
+  now open that gate. (W1)
+- **Deeply-nested YAML flow collections can no longer hang the run.**
+  `serde_yaml_ng`/libyaml has no nesting limit and is super-linear on `[[[…` /
+  `{{{…`, so a crafted config, an `extends:`'d ruleset, or a `yaml_path_*` rule
+  over crafted repo content could stall for seconds-to-forever. A cheap pre-parse
+  flow-depth scan (shared in `alint-core`, cap 1024) now rejects such input
+  before libyaml sees it, matching the existing JSON/TOML/XML depth guards; it
+  counts only genuine flow opens, so a `[` inside a plain or quoted scalar never
+  false-rejects ordinary YAML. (W2)
+- **The Trojan-Source and zero-width rules no longer fail open on a non-UTF-8
+  byte.** `no_bidi_controls` and `no_zero_width_chars` abandoned the whole file
+  on the first invalid UTF-8 byte, so appending one stray `0xFF` suppressed
+  detection of every bidi override / zero-width char in it — a one-byte bypass of
+  a CVE-2021-42574 defense. Both now decode lossily and keep scanning the valid
+  runs. (W3)
+- **A direct read of an in-tree FIFO can no longer hang the run.** The walker
+  skips named pipes at index time, but the direct-read helpers reached by
+  shebang / prefix / suffix / structured rules on a config- or content-derived
+  path opened them anyway, blocking `O_RDONLY` until a writer appeared. They now
+  stat `is_file()` before opening, matching the walker. (W5)
+
+### Internal
+
+- Expanded the dogfood config (`.alint.yml`) to exercise alint's flagship rule
+  families on its own tree (Dog1): structured-query (`toml`/`json`/`yaml_path_equals`
+  over `Cargo.toml`, the VS Code `package.json`, and `action.yml`), cross-file
+  (`registry_paths_resolve` on the `[workspace] members`), and git-hygiene
+  (`git_no_denied_paths` for secret-shaped files). Each was negative-tested to
+  confirm it fires when broken; the dogfood stays green (46/46).
+- Split the two source files over the self-lint's `rust-file-max-lines`
+  threshold so the dogfood is fully green (Dog2, no behavior change):
+  `alint-dsl/src/lib.rs`'s test module moved to `src/tests.rs`, and
+  `xtask/src/docs_export.rs` split its tests + the drift-gate count parsers into
+  `docs_export/{tests,counts}.rs`. Verified the `docs-export` manifest counts
+  are unchanged.
+- The post-v0.12 audit fixes each ship with a regression test (a registry-driven
+  unknown-option probe over every kind, nested-`require:` and nested
+  `allow_out_of_root` rejection, the `baseline --format` guard, and the
+  `filename_regex` message). Workspace line coverage is 91.05%, above the 85% CI
+  floor.
+- Corrected `docs/design/baseline.md`: the `gitlab.rs` fingerprint is documented
+  as still using the legacy message-keyed scheme — the unification onto
+  `violation_fingerprint` landed for the SARIF `partialFingerprints` but the
+  GitLab migration is deferred (it needs precomputed fingerprints threaded to the
+  formatter) — and `line_max_width` is reclassified as a first-offender rule.
+- New drift gates so the doc-vs-schema, stale-status, generated-page, and
+  dead-link classes can't recur: `coverage_audit_doc_examples` loads every
+  fenced config example in the hand-written docs through the real config
+  loader; `coverage_audit_planned_rulesets` fails if a "Planned" section
+  names a ruleset already in `facts.json`; `structured_query_pages_lead_with_their_own_kind`
+  asserts each generated structured-query page leads with its own kind; and
+  `coverage_audit_doc_links` checks repo-doc links resolve (no broken
+  relative links, no GitHub-dead root-absolute links).
+
 ## [0.13.0] - 2026-06-17
 
 This release turns the documented surface into generated, drift-proof contracts.
@@ -15,7 +542,8 @@ The config JSON Schema is now derived from the Rust option types, powering a
 per-rule `## Options` table on every reference page; `facts.json` and
 `roadmap.json` publish the surface-area counts and the public roadmap as
 machine-readable artifacts; the path-confinement boundary from v0.12.0 gains a
-Kani-model-checked proof and proptest properties; and the architecture is
+Kani-model-checked proof of its lexical containment policy plus proptest
+properties; and the architecture is
 documented as a single interactive LikeC4 model on alint.org, exported to Mermaid
 for the GitHub repository.
 
@@ -63,9 +591,13 @@ for the GitHub repository.
 
 ### Security
 
-- **A Kani-model-checked proof and proptest properties now verify the
-  path-confinement boundary** introduced in v0.12.0 (the untrusted-`extends:`
-  threat model), turning that guarantee into a machine-checked invariant.
+- **A Kani-model-checked proof and proptest properties now verify the lexical
+  path-confinement policy** introduced in v0.12.0 (the untrusted-`extends:`
+  threat model): the `..`/absolute-root normalization can't underflow or escape.
+  Both cover the *lexical* layer only; the filesystem layer — an in-repo symlink
+  that resolves outside the root — is a separate runtime canonicalize-and-recheck
+  (`resolved_within_root`), covered by integration tests, not the proof. Turns
+  the lexical guarantee into a machine-checked invariant.
 
 ## [0.12.0] - 2026-06-07
 
@@ -699,7 +1231,7 @@ informational-notes channel surfaced via `--show-notes`.
   floor for external consumers pulling a single workspace crate by
   name.
 
-## [0.10.2] — 2026-05-21 (asciinema-demo underline-extension fix)
+## [0.10.2] - 2026-05-21 (asciinema-demo underline-extension fix)
 
 Targeted follow-up to v0.10.1. The alint.org landing-page demo
 rendered `docs:` link underlines extending past the URL text to
@@ -739,7 +1271,7 @@ configs continue to work; safe upgrade for every consumer.
   /tmp/demo-outputs/01.txt` would otherwise see `is_tty=false`
   and skip OSC 8 entirely. Empty / `0` values do NOT force.
 
-## [0.10.1] — 2026-05-20 (read_capped reach extension + post-release CI/docs hygiene)
+## [0.10.1] - 2026-05-20 (read_capped reach extension + post-release CI/docs hygiene)
 
 Small post-release follow-up to v0.10.0. Headline change: the
 `crate::io::read_capped` 256 MiB whole-file cap (introduced in
@@ -773,7 +1305,7 @@ for every consumer.
   silent skip (which masked an OOM-DoS surface on hostile /
   accidental multi-GB candidate files). `version: 1` unchanged.
 
-## [0.10.0] — 2026-05-20 (case-study coverage push: 8 rule kinds + 2 bundled rulesets + pre-release hardening sweep)
+## [0.10.0] - 2026-05-20 (case-study coverage push: 8 rule kinds + 2 bundled rulesets + pre-release hardening sweep)
 
 The "case-study coverage push" minor. Eight new rule kinds and
 two bundled rulesets aggregated from the 30-OSS-repo demand-
@@ -1051,7 +1583,7 @@ configs continue to work.
   gap existed only within `[Unreleased]`, so no released
   version is affected.
 
-## [0.9.23] — 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
+## [0.9.23] - 2026-05-17 (GitHub Action pinning + release-pipeline hardening)
 
 Distribution + release-reliability release. The headline is the
 GitHub Action change: a pinned action ref now pins the installed
@@ -1142,7 +1674,7 @@ under **Changed** below.
   from that exact ref. Pairs with the binary-pin change under
   **Changed**.
 
-## [0.9.22] — 2026-05-14 (doc-drift cleanup + prevention automation)
+## [0.9.22] - 2026-05-14 (doc-drift cleanup + prevention automation)
 
 Doc + prevention-automation cleanup release. A 2026-05-14 audit of
 the alint and alint.org repos surfaced 10 categories of drift
@@ -1232,7 +1764,7 @@ Marketplace on this release.
   comment) refreshed for v0.9.21 + 70 rule kinds + 13 families
   consistency.
 
-## [0.9.21] — 2026-05-14 (commit-range mode for git_commit_message)
+## [0.9.21] - 2026-05-14 (commit-range mode for git_commit_message)
 
 Headline feature: the `git_commit_message` rule's new `since:`
 option ([#26](https://github.com/asamarts/alint/issues/26)), which
@@ -1338,7 +1870,7 @@ that replaces a hand-edited table.
 - v0.9.18 / v0.9.19 / v0.9.20 macro-bench + criterion results
   published under `docs/benchmarks/`.
 
-## [0.9.20] — 2026-05-10 (cross-command output polish)
+## [0.9.20] - 2026-05-10 (cross-command output polish)
 
 Extends v0.9.19's width-aware-output / `--no-docs` / message-wrap
 treatment from `alint check` to every other human-renderer command
@@ -1401,7 +1933,7 @@ the bundled-rule messages.
   4-command sequence (check → cat .alint.yml → fix → check),
   same reading beats. Cleaner visual.
 
-## [0.9.19] — 2026-05-09 (output polish)
+## [0.9.19] - 2026-05-09 (output polish)
 
 Quality-of-life patch focused on the human formatter's behaviour
 in narrow terminals, screen recordings, and CI logs — surfaced
@@ -1464,7 +1996,7 @@ goes in the policy URL or the rule's docs page.
   global flags.
 - 1 `cli_flag_inventory` snapshot regenerated.
 
-## [0.9.18] — 2026-05-08 (pre-launch fixes)
+## [0.9.18] - 2026-05-08 (pre-launch fixes)
 
 Findings from the v0.9.17 deep-analysis pass (30 case studies — see
 [`docs/development/case-study-deep-analysis-log.md`](docs/development/case-study-deep-analysis-log.md))
@@ -1594,7 +2126,7 @@ numbers:
   deep-analysis log evidence table is the v0.9.18 ship-state
   authority.
 
-## [0.9.17] — 2026-05-06
+## [0.9.17] - 2026-05-06
 
 Corrective release that re-publishes v0.9.16's content + the
 build.rs/main.rs lint fixes that prevented v0.9.16's Release
@@ -1676,7 +2208,7 @@ who pulled the v0.9.16 tag will see no published artifacts at any
 of the usual channels (crates.io / Homebrew / Docker / npm); v0.9.17
 is the first publishable tag in the 0.9.16 content lineage.
 
-## [0.9.16] — 2026-05-06 (tag-only — never published, see v0.9.17)
+## [0.9.16] - 2026-05-06 (tag-only — never published, see v0.9.17)
 
 Config DX hardening release. Closes the launch-prep validation pass
 with seven-phase coverage of the 17 schema + runtime pitfalls
@@ -1971,7 +2503,7 @@ for publish coordinated with this release's docs roll:
 The drafts are not part of the v0.9.15 binary release; they ship
 when the alint.org site repo is updated next.
 
-## [0.9.14] — 2026-05-05
+## [0.9.14] - 2026-05-05
 
 CI automation release. The `bench-record.yml` workflow that
 captures publish-grade bench data on every release tag is now
@@ -2064,7 +2596,7 @@ this release was cut).
   pinned at the same SHAs as v0.9.12; separate "rotate +
   verify" cycle (note from v0.9.13).
 
-## [0.9.13] — 2026-05-04
+## [0.9.13] - 2026-05-04
 
 Dependency-refresh release. Closes the 10 open Dependabot PRs
 plus opportunistic bumps the version specs already accepted.
@@ -2159,7 +2691,7 @@ once the bench-record workflow lands the canonical capture.
 - `cargo doc --no-deps --workspace` with `RUSTDOCFLAGS=-D warnings`
   clean.
 
-## [0.9.12] — 2026-05-03
+## [0.9.12] - 2026-05-03
 
 Backlog cleanup release closing the explicitly-held v0.9 items
 that didn't fit cleanly into earlier cuts. Three structural
@@ -2247,7 +2779,7 @@ audits + one engine refactor + the bench-record CI fix.
   leisure or kept as historical artefacts of the broken
   state.
 
-## [0.9.11] — 2026-05-03
+## [0.9.11] - 2026-05-03
 
 Structural fix for the `git_tracked_only:` silent-no-op
 recurrence-risk shape. v0.9.10 closed the analogous
@@ -2349,7 +2881,7 @@ because the slow-path iteration cost is dominant.
 - **`when:` ownership** remains explicitly out of scope —
   different semantics, no shared silent-no-op shape.
 
-## [0.9.10] — 2026-05-03
+## [0.9.10] - 2026-05-03
 
 Structural fix for the `scope_filter:` silent-no-op bug class.
 v0.9.6 / v0.9.7 / v0.9.9 each shipped a different group of rules
@@ -2422,7 +2954,7 @@ predicates. The bug class can no longer recur.
   `git_tracked_only:` silently dropped) but the field is
   rarer in practice and currently 100 % wired up. Tracked.
 
-## [0.9.9] — 2026-05-03
+## [0.9.9] - 2026-05-03
 
 Patch release for two `scope_filter:` silent-no-op gaps surfaced
 by the post-v0.9.8 audit. v0.9.7 wired the filter through the
@@ -2513,7 +3045,7 @@ the `for_each_dir` literal-path bypass introduced in v0.9.8.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   clean.
 
-## [0.9.8] — 2026-05-02
+## [0.9.8] - 2026-05-02
 
 Cross-file dispatch fast paths, round 2. v0.9.5 closed the
 `for_each_dir × file_exists` cliff via the lazy `path_set` index;
@@ -2590,7 +3122,7 @@ backfill (1M S7 was stuck at ~614 s across all three releases).
 - All 376 alint-rules tests + 226 e2e scenarios + 183 alint-core
   tests + 11 new walker tests pass.
 
-## [0.9.7] — 2026-05-02
+## [0.9.7] - 2026-05-02
 
 Patch release for the v0.9.6 `scope_filter:` runtime no-op (v0.9.6
 shipped the field, the type, and the engine gate but never wired the
@@ -2662,7 +3194,7 @@ dormant dependency.
 - **`.alint.yml`** dogfood fact `is_rust` → `has_rust` to match the v0.9.6
   bundled-fact rename.
 
-## [0.9.6] — 2026-05-02
+## [0.9.6] - 2026-05-02
 
 Closes the v0.9 cut with the `scope_filter:` primitive — closest-
 ancestor manifest scoping for per-file rules, designed to make the
@@ -2730,7 +3262,7 @@ See [`docs/benchmarks/investigations/2026-05-scope-filter-baseline-drift/`](docs
 for the dispositive A/B and the lesson on machine-state drift in
 cross-version bench comparisons.
 
-## [0.9.5] — 2026-05-01
+## [0.9.5] - 2026-05-01
 
 Reopens v0.9 with cross-file dispatch fast paths, the
 test/coverage floor that prevents the same class of regression
@@ -2933,7 +3465,7 @@ HTML reports.
   `bench-scale`'s internal monorepo shape, so trees are
   byte-identical to the published bench corpus.
 
-## [0.9.4] — 2026-04-30
+## [0.9.4] - 2026-04-30
 
 Mechanical follow-up to v0.9.3: migrates 16 of the
 remaining ~22 per-file content rules to opt into the
@@ -2990,7 +3522,7 @@ paths), `structured_path` (which backs `json_path_*`,
   v0.9.4 numbers at
   `docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion/`.
 
-## [0.9.3] — 2026-04-30
+## [0.9.3] - 2026-04-30
 
 Third phase of the v0.9 engine-optimization cut: the
 per-file dispatch flip plus the per-rule scanning
@@ -3098,7 +3630,7 @@ implementation that proves the shape works.
   v0.9.3 numbers at
   `docs/benchmarks/archive/v0.9-development-phases/v0.9.3-dispatch-flip/criterion/`.
 
-## [0.9.2] — 2026-04-30
+## [0.9.2] - 2026-04-30
 
 Second phase of the v0.9 engine-optimization cut: the
 type-level memory pass. No new user-visible rule kinds,
@@ -3180,7 +3712,7 @@ touching the same rule bodies twice. See
   same-day per-phase delta comparisons. v0.9.2 numbers
   at `docs/benchmarks/archive/v0.9-development-phases/v0.9.2-memory-pass/criterion/`.
 
-## [0.9.1] — 2026-04-30
+## [0.9.1] - 2026-04-30
 
 First phase of the v0.9 engine-optimization cut. Parallel
 walker. No user-visible rule kinds, formatters, or
@@ -3261,7 +3793,7 @@ subcommands change; every v0.8 config runs unchanged.
   one file). Designed in `docs/design/v0.9/dispatch_flip.md`;
   ships as v0.9.3.
 
-## [0.8.2] — 2026-04-29
+## [0.8.2] - 2026-04-29
 
 Second hotfix on v0.8.0; supersedes v0.8.1. Same code as
 v0.8.0 / v0.8.1; manifest + script changes only.
@@ -3293,7 +3825,7 @@ alint) all failed.
   v0.8.0 and v0.8.1 remain partially published on
   crates.io; consumers should pin to v0.8.2 or `latest`.
 
-## [0.8.1] — 2026-04-29 (partially published — superseded by v0.8.2)
+## [0.8.1] - 2026-04-29 (partially published — superseded by v0.8.2)
 
 Reverted `publish = false` on alint-dsl/rules/output to fix
 v0.8.0's crates.io publish failure. Pipeline progressed
@@ -3312,7 +3844,7 @@ see v0.8.2 above for the resolution. Use v0.8.2 instead.
   comment block on each manifest documents the constraint
   so a future audit doesn't repeat the trap.
 
-## [0.8.0] — 2026-04-29
+## [0.8.0] - 2026-04-29
 
 > **Note**: this tag shipped to GitHub Releases, npm, Homebrew,
 > and Docker, plus `alint-core` on crates.io — but the `alint`
@@ -3452,7 +3984,7 @@ internal. Schema-compatible: every v0.7 config runs unchanged.
   (binary). The other three are internal implementation
   detail.
 
-## [0.7.0] — 2026-04-28
+## [0.7.0] - 2026-04-28
 
 Closes the v0.7 cut. Three new rule kinds and two new
 subcommands targeting agent-driven development workflows
@@ -3692,7 +4224,7 @@ duplicate config to maintain.
     level: warning
   ```
 
-## [0.6.0] — 2026-04-27
+## [0.6.0] - 2026-04-27
 
 Two bundled rulesets and a new output format aimed at the
 agent-driven-development era. Schema-compatible: every v0.5.12
@@ -3822,7 +4354,7 @@ kinds, no engine changes, no architectural shift.
   refreshed to mention `agent` in the `--color` flag's
   documented list of plain-bytes formats.
 
-## [0.5.12] — 2026-04-27
+## [0.5.12] - 2026-04-27
 
 Maintenance release. Verifies the npm auto-publish CI wiring
 end-to-end after v0.5.11's `publish-npm` job failed (the
@@ -3846,7 +4378,7 @@ npm install --save-dev @asamarts/alint
 npx alint check
 ```
 
-## [0.5.11] — 2026-04-27
+## [0.5.11] - 2026-04-27
 
 npm install channel. Closes the v0.5 milestone — every
 deferred item from the v0.5 roadmap is now shipped.
@@ -3894,7 +4426,7 @@ deferred item from the v0.5 roadmap is now shipped.
   postinstall can fetch the binary tarballs); reads
   `NPM_TOKEN` secret from repo settings.
 
-## [0.5.10] — 2026-04-27
+## [0.5.10] - 2026-04-27
 
 DSL ergonomics: three composition primitives that close
 common monorepo / ops pain points. Schema-compatible: every
@@ -3982,7 +4514,7 @@ v0.5.9 config runs unchanged.
   collection + merge, 6 lib tests for template
   expansion).
 
-## [0.5.9] — 2026-04-27
+## [0.5.9] - 2026-04-27
 
 `json_schema_passes` (last unshipped structured-query
 primitive), two new git-aware rule kinds, and four
@@ -4059,7 +4591,7 @@ Schema-compatible: every v0.5.8 config runs unchanged.
   four new rules); two existing override scenarios
   updated to account for the new bundled rules.
 
-## [0.5.8] — 2026-04-26
+## [0.5.8] - 2026-04-26
 
 Three new output formats. Brings the count to seven and
 closes the v0.5 output-format roadmap item. Schema-compatible:
@@ -4118,7 +4650,7 @@ every v0.5.7 config runs unchanged.
   GitLab) fingerprint stability across line-drift +
   sensitivity to message changes.
 
-## [0.5.7] — 2026-04-26
+## [0.5.7] - 2026-04-26
 
 Competitive bench publication. The v0.5.6 harness becomes a
 multi-tool driver: alint, ls-lint, Repolinter, and `find` +
@@ -4227,7 +4759,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   committed reports. Capture now keeps just the first
   line of each tool's `--version` output.
 
-## [0.5.6] — 2026-04-26
+## [0.5.6] - 2026-04-26
 
 Scale-ceiling bench publication + a latent walker bug fix
 that the bench surfaced. New `xtask bench-scale` subcommand
@@ -4324,7 +4856,7 @@ runs unchanged.
   `.git/`-exclusion is a behaviour fix, not a config
   change.
 
-## [0.5.5] — 2026-04-26
+## [0.5.5] - 2026-04-26
 
 Two license-compliance bundled rulesets — the v0.5 cycle's
 expansion beyond the workspace-tier monorepo audience to
@@ -4404,7 +4936,7 @@ Schema-compatible; every v0.5.4 config runs unchanged.
 - JSON / SARIF / GitHub outputs byte-equivalent for
   configs that don't extend the new rulesets.
 
-## [0.5.4] — 2026-04-26
+## [0.5.4] - 2026-04-26
 
 `alint init` — the missing one-line adoption story.
 Detects the repo's ecosystem (Rust / Node / Python / Go /
@@ -4495,7 +5027,7 @@ config runs unchanged.
   workspace dep elsewhere; the binary needs it for the
   init unit tests).
 
-## [0.5.3] — 2026-04-26
+## [0.5.3] - 2026-04-26
 
 Three workspace-aware bundled rulesets layered on top of
 `monorepo@v1`. Each is gated by a workspace-flavor fact and
@@ -4567,7 +5099,7 @@ Schema-compatible; every v0.5.2 config runs unchanged.
 - JSON / SARIF / GitHub outputs byte-equivalent for
   configs that don't extend the new rulesets.
 
-## [0.5.2] — 2026-04-26
+## [0.5.2] - 2026-04-26
 
 Per-iteration `when:` filter on iterating rules — closes the
 second monorepo-scale gap from the v0.5 roadmap. Combined
@@ -4655,7 +5187,7 @@ Schema-compatible; every v0.5.1 config runs unchanged.
   helper) gained a `when_iter` parameter — only matters if
   you've forked the crate.
 
-## [0.5.1] — 2026-04-26
+## [0.5.1] - 2026-04-26
 
 Plugin tier 1: `command` rule kind. Wraps any CLI on `PATH`
 into alint's report. Continues the v0.5 monorepo-scale theme
@@ -4738,7 +5270,7 @@ runs unchanged.
   unchanged; the new `reject_command_rules_in` is a new
   public function in `alint-dsl`.
 
-## [0.5.0] — 2026-04-26
+## [0.5.0] - 2026-04-26
 
 First v0.5 cut. Headline: incremental `alint check --changed`
 mode for pre-commit and PR-check paths. Schema-compatible;
@@ -4821,7 +5353,7 @@ outputs byte-equivalent for full-tree runs.
   (`Step::CheckChanged`); embedders that exhaustively
   matched on `Step` need to add an arm for it.
 
-## [0.4.10] — 2026-04-25
+## [0.4.10] - 2026-04-25
 
 Three new content-family rule kinds rounding out the family.
 Schema-compatible; every v0.4.9 config runs unchanged. JSON /
@@ -4848,7 +5380,7 @@ SARIF / GitHub outputs byte-equivalent.
 - 6 new e2e scenarios covering pass/fail paths for the three
   new kinds.
 
-## [0.4.9] — 2026-04-25
+## [0.4.9] - 2026-04-25
 
 Java bundled ruleset. Schema-compatible; every v0.4.8 config
 runs unchanged. JSON / SARIF / GitHub outputs byte-equivalent.
@@ -4884,7 +5416,7 @@ runs unchanged. JSON / SARIF / GitHub outputs byte-equivalent.
   `silent_on_locally_built_target` e2e scenario proves the
   wiring end-to-end.
 
-
+## [0.4.8] - 2026-04-25
 
 First git-aware primitive lands. Schema-compatible; every v0.4.7
 config runs unchanged. JSON / SARIF / GitHub outputs gain no new
@@ -4931,7 +5463,7 @@ keys.
   add, commit }` block so e2e scenarios can stand up a real git
   repo in their tempdir before alint runs.
 
-
+## [0.4.7] - 2026-04-24
 
 Distribution breadth. Schema-compatible; every v0.4.6 config
 runs unchanged. JSON/SARIF/GitHub outputs byte-equivalent. No
@@ -4997,7 +5529,7 @@ Rust code changes — this release ships new install paths only.
   license / test-block shape). Wired into `ci/scripts/test.sh`
   so it runs on every CI pass.
 
-
+## [0.4.6] - 2026-04-23
 
 Ecosystem coverage + debugging ergonomics. Schema-compatible;
 every v0.4.5 config runs unchanged. JSON output unchanged for
@@ -5058,7 +5590,7 @@ existing commands; SARIF and GitHub outputs byte-equivalent.
   Used by the `facts` subcommand's renderers; available to
   external embedders.
 
-
+## [0.4.5] - 2026-04-23
 
 Supply-chain hardening ruleset + composition ergonomics.
 Schema-compatible; every v0.4.4 config runs unchanged. JSON
@@ -5131,7 +5663,7 @@ byte-equivalent.
   `{url, only?, except?}`. YAML ergonomics unchanged for the
   string form; existing configs continue to parse as before.
 
-
+## [0.4.4] - 2026-04-23
 
 Rule-catalogue expansion + README rewrite. Schema-compatible;
 every v0.4.3 config runs unchanged. JSON output gains no new
@@ -5198,7 +5730,7 @@ than being silently skipped.
   and the security-family bans. Bumped the family count from
   ten to eleven and the rule-kind count from ~42 to ~50.
 
-
+## [0.4.3] - 2026-04-23
 
 Composition ergonomics + monorepo support + four new bundled
 rulesets. Schema-compatible; every v0.4.2 config runs unchanged.
@@ -5311,7 +5843,7 @@ Workspace: 422 → 437 tests (+15). Includes 6 new unit tests
 on nested-discovery, 3 e2e on field-level override, 2 e2e on
 nested discovery, 4 e2e on Phase A bundled rulesets.
 
-## [0.4.2] — 2026-04-22
+## [0.4.2] - 2026-04-22
 
 Pretty-output overhaul of the `human` formatter. Schema-compatible;
 every v0.4.1 config still runs, every JSON/SARIF/GitHub output is
@@ -5383,7 +5915,7 @@ CLI flags (`--color`, `--ascii`, `--compact`) are new.
 - `supports-hyperlinks` (OSC 8 detection).
 - `terminal_size` (column-width detection).
 
-## [0.4.1] — 2026-04-21
+## [0.4.1] - 2026-04-21
 
 Packaging fix. v0.4.0 is functionally identical but failed to
 publish beyond `alint-core` on crates.io — the bundled-rulesets
@@ -5408,7 +5940,7 @@ publish beyond `alint-core` on crates.io — the bundled-rulesets
   It's functionally identical to `alint-core@0.4.1` and nothing
   transitively depends on it — safe to ignore or yank later.
 
-## [0.4.0] — 2026-04-21
+## [0.4.0] - 2026-04-21
 
 Headline: **bundled rulesets**. The single biggest adoption
 lever identified during pre-launch review — reduces onboarding
@@ -5480,7 +6012,7 @@ adopt alint with 4 lines of YAML.
   `alint-dsl` gains a new public `bundled` module; the existing
   `load` / `load_with` entry points are unchanged.
 
-## [0.3.2] — 2026-04-21
+## [0.3.2] - 2026-04-21
 
 Patch release fixing a broken `action.yml` that affects every
 `asamarts/alint@v0.2.1` / `v0.3.0` / `v0.3.1` consumer. No code
@@ -5520,7 +6052,7 @@ should bump to `@v0.3.2`. There are no API / CLI / config
 changes — configs that worked under `@v0.3.1` continue to work
 verbatim.
 
-## [0.3.1] — 2026-04-21
+## [0.3.1] - 2026-04-21
 
 Documentation-only patch release following v0.3.0. No code
 changes; no schema changes; v0.3.0 configs run unchanged.
@@ -5549,7 +6081,7 @@ changes; no schema changes; v0.3.0 configs run unchanged.
   exercise the v0.3 catalogue against alint's own tree. All
   rules pass.
 
-## [0.3.0] — 2026-04-21
+## [0.3.0] - 2026-04-21
 
 Rule-catalogue expansion. Adds ~25 new rule kinds across seven
 phase commits plus one new fix op, covering categories other
@@ -5673,7 +6205,7 @@ have a `dir_*` sibling.
   required methods; out-of-tree implementations compile
   unmodified. `Engine::with_fix_size_limit` is additive.
 
-## [0.2.1] — 2026-04-20
+## [0.2.1] - 2026-04-20
 
 Patch release. Finishes the v0.2 roadmap item that didn't make it
 into v0.2.0: `extends:` composition.
@@ -5725,7 +6257,7 @@ into v0.2.0: `extends:` composition.
 - `ureq` (rustls TLS), `sha2`, `directories`. Release-binary size
   impact: ~+1.5–2 MiB, mostly from rustls' embedded root certs.
 
-## [0.2.0] — 2026-04-19
+## [0.2.0] - 2026-04-19
 
 Second release. The theme is composition and remediation: cross-file rules,
 conditional gating, auto-fix, and two new output formats. Every v0.1 config
@@ -5818,7 +6350,7 @@ continues to validate and run under v0.2 without changes.
   gained a `fixer()` method with a `None` default, so out-of-tree rule
   implementations compile without modification.
 
-## [0.1.0] — 2026-04-19
+## [0.1.0] - 2026-04-19
 
 Initial release. MVP.
 
@@ -5840,7 +6372,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/asamarts/alint/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/asamarts/alint/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/asamarts/alint/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/asamarts/alint/compare/v0.11.0...v0.11.1
@@ -5880,6 +6413,7 @@ Initial release. MVP.
 [0.5.10]: https://github.com/asamarts/alint/compare/v0.5.9...v0.5.10
 [0.5.9]: https://github.com/asamarts/alint/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/asamarts/alint/compare/v0.4.10...v0.5.8
+[0.5.7]: https://github.com/asamarts/alint/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/asamarts/alint/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/asamarts/alint/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/asamarts/alint/compare/v0.5.3...v0.5.4

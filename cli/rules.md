@@ -1,24 +1,20 @@
 ---
-title: 'alint check'
-description: 'Run linters against the current (or given) directory. Default command. alint check CLI reference and flags.'
+title: 'alint rules'
+description: 'Browse the catalog of rule kinds alint ships (config-independent). alint rules CLI reference and flags.'
 ---
 
-The pipeline `alint check` runs:
-
-<likec4-view view-id="checkFlow"></likec4-view>
-
 ```
-Run linters against the current (or given) directory. Default command
+Browse the catalog of rule kinds alint ships (config-independent). Use `alint list` for the rules configured in THIS repo; `alint rules` never reads a config and works anywhere
 
-Usage: alint check [OPTIONS] [PATH]
+Usage: alint rules [OPTIONS] <COMMAND>
 
-Arguments:
-  [PATH]  Root of the repository to lint. Defaults to the current directory [default: .]
+Commands:
+  list        List rule kinds in the catalog, optionally filtered. Reads no config
+  categories  List the rule categories: slug, title, and how many kinds each holds
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
   -c, --config <CONFIG>  Path to a config file
-      --changed          Restrict the check to files in the working-tree diff. Without `--base`, uses `git ls-files --modified --others --exclude-standard` (right shape for pre-commit). With `--base`, uses `git diff --name-only <base>...HEAD` (right shape for PR checks). Cross-file rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) and existence rules (`file_exists` et al.) still consult the full tree by definition
-      --base <REF>       Base ref for `--changed` (uses three-dot `<base>...HEAD`, i.e. merge-base diff). Implies `--changed`
   -f, --format <FORMAT>  Output format [default: human]
       --no-gitignore     Disable .gitignore handling (overrides config)
       --fail-on-warning  Treat warnings as errors for exit-code purposes

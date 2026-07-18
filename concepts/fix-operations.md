@@ -27,6 +27,7 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 
 `fix_size_limit` is a top-level config field:
 
+<!-- alint:ignore-example -->
 ```yaml
 version: 1
 fix_size_limit: 1048576   # 1 MiB — the default; `null` disables

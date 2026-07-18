@@ -1,13 +1,13 @@
 {
-  "format_version": 1,
-  "alint_version": "0.13.0",
+  "format_version": 2,
+  "alint_version": "0.14.0",
   "counts": {
     "rule_kinds": 89,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
     "output_formats": 8,
-    "subcommands": 10
+    "subcommands": 12
   },
   "rule_kinds": [
     "changeset_requires_path",
@@ -115,6 +115,495 @@
     "Text hygiene",
     "Unix metadata"
   ],
+  "categories": [
+    {
+      "slug": "existence",
+      "title": "Existence",
+      "order": 0
+    },
+    {
+      "slug": "content",
+      "title": "Content",
+      "order": 1
+    },
+    {
+      "slug": "structured-query",
+      "title": "Structured query",
+      "order": 2
+    },
+    {
+      "slug": "naming",
+      "title": "Naming",
+      "order": 3
+    },
+    {
+      "slug": "text-hygiene",
+      "title": "Text hygiene",
+      "order": 4
+    },
+    {
+      "slug": "security-unicode-sanity",
+      "title": "Security / Unicode sanity",
+      "order": 5
+    },
+    {
+      "slug": "encoding",
+      "title": "Encoding",
+      "order": 6
+    },
+    {
+      "slug": "structure",
+      "title": "Structure",
+      "order": 7
+    },
+    {
+      "slug": "portable-metadata",
+      "title": "Portable metadata",
+      "order": 8
+    },
+    {
+      "slug": "unix-metadata",
+      "title": "Unix metadata",
+      "order": 9
+    },
+    {
+      "slug": "git-hygiene",
+      "title": "Git hygiene",
+      "order": 10
+    },
+    {
+      "slug": "cross-file",
+      "title": "Cross-file",
+      "order": 11
+    },
+    {
+      "slug": "plugin-tier-1",
+      "title": "Plugin (tier 1)",
+      "order": 12
+    }
+  ],
+  "rule_categories": {
+    "changeset_requires_path": [
+      "git-hygiene",
+      "cross-file"
+    ],
+    "command": [
+      "plugin-tier-1"
+    ],
+    "command_idempotent": [
+      "cross-file"
+    ],
+    "commented_out_code": [
+      "git-hygiene",
+      "content"
+    ],
+    "cross_file": [
+      "cross-file"
+    ],
+    "dir_absent": [
+      "existence"
+    ],
+    "dir_contains": [
+      "cross-file",
+      "structure"
+    ],
+    "dir_exists": [
+      "existence"
+    ],
+    "dir_only_contains": [
+      "cross-file",
+      "structure"
+    ],
+    "every_matching_has": [
+      "cross-file"
+    ],
+    "executable_bit": [
+      "unix-metadata"
+    ],
+    "executable_has_shebang": [
+      "unix-metadata",
+      "content"
+    ],
+    "file_absent": [
+      "existence"
+    ],
+    "file_content_forbidden": [
+      "content",
+      "security-unicode-sanity"
+    ],
+    "file_content_matches": [
+      "content"
+    ],
+    "file_ends_with": [
+      "content"
+    ],
+    "file_exists": [
+      "existence"
+    ],
+    "file_footer": [
+      "content"
+    ],
+    "file_graph": [
+      "cross-file"
+    ],
+    "file_hash": [
+      "content",
+      "security-unicode-sanity"
+    ],
+    "file_header": [
+      "content"
+    ],
+    "file_is_ascii": [
+      "content",
+      "encoding",
+      "security-unicode-sanity"
+    ],
+    "file_is_text": [
+      "content",
+      "encoding"
+    ],
+    "file_max_lines": [
+      "content",
+      "structure"
+    ],
+    "file_max_size": [
+      "content",
+      "structure"
+    ],
+    "file_min_lines": [
+      "content",
+      "structure"
+    ],
+    "file_min_size": [
+      "content",
+      "structure"
+    ],
+    "file_shebang": [
+      "content",
+      "unix-metadata"
+    ],
+    "file_starts_with": [
+      "content"
+    ],
+    "filename_case": [
+      "naming"
+    ],
+    "filename_regex": [
+      "naming"
+    ],
+    "final_newline": [
+      "text-hygiene"
+    ],
+    "for_each_dir": [
+      "cross-file"
+    ],
+    "for_each_file": [
+      "cross-file"
+    ],
+    "for_each_match": [
+      "cross-file"
+    ],
+    "generated_file_fresh": [
+      "cross-file",
+      "security-unicode-sanity"
+    ],
+    "git_blame_age": [
+      "git-hygiene"
+    ],
+    "git_commit_author_allowlist": [
+      "git-hygiene",
+      "security-unicode-sanity"
+    ],
+    "git_commit_gpg_signed": [
+      "git-hygiene",
+      "security-unicode-sanity"
+    ],
+    "git_commit_message": [
+      "git-hygiene"
+    ],
+    "git_commit_no_fixup": [
+      "git-hygiene"
+    ],
+    "git_commit_signed_off": [
+      "git-hygiene"
+    ],
+    "git_commit_subject_matches": [
+      "git-hygiene"
+    ],
+    "git_no_denied_paths": [
+      "git-hygiene",
+      "security-unicode-sanity"
+    ],
+    "import_gate": [
+      "cross-file",
+      "security-unicode-sanity"
+    ],
+    "indent_style": [
+      "text-hygiene"
+    ],
+    "json_path_equals": [
+      "structured-query"
+    ],
+    "json_path_matches": [
+      "structured-query"
+    ],
+    "json_schema_passes": [
+      "structured-query"
+    ],
+    "line_endings": [
+      "text-hygiene",
+      "portable-metadata"
+    ],
+    "line_max_width": [
+      "text-hygiene"
+    ],
+    "markdown_paths_resolve": [
+      "git-hygiene",
+      "cross-file"
+    ],
+    "max_consecutive_blank_lines": [
+      "text-hygiene"
+    ],
+    "max_directory_depth": [
+      "structure"
+    ],
+    "max_files_per_directory": [
+      "structure"
+    ],
+    "no_bidi_controls": [
+      "security-unicode-sanity",
+      "encoding"
+    ],
+    "no_bom": [
+      "encoding",
+      "text-hygiene"
+    ],
+    "no_case_conflicts": [
+      "portable-metadata",
+      "naming"
+    ],
+    "no_empty_files": [
+      "structure"
+    ],
+    "no_illegal_windows_names": [
+      "portable-metadata",
+      "naming"
+    ],
+    "no_merge_conflict_markers": [
+      "security-unicode-sanity",
+      "text-hygiene"
+    ],
+    "no_submodules": [
+      "git-hygiene"
+    ],
+    "no_symlinks": [
+      "unix-metadata",
+      "portable-metadata",
+      "security-unicode-sanity"
+    ],
+    "no_trailing_whitespace": [
+      "text-hygiene"
+    ],
+    "no_zero_width_chars": [
+      "security-unicode-sanity",
+      "encoding"
+    ],
+    "ordered_block": [
+      "cross-file",
+      "text-hygiene"
+    ],
+    "pair": [
+      "cross-file"
+    ],
+    "pair_changed_together": [
+      "git-hygiene",
+      "cross-file"
+    ],
+    "pair_hash": [
+      "cross-file",
+      "security-unicode-sanity"
+    ],
+    "registry_paths_resolve": [
+      "cross-file"
+    ],
+    "shebang_has_executable": [
+      "unix-metadata",
+      "content"
+    ],
+    "toml_path_equals": [
+      "structured-query"
+    ],
+    "toml_path_matches": [
+      "structured-query"
+    ],
+    "unique_by": [
+      "cross-file"
+    ],
+    "xml_path_equals": [
+      "structured-query"
+    ],
+    "xml_path_matches": [
+      "structured-query"
+    ],
+    "yaml_path_equals": [
+      "structured-query"
+    ],
+    "yaml_path_matches": [
+      "structured-query"
+    ]
+  },
+  "rule_aliases": {
+    "content_forbidden": "file_content_forbidden",
+    "content_matches": "file_content_matches",
+    "cross_file_value_equals": "cross_file",
+    "footer": "file_footer",
+    "header": "file_header",
+    "is_text": "file_is_text",
+    "max_lines": "file_max_lines",
+    "max_size": "file_max_size",
+    "min_lines": "file_min_lines",
+    "min_size": "file_min_size",
+    "shebang": "file_shebang"
+  },
+  "rule_source_files": {
+    "changeset_requires_path": "changeset_requires_path",
+    "command": "command",
+    "command_idempotent": "command_idempotent",
+    "commented_out_code": "commented_out_code",
+    "content_forbidden": "file_content_forbidden",
+    "content_matches": "file_content_matches",
+    "cross_file": "cross_file",
+    "cross_file_value_equals": "cross_file",
+    "dir_absent": "dir_absent",
+    "dir_contains": "dir_contains",
+    "dir_exists": "dir_exists",
+    "dir_only_contains": "dir_only_contains",
+    "every_matching_has": "every_matching_has",
+    "executable_bit": "executable_bit",
+    "executable_has_shebang": "executable_has_shebang",
+    "file_absent": "file_absent",
+    "file_content_forbidden": "file_content_forbidden",
+    "file_content_matches": "file_content_matches",
+    "file_ends_with": "file_ends_with",
+    "file_exists": "file_exists",
+    "file_footer": "file_footer",
+    "file_graph": "file_graph",
+    "file_hash": "file_hash",
+    "file_header": "file_header",
+    "file_is_ascii": "file_is_ascii",
+    "file_is_text": "file_is_text",
+    "file_max_lines": "file_max_lines",
+    "file_max_size": "file_max_size",
+    "file_min_lines": "file_min_lines",
+    "file_min_size": "file_min_size",
+    "file_shebang": "file_shebang",
+    "file_starts_with": "file_starts_with",
+    "filename_case": "filename_case",
+    "filename_regex": "filename_regex",
+    "final_newline": "final_newline",
+    "footer": "file_footer",
+    "for_each_dir": "for_each_dir",
+    "for_each_file": "for_each_file",
+    "for_each_match": "for_each_match",
+    "generated_file_fresh": "generated_file_fresh",
+    "git_blame_age": "git_blame_age",
+    "git_commit_author_allowlist": "git_commit_author_allowlist",
+    "git_commit_gpg_signed": "git_commit_gpg_signed",
+    "git_commit_message": "git_commit_message",
+    "git_commit_no_fixup": "git_commit_no_fixup",
+    "git_commit_signed_off": "git_commit_signed_off",
+    "git_commit_subject_matches": "git_commit_subject_matches",
+    "git_no_denied_paths": "git_no_denied_paths",
+    "header": "file_header",
+    "import_gate": "import_gate",
+    "indent_style": "indent_style",
+    "is_text": "file_is_text",
+    "json_path_equals": "structured_path",
+    "json_path_matches": "structured_path",
+    "json_schema_passes": "json_schema_passes",
+    "line_endings": "line_endings",
+    "line_max_width": "line_max_width",
+    "markdown_paths_resolve": "markdown_paths_resolve",
+    "max_consecutive_blank_lines": "max_consecutive_blank_lines",
+    "max_directory_depth": "max_directory_depth",
+    "max_files_per_directory": "max_files_per_directory",
+    "max_lines": "file_max_lines",
+    "max_size": "file_max_size",
+    "min_lines": "file_min_lines",
+    "min_size": "file_min_size",
+    "no_bidi_controls": "no_bidi_controls",
+    "no_bom": "no_bom",
+    "no_case_conflicts": "no_case_conflicts",
+    "no_empty_files": "no_empty_files",
+    "no_illegal_windows_names": "no_illegal_windows_names",
+    "no_merge_conflict_markers": "no_merge_conflict_markers",
+    "no_submodules": "no_submodules",
+    "no_symlinks": "no_symlinks",
+    "no_trailing_whitespace": "no_trailing_whitespace",
+    "no_zero_width_chars": "no_zero_width_chars",
+    "ordered_block": "ordered_block",
+    "pair": "pair",
+    "pair_changed_together": "pair_changed_together",
+    "pair_hash": "pair_hash",
+    "registry_paths_resolve": "registry_paths_resolve",
+    "shebang": "file_shebang",
+    "shebang_has_executable": "shebang_has_executable",
+    "toml_path_equals": "structured_path",
+    "toml_path_matches": "structured_path",
+    "unique_by": "unique_by",
+    "xml_path_equals": "structured_path",
+    "xml_path_matches": "structured_path",
+    "yaml_path_equals": "structured_path",
+    "yaml_path_matches": "structured_path"
+  },
+  "example_rule_counts": {
+    "angular-angular": 128,
+    "apache-airflow": 90,
+    "apache-arrow": 116,
+    "apache-spark": 110,
+    "astral-sh-ruff": 80,
+    "astral-sh-uv": 89,
+    "bazelbuild-bazel": 86,
+    "clap-rs-clap": 76,
+    "denoland-deno": 81,
+    "dotnet-runtime": 59,
+    "facebook-react": 82,
+    "flutter-flutter": 58,
+    "golang-go": 62,
+    "helm-helm": 58,
+    "istio-istio": 64,
+    "kubernetes-kubernetes": 58,
+    "microsoft-typescript": 71,
+    "microsoft-vscode": 68,
+    "nixos-nixpkgs": 58,
+    "nodejs-node": 61,
+    "pnpm-pnpm": 92,
+    "prettier-prettier": 65,
+    "protocolbuffers-protobuf": 45,
+    "python-cpython": 78,
+    "pytorch-pytorch": 61,
+    "rust-lang-rust": 68,
+    "tensorflow-tensorflow": 58,
+    "tokio-rs-tokio": 73,
+    "vercel-next.js": 115,
+    "vercel-turbo": 91
+  },
+  "bench_scenario_rule_counts": {
+    "S1": 8,
+    "S10": 5,
+    "S11": 3,
+    "S12": 4,
+    "S13": 2,
+    "S14": 7,
+    "S2": 8,
+    "S3": 32,
+    "S4": 5,
+    "S5": 4,
+    "S6": 13,
+    "S7": 6,
+    "S8": 34,
+    "S9": 26
+  },
   "bundled_rulesets": [
     "agent-context",
     "agent-hygiene",
@@ -139,6 +628,30 @@
     "rust",
     "tooling/editorconfig"
   ],
+  "bundled_ruleset_sizes": {
+    "agent-context": 4,
+    "agent-hygiene": 6,
+    "apache/governance": 8,
+    "ci/github-actions": 3,
+    "compliance/apache-2": 3,
+    "compliance/reuse": 3,
+    "docs/adr": 4,
+    "dotnet": 7,
+    "go": 7,
+    "hygiene/lockfiles": 7,
+    "hygiene/no-tracked-artifacts": 11,
+    "java": 10,
+    "monorepo": 4,
+    "monorepo/cargo-workspace": 3,
+    "monorepo/pnpm-workspace": 3,
+    "monorepo/yarn-workspace": 3,
+    "node": 8,
+    "oss-baseline": 15,
+    "php": 6,
+    "python": 8,
+    "rust": 10,
+    "tooling/editorconfig": 3
+  },
   "output_formats": [
     "agent",
     "github",
@@ -150,6 +663,7 @@
     "sarif"
   ],
   "subcommands": [
+    "baseline",
     "check",
     "explain",
     "export-agents-md",
@@ -158,6 +672,7 @@
     "init",
     "list",
     "lsp",
+    "rules",
     "suggest",
     "validate-config"
   ],

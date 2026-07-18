@@ -662,10 +662,6 @@
         }
       ]
     },
-    "per_rule_respect_gitignore": {
-      "description": "Per-rule override for the workspace-level `respect_gitignore:` setting. When `false`, this rule treats `.gitignore`-listed files as if they were untracked-but-on-disk: the rule sees them. The canonical use case is the bazel-style \"tracked AND gitignored\" pattern (a file like `.bazelversion` ships a default upstream and contributors override it locally without committing the override) — the workspace walker honours the gitignore, so `file_exists` reports \"no match\" against a file that's both on disk AND in `git ls-files`. This per-rule knob lets that single rule see the file without flipping the workspace-wide setting. Currently honoured by `file_exists` for literal-path patterns; other rule kinds + glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`. See `docs/development/CONFIG-AUTHORING.md` pitfall #18.",
-      "type": "boolean"
-    },
     "rule": {
       "description": "A rule entry — either a kind-driven rule (with `kind` and the kind-specific fields) or a template instance (with `extends_template` referencing a template id and optional `vars` overrides).",
       "oneOf": [
@@ -887,6 +883,7 @@
       "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default — every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` — the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
       "properties": {
         "allow_missing_target": {
+          "description": "When true, an absent target file or a missing extracted target value is tolerated instead of reported as drift.",
           "type": "boolean"
         },
         "kind": {
@@ -922,6 +919,7 @@
           ]
         },
         "relation": {
+          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts exists on disk).",
           "enum": [
             "equals",
             "subset",
@@ -932,11 +930,13 @@
           ]
         },
         "skip_header_lines": {
+          "description": "For the `identical` relation only: drop this many leading lines from both files before comparison, to ignore a differing license or generated header.",
           "minimum": 0,
           "type": "integer"
         },
         "source": {
           "additionalProperties": false,
+          "description": "The file whose extracted value(s) form the reference side of the relation — a single `{ file, extract }`, or (set relations only) `{ files: <glob>, extract }` whose matches are unioned into one set.",
           "oneOf": [
             {
               "required": [
@@ -965,6 +965,7 @@
           "type": "object"
         },
         "targets": {
+          "description": "The file(s) compared against the source, one relation check per target — a `{ files: <glob>, extract }` map or a list of `{ file, extract }` pins; omitted for the `resolves` relation (whose target is the filesystem).",
           "oneOf": [
             {
               "additionalProperties": false,
@@ -1010,13 +1011,20 @@
     "rule_dir_absent": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "dir_absent"
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a directory directly at the repository root is forbidden; a nested match with the same name is allowed.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1046,6 +1054,7 @@
           ]
         },
         "select": {
+          "description": "Glob selecting the directories to check.",
           "type": "string"
         }
       },
@@ -1058,13 +1067,20 @@
     "rule_dir_exists": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "dir_exists"
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a directory directly at the repository root satisfies the rule; a nested match does not.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1111,6 +1127,7 @@
           "const": "every_matching_has"
         },
         "require": {
+          "description": "One or more nested rules that every file or directory matching `select` must satisfy.",
           "items": {
             "$ref": "#/$defs/nested_rule"
           },
@@ -1181,13 +1198,20 @@
     "rule_file_absent": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "file_absent"
         },
         "paths": {
           "$ref": "#/$defs/paths_spec"
+        },
+        "root_only": {
+          "default": false,
+          "description": "If true, only a file matching `paths` directly at the repository root is forbidden; a nested match with the same name is allowed.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1263,7 +1287,9 @@
     "rule_file_exists": {
       "properties": {
         "git_tracked_only": {
-          "$ref": "#/$defs/git_tracked_only"
+          "default": false,
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`.",
+          "type": "boolean"
         },
         "kind": {
           "const": "file_exists"
@@ -1272,7 +1298,12 @@
           "$ref": "#/$defs/paths_spec"
         },
         "respect_gitignore": {
-          "$ref": "#/$defs/per_rule_respect_gitignore"
+          "default": null,
+          "description": "Per-rule override for the workspace `respect_gitignore` setting. When `false`, this rule's literal-path checks also stat the filesystem directly, so it sees files that are tracked AND `.gitignore`-masked (the bazel-style `.bazelversion` pattern — pitfall #18 in `docs/development/CONFIG-AUTHORING.md`). Honoured only by `file_exists` literal paths; glob patterns fall through to the workspace setting. Default: inherit the workspace `respect_gitignore`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "root_only": {
           "default": false,
@@ -1927,6 +1958,7 @@
           "const": "generated_file_fresh"
         },
         "normalize": {
+          "description": "Normalization applied before comparison to absorb trailing-newline churn: `none`, `trim`, or `final-newline`.",
           "enum": [
             "none",
             "trim",
@@ -3064,12 +3096,15 @@
           "type": "string"
         },
         "entries_are_globs": {
+          "description": "Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation.",
           "type": "boolean"
         },
         "exclude_query": {
+          "description": "A structured query selecting entries to subtract from the extracted list before resolution is checked.",
           "type": "string"
         },
         "expect": {
+          "description": "Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`.",
           "enum": [
             "any",
             "file",
@@ -3110,10 +3145,12 @@
           "const": "registry_paths_resolve"
         },
         "must_contain": {
+          "description": "When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation.",
           "type": "string"
         },
         "orphans": {
           "additionalProperties": false,
+          "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the \"new crate not wired into the workspace\" detector).",
           "properties": {
             "space": {
               "type": "string"
@@ -3171,9 +3208,11 @@
           "$ref": "#/$defs/level"
         },
         "message": {
+          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
           "type": "string"
         },
         "policy_url": {
+          "description": "Link to a human-readable policy justification.",
           "format": "uri",
           "type": "string"
         },
@@ -3189,6 +3228,7 @@
           "type": "object"
         },
         "when": {
+          "description": "Gate the rule on a fact-based expression (available from v0.2).",
           "type": "string"
         }
       },
@@ -3501,6 +3541,10 @@
           "type": "object"
         }
       ]
+    },
+    "baseline": {
+      "description": "Path to a committed baseline file (see `alint baseline`), resolved relative to the repo root. When set, `alint check` suppresses every violation recorded in it and gates only on NEW ones, so CI need not pass `--baseline`. The `--baseline` flag overrides this. Honored only from the user's own top-level config: a `baseline:` reaching the loader from an `extends:`'d or nested config is refused, because a ruleset must not choose which findings the gate suppresses. There is no silent auto-detect — suppression is always an explicit opt-in.",
+      "type": "string"
     },
     "extends": {
       "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends. **Rule merging is field-level by `id`.** A child can override just the fields it wants to change — `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it. **Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately. Remote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead.",
