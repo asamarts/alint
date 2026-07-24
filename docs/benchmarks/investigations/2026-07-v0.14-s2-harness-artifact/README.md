@@ -83,9 +83,15 @@ fast-reject. The `take(cap+1)` stays the sole correctness bound, so the hint is
 strictly advisory: a stale or hostile size cannot force an over-read (locked in by the
 `read_bounded_bounds_the_actual_read_toctou` test, which now passes a deliberately
 lying hint). The microbench above nets −8.8 % vs v0.13 — the fix skips even the `fstat`
-`std::fs::read` does internally, since alint has the size for free. Shipped in v0.14.1;
-the v0.14.1 runner bench is the on-host recovery confirmation (see
-[`../../HISTORY.md`](../../HISTORY.md)).
+`std::fs::read` does internally, since alint has the size for free. Shipped in v0.14.1.
+
+The v0.14.1 runner bench confirms the recovery on-host (same kbench harness, `min_ms`):
+**S2 returns to the v0.13 baseline — −0.7 % at 100k, −3.3 % at 1M vs v0.13 (i.e. −13.8 %
+/ −14.1 % vs v0.14)** — S12 to +0.5…+2.1 % vs v0.13 (−9.7…−9.9 % vs v0.14), and the less
+read-dominated content scenarios (S3/S6/S9) to +2…+5 % vs v0.13 (within the ~3 % run CV),
+while the non-reading controls S1/S7 stay flat throughout. The `xtask bench-gate` for
+v0.14.1 vs v0.14.0 passes (an improvement never gates). Full trajectory:
+[`../../HISTORY.md`](../../HISTORY.md).
 
 Reproduce the mechanism + fix microbench:
 [`read-preallocation-microbench/`](read-preallocation-microbench/).
