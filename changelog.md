@@ -6,6 +6,30 @@ All notable changes to alint are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-07-24
+
+A performance patch. v0.14.0's OOM/TOCTOU read cap inadvertently regressed
+content-read throughput on read-heavy repositories by up to ~15% (worst on the
+existence-and-content and per-file scenarios), because bounding every whole-file read
+with `Take<File>` dropped the standard-library buffer preallocation that
+`std::fs::read` performs — the read fell back to a grow-and-reread loop issuing extra
+`read()` syscalls per file. v0.14.1 restores single-read behaviour by sizing the read
+buffer from the file size the directory walk already knows, keeping the read cap and
+its bound fully intact. Read-heavy runs return to (and slightly below) v0.13.0
+timings. No configuration or behaviour changes.
+
+### Fixed
+
+- Whole-file content reads no longer grow-and-reread their buffer. The read helpers
+  (`alint-core`'s `read_bounded` and `alint-rules`'s `read_capped_with`) preallocate
+  from the walk-time file size, so a read completes in one syscall instead of several.
+  This reverses a v0.14.0 wall-clock regression on read-heavy scenarios (up to ~15% on
+  the most read-dominated) that was invisible to the deterministic instruction-count
+  perf gate because the cost lives in syscalls, not guest instructions. The 256 MiB
+  analysis cap and its TOCTOU-safe read bound are unchanged. Full investigation,
+  reproduction, and the corrected write-up:
+  `docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/`.
+
 ## [Unreleased]
 
 ## [0.14.0] - 2026-07-18
@@ -6372,7 +6396,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/asamarts/alint/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/asamarts/alint/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/asamarts/alint/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/asamarts/alint/compare/v0.11.1...v0.12.0
