@@ -28,12 +28,23 @@ Fix: `file_remove` — delete every violating file.
   level: error
 ```
 
+**Optional `content_prefix_hex`** narrows a name match with a content check: a matching file fires only if its bytes begin with one of the listed hex signatures. This separates real binary junk from unrelated files that share a name pattern — macOS AppleDouble sidecars (`._*`) start with `00 05 16 07` and `.DS_Store` with `00 00 00 01` `"Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0`. A file that cannot be read, or is shorter than every signature, does not match; an empty list (the default) keeps the name-only behaviour.
+
+```yaml
+- id: no-macos-junk
+  kind: file_absent
+  paths: ["**/.DS_Store", "**/._*"]
+  content_prefix_hex: ["00051607", "0000000142756431"]
+  level: error
+```
+
 **What "exists" means**: alint walks the filesystem and honours `.gitignore` by default, so a `file_absent` rule fires whenever a matching file is **present in the walked tree**, not when it's tracked in git. Files filtered by `.gitignore` are invisible to the rule. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics, the `--no-gitignore` flag, and the gap between this and git's actual index.
 
 ## Options
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `content_prefix_hex` | list of string |  | `[]` | When non-empty, a file matching `paths` is reported only if its raw content begins with one of these byte signatures, each given as an even-length hex string (e.g. `"00051607"`). This separates genuine binary junk from unrelated files that merely share the name pattern: macOS `AppleDouble` sidecars start with `00 05 16 07` and `.DS_Store` with `00 00 00 01 "Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0` and are not macOS junk. A file that cannot be read, or is shorter than every signature, does not match. Empty (the default) keeps the historical name-only behaviour. |
 | `git_tracked_only` | boolean |  | `false` | Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. No effect outside a git repo. Default `false`. |
 | `root_only` | boolean |  | `false` | If true, only a file matching `paths` directly at the repository root is forbidden; a nested match with the same name is allowed. |
 
