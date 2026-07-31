@@ -1279,5 +1279,25 @@ now unversioned until the engine work is scheduled.
   the raw env namespace.
 - Plugin registry scaffolding with signature verification.
 - Bless a few canonical agent-aware semantic plugins (mock-ratio checker,
-  file-similarity / near-dup detector, debug-statement auto-stripper) as
-  documented examples, not bundled, to keep the binary lean.
+  debug-statement auto-stripper) as documented examples, not bundled, to keep
+  the binary lean.
+
+### Duplicate-code detection
+
+AI-assisted development correlates with measurable code duplication (the
+GitClear analysis reports the copy-paste share of changed lines climbing as
+assistants spread), and copy-paste drift long predates agents. alint reads
+text rather than building ASTs, so a similarity-based detector fits the engine
+without a per-language parser: hash normalized token or line windows, then
+flag blocks that recur across the tree above a configurable size and
+similarity threshold, in the spirit of jscpd or PMD CPD but language-agnostic.
+
+- A `duplicate_blocks` rule kind (working name): cross-file, deterministic,
+  with `min_lines` / `min_tokens` / `similarity` knobs plus the usual `paths`
+  scoping and ignore handling.
+- Emit each cluster of matching regions under a shared content fingerprint, so
+  baseline mode can grandfather today's duplication and gate only new clones.
+- Open design question: a native heuristic kind, or one of the WASM semantic
+  plugins above, to keep the core binary lean. Either way it must stay
+  near-linear (fingerprint hashing, not pairwise comparison) so it does not
+  erode the sub-second structural floor.

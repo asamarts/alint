@@ -95,7 +95,7 @@
       "version": null,
       "title": "Future / backlog",
       "kind": "foundations",
-      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry, unpinned from a numbered release until the engine work is scheduled."
+      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry, plus a language-agnostic duplicate-code detector, all unpinned from a numbered release until the engine work is scheduled."
     }
   ]
 }
