@@ -23,13 +23,13 @@ A manifest file enumerates path entries; each must resolve to an on-disk artefac
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `base` | string |  |  | Resolve entries relative to: registry_dir (default), lint_root, or an explicit path. |
-| `entries_are_globs` | boolean |  |  | Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation. |
-| `exclude_query` | string |  |  | A structured query selecting entries to subtract from the extracted list before resolution is checked. |
+| `base` | string |  | `null` | Resolve entries relative to: `registry_dir` (default), `lint_root`, or an explicit path. |
+| `entries_are_globs` | boolean |  | `false` | Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation. |
+| `exclude_query` | string |  | `null` | A structured query selecting entries to subtract from the extracted list before resolution is checked. |
 | `expect` | one of `any` \| `file` \| `dir` |  |  | Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`. |
-| `extract` | object | yes |  | Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path). |
-| `must_contain` | string |  |  | When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation. |
-| `orphans` | object |  |  | Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the "new crate not wired into the workspace" detector). |
+| `extract` | extract spec | yes |  | Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path). |
+| `must_contain` | string |  | `null` | When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation. |
+| `orphans` | OrphansSpec |  |  | Enable the reverse-completeness check (see `OrphansSpec`). |
 | `source` | string | yes |  | The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
