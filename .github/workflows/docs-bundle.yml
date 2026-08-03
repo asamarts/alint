@@ -13,7 +13,7 @@ on:
     #   Treats docs as a sixth distribution channel alongside
     #   crates.io / npm / Docker / Homebrew / GH Release.
     branches: [main]
-    tags: ["v*"]
+    tags: ["v*.*.*"]
   workflow_dispatch:
     # Lets the alint.org repo (or a maintainer) re-trigger a
     # rebuild without a code change — useful when only a brand-

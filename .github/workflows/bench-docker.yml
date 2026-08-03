@@ -18,7 +18,7 @@ name: bench-docker
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
     branches:
       - main
     paths:

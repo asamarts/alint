@@ -40,7 +40,7 @@ name: bench-record
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       ref:
