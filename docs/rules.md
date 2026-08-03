@@ -148,7 +148,7 @@ File contents must contain at least one match for a regex.
 
 ```yaml
 - id: crate-is-2024-edition
-  kind: content_matches
+  kind: file_content_matches
   paths: "Cargo.toml"
   pattern: 'edition\s*=\s*"2024"'
   level: error
@@ -164,7 +164,7 @@ File contents must NOT match a regex.
 
 ```yaml
 - id: no-dbg-macros
-  kind: content_forbidden
+  kind: file_content_forbidden
   paths: "crates/**/src/**/*.rs"
   pattern: '\bdbg!\('
   level: warning
@@ -178,7 +178,7 @@ The first N lines must match a regex (line-oriented). For a byte-level prefix ch
 
 ```yaml
 - id: spdx-header
-  kind: header
+  kind: file_header
   paths: "src/**/*.rs"
   pattern: "^// SPDX-License-Identifier: MIT"
   level: error
@@ -224,7 +224,7 @@ File must be at most `max_bytes` in size. Catches accidental large-blob commits.
 
 ```yaml
 - id: no-huge-blobs
-  kind: max_size
+  kind: file_max_size
   paths: "**"
   max_bytes: 5242880   # 5 MiB
   level: warning
@@ -238,7 +238,7 @@ File must be at least `min_bytes` in size. Catches placeholder / stub files that
 
 ```yaml
 - id: license-non-empty
-  kind: min_size
+  kind: file_min_size
   paths: ["LICENSE", "LICENSE.md", "LICENSE-APACHE", "LICENSE-MIT"]
   min_bytes: 200
   level: warning
@@ -252,7 +252,7 @@ File must have at least `min_lines` lines (`\n`-terminated, with an unterminated
 
 ```yaml
 - id: readme-non-stub
-  kind: min_lines
+  kind: file_min_lines
   paths: ["README.md", "README"]
   min_lines: 5
   level: info
@@ -266,7 +266,7 @@ File must have at most `max_lines` lines, using the same accounting as `file_min
 
 ```yaml
 - id: cap-source-file-size
-  kind: max_lines
+  kind: file_max_lines
   paths: "src/**/*.rs"
   max_lines: 800
   level: warning
@@ -280,7 +280,7 @@ Last `lines` lines of each file in scope must match a regex. Mirror of `file_hea
 
 ```yaml
 - id: license-footer
-  kind: footer
+  kind: file_footer
   paths: "src/**/*.rs"
   pattern: "Licensed under the Apache License, Version 2\\.0"
   lines: 3
@@ -297,7 +297,7 @@ First line of each file in scope must match the `shebang` regex. Pairs with `exe
 
 ```yaml
 - id: scripts-use-env-bash
-  kind: shebang
+  kind: file_shebang
   paths: "scripts/*.sh"
   shebang: '^#!/usr/bin/env bash$'
   level: error
