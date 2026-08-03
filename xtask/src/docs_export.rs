@@ -422,6 +422,10 @@ fn generate_rules_pages(
     // missing example at once instead of fixing them one at a
     // time. Reflected on alint.org/docs/rules/<family>/<kind>/.
     let mut missing_examples: Vec<String> = Vec::new();
+    // Rule examples whose top-level `kind:` is an alias (or otherwise not the
+    // H3's canonical kind). The page is slugged by the canonical name, so the
+    // example must match it. Accumulated + hard-failed alongside missing_examples.
+    let mut wrong_kind_examples: Vec<String> = Vec::new();
 
     let mut family_order: u32 = 0;
     for h2 in split_h2_sections(&src) {
@@ -461,6 +465,7 @@ fn generate_rules_pages(
             &mut kind_to_family,
             &mut all_kinds,
             &mut missing_examples,
+            &mut wrong_kind_examples,
             released,
         )?;
         families_meta.push((h2.title.clone(), family_order, family_slug.clone()));
@@ -489,23 +494,11 @@ fn generate_rules_pages(
         );
     }
 
-    // Hard-fail on any per-rule H3 that lacks a ```yaml usage
-    // example. Caught here (rather than as a soft warning) so a
-    // missing-example PR fails the docs-bundle build before it
-    // ever reaches alint.org. To add an example, edit the H3
-    // section in `docs/rules.md` for that rule and include a
-    // realistic ```yaml ... ``` snippet.
-    if !missing_examples.is_empty() {
-        anyhow::bail!(
-            "{} rule kind H3 section(s) in docs/rules.md are missing a \
-             ```yaml usage example:\n  - {}\n\n\
-             Each per-rule heading must include at least one fenced \
-             ```yaml block before the next heading. The block becomes \
-             the usage example shown on alint.org/docs/rules/<family>/<kind>/.",
-            missing_examples.len(),
-            missing_examples.join("\n  - "),
-        );
-    }
+    // Hard-fail the two per-rule-example docs gates (a missing yaml example, and
+    // an alias / non-canonical example `kind:`). Enforced here, not as soft
+    // warnings, so a regressing PR fails the docs-bundle build before it can
+    // publish a broken example to alint.org.
+    enforce_example_gates(&missing_examples, &wrong_kind_examples)?;
 
     // Family Overview pages: categories-based membership. Each family lists every
     // kind whose `**Categories:**` line includes it (by slug), not just the kinds
@@ -538,7 +531,7 @@ fn generate_rules_pages(
 /// of `generate_rules_pages` because clippy's `too_many_lines`
 /// flagged the original — and even ignoring that, "process one
 /// family" is its own logical chunk worth naming.
-// Threads the read-only registry/schema context plus the three
+// Threads the read-only registry/schema context plus the four
 // accumulators through one family's H3 sections; bundling these into
 // a struct would obscure more than it clarifies.
 #[allow(clippy::too_many_arguments)]
@@ -552,6 +545,7 @@ fn process_family_h3s(
     kind_to_family: &mut std::collections::HashMap<String, String>,
     all_kinds: &mut Vec<KindEntry>,
     missing_examples: &mut Vec<String>,
+    wrong_kind_examples: &mut Vec<String>,
     released: Option<crate::rule_options_table::Version>,
 ) -> Result<()> {
     let mut kind_order: u32 = 0;
@@ -579,6 +573,23 @@ fn process_family_h3s(
         // one example per heading covers the group.
         if !h3.body.contains("```yaml") {
             missing_examples.push(format!("{} → {}", h2.title, h3.title));
+        }
+        // The example must demonstrate the H3's CANONICAL kind, not an alias:
+        // the generated page is slugged/titled by the canonical name, so an
+        // alias in the example (e.g. `kind: header` under `file_header`) reads
+        // as a mismatch. extract_kinds() returns only canonical kinds, so a
+        // top-level example `kind:` outside `group_kinds` is an alias (or wrong).
+        if let Some(ex_kind) = example_first_kind(&h3.body) {
+            if !group_kinds.contains(&ex_kind) {
+                wrong_kind_examples.push(format!(
+                    "{} → {}: example uses `kind: {}`, but this H3 documents `{}`; \
+                     use the canonical name (the alias still works in user configs)",
+                    h2.title,
+                    h3.title,
+                    ex_kind,
+                    group_kinds.join("` / `"),
+                ));
+            }
         }
         // Strip the `**Categories:**` association line (if any) from the body
         // BEFORE summarizing or rendering, so it never becomes the summary / SEO
@@ -921,6 +932,59 @@ fn lead_example_with_kind(body: &str, kind: &str) -> String {
         reordered.join("\n\n"),
         &body[close..]
     )
+}
+
+/// The `kind:` value of the first rule entry in a rule H3's leading fenced
+/// yaml example, if any. Used to assert the example demonstrates the H3's
+/// canonical kind rather than an alias (the page is slugged/titled by the
+/// canonical name, so an alias in the example reads as a mismatch). Returns
+/// None when the H3 has no yaml example block or the block carries no
+/// top-level `kind:` line.
+fn example_first_kind(body: &str) -> Option<String> {
+    let open = body.find("```yaml")?;
+    let after_fence = open + "```yaml".len();
+    let nl = body[after_fence..].find('\n')?;
+    let content_start = after_fence + nl + 1;
+    let close_rel = body[content_start..].find("```")?;
+    for line in body[content_start..content_start + close_rel].lines() {
+        if let Some(v) = line.trim().strip_prefix("kind:") {
+            return Some(v.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Enforce the two per-rule-example docs gates and bail on the first failure:
+/// `missing` = H3 sections with no fenced yaml example; `wrong_kind` = examples
+/// whose top-level `kind:` is an alias (or otherwise not the H3's canonical
+/// kind). Enforced (not warned) so a regressing docs/rules.md fails the
+/// docs-bundle build before it can publish a broken example to alint.org.
+/// Split out of `generate_rules_pages` to keep that orchestrator within the
+/// clippy line budget.
+fn enforce_example_gates(missing: &[String], wrong_kind: &[String]) -> Result<()> {
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "{} rule kind H3 section(s) in docs/rules.md are missing a \
+             ```yaml usage example:\n  - {}\n\n\
+             Each per-rule heading must include at least one fenced \
+             ```yaml block before the next heading. The block becomes \
+             the usage example shown on alint.org/docs/rules/<family>/<kind>/.",
+            missing.len(),
+            missing.join("\n  - "),
+        );
+    }
+    if !wrong_kind.is_empty() {
+        anyhow::bail!(
+            "{} rule example(s) in docs/rules.md use a non-canonical `kind:` \
+             (an alias, or a wrong kind):\n  - {}\n\n\
+             Each rule H3's fenced yaml example must set its top-level `kind:` to \
+             the H3's canonical name (the first backticked kind in the heading), \
+             not an alias declared in `(alias: …)`.",
+            wrong_kind.len(),
+            wrong_kind.join("\n  - "),
+        );
+    }
+    Ok(())
 }
 
 /// Strip release-gated prose blocks from a rule's markdown body. A block
