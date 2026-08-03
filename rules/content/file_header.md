@@ -10,7 +10,7 @@ The first N lines must match a regex (line-oriented). For a byte-level prefix ch
 
 ```yaml
 - id: spdx-header
-  kind: header
+  kind: file_header
   paths: "src/**/*.rs"
   pattern: "^// SPDX-License-Identifier: MIT"
   level: error

@@ -10,7 +10,7 @@ File contents must NOT match a regex.
 
 ```yaml
 - id: no-dbg-macros
-  kind: content_forbidden
+  kind: file_content_forbidden
   paths: "crates/**/src/**/*.rs"
   pattern: '\bdbg!\('
   level: warning

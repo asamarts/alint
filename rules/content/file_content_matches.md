@@ -10,7 +10,7 @@ File contents must contain at least one match for a regex.
 
 ```yaml
 - id: crate-is-2024-edition
-  kind: content_matches
+  kind: file_content_matches
   paths: "Cargo.toml"
   pattern: 'edition\s*=\s*"2024"'
   level: error

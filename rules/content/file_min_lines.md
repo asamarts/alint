@@ -10,7 +10,7 @@ File must have at least `min_lines` lines (`\n`-terminated, with an unterminated
 
 ```yaml
 - id: readme-non-stub
-  kind: min_lines
+  kind: file_min_lines
   paths: ["README.md", "README"]
   min_lines: 5
   level: info

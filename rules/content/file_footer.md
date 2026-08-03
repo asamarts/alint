@@ -10,7 +10,7 @@ Last `lines` lines of each file in scope must match a regex. Mirror of `file_hea
 
 ```yaml
 - id: license-footer
-  kind: footer
+  kind: file_footer
   paths: "src/**/*.rs"
   pattern: "Licensed under the Apache License, Version 2\\.0"
   lines: 3

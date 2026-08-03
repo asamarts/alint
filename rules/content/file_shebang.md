@@ -10,7 +10,7 @@ First line of each file in scope must match the `shebang` regex. Pairs with `exe
 
 ```yaml
 - id: scripts-use-env-bash
-  kind: shebang
+  kind: file_shebang
   paths: "scripts/*.sh"
   shebang: '^#!/usr/bin/env bash$'
   level: error

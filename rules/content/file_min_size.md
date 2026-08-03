@@ -10,7 +10,7 @@ File must be at least `min_bytes` in size. Catches placeholder / stub files that
 
 ```yaml
 - id: license-non-empty
-  kind: min_size
+  kind: file_min_size
   paths: ["LICENSE", "LICENSE.md", "LICENSE-APACHE", "LICENSE-MIT"]
   min_bytes: 200
   level: warning

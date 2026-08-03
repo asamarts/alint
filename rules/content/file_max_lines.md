@@ -10,7 +10,7 @@ File must have at most `max_lines` lines, using the same accounting as `file_min
 
 ```yaml
 - id: cap-source-file-size
-  kind: max_lines
+  kind: file_max_lines
   paths: "src/**/*.rs"
   max_lines: 800
   level: warning
