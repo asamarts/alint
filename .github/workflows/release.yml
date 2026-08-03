@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    # Three-part version tags only. A bare major tag (v0, v1) is a moving
+    # pointer the `release` job maintains for `asamarts/alint@v0` consumers;
+    # it must NOT re-run this release pipeline.
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write   # required to create GitHub Releases
@@ -205,6 +208,22 @@ jobs:
           # *published* Release (now this one), rebuilds the bundle at the new
           # version, and pings the deploy hook -- so the guard clears on its own.
           gh workflow run docs-bundle.yml --ref main
+
+      - name: move the major tag (e.g. v0) to this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Consumers pin `asamarts/alint@v<major>` (e.g. @v0) to always track the
+          # latest release: the action resolves a non-vX.Y.Z ref to `latest`
+          # (see action.yml), and alint.org's CI pins @v0. Keep the major tag on
+          # the newest release so its action.yml + install.sh stay current. Pushed
+          # with GITHUB_TOKEN, so it does NOT re-trigger this workflow
+          # (anti-recursion); the `v*.*.*` filter above also excludes bare major tags.
+          MAJOR="${GITHUB_REF_NAME%%.*}"   # v0.14.1 -> v0
+          echo "Moving major tag ${MAJOR} -> ${GITHUB_SHA} (from ${GITHUB_REF_NAME})"
+          git tag -f "$MAJOR" "$GITHUB_SHA"
+          git push -f origin "refs/tags/${MAJOR}"
 
   docker:
     name: push Docker image to ghcr.io
