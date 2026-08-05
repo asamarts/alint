@@ -6,7 +6,7 @@
 # $HOME/.local/bin).
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
+#   curl -sSL https://alint.org/install.sh | bash
 #
 # Environment variables:
 #   ALINT_VERSION   Tag to install (e.g. v0.1.0). Defaults to the latest release.

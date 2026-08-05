@@ -32,7 +32,7 @@ Working `.alint.yml` configs for 30 OSS repos (single-language workspaces, polyg
 
 ```sh
 # Install (Linux + macOS + Windows tarballs):
-curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
+curl -sSL https://alint.org/install.sh | bash
 
 # Initialise a config in the current repo (uses bundled oss-baseline + auto-detected ecosystem rulesets):
 cat > .alint.yml <<'YAML'
@@ -97,7 +97,7 @@ Scope is the filesystem shape and contents of a repository, not the semantics of
 ### install.sh (Linux + macOS + Windows tarballs)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/asamarts/alint/main/install.sh | bash
+curl -sSL https://alint.org/install.sh | bash
 ```
 
 Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases).
