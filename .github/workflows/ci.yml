@@ -44,7 +44,7 @@ jobs:
       runner: ${{ steps.route.outputs.runner }}
       untrusted: ${{ steps.route.outputs.untrusted }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       # Routing runs FIRST and writes to its OWN step output, which the
@@ -81,9 +81,11 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-fmt
       - run: ci/scripts/fmt.sh
@@ -96,9 +98,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-clippy
       - run: ci/scripts/clippy.sh
@@ -111,9 +115,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-test
       - run: ci/scripts/test.sh
@@ -126,9 +132,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-audit
       - run: ci/scripts/audit.sh
@@ -141,9 +149,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-deny
       - run: ci/scripts/deny.sh
@@ -156,9 +166,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-build
       - run: ci/scripts/build.sh
@@ -178,9 +190,11 @@ jobs:
       && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.docs == 'true')
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-docs
       # Ephemeral fork-PR path only: the box's runner image already ships
@@ -188,7 +202,7 @@ jobs:
       # `likec4 validate` + `gen-mermaid --check` gates run (they fetch
       # likec4 via `npx -y likec4@<pin>`). Skipped on the box.
       - if: needs.changes.outputs.untrusted == 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
       # Load-bearing for schema/parser/contract correctness; must catch drift
@@ -203,9 +217,11 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-dogfood
       - run: ci/scripts/dogfood.sh
@@ -227,9 +243,11 @@ jobs:
       && needs.changes.outputs.untrusted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-bench-smoke
       - run: ci/scripts/bench-smoke.sh
@@ -257,11 +275,13 @@ jobs:
       # job's `needs:` so a failed gate is reflected in the aggregate Summary.
       DET_PERF_ADVISORY: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-perf-gate
       - env:
@@ -281,9 +301,11 @@ jobs:
       && needs.changes.outputs.examples == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ci-examples
       - run: ci/scripts/examples-validate.sh
@@ -300,7 +322,7 @@ jobs:
       && needs.changes.outputs.rust == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ci/scripts/shell-tests.sh
 
   # ── Editor extensions ─────────────────────────────────────────────
@@ -317,8 +339,8 @@ jobs:
       && needs.changes.outputs.editors == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "20"
       - name: VS Code — install, typecheck, bundle
@@ -327,17 +349,18 @@ jobs:
           npm ci
           npm run check-types
           npm run build
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           targets: wasm32-wasip1
       - name: Zed — wasm build
         working-directory: editors/zed
         run: cargo build --release --target wasm32-wasip1
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
       - name: JetBrains — build + verify plugin
         working-directory: editors/jetbrains
         run: ./gradlew buildPlugin verifyPlugin --no-daemon
@@ -365,7 +388,7 @@ jobs:
     # fall back to ubuntu-latest so a clean cancel can't fail on fromJSON('').
     runs-on: ${{ needs.changes.outputs.runner && fromJSON(needs.changes.outputs.runner) || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - env:
           RUST_CHANGED: ${{ needs.changes.outputs.rust }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs }}

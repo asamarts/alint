@@ -419,3 +419,25 @@ rules:
     message: >-
       Smart / curly quotes on top-level user-facing docs are a
       "pasted from a chat window" tell. Use straight quotes.
+
+  # --- Supply-chain: pin GitHub Actions to full commit SHAs ----------------
+  # OpenSSF Scorecard Pinned-Dependencies. Mirrors gha-pin-actions-to-sha in
+  # alint://bundled/ci/github-actions@v1, enforced at error here (the ruleset
+  # default is warning). Every third-party action `uses:` must be a full 40-hex
+  # commit SHA so a moved or compromised tag cannot silently change what CI
+  # runs. Local `./` composite-action references (the action-selftest jobs that
+  # load this repo's own action.yml from the checked-out commit) are allowed.
+  # Dependabot (.github/dependabot.yml) keeps the pins current.
+  - id: gha-pin-actions-to-sha
+    kind: yaml_path_matches
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+    path: "$.jobs.*.steps[*].uses"
+    matches: '^(\./.*|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
+    if_present: true
+    level: error
+    message: >-
+      Third-party GitHub Action is not pinned to a full commit SHA. Pin with
+      `@<40-char-sha>  # v4.1.1` so a moved or compromised tag cannot silently
+      change what runs. (Local `./` action references are allowed.)

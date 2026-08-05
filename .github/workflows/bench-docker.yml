@@ -48,7 +48,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # SHA-pinned per supply-chain hardening (matches release.yml).
       # Dependabot raises a PR on any docker/* major-version bump; keep

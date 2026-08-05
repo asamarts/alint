@@ -74,7 +74,7 @@ jobs:
     runs-on: [self-hosted, linux, bench]
     timeout-minutes: 360   # 6h cap; ~3.5h expected at publish-grade flags
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
@@ -83,8 +83,10 @@ jobs:
       # being cross-version comparable. 1.97.0 matches the v0.10-v0.13 backfill
       # that re-based the series onto kbench. Bump deliberately (and re-baseline)
       # when the fleet moves, never implicitly via `stable` drift.
-      - uses: dtolnay/rust-toolchain@1.97.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0
+        with:
+          toolchain: 1.97.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: bench-record
 

@@ -50,12 +50,12 @@ updates:
         update-types:
           - patch
           - minor
-    # dtolnay/rust-toolchain@X.Y.Z's tag IS the rustc version it installs, and
-    # bench-record.yml pins it to the canonical bench fingerprint (rustc 1.97.0;
-    # the whole macro corpus is measured on it). Dependabot treats it as an action
-    # version and bumps it (did: 1.97.0 -> 1.100.0 in #132), silently breaking
-    # fingerprint reproducibility. That pin is bumped MANUALLY in lock-step with a
-    # re-baseline (see the comment at its `uses:`), so hold it here.
+    # dtolnay/rust-toolchain is now SHA-pinned with an explicit `toolchain:`
+    # input (bench-record.yml uses `toolchain: 1.97.0`, the canonical bench
+    # fingerprint the whole macro corpus is measured on). Holding it here keeps
+    # both the action SHA and that pinned rustc stable: the rustc bump is done
+    # MANUALLY in lock-step with a re-baseline, not by Dependabot (which once
+    # bumped 1.97.0 -> 1.100.0 in #132, silently breaking fingerprint repro).
     ignore:
       - dependency-name: "dtolnay/rust-toolchain"
     commit-message:
