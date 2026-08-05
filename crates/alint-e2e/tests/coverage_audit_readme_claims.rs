@@ -19,7 +19,7 @@
 //! | bundled rulesets       | `.yml` files under `crates/alint-dsl/rulesets/v1/`          |
 //! | auto-fix ops           | `pub struct *Fixer` declarations under `crates/alint-rules/src/fixers/` |
 //! | output formats         | variants of `Format` enum in `crates/alint-output/src/lib.rs` |
-//! | subcommands            | variants of `Command` enum in `crates/alint/src/main.rs`    |
+//! | subcommands            | variants of `Command` enum in `crates/alint/src/cli.rs`     |
 //!
 //! Failures point the maintainer at exactly which side drifted.
 //!
@@ -348,7 +348,7 @@ fn readme_subcommands_count_matches_command_enum() {
     let readme = read_readme();
     let claimed = num_before(&readme, "subcommands").expect("README must contain 'N subcommands'");
 
-    let path = workspace_root().join("crates/alint/src/main.rs");
+    let path = workspace_root().join("crates/alint/src/cli.rs");
     let src = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let actual = count_enum_variants(&src, "Command");
 

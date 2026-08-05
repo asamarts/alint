@@ -182,7 +182,7 @@ fn collect_md(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 /// Pin the `CLI_REFERENCE_SUBCMDS` list against the `enum
-/// Command` variants in `crates/alint/src/main.rs`. If the
+/// Command` variants in `crates/alint/src/cli.rs`. If the
 /// binary gains a subcommand and the list isn't bumped, the
 /// `/docs/cli/<new>/` URL would be a live 404 on alint.org;
 /// this test catches that pre-merge.
@@ -193,7 +193,7 @@ fn cli_reference_subcmds_match_command_enum() {
         .join("crates")
         .join("alint")
         .join("src")
-        .join("main.rs");
+        .join("cli.rs");
     let src = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     // Reuse the same variant-extraction approach the
     // `count_enum_variants` helper uses, but return the names
@@ -243,7 +243,7 @@ fn cli_reference_subcmds_match_command_enum() {
     assert_eq!(
         variants, listed,
         "CLI_REFERENCE_SUBCMDS does not match `enum Command` variants in \
-             crates/alint/src/main.rs. A new subcommand probably landed \
+             crates/alint/src/cli.rs. A new subcommand probably landed \
              without its `/docs/cli/<name>.md` reference page being \
              generated; bump CLI_REFERENCE_SUBCMDS in xtask/src/docs_export.rs \
              to match the enum (kebab-case)."
@@ -294,6 +294,72 @@ Options:
 
     // No Options section -> None, so the caller keeps the raw `--help` dump.
     assert!(format_top_help("Usage: alint\n\nCommands:\n  check  Lint\n").is_none());
+}
+
+/// Once options carry long help (the `wrap_help` + short/long split), clap renders
+/// each option in its *next-line* layout: the flag header sits alone on a shallow
+/// line and the (possibly multi-paragraph) help is indented below it. `format_top_help`
+/// must still emit one Global-options row per flag with every paragraph, plus trailing
+/// `[default:]`/`[possible values:]` metadata, folded into a single cell — the same
+/// shape it produces for the same-line layout.
+#[test]
+fn format_top_help_folds_next_line_option_layout() {
+    let sample = "\
+A monorepo linter.
+
+Usage: alint [OPTIONS] [COMMAND]
+
+Commands:
+  check    Lint the repository
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -c, --config <CONFIG>
+          Path to a config file
+
+  -f, --format <FORMAT>
+          Output format
+
+          [default: human]
+
+      --show-notes
+          List informational notes in full on stderr.
+
+          Notes are non-violation findings, e.g. entries a rule
+          skipped rather than failed on.
+
+  -h, --help
+          Print help (see a summary with '-h')
+";
+    let out = format_top_help(sample).expect("next-line help parses");
+    assert!(out.contains("## Global options"), "{out}");
+    // Flag header alone on its line; the single help line below folds into the cell.
+    assert!(
+        out.contains("| `-c, --config <CONFIG>` | Path to a config file |"),
+        "{out}"
+    );
+    // Trailing `[default:]` metadata folds into the same cell.
+    assert!(
+        out.contains("| `-f, --format <FORMAT>` | Output format [default: human] |"),
+        "{out}"
+    );
+    // A multi-paragraph long help folds summary + detail into one cell.
+    assert!(
+        out.contains("List informational notes in full on stderr."),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "Notes are non-violation findings, e.g. entries a rule skipped rather than failed on."
+        ),
+        "{out}"
+    );
+    // Commands table is unchanged: known subcommands link, clap builtins stay plain.
+    assert!(out.contains("[`check`](/docs/cli/check/)"), "{out}");
+    assert!(
+        !out.contains("[`help`]"),
+        "clap builtin must not be linked: {out}"
+    );
 }
 
 /// `PascalCase` -> `kebab-case`. `ExportAgentsMd` ->

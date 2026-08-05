@@ -11,14 +11,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 /// Canonical subcommand count = `enum Command` variants in
-/// `crates/alint/src/main.rs`. Mirrors
+/// `crates/alint/src/cli.rs`. Mirrors
 /// `coverage_audit_readme_claims::readme_subcommands_count_matches_command_enum`.
 pub(super) fn count_canonical_subcommands() -> Result<usize> {
     let path = crate::bench_release::workspace_root()?
         .join("crates")
         .join("alint")
         .join("src")
-        .join("main.rs");
+        .join("cli.rs");
     let src = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Ok(count_enum_variants(&src, "Command"))
 }

@@ -43,6 +43,45 @@ fn snapshot_path() -> PathBuf {
         .join("cli-flags.txt")
 }
 
+/// Does `h` match clap's flag-header shape `[-x, ]--long [<VALUE>]`?
+///
+/// `wrap_help` can wrap a long description onto a line that *starts*
+/// with a `--token` (e.g. `git ls-files --modified --others
+/// --exclude-standard` in `check --changed`). Such a line is prose,
+/// not a flag header — this guard rejects it so it never pollutes the
+/// inventory.
+fn is_flag_header(h: &str) -> bool {
+    let mut s = h;
+    let b = s.as_bytes();
+    // optional short alias: `-x, `
+    if b.len() >= 4
+        && b[0] == b'-'
+        && (b[1] as char).is_ascii_alphanumeric()
+        && b[2] == b','
+        && b[3] == b' '
+    {
+        s = &s[4..];
+    }
+    let Some(rest) = s.strip_prefix("--") else {
+        return false;
+    };
+    let name_len = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .unwrap_or(rest.len());
+    if name_len == 0 {
+        return false;
+    }
+    let after = &rest[name_len..];
+    if after.is_empty() {
+        return true;
+    }
+    // the only permitted trailer is a single ` <VALUE>` placeholder
+    if let Some(v) = after.strip_prefix(" <") {
+        return matches!(v.find('>'), Some(i) if v[i + 1..].is_empty());
+    }
+    false
+}
+
 /// Pull the `Options:` section out of `--help` output and reduce
 /// it to a sorted list of flag headers (everything up to the
 /// first description column). Help-text indentation and prose
@@ -86,6 +125,11 @@ fn parse_flags(help: &str) -> Vec<String> {
             Some(i) => indent_stripped[..i].trim_end(),
             None => indent_stripped.trim_end(),
         };
+        // A wrapped description line can begin with a `--token`; only
+        // keep strings that actually match a flag header.
+        if !is_flag_header(header) {
+            continue;
+        }
         flags.push(header.to_string());
     }
     flags.sort();
