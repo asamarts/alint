@@ -6,6 +6,60 @@ All notable changes to alint are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2] - 2026-08-06
+
+A fixes-and-hardening patch on top of 0.14.1. The `hygiene-no-macos-junk`
+bundled rule stops flagging Hadoop checksum sidecars (via a new
+`content_prefix_hex` signature check any `file_absent` rule can use), SARIF
+output carries a stable `partialFingerprints` identity on every run,
+untagged-enum config errors read clearly, `alint --help` is legible on narrow
+terminals, and every third-party CI action is SHA-pinned. Existing configs keep
+working; the only change in what gets flagged is fewer false positives from
+`hygiene-no-macos-junk`.
+
+### Added
+
+- `file_absent` (and the rules built on it) gained an optional
+  `content_prefix_hex` option: a list of hex byte-signatures that a matching
+  file's content must begin with to be flagged. It distinguishes real binary
+  junk from unrelated files that merely share a name pattern. Unset (the
+  default) keeps the historical name-only behaviour.
+- `alint check --format sarif` now emits `partialFingerprints` (the canonical
+  `violation_fingerprint`) on every run, not only when a baseline is active, so
+  GitHub Code Scanning can correlate alerts across runs without `--baseline`.
+  The fingerprint matches the GitLab Code Quality export and the baseline file,
+  so a finding has one identity across every surface.
+
+### Changed
+
+- `alint --help` now wraps to the terminal width, with each command and global
+  option summarised on one line; the full per-item detail moved to
+  `alint <cmd> --help` (and `alint -h` shows the concise summary). Previously
+  clap emitted the long descriptions unwrapped and the terminal soft-wrapped
+  them under the command/option columns, which was unreadable on narrow screens.
+
+### Fixed
+
+- `hygiene-no-macos-junk` no longer reports Hadoop `._<name>.crc` checksum
+  files as macOS junk. The rule matched `**/._*` by name, so a committed
+  `._SUCCESS.crc` (whose content begins `crc\0`) looked like a macOS
+  AppleDouble sidecar (`00 05 16 07`). The bundled rule now verifies the
+  AppleDouble or `.DS_Store` ("Bud1") signature via `content_prefix_hex`
+  before flagging, and `alint fix` removes only files that carry a real
+  signature. Name-only matching is unchanged when `content_prefix_hex` is
+  unset.
+- Config-parse errors for untagged-enum rejections now describe the accepted
+  forms (via serde `expecting`) instead of a bare "data did not match any
+  variant" message, across the whole config surface.
+
+### Security
+
+- Every third-party GitHub Actions reference in CI is pinned to a full commit
+  SHA, enforced by alint's own `gha-pin-actions-to-sha` dogfood rule (OpenSSF
+  Scorecard Pinned-Dependencies hardening).
+
+## [Unreleased]
+
 ## [0.14.1] - 2026-07-24
 
 A performance patch. v0.14.0's OOM/TOCTOU read cap inadvertently regressed
@@ -29,8 +83,6 @@ timings. No configuration or behaviour changes.
   analysis cap and its TOCTOU-safe read bound are unchanged. Full investigation,
   reproduction, and the corrected write-up:
   `docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/`.
-
-## [Unreleased]
 
 ## [0.14.0] - 2026-07-18
 
@@ -6396,7 +6448,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/asamarts/alint/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/asamarts/alint/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/asamarts/alint/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/asamarts/alint/compare/v0.12.0...v0.13.0

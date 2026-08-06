@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-Adopting a linter on an established repo has a chicken-and-egg problem: turn the rules on and CI goes red on thousands of pre-existing violations, none of which the current PR introduced. **Baseline mode** breaks it. You record today's violations into a committed baseline file, and from then on `alint check` reports and gates on only the findings that are *new* relative to that snapshot. The legacy debt stays visible but non-blocking; the moment someone adds a *fresh* violation, the gate catches it.
+Adopting a linter on an established repo has a chicken-and-egg problem: turn the rules on and CI goes red on thousands of pre-existing violations, none of which the current PR introduced. **Baseline mode** breaks it. You record today's violations into a committed baseline file, and from then on `alint check` reports and gates on only the findings that are *new* relative to that snapshot. The legacy debt is kept in the baseline and suppressed from the default report (shown as a count, and listable with `--show-baselined`) rather than blocking; the moment someone adds a *fresh* violation, the gate catches it.
 
 This is the standard "ratchet": stop the bleeding now, pay the backlog down on your own schedule.
 

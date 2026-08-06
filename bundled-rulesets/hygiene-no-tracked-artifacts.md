@@ -167,6 +167,11 @@ rules:
   - id: hygiene-no-macos-junk
     kind: file_absent
     paths: ["**/.DS_Store", "**/._*"]
+    # Verify the file actually IS macOS junk before flagging it: the `._*`
+    # glob otherwise collides with Hadoop's `._<name>.crc` checksum files
+    # (which begin "crc\0"). Require the AppleDouble magic (00 05 16 07) or
+    # the .DS_Store "Bud1" magic (00 00 00 01 42 75 64 31) at byte 0.
+    content_prefix_hex: ["00051607", "0000000142756431"]
     level: error
     message: "macOS Finder metadata must not be committed."
     fix:
