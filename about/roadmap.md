@@ -12,8 +12,12 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.14.1** (2026-07-24), a performance patch restoring content-read
-throughput over v0.14.0. The v0.14.0 adoption release: `alint baseline`
+**Latest release: v0.14.2** (2026-08-06), a fixes-and-hardening patch: the
+macOS-junk hygiene rule stops flagging Hadoop checksum sidecars, SARIF gains a
+stable per-run fingerprint, `alint --help` wraps legibly on narrow terminals,
+and CI actions are SHA-pinned. It follows v0.14.1 (2026-07-24), a performance
+patch restoring content-read throughput over v0.14.0. The v0.14.0 adoption
+release: `alint baseline`
 snapshots a repo's existing violations behind a content fingerprint, so `alint
 check` reports and gates only on new findings, making alint a drop-in blocking
 merge gate on an established codebase without a flag-day cleanup (for SARIF the
