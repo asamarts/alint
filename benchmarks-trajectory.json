@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.14.2",
+      "date": "2026-08-06",
+      "headline": "A fixes-and-hardening patch on top of 0.14.1.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18328.36010014,
+          "stddev_ms": 147.51345062169503,
+          "display": "18.33 s ± 0.15"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17348.08608825333,
+          "stddev_ms": 19.2315417660513,
+          "display": "17.35 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16187.329738740002,
+          "stddev_ms": 228.92918563332353,
+          "display": "16.19 s ± 0.23"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11873.2182505,
+          "stddev_ms": 86.91882188163285,
+          "display": "11.87 s ± 0.09"
+        }
+      }
+    },
+    {
       "version": "v0.14.1",
       "date": "2026-07-24",
       "headline": "A performance patch.",
