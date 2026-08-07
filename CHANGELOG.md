@@ -4,6 +4,20 @@ All notable changes to alint are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `alint explain <rule>` now surfaces the rule's full configured detail. It
+  previously printed only `id`, `level`, and `policy_url`; it now also shows the
+  rule's `kind` and categories, the `paths:` scope, the author's `message:`, the
+  `when:` clause as authored (not the parsed AST), and, for a fixable rule, a
+  one-line description of the auto-fix. `explain --format json` gains matching
+  additive fields (`rule_kind`, `categories`, `paths`, `message`, `when`,
+  `fix`); the existing fields are unchanged. The detail was already in the
+  loaded config but was dropped when the rule was built, so most rules used to
+  explain to two bare lines.
+
 ## [0.14.2] - 2026-08-06
 
 A fixes-and-hardening patch on top of 0.14.1. The `hygiene-no-macos-junk`

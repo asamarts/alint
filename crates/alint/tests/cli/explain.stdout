@@ -1,3 +1,7 @@
 id:         has-readme
+kind:       file_exists
+categories: existence
 level:      error
+paths:      README.md
+message:    README.md must exist at the repository root.
 policy_url: https://opensource.guide/starting-a-project/#writing-a-readme

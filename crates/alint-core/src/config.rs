@@ -257,6 +257,39 @@ pub enum PathsSpec {
     },
 }
 
+impl PathsSpec {
+    /// Human-readable one-line rendering of the scope, for `alint explain`.
+    #[must_use]
+    pub fn render_scope(&self) -> String {
+        match self {
+            PathsSpec::Single(s) => s.clone(),
+            PathsSpec::Many(v) => v.join(", "),
+            PathsSpec::IncludeExclude { include, exclude } => {
+                let inc = if include.is_empty() {
+                    "**".to_string()
+                } else {
+                    include.join(", ")
+                };
+                if exclude.is_empty() {
+                    inc
+                } else {
+                    format!("{inc}  (excluding {})", exclude.join(", "))
+                }
+            }
+        }
+    }
+
+    /// Normalised `(include, exclude)` glob lists, for machine output.
+    #[must_use]
+    pub fn include_exclude(&self) -> (Vec<String>, Vec<String>) {
+        match self {
+            PathsSpec::Single(s) => (vec![s.clone()], Vec::new()),
+            PathsSpec::Many(v) => (v.clone(), Vec::new()),
+            PathsSpec::IncludeExclude { include, exclude } => (include.clone(), exclude.clone()),
+        }
+    }
+}
+
 fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,

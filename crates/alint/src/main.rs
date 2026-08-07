@@ -1292,11 +1292,24 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         Level::Off => style::DIM,
     };
     writeln!(out, "{dim}id:        {dim:#} {}", rule.id())?;
+    if !entry.kind.is_empty() {
+        writeln!(out, "{dim}kind:      {dim:#} {}", entry.kind)?;
+        let cats = rules::categories_for_kind(&entry.kind);
+        if !cats.is_empty() {
+            writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
+        }
+    }
     writeln!(
         out,
         "{dim}level:     {dim:#} {level_style}{}{level_style:#}",
         rule.level().as_str(),
     )?;
+    if let Some(paths) = &entry.paths {
+        writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
+    }
+    if let Some(msg) = &entry.message {
+        writeln!(out, "{dim}message:   {dim:#} {msg}")?;
+    }
     // v0.9.20: honour --no-docs by suppressing the policy_url line.
     // URLs remain in machine-readable formats regardless.
     if opts.show_docs
@@ -1304,8 +1317,15 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     {
         writeln!(out, "{dim}policy_url:{dim:#} {docs}{url}{docs:#}")?;
     }
-    if let Some(when) = &entry.when {
-        writeln!(out, "{dim}when:      {dim:#} {when:?}")?;
+    if let Some(when) = &entry.when_src {
+        writeln!(out, "{dim}when:      {dim:#} {when}")?;
+    }
+    if let Some(fixer) = rule.fixer() {
+        writeln!(
+            out,
+            "{dim}fix:       {dim:#} {}",
+            alint_core::Fixer::describe(fixer)
+        )?;
     }
     out.flush().ok();
     // v0.9.20: dropped the `debug: {rule:?}` line. The internal Debug
@@ -1320,14 +1340,27 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
 /// Machine-readable single-rule shape for `alint explain <id> --format
 /// json`. Parallels each entry of the `list --format json` inventory.
 fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
+    // `paths` normalises to `{ include, exclude }` glob lists. `rule_kind`
+    // carries the rule's own kind (the envelope's `kind` is the fixed `"rule"`
+    // discriminator), and `categories` matches each `list --format json` entry.
+    let paths = entry.paths.as_ref().map(|p| {
+        let (include, exclude) = p.include_exclude();
+        serde_json::json!({ "include": include, "exclude": exclude })
+    });
     let doc = serde_json::json!({
         "schema_version": 1,
         "kind": "rule",
         "id": entry.rule.id(),
+        "rule_kind": entry.kind,
+        "categories": rules::categories_for_kind(&entry.kind),
         "level": entry.rule.level().as_str(),
+        "paths": paths,
+        "message": entry.message,
         "policy_url": entry.rule.policy_url(),
+        "when": entry.when_src,
         "conditional": entry.when.is_some(),
         "fixable": entry.rule.fixer().is_some(),
+        "fix": entry.rule.fixer().map(alint_core::Fixer::describe),
     });
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
@@ -1606,11 +1639,13 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         rule.set_allow_out_of_root(allow_out_of_root);
         let mut entry = alint_core::RuleEntry::new(rule)
             .with_kind(spec.kind.clone())
+            .with_paths(spec.paths.clone())
+            .with_message(spec.message.clone())
             .with_allow_out_of_root(allow_out_of_root);
         if let Some(when_src) = &spec.when {
             let expr = alint_core::when::parse(when_src)
                 .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
-            entry = entry.with_when(expr);
+            entry = entry.with_when(expr).with_when_src(when_src.clone());
         }
         entries.push(entry);
     }

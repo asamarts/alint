@@ -73,6 +73,10 @@ type LivePerFileEntries<'a> = (Vec<(usize, &'a RuleEntry)>, Vec<(usize, RuleResu
 pub struct RuleEntry {
     pub rule: Box<dyn Rule>,
     pub when: Option<WhenExpr>,
+    /// The `when:` clause's source text, retained so `alint explain` can show
+    /// the authored expression rather than the parsed AST. `None` when the rule
+    /// is unconditional.
+    pub when_src: Option<String>,
     /// The rule's kind (e.g. `file_exists`), retained from its `RuleSpec` so
     /// config-scoped tooling (`alint list --category`) can map an active rule to
     /// its categories. Empty for entries built without a spec (`Engine::new`,
@@ -80,6 +84,14 @@ pub struct RuleEntry {
     /// categories" (the rule is silently dropped), so any config-loading path
     /// that wants `--category` to work MUST set this via [`RuleEntry::with_kind`].
     pub kind: String,
+    /// The rule's `paths:` scope, retained from its `RuleSpec` so config-scoped
+    /// tooling (`alint explain`) can show what the rule matches without
+    /// re-reading the config. `None` for entries built without a spec.
+    pub paths: Option<crate::config::PathsSpec>,
+    /// The rule's custom `message:`, retained from its `RuleSpec` so `alint
+    /// explain` can surface the author's violation text. `None` when the rule
+    /// falls back to its kind's default message.
+    pub message: Option<String>,
     /// The rule's resolved top-level `allow_out_of_root:` permission, threaded
     /// into the fixer's [`FixContext`] so a config-declared fix path can escape
     /// the root only when the user's own config opted this rule in. Defaults to
@@ -92,7 +104,10 @@ impl RuleEntry {
         Self {
             rule,
             when: None,
+            when_src: None,
             kind: String::new(),
+            paths: None,
+            message: None,
             allow_out_of_root: false,
         }
     }
@@ -111,10 +126,31 @@ impl RuleEntry {
         self
     }
 
+    /// Record the `when:` clause's source text (see [`RuleEntry::when_src`]).
+    #[must_use]
+    pub fn with_when_src(mut self, src: impl Into<String>) -> Self {
+        self.when_src = Some(src.into());
+        self
+    }
+
     /// Record the rule's kind (see [`RuleEntry::kind`]).
     #[must_use]
     pub fn with_kind(mut self, kind: impl Into<String>) -> Self {
         self.kind = kind.into();
+        self
+    }
+
+    /// Record the rule's `paths:` scope (see [`RuleEntry::paths`]).
+    #[must_use]
+    pub fn with_paths(mut self, paths: Option<crate::config::PathsSpec>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    /// Record the rule's custom `message:` (see [`RuleEntry::message`]).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
         self
     }
 }
