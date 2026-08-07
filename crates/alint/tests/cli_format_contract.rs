@@ -286,6 +286,63 @@ fn explain_covers_every_registered_kind() {
     }
 }
 
+// ─── list human surfaces kind + fixable/conditional markers ────────
+//
+// #163 added `kind`, `[fix]` (fixable), and `[when]` (conditional) markers to
+// `alint list`'s human output (parity with `list --format json`). The
+// `list.stdout` snapshot fixture has no fixable/conditional rule, so it
+// exercises only `kind`; this asserts the markers directly.
+#[test]
+fn list_human_surfaces_kind_and_markers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: rule-a
+    kind: file_exists
+    paths: .editorconfig
+    level: error
+    fix: { file_create: { content: "x\n" } }
+  - id: rule-b
+    kind: file_exists
+    paths: rust-toolchain.toml
+    level: info
+    when: "facts.has_rust"
+  - id: rule-c
+    kind: file_absent
+    paths: "**/*.bak"
+    level: warning
+"#,
+    )
+    .unwrap();
+
+    let s = String::from_utf8_lossy(&run(dir.path(), &["list"]).stdout).into_owned();
+    // Every rule shows its kind (parity with `list --format json`).
+    assert!(
+        s.contains("file_exists") && s.contains("file_absent"),
+        "list human dropped the kind:\n{s}"
+    );
+    let line = |id: &str| s.lines().find(|l| l.contains(id)).unwrap_or("").to_string();
+    // A fixable rule shows `[fix]`; a non-fixable one does not.
+    assert!(
+        line("rule-a").contains("[fix]"),
+        "fixable rule missing [fix]: {:?}",
+        line("rule-a")
+    );
+    assert!(
+        !line("rule-c").contains("[fix]"),
+        "non-fixable rule has a stray [fix]: {:?}",
+        line("rule-c")
+    );
+    // A conditional rule shows `[when]`.
+    assert!(
+        line("rule-b").contains("[when]"),
+        "conditional rule missing [when]: {:?}",
+        line("rule-b")
+    );
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:
