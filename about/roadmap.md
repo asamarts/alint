@@ -167,7 +167,10 @@ on it for adoption, they can lint without it.
 
 - **v0.11, LSP + developer experience.** LSP server, VS Code
   extension, ScopeFilter generalisation (`has_sibling`,
-  `has_descendant`), single-file re-eval hot path, and the
+  `has_descendant`; a further manifest-path generalisation is
+  seeded for a later cut in
+  [`v0.15/manifest-derived-scope.md`](v0.15/manifest-derived-scope.md), ADR-0010),
+  single-file re-eval hot path, and the
   v0.11+ ship-targets that didn't make v0.10:
   `cross_language_implementation_complete` (5 sources: arrow,
   tensorflow, protobuf, angular, flutter),
