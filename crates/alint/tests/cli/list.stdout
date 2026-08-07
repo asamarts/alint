@@ -1,2 +1,2 @@
-error    has-readme
-warning  no-bak-files
+error    has-readme  file_exists
+warning  no-bak-files  file_absent

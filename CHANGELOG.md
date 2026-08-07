@@ -17,6 +17,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `fix`); the existing fields are unchanged. The detail was already in the
   loaded config but was dropped when the rule was built, so most rules used to
   explain to two bare lines.
+- `alint list` now shows each rule's `kind` and a `[fix]` marker in its human
+  output, matching what `list --format json` already carried (the human
+  inventory previously showed only level, id, `[when]`, and the policy URL).
+- `alint export-agents-md` keeps a rule's scope in the generated directive when
+  the rule sets no `message:` ("file_exists rule on README.md" rather than the
+  bare "file_exists rule"), so a generated AGENTS.md stays actionable.
 
 ## [0.14.2] - 2026-08-06
 
