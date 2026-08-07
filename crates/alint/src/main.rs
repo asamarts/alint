@@ -1307,8 +1307,16 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if let Some(paths) = &entry.paths {
         writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
     }
-    if let Some(msg) = &entry.message {
-        writeln!(out, "{dim}message:   {dim:#} {msg}")?;
+    // A blank / whitespace-only message renders as absent rather than a
+    // dangling `message:` label. Continuation lines indent under the value
+    // column and a trailing newline (block scalars carry one) is dropped, so a
+    // multi-line message stays aligned instead of wrapping back to column 0.
+    if let Some(msg) = entry.message.as_deref() {
+        let msg = msg.trim_end_matches('\n');
+        if !msg.trim().is_empty() {
+            let msg = msg.replace('\n', &format!("\n{}", " ".repeat(12)));
+            writeln!(out, "{dim}message:   {dim:#} {msg}")?;
+        }
     }
     // v0.9.20: honour --no-docs by suppressing the policy_url line.
     // URLs remain in machine-readable formats regardless.
@@ -1355,10 +1363,13 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "categories": rules::categories_for_kind(&entry.kind),
         "level": entry.rule.level().as_str(),
         "paths": paths,
-        "message": entry.message,
+        "message": entry.message.as_deref().filter(|m| !m.trim().is_empty()),
         "policy_url": entry.rule.policy_url(),
         "when": entry.when_src,
-        "conditional": entry.when.is_some(),
+        // Mirror the displayed `when` source so `conditional` and `when` can
+        // never disagree (both are set together at load; deriving from one
+        // field keeps the output self-consistent for any future caller).
+        "conditional": entry.when_src.is_some(),
         "fixable": entry.rule.fixer().is_some(),
         "fix": entry.rule.fixer().map(alint_core::Fixer::describe),
     });

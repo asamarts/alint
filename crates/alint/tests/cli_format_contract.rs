@@ -184,6 +184,63 @@ fn explain_surfaces_configured_rule_detail() {
     }
 }
 
+// ─── Explain edge cases — negation paths + blank message ───────────
+//
+// Guards two adversarial-review findings: an inline `!` negation in a paths
+// list must report as an exclude (not a bogus include), and a blank message
+// must render as absent (no dangling `message:` label, json null).
+#[test]
+fn explain_handles_negation_paths_and_blank_message() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: neg
+    kind: file_content_forbidden
+    paths: ["src/**", "!src/gen/**"]
+    pattern: "TODO"
+    level: warning
+  - id: blank
+    kind: file_exists
+    paths: X
+    level: error
+    message: ""
+"#,
+    )
+    .unwrap();
+
+    // An inline `!` negation is an exclude, mirroring the scope matcher.
+    let v: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["explain", "neg", "--format", "json"]).stdout)
+            .expect("json");
+    assert_eq!(v["paths"]["include"][0], "src/**");
+    assert_eq!(
+        v["paths"]["exclude"][0], "src/gen/**",
+        "inline `!` negation must report as an exclude, not an include: {v}"
+    );
+    let human = String::from_utf8_lossy(&run(dir.path(), &["explain", "neg"]).stdout).into_owned();
+    assert!(
+        human.contains("(excluding src/gen/**)"),
+        "human paths must show the negation as an exclusion:\n{human}"
+    );
+
+    // A blank message renders as absent: json null, no human label.
+    let v: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["explain", "blank", "--format", "json"]).stdout)
+            .expect("json");
+    assert!(
+        v["message"].is_null(),
+        "blank message must be json null: {v}"
+    );
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["explain", "blank"]).stdout).into_owned();
+    assert!(
+        !human.contains("message:"),
+        "blank message must not print a dangling label:\n{human}"
+    );
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:

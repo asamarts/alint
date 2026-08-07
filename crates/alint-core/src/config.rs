@@ -258,34 +258,56 @@ pub enum PathsSpec {
 }
 
 impl PathsSpec {
-    /// Human-readable one-line rendering of the scope, for `alint explain`.
+    /// Split a raw pattern list into `(include, exclude)` exactly as the scope
+    /// matcher does (`Scope::from_patterns`): a leading `!` marks an exclusion,
+    /// with the `!` stripped. Keeps `alint explain` honest about a rule that
+    /// uses inline negations (`paths: ["src/**", "!src/tests/**"]`).
+    fn split_patterns(patterns: &[String]) -> (Vec<String>, Vec<String>) {
+        let mut include = Vec::new();
+        let mut exclude = Vec::new();
+        for p in patterns {
+            if let Some(rest) = p.strip_prefix('!') {
+                exclude.push(rest.to_string());
+            } else {
+                include.push(p.clone());
+            }
+        }
+        (include, exclude)
+    }
+
+    /// Normalised `(include, exclude)` glob lists, for machine output. Mirrors
+    /// how `Scope::from_paths_spec` classifies each form, so inline `!`
+    /// negations report as excludes rather than includes.
     #[must_use]
-    pub fn render_scope(&self) -> String {
+    pub fn include_exclude(&self) -> (Vec<String>, Vec<String>) {
         match self {
-            PathsSpec::Single(s) => s.clone(),
-            PathsSpec::Many(v) => v.join(", "),
+            PathsSpec::Single(s) => Self::split_patterns(std::slice::from_ref(s)),
+            PathsSpec::Many(v) => Self::split_patterns(v),
             PathsSpec::IncludeExclude { include, exclude } => {
-                let inc = if include.is_empty() {
-                    "**".to_string()
-                } else {
-                    include.join(", ")
-                };
-                if exclude.is_empty() {
-                    inc
-                } else {
-                    format!("{inc}  (excluding {})", exclude.join(", "))
-                }
+                // The include list may itself carry `!` negations (the matcher
+                // folds them in); split it, then append the explicit excludes.
+                let (inc, mut exc) = Self::split_patterns(include);
+                exc.extend(exclude.iter().cloned());
+                (inc, exc)
             }
         }
     }
 
-    /// Normalised `(include, exclude)` glob lists, for machine output.
+    /// Human-readable one-line rendering of the scope, for `alint explain`.
+    /// Built from [`include_exclude`](Self::include_exclude) so it classifies
+    /// inline `!` negations the same way the matcher does.
     #[must_use]
-    pub fn include_exclude(&self) -> (Vec<String>, Vec<String>) {
-        match self {
-            PathsSpec::Single(s) => (vec![s.clone()], Vec::new()),
-            PathsSpec::Many(v) => (v.clone(), Vec::new()),
-            PathsSpec::IncludeExclude { include, exclude } => (include.clone(), exclude.clone()),
+    pub fn render_scope(&self) -> String {
+        let (include, exclude) = self.include_exclude();
+        let inc = if include.is_empty() {
+            "**".to_string()
+        } else {
+            include.join(", ")
+        };
+        if exclude.is_empty() {
+            inc
+        } else {
+            format!("{inc}  (excluding {})", exclude.join(", "))
         }
     }
 }
@@ -933,6 +955,42 @@ mod tests {
         };
         assert_eq!(include, vec!["a"]);
         assert_eq!(exclude, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn paths_spec_include_exclude_classifies_negations() {
+        let inc = |s: &str| vec![s.to_string()];
+
+        // A leading `!` marks an exclusion (matching `Scope::from_patterns`),
+        // not an include — `explain` must not mislabel it.
+        let single = PathsSpec::Single("src/**".to_string());
+        assert_eq!(single.include_exclude(), (inc("src/**"), Vec::new()));
+
+        let many = PathsSpec::Many(vec!["src/**".to_string(), "!src/vendor/**".to_string()]);
+        assert_eq!(
+            many.include_exclude(),
+            (inc("src/**"), inc("src/vendor/**"))
+        );
+        assert_eq!(many.render_scope(), "src/**  (excluding src/vendor/**)");
+
+        // Explicit include/exclude, plus a `!` inside the include list: both
+        // land in the exclude bucket (mirroring `from_paths_spec`).
+        let inc_exc = PathsSpec::IncludeExclude {
+            include: vec!["a/**".to_string(), "!a/gen/**".to_string()],
+            exclude: vec!["a/test/**".to_string()],
+        };
+        assert_eq!(
+            inc_exc.include_exclude(),
+            (
+                inc("a/**"),
+                vec!["a/gen/**".to_string(), "a/test/**".to_string()],
+            )
+        );
+
+        // An exclusion-only Single renders as match-all minus the exclude.
+        let excl_only = PathsSpec::Single("!dist/**".to_string());
+        assert_eq!(excl_only.include_exclude(), (Vec::new(), inc("dist/**")));
+        assert_eq!(excl_only.render_scope(), "**  (excluding dist/**)");
     }
 
     #[test]
