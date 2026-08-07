@@ -1316,6 +1316,21 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if let Some(paths) = &entry.paths {
         writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
     }
+    // Kind-specific options (pattern, max_lines, ...): the first inline after
+    // the `options:` label, the rest indented under the value column.
+    for (i, (k, v)) in entry.extra.iter().enumerate() {
+        let key = k.as_str().unwrap_or_default();
+        let val = match serde_json::to_value(v) {
+            Ok(serde_json::Value::String(s)) => s,
+            Ok(jv) => jv.to_string(),
+            Err(_) => String::new(),
+        };
+        if i == 0 {
+            writeln!(out, "{dim}options:   {dim:#} {dim}{key}:{dim:#} {val}")?;
+        } else {
+            writeln!(out, "            {dim}{key}:{dim:#} {val}")?;
+        }
+    }
     // A blank / whitespace-only message renders as absent rather than a
     // dangling `message:` label. Continuation lines indent under the value
     // column and a trailing newline (block scalars carry one) is dropped, so a
@@ -1364,6 +1379,11 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         let (include, exclude) = p.include_exclude();
         serde_json::json!({ "include": include, "exclude": exclude })
     });
+    let options = if entry.extra.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::to_value(&entry.extra).unwrap_or(serde_json::Value::Null)
+    };
     let doc = serde_json::json!({
         "schema_version": 1,
         "kind": "rule",
@@ -1372,6 +1392,7 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "categories": rules::categories_for_kind(&entry.kind),
         "level": entry.rule.level().as_str(),
         "paths": paths,
+        "options": options,
         "message": entry.message.as_deref().filter(|m| !m.trim().is_empty()),
         "policy_url": entry.rule.policy_url(),
         "when": entry.when_src,
@@ -1661,6 +1682,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
             .with_kind(spec.kind.clone())
             .with_paths(spec.paths.clone())
             .with_message(spec.message.clone())
+            .with_extra(spec.extra.clone())
             .with_allow_out_of_root(allow_out_of_root);
         if let Some(when_src) = &spec.when {
             let expr = alint_core::when::parse(when_src)

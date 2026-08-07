@@ -343,6 +343,45 @@ rules:
     );
 }
 
+// ─── Explain surfaces kind-specific options ────────────────────────
+//
+// The last completeness gap: `explain` now shows a rule's kind options (the
+// flattened non-common `RuleSpec` fields like `pattern`/`max_lines`) in both
+// human and json, retained as `RuleEntry.extra` from the spec.
+#[test]
+fn explain_surfaces_kind_options() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: no-dbg
+    kind: file_content_forbidden
+    paths: "src/**/*.rs"
+    pattern: '\bdbg!\('
+    level: warning
+"#,
+    )
+    .unwrap();
+
+    // JSON: `options` carries the kind-specific fields.
+    let v: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["explain", "no-dbg", "--format", "json"]).stdout)
+            .expect("json");
+    assert_eq!(
+        v["options"]["pattern"], r"\bdbg!\(",
+        "explain json dropped the kind option: {v}"
+    );
+
+    // Human: the option is visible under an `options:` label.
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["explain", "no-dbg"]).stdout).into_owned();
+    assert!(
+        human.contains("options:") && human.contains(r"pattern: \bdbg!\("),
+        "explain human dropped the kind option:\n{human}"
+    );
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:

@@ -92,6 +92,10 @@ pub struct RuleEntry {
     /// explain` can surface the author's violation text. `None` when the rule
     /// falls back to its kind's default message.
     pub message: Option<String>,
+    /// The rule's kind-specific options (the flattened non-common `RuleSpec`
+    /// fields, e.g. `pattern`, `max_lines`), retained so `alint explain` can show
+    /// them. Empty for entries built without a spec.
+    pub extra: serde_yaml_ng::Mapping,
     /// The rule's resolved top-level `allow_out_of_root:` permission, threaded
     /// into the fixer's [`FixContext`] so a config-declared fix path can escape
     /// the root only when the user's own config opted this rule in. Defaults to
@@ -108,6 +112,7 @@ impl RuleEntry {
             kind: String::new(),
             paths: None,
             message: None,
+            extra: serde_yaml_ng::Mapping::new(),
             allow_out_of_root: false,
         }
     }
@@ -130,6 +135,13 @@ impl RuleEntry {
     #[must_use]
     pub fn with_when_src(mut self, src: impl Into<String>) -> Self {
         self.when_src = Some(src.into());
+        self
+    }
+
+    /// Record the rule's kind-specific options (see [`RuleEntry::extra`]).
+    #[must_use]
+    pub fn with_extra(mut self, extra: serde_yaml_ng::Mapping) -> Self {
+        self.extra = extra;
         self
     }
 

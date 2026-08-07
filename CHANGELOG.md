@@ -23,6 +23,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `alint export-agents-md` keeps a rule's scope in the generated directive when
   the rule sets no `message:` ("file_exists rule on README.md" rather than the
   bare "file_exists rule"), so a generated AGENTS.md stays actionable.
+- `alint explain <rule>` additionally surfaces a rule's kind-specific options
+  (the flattened fields such as `pattern` / `max_lines`), under an `options:`
+  block in the human output and an `options` object in `--format json`. This
+  completes the explain output: id, kind, categories, level, paths, options,
+  message, policy_url, when, and fix.
 
 ## [0.14.2] - 2026-08-06
 
