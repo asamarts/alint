@@ -1321,7 +1321,10 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     for (i, (k, v)) in entry.extra.iter().enumerate() {
         let key = k.as_str().unwrap_or_default();
         let val = match serde_json::to_value(v) {
-            Ok(serde_json::Value::String(s)) => s,
+            // A single-line string renders bare; a multi-line string (and every
+            // non-string) renders as compact JSON, so an embedded newline cannot
+            // break the aligned options block.
+            Ok(serde_json::Value::String(s)) if !s.contains(['\n', '\r']) => s,
             Ok(jv) => jv.to_string(),
             Err(_) => String::new(),
         };

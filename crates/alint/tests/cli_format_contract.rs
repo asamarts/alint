@@ -351,34 +351,55 @@ rules:
 #[test]
 fn explain_surfaces_kind_options() {
     let dir = tempfile::tempdir().expect("tempdir");
+    // Two options, the first a MULTI-LINE string: exercises the inline (i==0)
+    // AND indented (i>0) render branches plus multi-line handling.
     std::fs::write(
         dir.path().join(".alint.yml"),
         r#"version: 1
 rules:
-  - id: no-dbg
-    kind: file_content_forbidden
+  - id: hdr
+    kind: file_header
     paths: "src/**/*.rs"
-    pattern: '\bdbg!\('
     level: warning
+    pattern: "first\nsecond"
+    lines: 3
 "#,
     )
     .unwrap();
 
-    // JSON: `options` carries the kind-specific fields.
+    // JSON: `options` carries both kind fields, the newline preserved.
     let v: serde_json::Value =
-        serde_json::from_slice(&run(dir.path(), &["explain", "no-dbg", "--format", "json"]).stdout)
+        serde_json::from_slice(&run(dir.path(), &["explain", "hdr", "--format", "json"]).stdout)
             .expect("json");
     assert_eq!(
-        v["options"]["pattern"], r"\bdbg!\(",
-        "explain json dropped the kind option: {v}"
+        v["options"]["pattern"], "first\nsecond",
+        "explain json dropped/mangled a kind option: {v}"
+    );
+    assert_eq!(
+        v["options"]["lines"], 3,
+        "explain json dropped a kind option: {v}"
     );
 
-    // Human: the option is visible under an `options:` label.
-    let human =
-        String::from_utf8_lossy(&run(dir.path(), &["explain", "no-dbg"]).stdout).into_owned();
+    // Human: both options appear; the multi-line value stays on ONE line
+    // (escaped JSON) so it can't break the aligned block, and the second option
+    // is indented on its own line rather than run inline.
+    let human = String::from_utf8_lossy(&run(dir.path(), &["explain", "hdr"]).stdout).into_owned();
+    let opt_line = human
+        .lines()
+        .find(|l| l.contains("options:"))
+        .unwrap_or("")
+        .to_string();
     assert!(
-        human.contains("options:") && human.contains(r"pattern: \bdbg!\("),
-        "explain human dropped the kind option:\n{human}"
+        opt_line.contains("pattern:") && opt_line.contains(r"first\nsecond"),
+        "multi-line option must render inline as escaped JSON: {opt_line:?}"
+    );
+    assert!(
+        !human.lines().any(|l| l == "second"),
+        "multi-line option leaked a column-0 continuation line:\n{human}"
+    );
+    assert!(
+        human.lines().any(|l| l.trim_start() == "lines: 3"),
+        "the second option must be indented on its own line:\n{human}"
     );
 }
 
