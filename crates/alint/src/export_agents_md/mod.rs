@@ -111,10 +111,14 @@ fn collect_directives(config: &alint_core::Config, include_info: bool) -> Vec<Di
         .map(|spec| Directive {
             rule_id: spec.id.clone(),
             severity: spec.level,
-            directive: spec
-                .message
-                .clone()
-                .unwrap_or_else(|| format!("{} rule", spec.kind)),
+            directive: spec.message.clone().unwrap_or_else(|| match &spec.paths {
+                // No author message: fall back to the kind AND the scope it
+                // applies to, so a generated AGENTS.md directive stays
+                // actionable ("file_exists rule on README.md", not just the
+                // bare "file_exists rule").
+                Some(p) => format!("{} rule on {}", spec.kind, p.render_scope()),
+                None => format!("{} rule", spec.kind),
+            }),
             policy_url: spec.policy_url.clone(),
         })
         .collect();
@@ -319,6 +323,17 @@ mod tests {
         let dirs = collect_directives(&cfg, false);
         assert_eq!(dirs.len(), 1);
         assert_eq!(dirs[0].directive, "file_exists rule");
+    }
+
+    #[test]
+    fn missing_message_with_paths_keeps_the_scope() {
+        // A message-less rule WITH a paths scope keeps the scope in the
+        // directive, so a generated AGENTS.md stays actionable (ADR-0012).
+        let mut s = spec("no-msg-scoped", Level::Warning, None);
+        s.paths = Some(alint_core::PathsSpec::Single("README.md".into()));
+        let dirs = collect_directives(&config_with(vec![s]), false);
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0].directive, "file_exists rule on README.md");
     }
 
     #[test]

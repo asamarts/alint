@@ -241,6 +241,51 @@ rules:
     );
 }
 
+// ─── Explain covers every registered kind (all_kinds.yaml) ─────────
+//
+// ADR-0012's generalisation of the per-rule completeness gate: drive the
+// `all_kinds.yaml` fixture (a rule for ~every registered kind) through
+// `explain --format json` and assert each renders valid JSON with its id and
+// kind round-tripping and categories present. A newly registered kind that
+// rendered blank, mis-reported its kind, or crashed `explain` fails here.
+#[test]
+fn explain_covers_every_registered_kind() {
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../alint-dsl/tests/fixtures/all_kinds.yaml"
+    ))
+    .expect("read all_kinds.yaml");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".alint.yml"), &fixture).unwrap();
+
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    let rules = list["rules"].as_array().expect("rules array");
+    assert!(
+        rules.len() > 60,
+        "all_kinds fixture should exercise many kinds (got {})",
+        rules.len()
+    );
+
+    for r in rules {
+        let id = r["id"].as_str().expect("rule id");
+        let kind = r["kind"].as_str().expect("rule kind");
+        let out = run(dir.path(), &["explain", id, "--format", "json"]);
+        let ev: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|_| panic!("explain {id} --format json must be valid JSON"));
+        assert_eq!(ev["id"], id, "explain mis-reported the id for {id}: {ev}");
+        assert_eq!(
+            ev["rule_kind"], kind,
+            "explain mis-reported the kind for {id}: {ev}"
+        );
+        assert!(
+            ev["categories"].as_array().is_some(),
+            "explain dropped categories for {id}: {ev}"
+        );
+    }
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:

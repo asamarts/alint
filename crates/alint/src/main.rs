@@ -1086,8 +1086,17 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
             "{level_style}{label}{level_style:#}{pad} {}",
             rule.id()
         )?;
+        // Surface the rule's kind (and a fixable marker) in the human list,
+        // matching what `list --format json` already carries — otherwise the
+        // human inventory can't answer "what kind is this rule?".
+        if !entry.kind.is_empty() {
+            write!(out, "  {dim}{}{dim:#}", entry.kind)?;
+        }
         if entry.when.is_some() {
             write!(out, " {dim}[when]{dim:#}")?;
+        }
+        if rule.fixer().is_some() {
+            write!(out, " {dim}[fix]{dim:#}")?;
         }
         if opts.show_docs
             && let Some(url) = rule.policy_url()
