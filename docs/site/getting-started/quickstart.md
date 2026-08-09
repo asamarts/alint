@@ -26,6 +26,31 @@ alint explain <id>    # show a rule's full, resolved definition
 alint facts           # evaluate facts against the repo — debug `when:` clauses
 ```
 
+Run `alint --help` for a one-line summary of every command, or `alint <cmd> --help` for a command's full options.
+
+## Inspecting your rules
+
+`alint list` shows the effective rules (after `extends:` and overrides), each with its kind and a marker for a conditional (`[when]`) or auto-fixable (`[fix]`) rule:
+
+```text
+error    needs-readme  file_exists [fix]
+warning  no-bak  file_absent
+```
+
+`alint explain <id>` resolves a single rule to its full definition — kind and categories, level, the `paths:` scope, any kind-specific options, the author `message:`, the `when:` clause as authored, and a one-line description of the auto-fix:
+
+```text
+id:         needs-readme
+kind:       file_exists
+categories: existence
+level:      error
+paths:      README.md
+message:    README.md must exist.
+fix:        create README.md (8 bytes)
+```
+
+Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+
 ## Output formats
 
 ```bash

@@ -50,6 +50,8 @@ Use `format: sarif` and pipe to the standard upload action:
 
 `continue-on-error: true` is what lets the SARIF upload run even when alint finds issues — without it, a non-zero exit short-circuits the upload and the findings never reach Code Scanning.
 
+alint's SARIF carries a stable [`partialFingerprints`](/docs/reference/output-formats/#stable-fingerprints) identity on every run, so Code Scanning correlates each alert across runs — deduping, and tracking a finding as fixed or reopened — with no `--baseline` needed.
+
 ## Pin to a SHA
 
 For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/docs/bundled-rulesets/) bundled ruleset), pin the action to a commit SHA:

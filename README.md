@@ -189,6 +189,8 @@ alint export-agents-md --inline --output AGENTS.md    # splice between alint mar
 
 `--inline` writes only between `<!-- alint:start -->` / `<!-- alint:end -->` markers; everything else in `AGENTS.md` is human-owned prose. Re-runs are idempotent (when the on-disk content already matches, no write happens), and missing markers auto-init with a stderr warning so the second run splices cleanly.
 
+Each rule renders as a one-line directive: its `message:` when it sets one, otherwise its kind and scope (for example, "file_exists rule on README.md"), so a rule with no message still tells the agent what to enforce.
+
 The generated file is editable: start there, override or extend as needed. If you'd rather hand-roll, the minimum viable shape is:
 
 ```yaml
