@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-06
 decision-makers: asamarts
 ---
@@ -8,8 +8,15 @@ decision-makers: asamarts
 
 ## Status
 
-Proposed. Prompted by the `alint explain` gap fixed in the Tier 1 explain change,
-and a 2026-08-06 audit of every subcommand's output against its data model.
+Accepted (2026-08-08). Commitments 1 and 2 shipped: the positive-invariant gates
+driven by `all_kinds.yaml` (`explain_surfaces_configured_rule_detail`,
+`explain_covers_every_registered_kind`) and the `list` / `export-agents-md`
+remediations (the human `kind` + `[fix]` marker, the scope fallback, and
+kind-specific options). Commitment 3's structural-prevention choice is decided in
+ADR-0013 - retain the `RuleSpec` projection on `RuleEntry` and render from it; the
+`Rule::message()` accessor is rejected there. Originally prompted by the `alint
+explain` gap fixed in the Tier 1 explain change and a 2026-08-06 audit of every
+subcommand's output against its data model.
 
 ## Context
 
