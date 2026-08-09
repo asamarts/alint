@@ -451,6 +451,174 @@ fn explain_surfaces_when_source() {
     );
 }
 
+// ─── Explain surfaces the auto-fix for a fixable rule ──────────────
+//
+// `explain` emits `fix` + `fixable` (main.rs), but every other explain gate uses
+// a NON-fixable rule, so the human `fix:` line and the json `fix`/`fixable`
+// fields were asserted nowhere. This pins BOTH sides: a file_create-fixable rule
+// (fix line + fixable:true) and a non-fixable rule (no fix line + fixable:false).
+#[test]
+fn explain_surfaces_fix_for_fixable_rule() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+        \x20 - id: needs-editorconfig\n\
+        \x20   kind: file_exists\n\
+        \x20   paths: .editorconfig\n\
+        \x20   level: error\n\
+        \x20   fix: { file_create: { content: \"root = true\\n\" } }\n",
+    )
+    .unwrap();
+
+    // JSON: `fixable` is true and `fix` carries a non-empty describe string.
+    let v: serde_json::Value = serde_json::from_slice(
+        &run(
+            dir.path(),
+            &["explain", "needs-editorconfig", "--format", "json"],
+        )
+        .stdout,
+    )
+    .expect("explain --format json must be JSON");
+    assert_eq!(
+        v["fixable"], true,
+        "explain json must report a fixable rule: {v}"
+    );
+    assert!(
+        v["fix"].as_str().is_some_and(|s| !s.is_empty()),
+        "explain json must describe the fix: {v}"
+    );
+
+    // Human: the `fix:` line renders.
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["explain", "needs-editorconfig"]).stdout)
+            .into_owned();
+    assert!(
+        human.lines().any(|l| l.trim_start().starts_with("fix:")),
+        "explain human must show the fix: line:\n{human}"
+    );
+
+    // Negative: a non-fixable rule reports fixable:false, nulls `fix`, and renders
+    // no `fix:` line, so the projection can't regress to "always fixable".
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+        \x20 - id: no-bak\n\
+        \x20   kind: file_absent\n\
+        \x20   paths: \"**/*.bak\"\n\
+        \x20   level: warning\n",
+    )
+    .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["explain", "no-bak", "--format", "json"]).stdout)
+            .expect("explain --format json must be JSON");
+    assert_eq!(
+        v["fixable"], false,
+        "explain json must report a non-fixable rule as fixable:false: {v}"
+    );
+    assert!(
+        v["fix"].is_null(),
+        "explain json must null the fix for a non-fixable rule: {v}"
+    );
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["explain", "no-bak"]).stdout).into_owned();
+    assert!(
+        !human.lines().any(|l| l.trim_start().starts_with("fix:")),
+        "a non-fixable rule must not render a fix: line:\n{human}"
+    );
+}
+
+// ─── export-agents-md keeps scope when a rule has no message ────────
+//
+// A message-less, path-scoped rule must render "<kind> rule on <scope>" in the
+// generated directive, not the bare "<kind> rule". The markdown snapshot
+// fixture's rules all set a `message:`, so this fallback had only a unit test
+// (`export_agents_md::missing_message_with_paths_keeps_the_scope`); this drives
+// it through the real binary.
+#[test]
+fn export_agents_md_keeps_scope_for_messageless_rule() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+        \x20 - id: needs-readme\n\
+        \x20   kind: file_exists\n\
+        \x20   paths: README.md\n\
+        \x20   level: error\n",
+    )
+    .unwrap();
+
+    let out = String::from_utf8_lossy(&run(dir.path(), &["export-agents-md"]).stdout).into_owned();
+    assert!(
+        out.contains("file_exists rule on README.md"),
+        "a message-less rule must keep its scope in the directive:\n{out}"
+    );
+}
+
+// ─── --help wraps to a narrow terminal width ───────────────────────
+//
+// #159 made `alint --help` wrap to the terminal width, but the committed
+// help-*.stdout snapshots capture only clap's 100-col non-TTY fallback, so the
+// genuinely-narrow promise was unpinned. Drive the real binary at COLUMNS=40.
+// The top-level help holds no unbreakable token, so no line may exceed 40.
+// Subcommands can carry a literal clap cannot split (a `path@v1` option value,
+// or the un-wrapped `Usage:` line — currently up to 45), so a line may run a
+// little over; the ceiling still catches a wrap_help regression, which would put
+// whole 100+ char option descriptions back on one line. The new quickstart tells
+// users to run `alint <cmd> --help`, so cover the top level AND every subcommand.
+#[test]
+fn help_wraps_to_narrow_terminal_width() {
+    let widest = |sub: &[&str]| -> (usize, String) {
+        let out = Command::new(alint_bin())
+            .args(sub)
+            .arg("--help")
+            .env("COLUMNS", "40")
+            .output()
+            .expect("spawn alint");
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let w = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
+        (w, text)
+    };
+
+    // Top level: exact — nothing here is unbreakable, so it fits the column.
+    let (top, text) = widest(&[]);
+    assert!(
+        text.contains("explain") && text.lines().count() > 10,
+        "narrow top-level --help looks truncated:\n{text}"
+    );
+    assert!(
+        top <= 40,
+        "no top-level `--help` line may exceed COLUMNS=40, but the widest is {top}:\n{text}"
+    );
+
+    // Every subcommand: rendered and wrapped (no return to unwrapped prose).
+    for sub in [
+        "check",
+        "list",
+        "explain",
+        "fix",
+        "baseline",
+        "facts",
+        "init",
+        "export-agents-md",
+        "suggest",
+        "validate-config",
+        "lsp",
+        "rules",
+    ] {
+        let (w, text) = widest(&[sub]);
+        assert!(w > 10, "`alint {sub} --help` looks truncated:\n{text}");
+        assert!(
+            w <= 60,
+            "`alint {sub} --help` has a {w}-wide line at COLUMNS=40 — a wrap_help \
+             regression would put whole option descriptions (100+ chars) on one line:\n{text}"
+        );
+    }
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:
