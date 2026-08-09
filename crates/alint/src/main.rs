@@ -1038,7 +1038,7 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
     if let Some(slug) = category {
         loaded
             .entries
-            .retain(|e| rules::categories_for_kind(&e.kind).contains(&slug));
+            .retain(|e| rules::categories_for_kind(e.kind()).contains(&slug));
     }
 
     // `list` honours --format for machine consumers: `json` emits a
@@ -1089,8 +1089,8 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         // Surface the rule's kind (and a fixable marker) in the human list,
         // matching what `list --format json` already carries — otherwise the
         // human inventory can't answer "what kind is this rule?".
-        if !entry.kind.is_empty() {
-            write!(out, "  {dim}{}{dim:#}", entry.kind)?;
+        if !entry.kind().is_empty() {
+            write!(out, "  {dim}{}{dim:#}", entry.kind())?;
         }
         if entry.when.is_some() {
             write!(out, " {dim}[when]{dim:#}")?;
@@ -1122,8 +1122,8 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
         .map(|entry| {
             serde_json::json!({
                 "id": entry.rule.id(),
-                "kind": entry.kind,
-                "categories": rules::categories_for_kind(&entry.kind),
+                "kind": entry.kind(),
+                "categories": rules::categories_for_kind(entry.kind()),
                 "level": entry.rule.level().as_str(),
                 "policy_url": entry.rule.policy_url(),
                 "conditional": entry.when.is_some(),
@@ -1301,9 +1301,9 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         Level::Off => style::DIM,
     };
     writeln!(out, "{dim}id:        {dim:#} {}", rule.id())?;
-    if !entry.kind.is_empty() {
-        writeln!(out, "{dim}kind:      {dim:#} {}", entry.kind)?;
-        let cats = rules::categories_for_kind(&entry.kind);
+    if !entry.kind().is_empty() {
+        writeln!(out, "{dim}kind:      {dim:#} {}", entry.kind())?;
+        let cats = rules::categories_for_kind(entry.kind());
         if !cats.is_empty() {
             writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
         }
@@ -1313,12 +1313,13 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         "{dim}level:     {dim:#} {level_style}{}{level_style:#}",
         rule.level().as_str(),
     )?;
-    if let Some(paths) = &entry.paths {
+    if let Some(paths) = entry.paths() {
         writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
     }
     // Kind-specific options (pattern, max_lines, ...): the first inline after
-    // the `options:` label, the rest indented under the value column.
-    for (i, (k, v)) in entry.extra.iter().enumerate() {
+    // the `options:` label, the rest indented under the value column. A
+    // spec-less entry has no options, so the flattened iterator is empty.
+    for (i, (k, v)) in entry.extra().into_iter().flatten().enumerate() {
         let key = k.as_str().unwrap_or_default();
         let val = match serde_json::to_value(v) {
             // A single-line string renders bare; a multi-line string (and every
@@ -1338,7 +1339,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     // dangling `message:` label. Continuation lines indent under the value
     // column and a trailing newline (block scalars carry one) is dropped, so a
     // multi-line message stays aligned instead of wrapping back to column 0.
-    if let Some(msg) = entry.message.as_deref() {
+    if let Some(msg) = entry.message() {
         let msg = msg.trim_end_matches('\n');
         if !msg.trim().is_empty() {
             let msg = msg.replace('\n', &format!("\n{}", " ".repeat(12)));
@@ -1352,7 +1353,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     {
         writeln!(out, "{dim}policy_url:{dim:#} {docs}{url}{docs:#}")?;
     }
-    if let Some(when) = &entry.when_src {
+    if let Some(when) = entry.when_src() {
         writeln!(out, "{dim}when:      {dim:#} {when}")?;
     }
     if let Some(fixer) = rule.fixer() {
@@ -1378,31 +1379,33 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
     // `paths` normalises to `{ include, exclude }` glob lists. `rule_kind`
     // carries the rule's own kind (the envelope's `kind` is the fixed `"rule"`
     // discriminator), and `categories` matches each `list --format json` entry.
-    let paths = entry.paths.as_ref().map(|p| {
+    let paths = entry.paths().map(|p| {
         let (include, exclude) = p.include_exclude();
         serde_json::json!({ "include": include, "exclude": exclude })
     });
-    let options = if entry.extra.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::to_value(&entry.extra).unwrap_or(serde_json::Value::Null)
+    let options = match entry.extra() {
+        Some(extra) if !extra.is_empty() => {
+            serde_json::to_value(extra).unwrap_or(serde_json::Value::Null)
+        }
+        _ => serde_json::Value::Null,
     };
     let doc = serde_json::json!({
         "schema_version": 1,
         "kind": "rule",
         "id": entry.rule.id(),
-        "rule_kind": entry.kind,
-        "categories": rules::categories_for_kind(&entry.kind),
+        "rule_kind": entry.kind(),
+        "categories": rules::categories_for_kind(entry.kind()),
         "level": entry.rule.level().as_str(),
         "paths": paths,
         "options": options,
-        "message": entry.message.as_deref().filter(|m| !m.trim().is_empty()),
+        "message": entry.message().filter(|m| !m.trim().is_empty()),
         "policy_url": entry.rule.policy_url(),
-        "when": entry.when_src,
-        // Mirror the displayed `when` source so `conditional` and `when` can
-        // never disagree (both are set together at load; deriving from one
-        // field keeps the output self-consistent for any future caller).
-        "conditional": entry.when_src.is_some(),
+        "when": entry.when_src(),
+        // Both `when` and `conditional` project from the retained `when:` source
+        // (`spec.when`), so within this document they can never disagree - deriving
+        // both from one field keeps it self-consistent for any future caller.
+        // `list --format json`'s `conditional` reads the equivalent parsed `when`.
+        "conditional": entry.when_src().is_some(),
         "fixable": entry.rule.fixer().is_some(),
         "fix": entry.rule.fixer().map(alint_core::Fixer::describe),
     });
@@ -1681,16 +1684,17 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         // kind that doesn't honor the flag).
         let allow_out_of_root = config.allow_out_of_root.allows(&spec.id, &spec.kind);
         rule.set_allow_out_of_root(allow_out_of_root);
+        // Retain the whole spec (one `Arc`-wrapped clone) so `explain`/`list`
+        // render every configured detail from a single source of truth. The
+        // marginal cost over the old per-field copies is ~nil — `extra` was
+        // already cloned here — and nothing on the check hot path reads it.
         let mut entry = alint_core::RuleEntry::new(rule)
-            .with_kind(spec.kind.clone())
-            .with_paths(spec.paths.clone())
-            .with_message(spec.message.clone())
-            .with_extra(spec.extra.clone())
+            .with_spec(std::sync::Arc::new(spec.clone()))
             .with_allow_out_of_root(allow_out_of_root);
         if let Some(when_src) = &spec.when {
             let expr = alint_core::when::parse(when_src)
                 .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
-            entry = entry.with_when(expr).with_when_src(when_src.clone());
+            entry = entry.with_when(expr);
         }
         entries.push(entry);
     }

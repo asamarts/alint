@@ -403,6 +403,54 @@ rules:
     );
 }
 
+// ─── Explain surfaces the authored `when:` source ──────────────────
+//
+// The one retired display field the other four completeness gates DON'T cover:
+// the `[when]` marker `list_human_surfaces_kind_and_markers` asserts reads the
+// retained PARSED `when` (`entry.when`), not the authored source, so it would
+// still pass if the `when:` source rendering regressed. This gate pins that
+// `explain` renders a rule's `when:` source (human AND json) and reports
+// `conditional: true`, closing the last hole in the RuleSpec -> RuleEntry
+// projection (ADR-0013).
+#[test]
+fn explain_surfaces_when_source() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+        \x20 - id: gated\n\
+        \x20   kind: file_exists\n\
+        \x20   paths: rust-toolchain.toml\n\
+        \x20   level: info\n\
+        \x20   when: \"facts.has_rust\"\n",
+    )
+    .unwrap();
+
+    // JSON: `when` carries the authored source and `conditional` is true.
+    let v: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["explain", "gated", "--format", "json"]).stdout)
+            .expect("explain --format json must be JSON");
+    assert_eq!(
+        v["when"], "facts.has_rust",
+        "explain json dropped the authored when source: {v}"
+    );
+    assert_eq!(
+        v["conditional"], true,
+        "explain json must report a gated rule as conditional: {v}"
+    );
+
+    // Human: the `when:` line shows the source expression.
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["explain", "gated"]).stdout).into_owned();
+    assert!(
+        human
+            .lines()
+            .any(|l| l.contains("when:") && l.contains("facts.has_rust")),
+        "explain human must show the when: source expression:\n{human}"
+    );
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:

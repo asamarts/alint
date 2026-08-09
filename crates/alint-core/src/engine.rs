@@ -73,29 +73,20 @@ type LivePerFileEntries<'a> = (Vec<(usize, &'a RuleEntry)>, Vec<(usize, RuleResu
 pub struct RuleEntry {
     pub rule: Box<dyn Rule>,
     pub when: Option<WhenExpr>,
-    /// The `when:` clause's source text, retained so `alint explain` can show
-    /// the authored expression rather than the parsed AST. `None` when the rule
-    /// is unconditional.
-    pub when_src: Option<String>,
-    /// The rule's kind (e.g. `file_exists`), retained from its `RuleSpec` so
-    /// config-scoped tooling (`alint list --category`) can map an active rule to
-    /// its categories. Empty for entries built without a spec (`Engine::new`,
-    /// nested rules). INVARIANT: category filtering treats an empty kind as "no
-    /// categories" (the rule is silently dropped), so any config-loading path
-    /// that wants `--category` to work MUST set this via [`RuleEntry::with_kind`].
-    pub kind: String,
-    /// The rule's `paths:` scope, retained from its `RuleSpec` so config-scoped
-    /// tooling (`alint explain`) can show what the rule matches without
-    /// re-reading the config. `None` for entries built without a spec.
-    pub paths: Option<crate::config::PathsSpec>,
-    /// The rule's custom `message:`, retained from its `RuleSpec` so `alint
-    /// explain` can surface the author's violation text. `None` when the rule
-    /// falls back to its kind's default message.
-    pub message: Option<String>,
-    /// The rule's kind-specific options (the flattened non-common `RuleSpec`
-    /// fields, e.g. `pattern`, `max_lines`), retained so `alint explain` can show
-    /// them. Empty for entries built without a spec.
-    pub extra: serde_yaml_ng::Mapping,
+    /// The rule's originating [`RuleSpec`](crate::config::RuleSpec), retained so
+    /// config-scoped tooling (`alint explain`, `alint list`) can render the
+    /// rule's configured detail — kind, `paths:`, `message:`, `when:` source, and
+    /// kind-specific options — from one source of truth rather than a handful of
+    /// ad-hoc per-field copies. Read only by display code, never on the check
+    /// hot path.
+    ///
+    /// `None` for entries built without a spec (`Engine::new`, nested/iterator
+    /// child rules); such entries render as if every display field were empty.
+    /// INVARIANT: `list --category` maps a `None` spec (an empty
+    /// [`kind`](RuleEntry::kind)) to "no categories" and silently drops the rule,
+    /// so any config-loading path that wants `--category` to work MUST attach the
+    /// spec via [`with_spec`](RuleEntry::with_spec).
+    pub spec: Option<Arc<crate::config::RuleSpec>>,
     /// The rule's resolved top-level `allow_out_of_root:` permission, threaded
     /// into the fixer's [`FixContext`] so a config-declared fix path can escape
     /// the root only when the user's own config opted this rule in. Defaults to
@@ -108,11 +99,7 @@ impl RuleEntry {
         Self {
             rule,
             when: None,
-            when_src: None,
-            kind: String::new(),
-            paths: None,
-            message: None,
-            extra: serde_yaml_ng::Mapping::new(),
+            spec: None,
             allow_out_of_root: false,
         }
     }
@@ -131,39 +118,48 @@ impl RuleEntry {
         self
     }
 
-    /// Record the `when:` clause's source text (see [`RuleEntry::when_src`]).
+    /// Attach the rule's originating [`RuleSpec`](crate::config::RuleSpec) (see
+    /// [`RuleEntry::spec`]) — the single source config-scoped tooling renders
+    /// the rule's kind, paths, message, `when:` source, and options from.
     #[must_use]
-    pub fn with_when_src(mut self, src: impl Into<String>) -> Self {
-        self.when_src = Some(src.into());
+    pub fn with_spec(mut self, spec: Arc<crate::config::RuleSpec>) -> Self {
+        self.spec = Some(spec);
         self
     }
 
-    /// Record the rule's kind-specific options (see [`RuleEntry::extra`]).
+    /// The rule's kind (e.g. `file_exists`), or `""` when built without a spec.
+    /// An empty kind maps to "no categories" for `list --category` (the rule is
+    /// silently dropped), matching the pre-projection behaviour.
     #[must_use]
-    pub fn with_extra(mut self, extra: serde_yaml_ng::Mapping) -> Self {
-        self.extra = extra;
-        self
+    pub fn kind(&self) -> &str {
+        self.spec.as_ref().map_or("", |s| s.kind.as_str())
     }
 
-    /// Record the rule's kind (see [`RuleEntry::kind`]).
+    /// The rule's `paths:` scope, if the spec configured one.
     #[must_use]
-    pub fn with_kind(mut self, kind: impl Into<String>) -> Self {
-        self.kind = kind.into();
-        self
+    pub fn paths(&self) -> Option<&crate::config::PathsSpec> {
+        self.spec.as_ref().and_then(|s| s.paths.as_ref())
     }
 
-    /// Record the rule's `paths:` scope (see [`RuleEntry::paths`]).
+    /// The rule's custom `message:`, if set (see [`RuleEntry::spec`]).
     #[must_use]
-    pub fn with_paths(mut self, paths: Option<crate::config::PathsSpec>) -> Self {
-        self.paths = paths;
-        self
+    pub fn message(&self) -> Option<&str> {
+        self.spec.as_ref().and_then(|s| s.message.as_deref())
     }
 
-    /// Record the rule's custom `message:` (see [`RuleEntry::message`]).
+    /// The rule's authored `when:` source text, retained so `alint explain` can
+    /// show the written expression rather than the parsed AST. `None` when the
+    /// rule is unconditional.
     #[must_use]
-    pub fn with_message(mut self, message: Option<String>) -> Self {
-        self.message = message;
-        self
+    pub fn when_src(&self) -> Option<&str> {
+        self.spec.as_ref().and_then(|s| s.when.as_deref())
+    }
+
+    /// The rule's kind-specific options (the flattened non-common `RuleSpec`
+    /// fields, e.g. `pattern`, `max_lines`), or `None` when built without a spec.
+    #[must_use]
+    pub fn extra(&self) -> Option<&serde_yaml_ng::Mapping> {
+        self.spec.as_ref().map(|s| &s.extra)
     }
 }
 
