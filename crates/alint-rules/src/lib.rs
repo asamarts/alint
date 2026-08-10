@@ -11,6 +11,12 @@ use alint_core::RuleRegistry;
 #[path = "categories_gen.rs"]
 pub mod categories;
 
+/// The generated per-kind summary bridge (`xtask gen-categories`, from the
+/// opening sentence of each kind's docs/rules.md section, cleaned + capped).
+/// Backs `alint explain` and `alint rules` per ADR-0011.
+#[path = "kind_docs_gen.rs"]
+pub mod kind_docs;
+
 /// Generates a migrated rule kind's `options_schema()` fn: the schemars-derived
 /// JSON Schema for its `Options` struct. `xtask gen-schema` composes the result
 /// with the `kind`/`paths` structure preserved from the committed base branch.

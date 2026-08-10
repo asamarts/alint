@@ -16,6 +16,10 @@ use anyhow::{Context, Result, bail};
 
 const RULES_MD: &str = "docs/rules.md";
 const GEN_PATH: &str = "crates/alint-rules/src/categories_gen.rs";
+const KIND_DOCS_PATH: &str = "crates/alint-rules/src/kind_docs_gen.rs";
+/// Terminal one-line-summary length cap (ADR-0011). Kept short so `alint
+/// explain`'s `summary:` line stays a single readable line.
+const SUMMARY_MAX_CHARS: usize = 100;
 
 const META_FAMILIES: &[&str] = &[
     "Contents",
@@ -29,39 +33,59 @@ struct KindCats {
     cats: Vec<Category>,
 }
 
-/// (canonical kind -> categories, alias -> canonical kind).
-type Bridge = (Vec<KindCats>, Vec<(String, String)>);
+/// (canonical kind -> categories, alias -> canonical kind, canonical kind -> summary).
+type Bridge = (Vec<KindCats>, Vec<(String, String)>, Vec<(String, String)>);
 
 pub fn run(check: bool) -> Result<()> {
     let root = crate::workspace_root()?;
     let md = fs::read_to_string(root.join(RULES_MD)).with_context(|| format!("read {RULES_MD}"))?;
 
-    let (kind_cats, alias_to_canonical) = parse(&md)?;
+    let (kind_cats, alias_to_canonical, kind_summaries) = parse(&md)?;
     validate_against_registry(&kind_cats, &alias_to_canonical)?;
 
-    let rendered = render(&kind_cats, &alias_to_canonical);
-    let path = root.join(GEN_PATH);
+    // Two committed bridges from one parse: the category associations and the
+    // per-kind one-line summaries (ADR-0011). Separate files because summaries
+    // churn on ordinary prose edits while category associations are near-static.
+    write_or_check(
+        &root.join(GEN_PATH),
+        GEN_PATH,
+        &render(&kind_cats, &alias_to_canonical),
+        check,
+    )?;
+    write_or_check(
+        &root.join(KIND_DOCS_PATH),
+        KIND_DOCS_PATH,
+        &render_summaries(&kind_summaries),
+        check,
+    )?;
 
     if check {
-        let committed =
-            fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        if committed != rendered {
-            bail!(
-                "{GEN_PATH} is stale. Run `cargo run -p xtask -- gen-categories` to regenerate \
-                 and commit the result."
-            );
-        }
         println!(
-            "{GEN_PATH} is up to date; the category bridge matches rules.md + the registry ({} \
-             canonical kinds, {} aliases)",
+            "category + summary bridges up to date vs rules.md + the registry ({} canonical \
+             kinds, {} aliases)",
             kind_cats.len(),
             alias_to_canonical.len()
         );
-        return Ok(());
     }
+    Ok(())
+}
 
-    fs::write(&path, &rendered).with_context(|| format!("write {}", path.display()))?;
-    println!("wrote {GEN_PATH}");
+/// Write `rendered` to `path`, or (in `--check`) fail if the committed file
+/// differs byte-for-byte. Mirrors the sibling generators' drift gate.
+fn write_or_check(path: &std::path::Path, label: &str, rendered: &str, check: bool) -> Result<()> {
+    if check {
+        let committed =
+            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        if committed != rendered {
+            bail!(
+                "{label} is stale. Run `cargo run -p xtask -- gen-categories` to regenerate \
+                 and commit the result."
+            );
+        }
+    } else {
+        fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
+        println!("wrote {label}");
+    }
     Ok(())
 }
 
@@ -103,23 +127,28 @@ fn parse(md: &str) -> Result<Bridge> {
 
     let mut kind_cats: Vec<KindCats> = Vec::new();
     let mut alias_to_canonical: Vec<(String, String)> = Vec::new();
+    let mut kind_summaries: Vec<(String, String)> = Vec::new();
 
     for (fam, title, body) in &sections {
         let (canon, aliases) = parse_h3_title(title);
         if canon.is_empty() {
             continue;
         }
-        let (content, _) = crate::categories_line::split_categories_line(body);
+        let (content, clean_body) = crate::categories_line::split_categories_line(body);
         let content = content.ok_or_else(|| {
             anyhow::anyhow!("rule kind(s) {canon:?} have no `**Categories:**` line in {RULES_MD}")
         })?;
         let cats = parse_categories(&content, *fam)
             .with_context(|| format!("`**Categories:**` line for {canon:?}"))?;
+        // One summary per H3, shared by every canonical kind under the heading
+        // (a multi-kind heading describes the group in one sentence).
+        let summary = crate::docs_export::kind_summary(&clean_body, SUMMARY_MAX_CHARS);
         for k in &canon {
             kind_cats.push(KindCats {
                 kind: k.clone(),
                 cats: cats.clone(),
             });
+            kind_summaries.push((k.clone(), summary.clone()));
         }
         for a in &aliases {
             alias_to_canonical.push((a.clone(), canon[0].clone()));
@@ -128,7 +157,8 @@ fn parse(md: &str) -> Result<Bridge> {
 
     kind_cats.sort_by(|a, b| a.kind.cmp(&b.kind));
     alias_to_canonical.sort();
-    Ok((kind_cats, alias_to_canonical))
+    kind_summaries.sort();
+    Ok((kind_cats, alias_to_canonical, kind_summaries))
 }
 
 /// Split an H3 title into (canonical kinds, alias kinds). Aliases are the
@@ -249,6 +279,26 @@ fn render(kind_cats: &[KindCats], alias_to_canonical: &[(String, String)]) -> St
     s.push_str("pub static ALIAS_TO_CANONICAL: &[(&str, &str)] = &[\n");
     for (a, c) in alias_to_canonical {
         let _ = writeln!(s, "    ({a:?}, {c:?}),");
+    }
+    s.push_str("];\n");
+    s
+}
+
+/// Render the sibling per-kind summary bridge (ADR-0011).
+fn render_summaries(kind_summaries: &[(String, String)]) -> String {
+    let mut s = String::new();
+    s.push_str("//! @generated by `cargo run -p xtask -- gen-categories`. DO NOT EDIT.\n");
+    s.push_str("//!\n");
+    s.push_str("//! Per-kind one-line summaries: the cleaned, capped opening sentence of each\n");
+    s.push_str("//! kind's section in docs/rules.md. Backs `alint explain` / `alint rules`\n");
+    s.push_str("//! (ADR-0011). Regenerate with `cargo run -p xtask -- gen-categories`; gated\n");
+    s.push_str("//! by `--check`.\n");
+    s.push('\n');
+    s.push_str("/// Canonical rule kind -> its one-line summary. Sorted by kind.\n");
+    s.push_str("#[rustfmt::skip]\n");
+    s.push_str("pub static KIND_SUMMARIES: &[(&str, &str)] = &[\n");
+    for (kind, summary) in kind_summaries {
+        let _ = writeln!(s, "    ({kind:?}, {summary:?}),");
     }
     s.push_str("];\n");
     s

@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use alint_core::Category;
 use alint_output::Format;
 use alint_rules::categories::{ALIAS_TO_CANONICAL, KIND_CATEGORIES};
+use alint_rules::kind_docs::KIND_SUMMARIES;
 use anyhow::{Result, bail};
 
 use crate::{Cli, RulesCommand};
@@ -54,6 +55,27 @@ pub(crate) fn categories_for_kind(kind: &str) -> Vec<&'static str> {
         .map_or_else(Vec::new, |(_, cats)| {
             cats.iter().map(|c| c.slug()).collect()
         })
+}
+
+/// The one-line summary of a rule KIND (resolving an alias to its canonical kind
+/// first), or `None` for an unknown kind or an empty summary. Sourced from the
+/// generated docs bridge (ADR-0011); shared by `alint explain` and `alint rules`.
+pub(crate) fn summary_for_kind(kind: &str) -> Option<&'static str> {
+    KIND_SUMMARIES
+        .iter()
+        .find(|(k, _)| *k == canonical_kind(kind))
+        .map(|(_, s)| *s)
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve an alias spelling to its canonical kind (identity for a canonical or
+/// unknown kind). The canonical kind is the one with a `docs/rules.md` page, so
+/// deep links use it.
+pub(crate) fn canonical_kind(kind: &str) -> &str {
+    ALIAS_TO_CANONICAL
+        .iter()
+        .find(|(alias, _)| *alias == kind)
+        .map_or(kind, |(_, canon)| canon)
 }
 
 /// canonical kind -> its alias spellings, sorted.

@@ -1,6 +1,8 @@
 id:         has-readme
 kind:       file_exists
 categories: existence
+summary:    Every glob match in paths must correspond to a real file.
+docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      error
 paths:      README.md
 message:    README.md must exist at the repository root.

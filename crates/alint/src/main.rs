@@ -1307,6 +1307,21 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         if !cats.is_empty() {
             writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
         }
+        if let Some(summary) = rules::summary_for_kind(entry.kind()) {
+            writeln!(out, "{dim}summary:   {dim:#} {summary}")?;
+        }
+        // Deep link to the kind's full docs. Family = its primary category slug
+        // (equals the docs URL family segment); an alias resolves to its
+        // canonical page. Suppressed by --no-docs, like the policy_url line.
+        if opts.show_docs
+            && let Some(family) = cats.first()
+        {
+            writeln!(
+                out,
+                "{dim}docs:      {dim:#} {docs}https://alint.org/docs/rules/{family}/{}/{docs:#}",
+                rules::canonical_kind(entry.kind()),
+            )?;
+        }
     }
     writeln!(
         out,

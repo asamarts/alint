@@ -619,6 +619,44 @@ fn help_wraps_to_narrow_terminal_width() {
     }
 }
 
+// ─── Explain surfaces a summary + docs link for every kind (ADR-0011) ─
+//
+// The generated per-kind summary bridge must yield a non-empty `summary:` line
+// and a `docs:` deep link for EVERY registered kind. Drives `all_kinds.yaml`
+// (the same all-kinds driver ADR-0012 established) so a newly registered kind
+// missing a `docs/rules.md` summary can't ship silently.
+#[test]
+fn explain_surfaces_summary_and_docs_for_every_kind() {
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../alint-dsl/tests/fixtures/all_kinds.yaml"
+    ))
+    .expect("read all_kinds.yaml");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".alint.yml"), &fixture).unwrap();
+
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    for r in list["rules"].as_array().expect("rules array") {
+        let id = r["id"].as_str().expect("rule id");
+        let human = String::from_utf8_lossy(&run(dir.path(), &["explain", id]).stdout).into_owned();
+        let has_summary = human.lines().any(|l| {
+            l.trim_start()
+                .strip_prefix("summary:")
+                .is_some_and(|rest| rest.trim().len() >= 5)
+        });
+        assert!(
+            has_summary,
+            "explain {id} has no non-empty summary:\n{human}"
+        );
+        assert!(
+            human.contains("https://alint.org/docs/rules/"),
+            "explain {id} has no docs deep link:\n{human}"
+        );
+    }
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:

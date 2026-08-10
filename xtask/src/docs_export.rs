@@ -821,6 +821,68 @@ fn first_sentence(body: &str) -> String {
     paragraph.trim().to_string()
 }
 
+/// Terminal-ready one-line summary of a rule kind's `docs/rules.md` prose, for
+/// the in-binary docs bridge (ADR-0011). Unlike [`first_sentence`] (which feeds
+/// the website and leaves markdown intact), this yields clean plaintext: the
+/// opening sentence with abbreviation-aware splitting, `**bold**` and inline
+/// backticks stripped, em/en-dashes folded, whitespace collapsed, and
+/// length-capped. Input is the `**Categories:**`-stripped H3 body.
+pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
+    let sentence = guarded_first_sentence(clean_body).replace("**", "");
+    let cleaned = meta_desc_clean(&sentence, usize::MAX);
+    if cleaned.chars().count() <= max_chars {
+        return cleaned;
+    }
+    // A first sentence longer than one terminal line: word-cap it (leaving room
+    // for the marker), drop trailing punctuation, and end with an ASCII `...` so
+    // the truncation is honest rather than a dangling comma / open quote.
+    let capped = meta_desc_clean(&cleaned, max_chars.saturating_sub(3));
+    let trimmed = capped.trim_end_matches([',', ';', ':', ' ', '(', '"', '\'']);
+    format!("{trimmed}...")
+}
+
+/// Like the paragraph-gather in [`first_sentence`], but ends the sentence at the
+/// first `". "` that does NOT close a dotted abbreviation (`e.g.` / `i.e.`),
+/// whose terminating `.` has another `.` two bytes back. Without this guard the
+/// naive split truncates a clause like "differ only by case (e.g. ...)" at the
+/// "g." (see `no_case_conflicts`).
+fn guarded_first_sentence(body: &str) -> String {
+    let mut paragraph = String::new();
+    let mut in_code_block = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !paragraph.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if !paragraph.is_empty() {
+            paragraph.push(' ');
+        }
+        paragraph.push_str(trimmed);
+    }
+    let bytes = paragraph.as_bytes();
+    let mut cut = paragraph.len();
+    let mut from = 0;
+    while let Some(rel) = paragraph[from..].find(". ") {
+        let dot = from + rel;
+        if dot < 2 || bytes[dot - 2] != b'.' {
+            cut = dot + 1;
+            break;
+        }
+        from = dot + 2;
+    }
+    paragraph[..cut].trim().to_string()
+}
+
 /// SERP `<meta description>` line normaliser. Strips markdown
 /// inline backticks (they read as literal grave accents in a
 /// search snippet), collapses whitespace, removes em/en dashes
@@ -829,7 +891,7 @@ fn first_sentence(body: &str) -> String {
 /// doesn't truncate mid-word. Sentence-aware: if the cap lands
 /// inside a sentence, back off to the previous sentence end so the
 /// snippet never trails an ellipsis.
-fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
+pub(crate) fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
     // Drop inline-code backticks, collapse all whitespace runs.
     let despaced: String = raw.replace('`', "");
     let mut s = despaced.split_whitespace().collect::<Vec<_>>().join(" ");
