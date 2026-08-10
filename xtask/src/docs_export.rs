@@ -824,29 +824,55 @@ fn first_sentence(body: &str) -> String {
 /// Terminal-ready one-line summary of a rule kind's `docs/rules.md` prose, for
 /// the in-binary docs bridge (ADR-0011). Unlike [`first_sentence`] (which feeds
 /// the website and leaves markdown intact), this yields clean plaintext: the
-/// opening sentence with abbreviation-aware splitting, `**bold**` and inline
-/// backticks stripped, em/en-dashes folded, whitespace collapsed, and
-/// length-capped. Input is the `**Categories:**`-stripped H3 body.
+/// opening sentence with abbreviation-aware splitting, `**bold**` / `*italic*`
+/// and inline backticks stripped, em/en-dashes folded and arrows ASCII-ized,
+/// whitespace collapsed, a colon/comma lead-in trimmed, and length-capped with an
+/// honest `...` marker. Input is the `**Categories:**`-stripped H3 body.
 pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
-    let sentence = guarded_first_sentence(clean_body).replace("**", "");
+    let sentence = strip_markup(&guarded_first_sentence(clean_body));
     let cleaned = meta_desc_clean(&sentence, usize::MAX);
+    // A colon / comma / semicolon lead-in (a sentence that introduces a list) is
+    // not a self-contained one-liner; drop the trailing punctuation.
+    let cleaned = cleaned.trim_end_matches([':', ';', ',', ' ']);
     if cleaned.chars().count() <= max_chars {
-        return cleaned;
+        return cleaned.to_string();
     }
-    // A first sentence longer than one terminal line: word-cap it (leaving room
-    // for the marker), drop trailing punctuation, and end with an ASCII `...` so
-    // the truncation is honest rather than a dangling comma / open quote.
-    let capped = meta_desc_clean(&cleaned, max_chars.saturating_sub(3));
+    // Longer than one terminal line: word-cap it (leaving room for the marker),
+    // drop a dangling open quote the cap may have created plus any trailing
+    // punctuation, and end with an ASCII `...` so the truncation is honest.
+    let capped = meta_desc_clean(cleaned, max_chars.saturating_sub(3));
+    let capped: &str = match (capped.matches('"').count() % 2, capped.rfind('"')) {
+        (1, Some(q)) => &capped[..q],
+        _ => capped.as_str(),
+    };
     let trimmed = capped.trim_end_matches([',', ';', ':', ' ', '(', '"', '\'']);
     format!("{trimmed}...")
 }
 
+/// Strip markdown emphasis (`**bold**`, `*italic*`) and fold non-ASCII arrows to
+/// ASCII, so the terminal summary is plain text. A bare, unbalanced `*` (e.g. the
+/// `*_equals` wildcard family) is left intact.
+fn strip_markup(s: &str) -> String {
+    static ITALIC: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\*([^*\n]+)\*").unwrap());
+    ITALIC
+        .replace_all(&s.replace("**", ""), "$1")
+        .replace('→', "->")
+        .replace('⇒', "=>")
+        .replace('←', "<-")
+        .replace('⇐', "<=")
+        .replace('↔', "<->")
+}
+
 /// Like the paragraph-gather in [`first_sentence`], but ends the sentence at the
-/// first `". "` that does NOT close a dotted abbreviation (`e.g.` / `i.e.`),
-/// whose terminating `.` has another `.` two bytes back. Without this guard the
-/// naive split truncates a clause like "differ only by case (e.g. ...)" at the
-/// "g." (see `no_case_conflicts`).
+/// first `". "` whose preceding word is NOT a known abbreviation (`e.g.`, `i.e.`,
+/// `vs.`, ...). Without this a clause like "differ only by case (e.g. ...)" is cut
+/// at the "g." (`no_case_conflicts`); a decimal like "v1.2." is not mistaken for
+/// an abbreviation and correctly ends the sentence.
 fn guarded_first_sentence(body: &str) -> String {
+    const ABBREV: &[&str] = &[
+        "e.g", "i.e", "vs", "cf", "etc", "al", "resp", "approx", "fig", "no",
+    ];
     let mut paragraph = String::new();
     let mut in_code_block = false;
     for line in body.lines() {
@@ -869,12 +895,14 @@ fn guarded_first_sentence(body: &str) -> String {
         }
         paragraph.push_str(trimmed);
     }
-    let bytes = paragraph.as_bytes();
     let mut cut = paragraph.len();
     let mut from = 0;
     while let Some(rel) = paragraph[from..].find(". ") {
         let dot = from + rel;
-        if dot < 2 || bytes[dot - 2] != b'.' {
+        // The word ending at this period: from the last space/`(` before it.
+        let start = paragraph[..dot].rfind([' ', '(']).map_or(0, |i| i + 1);
+        let word = paragraph[start..dot].to_ascii_lowercase();
+        if !ABBREV.contains(&word.as_str()) {
             cut = dot + 1;
             break;
         }

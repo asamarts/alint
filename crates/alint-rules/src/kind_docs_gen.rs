@@ -8,9 +8,9 @@
 /// Canonical rule kind -> its one-line summary. Sorted by kind.
 #[rustfmt::skip]
 pub static KIND_SUMMARIES: &[(&str, &str)] = &[
-    ("changeset_requires_path", "The <since>...HEAD diff must add (git status A) at least one path matching add_glob:, the \"did..."),
+    ("changeset_requires_path", "The <since>...HEAD diff must add (git status A) at least one path matching add_glob:, the..."),
     ("command", "Shell out to an external CLI per matched file."),
-    ("command_idempotent", "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 ⇒ the tree..."),
+    ("command_idempotent", "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 => the tree..."),
     ("commented_out_code", "Heuristic detector for blocks of commented-out source code (as opposed to prose comments..."),
     ("cross_file", "A source must hold a relation to one or more targets (or, for resolves, the filesystem)."),
     ("dir_absent", "Directory counterpart of file_absent."),
@@ -26,7 +26,7 @@ pub static KIND_SUMMARIES: &[(&str, &str)] = &[
     ("file_ends_with", "Byte-level prefix / suffix check."),
     ("file_exists", "Every glob match in paths must correspond to a real file."),
     ("file_footer", "Last lines lines of each file in scope must match a regex."),
-    ("file_graph", "Assemble the repo's *file → file* reference graph and assert a global structural property the..."),
+    ("file_graph", "Assemble the repo's file -> file reference graph and assert a global structural property the..."),
     ("file_hash", "Content SHA-256 must equal the expected digest."),
     ("file_header", "The first N lines must match a regex (line-oriented)."),
     ("file_is_ascii", "Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in allow:."),
@@ -67,7 +67,7 @@ pub static KIND_SUMMARIES: &[(&str, &str)] = &[
     ("no_bom", "Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark."),
     ("no_case_conflicts", "Flag paths that differ only by case (e.g. README.md + readme.md)."),
     ("no_empty_files", "Flag zero-byte files."),
-    ("no_illegal_windows_names", "Reject path components Windows can't represent:"),
+    ("no_illegal_windows_names", "Reject path components Windows can't represent"),
     ("no_merge_conflict_markers", "Flag <<<<<<<, =======, >>>>>>>, ||||||| markers at the start of a line, almost always left over..."),
     ("no_submodules", "Flag the presence of .gitmodules at the repo root, always, regardless of paths."),
     ("no_symlinks", "Flag tracked paths that are symbolic links."),

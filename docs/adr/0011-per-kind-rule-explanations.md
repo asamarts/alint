@@ -72,11 +72,12 @@ diverge from the docs. Concretely:
   URL segment) - no new family field is needed. The `docs:` line honors `--no-docs`,
   exactly as the existing `policy_url` line does.
 
-- **`alint rules` gains a description column and `rules show <kind>`.** `rules
-  list` renders the summary in a new column; a new `RulesCommand::Show` prints a
-  single kind's summary plus its deep link; and `list --search` extends its
-  existing name/alias match to also match summary text - closing the ADR-0009
-  catalog deferrals with one data source.
+- **`alint rules` gains a per-kind description and `rules show <kind>`.** `rules
+  list` renders each kind's summary on an indented line under it; a new
+  `RulesCommand::Show` prints a single kind's summary plus its deep link (honoring
+  `--no-docs` like `explain`); and `list --search` extends its existing name/alias
+  match to also match summary text - closing the ADR-0009 catalog deferrals with
+  one data source.
 
 - **Drift gate.** A `gen-<x> --check` step in the docs CI job (and under `cargo
   test`, like the others) fails if the committed `kind_docs_gen.rs` is stale,

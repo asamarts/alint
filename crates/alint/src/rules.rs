@@ -39,7 +39,7 @@ pub(crate) fn run(command: &RulesCommand, cli: &Cli) -> Result<ExitCode> {
             list(category.as_deref(), search.as_deref(), format)
         }
         RulesCommand::Categories => categories(format),
-        RulesCommand::Show { kind } => show(kind, format),
+        RulesCommand::Show { kind } => show(kind, format, !cli.no_docs),
     }
 }
 
@@ -188,7 +188,7 @@ fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<
 
 /// `alint rules show <kind>`: a single kind's summary, categories, aliases, and
 /// docs link (ADR-0011). Accepts an alias, resolving to its canonical kind.
-fn show(kind: &str, format: Format) -> Result<ExitCode> {
+fn show(kind: &str, format: Format, show_docs: bool) -> Result<ExitCode> {
     let cats = categories_for_kind(kind);
     if cats.is_empty() {
         bail!("unknown rule kind {kind:?}. Run `alint rules list` for the catalog.");
@@ -228,7 +228,9 @@ fn show(kind: &str, format: Format) -> Result<ExitCode> {
         if !aliases.is_empty() {
             writeln!(out, "  aliases:    {}", aliases.join(", "))?;
         }
-        writeln!(out, "  docs:       {docs}")?;
+        if show_docs {
+            writeln!(out, "  docs:       {docs}")?;
+        }
     }
     out.flush().ok();
     Ok(ExitCode::SUCCESS)

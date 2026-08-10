@@ -640,19 +640,39 @@ fn explain_surfaces_summary_and_docs_for_every_kind() {
             .expect("list --format json must be JSON");
     for r in list["rules"].as_array().expect("rules array") {
         let id = r["id"].as_str().expect("rule id");
-        let human = String::from_utf8_lossy(&run(dir.path(), &["explain", id]).stdout).into_owned();
-        let has_summary = human.lines().any(|l| {
-            l.trim_start()
-                .strip_prefix("summary:")
-                .is_some_and(|rest| rest.trim().len() >= 5)
-        });
+
+        // JSON: `summary` non-empty + `docs` a deep link whose family segment is
+        // the kind's primary category. This gate asserts the JSON surface, not
+        // only human, matching its Tier-1 sibling `explain_surfaces_configured_
+        // rule_detail` - dropping the json half is what let the explain-json
+        // summary/docs omission ship in the first place.
+        let v: serde_json::Value =
+            serde_json::from_slice(&run(dir.path(), &["explain", id, "--format", "json"]).stdout)
+                .unwrap_or_else(|_| panic!("explain {id} --format json must be JSON"));
         assert!(
-            has_summary,
-            "explain {id} has no non-empty summary:\n{human}"
+            v["summary"].as_str().is_some_and(|s| s.trim().len() >= 5),
+            "explain {id} json has no summary: {v}"
+        );
+        let family = v["categories"][0].as_str().unwrap_or_default();
+        let docs = v["docs"].as_str().unwrap_or_default();
+        assert!(
+            docs.starts_with("https://alint.org/docs/rules/") && docs.contains(family),
+            "explain {id} json docs link is wrong (family {family:?}): {docs:?}"
+        );
+
+        // Human: the same summary and the same docs link must be visible.
+        let human = String::from_utf8_lossy(&run(dir.path(), &["explain", id]).stdout).into_owned();
+        assert!(
+            human.lines().any(|l| {
+                l.trim_start()
+                    .strip_prefix("summary:")
+                    .is_some_and(|rest| rest.trim().len() >= 5)
+            }),
+            "explain {id} human has no summary:\n{human}"
         );
         assert!(
-            human.contains("https://alint.org/docs/rules/"),
-            "explain {id} has no docs deep link:\n{human}"
+            human.contains(docs),
+            "explain {id} human is missing its docs link:\n{human}"
         );
     }
 }

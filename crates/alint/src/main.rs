@@ -1410,6 +1410,15 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "id": entry.rule.id(),
         "rule_kind": entry.kind(),
         "categories": rules::categories_for_kind(entry.kind()),
+        "summary": rules::summary_for_kind(entry.kind()),
+        // The docs deep link, always present in JSON (like policy_url) regardless
+        // of --no-docs. Family = the primary category slug; alias -> canonical.
+        "docs": rules::categories_for_kind(entry.kind()).first().map(|family| {
+            format!(
+                "https://alint.org/docs/rules/{family}/{}/",
+                rules::canonical_kind(entry.kind())
+            )
+        }),
         "level": entry.rule.level().as_str(),
         "paths": paths,
         "options": options,
