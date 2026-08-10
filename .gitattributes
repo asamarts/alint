@@ -41,6 +41,7 @@ docs/design/architecture/crate-graph.md text eol=lf
 # hazard as the generated artifacts above. Without this pin the Windows CI job
 # reports the bridge spuriously stale.
 crates/alint-rules/src/categories_gen.rs text eol=lf
+crates/alint-rules/src/kind_docs_gen.rs text eol=lf
 
 # Generated LikeC4 architecture-model fragments: `gen-model --check` (and its
 # xtask test) byte-compare these against a `\n`-only rendered string — same
