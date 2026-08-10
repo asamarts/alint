@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `alint explain <rule>` now shows a one-line `summary:` of what the rule's KIND
+  checks, plus a `docs:` deep link to the full reference. Both are compiled into
+  the binary from `docs/rules.md` (so they work offline); `--no-docs` suppresses
+  the link, and an alias links to its canonical docs page.
+- `alint rules show <kind>` describes a single rule kind (summary, categories,
+  aliases, docs link) and accepts an alias; `alint rules list` gains a per-kind
+  description line; and `alint rules list --search` now matches summary text, not
+  just the kind name and its aliases.
+
 ### Changed
 
 - `alint explain <rule>` now surfaces the rule's full configured detail. It

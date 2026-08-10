@@ -405,10 +405,17 @@ pub(crate) enum RulesCommand {
         /// run `alint rules categories` for the list).
         #[arg(long)]
         category: Option<String>,
-        /// Case-insensitive substring filter on the kind name (and its aliases).
+        /// Case-insensitive substring filter on the kind name, its aliases, and
+        /// its one-line summary.
         #[arg(long)]
         search: Option<String>,
     },
     /// List the rule categories: slug, title, and how many kinds each holds.
     Categories,
+    /// Show one rule kind: its summary, categories, aliases, and docs link.
+    /// Accepts an alias (resolves to the canonical kind).
+    Show {
+        /// The rule kind (or alias) to describe.
+        kind: String,
+    },
 }

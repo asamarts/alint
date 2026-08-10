@@ -657,6 +657,74 @@ fn explain_surfaces_summary_and_docs_for_every_kind() {
     }
 }
 
+// ─── rules show + list --search over summaries (ADR-0011 phase 2) ──
+//
+// `rules show <kind>` surfaces a kind's summary + docs link (alias-resolving),
+// and `list --search` now matches summary TEXT, not just the kind name/alias.
+#[test]
+fn rules_show_and_search_over_summaries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // `rules show <alias>` resolves to the canonical kind + its docs link.
+    let out =
+        String::from_utf8_lossy(&run(dir.path(), &["rules", "show", "content_matches"]).stdout)
+            .into_owned();
+    assert!(
+        out.contains("file_content_matches")
+            && out.contains("https://alint.org/docs/rules/content/file_content_matches/"),
+        "rules show must resolve the alias and print the canonical docs link:\n{out}"
+    );
+
+    // JSON: a summary + docs link.
+    let v: serde_json::Value = serde_json::from_slice(
+        &run(
+            dir.path(),
+            &["rules", "show", "file_hash", "--format", "json"],
+        )
+        .stdout,
+    )
+    .expect("rules show --format json must be JSON");
+    assert!(
+        v["summary"].as_str().is_some_and(|s| !s.is_empty()),
+        "rules show json must carry a summary: {v}"
+    );
+    assert!(
+        v["docs"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("https://")),
+        "rules show json must carry a docs link: {v}"
+    );
+
+    // `list --search` matches summary text: "digest" is in file_hash's summary,
+    // not its name.
+    let v: serde_json::Value = serde_json::from_slice(
+        &run(
+            dir.path(),
+            &["rules", "list", "--search", "digest", "--format", "json"],
+        )
+        .stdout,
+    )
+    .expect("rules list --format json must be JSON");
+    let hits: Vec<&str> = v["rules"]
+        .as_array()
+        .expect("rules")
+        .iter()
+        .filter_map(|r| r["kind"].as_str())
+        .collect();
+    assert!(
+        hits.contains(&"file_hash"),
+        "list --search over summaries must match file_hash on 'digest': {hits:?}"
+    );
+
+    // An unknown kind is a loud error, not an empty success.
+    assert!(
+        !run(dir.path(), &["rules", "show", "not_a_kind"])
+            .status
+            .success(),
+        "rules show on an unknown kind must fail"
+    );
+}
+
 // ─── G1b — the agent format only emits commands the CLI accepts ─────
 
 /// Pull `` `alint …` `` commands out of an `agent_instruction` string:
