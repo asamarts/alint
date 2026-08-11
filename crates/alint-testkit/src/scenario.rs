@@ -55,8 +55,8 @@ pub struct Scenario {
     pub expect_tree_mode: ExpectTreeMode,
     /// Optional opt-in marking this scenario as a rule page's rendered
     /// example. When present, `xtask docs-export` renders this fixture
-    /// (its tree, config, and a real `alint check` run) onto
-    /// alint.org/docs/rules/<kind>. See ADR-0014.
+    /// (its tree, config, and a real `alint check` run) onto its
+    /// `alint.org/docs/rules/<kind>` page. See ADR-0014.
     #[serde(default)]
     pub docs: Option<DocsExample>,
 }
