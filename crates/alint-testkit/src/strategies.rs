@@ -71,6 +71,7 @@ pub fn any_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<Value
             expect: vec![],
             expect_tree: None,
             expect_tree_mode: crate::scenario::ExpectTreeMode::default(),
+            docs: None,
         }
     })
 }
@@ -99,6 +100,7 @@ pub fn fixable_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<V
             expect: vec![],
             expect_tree: None,
             expect_tree_mode: crate::scenario::ExpectTreeMode::default(),
+            docs: None,
         }
     })
 }

@@ -53,6 +53,44 @@ pub struct Scenario {
     pub expect_tree: Option<TreeSpec>,
     #[serde(default)]
     pub expect_tree_mode: ExpectTreeMode,
+    /// Optional opt-in marking this scenario as a rule page's rendered
+    /// example. When present, `xtask docs-export` renders this fixture
+    /// (its tree, config, and a real `alint check` run) onto
+    /// alint.org/docs/rules/<kind>. See ADR-0014.
+    #[serde(default)]
+    pub docs: Option<DocsExample>,
+}
+
+/// `docs:` block - opt a scenario in as a rule page's rendered example.
+/// The gate (`xtask docs-export`) requires every canonical kind to carry
+/// one `fail` and one `pass` documented scenario, and asserts `kind`
+/// equals the single top-level rule kind in `given.config`. The kind is
+/// explicit and registry-validated - never inferred from `tags:`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocsExample {
+    /// Heading shown above the example, e.g. "Require a README".
+    pub title: String,
+    /// Which state this fixture demonstrates.
+    pub case: DocsCase,
+    /// The rule kind this scenario documents (canonical or alias
+    /// spelling).
+    pub kind: String,
+    /// Tie-breaker when a kind documents more than the fail+pass pair
+    /// (a promoted edge case). Lower sorts first.
+    #[serde(default)]
+    pub order: i32,
+}
+
+/// Whether a documented scenario demonstrates the rule firing (`fail`)
+/// or a compliant repo (`pass`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocsCase {
+    /// The rule fires - "what this catches".
+    Fail,
+    /// The rule stays silent - "what a compliant repo looks like".
+    Pass,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -260,5 +298,54 @@ expect:
 "#;
         let s = Scenario::from_yaml(src).unwrap();
         assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn parses_docs_block() {
+        let src = r#"
+name: file_exists flags a missing README
+tags: [check, file_exists]
+docs:
+  title: Require a README
+  case: fail
+  kind: file_exists
+given:
+  tree:
+    Cargo.toml: "x"
+  config: |
+    version: 1
+    rules: []
+when: [check]
+expect:
+  - violations: []
+"#;
+        let s = Scenario::from_yaml(src).unwrap();
+        let docs = s.docs.expect("docs block should parse");
+        assert_eq!(docs.title, "Require a README");
+        assert_eq!(docs.case, DocsCase::Fail);
+        assert_eq!(docs.kind, "file_exists");
+        assert_eq!(docs.order, 0);
+    }
+
+    #[test]
+    fn docs_block_rejects_unknown_field() {
+        let src = r#"
+name: x
+docs:
+  title: t
+  case: pass
+  kind: file_exists
+  bogus: true
+given:
+  tree: {}
+  config: "version: 1\nrules: []\n"
+"#;
+        assert!(Scenario::from_yaml(src).is_err());
+    }
+
+    #[test]
+    fn scenario_without_docs_block_defaults_to_none() {
+        let s = Scenario::from_yaml(SRC).unwrap();
+        assert!(s.docs.is_none());
     }
 }
