@@ -198,9 +198,10 @@ vary. docs-export must spawn `alint check` under this exact contract:
   `TERM` (which otherwise flips the whole set on `TERM=dumb`). This corrects an
   earlier draft that pinned `TERM` for Unicode glyphs - the pages cannot carry
   Unicode.
-- **Sanitised, fixed environment:** `LC_ALL=C`; clear `CLICOLOR_FORCE`, `NO_COLOR`,
-  `ALINT_FORCE_HYPERLINKS`, `ALINT_LOG` (a fixed `TERM` is belt-and-suspenders once
-  `--ascii` is set).
+- **Sanitised, allowlisted environment:** `env_clear()` then set only `PATH`,
+  `LC_ALL=C`, and a fixed `TERM` - an allowlist, not a denylist, so a stray
+  `{{env.X}}` interpolation in a config can't leak host state or vary the output
+  (a denylist of the known color/hyperlink vars would miss an arbitrary `X`).
 - **Explicit `--color=never`** (defeats `CLICOLOR_FORCE`/TTY, strips OSC-8
   hyperlinks) and **stdout captured through a pipe, never a PTY** (width -> 80).
 
@@ -263,11 +264,15 @@ For a documented (migrated) kind it additionally asserts:
   rules and could not be documented as-is).
 - **Case correctness.** The documented scenario is also run by the `scenarios.rs`
   harness, whose `expect:` assertion guarantees a **real violation** (not a rule
-  *error* masquerading as output - important because a misconfigured diff rule
-  emits a range-resolution error that a bare "produced a finding" check would
-  accept). docs-export's re-run additionally asserts the `fail` case exits
-  non-zero and the `pass` case exits zero and produces no findings (now reliable,
-  since the config lives outside the walked tree).
+  *error* masquerading as output). docs-export's re-run rejects an errored run
+  (exit 2) outright, and cross-checks the case against that asserted `expect:` - a
+  `fail` must assert a violation and produce non-empty output, a `pass` must exit
+  clean and assert none - so a mislabeled case can't ship.
+- **Shape.** A documented scenario is a single `check` step (`when: [check]`, so
+  the asserted `expect:` matches the rendered run) with no `given.git` block (the
+  render doesn't drive git yet - Phase 2). A documented kind's `docs/rules.md` H3
+  must also carry **no hand-written** ```` ```yaml ```` block, or the page would
+  double-render the generated example alongside a stale hand-written one.
 - **Config fidelity.** The config rendered on the page is byte-for-byte the
   scenario's `given.config`.
 - **Hermeticity.** `given.config` (including any transitively resolved `extends:`)
