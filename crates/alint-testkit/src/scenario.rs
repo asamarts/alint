@@ -348,4 +348,35 @@ given:
         let s = Scenario::from_yaml(SRC).unwrap();
         assert!(s.docs.is_none());
     }
+
+    #[test]
+    fn docs_block_rejects_invalid_case() {
+        let src = r#"
+name: x
+docs:
+  title: t
+  case: sometimes
+  kind: file_exists
+given:
+  tree: {}
+  config: "version: 1\nrules: []\n"
+"#;
+        assert!(Scenario::from_yaml(src).is_err());
+    }
+
+    #[test]
+    fn docs_block_requires_kind_title_and_case() {
+        // Each required field, omitted in turn, must fail to parse.
+        let full = "name: x\n\
+                    docs:\n  title: t\n  case: fail\n  kind: file_exists\n\
+                    given:\n  tree: {}\n  config: \"version: 1\\nrules: []\\n\"\n";
+        for line in ["  title: t\n", "  case: fail\n", "  kind: file_exists\n"] {
+            let src = full.replace(line, "");
+            assert!(
+                Scenario::from_yaml(&src).is_err(),
+                "omitting `{}` should fail to parse",
+                line.trim()
+            );
+        }
+    }
 }
