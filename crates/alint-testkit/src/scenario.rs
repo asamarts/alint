@@ -73,8 +73,9 @@ pub struct DocsExample {
     pub title: String,
     /// Which state this fixture demonstrates.
     pub case: DocsCase,
-    /// The rule kind this scenario documents (canonical or alias
-    /// spelling).
+    /// The rule kind this scenario documents. Must be the CANONICAL kind
+    /// (the one with its own page); the docs-export gate rejects an alias
+    /// spelling since aliases have no page of their own.
     pub kind: String,
     /// Tie-breaker when a kind documents more than the fail+pass pair
     /// (a promoted edge case). Lower sorts first.

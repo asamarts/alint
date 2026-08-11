@@ -119,7 +119,7 @@ fn structured_query_pages_lead_with_their_own_kind() {
     ];
     let workspace = crate::bench_release::workspace_root().expect("workspace_root");
     let tmp = tempfile::tempdir().expect("tempdir");
-    generate_rules_pages(&workspace, tmp.path(), None).expect("generate rules pages");
+    generate_rules_pages(&workspace, tmp.path(), None, false).expect("generate rules pages");
 
     let rules_dir = tmp.path().join("rules");
     let mut pages: Vec<std::path::PathBuf> = Vec::new();
