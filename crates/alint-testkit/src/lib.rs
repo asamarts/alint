@@ -19,7 +19,7 @@ pub mod strategies;
 pub mod treespec;
 
 pub use error::{Error, Result};
-pub use runner::{ScenarioRun, StepOutcome, assert_scenario, run_scenario};
+pub use runner::{ScenarioRun, StepOutcome, assert_scenario, run_scenario, setup_git};
 pub use scenario::{
     CommitSpec, DetailedCommit, DocsCase, DocsExample, ExpectStep, ExpectTreeMode, ExpectViolation,
     Given, GivenGit, LevelName, Scenario, Step,

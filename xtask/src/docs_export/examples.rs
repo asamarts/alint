@@ -13,7 +13,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use alint_testkit::{DocsCase, DocsExample, Scenario, Step, TreeNode, TreeSpec, materialize};
+use alint_testkit::{
+    DocsCase, DocsExample, Scenario, Step, TreeNode, TreeSpec, materialize, setup_git,
+};
 use anyhow::{Context, Result, bail};
 
 /// One rendered documented example: the markdown subsection injected onto the
@@ -110,9 +112,6 @@ fn validate_documented(scenario: &Scenario, docs: &DocsExample) -> Result<()> {
              hermetic (inline rules or `alint://bundled/...` only)"
         );
     }
-    if scenario.given.git.is_some() {
-        bail!("`given.git` is not supported for documented examples yet (Phase 2)");
-    }
     if scenario.when.as_slice() != [Step::Check] {
         bail!(
             "documented examples must be a single `check` scenario (when: [check]), \
@@ -147,6 +146,11 @@ fn run_and_capture(bin: &Path, scenario: &Scenario, docs: &DocsExample) -> Resul
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo)?;
     materialize(&scenario.given.tree, &repo).context("materialising example tree")?;
+
+    // Git-rule examples drive a real repo (init + commits) inside the tree.
+    if let Some(git_spec) = &scenario.given.git {
+        setup_git(&repo, git_spec).context("git setup for the documented example")?;
+    }
 
     // Config OUTSIDE the walked tree, reached via `-c`, so `.alint.yml` is never
     // itself a rule-matchable file.

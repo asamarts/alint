@@ -52,7 +52,7 @@ pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
     })?;
 
     if let Some(git_spec) = &scenario.given.git {
-        init_git_for_scenario(&root, git_spec)?;
+        setup_git(&root, git_spec)?;
     }
 
     let mut steps = Vec::with_capacity(scenario.when.len());
@@ -68,17 +68,17 @@ pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
     })
 }
 
-/// Run the scenario's `given.git:` setup against the tempdir.
-/// Each git invocation is shelled out via the `git` on PATH;
-/// scenarios in environments without git skip the setup with a
-/// clear error rather than silently producing a non-git tempdir.
+/// Run a scenario's `given.git:` setup against a materialised tempdir:
+/// `git init`, optional `git add`/`add -f`, and the commit chain. Public so
+/// docs-export can drive git for a documented git-rule example (ADR-0014).
+/// Each git invocation is shelled out via the `git` on PATH.
 ///
 /// The runner sets minimal user.name / user.email config so
 /// `git commit` doesn't fail in CI environments whose default
 /// identity isn't configured. Both values are scoped to the
 /// scenario tempdir (`-c user.…=`) and don't touch the host's
 /// global config.
-fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
+pub fn setup_git(root: &Path, spec: &GivenGit) -> Result<()> {
     if !spec.init {
         return Ok(());
     }
