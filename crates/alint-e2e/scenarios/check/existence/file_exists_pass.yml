@@ -1,6 +1,11 @@
 name: file_exists is silent when the required file is present
 tags: [check, file_exists, passing]
 
+docs:
+  title: A repository with the README present
+  case: pass
+  kind: file_exists
+
 given:
   tree:
     README.md: "# demo"

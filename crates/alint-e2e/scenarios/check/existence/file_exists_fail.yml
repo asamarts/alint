@@ -1,6 +1,11 @@
 name: file_exists fires when the required file is missing
 tags: [check, file_exists]
 
+docs:
+  title: A repository missing its README
+  case: fail
+  kind: file_exists
+
 given:
   tree:
     Cargo.toml: "[package]\nname = \"demo\"\n"
