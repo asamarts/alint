@@ -269,10 +269,14 @@ For a documented (migrated) kind it additionally asserts:
   `fail` must assert a violation and produce non-empty output, a `pass` must exit
   clean and assert none - so a mislabeled case can't ship.
 - **Shape.** A documented scenario is a single `check` step (`when: [check]`, so
-  the asserted `expect:` matches the rendered run) with no `given.git` block (the
-  render doesn't drive git yet - Phase 2). A documented kind's `docs/rules.md` H3
-  must also carry **no hand-written** ```` ```yaml ```` block, or the page would
-  double-render the generated example alongside a stale hand-written one.
+  the asserted `expect:` matches the rendered run). A git-rule example may carry a
+  `given.git` block - docs-export drives it (Phase 2 shipped the git harness:
+  `$exec`/`$symlink` tree nodes and the `commits` DSL, zeroing
+  `NATIVE_FIRES_ALLOWLIST`). A documented kind's `docs/rules.md` H3 must also carry
+  **no hand-written config** ```` ```yaml ```` block (one whose `kind:` is the
+  documented kind - a non-config yaml like a CI-workflow recipe is fine), or the
+  page would double-render the generated example alongside a stale hand-written
+  one.
 - **Config fidelity.** The config rendered on the page is byte-for-byte the
   scenario's `given.config`.
 - **Hermeticity.** `given.config` (including any transitively resolved `extends:`)
