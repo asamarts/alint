@@ -116,12 +116,17 @@ things (see [Gate upgrade](#gate-upgrade)):
 3. `canonical(docs.kind)` equals that one kind (the label cannot lie about what
    the fixture exercises).
 
-Canonicalisation must use the **`register_builtin`-derived** alias set (the
-`xtask/src/facts.rs::rule_source_files` approach), **not** the hand-maintained
-10-entry `ALIASES` const duplicated across six files - that const omits the 11th
-alias (`cross_file_value_equals` -> `cross_file`). Extracting one shared
-canonical-kind helper in `alint-rules` and deleting the six copies is folded into
-Phase 1.
+Canonicalisation reuses docs-export's own alias map, `harvest_aliases`
+(`xtask/src/docs_export.rs`), which reads each kind's canonical spelling and its
+`(alias: ...)` annotations straight from `docs/rules.md` H3 titles - the same
+source the pages are built from, so it cannot drift from them, and it already
+carries `cross_file_value_equals -> cross_file`. (An earlier draft proposed the
+`register_builtin`-derived `rule_source_files` map; that is the **wrong** source -
+it maps a kind to its Rust *module*, which conflates the eight `structured_path`
+query kinds that share a module but are distinct pages.) The hand-maintained
+10-entry `ALIASES` const duplicated across the coverage-audit tests is a separate,
+pre-existing concern (it omits the 11th alias); deduplicating it does not block
+this gate and is left as a follow-up.
 
 ## Render pipeline
 
@@ -398,9 +403,11 @@ Once all seven fixtures fire natively, `NATIVE_FIRES_ALLOWLIST` is deleted and
 
 - **Phase 0 - ADR + design doc (this).** Decisions recorded; forks resolved.
 - **Phase 1 - plumbing + pilot (existence family).** Add the `docs:` block (with
-  explicit `kind`) and the `setup_git` helper; extract the shared canonical-kind
-  helper and retire the six duplicated alias maps; **hoist `build_release_binary`
-  above `generate_rules_pages`**; build the render pipeline (config-outside-tree
+  explicit `kind`); reuse docs-export's existing `harvest_aliases` map for
+  canonicalisation (the shared-helper/const dedup and `setup_git` extraction are
+  deferred - the const dedup is a separate follow-up, `setup_git` a Phase-2 need
+  since the existence pilot is git-free); **hoist `build_release_binary` above
+  `generate_rules_pages`**; build the render pipeline (config-outside-tree
   via `-c`) and the re-architected, migration-aware gate; migrate the existence
   family end to end via an **atomic per-family swap** (one commit that adds the
   family's `docs:` scenarios, removes its hand-written YAML from `docs/rules.md`,
