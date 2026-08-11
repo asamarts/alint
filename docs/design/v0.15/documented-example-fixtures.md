@@ -192,9 +192,15 @@ vary. docs-export must spawn `alint check` under this exact contract:
   message from leaking the random tempdir basename (`command.rs` prints
   `root.display()`), **and** prevents upward config-discovery from escaping into a
   parent repo's `.alint.yml` (`Path::new(".").parent()` terminates immediately).
-- **Sanitised, fixed environment:** `LC_ALL=C`; `TERM` pinned to a fixed
-  non-`dumb` value (locks Unicode glyphs); clear `CLICOLOR_FORCE`, `NO_COLOR`,
-  `ALINT_FORCE_HYPERLINKS`, `ALINT_LOG`.
+- **`--ascii` glyphs.** The generated rule pages are ASCII-gated (docs-export's
+  `check_ascii`), so the captured output must be ASCII: `--ascii` forces the ASCII
+  glyph set (`x` / `v` / `---` for the Unicode defaults) and makes glyphs immune to
+  `TERM` (which otherwise flips the whole set on `TERM=dumb`). This corrects an
+  earlier draft that pinned `TERM` for Unicode glyphs - the pages cannot carry
+  Unicode.
+- **Sanitised, fixed environment:** `LC_ALL=C`; clear `CLICOLOR_FORCE`, `NO_COLOR`,
+  `ALINT_FORCE_HYPERLINKS`, `ALINT_LOG` (a fixed `TERM` is belt-and-suspenders once
+  `--ascii` is set).
 - **Explicit `--color=never`** (defeats `CLICOLOR_FORCE`/TTY, strips OSC-8
   hyperlinks) and **stdout captured through a pipe, never a PTY** (width -> 80).
 

@@ -89,8 +89,9 @@ time. Concretely:
    and spawns `alint check -c <config> .` from inside the tree, capturing stdout as
    the "what alint reports" block. The `docs-export --check` gate re-runs it, so
    any drift fails the build. The run is byte-deterministic only under a
-   **pinned-invocation contract** (config outside the tree; `.` target; fixed
-   `TERM`/`LC_ALL`; `--color=never`; pipe capture), and a few kinds need
+   **pinned-invocation contract** (config outside the tree; `.` target; `--ascii`
+   since the generated pages are ASCII-gated; `LC_ALL=C`; `--color=never`; pipe
+   capture), and a few kinds need
    fixture-level care - `git_blame_age` (a wall-clock-relative default message,
    overridable via `message:`), the three spawning kinds (`command`,
    `command_idempotent`, `generated_file_fresh`, which embed subprocess output),
