@@ -1,0 +1,30 @@
+name: git_blame_age is silent on a freshly-committed TODO
+tags: [check, git_blame_age, passing]
+
+docs:
+  title: A freshly-added TODO
+  case: pass
+  kind: git_blame_age
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {\n    // TODO: refactor this\n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: stale-todos
+        kind: git_blame_age
+        paths: "**/*.rs"
+        pattern: '\bTODO\b'
+        max_age_days: 30
+        message: "This TODO is older than 30 days; address it or remove the marker."
+        level: warning
+  git:
+    commits:
+      - { message: "add a todo", add: [src/main.rs] }
+
+when: [check]
+
+expect:
+  - violations: []

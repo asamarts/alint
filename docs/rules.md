@@ -826,25 +826,6 @@ Two modes, selected by the optional `since:` field:
 - **HEAD-only** (default, `since:` omitted): validate the tip commit. Right shape for push-trigger CI and post-commit hooks.
 - **Range** (`since:` set): validate every commit reachable from HEAD but not from `since`. Right shape for `pull_request`-trigger CI, where `actions/checkout` checks out a synthetic merge commit whose subject the rule would always flag.
 
-```yaml
-# HEAD-only. The tip commit must follow Conventional Commits and be <= 72 chars.
-- id: conventional-commit
-  kind: git_commit_message
-  pattern: '^(feat|fix|chore|docs|refactor|test)(\([a-z-]+\))?: '
-  subject_max_length: 72
-  level: warning
-
-# Range mode for PR CI. `ALINT_BASE_SHA` is exported in the workflow from
-# `github.event.pull_request.base.sha`; on push-trigger or local runs where
-# the env var is unset, falls back to `origin/main`.
-- id: pr-conventional-commits
-  kind: git_commit_message
-  pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
-  subject_max_length: 72
-  since: ${ALINT_BASE_SHA:-origin/main}
-  level: error
-```
-
 #### `since:` semantics
 
 `since:` accepts anything `git rev-parse` resolves: a 40-char or abbreviated SHA, a branch (`origin/main`), a tag (`v1.2.3`), or a relative ref (`HEAD~5`). The rule walks `<since>..HEAD` oldest-first, validates each commit, and emits one violation per failing commit with the short SHA + a subject snippet so you know which to amend.
@@ -980,22 +961,6 @@ The rule reflects git's own verdict and deliberately does **not** distinguish "u
 
 Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Same regex match shape as `file_content_forbidden`, but with a per-line age gate: a TODO added yesterday passes silently; a TODO that has sat in tree for 18 months fires. Closes the gap between `level: warning` on every TODO (too noisy) and `level: off` (accepts unbounded debt accumulation).
 
-```yaml
-- id: stale-todos
-  kind: git_blame_age
-  paths:
-    include: ["**/*.{rs,ts,tsx,js,jsx,py,go,java,kt,rb}"]
-    exclude:
-      - "**/*test*/**"
-      - "**/fixtures/**"
-      - "vendor/**"
-      - "third_party/**"
-  pattern: '\b(TODO|FIXME|XXX|HACK)\b'
-  max_age_days: 180
-  level: warning
-  message: "`{{ctx.match}}` has been here for over 180 days — resolve, convert to a tracked issue, or remove."
-```
-
 `{{ctx.match}}` substitutes the regex capture group 1 when present, otherwise the full match — useful for surfacing which marker was caught (`TODO` vs `FIXME` vs …).
 
 Heuristic notes:
@@ -1013,15 +978,6 @@ Outside a git repo, on untracked files, or when blame fails for any other reason
 
 The `<since>...HEAD` diff must **add** (git status `A`) at least one path matching `add_glob:` — the "did you add a changelog entry?" gate. Three corpus signals: prettier's `changelog_unreleased/`, cpython's `Misc/NEWS.d/next/`, pnpm's `.changeset/*.md`. `since:` (the base ref) is required — the rule asserts about the *set of files a contribution adds*, so it's diff-scoped. An optional `when_changed:` gates the requirement on some other glob having changed (don't demand a changelog for a docs-only PR); with no gate, any non-empty changeset triggers it. Builds on the same `<since>...HEAD` three-dot (merge-base) diff as `alint check --changed`. Silent no-op outside a git repo or when nothing relevant changed; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
-```yaml
-- id: changelog-per-pr
-  kind: changeset_requires_path
-  add_glob: ".changeset/*.md"          # the PR must add a changeset file…
-  when_changed: "src/**"               # …but only when it touches src/
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
-
 ---
 
 ### `pair_changed_together`
@@ -1029,15 +985,6 @@ The `<since>...HEAD` diff must **add** (git status `A`) at least one path matchi
 **Categories:** Git hygiene, Cross-file
 
 If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. Corpus signals: rust's `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct changes; "`version.txt` and the lockfile change together" release guards. Both globs and `since:` (the base ref) are required. **Directional** — the trigger is `if_changed`, the obligation is `then_changed`; a `then_changed`-only change never fires it, so add a second rule with the globs swapped for a bidirectional pact. The `changeset_requires_path` sibling, built on the same merge-base diff as `alint check --changed`. Silent no-op outside a git repo or when `if_changed` didn't change; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
-
-```yaml
-- id: format-version-bumped
-  kind: pair_changed_together
-  if_changed: "src/rustdoc-json-types/lib.rs"     # if the format struct changes…
-  then_changed: "src/rustdoc-json-types/FORMAT_VERSION"  # …the version file must too
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
 
 ---
 

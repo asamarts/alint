@@ -1,0 +1,31 @@
+name: changeset_requires_path is silent when the change includes a changeset
+tags: [check, changeset_requires_path, passing]
+
+docs:
+  title: A code change with its changeset entry
+  case: pass
+  kind: changeset_requires_path
+
+given:
+  tree:
+    src:
+      lib.rs: "pub fn feature() {}\n"
+    .changeset:
+      add-feature.md: "Added the feature.\n"
+  config: |
+    version: 1
+    rules:
+      - id: needs-changeset
+        kind: changeset_requires_path
+        add_glob: ".changeset/*.md"
+        since: HEAD~1
+        level: error
+  git:
+    commits:
+      - "chore: base"
+      - { message: "feat: add feature", add: [src/lib.rs, ".changeset/add-feature.md"] }
+
+when: [check]
+
+expect:
+  - violations: []

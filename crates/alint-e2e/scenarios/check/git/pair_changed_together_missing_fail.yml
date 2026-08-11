@@ -1,0 +1,31 @@
+name: pair_changed_together fires when the paired file is not updated
+tags: [check, pair_changed_together]
+
+docs:
+  title: A format change without the version bump
+  case: fail
+  kind: pair_changed_together
+
+given:
+  tree:
+    src:
+      format.rs: "pub struct Format;\n"
+  config: |
+    version: 1
+    rules:
+      - id: format-version
+        kind: pair_changed_together
+        if_changed: "src/format.rs"
+        then_changed: "FORMAT_VERSION"
+        since: HEAD~1
+        level: error
+  git:
+    commits:
+      - "chore: base"
+      - { message: "change the format struct", add: [src/format.rs] }
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: format-version, level: error}

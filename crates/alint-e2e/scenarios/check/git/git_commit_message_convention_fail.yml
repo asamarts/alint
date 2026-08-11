@@ -1,0 +1,27 @@
+name: git_commit_message fires when HEAD's subject breaks the convention
+tags: [check, git_commit_message]
+
+docs:
+  title: A commit with a non-conventional subject
+  case: fail
+  kind: git_commit_message
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: conventional-commits
+        kind: git_commit_message
+        pattern: '^(feat|fix|chore): '
+        level: error
+  git:
+    commits:
+      - { message: "wip nonsense", add: [README.md] }
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: conventional-commits, level: error}

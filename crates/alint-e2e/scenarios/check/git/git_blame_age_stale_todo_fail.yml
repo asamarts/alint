@@ -1,0 +1,31 @@
+name: git_blame_age fires on a long-stale TODO
+tags: [check, git_blame_age]
+
+docs:
+  title: A TODO comment that has gone stale
+  case: fail
+  kind: git_blame_age
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {\n    // TODO: refactor this\n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: stale-todos
+        kind: git_blame_age
+        paths: "**/*.rs"
+        pattern: '\bTODO\b'
+        max_age_days: 30
+        message: "This TODO is older than 30 days; address it or remove the marker."
+        level: warning
+  git:
+    commits:
+      - { message: "add a todo", add: [src/main.rs], date: "2000-01-01T00:00:00" }
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: stale-todos, level: warning}

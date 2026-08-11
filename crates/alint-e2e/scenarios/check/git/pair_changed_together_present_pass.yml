@@ -1,0 +1,31 @@
+name: pair_changed_together is silent when both files change together
+tags: [check, pair_changed_together, passing]
+
+docs:
+  title: A format change with the version bump
+  case: pass
+  kind: pair_changed_together
+
+given:
+  tree:
+    src:
+      format.rs: "pub struct Format;\n"
+    FORMAT_VERSION: "2\n"
+  config: |
+    version: 1
+    rules:
+      - id: format-version
+        kind: pair_changed_together
+        if_changed: "src/format.rs"
+        then_changed: "FORMAT_VERSION"
+        since: HEAD~1
+        level: error
+  git:
+    commits:
+      - "chore: base"
+      - { message: "change the format struct and bump the version", add: [src/format.rs, FORMAT_VERSION] }
+
+when: [check]
+
+expect:
+  - violations: []

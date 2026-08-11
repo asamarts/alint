@@ -587,21 +587,20 @@ fn process_family_h3s(
         if !h3.body.contains("```yaml") && !group_kinds.iter().all(|k| documented.contains_key(k)) {
             missing_examples.push(format!("{} → {}", h2.title, h3.title));
         }
-        // ...and a documented kind must NOT also keep a hand-written ```yaml
-        // block, or the page double-renders (the generated example plus a stale
-        // hand-written one). Enforce the atomic-swap invariant (ADR-0014).
-        if h3.body.contains("```yaml") && group_kinds.iter().any(|k| documented.contains_key(k)) {
-            let dup: Vec<&str> = group_kinds
-                .iter()
-                .filter(|k| documented.contains_key(*k))
-                .map(String::as_str)
-                .collect();
-            anyhow::bail!(
-                "docs/rules.md H3 '{}' documents {dup:?} via a `docs:` scenario but \
-                 still contains a hand-written ```yaml example - remove the \
-                 hand-written block; the example now renders from the fixture.",
-                h3.title,
-            );
+        // ...and a documented kind must NOT keep a hand-written CONFIG example
+        // (a ```yaml block whose top-level `kind:` is the documented kind), or
+        // the page double-renders the generated example alongside a stale
+        // hand-written one. A non-config yaml block (e.g. a CI-workflow recipe)
+        // is fine. Enforce the atomic-swap invariant (ADR-0014).
+        if let Some(ex_kind) = example_first_kind(&h3.body) {
+            if documented.contains_key(&ex_kind) {
+                anyhow::bail!(
+                    "docs/rules.md H3 '{}' documents `{ex_kind}` via a `docs:` scenario \
+                     but still contains a hand-written config example for it - remove the \
+                     hand-written block; the example now renders from the fixture.",
+                    h3.title,
+                );
+            }
         }
         // The example must demonstrate the H3's CANONICAL kind, not an alias:
         // the generated page is slugged/titled by the canonical name, so an

@@ -1,0 +1,30 @@
+name: changeset_requires_path fires when a change ships no changeset entry
+tags: [check, changeset_requires_path]
+
+docs:
+  title: A code change with no changeset entry
+  case: fail
+  kind: changeset_requires_path
+
+given:
+  tree:
+    src:
+      lib.rs: "pub fn feature() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: needs-changeset
+        kind: changeset_requires_path
+        add_glob: ".changeset/*.md"
+        since: HEAD~1
+        level: error
+  git:
+    commits:
+      - "chore: base"
+      - { message: "feat: add feature", add: [src/lib.rs] }
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: needs-changeset, level: error}

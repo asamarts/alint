@@ -1,0 +1,26 @@
+name: git_commit_message is silent when HEAD follows the convention
+tags: [check, git_commit_message, passing]
+
+docs:
+  title: A commit that follows the convention
+  case: pass
+  kind: git_commit_message
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: conventional-commits
+        kind: git_commit_message
+        pattern: '^(feat|fix|chore): '
+        level: error
+  git:
+    commits:
+      - { message: "feat: add the readme", add: [README.md] }
+
+when: [check]
+
+expect:
+  - violations: []

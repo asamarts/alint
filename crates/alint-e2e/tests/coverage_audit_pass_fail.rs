@@ -121,35 +121,22 @@ fn walkdir(root: &Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// Rule kinds whose firing case can't be expressed in the
-/// scenario YAML format because the testkit doesn't yet
-/// materialise the required filesystem primitive. Each entry
-/// must point at a native Rust integration test that DOES
-/// cover the firing case.
-///
-/// These should shrink to zero as the testkit grows
-/// `mode: 0o755`, `symlink_to: <path>`, custom commit
-/// messages, and `GIT_AUTHOR_DATE` overrides — at which point
-/// the YAML coverage becomes feasible and the entry is
-/// removed.
-const NATIVE_FIRES_ALLOWLIST: &[(&str, &str)] = &[
-    (
-        "git_blame_age",
-        "crates/alint-rules/tests/git_blame_age.rs (testkit runner doesn't backdate commits via GIT_AUTHOR_DATE)",
-    ),
-    (
-        "git_commit_message",
-        "crates/alint-rules/tests/shell_out_rules.rs (testkit runner uses a fixed commit message)",
-    ),
-    (
-        "changeset_requires_path",
-        "crates/alint-rules/tests/shell_out_rules.rs (testkit `git: {commits}` makes empty commits; an added-file diff can't be expressed)",
-    ),
-    (
-        "pair_changed_together",
-        "crates/alint-rules/tests/shell_out_rules.rs (testkit `git: {commits}` makes empty commits; a real two-commit co-change diff can't be expressed)",
-    ),
-];
+/// Rule kinds whose firing case can't be expressed in scenario YAML. Now
+/// EMPTY: Phase 2 (ADR-0014) grew the testkit's `$exec`/`$symlink` tree nodes
+/// and the git commits DSL (custom messages, `GIT_AUTHOR_DATE`, staged file
+/// deltas), so every registered kind now fires in a YAML scenario. Kept as a
+/// tripwire - `native_fires_allowlist_is_empty` fails if a future kind re-adds
+/// an exemption, forcing the "can this fire in YAML?" question first.
+const NATIVE_FIRES_ALLOWLIST: &[(&str, &str)] = &[];
+
+#[test]
+fn native_fires_allowlist_is_empty() {
+    assert!(
+        NATIVE_FIRES_ALLOWLIST.is_empty(),
+        "the native-fires allowlist should stay empty (Phase 2 zeroed it); a new \
+         entry means a kind cannot express firing in YAML - reconsider before re-adding"
+    );
+}
 
 /// Same alias map as `coverage_audit.rs`. Normalise before
 /// recording status so a single scenario using either form
