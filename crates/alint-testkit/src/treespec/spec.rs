@@ -18,7 +18,30 @@ use serde::{Deserialize, Serialize};
 #[serde(untagged)]
 pub enum TreeNode {
     File(String),
+    Exec(ExecNode),
+    Symlink(SymlinkNode),
     Dir(BTreeMap<String, TreeNode>),
+}
+
+/// An executable (`0755`) regular file, written as a reserved-key mapping:
+/// `{ "$exec": "content" }`. Serde tries this before [`TreeNode::Dir`], so a
+/// mapping carrying `$exec` is always this node - `$exec` is therefore a
+/// reserved filename (a fixture cannot materialise a literal file named
+/// `$exec`; nothing needs to).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecNode {
+    #[serde(rename = "$exec")]
+    pub content: String,
+}
+
+/// A symbolic link, written as a reserved-key mapping: `{ "$symlink": "target" }`.
+/// `$symlink` is a reserved filename like `$exec`. Unix-only to materialise.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymlinkNode {
+    #[serde(rename = "$symlink")]
+    pub target: String,
 }
 
 impl TreeNode {
@@ -28,6 +51,14 @@ impl TreeNode {
 
     pub fn is_dir(&self) -> bool {
         matches!(self, TreeNode::Dir(_))
+    }
+
+    pub fn is_exec(&self) -> bool {
+        matches!(self, TreeNode::Exec(_))
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        matches!(self, TreeNode::Symlink(_))
     }
 }
 
@@ -169,5 +200,24 @@ z.txt: "y"
         let yaml = spec.to_yaml().unwrap();
         let re = TreeSpec::from_yaml(&yaml).unwrap();
         assert_eq!(spec, re);
+    }
+
+    #[test]
+    fn parses_and_roundtrips_exec_and_symlink() {
+        let src = r##"
+hook.sh: { "$exec": "#!/bin/sh\necho hi\n" }
+latest: { "$symlink": "releases/v2" }
+plain.txt: "regular"
+src:
+  main.rs: "fn main() {}"
+"##;
+        let spec = TreeSpec::from_yaml(src).unwrap();
+        assert!(spec.root["hook.sh"].is_exec());
+        assert!(spec.root["latest"].is_symlink());
+        assert!(spec.root["plain.txt"].is_file());
+        assert!(spec.root["src"].is_dir());
+        // The reserved-key nodes serialize back to the same mappings.
+        let yaml = spec.to_yaml().unwrap();
+        assert_eq!(TreeSpec::from_yaml(&yaml).unwrap(), spec);
     }
 }

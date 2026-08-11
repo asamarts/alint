@@ -310,6 +310,8 @@ fn render_tree(tree: &TreeSpec) -> String {
         .iter()
         .map(|(path, node)| match node {
             TreeNode::File(_) => path,
+            TreeNode::Exec(_) => format!("{path}  (executable)"),
+            TreeNode::Symlink(link) => format!("{path} -> {}", link.target),
             TreeNode::Dir(_) => format!("{path}/"),
         })
         .collect();

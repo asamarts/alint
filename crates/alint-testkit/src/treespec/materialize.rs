@@ -32,6 +32,50 @@ fn write_map(children: &std::collections::BTreeMap<String, TreeNode>, parent: &P
                     source,
                 })?;
             }
+            TreeNode::Exec(exec) => {
+                if let Some(pp) = path.parent() {
+                    std::fs::create_dir_all(pp).map_err(|source| Error::Io {
+                        path: pp.to_path_buf(),
+                        source,
+                    })?;
+                }
+                std::fs::write(&path, &exec.content).map_err(|source| Error::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                // The executable bit is the only mode any consuming rule checks;
+                // it is a Unix concept, so the chmod is Unix-only. The node still
+                // materialises its content on other targets (the firing scenarios
+                // are `unix-only`-tagged and skipped there anyway).
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                        .map_err(|source| Error::Io {
+                            path: path.clone(),
+                            source,
+                        })?;
+                }
+            }
+            TreeNode::Symlink(link) => {
+                if let Some(pp) = path.parent() {
+                    std::fs::create_dir_all(pp).map_err(|source| Error::Io {
+                        path: pp.to_path_buf(),
+                        source,
+                    })?;
+                }
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&link.target, &path).map_err(|source| Error::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                #[cfg(not(unix))]
+                return Err(Error::scenario(format!(
+                    "cannot materialise symlink {} -> {}: symlinks are unix-only",
+                    path.display(),
+                    link.target
+                )));
+            }
             TreeNode::Dir(sub) => {
                 std::fs::create_dir_all(&path).map_err(|source| Error::Io {
                     path: path.clone(),
@@ -119,5 +163,28 @@ empty: {}
         let spec = TreeSpec::from_yaml(r#"a.txt: "x""#).unwrap();
         let err = materialize(&spec, &bogus).unwrap_err();
         assert!(matches!(err, Error::NotADirectory(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialises_executable_bit_and_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let spec = TreeSpec::from_yaml(
+            "hook.sh: { \"$exec\": \"#!/bin/sh\\n\" }\nlatest: { \"$symlink\": \"hook.sh\" }\n",
+        )
+        .unwrap();
+        materialize(&spec, tmp.path()).unwrap();
+        let mode = std::fs::metadata(tmp.path().join("hook.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o111, 0o111, "executable bit must be set");
+        let link = std::fs::symlink_metadata(tmp.path().join("latest")).unwrap();
+        assert!(link.file_type().is_symlink(), "latest must be a symlink");
+        assert_eq!(
+            std::fs::read_link(tmp.path().join("latest")).unwrap(),
+            std::path::Path::new("hook.sh")
+        );
     }
 }

@@ -25,6 +25,6 @@ pub use scenario::{
     Step,
 };
 pub use treespec::{
-    Discrepancy, ExtractOpts, TreeNode, TreeSpec, VerifyMode, VerifyReport, extract, materialize,
-    verify,
+    Discrepancy, ExecNode, ExtractOpts, SymlinkNode, TreeNode, TreeSpec, VerifyMode, VerifyReport,
+    extract, materialize, verify,
 };

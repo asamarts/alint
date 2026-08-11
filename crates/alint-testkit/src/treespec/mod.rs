@@ -10,5 +10,5 @@ mod verify;
 
 pub use extract::{ExtractOpts, extract};
 pub use materialize::materialize;
-pub use spec::{TreeNode, TreeSpec, TreeSpecIter};
+pub use spec::{ExecNode, SymlinkNode, TreeNode, TreeSpec, TreeSpecIter};
 pub use verify::{Discrepancy, VerifyMode, VerifyReport, verify};
