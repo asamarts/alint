@@ -3502,6 +3502,7 @@ dependencies = [
  "alint-core",
  "alint-dsl",
  "alint-rules",
+ "alint-testkit",
  "anyhow",
  "clap",
  "jsonschema",

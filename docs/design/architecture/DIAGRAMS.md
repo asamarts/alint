@@ -110,8 +110,8 @@ graph TB
   subgraph AlintTooling["`Dev + build tooling`"]
     AlintTooling.E2e["alint-e2e"]
     AlintTooling.Xtask["xtask"]
-    AlintTooling.Testkit["alint-testkit"]
     AlintTooling.Bench["alint-bench"]
+    AlintTooling.Testkit["alint-testkit"]
   end
   subgraph AlintCli["`CLI`"]
     AlintCli.AlintBin["alint"]
@@ -151,6 +151,7 @@ graph TB
   AlintTooling.Xtask -.-> AlintCli.Dsl
   AlintTooling.Xtask -.-> AlintCli.Rules
   AlintTooling.Xtask -.-> AlintTooling.Bench
+  AlintTooling.Xtask -.-> AlintTooling.Testkit
 ```
 
 ## Execution pipeline

@@ -18,6 +18,7 @@ alint-bench.workspace = true
 alint-core.workspace = true
 alint-dsl.workspace = true
 alint-rules.workspace = true
+alint-testkit.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 regex.workspace = true

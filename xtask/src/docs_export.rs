@@ -407,6 +407,12 @@ fn generate_rules_pages(
     let schema = load_config_schema(&workspace.join(docs_paths::SCHEMA_JSON))?;
     let kind_branches = build_kind_branch_index(&schema);
 
+    // ADR-0014: scenarios carrying a `docs:` block render their kind's worked
+    // example from the real fixture (tree + config + a live `alint check` run).
+    // Empty until a kind opts in, so every other kind keeps its hand-written
+    // rules.md example.
+    let documented = examples::render_documented(workspace)?;
+
     let rules_dir = target_dir.join("rules");
     fs::create_dir_all(&rules_dir)?;
 
@@ -466,6 +472,7 @@ fn generate_rules_pages(
             &mut all_kinds,
             &mut missing_examples,
             &mut wrong_kind_examples,
+            &documented,
             released,
         )?;
         families_meta.push((h2.title.clone(), family_order, family_slug.clone()));
@@ -546,6 +553,7 @@ fn process_family_h3s(
     all_kinds: &mut Vec<KindEntry>,
     missing_examples: &mut Vec<String>,
     wrong_kind_examples: &mut Vec<String>,
+    documented: &std::collections::BTreeMap<String, Vec<examples::RenderedExample>>,
     released: Option<crate::rule_options_table::Version>,
 ) -> Result<()> {
     let mut kind_order: u32 = 0;
@@ -571,7 +579,10 @@ fn process_family_h3s(
         // pass. Multi-kind headings (e.g. the structured-query
         // family's three path_equals kinds) share one body, so
         // one example per heading covers the group.
-        if !h3.body.contains("```yaml") {
+        // A kind rendered from a documented `docs:` scenario (ADR-0014) needs
+        // no hand-written ```yaml block - its example is generated. Exempt an
+        // H3 only when every kind it documents is covered that way.
+        if !h3.body.contains("```yaml") && !group_kinds.iter().all(|k| documented.contains_key(k)) {
             missing_examples.push(format!("{} → {}", h2.title, h3.title));
         }
         // The example must demonstrate the H3's CANONICAL kind, not an alias:
@@ -636,6 +647,7 @@ fn process_family_h3s(
                 options_md.as_deref(),
                 kind_order,
                 &category_slugs,
+                documented.get(kind).map(Vec::as_slice),
             )?;
             kind_to_family.insert(kind.clone(), family_slug.to_string());
             all_kinds.push(KindEntry {
@@ -1140,6 +1152,7 @@ fn emit_rule_page(
     options_md: Option<&str>,
     sidebar_order: u32,
     category_slugs: &[&str],
+    documented: Option<&[examples::RenderedExample]>,
 ) -> Result<()> {
     let mut page = String::new();
     let _ = writeln!(&mut page, "---");
@@ -1174,6 +1187,18 @@ fn emit_rule_page(
         page.push_str("\n\n");
         page.push_str(opts.trim_end_matches('\n'));
         page.push('\n');
+    }
+    // ADR-0014: worked examples rendered from the kind's documented scenarios
+    // (example repo + config + a real `alint check` run). Injected after the
+    // options table, before "See also".
+    if let Some(rendered) = documented {
+        while page.ends_with('\n') {
+            page.pop();
+        }
+        page.push_str("\n\n## Example\n\n");
+        for ex in rendered {
+            page.push_str(&ex.markdown);
+        }
     }
     if !siblings.is_empty() {
         // Trim trailing newlines so the footer doesn't have a
@@ -2143,6 +2168,8 @@ fn write_manifest(target_dir: &Path) -> Result<()> {
     fs::write(target_dir.join("manifest.json"), json)?;
     Ok(())
 }
+
+mod examples;
 
 mod counts;
 
