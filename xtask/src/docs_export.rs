@@ -506,6 +506,7 @@ fn generate_rules_pages(
     // warnings, so a regressing PR fails the docs-bundle build before it can
     // publish a broken example to alint.org.
     enforce_example_gates(&missing_examples, &wrong_kind_examples)?;
+    enforce_documented_page_targets(&documented, &kind_to_family)?;
 
     // Family Overview pages: categories-based membership. Each family lists every
     // kind whose `**Categories:**` line includes it (by slug), not just the kinds
@@ -1084,6 +1085,30 @@ fn enforce_example_gates(missing: &[String], wrong_kind: &[String]) -> Result<()
              not an alias declared in `(alias: …)`.",
             wrong_kind.len(),
             wrong_kind.join("\n  - "),
+        );
+    }
+    Ok(())
+}
+
+/// Every documented scenario's `docs.kind` must resolve to an emitted page, or
+/// its example is silently dropped (ADR-0014).
+fn enforce_documented_page_targets(
+    documented: &std::collections::BTreeMap<String, Vec<examples::RenderedExample>>,
+    kind_to_family: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let mut orphan: Vec<&str> = documented
+        .keys()
+        .filter(|k| !kind_to_family.contains_key(*k))
+        .map(String::as_str)
+        .collect();
+    orphan.sort_unstable();
+    if !orphan.is_empty() {
+        anyhow::bail!(
+            "{} documented scenario `docs.kind` value(s) match no rule page \
+             (a typo, or an alias without its own page):\n  - {}\n\n\
+             Set `docs.kind` to the canonical kind whose H3 the example documents.",
+            orphan.len(),
+            orphan.join("\n  - "),
         );
     }
     Ok(())
