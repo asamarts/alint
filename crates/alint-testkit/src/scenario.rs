@@ -142,15 +142,41 @@ pub struct GivenGit {
     /// "fully checked-in repo."
     #[serde(default = "default_true")]
     pub commit: bool,
-    /// Make a chain of empty commits, oldest first. Each entry is
-    /// the subject line of one commit; the runner uses
-    /// `git commit --allow-empty -m <subject>` for every entry so
-    /// no working-tree file is required. Mutually exclusive with
-    /// `add:`/`commit:` (which write one mass commit of the
-    /// staged files). Used to fixture multi-commit shapes the
-    /// `git_commit_message` rule's `since:` mode needs to walk.
+    /// Make a chain of commits, oldest first. Each entry is either a bare
+    /// subject string (an empty commit with that subject) or a detailed
+    /// `{ message, add, date }` mapping that stages the listed paths and can
+    /// backdate the commit. Mutually exclusive with the top-level
+    /// `add:`/`commit:` path (which writes one mass commit of the staged
+    /// files). Used to fixture multi-commit shapes and the real file-delta
+    /// history the git rules inspect.
     #[serde(default)]
-    pub commits: Vec<String>,
+    pub commits: Vec<CommitSpec>,
+}
+
+/// One entry in `git.commits`: either a bare subject (an empty commit) or a
+/// detailed commit that stages files, sets a message, and optionally backdates.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CommitSpec {
+    /// An empty commit with this subject line.
+    Subject(String),
+    /// A commit that stages `add` paths (empty -> `--allow-empty`), uses a
+    /// custom `message`, and optionally backdates via `date`.
+    Detailed(DetailedCommit),
+}
+
+/// The detailed form of a [`CommitSpec`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetailedCommit {
+    /// Commit message (subject).
+    pub message: String,
+    /// Paths to `git add` before committing. Empty commits with `--allow-empty`.
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Sets `GIT_AUTHOR_DATE` + `GIT_COMMITTER_DATE`, e.g. `2000-01-01T00:00:00`.
+    #[serde(default)]
+    pub date: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -378,6 +404,31 @@ given:
                 "omitting `{}` should fail to parse",
                 line.trim()
             );
+        }
+    }
+
+    #[test]
+    fn parses_commit_spec_forms() {
+        let src = r#"
+name: x
+given:
+  tree: {}
+  config: "version: 1\nrules: []\n"
+  git:
+    commits:
+      - "bare subject"
+      - { message: "detailed", add: ["a.txt"], date: "2000-01-01T00:00:00" }
+"#;
+        let s = Scenario::from_yaml(src).unwrap();
+        let commits = &s.given.git.unwrap().commits;
+        assert!(matches!(commits[0], CommitSpec::Subject(_)));
+        match &commits[1] {
+            CommitSpec::Detailed(d) => {
+                assert_eq!(d.message, "detailed");
+                assert_eq!(d.add, vec!["a.txt"]);
+                assert_eq!(d.date.as_deref(), Some("2000-01-01T00:00:00"));
+            }
+            CommitSpec::Subject(_) => panic!("expected Detailed"),
         }
     }
 }

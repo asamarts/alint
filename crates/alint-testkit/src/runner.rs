@@ -9,7 +9,7 @@ use alint_core::{Engine, FixReport, FixStatus, Level, Report, RuleEntry, WalkOpt
 use tempfile::TempDir;
 
 use crate::error::{Error, Result};
-use crate::scenario::{ExpectStep, GivenGit, Scenario, Step};
+use crate::scenario::{CommitSpec, ExpectStep, GivenGit, Scenario, Step};
 use crate::treespec::{VerifyReport, materialize, verify};
 
 /// Concrete outcome of one step. The runner collects these in order;
@@ -110,21 +110,8 @@ fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
                     .to_string(),
             ));
         }
-        for subject in &spec.commits {
-            git(
-                root,
-                &[
-                    "-c",
-                    "user.name=alint scenario",
-                    "-c",
-                    "user.email=scenario@alint.test",
-                    "commit",
-                    "-q",
-                    "--allow-empty",
-                    "-m",
-                    subject,
-                ],
-            )?;
+        for commit in &spec.commits {
+            commit_one(root, commit)?;
         }
         return Ok(());
     }
@@ -149,16 +136,56 @@ fn init_git_for_scenario(root: &Path, spec: &GivenGit) -> Result<()> {
     Ok(())
 }
 
+/// Apply one `commits:` entry. A bare subject is an empty commit; a detailed
+/// entry stages its `add` paths (or `--allow-empty` when it stages none),
+/// commits with the given message, and backdates when `date` is set.
+fn commit_one(root: &Path, commit: &CommitSpec) -> Result<()> {
+    let (message, add, date): (&str, &[String], Option<&str>) = match commit {
+        CommitSpec::Subject(subject) => (subject.as_str(), &[], None),
+        CommitSpec::Detailed(d) => (d.message.as_str(), d.add.as_slice(), d.date.as_deref()),
+    };
+    if !add.is_empty() {
+        let mut args: Vec<&str> = vec!["add", "--"];
+        args.extend(add.iter().map(String::as_str));
+        git(root, &args)?;
+    }
+    let mut args: Vec<&str> = vec![
+        "-c",
+        "user.name=alint scenario",
+        "-c",
+        "user.email=scenario@alint.test",
+        "commit",
+        "-q",
+    ];
+    if add.is_empty() {
+        args.push("--allow-empty");
+    }
+    args.push("-m");
+    args.push(message);
+    match date {
+        Some(date) => git_env(
+            root,
+            &args,
+            &[("GIT_AUTHOR_DATE", date), ("GIT_COMMITTER_DATE", date)],
+        ),
+        None => git(root, &args),
+    }
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<()> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map_err(|source| Error::Io {
-            path: root.to_path_buf(),
-            source,
-        })?;
+    git_env(root, args, &[])
+}
+
+fn git_env(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<()> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(root).args(args);
+    for (key, val) in envs {
+        cmd.env(key, val);
+    }
+    let out = cmd.output().map_err(|source| Error::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         return Err(Error::scenario(format!(
