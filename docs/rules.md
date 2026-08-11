@@ -686,28 +686,13 @@ Flag tracked paths that are symbolic links. Symlinks are a portability footgun: 
 
 Caveat: a symlink whose target escapes the repository root (`link -> /etc`) is pruned by the walker *before* indexing, so it is **not** flagged — the rule reports in-tree symlinks (to files or directories), not escaping ones. The escaping symlink can't be read out-of-root either (path confinement blocks that), so this is a reporting gap, not a disclosure one; recording escaping symlinks safely is a tracked follow-up.
 
-```yaml
-- id: no-symlinks
-  kind: no_symlinks
-  paths: "**"
-  level: warning
-  fix:
-    file_remove: {}   # unlinks the symlink; target is untouched
-```
+Fix: `file_remove` — unlinks the symlink; the target is untouched.
 
 ### `executable_bit`
 
 **Categories:** Unix metadata
 
 Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`).
-
-```yaml
-- id: ci-scripts-exec
-  kind: executable_bit
-  paths: "ci/**/*.sh"
-  require: true
-  level: warning
-```
 
 No fix op — chmod auto-apply is deferred.
 
@@ -716,13 +701,6 @@ No fix op — chmod auto-apply is deferred.
 **Categories:** Unix metadata, Content
 
 Every file with `+x` set must begin with `#!`. Catches plain text files accidentally marked executable.
-
-```yaml
-- id: executables-have-shebangs
-  kind: executable_has_shebang
-  paths: "**"
-  level: error
-```
 
 ### `shebang_has_executable`
 

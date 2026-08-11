@@ -1,6 +1,11 @@
 name: no_symlinks is silent on regular files
 tags: [check, no_symlinks, unix_metadata, passing]
 
+docs:
+  title: A repository with no symlinks
+  case: pass
+  kind: no_symlinks
+
 given:
   tree:
     README.md: "# demo"

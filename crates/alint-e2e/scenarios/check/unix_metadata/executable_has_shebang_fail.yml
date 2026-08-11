@@ -1,0 +1,26 @@
+name: executable_has_shebang fires on an executable file with no shebang
+tags: [check, executable_has_shebang, unix_metadata, unix-only]
+
+docs:
+  title: An executable script missing its shebang
+  case: fail
+  kind: executable_has_shebang
+
+given:
+  tree:
+    README.md: "# demo"
+    scripts:
+      run: { "$exec": "echo hi\n" }
+  config: |
+    version: 1
+    rules:
+      - id: exec-shebang
+        kind: executable_has_shebang
+        paths: "scripts/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: exec-shebang, level: error, path: scripts/run}

@@ -134,18 +134,6 @@ fn walkdir(root: &Path) -> Vec<std::path::PathBuf> {
 /// removed.
 const NATIVE_FIRES_ALLOWLIST: &[(&str, &str)] = &[
     (
-        "executable_bit",
-        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't write +x bits)",
-    ),
-    (
-        "executable_has_shebang",
-        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't write +x bits)",
-    ),
-    (
-        "no_symlinks",
-        "crates/alint-e2e/tests/unix_metadata.rs (testkit can't materialise symlinks)",
-    ),
-    (
         "git_blame_age",
         "crates/alint-rules/tests/git_blame_age.rs (testkit runner doesn't backdate commits via GIT_AUTHOR_DATE)",
     ),

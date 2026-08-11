@@ -1,0 +1,27 @@
+name: executable_bit fires on a committed +x file that should not be
+tags: [check, executable_bit, unix_metadata, unix-only]
+
+docs:
+  title: A docs file that is unexpectedly executable
+  case: fail
+  kind: executable_bit
+
+given:
+  tree:
+    README.md: "# demo"
+    docs:
+      generate.sh: { "$exec": "echo generated\n" }
+  config: |
+    version: 1
+    rules:
+      - id: docs-not-exec
+        kind: executable_bit
+        paths: "docs/**"
+        level: error
+        require: false
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: docs-not-exec, level: error, path: docs/generate.sh}

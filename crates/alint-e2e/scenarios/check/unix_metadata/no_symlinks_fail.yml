@@ -1,0 +1,27 @@
+name: no_symlinks fires on a committed symbolic link
+tags: [check, no_symlinks, unix_metadata, unix-only]
+
+docs:
+  title: A repository containing a symlink
+  case: fail
+  kind: no_symlinks
+
+given:
+  tree:
+    README.md: "# demo"
+    src:
+      main.rs: "fn main() {}\n"
+    latest.rs: { "$symlink": "src/main.rs" }
+  config: |
+    version: 1
+    rules:
+      - id: no-links
+        kind: no_symlinks
+        paths: "**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-links, level: error, path: latest.rs}

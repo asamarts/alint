@@ -1,6 +1,11 @@
 name: executable_has_shebang is silent when no file carries the +x bit
 tags: [check, executable_has_shebang, unix_metadata, passing]
 
+docs:
+  title: No executable scripts, so nothing to require a shebang
+  case: pass
+  kind: executable_has_shebang
+
 # The testkit writes tree files via std::fs::write, which never sets
 # the +x bit. `executable_has_shebang` only checks +x files, so this
 # scenario is vacuously passing — the +x-ing-matters paths live in
