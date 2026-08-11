@@ -1,6 +1,11 @@
 name: file_absent is silent when no match exists
 tags: [check, file_absent, passing]
 
+docs:
+  title: A repository with no .bak files
+  case: pass
+  kind: file_absent
+
 given:
   tree:
     Cargo.toml: "[package]\nname = \"demo\"\n"

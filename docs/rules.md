@@ -52,35 +52,12 @@ Fix: `file_create` — write a declared `content`. With an array of `paths`, the
 
 No file matching `paths` may exist in the walked tree. The inverse of `file_exists`.
 
-```yaml
-- id: no-backup-files
-  kind: file_absent
-  paths: "**/*.bak"
-  level: warning
-```
-
 Fix: `file_remove` — delete every violating file.
 
 **Optional `root_only: true`** (like `file_exists`) restricts the check to the repository root: a file forbidden at the root does not fire on nested copies of the same name.
 **Optional `git_tracked_only: true`** restricts the check to files in git's index. With it set, the rule fires only on tracked paths regardless of `.gitignore` state — closing the gap where a `git add -f`'d file slips past the walker's gitignore filter. Outside a git repo the rule becomes a silent no-op.
 
-```yaml
-- id: no-tracked-env
-  kind: file_absent
-  paths: ".env"
-  git_tracked_only: true
-  level: error
-```
-
 **Optional `content_prefix_hex`** narrows a name match with a content check: a matching file fires only if its bytes begin with one of the listed hex signatures. This separates real binary junk from unrelated files that share a name pattern — macOS AppleDouble sidecars (`._*`) start with `00 05 16 07` and `.DS_Store` with `00 00 00 01` `"Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0`. A file that cannot be read, or is shorter than every signature, does not match; an empty list (the default) keeps the name-only behaviour.
-
-```yaml
-- id: no-macos-junk
-  kind: file_absent
-  paths: ["**/.DS_Store", "**/._*"]
-  content_prefix_hex: ["00051607", "0000000142756431"]
-  level: error
-```
 
 **What "exists" means**: alint walks the filesystem and honours `.gitignore` by default, so a `file_absent` rule fires whenever a matching file is **present in the walked tree**, not when it's tracked in git. Files filtered by `.gitignore` are invisible to the rule. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics, the `--no-gitignore` flag, and the gap between this and git's actual index.
 
@@ -89,14 +66,6 @@ Fix: `file_remove` — delete every violating file.
 **Categories:** Existence
 
 Directory counterpart of `file_exists`. Every match must correspond to a real directory in the walked tree.
-
-```yaml
-- id: docs-dir-exists
-  kind: dir_exists
-  paths: "docs"
-  root_only: true
-  level: error
-```
 
 **Optional `root_only: true`** (like `file_exists`) requires the match to be a
 directory directly at the repository root, not nested.
@@ -108,23 +77,8 @@ directory directly at the repository root, not nested.
 
 Directory counterpart of `file_absent`. The match-and-fire semantics are the same as `file_absent` — including the `.gitignore` interaction. A `dir_absent` rule with `paths: "**/target"` only fires when `target/` exists in the walked tree; if it's gitignored, the walker filters it out and the rule stays silent.
 
-```yaml
-- id: no-tracked-target
-  kind: dir_absent
-  paths: "**/target"
-  level: error
-```
-
 **Optional `root_only: true`** (like `dir_exists`) restricts the check to the repository root: a directory forbidden at the root does not fire on nested directories of the same name.
 **Optional `git_tracked_only: true`** restricts the check to directories that contain at least one git-tracked file. With it set, a developer's locally-built `target/` (gitignored, no tracked content) doesn't trigger; a `target/` whose contents made it into git's index does. This is the canonical "don't let `target/` be committed" semantic.
-
-```yaml
-- id: no-tracked-target
-  kind: dir_absent
-  paths: "**/target"
-  git_tracked_only: true
-  level: error
-```
 
 See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
 

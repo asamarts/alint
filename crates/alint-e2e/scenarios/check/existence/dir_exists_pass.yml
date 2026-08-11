@@ -1,6 +1,11 @@
 name: dir_exists is silent when the directory is present
 tags: [check, dir_exists, passing]
 
+docs:
+  title: A repository with a src directory
+  case: pass
+  kind: dir_exists
+
 given:
   tree:
     Cargo.toml: "[package]\nname = \"demo\"\n"

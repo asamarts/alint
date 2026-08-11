@@ -1,6 +1,11 @@
 name: dir_exists fires when the required directory is missing
 tags: [check, dir_exists]
 
+docs:
+  title: A repository missing its src directory
+  case: fail
+  kind: dir_exists
+
 given:
   tree:
     Cargo.toml: "[package]\nname = \"demo\"\n"
