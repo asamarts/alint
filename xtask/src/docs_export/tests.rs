@@ -387,6 +387,70 @@ fn pascal_to_kebab_examples() {
     assert_eq!(pascal_to_kebab("Lsp"), "lsp");
 }
 
+/// `example_first_kind` reads ONLY the leading yaml block (the canonical-kind
+/// gate polices that block); `example_block_kinds` reads EVERY block (the
+/// double-example gate must catch a stale config wherever it sits). The
+/// `git_commit_message` shape - a non-config recipe first, a config after -
+/// is exactly where the two diverge, so lock both in.
+#[test]
+fn block_kind_scanners_read_first_vs_all_yaml_blocks() {
+    // A CI-workflow recipe (no `kind:`) followed by a config block: the leading
+    // scan sees nothing, the all-blocks scan finds the config's kind.
+    let body = "\
+Intro prose.
+
+```yaml
+# .github/workflows/lint.yml
+on: [push]
+jobs: {}
+```
+
+More prose.
+
+```yaml
+- id: r
+  kind: git_commit_message
+  max_subject_length: 50
+```
+";
+    assert_eq!(
+        example_first_kind(body),
+        None,
+        "leading block is a recipe with no kind:"
+    );
+    assert_eq!(
+        example_block_kinds(body),
+        vec!["git_commit_message".to_string()],
+        "the config in a later block must still be seen"
+    );
+
+    // Leading config block: both scanners agree, and a later block's kind is
+    // still collected in document order.
+    let two_configs = "\
+```yaml
+- id: a
+  kind: file_exists
+```
+
+```yaml
+- id: b
+  kind: file_absent
+```
+";
+    assert_eq!(
+        example_first_kind(two_configs).as_deref(),
+        Some("file_exists")
+    );
+    assert_eq!(
+        example_block_kinds(two_configs),
+        vec!["file_exists".to_string(), "file_absent".to_string()]
+    );
+
+    // No yaml at all: both empty.
+    assert_eq!(example_first_kind("just prose"), None);
+    assert!(example_block_kinds("just prose").is_empty());
+}
+
 /// Design invariant (docs/design/rule-categories.md): the `**Categories:**` line
 /// is stripped from every H3 body BEFORE it is summarized or rendered, so no
 /// generated summary or page body ever carries the literal marker. Tested

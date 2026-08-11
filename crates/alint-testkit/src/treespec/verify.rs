@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::spec::{TreeNode, TreeSpec};
+use super::spec::{ExecNode, SymlinkNode, TreeNode, TreeSpec};
 use crate::error::{Error, Result};
 
 /// Strictness of the tree comparison.
@@ -127,6 +127,20 @@ fn visit_spec(
         };
         seen.insert(rel.clone());
         let abs = root.join(&rel);
+        // Symlink/Exec need lstat-style checks: the `exists()`/`is_file()` in the
+        // match below FOLLOW symlinks (a valid dangling link would read as
+        // Missing) and ignore the mode. Handle them first.
+        match node {
+            TreeNode::Symlink(want) => {
+                verify_symlink(&abs, want, rel, report);
+                continue;
+            }
+            TreeNode::Exec(want) => {
+                verify_exec(&abs, want, rel, report)?;
+                continue;
+            }
+            _ => {}
+        }
         match (node, abs.is_dir(), abs.is_file(), abs.exists()) {
             (_, _, _, false) => {
                 report
@@ -164,6 +178,78 @@ fn visit_spec(
                 });
             }
             _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Verify a `$symlink` node with an lstat (don't follow the link), so a valid
+/// dangling symlink isn't reported `Missing`.
+fn verify_symlink(abs: &Path, want: &SymlinkNode, rel: String, report: &mut VerifyReport) {
+    match std::fs::symlink_metadata(abs) {
+        Err(_) => report
+            .discrepancies
+            .push(Discrepancy::Missing { path: rel }),
+        Ok(meta) if !meta.file_type().is_symlink() => {
+            report.discrepancies.push(Discrepancy::Kind {
+                path: rel,
+                expected: "symlink",
+                actual: if meta.is_dir() { "dir" } else { "file" },
+            });
+        }
+        Ok(_) => {
+            let got = std::fs::read_link(abs)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if got != want.target {
+                report.discrepancies.push(Discrepancy::Content {
+                    path: rel,
+                    expected: want.target.clone(),
+                    actual: got,
+                });
+            }
+        }
+    }
+}
+
+/// Verify a `$exec` node: a regular file with matching content and, on Unix,
+/// the executable bit set.
+fn verify_exec(abs: &Path, want: &ExecNode, rel: String, report: &mut VerifyReport) -> Result<()> {
+    if abs.is_dir() {
+        report.discrepancies.push(Discrepancy::Kind {
+            path: rel,
+            expected: "file",
+            actual: "dir",
+        });
+        return Ok(());
+    }
+    if !abs.is_file() {
+        report
+            .discrepancies
+            .push(Discrepancy::Missing { path: rel });
+        return Ok(());
+    }
+    let got = std::fs::read_to_string(abs).map_err(|source| Error::Io {
+        path: abs.to_path_buf(),
+        source,
+    })?;
+    if got != want.content {
+        report.discrepancies.push(Discrepancy::Content {
+            path: rel.clone(),
+            expected: want.content.clone(),
+            actual: got,
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = std::fs::metadata(abs).is_ok_and(|m| m.permissions().mode() & 0o111 != 0);
+        if !executable {
+            report.discrepancies.push(Discrepancy::Kind {
+                path: rel,
+                expected: "executable file",
+                actual: "non-executable file",
+            });
         }
     }
     Ok(())
@@ -217,6 +303,34 @@ mod tests {
 
     fn spec(src: &str) -> TreeSpec {
         TreeSpec::from_yaml(src).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verifies_exec_and_symlink_nodes() {
+        let tmp = TempDir::new().unwrap();
+        let s = spec(
+            "hook.sh: { \"$exec\": \"#!/bin/sh\\n\" }\n\
+             latest: { \"$symlink\": \"hook.sh\" }\n\
+             dangling: { \"$symlink\": \"does/not/exist\" }\n",
+        );
+        materialize(&s, tmp.path()).unwrap();
+        // exec content+bit, a valid symlink, AND a dangling symlink all verify
+        // clean - the dangling link must not read as `Missing`.
+        assert!(
+            verify(&s, tmp.path(), VerifyMode::Strict)
+                .unwrap()
+                .is_match(),
+            "exec + symlinks (incl. dangling) should verify clean"
+        );
+        // A wrong symlink target is flagged, not silently passed.
+        let wrong = spec("latest: { \"$symlink\": \"wrong-target\" }\n");
+        assert!(
+            !verify(&wrong, tmp.path(), VerifyMode::Contains)
+                .unwrap()
+                .is_match(),
+            "a wrong symlink target must be flagged"
+        );
     }
 
     #[test]

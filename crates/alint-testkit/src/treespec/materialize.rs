@@ -45,8 +45,9 @@ fn write_map(children: &std::collections::BTreeMap<String, TreeNode>, parent: &P
                 })?;
                 // The executable bit is the only mode any consuming rule checks;
                 // it is a Unix concept, so the chmod is Unix-only. The node still
-                // materialises its content on other targets (the firing scenarios
-                // are `unix-only`-tagged and skipped there anyway).
+                // materialises its content on other targets. The exec/symlink
+                // firing scenarios are `unix-only`-tagged: scenarios.rs skips them
+                // off Unix, and docs-export renders only on its Linux host.
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;

@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use alint_testkit::{
-    DocsCase, DocsExample, Scenario, Step, TreeNode, TreeSpec, materialize, setup_git,
+    CommitSpec, DocsCase, DocsExample, GivenGit, Scenario, Step, TreeNode, TreeSpec, materialize,
+    setup_git,
 };
 use anyhow::{Context, Result, bail};
 
@@ -92,16 +93,18 @@ fn render_one(
         markdown: render_markdown(
             docs,
             &scenario.given.tree,
+            scenario.given.git.as_ref(),
             &scenario.given.config,
             output.as_deref(),
         ),
     })
 }
 
-/// Gate a documented scenario before it can back a page: hermetic config, no
-/// git (Phase 2), a single `check` step so the `expect:` the `scenarios.rs`
-/// harness asserts matches the run the page renders, and exactly one top-level
-/// rule whose kind is the documented kind (so the label cannot lie).
+/// Gate a documented scenario before it can back a page: hermetic config, a
+/// single `check` step so the `expect:` the `scenarios.rs` harness asserts
+/// matches the run the page renders, and exactly one top-level rule whose kind
+/// is the documented kind (so the label cannot lie). A git-rule example may
+/// carry a `given.git` block - the render drives it.
 fn validate_documented(scenario: &Scenario, docs: &DocsExample) -> Result<()> {
     let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&scenario.given.config)
         .context("parsing the documented example config")?;
@@ -254,6 +257,7 @@ fn has_remote_extends(config: &serde_yaml_ng::Value) -> bool {
 fn render_markdown(
     docs: &DocsExample,
     tree: &TreeSpec,
+    git: Option<&GivenGit>,
     config: &str,
     output: Option<&str>,
 ) -> String {
@@ -271,6 +275,14 @@ fn render_markdown(
     let _ = writeln!(&mut md, "With this `.alint.yml`:");
     let _ = writeln!(&mut md);
     push_fenced(&mut md, "yaml", config);
+    // Git-rule examples turn on the repo's history (a backdated commit, a bad
+    // subject) - surface it, or the worked example's premise is off-screen.
+    if let Some(history) = git.and_then(render_git_history) {
+        let _ = writeln!(&mut md);
+        let _ = writeln!(&mut md, "committed with this history (oldest first):");
+        let _ = writeln!(&mut md);
+        push_fenced(&mut md, "text", &history);
+    }
     if let Some(output) = output {
         let _ = writeln!(&mut md);
         let _ = writeln!(&mut md, "`alint check` reports:");
@@ -279,6 +291,35 @@ fn render_markdown(
     }
     let _ = writeln!(&mut md);
     md
+}
+
+/// A `git log --oneline`-style summary of the scenario's commits (oldest
+/// first), so a git-rule page shows the message, backdate, and staged files
+/// that drive the example. `None` when there are no commits.
+fn render_git_history(git: &GivenGit) -> Option<String> {
+    if git.commits.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::with_capacity(git.commits.len());
+    for commit in &git.commits {
+        match commit {
+            CommitSpec::Subject(subject) => lines.push(subject.clone()),
+            CommitSpec::Detailed(d) => {
+                let date = d
+                    .date
+                    .as_deref()
+                    .map(|x| format!("{x}  "))
+                    .unwrap_or_default();
+                let files = if d.add.is_empty() {
+                    String::new()
+                } else {
+                    format!("  (adds {})", d.add.join(", "))
+                };
+                lines.push(format!("{date}{}{files}", d.message));
+            }
+        }
+    }
+    Some(lines.join("\n"))
 }
 
 /// Append a fenced code block, sizing the fence one backtick longer than the
@@ -405,7 +446,7 @@ mod tests {
             kind: "file_exists".into(),
             order: 0,
         };
-        let md = render_markdown(&docs, &tree("README.md: \"x\""), "version: 1\n", None);
+        let md = render_markdown(&docs, &tree("README.md: \"x\""), None, "version: 1\n", None);
         assert!(md.contains("### T"));
         assert!(md.contains("With this `.alint.yml`:"));
         assert!(!md.contains("alint check` reports"));

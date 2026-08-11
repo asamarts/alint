@@ -1,21 +1,16 @@
-name: executable_has_shebang is silent when no file carries the +x bit
-tags: [check, executable_has_shebang, unix_metadata, passing]
+name: executable_has_shebang is silent when the executable carries a shebang
+tags: [check, executable_has_shebang, unix_metadata, unix-only, passing]
 
 docs:
-  title: No executable scripts, so nothing to require a shebang
+  title: An executable script that has its shebang
   case: pass
   kind: executable_has_shebang
 
-# The testkit writes tree files via std::fs::write, which never sets
-# the +x bit. `executable_has_shebang` only checks +x files, so this
-# scenario is vacuously passing — the +x-ing-matters paths live in
-# the native Rust integration tests under tests/unix_metadata.rs.
 given:
   tree:
     README.md: "# demo"
     scripts:
-      hello.sh: "echo hi\n"
-      broken.sh: "no shebang here\n"
+      hello.sh: { "$exec": "#!/bin/sh\necho hi\n" }
   config: |
     version: 1
     rules:

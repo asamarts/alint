@@ -591,16 +591,21 @@ fn process_family_h3s(
         // (a ```yaml block whose top-level `kind:` is the documented kind), or
         // the page double-renders the generated example alongside a stale
         // hand-written one. A non-config yaml block (e.g. a CI-workflow recipe)
-        // is fine. Enforce the atomic-swap invariant (ADR-0014).
-        if let Some(ex_kind) = example_first_kind(&h3.body) {
-            if documented.contains_key(&ex_kind) {
-                anyhow::bail!(
-                    "docs/rules.md H3 '{}' documents `{ex_kind}` via a `docs:` scenario \
-                     but still contains a hand-written config example for it - remove the \
-                     hand-written block; the example now renders from the fixture.",
-                    h3.title,
-                );
-            }
+        // is fine. Scan EVERY yaml block, not just the leading one: a documented
+        // kind can keep a non-config recipe as its first block (git_commit_message
+        // keeps a CI-workflow yaml), so a stale config re-added after it would sit
+        // in a later block. Match only against `documented` kind names, so an
+        // incidental `kind:` in a recipe can't false-fire. Atomic-swap (ADR-0014).
+        if let Some(ex_kind) = example_block_kinds(&h3.body)
+            .into_iter()
+            .find(|k| documented.contains_key(k))
+        {
+            anyhow::bail!(
+                "docs/rules.md H3 '{}' documents `{ex_kind}` via a `docs:` scenario \
+                 but still contains a hand-written config example for it - remove the \
+                 hand-written block; the example now renders from the fixture.",
+                h3.title,
+            );
         }
         // The example must demonstrate the H3's CANONICAL kind, not an alias:
         // the generated page is slugged/titled by the canonical name, so an
@@ -1071,6 +1076,37 @@ fn example_first_kind(body: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The first top-level `kind:` of EACH fenced yaml block in a rule H3's body, in
+/// document order (a block with no `kind:` contributes nothing). Unlike
+/// `example_first_kind` (which reads only the leading block, to police that
+/// block's canonical kind), the double-example gate must see a stale config block
+/// wherever it sits - e.g. a later block after a non-config recipe. Callers
+/// filter the result against the documented-kind set, so an incidental `kind:`
+/// in a recipe can't false-fire.
+fn example_block_kinds(body: &str) -> Vec<String> {
+    let mut kinds = Vec::new();
+    let mut offset = 0;
+    while let Some(rel_open) = body[offset..].find("```yaml") {
+        let after_fence = offset + rel_open + "```yaml".len();
+        let Some(nl) = body[after_fence..].find('\n') else {
+            break;
+        };
+        let content_start = after_fence + nl + 1;
+        let Some(close_rel) = body[content_start..].find("```") else {
+            break;
+        };
+        let block_end = content_start + close_rel;
+        for line in body[content_start..block_end].lines() {
+            if let Some(v) = line.trim().strip_prefix("kind:") {
+                kinds.push(v.trim().to_string());
+                break; // the FIRST kind: of this block only
+            }
+        }
+        offset = block_end + 3; // step past the closing fence
+    }
+    kinds
 }
 
 /// Enforce the two per-rule-example docs gates and bail on the first failure:
