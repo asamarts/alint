@@ -1,0 +1,31 @@
+name: shebang_has_executable is silent when the #! script carries +x
+tags: [check, shebang_has_executable, unix_metadata, unix-only, passing]
+
+docs:
+  title: A shebang script that carries the executable bit
+  case: pass
+  kind: shebang_has_executable
+
+# The script starts with `#!` AND is materialised executable (the `$exec`
+# node sets the +x bit), so the rule that a shebang script must be
+# executable is satisfied and stays silent. unix-only: the rule consults
+# the Unix executable bit, so scenarios.rs runs it on Unix and docs-export
+# renders it on its Linux host.
+
+given:
+  tree:
+    README.md: "# demo"
+    scripts:
+      hello.sh: { "$exec": "#!/bin/sh\necho hi\n" }
+  config: |
+    version: 1
+    rules:
+      - id: shebang-needs-x
+        kind: shebang_has_executable
+        paths: "scripts/**"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

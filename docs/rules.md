@@ -384,13 +384,6 @@ Every file with `+x` set must begin with `#!`. Catches plain text files accident
 
 Every file starting with `#!` must have `+x` set. Catches scripts that got their `+x` bit stripped by `git add --chmod=-x`, a tar round-trip, or a `cp` across filesystems.
 
-```yaml
-- id: scripts-wired
-  kind: shebang_has_executable
-  paths: "ci/**/*.sh"
-  level: warning
-```
-
 ---
 
 ## Git hygiene

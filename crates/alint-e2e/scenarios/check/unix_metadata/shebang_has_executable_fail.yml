@@ -9,6 +9,12 @@ tags: [check, shebang_has_executable, unix_metadata, unix-only]
 # with `#!` trips this rule on Unix. On non-Unix the rule is a no-op.
 # The scenario is tagged `unix_metadata`; the native integration test
 # exercises the +x-present pass case.
+
+docs:
+  title: Scripts with a shebang but no executable bit
+  case: fail
+  kind: shebang_has_executable
+
 given:
   tree:
     README.md: "# demo"
