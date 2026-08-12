@@ -134,10 +134,17 @@ fn structured_query_pages_lead_with_their_own_kind() {
             continue;
         }
         let text = fs::read_to_string(page).unwrap();
-        // First `kind:` inside the first fenced yaml block.
-        let Some(open) = text.find("```yaml") else {
+        // The CONFIG block is the ```yaml under "With this `.alint.yml`:", NOT
+        // the first ```yaml on the page: file-content rendering (ADR-0014) now
+        // shows a `.yml` fixture file (e.g. a workflow) as a ```yaml block that
+        // can precede the config. Anchor on the marker to reach the real config.
+        let Some(marker) = text.find("With this `.alint.yml`:") else {
             continue;
         };
+        let Some(rel) = text[marker..].find("```yaml") else {
+            continue;
+        };
+        let open = marker + rel;
         let after = &text[open..];
         let Some(close) = after[7..].find("```") else {
             continue;
