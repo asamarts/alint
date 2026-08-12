@@ -1,6 +1,11 @@
 name: max_directory_depth flags paths nested too deeply
 tags: [check, max_directory_depth, structure]
 
+docs:
+  title: A source file nested too many directories deep
+  case: fail
+  kind: max_directory_depth
+
 given:
   tree:
     top.txt: ""

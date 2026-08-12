@@ -1,6 +1,11 @@
 name: no_empty_files is silent when every file has at least one byte
 tags: [check, no_empty_files, structure, passing]
 
+docs:
+  title: Every file carries at least one byte of content
+  case: pass
+  kind: no_empty_files
+
 given:
   tree:
     README.md: "# hi"

@@ -365,42 +365,17 @@ Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer st
 
 Tree depth from repo root may not exceed `max_depth`. A shallow depth stops deeply-nested imports and keeps CI path globs sane.
 
-```yaml
-- id: shallow-tree
-  kind: max_directory_depth
-  paths: "**"
-  max_depth: 6
-  level: warning
-```
-
 ### `max_files_per_directory`
 
 **Categories:** Structure
 
 Per-directory fanout may not exceed `max_files`. Useful for vendor directories that accidentally grow to thousands of entries.
 
-```yaml
-- id: vendor-dir-fanout-cap
-  kind: max_files_per_directory
-  paths: "vendor/**"
-  max_files: 200
-  level: warning
-```
-
 ### `no_empty_files`
 
 **Categories:** Structure
 
 Flag zero-byte files. Fixable via `file_remove`.
-
-```yaml
-- id: no-empty
-  kind: no_empty_files
-  paths: "**"
-  level: warning
-  fix:
-    file_remove: {}
-```
 
 ---
 

@@ -1,6 +1,11 @@
 name: max_files_per_directory is silent when every dir is under the cap
 tags: [check, max_files_per_directory, structure, passing]
 
+docs:
+  title: Every directory stays under the file-count cap
+  case: pass
+  kind: max_files_per_directory
+
 given:
   tree:
     docs:

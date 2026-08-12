@@ -1,6 +1,11 @@
 name: no_empty_files flags zero-byte files
 tags: [check, no_empty_files, structure]
 
+docs:
+  title: Zero-byte placeholder files left in the tree
+  case: fail
+  kind: no_empty_files
+
 given:
   tree:
     README.md: "# hi"

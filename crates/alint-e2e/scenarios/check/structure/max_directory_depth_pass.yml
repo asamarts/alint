@@ -1,6 +1,11 @@
 name: max_directory_depth is silent when every path is within the cap
 tags: [check, max_directory_depth, structure, passing]
 
+docs:
+  title: Every file stays within the directory-depth cap
+  case: pass
+  kind: max_directory_depth
+
 given:
   tree:
     README.md: ""
