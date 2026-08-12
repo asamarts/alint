@@ -325,23 +325,31 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("dir_absent", dir_absent::build);
 
     registry.register("file_content_matches", file_content_matches::build);
-    registry.register("content_matches", file_content_matches::build);
+    registry.register_alias(
+        "content_matches",
+        "file_content_matches",
+        file_content_matches::build,
+    );
     registry.register("file_content_forbidden", file_content_forbidden::build);
-    registry.register("content_forbidden", file_content_forbidden::build);
+    registry.register_alias(
+        "content_forbidden",
+        "file_content_forbidden",
+        file_content_forbidden::build,
+    );
     registry.register("file_header", file_header::build);
-    registry.register("header", file_header::build);
+    registry.register_alias("header", "file_header", file_header::build);
     registry.register("file_max_size", file_max_size::build);
-    registry.register("max_size", file_max_size::build);
+    registry.register_alias("max_size", "file_max_size", file_max_size::build);
     registry.register("file_min_size", file_min_size::build);
-    registry.register("min_size", file_min_size::build);
+    registry.register_alias("min_size", "file_min_size", file_min_size::build);
     registry.register("file_min_lines", file_min_lines::build);
-    registry.register("min_lines", file_min_lines::build);
+    registry.register_alias("min_lines", "file_min_lines", file_min_lines::build);
     registry.register("file_max_lines", file_max_lines::build);
-    registry.register("max_lines", file_max_lines::build);
+    registry.register_alias("max_lines", "file_max_lines", file_max_lines::build);
     registry.register("file_footer", file_footer::build);
-    registry.register("footer", file_footer::build);
+    registry.register_alias("footer", "file_footer", file_footer::build);
     registry.register("file_shebang", file_shebang::build);
-    registry.register("shebang", file_shebang::build);
+    registry.register_alias("shebang", "file_shebang", file_shebang::build);
 
     // Structured-query family — JSONPath queries over
     // JSON / YAML / TOML documents.
@@ -381,7 +389,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("git_blame_age", git_blame_age::build);
     registry.register("changeset_requires_path", changeset_requires_path::build);
     registry.register_optionless("file_is_text", file_is_text::build);
-    registry.register_optionless("is_text", file_is_text::build);
+    registry.register_alias_optionless("is_text", "file_is_text", file_is_text::build);
 
     registry.register("filename_case", filename_case::build);
     registry.register("filename_regex", filename_regex::build);
@@ -398,7 +406,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     // The unified cross-file value-relation kind; `cross_file_value_equals`
     // (v0.10) is a byte-compatible alias with `relation` defaulting to `equals`.
     registry.register("cross_file", cross_file::build);
-    registry.register("cross_file_value_equals", cross_file::build);
+    registry.register_alias("cross_file_value_equals", "cross_file", cross_file::build);
     registry.register("file_graph", file_graph::build);
     registry.register("ordered_block", ordered_block::build);
     registry.register("for_each_match", for_each_match::build);
@@ -467,6 +475,36 @@ pub fn builtin_registry() -> RuleRegistry {
 #[cfg(test)]
 mod registry_tests {
     use super::*;
+
+    #[test]
+    fn every_alias_resolves_to_a_known_non_alias_canonical() {
+        // Guards `register_alias`: each alias must point at a canonical kind
+        // that is itself registered and is NOT an alias (no alias chains), so
+        // `canonical_kind` always lands on a real rule/page in one hop. Catches
+        // a typo'd or reordered `register_alias` at test time.
+        let r = builtin_registry();
+        let known: std::collections::HashSet<&str> = r.known_kinds().collect();
+        let mut alias_count = 0usize;
+        for kind in r.known_kinds() {
+            let canon = r.canonical_kind(kind);
+            if canon == kind {
+                continue; // canonical (or standalone) kind
+            }
+            alias_count += 1;
+            assert!(
+                known.contains(canon),
+                "alias `{kind}` resolves to unregistered canonical `{canon}`"
+            );
+            assert_eq!(
+                r.canonical_kind(canon),
+                canon,
+                "alias `{kind}` points at `{canon}`, which is itself an alias (chain)"
+            );
+        }
+        // The 11 known aliases: the 10 short-name `file_*` forms + is_text, plus
+        // `cross_file_value_equals`. A drift in that count is a deliberate change.
+        assert_eq!(alias_count, 11, "unexpected number of registered aliases");
+    }
 
     #[test]
     fn every_documented_kind_is_registered() {

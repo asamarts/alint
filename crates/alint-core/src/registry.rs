@@ -14,15 +14,23 @@ type BoxedBuilder = Box<dyn Fn(&RuleSpec) -> Result<Box<dyn Rule>> + Send + Sync
 
 /// Map from `kind` string → factory function. Built-in rule crates register
 /// themselves here at startup, and plugin rules (in later phases) will too.
+///
+/// A kind may be registered under more than one spelling: `register_alias`
+/// records that the alias resolves to a canonical kind, so `canonical_kind`
+/// can collapse the two. The alias still builds the same rule.
 #[derive(Default)]
 pub struct RuleRegistry {
     builders: HashMap<String, BoxedBuilder>,
+    /// alias kind → canonical kind. Only populated by `register_alias*`; a
+    /// canonical (or unregistered) name is absent and resolves to itself.
+    aliases: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for RuleRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RuleRegistry")
             .field("kinds", &self.builders.keys().collect::<Vec<_>>())
+            .field("aliases", &self.aliases)
             .finish()
     }
 }
@@ -49,6 +57,51 @@ impl RuleRegistry {
                 builder(spec)
             }),
         );
+    }
+
+    /// Register `alias` as another spelling of `canonical`: it builds the same
+    /// rule (same `builder`, as [`register`](Self::register) would) AND records
+    /// the alias → canonical mapping that [`canonical_kind`](Self::canonical_kind)
+    /// and [`canonical_kinds`](Self::canonical_kinds) expose. `canonical` should
+    /// itself be registered (as a non-alias) so an alias always resolves to a
+    /// real page/kind; the built-in registry's consistency test enforces this.
+    pub fn register_alias(&mut self, alias: &str, canonical: &str, builder: RuleBuilder) {
+        self.register(alias, builder);
+        self.aliases
+            .insert(alias.to_string(), canonical.to_string());
+    }
+
+    /// [`register_alias`](Self::register_alias) for an OPTION-LESS canonical
+    /// kind: the alias gets the same unknown-option rejection as
+    /// [`register_optionless`](Self::register_optionless).
+    pub fn register_alias_optionless(
+        &mut self,
+        alias: &str,
+        canonical: &str,
+        builder: RuleBuilder,
+    ) {
+        self.register_optionless(alias, builder);
+        self.aliases
+            .insert(alias.to_string(), canonical.to_string());
+    }
+
+    /// Resolve `name` to its canonical kind: the target of an alias registered
+    /// via [`register_alias`](Self::register_alias), or `name` itself when it is
+    /// already canonical (or not registered at all). Alias-aware equality —
+    /// `canonical_kind(a) == canonical_kind(b)` — is how a caller tells whether
+    /// two spellings name the same rule.
+    pub fn canonical_kind<'a>(&'a self, name: &'a str) -> &'a str {
+        self.aliases.get(name).map_or(name, String::as_str)
+    }
+
+    /// Every registered kind that is NOT an alias, in arbitrary order — the
+    /// canonical set the coverage audits enumerate (each alias collapses into
+    /// the canonical it points at).
+    pub fn canonical_kinds(&self) -> impl Iterator<Item = &str> {
+        self.builders
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !self.aliases.contains_key(*k))
     }
 
     pub fn build(&self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -139,6 +192,26 @@ mod tests {
             Error::UnknownRuleKind(name) => assert_eq!(name, "not_real"),
             other => panic!("expected UnknownRuleKind, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn register_alias_records_canonical_and_still_builds() {
+        let mut r = RuleRegistry::new();
+        r.register("file_content_matches", ok_builder);
+        r.register_alias("content_matches", "file_content_matches", ok_builder);
+        // The alias is a real, buildable kind (both spellings are known).
+        assert_eq!(r.known_kinds().count(), 2);
+        // canonical_kind collapses the alias; a canonical / unknown name is itself.
+        assert_eq!(r.canonical_kind("content_matches"), "file_content_matches");
+        assert_eq!(
+            r.canonical_kind("file_content_matches"),
+            "file_content_matches"
+        );
+        assert_eq!(r.canonical_kind("not_registered"), "not_registered");
+        // canonical_kinds omits the alias.
+        let mut canon: Vec<&str> = r.canonical_kinds().collect();
+        canon.sort_unstable();
+        assert_eq!(canon, vec!["file_content_matches"]);
     }
 
     #[test]

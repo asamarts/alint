@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use alint_core::RuleRegistry;
 use alint_testkit::{
     CommitSpec, DocsCase, DocsExample, GivenGit, Scenario, Step, TreeNode, TreeSpec, materialize,
     setup_git,
@@ -64,10 +65,16 @@ pub(crate) fn render_documented(
     } else {
         None
     };
+    let registry = alint_rules::builtin_registry();
     for (path, scenario, docs) in &documented {
-        let rendered = render_one(bin.as_deref(), scenario, docs)
+        let rendered = render_one(bin.as_deref(), &registry, scenario, docs)
             .with_context(|| format!("documented example {}", path.display()))?;
-        out.entry(docs.kind.clone()).or_default().push(rendered);
+        // Key by the CANONICAL kind: the page/H3 lookup and the double-example /
+        // page-target gates all use canonical names, so an alias-spelled
+        // `docs.kind` still lands its example on the canonical rule's page.
+        out.entry(registry.canonical_kind(&docs.kind).to_string())
+            .or_default()
+            .push(rendered);
     }
     for examples in out.values_mut() {
         examples.sort_by_key(|e| (matches!(e.case, DocsCase::Pass), e.order));
@@ -79,10 +86,11 @@ pub(crate) fn render_documented(
 /// render its markdown subsection.
 fn render_one(
     bin: Option<&Path>,
+    registry: &RuleRegistry,
     scenario: &Scenario,
     docs: &DocsExample,
 ) -> Result<RenderedExample> {
-    validate_documented(scenario, docs)?;
+    validate_documented(scenario, docs, registry)?;
     let output = match bin {
         Some(bin) => Some(run_and_capture(bin, scenario, docs)?),
         None => None,
@@ -103,9 +111,15 @@ fn render_one(
 /// Gate a documented scenario before it can back a page: hermetic config, a
 /// single `check` step so the `expect:` the `scenarios.rs` harness asserts
 /// matches the run the page renders, and exactly one top-level rule whose kind
-/// is the documented kind (so the label cannot lie). A git-rule example may
-/// carry a `given.git` block - the render drives it.
-fn validate_documented(scenario: &Scenario, docs: &DocsExample) -> Result<()> {
+/// is the documented kind (so the label cannot lie). The kind check is
+/// alias-aware: a config `kind: cross_file_value_equals` satisfies a
+/// `docs.kind: cross_file` page (both canonicalise to `cross_file`). A git-rule
+/// example may carry a `given.git` block - the render drives it.
+fn validate_documented(
+    scenario: &Scenario,
+    docs: &DocsExample,
+    registry: &RuleRegistry,
+) -> Result<()> {
     let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&scenario.given.config)
         .context("parsing the documented example config")?;
 
@@ -125,10 +139,13 @@ fn validate_documented(scenario: &Scenario, docs: &DocsExample) -> Result<()> {
 
     let kinds = config_rule_kinds(&config);
     match kinds.as_slice() {
-        [k] if *k == docs.kind => Ok(()),
+        [k] if registry.canonical_kind(k) == registry.canonical_kind(&docs.kind) => Ok(()),
         [k] => bail!(
-            "`docs.kind: {}` but the config's rule is `kind: {k}` - they must match",
-            docs.kind
+            "`docs.kind: {}` but the config's rule is `kind: {k}` - they must name the \
+             same rule; `{k}` canonicalises to `{}`, `docs.kind` to `{}`",
+            docs.kind,
+            registry.canonical_kind(k),
+            registry.canonical_kind(&docs.kind),
         ),
         _ => bail!(
             "a documented example's config must declare exactly one top-level rule \
@@ -436,6 +453,50 @@ mod tests {
         assert_eq!(fence_for("no backticks"), "```");
         assert_eq!(fence_for("a ``` b"), "````");
         assert_eq!(fence_for("```` deep"), "`````");
+    }
+
+    #[test]
+    fn validate_documented_matches_kinds_alias_aware() {
+        let registry = alint_rules::builtin_registry();
+        // `docs.kind: cross_file` (canonical) fed by a config that spells the
+        // rule as its alias `cross_file_value_equals`. The gate must accept it:
+        // both canonicalise to `cross_file`.
+        let yaml = |config_kind: &str| {
+            format!(
+                r#"name: t
+docs:
+  title: X
+  case: fail
+  kind: cross_file
+given:
+  tree:
+    a.txt: "x"
+  config: |
+    version: 1
+    rules:
+      - id: r
+        kind: {config_kind}
+when: [check]
+expect:
+  - violations: []
+"#
+            )
+        };
+
+        let aliased = Scenario::from_yaml(&yaml("cross_file_value_equals")).unwrap();
+        let docs = aliased.docs.clone().unwrap();
+        assert!(
+            validate_documented(&aliased, &docs, &registry).is_ok(),
+            "an alias-spelled config must satisfy its canonical page"
+        );
+
+        // A genuinely different rule is still rejected.
+        let mismatch = Scenario::from_yaml(&yaml("file_header")).unwrap();
+        let docs2 = mismatch.docs.clone().unwrap();
+        assert!(
+            validate_documented(&mismatch, &docs2, &registry).is_err(),
+            "a config naming a different rule must still fail the gate"
+        );
     }
 
     #[test]

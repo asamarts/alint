@@ -230,12 +230,18 @@ fn rule_source_files(root: &Path) -> Result<BTreeMap<String, String>> {
         .context("register_builtin closing brace not found")?;
     let body = &body[..end];
 
-    // `registry.register("<kind>", <module>::<builder>)` OR the
-    // `.register_optionless(…)` variant — kind is the string literal, the source
-    // stem is the module path segment before `::`. `\s` spans the newline in the
-    // multi-line register calls.
-    let re = Regex::new(r#"\.register(?:_optionless)?\(\s*"([A-Za-z0-9_]+)"\s*,\s*([a-z0-9_]+)::"#)
-        .expect("static regex compiles");
+    // `registry.register("<kind>", <module>::<builder>)`, its
+    // `.register_optionless(…)` variant, OR the alias forms
+    // `.register_alias("<alias>", "<canonical>", <module>::<builder>)` /
+    // `.register_alias_optionless(…)`. The captured kind is the FIRST string
+    // literal (the alias name, for the alias forms); the optional second string
+    // literal (the canonical) is skipped; the source stem is the builder's module
+    // segment before `::` (so an alias maps to its canonical rule's file). `\s`
+    // spans the newline in the multi-line register calls.
+    let re = Regex::new(
+        r#"\.register(?:_alias_optionless|_optionless|_alias)?\(\s*"([A-Za-z0-9_]+)"\s*,\s*(?:"[A-Za-z0-9_]+"\s*,\s*)?([a-z0-9_]+)::"#,
+    )
+    .expect("static regex compiles");
     let src_dir = root.join("crates/alint-rules/src");
     let mut map = BTreeMap::new();
     for cap in re.captures_iter(body) {

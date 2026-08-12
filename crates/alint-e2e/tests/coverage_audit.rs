@@ -103,52 +103,27 @@ fn every_registered_rule_kind_has_a_scenario() {
     let scenario_kinds = collect_scenario_kinds(&scenarios_dir);
 
     let registry = alint_rules::builtin_registry();
-    let registered: HashSet<String> = registry.known_kinds().map(str::to_string).collect();
 
-    // Aliases register both `file_content_matches` and
-    // `content_matches` to the same builder. For coverage
-    // purposes, we accept either form — adding both to scenarios
-    // is wasteful. Build the alias→canonical mapping inline so
-    // a scenario using just one form satisfies the audit.
-    let aliased: &[(&str, &str)] = &[
-        ("content_matches", "file_content_matches"),
-        ("content_forbidden", "file_content_forbidden"),
-        ("header", "file_header"),
-        ("footer", "file_footer"),
-        ("shebang", "file_shebang"),
-        ("max_size", "file_max_size"),
-        ("min_size", "file_min_size"),
-        ("min_lines", "file_min_lines"),
-        ("max_lines", "file_max_lines"),
-        ("is_text", "file_is_text"),
-    ];
-    let alias_set: HashSet<&str> = aliased.iter().map(|(alias, _)| *alias).collect();
-
-    let canonical_registered: HashSet<&String> = registered
-        .iter()
-        .filter(|k| !alias_set.contains(k.as_str()))
-        .collect();
-
+    // Aliases (e.g. `content_matches` == `file_content_matches`,
+    // `cross_file_value_equals` == `cross_file`) build the same rule, so a
+    // scenario using either spelling counts. Collapse the registered set and
+    // the scenario set through the registry's canonical map so they agree.
+    let canonical_registered: Vec<String> =
+        registry.canonical_kinds().map(str::to_string).collect();
     let scenario_canonical: HashSet<String> = scenario_kinds
         .iter()
-        .map(|k| {
-            aliased
-                .iter()
-                .find(|(alias, _)| alias == k)
-                .map_or_else(|| k.clone(), |(_, canon)| (*canon).to_string())
-        })
+        .map(|k| registry.canonical_kind(k).to_string())
         .collect();
 
-    let missing: Vec<&&String> = canonical_registered
+    let mut missing: Vec<&String> = canonical_registered
         .iter()
         .filter(|k| !scenario_canonical.contains(k.as_str()))
         .collect();
 
     if !missing.is_empty() {
-        let mut sorted: Vec<&&String> = missing.clone();
-        sorted.sort();
+        missing.sort();
         let mut bullets = String::new();
-        for k in &sorted {
+        for k in &missing {
             let _ = writeln!(bullets, "  - {k}");
         }
         panic!(

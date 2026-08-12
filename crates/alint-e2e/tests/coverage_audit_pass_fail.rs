@@ -138,29 +138,6 @@ fn native_fires_allowlist_is_empty() {
     );
 }
 
-/// Same alias map as `coverage_audit.rs`. Normalise before
-/// recording status so a single scenario using either form
-/// satisfies the audit.
-const ALIASES: &[(&str, &str)] = &[
-    ("content_matches", "file_content_matches"),
-    ("content_forbidden", "file_content_forbidden"),
-    ("header", "file_header"),
-    ("footer", "file_footer"),
-    ("shebang", "file_shebang"),
-    ("max_size", "file_max_size"),
-    ("min_size", "file_min_size"),
-    ("min_lines", "file_min_lines"),
-    ("max_lines", "file_max_lines"),
-    ("is_text", "file_is_text"),
-];
-
-fn canonical(kind: &str) -> &str {
-    ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == kind)
-        .map_or(kind, |(_, canon)| *canon)
-}
-
 // 101 lines — the test enumerates every registered rule kind,
 // classifies each as having a pass scenario / fail scenario /
 // both / neither, and emits a structured failure report when
@@ -170,6 +147,7 @@ fn canonical(kind: &str) -> &str {
 #[test]
 fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
     let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+    let registry = alint_rules::builtin_registry();
     let mut status: HashMap<String, Status> = HashMap::new();
 
     for path in walkdir(&scenarios_dir) {
@@ -197,7 +175,7 @@ fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
         // "silent" — that's correct, the rule did stay silent.
         let mut kinds_in_scenario: HashMap<String, bool> = HashMap::new();
         for (id, kind) in &rules {
-            let canon = canonical(kind).to_string();
+            let canon = registry.canonical_kind(kind).to_string();
             let entry = kinds_in_scenario.entry(canon).or_insert(false);
             if fired.contains(id) {
                 *entry = true;
@@ -213,13 +191,7 @@ fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
         }
     }
 
-    let registry = alint_rules::builtin_registry();
-    let alias_set: HashSet<&str> = ALIASES.iter().map(|(alias, _)| *alias).collect();
-    let canonical_kinds: Vec<String> = registry
-        .known_kinds()
-        .filter(|k| !alias_set.contains(k))
-        .map(str::to_string)
-        .collect();
+    let canonical_kinds: Vec<String> = registry.canonical_kinds().map(str::to_string).collect();
 
     let native_allowlist: HashSet<&str> = NATIVE_FIRES_ALLOWLIST
         .iter()

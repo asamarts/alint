@@ -14,26 +14,6 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-const ALIASES: &[(&str, &str)] = &[
-    ("content_matches", "file_content_matches"),
-    ("content_forbidden", "file_content_forbidden"),
-    ("header", "file_header"),
-    ("footer", "file_footer"),
-    ("shebang", "file_shebang"),
-    ("max_size", "file_max_size"),
-    ("min_size", "file_min_size"),
-    ("min_lines", "file_min_lines"),
-    ("max_lines", "file_max_lines"),
-    ("is_text", "file_is_text"),
-];
-
-fn canonical(kind: &str) -> &str {
-    ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == kind)
-        .map_or(kind, |(_, canon)| *canon)
-}
-
 fn collect_kinds_from_yaml(yaml: &str, out: &mut HashSet<String>) {
     let Ok(parsed) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml) else {
         return;
@@ -48,7 +28,9 @@ fn walk(v: &serde_yaml_ng::Value, out: &mut HashSet<String>) {
                 .get(serde_yaml_ng::Value::String("kind".into()))
                 .and_then(|v| v.as_str())
             {
-                out.insert(canonical(kind).to_string());
+                // Harvest the raw spelling; canonicalisation happens once the
+                // registry is in scope (an alias here collapses to its canonical).
+                out.insert(kind.to_string());
             }
             for (_, child) in m {
                 walk(child, out);
@@ -131,12 +113,13 @@ fn list_rule_kinds_not_covered_by_bench_scale() {
     }
 
     let registry = alint_rules::builtin_registry();
-    let alias_set: HashSet<&str> = ALIASES.iter().map(|(alias, _)| *alias).collect();
-    let canonical_kinds: Vec<String> = registry
-        .known_kinds()
-        .filter(|k| !alias_set.contains(k))
-        .map(str::to_string)
+    // Canonicalise the kinds harvested from bench YAML (they may use an alias
+    // spelling) so they line up with the canonical set below.
+    let bench_kinds: HashSet<String> = bench_kinds
+        .iter()
+        .map(|k| registry.canonical_kind(k).to_string())
         .collect();
+    let canonical_kinds: Vec<String> = registry.canonical_kinds().map(str::to_string).collect();
 
     let uncovered: Vec<&String> = canonical_kinds
         .iter()
