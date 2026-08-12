@@ -8,22 +8,6 @@ categories: ['git-hygiene']
 
 Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Same regex match shape as `file_content_forbidden`, but with a per-line age gate: a TODO added yesterday passes silently; a TODO that has sat in tree for 18 months fires. Closes the gap between `level: warning` on every TODO (too noisy) and `level: off` (accepts unbounded debt accumulation).
 
-```yaml
-- id: stale-todos
-  kind: git_blame_age
-  paths:
-    include: ["**/*.{rs,ts,tsx,js,jsx,py,go,java,kt,rb}"]
-    exclude:
-      - "**/*test*/**"
-      - "**/fixtures/**"
-      - "vendor/**"
-      - "third_party/**"
-  pattern: '\b(TODO|FIXME|XXX|HACK)\b'
-  max_age_days: 180
-  level: warning
-  message: "`{{ctx.match}}` has been here for over 180 days — resolve, convert to a tracked issue, or remove."
-```
-
 `{{ctx.match}}` substitutes the regex capture group 1 when present, otherwise the full match — useful for surfacing which marker was caught (`TODO` vs `FIXME` vs …).
 
 Heuristic notes:
@@ -43,3 +27,64 @@ Outside a git repo, on untracked files, or when blame fails for any other reason
 | `pattern` | string | yes |  | Rust-regex pattern applied to each blame line's content. Capture group 1 (when present) is exposed as `{{ctx.match}}` in the message template; without a capture group, `{{ctx.match}}` substitutes the full match. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A TODO comment that has gone stale
+
+The rule fires on this repository:
+
+```text
+src/
+src/main.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: stale-todos
+    kind: git_blame_age
+    paths: "**/*.rs"
+    pattern: '\bTODO\b'
+    max_age_days: 30
+    message: "This TODO is older than 30 days; address it or remove the marker."
+    level: warning
+```
+
+committed with this history (oldest first):
+
+```text
+2000-01-01T00:00:00  add a todo  (adds src/main.rs)
+```
+
+### A freshly-added TODO
+
+This repository is compliant:
+
+```text
+src/
+src/main.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: stale-todos
+    kind: git_blame_age
+    paths: "**/*.rs"
+    pattern: '\bTODO\b'
+    max_age_days: 30
+    message: "This TODO is older than 30 days; address it or remove the marker."
+    level: warning
+```
+
+committed with this history (oldest first):
+
+```text
+add a todo  (adds src/main.rs)
+```
+

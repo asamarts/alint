@@ -13,25 +13,6 @@ Two modes, selected by the optional `since:` field:
 - **HEAD-only** (default, `since:` omitted): validate the tip commit. Right shape for push-trigger CI and post-commit hooks.
 - **Range** (`since:` set): validate every commit reachable from HEAD but not from `since`. Right shape for `pull_request`-trigger CI, where `actions/checkout` checks out a synthetic merge commit whose subject the rule would always flag.
 
-```yaml
-# HEAD-only. The tip commit must follow Conventional Commits and be <= 72 chars.
-- id: conventional-commit
-  kind: git_commit_message
-  pattern: '^(feat|fix|chore|docs|refactor|test)(\([a-z-]+\))?: '
-  subject_max_length: 72
-  level: warning
-
-# Range mode for PR CI. `ALINT_BASE_SHA` is exported in the workflow from
-# `github.event.pull_request.base.sha`; on push-trigger or local runs where
-# the env var is unset, falls back to `origin/main`.
-- id: pr-conventional-commits
-  kind: git_commit_message
-  pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
-  subject_max_length: 72
-  since: ${ALINT_BASE_SHA:-origin/main}
-  level: error
-```
-
 #### `since:` semantics
 
 `since:` accepts anything `git rev-parse` resolves: a 40-char or abbreviated SHA, a branch (`origin/main`), a tag (`v1.2.3`), or a relative ref (`HEAD~5`). The rule walks `<since>..HEAD` oldest-first, validates each commit, and emits one violation per failing commit with the short SHA + a subject snippet so you know which to amend.
@@ -88,3 +69,56 @@ jobs:
 | `subject_max_length` | integer (>= 1) |  | `null` | Maximum number of characters allowed in the subject line. Common values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A commit with a non-conventional subject
+
+The rule fires on this repository:
+
+```text
+README.md
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: conventional-commits
+    kind: git_commit_message
+    pattern: '^(feat|fix|chore): '
+    level: error
+```
+
+committed with this history (oldest first):
+
+```text
+wip nonsense  (adds README.md)
+```
+
+### A commit that follows the convention
+
+This repository is compliant:
+
+```text
+README.md
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: conventional-commits
+    kind: git_commit_message
+    pattern: '^(feat|fix|chore): '
+    level: error
+```
+
+committed with this history (oldest first):
+
+```text
+feat: add the readme  (adds README.md)
+```
+

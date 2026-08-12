@@ -8,14 +8,6 @@ categories: ['unix-metadata']
 
 Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`).
 
-```yaml
-- id: ci-scripts-exec
-  kind: executable_bit
-  paths: "ci/**/*.sh"
-  require: true
-  level: warning
-```
-
 No fix op — chmod auto-apply is deferred.
 
 ## Options
@@ -25,3 +17,50 @@ No fix op — chmod auto-apply is deferred.
 | `require` | boolean | yes |  | `true` → +x must be set; `false` → +x must NOT be set. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A docs file that is unexpectedly executable
+
+The rule fires on this repository:
+
+```text
+README.md
+docs/
+docs/generate.sh  (executable)
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: docs-not-exec
+    kind: executable_bit
+    paths: "docs/**"
+    level: error
+    require: false
+```
+
+### Docs files that are not executable
+
+This repository is compliant:
+
+```text
+README.md
+docs/
+docs/intro.md
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: docs-not-exec
+    kind: executable_bit
+    paths: "docs/**"
+    level: error
+    require: false
+```
+
