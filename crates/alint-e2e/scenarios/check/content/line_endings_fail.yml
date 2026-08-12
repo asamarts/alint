@@ -1,6 +1,11 @@
 name: line_endings flags files that mix CRLF and LF
 tags: [check, line_endings]
 
+docs:
+  title: A source file with CRLF line endings under an LF policy
+  case: fail
+  kind: line_endings
+
 given:
   tree:
     src:

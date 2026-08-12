@@ -1,6 +1,11 @@
 name: line_max_width is silent when every line fits
 tags: [check, line_max_width, passing]
 
+docs:
+  title: Every line stays within the width limit
+  case: pass
+  kind: line_max_width
+
 given:
   tree:
     src:

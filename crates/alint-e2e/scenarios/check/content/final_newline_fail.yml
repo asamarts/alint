@@ -1,6 +1,11 @@
 name: final_newline flags files missing the trailing newline
 tags: [check, final_newline]
 
+docs:
+  title: A Markdown file missing its trailing newline
+  case: fail
+  kind: final_newline
+
 given:
   tree:
     docs:

@@ -1,6 +1,11 @@
 name: indent_style tabs passes tab-indented sources
 tags: [check, indent_style, content, passing]
 
+docs:
+  title: Every Go file is indented with tabs
+  case: pass
+  kind: indent_style
+
 given:
   tree:
     src:

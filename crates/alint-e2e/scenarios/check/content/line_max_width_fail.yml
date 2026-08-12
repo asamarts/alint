@@ -1,6 +1,11 @@
 name: line_max_width flags overlong lines
 tags: [check, line_max_width]
 
+docs:
+  title: A source file with a line past the width limit
+  case: fail
+  kind: line_max_width
+
 given:
   tree:
     src:

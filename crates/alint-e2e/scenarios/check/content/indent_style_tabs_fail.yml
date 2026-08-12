@@ -1,6 +1,11 @@
 name: indent_style tabs flags space-indented sources
 tags: [check, indent_style, content]
 
+docs:
+  title: A Go file indented with spaces instead of tabs
+  case: fail
+  kind: indent_style
+
 given:
   tree:
     src:

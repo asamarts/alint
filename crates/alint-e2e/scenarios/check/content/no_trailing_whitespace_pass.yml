@@ -1,6 +1,11 @@
 name: no_trailing_whitespace is silent when files are clean
 tags: [check, no_trailing_whitespace, passing]
 
+docs:
+  title: Every source file is free of trailing whitespace
+  case: pass
+  kind: no_trailing_whitespace
+
 given:
   tree:
     src:

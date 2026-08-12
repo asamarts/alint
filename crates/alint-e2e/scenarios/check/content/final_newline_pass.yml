@@ -1,6 +1,11 @@
 name: final_newline is silent when every file ends with a newline
 tags: [check, final_newline, passing]
 
+docs:
+  title: Every file ends with a trailing newline
+  case: pass
+  kind: final_newline
+
 given:
   tree:
     docs:

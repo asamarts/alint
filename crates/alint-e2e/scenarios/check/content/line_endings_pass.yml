@@ -1,6 +1,11 @@
 name: line_endings is silent when every line matches the target
 tags: [check, line_endings, passing]
 
+docs:
+  title: Every source file uses LF line endings
+  case: pass
+  kind: line_endings
+
 given:
   tree:
     src:

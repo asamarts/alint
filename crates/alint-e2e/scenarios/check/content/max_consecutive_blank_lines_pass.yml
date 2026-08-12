@@ -1,6 +1,11 @@
 name: max_consecutive_blank_lines is silent within the limit
 tags: [check, max_consecutive_blank_lines, content, passing]
 
+docs:
+  title: Blank-line runs stay within the limit
+  case: pass
+  kind: max_consecutive_blank_lines
+
 given:
   tree:
     docs:

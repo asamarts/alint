@@ -255,29 +255,11 @@ Basename matches a regex. Use `stem: true` to match the stem only.
 
 No line may end with space or tab.
 
-```yaml
-- id: rust-no-trailing-ws
-  kind: no_trailing_whitespace
-  paths: "crates/**/src/**/*.rs"
-  level: warning
-  fix:
-    file_trim_trailing_whitespace: {}
-```
-
 ### `final_newline`
 
 **Categories:** Text hygiene
 
 File must end with a single `\n`. Fixable via `file_append_final_newline`.
-
-```yaml
-- id: text-files-final-newline
-  kind: final_newline
-  paths: "**/*.{md,yml,yaml,toml,sh}"
-  level: warning
-  fix:
-    file_append_final_newline: {}
-```
 
 ### `line_endings`
 
@@ -285,44 +267,17 @@ File must end with a single `\n`. Fixable via `file_append_final_newline`.
 
 Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single file fail.
 
-```yaml
-- id: lf-only
-  kind: line_endings
-  paths: ["**/*.rs", "**/*.md"]
-  target: lf
-  level: warning
-  fix:
-    file_normalize_line_endings: {}
-```
-
 ### `line_max_width`
 
 **Categories:** Text hygiene
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
 
-```yaml
-- id: docs-80-col
-  kind: line_max_width
-  paths: "docs/**/*.md"
-  max_width: 80
-  level: info
-```
-
 ### `indent_style`
 
 **Categories:** Text hygiene
 
 Every non-blank line indents with the configured `style` (`tabs` or `spaces`). When `style: spaces`, optional `width` enforces a multiple.
-
-```yaml
-- id: yaml-2sp
-  kind: indent_style
-  paths: "**/*.yml"
-  style: spaces
-  width: 2
-  level: warning
-```
 
 Check-only: tab-width-aware reindentation is language-specific. Pair with your editor's "reindent on save" for remediation.
 
@@ -331,16 +286,6 @@ Check-only: tab-width-aware reindentation is language-specific. Pair with your e
 **Categories:** Text hygiene
 
 Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.
-
-```yaml
-- id: md-tidy
-  kind: max_consecutive_blank_lines
-  paths: "**/*.md"
-  max: 1
-  level: warning
-  fix:
-    file_collapse_blank_lines: {}
-```
 
 ---
 

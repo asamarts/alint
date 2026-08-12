@@ -1,6 +1,11 @@
 name: max_consecutive_blank_lines flags runs longer than the limit
 tags: [check, max_consecutive_blank_lines, content]
 
+docs:
+  title: A document with too many blank lines in a row
+  case: fail
+  kind: max_consecutive_blank_lines
+
 given:
   tree:
     docs:

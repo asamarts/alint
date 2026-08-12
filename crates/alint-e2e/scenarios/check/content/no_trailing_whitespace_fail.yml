@@ -1,6 +1,11 @@
 name: no_trailing_whitespace flags files with trailing spaces or tabs
 tags: [check, no_trailing_whitespace]
 
+docs:
+  title: Source files with trailing spaces or tabs
+  case: fail
+  kind: no_trailing_whitespace
+
 given:
   tree:
     src:
