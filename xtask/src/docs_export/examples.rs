@@ -178,9 +178,12 @@ fn run_and_capture(bin: &Path, scenario: &Scenario, docs: &DocsExample) -> Resul
     std::fs::write(&config_path, &scenario.given.config)?;
 
     // Pinned-invocation contract: run from inside the tree with a `.` target (no
-    // absolute path leaks), config via `-c`, ASCII glyphs (the pages are
-    // ASCII-gated) and no color, and a fixed allowlisted environment (env_clear
-    // so a stray `{{env.X}}` in a config can't leak host state).
+    // absolute path leaks), config via `-c`, ASCII glyphs (the pages keep ASCII
+    // box/severity glyphs), `--color=always` so the page can render alint's real
+    // ANSI colors (via an `ansi` code block) instead of a flat monochrome dump,
+    // and a fixed allowlisted environment (env_clear so a stray `{{env.X}}` in a
+    // config can't leak host state). OSC-8 hyperlinks that `always` re-enables
+    // are stripped below - `ansi` highlighting wants SGR colors, not link escapes.
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     let output = Command::new(bin)
         .current_dir(&repo)
@@ -188,7 +191,7 @@ fn run_and_capture(bin: &Path, scenario: &Scenario, docs: &DocsExample) -> Resul
         .arg("-c")
         .arg(&config_path)
         .arg("--ascii")
-        .arg("--color=never")
+        .arg("--color=always")
         .arg(".")
         .env_clear()
         .env("PATH", path_var)
@@ -205,7 +208,8 @@ fn run_and_capture(bin: &Path, scenario: &Scenario, docs: &DocsExample) -> Resul
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    let stdout = String::from_utf8(output.stdout).context("non-UTF8 `alint check` output")?;
+    let stdout =
+        strip_osc8(&String::from_utf8(output.stdout).context("non-UTF8 `alint check` output")?);
 
     // The `case` must match the scenario's asserted contract (which the
     // scenarios.rs harness verifies against a real run), and a fail must show a
@@ -288,6 +292,10 @@ fn render_markdown(
     let _ = writeln!(&mut md, "{lead}");
     let _ = writeln!(&mut md);
     push_fenced(&mut md, "text", &render_tree(tree));
+    // The tree shows only names; a content-based rule (file_content_matches,
+    // file_header, ...) turns on what's INSIDE the files, so render each file's
+    // content too - otherwise the pass/fail premise is invisible.
+    push_file_contents(&mut md, tree);
     let _ = writeln!(&mut md);
     let _ = writeln!(&mut md, "With this `.alint.yml`:");
     let _ = writeln!(&mut md);
@@ -304,10 +312,114 @@ fn render_markdown(
         let _ = writeln!(&mut md);
         let _ = writeln!(&mut md, "`alint check` reports:");
         let _ = writeln!(&mut md);
-        push_fenced(&mut md, "text", output);
+        // `ansi` so the site's Shiki highlighter colours alint's real severity
+        // markers / rule ids from the captured SGR codes.
+        push_fenced(&mut md, "ansi", output);
     }
     let _ = writeln!(&mut md);
     md
+}
+
+/// Render each regular file's content after the tree, so a content-based rule's
+/// example shows what's actually inside the files. Files are label + fenced
+/// block, language inferred from the extension for highlighting. Empty files are
+/// skipped; a file with binary bytes (e.g. the `file_is_text` null-byte fixture)
+/// is noted rather than dumped, which never emits control chars into the page.
+fn push_file_contents(md: &mut String, tree: &TreeSpec) {
+    let mut files: Vec<(String, &str)> = tree
+        .iter()
+        .filter_map(|(path, node)| match node {
+            TreeNode::File(c) => Some((path, c.as_str())),
+            TreeNode::Exec(e) => Some((path, e.content.as_str())),
+            TreeNode::Dir(_) | TreeNode::Symlink(_) => None,
+        })
+        .collect();
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, content) in files {
+        if content.is_empty() {
+            continue;
+        }
+        let _ = writeln!(md);
+        let _ = writeln!(md, "`{path}`:");
+        let _ = writeln!(md);
+        if looks_binary(content) {
+            push_fenced(
+                md,
+                "text",
+                &format!("(binary content, {} bytes)", content.len()),
+            );
+        } else {
+            push_fenced(md, lang_for(&path), content);
+        }
+    }
+}
+
+/// A Shiki language id inferred from `path`'s extension, for syntax
+/// highlighting. Unknown extensions fall back to `text`.
+fn lang_for(path: &str) -> &'static str {
+    match Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+    {
+        "rs" => "rust",
+        "md" | "markdown" => "markdown",
+        "yml" | "yaml" => "yaml",
+        "toml" => "toml",
+        "json" => "json",
+        "sh" | "bash" => "bash",
+        "py" => "python",
+        "js" | "mjs" | "cjs" => "js",
+        "ts" => "ts",
+        "go" => "go",
+        "rb" => "ruby",
+        "c" | "h" => "c",
+        _ => "text",
+    }
+}
+
+/// Heuristic: content with a NUL byte is binary (the `file_is_text` fixture
+/// embeds one, and macOS-junk magic bytes carry them). Kept deliberately narrow
+/// so ordinary UTF-8 text - including the non-ASCII `file_is_ascii` fixture - is
+/// still rendered verbatim.
+fn looks_binary(content: &str) -> bool {
+    content.contains('\0')
+}
+
+/// Strip OSC-8 hyperlink sequences (`ESC ] 8 ; ... ST`) while keeping SGR colour
+/// codes. `--color=always` re-enables the terminal hyperlinks that `--color=never`
+/// used to drop; an `ansi` code block wants colours, not link escapes.
+fn strip_osc8(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        // OSC-8 opener: ESC ] 8 ;
+        if bytes[i] == 0x1b
+            && bytes.get(i + 1) == Some(&b']')
+            && bytes.get(i + 2) == Some(&b'8')
+            && bytes.get(i + 3) == Some(&b';')
+        {
+            i += 4;
+            // Skip to the string terminator: BEL (0x07) or ST (ESC \).
+            while i < bytes.len() {
+                if bytes[i] == 0x07 {
+                    i += 1;
+                    break;
+                }
+                if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'\\') {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    // Only whole ASCII OSC-8 spans were removed, so the rest is still valid UTF-8.
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 /// A `git log --oneline`-style summary of the scenario's commits (oldest
@@ -511,5 +623,59 @@ expect:
         assert!(md.contains("### T"));
         assert!(md.contains("With this `.alint.yml`:"));
         assert!(!md.contains("alint check` reports"));
+        // The file's content is shown (not just its name in the tree).
+        assert!(
+            md.contains("`README.md`:"),
+            "file content label missing:\n{md}"
+        );
+    }
+
+    #[test]
+    fn file_contents_render_with_language_and_binary_guard() {
+        // Text file: content shown, highlighted by extension. Binary file: noted,
+        // never dumped (no control char reaches the page). Empty file: skipped.
+        let t = tree(
+            "src:\n  main.rs: \"fn main() {}\\n\"\nblob.bin: \"a\\u0000b\"\nempty.txt: \"\"\n",
+        );
+        let mut md = String::new();
+        push_file_contents(&mut md, &t);
+        assert!(
+            md.contains("`src/main.rs`:") && md.contains("```rust"),
+            "rust block missing:\n{md}"
+        );
+        assert!(md.contains("fn main() {}"));
+        assert!(
+            md.contains("(binary content, 3 bytes)"),
+            "binary note missing:\n{md}"
+        );
+        assert!(!md.contains('\0'), "a NUL byte leaked into the page");
+        assert!(!md.contains("`empty.txt`:"), "empty file should be skipped");
+    }
+
+    #[test]
+    fn lang_for_maps_common_extensions() {
+        assert_eq!(lang_for("a.rs"), "rust");
+        assert_eq!(lang_for("dir/README.md"), "markdown");
+        assert_eq!(lang_for("Cargo.toml"), "toml");
+        assert_eq!(lang_for("scripts/run.sh"), "bash");
+        assert_eq!(lang_for("Makefile"), "text");
+        assert_eq!(lang_for("noext"), "text");
+    }
+
+    #[test]
+    fn strip_osc8_removes_hyperlinks_keeps_color() {
+        // ESC]8;;https://x ESC\ LINK ESC]8;; ESC\  wrapped in red SGR.
+        let input = "\x1b[31m\x1b]8;;https://example.com/rule\x1b\\see docs\x1b]8;;\x1b\\\x1b[0m";
+        let out = strip_osc8(input);
+        assert!(!out.contains("\x1b]8"), "OSC-8 escape survived: {out:?}");
+        assert!(
+            !out.contains("https://example.com"),
+            "hyperlink URI survived"
+        );
+        assert!(
+            out.contains("\x1b[31m") && out.contains("\x1b[0m"),
+            "SGR colour was stripped"
+        );
+        assert!(out.contains("see docs"), "link text was lost");
     }
 }

@@ -202,8 +202,9 @@ vary. docs-export must spawn `alint check` under this exact contract:
   `LC_ALL=C`, and a fixed `TERM` - an allowlist, not a denylist, so a stray
   `{{env.X}}` interpolation in a config can't leak host state or vary the output
   (a denylist of the known color/hyperlink vars would miss an arbitrary `X`).
-- **Explicit `--color=never`** (defeats `CLICOLOR_FORCE`/TTY, strips OSC-8
-  hyperlinks) and **stdout captured through a pipe, never a PTY** (width -> 80).
+- **Explicit `--color=always`** (deterministic SGR colours the page renders via
+  an `ansi` code block; OSC-8 hyperlinks are stripped in post so only the colours
+  survive) and **stdout captured through a pipe, never a PTY** (width -> 80).
 
 Fixture-level care for the spawning and now-relative kinds:
 
@@ -468,8 +469,9 @@ Once all seven fixtures fire natively, `NATIVE_FIRES_ALLOWLIST` is deleted and
 ## Determinism and cost
 
 - **Determinism is a hard release invariant**, enforced by the pinned-invocation
-  contract (config outside the tree, `.` target, fixed env, `--color=never`, pipe
-  capture, stable order) plus the fixture-level handling for the spawning and
+  contract (config outside the tree, `.` target, fixed env, `--color=always` with
+  OSC-8 stripped, pipe capture, stable order) plus the fixture-level handling for
+  the spawning and
   now-relative kinds. Because `--check` re-runs each fixture, any residual
   per-fixture nondeterminism reds the build rather than shipping.
 - **Build cost:** ~2 runs x 78 kinds = ~156 gen-time spawns, plus the release-build
