@@ -1,6 +1,11 @@
 name: no_bom flags files with a UTF-8 BOM
 tags: [check, no_bom, encoding]
 
+docs:
+  title: A Markdown file that opens with a UTF-8 byte-order mark
+  case: fail
+  kind: no_bom
+
 given:
   tree:
     docs:

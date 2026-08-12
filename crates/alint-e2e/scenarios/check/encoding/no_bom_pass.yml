@@ -1,6 +1,11 @@
 name: no_bom is silent on BOM-less files
 tags: [check, no_bom, encoding, passing]
 
+docs:
+  title: Markdown files saved as plain UTF-8 with no BOM
+  case: pass
+  kind: no_bom
+
 given:
   tree:
     docs:
