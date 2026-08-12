@@ -1,6 +1,11 @@
 name: toml_path_matches stays silent when every match satisfies the regex
 tags: [check, toml_path_matches, structured, passing]
 
+docs:
+  title: Every crate version matches the semver pattern
+  case: pass
+  kind: toml_path_matches
+
 given:
   tree:
     crates:

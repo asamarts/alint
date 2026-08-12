@@ -1,6 +1,11 @@
 name: json_schema_passes is silent on a schema-conforming JSON document
 tags: [check, json_schema_passes, structured, passing]
 
+docs:
+  title: A package.json that conforms to its JSON Schema
+  case: pass
+  kind: json_schema_passes
+
 given:
   tree:
     schemas:

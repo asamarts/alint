@@ -5,6 +5,11 @@ tags: [check, xml_path_matches, structured, passing]
 # (names flatten to the local part), and repeated <dependency>
 # elements must be an array so `dependency[*]` reaches each one.
 
+docs:
+  title: Every Maven dependency declares a concrete version
+  case: pass
+  kind: xml_path_matches
+
 given:
   tree:
     "pom.xml": |

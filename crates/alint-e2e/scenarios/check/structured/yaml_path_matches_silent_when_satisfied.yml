@@ -1,6 +1,11 @@
 name: yaml_path_matches stays silent when every match satisfies the regex
 tags: [check, yaml_path_matches, structured, passing]
 
+docs:
+  title: Every workflow action is pinned to a commit SHA
+  case: pass
+  kind: yaml_path_matches
+
 given:
   tree:
     ".github":

@@ -1,6 +1,11 @@
 name: xml_path_equals catches a .csproj with the wrong TargetFramework
 tags: [check, xml_path_equals, structured]
 
+docs:
+  title: A project file targeting the wrong .NET framework
+  case: fail
+  kind: xml_path_equals
+
 given:
   tree:
     src:

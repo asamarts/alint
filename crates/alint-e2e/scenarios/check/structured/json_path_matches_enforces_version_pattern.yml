@@ -1,6 +1,11 @@
 name: json_path_matches flags a semver that fails the regex
 tags: [check, json_path_matches, structured]
 
+docs:
+  title: A package version that is not valid semver
+  case: fail
+  kind: json_path_matches
+
 given:
   tree:
     packages:

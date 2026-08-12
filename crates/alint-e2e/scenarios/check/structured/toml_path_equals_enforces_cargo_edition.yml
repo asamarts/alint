@@ -1,6 +1,11 @@
 name: toml_path_equals catches Cargo.toml with the wrong edition
 tags: [check, toml_path_equals, structured]
 
+docs:
+  title: A crate pinned to an older Rust edition
+  case: fail
+  kind: toml_path_equals
+
 given:
   tree:
     crates:

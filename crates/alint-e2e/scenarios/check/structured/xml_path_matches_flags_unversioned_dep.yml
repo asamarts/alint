@@ -1,6 +1,11 @@
 name: xml_path_matches flags a pom.xml dependency whose version is not a release
 tags: [check, xml_path_matches, structured]
 
+docs:
+  title: A Maven dependency whose version is not a concrete release
+  case: fail
+  kind: xml_path_matches
+
 given:
   tree:
     "pom.xml": |

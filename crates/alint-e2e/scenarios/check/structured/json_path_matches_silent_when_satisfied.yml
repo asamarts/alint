@@ -1,6 +1,11 @@
 name: json_path_matches stays silent when every match satisfies the regex
 tags: [check, json_path_matches, structured, passing]
 
+docs:
+  title: Every package version is valid semver
+  case: pass
+  kind: json_path_matches
+
 given:
   tree:
     packages:

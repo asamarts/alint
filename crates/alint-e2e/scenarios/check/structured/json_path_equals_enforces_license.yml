@@ -1,6 +1,11 @@
 name: json_path_equals catches a package.json with the wrong license
 tags: [check, json_path_equals, structured]
 
+docs:
+  title: A package.json whose license is not MIT
+  case: fail
+  kind: json_path_equals
+
 given:
   tree:
     packages:

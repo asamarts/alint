@@ -1,6 +1,11 @@
 name: yaml_path_equals catches GitHub workflows without minimal permissions
 tags: [check, yaml_path_equals, structured]
 
+docs:
+  title: A workflow that sets contents permission to write
+  case: fail
+  kind: yaml_path_equals
+
 given:
   tree:
     ".github":

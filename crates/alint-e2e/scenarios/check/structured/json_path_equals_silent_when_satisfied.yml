@@ -1,6 +1,11 @@
 name: json_path_equals stays silent when every value matches the expected literal
 tags: [check, json_path_equals, structured, passing]
 
+docs:
+  title: Every package.json declares an MIT license
+  case: pass
+  kind: json_path_equals
+
 given:
   tree:
     packages:

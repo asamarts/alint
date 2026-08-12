@@ -1,6 +1,11 @@
 name: xml_path_equals stays silent when the .csproj TargetFramework is correct
 tags: [check, xml_path_equals, structured, passing]
 
+docs:
+  title: Every project file targets net8.0
+  case: pass
+  kind: xml_path_equals
+
 given:
   tree:
     src:

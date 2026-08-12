@@ -1,6 +1,11 @@
 name: toml_path_equals stays silent when every value matches the expected literal
 tags: [check, toml_path_equals, structured, passing]
 
+docs:
+  title: Every crate targets the 2024 edition
+  case: pass
+  kind: toml_path_equals
+
 given:
   tree:
     crates:

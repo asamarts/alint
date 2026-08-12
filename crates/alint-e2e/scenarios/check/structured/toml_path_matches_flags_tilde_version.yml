@@ -1,6 +1,11 @@
 name: toml_path_matches flags pyproject versions that don't satisfy the pin pattern
 tags: [check, toml_path_matches, structured]
 
+docs:
+  title: A project version that is not valid semver
+  case: fail
+  kind: toml_path_matches
+
 given:
   tree:
     "pyproject.toml": |

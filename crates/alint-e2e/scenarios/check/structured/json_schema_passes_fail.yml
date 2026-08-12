@@ -1,6 +1,11 @@
 name: json_schema_passes flags a JSON document that violates the schema
 tags: [check, json_schema_passes, structured, failing]
 
+docs:
+  title: A package.json that violates its JSON Schema
+  case: fail
+  kind: json_schema_passes
+
 given:
   tree:
     schemas:

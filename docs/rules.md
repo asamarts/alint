@@ -186,36 +186,6 @@ JSONPath queries over structured documents per [RFC 9535](https://datatracker.ie
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
-```yaml
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
-- id: workflow-contents-read
-  kind: yaml_path_equals
-  paths: ".github/workflows/*.yml"
-  path: "$.permissions.contents"
-  equals: "read"
-  level: error
-
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning
-
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-```
-
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
@@ -230,36 +200,6 @@ Query a structured document with a JSONPath expression and assert every match de
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-```yaml
-- id: semver-version
-  kind: json_path_matches
-  paths: "packages/*/package.json"
-  path: "$.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-
-- id: pin-actions-to-sha
-  kind: yaml_path_matches
-  paths: ".github/workflows/*.yml"
-  path: "$.jobs.*.steps[*].uses"
-  matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
-  level: warning
-
-- id: packageref-has-version
-  kind: xml_path_matches
-  paths: "**/*.csproj"
-  path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
-  matches: '^\d'
-  level: error
-
-- id: crate-version-is-semver
-  kind: toml_path_matches
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-```
-
 ### `json_schema_passes`
 
 **Categories:** Structured query
@@ -267,21 +207,6 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
 
 Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml`); pass `format:` to override.
-
-```yaml
-- id: package-json-shape
-  kind: json_schema_passes
-  paths: "packages/*/package.json"
-  schema_path: "schemas/package.schema.json"
-  level: error
-
-- id: workflow-shape
-  kind: json_schema_passes
-  paths: ".github/workflows/*.yml"
-  schema_path: "schemas/workflow.schema.json"
-  format: yaml
-  level: warning
-```
 
 Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
 

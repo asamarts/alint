@@ -1,6 +1,11 @@
 name: yaml_path_equals stays silent when every value matches the expected literal
 tags: [check, yaml_path_equals, structured, passing]
 
+docs:
+  title: Every workflow sets contents permission to read
+  case: pass
+  kind: yaml_path_equals
+
 given:
   tree:
     ".github":
