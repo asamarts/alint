@@ -1,6 +1,11 @@
 name: file_content_forbidden is silent when no match is found
 tags: [check, file_content_forbidden, passing]
 
+docs:
+  title: Source with no forbidden macros
+  case: pass
+  kind: file_content_forbidden
+
 given:
   tree:
     src:

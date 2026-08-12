@@ -1,6 +1,11 @@
 name: file_min_lines passes when files clear the line floor
 tags: [check, file_min_lines, metadata, passing]
 
+docs:
+  title: A file that clears the line floor
+  case: pass
+  kind: file_min_lines
+
 given:
   tree:
     # Five lines, with or without a trailing newline both count.

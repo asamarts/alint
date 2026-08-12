@@ -1,6 +1,11 @@
 name: file_shebang flags scripts without the required shebang
 tags: [check, file_shebang, content]
 
+docs:
+  title: Scripts without the required shebang
+  case: fail
+  kind: file_shebang
+
 given:
   tree:
     scripts:

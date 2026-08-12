@@ -1,6 +1,11 @@
 name: file_min_size flags files below the size floor
 tags: [check, file_min_size, metadata]
 
+docs:
+  title: A stub file below the byte floor
+  case: fail
+  kind: file_min_size
+
 given:
   tree:
     # Ten bytes — below the 50-byte floor.

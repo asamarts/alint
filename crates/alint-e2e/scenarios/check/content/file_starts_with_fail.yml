@@ -1,6 +1,11 @@
 name: file_starts_with flags files missing the required prefix
 tags: [check, file_starts_with, content]
 
+docs:
+  title: Files missing the required SPDX prefix
+  case: fail
+  kind: file_starts_with
+
 given:
   tree:
     src:

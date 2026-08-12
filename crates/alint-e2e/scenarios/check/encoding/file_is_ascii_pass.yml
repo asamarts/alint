@@ -1,6 +1,11 @@
 name: file_is_ascii is silent when every byte is ASCII
 tags: [check, file_is_ascii, encoding, passing]
 
+docs:
+  title: Every source file is pure ASCII
+  case: pass
+  kind: file_is_ascii
+
 given:
   tree:
     src:

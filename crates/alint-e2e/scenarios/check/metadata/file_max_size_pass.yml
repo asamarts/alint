@@ -1,6 +1,11 @@
 name: file_max_size is silent when every file is under the limit
 tags: [check, file_max_size, passing]
 
+docs:
+  title: Every file is under the byte limit
+  case: pass
+  kind: file_max_size
+
 given:
   tree:
     tiny.txt: "x"

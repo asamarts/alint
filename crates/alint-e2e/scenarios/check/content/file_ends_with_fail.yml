@@ -1,6 +1,11 @@
 name: file_ends_with flags files missing the required suffix
 tags: [check, file_ends_with, content]
 
+docs:
+  title: Generated files missing their sentinel line
+  case: fail
+  kind: file_ends_with
+
 given:
   tree:
     build:

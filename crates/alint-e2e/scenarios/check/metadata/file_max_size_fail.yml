@@ -1,6 +1,11 @@
 name: file_max_size flags oversized files
 tags: [check, file_max_size]
 
+docs:
+  title: A file over the byte limit
+  case: fail
+  kind: file_max_size
+
 given:
   tree:
     tiny.txt: "short"

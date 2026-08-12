@@ -1,6 +1,11 @@
 name: file_starts_with is silent when every file begins with the prefix
 tags: [check, file_starts_with, content, passing]
 
+docs:
+  title: Every file begins with the SPDX prefix
+  case: pass
+  kind: file_starts_with
+
 given:
   tree:
     src:

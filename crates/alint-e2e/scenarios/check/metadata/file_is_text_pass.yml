@@ -1,6 +1,11 @@
 name: file_is_text is silent when every file is UTF-8 text
 tags: [check, file_is_text, passing]
 
+docs:
+  title: Every source file is UTF-8 text
+  case: pass
+  kind: file_is_text
+
 given:
   tree:
     src:

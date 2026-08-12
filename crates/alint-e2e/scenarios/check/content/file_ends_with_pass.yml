@@ -1,6 +1,11 @@
 name: file_ends_with is silent when every file ends with the suffix
 tags: [check, file_ends_with, content, passing]
 
+docs:
+  title: Every generated file ends with the sentinel
+  case: pass
+  kind: file_ends_with
+
 given:
   tree:
     build:

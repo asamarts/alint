@@ -1,6 +1,11 @@
 name: file_min_size passes when every in-scope file clears the floor
 tags: [check, file_min_size, metadata, passing]
 
+docs:
+  title: A file that clears the byte floor
+  case: pass
+  kind: file_min_size
+
 given:
   tree:
     # Well above the 10-byte floor.

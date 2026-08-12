@@ -1,6 +1,11 @@
 name: file_content_matches is silent when the pattern is present
 tags: [check, file_content_matches, passing]
 
+docs:
+  title: A README that declares its SPDX license
+  case: pass
+  kind: file_content_matches
+
 given:
   tree:
     README.md: "# Project\n\nSPDX-License-Identifier: Apache-2.0\n\nA short description.\n"

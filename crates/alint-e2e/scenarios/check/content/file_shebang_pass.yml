@@ -1,6 +1,11 @@
 name: file_shebang is silent when scripts have the required interpreter
 tags: [check, file_shebang, content]
 
+docs:
+  title: Every script uses the env-style shebang
+  case: pass
+  kind: file_shebang
+
 given:
   tree:
     scripts:

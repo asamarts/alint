@@ -1,6 +1,11 @@
 name: file_content_forbidden flags every file matching the forbidden pattern
 tags: [check, file_content_forbidden]
 
+docs:
+  title: Source that left a debug macro in
+  case: fail
+  kind: file_content_forbidden
+
 given:
   tree:
     src:

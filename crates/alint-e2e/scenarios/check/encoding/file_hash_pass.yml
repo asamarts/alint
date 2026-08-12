@@ -1,6 +1,11 @@
 name: file_hash passes when content matches declared SHA-256
 tags: [check, file_hash, encoding, passing]
 
+docs:
+  title: A file matching its pinned SHA-256
+  case: pass
+  kind: file_hash
+
 given:
   tree:
     reference.txt: "hello world\n"

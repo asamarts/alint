@@ -1,6 +1,11 @@
 name: file_content_matches fires when the required pattern is absent
 tags: [check, file_content_matches]
 
+docs:
+  title: A README missing its SPDX license tag
+  case: fail
+  kind: file_content_matches
+
 given:
   tree:
     README.md: "# Project\n\nA short description.\n"

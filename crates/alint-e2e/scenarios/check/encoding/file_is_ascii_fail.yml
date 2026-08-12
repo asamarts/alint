@@ -1,6 +1,11 @@
 name: file_is_ascii flags any non-ASCII byte
 tags: [check, file_is_ascii, encoding]
 
+docs:
+  title: A source file with a non-ASCII byte
+  case: fail
+  kind: file_is_ascii
+
 given:
   tree:
     src:

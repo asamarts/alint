@@ -1,6 +1,11 @@
 name: file_header flags files whose first N lines miss the required pattern
 tags: [check, file_header]
 
+docs:
+  title: A source file missing its copyright header
+  case: fail
+  kind: file_header
+
 given:
   tree:
     src:

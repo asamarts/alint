@@ -1,6 +1,11 @@
 name: file_hash fails when file content drifts from declared SHA-256
 tags: [check, file_hash, encoding]
 
+docs:
+  title: A pinned file that drifted from its hash
+  case: fail
+  kind: file_hash
+
 given:
   tree:
     reference.txt: "hello world\n"

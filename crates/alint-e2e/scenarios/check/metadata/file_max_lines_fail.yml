@@ -1,6 +1,11 @@
 name: file_max_lines flags files exceeding the threshold
 tags: [check, file_max_lines, metadata]
 
+docs:
+  title: A source file over the line cap
+  case: fail
+  kind: file_max_lines
+
 given:
   tree:
     src:

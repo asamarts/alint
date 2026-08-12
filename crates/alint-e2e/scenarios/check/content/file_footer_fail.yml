@@ -1,6 +1,11 @@
 name: file_footer flags files whose tail doesn't match the required pattern
 tags: [check, file_footer, content]
 
+docs:
+  title: A file missing its license footer
+  case: fail
+  kind: file_footer
+
 given:
   tree:
     src:

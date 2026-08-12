@@ -1,6 +1,11 @@
 name: file_min_lines flags files with too few lines
 tags: [check, file_min_lines, metadata]
 
+docs:
+  title: A stub with too few lines
+  case: fail
+  kind: file_min_lines
+
 given:
   tree:
     # Two lines — below the 3-line floor.

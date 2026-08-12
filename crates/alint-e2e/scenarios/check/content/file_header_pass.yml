@@ -1,6 +1,11 @@
 name: file_header is silent when every file has the required header
 tags: [check, file_header, passing]
 
+docs:
+  title: Every source file carries the header
+  case: pass
+  kind: file_header
+
 given:
   tree:
     src:

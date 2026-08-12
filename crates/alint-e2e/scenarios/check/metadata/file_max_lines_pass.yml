@@ -1,6 +1,11 @@
 name: file_max_lines passes files at or under the threshold
 tags: [check, file_max_lines, metadata]
 
+docs:
+  title: A source file within the line cap
+  case: pass
+  kind: file_max_lines
+
 given:
   tree:
     src:

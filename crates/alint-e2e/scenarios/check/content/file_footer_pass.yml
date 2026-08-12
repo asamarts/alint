@@ -1,6 +1,11 @@
 name: file_footer is silent when every file ends with the required footer
 tags: [check, file_footer, content]
 
+docs:
+  title: Every file ends with the license footer
+  case: pass
+  kind: file_footer
+
 given:
   tree:
     src:
