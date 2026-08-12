@@ -31,6 +31,12 @@ src/
 src/lib.rs
 ```
 
+`src/lib.rs`:
+
+```rust
+pub fn feature() {}
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -59,6 +65,18 @@ This repository is compliant:
 .changeset/add-feature.md
 src/
 src/lib.rs
+```
+
+`.changeset/add-feature.md`:
+
+```markdown
+Added the feature.
+```
+
+`src/lib.rs`:
+
+```rust
+pub fn feature() {}
 ```
 
 With this `.alint.yml`:

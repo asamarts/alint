@@ -26,6 +26,18 @@ scripts/
 scripts/run  (executable)
 ```
 
+`README.md`:
+
+```markdown
+# demo
+```
+
+`scripts/run`:
+
+```text
+echo hi
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -45,6 +57,19 @@ This repository is compliant:
 README.md
 scripts/
 scripts/hello.sh  (executable)
+```
+
+`README.md`:
+
+```markdown
+# demo
+```
+
+`scripts/hello.sh`:
+
+```bash
+#!/bin/sh
+echo hi
 ```
 
 With this `.alint.yml`:

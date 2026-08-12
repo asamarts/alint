@@ -31,6 +31,12 @@ src/
 src/format.rs
 ```
 
+`src/format.rs`:
+
+```rust
+pub struct Format;
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -59,6 +65,18 @@ This repository is compliant:
 FORMAT_VERSION
 src/
 src/format.rs
+```
+
+`FORMAT_VERSION`:
+
+```text
+2
+```
+
+`src/format.rs`:
+
+```rust
+pub struct Format;
 ```
 
 With this `.alint.yml`:

@@ -8,14 +8,6 @@ categories: ['content', 'structure']
 
 File must be at least `min_bytes` in size. Catches placeholder / stub files that pass existence checks but add no information (a 0-byte `LICENSE`, a `README.md` with only a title).
 
-```yaml
-- id: license-non-empty
-  kind: file_min_size
-  paths: ["LICENSE", "LICENSE.md", "LICENSE-APACHE", "LICENSE-MIT"]
-  min_bytes: 200
-  level: warning
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -23,3 +15,70 @@ File must be at least `min_bytes` in size. Catches placeholder / stub files that
 | `min_bytes` | integer (>= 0) | yes |  | Minimum allowed file size in bytes. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A stub file below the byte floor
+
+The rule fires on this repository:
+
+```text
+healthy.md
+tiny.txt
+```
+
+`healthy.md`:
+
+```markdown
+# Healthy doc
+
+This document has more than fifty bytes of content, well
+above the minimum. A short README reads like a stub.
+```
+
+`tiny.txt`:
+
+```text
+too short
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: min-50
+    kind: file_min_size
+    paths: ["**/*.txt", "**/*.md"]
+    min_bytes: 50
+    level: warning
+```
+
+### A file that clears the byte floor
+
+This repository is compliant:
+
+```text
+README.md
+```
+
+`README.md`:
+
+```markdown
+# demo
+
+A short but non-stub README.
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: min-10
+    kind: file_min_size
+    paths: "**/*.md"
+    min_bytes: 10
+    level: warning
+```
+

@@ -40,6 +40,19 @@ src/
 src/main.rs.bak
 ```
 
+`Cargo.lock.bak`:
+
+```text
+# generated
+```
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "demo"
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -59,6 +72,19 @@ This repository is compliant:
 Cargo.toml
 src/
 src/main.rs
+```
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "demo"
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
 ```
 
 With this `.alint.yml`:

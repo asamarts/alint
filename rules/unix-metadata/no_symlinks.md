@@ -31,6 +31,18 @@ src/
 src/main.rs
 ```
 
+`README.md`:
+
+```markdown
+# demo
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -51,6 +63,18 @@ README.md
 src/
 src/lib.rs
 src/main.rs
+```
+
+`README.md`:
+
+```markdown
+# demo
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
 ```
 
 With this `.alint.yml`:

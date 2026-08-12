@@ -30,6 +30,18 @@ docs/
 docs/generate.sh  (executable)
 ```
 
+`README.md`:
+
+```markdown
+# demo
+```
+
+`docs/generate.sh`:
+
+```bash
+echo generated
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -50,6 +62,18 @@ This repository is compliant:
 README.md
 docs/
 docs/intro.md
+```
+
+`README.md`:
+
+```markdown
+# demo
+```
+
+`docs/intro.md`:
+
+```markdown
+hello
 ```
 
 With this `.alint.yml`:

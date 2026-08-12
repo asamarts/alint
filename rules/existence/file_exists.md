@@ -32,6 +32,13 @@ The rule fires on this repository:
 Cargo.toml
 ```
 
+`Cargo.toml`:
+
+```toml
+[package]
+name = "demo"
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -51,6 +58,19 @@ This repository is compliant:
 ```text
 Cargo.toml
 README.md
+```
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "demo"
+```
+
+`README.md`:
+
+```markdown
+# demo
 ```
 
 With this `.alint.yml`:

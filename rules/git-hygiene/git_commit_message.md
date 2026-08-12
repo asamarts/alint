@@ -80,6 +80,12 @@ The rule fires on this repository:
 README.md
 ```
 
+`README.md`:
+
+```markdown
+# demo
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -103,6 +109,12 @@ This repository is compliant:
 
 ```text
 README.md
+```
+
+`README.md`:
+
+```markdown
+# demo
 ```
 
 With this `.alint.yml`:

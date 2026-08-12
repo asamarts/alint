@@ -39,6 +39,14 @@ src/
 src/main.rs
 ```
 
+`src/main.rs`:
+
+```rust
+fn main() {
+    // TODO: refactor this
+}
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -66,6 +74,14 @@ This repository is compliant:
 ```text
 src/
 src/main.rs
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {
+    // TODO: refactor this
+}
 ```
 
 With this `.alint.yml`:
