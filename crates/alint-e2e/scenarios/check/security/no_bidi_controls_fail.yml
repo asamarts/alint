@@ -1,6 +1,11 @@
 name: no_bidi_controls flags Trojan-Source codepoints
 tags: [check, no_bidi_controls, security]
 
+docs:
+  title: A source file with a Trojan Source bidi override
+  case: fail
+  kind: no_bidi_controls
+
 given:
   tree:
     src:

@@ -1,6 +1,11 @@
 name: no_bidi_controls is silent on clean files (including non-bidi Unicode)
 tags: [check, no_bidi_controls, security, passing]
 
+docs:
+  title: Source files with ordinary emoji and no bidi controls
+  case: pass
+  kind: no_bidi_controls
+
 given:
   tree:
     src:

@@ -297,27 +297,11 @@ Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.
 
 Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. The anchor markers carry a trailing ref (`<<<<<<< HEAD`), so they never collide with prose; a bare `=======` is reported only when the file also contains one of those anchors, because on its own a seven-character `=======` is indistinguishable from a reST/Markdown setext heading underline (so docs trees no longer need to be excluded).
 
-```yaml
-- id: no-conflicts
-  kind: no_merge_conflict_markers
-  paths: "**"
-  level: error
-```
-
 ### `no_bidi_controls`
 
 **Categories:** Security / Unicode sanity, Encoding
 
 Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
-
-```yaml
-- id: no-bidi
-  kind: no_bidi_controls
-  paths: "crates/**/src/**/*.rs"
-  level: error
-  fix:
-    file_strip_bidi: {}
-```
 
 ### `no_zero_width_chars`
 
@@ -326,15 +310,6 @@ Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). Defe
 Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). A leading U+FEFF is `no_bom`'s concern.
 
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
-
-```yaml
-- id: no-zwsp
-  kind: no_zero_width_chars
-  paths: "crates/**/src/**/*.rs"
-  level: error
-  fix:
-    file_strip_zero_width: {}
-```
 
 ---
 

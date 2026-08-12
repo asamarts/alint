@@ -1,6 +1,11 @@
 name: no_zero_width_chars ignores a leading BOM (that's no_bom's job)
 tags: [check, no_zero_width_chars, security]
 
+docs:
+  title: A file whose only zero-width codepoint is an allowed leading BOM
+  case: pass
+  kind: no_zero_width_chars
+
 given:
   tree:
     src:

@@ -1,6 +1,11 @@
 name: no_merge_conflict_markers flags unresolved git markers
 tags: [check, no_merge_conflict_markers, security]
 
+docs:
+  title: A source file with unresolved merge conflict markers
+  case: fail
+  kind: no_merge_conflict_markers
+
 given:
   tree:
     src:

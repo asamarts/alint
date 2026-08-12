@@ -1,6 +1,11 @@
 name: no_zero_width_chars flags hidden zero-width characters
 tags: [check, no_zero_width_chars, security]
 
+docs:
+  title: An identifier with a hidden zero-width space
+  case: fail
+  kind: no_zero_width_chars
+
 given:
   tree:
     src:

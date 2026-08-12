@@ -1,6 +1,11 @@
 name: no_merge_conflict_markers is silent on clean files
 tags: [check, no_merge_conflict_markers, security, passing]
 
+docs:
+  title: Source files with no leftover conflict markers
+  case: pass
+  kind: no_merge_conflict_markers
+
 given:
   tree:
     src:
