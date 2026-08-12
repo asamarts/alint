@@ -810,14 +810,6 @@ For every file or directory matching `select:`, every nested rule under `require
 
 Shell out to an external CLI per matched file. Exit `0` is a pass; non-zero is one violation whose message is the (truncated) stdout+stderr. Working directory is the repo root; stdin is closed.
 
-```yaml
-- id: workflows-clean
-  kind: command
-  paths: ".github/workflows/*.{yml,yaml}"
-  command: ["actionlint", "{path}"]
-  level: error
-```
-
 Argv tokens accept the same path-template substitutions as `pair` and `for_each_dir`: `{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`. The first token is the program (looked up via `PATH` if it's a bare name).
 
 Environment threaded into the child:

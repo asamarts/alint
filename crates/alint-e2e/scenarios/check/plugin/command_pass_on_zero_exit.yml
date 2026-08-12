@@ -12,6 +12,11 @@ tags: [check, command, plugin, passing, linux-only]
 # already cover that platform — these e2e scenarios are unix-only
 # in practice, mirroring the testkit's tree-spec materialisation.
 
+docs:
+  title: A wrapped command that exits zero for every matched file
+  case: pass
+  kind: command
+
 given:
   tree:
     src:

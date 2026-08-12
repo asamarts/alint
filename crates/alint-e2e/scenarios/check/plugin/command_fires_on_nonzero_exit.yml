@@ -5,6 +5,11 @@ tags: [check, command, plugin, failing]
 # Unix-like system. Each matched file gets its own violation
 # carrying the subprocess's stdout+stderr (empty here).
 
+docs:
+  title: A wrapped command that exits non-zero for the matched files
+  case: fail
+  kind: command
+
 given:
   tree:
     src:
