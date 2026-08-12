@@ -1,6 +1,11 @@
 name: dir_contains is silent when every selected dir has the required files
 tags: [check, dir_contains, cross_file, passing]
 
+docs:
+  title: Every package directory has a README and a license
+  case: pass
+  kind: dir_contains
+
 given:
   tree:
     packages:

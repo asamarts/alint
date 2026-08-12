@@ -2,6 +2,12 @@ name: pair_hash is silent when the .sum line matches the source digest
 tags: [check, pair_hash, cross_file, passing]
 
 # "hello\n" is the canonical `echo hello | sha256sum` vector.
+
+docs:
+  title: Every source digest matches its checksum manifest line
+  case: pass
+  kind: pair_hash
+
 given:
   tree:
     "hello.txt": "hello\n"

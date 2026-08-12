@@ -1,5 +1,10 @@
 name: cross_file superset fires when a target value is missing from the source set
 
+docs:
+  title: A used value missing from the allow-list
+  case: fail
+  kind: cross_file
+
 given:
   tree:
     allowed.json: |

@@ -1,6 +1,11 @@
 name: ordered_block is silent when a marked block is sorted
 tags: [check, ordered_block, content, passing]
 
+docs:
+  title: A keep-sorted block in lexical order
+  case: pass
+  kind: ordered_block
+
 given:
   tree:
     .gitignore: |

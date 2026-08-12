@@ -1,6 +1,11 @@
 name: for_each_file passes when every selected file satisfies the require
 tags: [check, for_each_file, cross_file, passing]
 
+docs:
+  title: Every unit test has a snapshot file
+  case: pass
+  kind: for_each_file
+
 given:
   tree:
     tests:

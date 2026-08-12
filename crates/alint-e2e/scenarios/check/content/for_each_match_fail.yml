@@ -1,6 +1,11 @@
 name: for_each_match fires when a changelog entry breaks the per-line grammar
 tags: [check, for_each_match, content]
 
+docs:
+  title: A changelog line that breaks the entry grammar
+  case: fail
+  kind: for_each_match
+
 given:
   tree:
     CHANGELOG.md: |

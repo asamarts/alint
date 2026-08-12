@@ -1,6 +1,11 @@
 name: generated_file_fresh fires when the committed file is stale
 tags: [check, generated_file_fresh, plugin]
 
+docs:
+  title: A committed generated file gone stale
+  case: fail
+  kind: generated_file_fresh
+
 given:
   tree:
     gen/list.txt: |

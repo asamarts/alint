@@ -1,6 +1,11 @@
 name: unique_by is silent when every key is distinct
 tags: [check, unique_by, cross_file, passing]
 
+docs:
+  title: Every file has a distinct stem
+  case: pass
+  kind: unique_by
+
 given:
   tree:
     src:

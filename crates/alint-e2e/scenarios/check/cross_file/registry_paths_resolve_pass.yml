@@ -1,6 +1,11 @@
 name: registry_paths_resolve is silent when every workspace member resolves
 tags: [check, registry_paths_resolve, cross_file, passing]
 
+docs:
+  title: Every declared workspace member resolves on disk
+  case: pass
+  kind: registry_paths_resolve
+
 given:
   tree:
     Cargo.toml: |

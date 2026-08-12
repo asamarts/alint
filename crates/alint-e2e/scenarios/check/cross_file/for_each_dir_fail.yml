@@ -1,6 +1,11 @@
 name: for_each_dir evaluates nested rules in every selected directory
 tags: [check, for_each_dir, cross_file]
 
+docs:
+  title: A module directory missing its `mod.rs`
+  case: fail
+  kind: for_each_dir
+
 given:
   tree:
     src:

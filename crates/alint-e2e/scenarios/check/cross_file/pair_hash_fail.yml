@@ -4,6 +4,12 @@ tags: [check, pair_hash, cross_file]
 # The manifest pins only other.txt, so hello.txt's digest is
 # unaccounted for — the "file added to the module but not the
 # .sum" drift the golang/go FIPS use case guards against.
+
+docs:
+  title: A source file the checksum manifest omits
+  case: fail
+  kind: pair_hash
+
 given:
   tree:
     "hello.txt": "hello\n"

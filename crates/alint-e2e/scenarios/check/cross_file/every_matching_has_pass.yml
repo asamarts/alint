@@ -1,6 +1,11 @@
 name: every_matching_has passes when every selected entry satisfies the require
 tags: [check, every_matching_has, cross_file, passing]
 
+docs:
+  title: Every package directory has a `package.json`
+  case: pass
+  kind: every_matching_has
+
 given:
   tree:
     packages:

@@ -1,6 +1,11 @@
 name: import_gate fires when a scoped file imports a forbidden module
 tags: [check, import_gate, content]
 
+docs:
+  title: A staging file that imports a forbidden module
+  case: fail
+  kind: import_gate
+
 given:
   tree:
     staging/src/k8s.io/api/types.go: |

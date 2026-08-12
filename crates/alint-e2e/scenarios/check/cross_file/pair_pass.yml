@@ -1,6 +1,11 @@
 name: pair is silent when every primary has its partner
 tags: [check, pair, cross_file, passing]
 
+docs:
+  title: Every C source file has its header partner
+  case: pass
+  kind: pair
+
 given:
   tree:
     src:

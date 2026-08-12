@@ -1,6 +1,11 @@
 name: file_graph flags an import cycle under require acyclic
 tags: [check, file_graph, cross_file]
 
+docs:
+  title: An import cycle among proto files
+  case: fail
+  kind: file_graph
+
 given:
   tree:
     proto:

@@ -1,6 +1,11 @@
 name: ordered_block fires when a marked block is out of order
 tags: [check, ordered_block, content]
 
+docs:
+  title: A keep-sorted block left out of order
+  case: fail
+  kind: ordered_block
+
 given:
   tree:
     .gitignore: |

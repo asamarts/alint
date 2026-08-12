@@ -1,6 +1,11 @@
 name: dir_only_contains is silent when every child is in the allowlist
 tags: [check, dir_only_contains, cross_file, passing]
 
+docs:
+  title: The `src` directory holds only Rust files
+  case: pass
+  kind: dir_only_contains
+
 given:
   tree:
     src:

@@ -1,5 +1,10 @@
 name: cross_file superset is silent when the source contains every target value
 
+docs:
+  title: Every used value appears in the allow-list
+  case: pass
+  kind: cross_file
+
 given:
   tree:
     allowed.json: |

@@ -1,6 +1,11 @@
 name: pair fires when a primary file has no matching partner
 tags: [check, pair, cross_file]
 
+docs:
+  title: A C source file with no matching header
+  case: fail
+  kind: pair
+
 given:
   tree:
     src:

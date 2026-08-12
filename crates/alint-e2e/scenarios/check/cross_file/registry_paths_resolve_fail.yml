@@ -1,6 +1,11 @@
 name: registry_paths_resolve fires when a declared workspace member is missing
 tags: [check, registry_paths_resolve, cross_file]
 
+docs:
+  title: A declared workspace member that does not exist
+  case: fail
+  kind: registry_paths_resolve
+
 given:
   tree:
     Cargo.toml: |

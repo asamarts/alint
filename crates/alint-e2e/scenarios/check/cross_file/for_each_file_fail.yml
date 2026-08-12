@@ -1,6 +1,11 @@
 name: for_each_file checks nested rules against every selected file
 tags: [check, for_each_file, cross_file]
 
+docs:
+  title: A unit test with no snapshot file
+  case: fail
+  kind: for_each_file
+
 given:
   tree:
     tests:

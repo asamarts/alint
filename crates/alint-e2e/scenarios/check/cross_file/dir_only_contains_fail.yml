@@ -1,6 +1,11 @@
 name: dir_only_contains flags files outside the allowlist
 tags: [check, dir_only_contains, cross_file]
 
+docs:
+  title: Stray non-Rust files under `src`
+  case: fail
+  kind: dir_only_contains
+
 given:
   tree:
     src:

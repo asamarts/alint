@@ -1,6 +1,11 @@
 name: dir_contains fires when required files are missing in a selected dir
 tags: [check, dir_contains, cross_file]
 
+docs:
+  title: A package directory missing its README or license
+  case: fail
+  kind: dir_contains
+
 given:
   tree:
     packages:

@@ -1,6 +1,11 @@
 name: every_matching_has evaluates nested rules against every selected entry
 tags: [check, every_matching_has, cross_file]
 
+docs:
+  title: A package directory without a `package.json`
+  case: fail
+  kind: every_matching_has
+
 given:
   tree:
     packages:

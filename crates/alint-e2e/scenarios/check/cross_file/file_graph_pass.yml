@@ -1,6 +1,11 @@
 name: file_graph is silent when the import graph is acyclic
 tags: [check, file_graph, cross_file, passing]
 
+docs:
+  title: An acyclic proto import graph
+  case: pass
+  kind: file_graph
+
 given:
   tree:
     proto:

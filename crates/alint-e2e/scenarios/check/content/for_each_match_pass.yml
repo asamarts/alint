@@ -1,6 +1,11 @@
 name: for_each_match is silent when every changelog entry conforms
 tags: [check, for_each_match, content, passing]
 
+docs:
+  title: Every changelog entry matches the required grammar
+  case: pass
+  kind: for_each_match
+
 given:
   tree:
     CHANGELOG.md: |

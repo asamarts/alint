@@ -1,6 +1,11 @@
 name: command_idempotent fires per offending file the checker lists
 tags: [check, command_idempotent, plugin]
 
+docs:
+  title: A checker that flags an offending file
+  case: fail
+  kind: command_idempotent
+
 given:
   tree:
     src/main.rs: |

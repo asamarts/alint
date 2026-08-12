@@ -892,46 +892,17 @@ If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least o
 
 For every file matching `primary`, a file matching the `partner` template must exist.
 
-```yaml
-- id: every-impl-has-test
-  kind: pair
-  primary: "src/**/*.rs"
-  partner: "tests/{stem}.test.rs"
-  level: warning
-```
-
 ### `pair_hash`
 
 **Categories:** Cross-file, Security / Unicode sanity
 
 The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). The sums-line parser accepts **either order** — coreutils / go-`.sum` `<hex> <path>` *and* the Go FIPS snapshot's path-first `<path> <hex>` — by identifying the digest token by its shape (the algorithm fixes its hex length). One violation per source whose digest is absent or mismatched; a missing `target` is one violation anchored on `target`. Raw bytes are hashed (a CRLF/newline change *is* a digest change — it is an integrity pin). Detection-only: alint never regenerates the manifest (same posture as `file_hash`). The sibling of `file_hash` (one file vs a *literal* hash in the config) and `generated_file_fresh` (a *generator's* stdout); `pair_hash` is the cross-file "B carries A's current digest" relation. golang/go FIPS `fips140.sum` is the canonical, highest-stakes use.
 
-```yaml
-- id: fips-sum-pins-module
-  kind: pair_hash
-  source: "src/crypto/internal/fips140/v1.0.0/**/*.go"
-  target: "src/crypto/internal/fips140/fips140.sum"
-  algorithm: sha256
-  format: sums-line
-  level: error
-```
-
 ### `registry_paths_resolve`
 
 **Categories:** Cross-file
 
 A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` RFC 9535 JSONPath), a line list (`lines`, optional `comment` prefix), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. Non-literal entries (interpolation / antiquotation) are skipped, not failed. Optional `orphans` adds the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the "new crate not wired into the workspace" detector). Cross-file: reads one manifest, resolves against the file index.
-
-```yaml
-- id: workspace-members-resolve
-  kind: registry_paths_resolve
-  source: Cargo.toml
-  extract: { toml: "$.workspace.members[*]" }
-  expect: dir
-  must_contain: Cargo.toml
-  orphans: { space: "crates/*/Cargo.toml", unreferenced: warn }
-  level: error
-```
 
 ### `cross_file` (alias: `cross_file_value_equals`)
 
@@ -950,105 +921,11 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 
 `normalize` relaxes the value comparison — a single transform or an ordered list applied left-to-right (`normalize: [trim, semver-minor]`): `trim`, `lower`, `semver-major` (the leading `MAJOR` band — the dotnet SDK shape), and `semver-minor` (the leading `MAJOR.MINOR` band, each token's leading digits with a non-digit prefix stripped — so `4.36-dev`, `4.36.0`, `pnpm@11.3.0` and `>=22.13` reconcile; the protobuf / pnpm version-format case). `identical` reads whole files byte-for-byte (`normalize`/`extract` do not apply), with an optional `skip_header_lines` to ignore a differing license/header; `resolves` extracts paths from the `source` (no `targets`) and checks each exists relative to the source file's directory. Non-literal extracted values (interpolation / antiquotation) are skipped, not failed — **except** a `whole_file: {}` source/target, whose single value (the entire file content) is compared verbatim even when it embeds `${…}`/`{{…}}` markers (those mark interpolated *paths*, not content); `whole_file` still honours `normalize`, so it sits between a query-extract and a no-normalize `identical`. `allow_missing_target` controls absent files/values. `equals` requires the `source` to extract **exactly one** value; to pull the latest entry from a multi-match file (e.g. the newest version in a multi-release `CHANGELOG.md`), anchor the regex so it captures only the first match — `regex: '(?s)\A.*?## (\d+\.\d+\.\d+)'` (`(?s)` makes `.` cross newlines, `\A` anchors at the start, `.*?` reaches the first heading lazily) yields a single value (a leading `## Unreleased` is skipped because the version pattern doesn't match it). The released `cross_file_value_equals` is a **byte-compatible alias** (`relation` defaults to `equals`). Cross-file.
 
-```yaml
-# equals (the default; the cross_file_value_equals shape)
-- id: workspace-versions-coherent
-  kind: cross_file
-  source:  { file: Cargo.toml, extract: { toml: "$.workspace.package.version" } }
-  targets: { files: "crates/*/Cargo.toml", extract: { toml: "$.package.version" } }
-  relation: equals
-  level: error
-
-# subset — every catalog reference must resolve to a declared catalog key
-- id: pnpm-catalog-refs-resolve
-  kind: cross_file
-  source:  { file: pnpm-workspace.yaml, extract: { yaml: "$.catalog.*" } }
-  targets: { files: "packages/**/package.json", extract: { regex: 'catalog:(\S+)' } }
-  relation: subset
-  level: error
-
-# identical — each crate README must mirror the workspace README byte-for-byte
-- id: readme-mirrors-root
-  kind: cross_file
-  source:  { file: README.md }
-  targets: { files: "crates/*/README.md" }
-  relation: identical
-  level: error
-
-# resolves — every declared workspace member path must exist on disk
-- id: workspace-members-exist
-  kind: cross_file
-  source: { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
-  relation: resolves
-  level: error
-```
-
 ### `file_graph`
 
 **Categories:** Cross-file
 
 Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the `fresh` codegen-freshness mode **or** the `no_dangling` derived-sibling-existence mode. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check; with `edges.derive_target` it instead asserts each node's *derived* sibling exists, e.g. every `licenses/X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
-
-```yaml
-# Layering: domain code must not reach into infra (file → file).
-- id: domain-not-depend-on-infra
-  kind: file_graph
-  nodes: "src/**/*.ts"
-  edges:
-    from_content:
-      extract: { regex: 'from\s+"(\.[^"]+)"' }
-      resolve: relative_to_file
-  require:
-    forbidden_edges:
-      - { from: "src/domain/**", to: "src/infra/**" }
-  level: error
-
-# Acyclicity: the clearest capability gap — no current kind detects cycles.
-- id: no-proto-import-cycles
-  kind: file_graph
-  nodes: "proto/**/*.proto"
-  edges:
-    from_content:
-      extract: { regex: 'import\s+"([^"]+)"' }
-      resolve: relative_to_repo_root
-  require: acyclic
-
-# Integrity: every doc cross-link resolves, and no doc is unreferenced
-# except the declared entry points.
-- id: docs-links-resolve
-  kind: file_graph
-  nodes: "docs/**/*.md"
-  edges:
-    from_content:
-      extract: { regex: '\]\((\.[^)]+\.md)\)' }
-      resolve: relative_to_file
-  require: no_dangling
-
-- id: no-orphan-docs
-  kind: file_graph
-  nodes: "docs/**/*.md"
-  edges:
-    from_content:
-      extract: { regex: '\]\((\.[^)]+\.md)\)' }
-      resolve: relative_to_file
-  require:
-    no_orphans:
-      roots: ["docs/index.md", "docs/README.md"]
-
-# Freshness: each generated *.pb.go must embed the sha256 of its .proto
-# source (the alint-native, no-spawn form of `make gen && git diff`).
-- id: generated-stays-fresh
-  kind: file_graph
-  nodes: "proto/**/*.proto"
-  edges:
-    derive_target:
-      from: '(.*)\.proto'
-      to: '$1.pb.go'
-  require:
-    fresh:
-      hash: sha256
-      marker: 'sha256:([0-9a-f]{64})'
-```
 
 ### `ordered_block`
 
@@ -1056,35 +933,11 @@ Assemble the repo's *file → file* reference graph and assert a global structur
 
 The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`). **Both markers are optional**: omit `end` to sort from `start` to EOF, omit both to sort the whole file (the markerless "this file is one sorted list" form — dictionaries, allow-lists, a fully-sorted `CODEOWNERS`). The generic form of per-project keep-sorted scripts (protobuf `failure_lists`, sorted `.gitignore` / `CODEOWNERS` / dependency lists). Per-file: with markers, a file with no `start` marker is silently fine; markers match the trimmed line; blank lines inside a block are ignored; one violation per out-of-order block; a fully-delimited block that never sees its `end` is reported `unclosed` (a block with an absent `end` runs to EOF by design). An optional `select:` regex restricts the sortable entries to lines matching it — other lines inside the block (comments, group headers) pass through untouched (the sectioned / keep-sorted-subset shape).
 
-```yaml
-- id: keep-sorted
-  kind: ordered_block
-  paths: ["**/.gitignore", "CODEOWNERS"]
-  start: "# keep-sorted start"
-  end: "# keep-sorted end"
-  comparator: lexical
-  unique: false
-  select: '^\s*require '   # sort only the `require '…'` lines
-  level: warning
-```
-
 ### `for_each_match`
 
 **Categories:** Cross-file
 
 For each line matching `select` (a regex), the line must satisfy the nested `require:` predicates. The in-file line quantifier — the dual of `ordered_block`'s `select:` (where `ordered_block` *orders* selected lines, this asserts a *conjunction of predicates* over each). `require:` takes at least one of: `matches` (the line must match **all** listed regexes), `forbid` (the line must match **none**), and `equal` (the listed named `select` captures must all be **equal** — checked on **every** `select` match on the line, so a line carrying two PR links validates both). One violation per offending line; lines `select` does not match are ignored. It closes two shapes no `file_content_*` kind can: a per-line changelog grammar ("**every** `* ` entry must *also* end with a linked PR ref" — `file_content_matches` asserts existence, not a per-line conjunction) and intra-line capture equality ("the display number must equal the `/pull/` URL number" — the Rust `regex` engine is RE2: no backreferences). Per-file (the `PerFileRule` fast path).
-
-```yaml
-- id: changelog-entries-well-formed
-  kind: for_each_match
-  paths: ["CHANGELOG.md"]
-  select: '^[*-] .*\[#(?P<disp>\d+)\]\([^)]*pull/(?P<url>\d+)\)'
-  require:
-    matches: ['\)\.$']            # every entry line ends with ").":
-    forbid:  ['\[Fix #\d+\]']     # ...never uses the "[Fix #N]" form
-    equal:   [disp, url]          # ...and its display number == its URL number
-  level: warning
-```
 
 ### `generated_file_fresh`
 
@@ -1095,39 +948,11 @@ A committed artefact must equal what a declared `command` generator produces, in
 - **stdout mode** (`file:`) — the generator writes its single output to stdout; alint captures it and compares to the one committed `file`. Never writes the tree.
 - **mutating / in-place mode** (`outputs:`, a glob or list) — for the common `make gen && git diff --exit-code` pattern, where the generator rewrites files in place. alint **snapshots** the `outputs`, runs the generator, **diffs** (flagging each stale / newly-created / removed file), and **restores the snapshot** — so `alint check` leaves the working tree byte-identical (the restore is panic-safe). The generator must confine its writes to `outputs`.
 
-```yaml
-# stdout mode — diff the generator's stdout against one committed file
-- id: bindings-fresh
-  kind: generated_file_fresh
-  file: crates/ffi/include/core.h
-  command: ["cbindgen", "--config", "cbindgen.toml", "crates/core"]
-  normalize: final-newline
-  level: error
-
-# mutating mode — run the in-place generator and assert nothing changed
-- id: commands-def-fresh
-  kind: generated_file_fresh
-  outputs: "src/commands.def"          # glob or list; selects mutating mode
-  command: ["make", "commands.def"]
-  timeout: 300
-  level: error
-```
-
 ### `import_gate`
 
 **Categories:** Cross-file, Security / Unicode sanity
 
 Forbid imports whose **extracted target** matches a `forbid` regex, within the `paths` scope — an architectural import firewall (staging-layer isolation, core/providers separation, private-API gates). Matches the import target, not the raw line (so a comment or string mentioning the path doesn't fire — the low-false-positive specialisation of `file_content_forbidden`). `language` (`go`/`python`/`rust`/`js`/`scala`/`java`/`dart`/`nix`) supplies a built-in import-line pattern; `import_pattern` overrides it (capture group 1 = target; required for `generic`). The `js` preset (whose pattern is unanchored, to catch dynamic `import("m")` / `require("m")`) additionally blanks `//` and `/* … */` comments before matching, so a JSDoc `@typedef {import("../x")}` type annotation isn't mistaken for a real import. `allow` globs exempt sanctioned files. One violation per offending import.
-
-```yaml
-- id: staging-no-main-module
-  kind: import_gate
-  paths: "staging/src/k8s.io/**/*.go"
-  language: go
-  forbid: "^k8s\\.io/kubernetes/"
-  allow: ["staging/src/k8s.io/legacy/**"]
-  level: error
-```
 
 ### `command_idempotent`
 
@@ -1149,44 +974,13 @@ never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
 
-```yaml
-- id: code-is-formatted
-  kind: command_idempotent
-  command: ["cargo", "fmt", "--all", "--", "--check"]
-  workdir: "."
-  files_from: stderr
-  files_pattern: "Diff in (.+) at"
-  level: error
-  message: "run `cargo fmt` — code is not formatter-clean"
-```
-
 ### `for_each_dir` / `for_each_file`
 
 **Categories:** Cross-file
 
 For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["src/*", "!src/internal"]`).
 
-```yaml
-- id: every-pkg-has-readme
-  kind: for_each_dir
-  select: "packages/*"
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-```
-
 **`when_iter:` — per-iteration filter.** Optional expression in the `when:` grammar, with one extra namespace: `iter.*` references the entry currently being iterated. Iterations whose verdict is false are skipped before any nested rule is built — the canonical use case for monorepos shaped like Cargo / pnpm / Bazel workspaces:
-
-```yaml
-- id: workspace-member-has-readme
-  kind: for_each_dir
-  select: "crates/*"
-  when_iter: 'iter.has_file("Cargo.toml")'
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-  level: error
-```
 
 The `iter` namespace exposes:
 
@@ -1208,27 +1002,11 @@ The `iter` namespace exposes:
 
 Every directory matching `select:` must contain files matching every glob in `require:`. Sugar for a common `for_each_dir` shape.
 
-```yaml
-- id: packages-have-readme-and-license
-  kind: dir_contains
-  select: "packages/*"
-  require: ["README.md", "LICENSE*"]
-  level: error
-```
-
 ### `dir_only_contains`
 
 **Categories:** Cross-file, Structure
 
 Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. Catches stray test data in `src/`.
-
-```yaml
-- id: src-only-rs
-  kind: dir_only_contains
-  select: "src/*"
-  allow: ["*.rs", "README.md"]
-  level: error
-```
 
 ### `unique_by`
 
@@ -1236,29 +1014,11 @@ Every direct-child file of a directory matching `select:` must match at least on
 
 No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). Catches basename collisions across subdirectories. With `case_insensitive: true` the key is folded to lowercase before grouping, so `README.md` and `readme.md` collide — the case-insensitive-filesystem hazard (Windows / macOS).
 
-```yaml
-- id: unique-basenames
-  kind: unique_by
-  select: "src/**/*.rs"
-  key: "{stem}"
-  level: warning
-```
-
 ### `every_matching_has`
 
 **Categories:** Cross-file
 
 For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. Lightweight sibling of `pair` that iterates both file and directory entries. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["packages/*", "!packages/internal"]`).
-
-```yaml
-- id: every-pkg-has-readme
-  kind: every_matching_has
-  select: "packages/*"
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-  level: error
-```
 
 ---
 

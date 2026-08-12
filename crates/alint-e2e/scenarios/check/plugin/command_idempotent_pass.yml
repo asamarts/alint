@@ -1,6 +1,11 @@
 name: command_idempotent is silent when the checker exits clean
 tags: [check, command_idempotent, plugin, passing]
 
+docs:
+  title: A checker that exits clean
+  case: pass
+  kind: command_idempotent
+
 given:
   tree:
     src/main.rs: |

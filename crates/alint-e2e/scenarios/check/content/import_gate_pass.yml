@@ -1,6 +1,11 @@
 name: import_gate is silent when no forbidden import is present
 tags: [check, import_gate, content, passing]
 
+docs:
+  title: Staging files import only allowed modules
+  case: pass
+  kind: import_gate
+
 given:
   tree:
     staging/src/k8s.io/api/types.go: |

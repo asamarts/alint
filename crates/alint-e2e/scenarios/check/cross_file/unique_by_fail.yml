@@ -1,6 +1,11 @@
 name: unique_by fires when multiple files share the chosen key
 tags: [check, unique_by, cross_file]
 
+docs:
+  title: Two files colliding on the same stem
+  case: fail
+  kind: unique_by
+
 given:
   tree:
     a:
