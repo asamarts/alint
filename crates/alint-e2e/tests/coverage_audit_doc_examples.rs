@@ -82,7 +82,11 @@ fn fixture_configs(root: &Path) -> Vec<(String, String)> {
                 .and_then(|g| g.get("config"))
                 .and_then(serde_yaml_ng::Value::as_str)
             {
-                let src = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+                let src = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
                 out.push((src, config.to_string()));
             }
         }
