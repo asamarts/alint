@@ -1,6 +1,11 @@
 name: filename_regex is silent when every stem matches
 tags: [check, filename_regex, passing]
 
+docs:
+  title: Every test file name matches the required `test_` prefix
+  case: pass
+  kind: filename_regex
+
 given:
   tree:
     tests:

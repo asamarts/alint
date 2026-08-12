@@ -1,6 +1,11 @@
 name: filename_regex flags test stems that don't match the required pattern
 tags: [check, filename_regex]
 
+docs:
+  title: A test file whose name ignores the required `test_` prefix
+  case: fail
+  kind: filename_regex
+
 given:
   tree:
     tests:

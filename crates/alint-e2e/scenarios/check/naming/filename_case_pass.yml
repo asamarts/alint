@@ -1,6 +1,11 @@
 name: filename_case is silent when every stem matches
 tags: [check, filename_case, passing]
 
+docs:
+  title: Every Rust source file name is snake_case
+  case: pass
+  kind: filename_case
+
 given:
   tree:
     src:

@@ -1,6 +1,11 @@
 name: filename_case flags stems that don't match the convention
 tags: [check, filename_case]
 
+docs:
+  title: Rust source files whose names break the snake_case convention
+  case: fail
+  kind: filename_case
+
 given:
   tree:
     src:
