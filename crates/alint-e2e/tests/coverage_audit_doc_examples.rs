@@ -29,7 +29,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Docs whose fenced config examples must load. Scoped to the
 /// drift-prone hand-written docs the evaluation flagged; extend as new
@@ -46,6 +46,48 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
+}
+
+/// Every documented scenario's `given.config` — the post-ADR-0014 home of the
+/// rule-config examples that used to live inline in docs/rules.md. Harvested so
+/// the two doc-example gates keep covering every migrated kind (the rendered
+/// pages now pull their config from these fixtures). Returns `(source, config)`.
+fn fixture_configs(root: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.join("crates/alint-e2e/scenarios")];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(v) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) else {
+                continue;
+            };
+            if v.get("docs").is_none() {
+                continue; // only documented scenarios back a rule page
+            }
+            if let Some(config) = v
+                .get("given")
+                .and_then(|g| g.get("config"))
+                .and_then(serde_yaml_ng::Value::as_str)
+            {
+                let src = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+                out.push((src, config.to_string()));
+            }
+        }
+    }
+    out
 }
 
 /// One fenced `yaml` block plus enough context to decide intent.
@@ -290,6 +332,29 @@ fn every_doc_config_example_loads() {
         }
     }
 
+    // Validate the fixture-backed examples too: post-ADR-0014 the migrated
+    // config examples live in documented scenarios' `given.config`, not inline
+    // in the docs.
+    for (src, config) in fixture_configs(&root) {
+        let config = inject_default_levels(&config);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".alint.yml"), &config).unwrap();
+        match alint_dsl::load(&dir.path().join(".alint.yml")) {
+            Ok(cfg) => {
+                for spec in &cfg.rules {
+                    if matches!(spec.level, alint_core::Level::Off) {
+                        continue;
+                    }
+                    if let Err(e) = registry.build(spec) {
+                        failures.push(format!("{src}: rule {:?} fails to build — {e}", spec.id));
+                    }
+                }
+                validated += 1;
+            }
+            Err(e) => failures.push(format!("{src}: config does not load — {e}")),
+        }
+    }
+
     eprintln!(
         "doc-example gate: {validated} validated, \
          {skipped_non_config} non-config, {skipped_deliberate} deliberate-invalid, \
@@ -418,6 +483,35 @@ fn every_rule_kind_rejects_an_unknown_option() {
                 if registry.build(&bogus).is_ok() {
                     swallowers.insert(spec.kind.clone());
                 }
+            }
+        }
+    }
+
+    // Probe the fixture-backed examples too: post-ADR-0014 most kinds' config
+    // examples live in the documented scenarios' `given.config`, not inline in
+    // the docs, so the DOC_FILES corpus alone no longer covers 30+ kinds.
+    for (_src, config) in fixture_configs(&root) {
+        let config = inject_default_levels(&config);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".alint.yml"), &config).unwrap();
+        let Ok(cfg) = alint_dsl::load(&dir.path().join(".alint.yml")) else {
+            continue;
+        };
+        for spec in &cfg.rules {
+            if matches!(spec.level, alint_core::Level::Off) {
+                continue;
+            }
+            if registry.build(spec).is_err() {
+                continue;
+            }
+            let mut bogus = spec.clone();
+            bogus.extra.insert(
+                serde_yaml_ng::Value::String("__alint_unknown_option_probe__".into()),
+                serde_yaml_ng::Value::Bool(true),
+            );
+            probed.insert(spec.kind.clone());
+            if registry.build(&bogus).is_ok() {
+                swallowers.insert(spec.kind.clone());
             }
         }
     }
