@@ -1,32 +1,35 @@
-name: command plugin fires once per file when the wrapped CLI exits non-zero
-tags: [check, command, plugin, failing]
-
-# Uses `/bin/false` for a deterministic non-zero exit on any
-# Unix-like system. Each matched file gets its own violation
-# carrying the subprocess's stdout+stderr (empty here).
+name: command plugin fires when the wrapped checker reports a problem
+# linux-only: the wrapped command is a POSIX `sh` one-liner, and the
+# command rule's macOS behaviour is tracked separately (see the pass scenario).
+tags: [check, command, plugin, linux-only, failing]
 
 docs:
-  title: A wrapped command that exits non-zero for the matched files
+  title: A file the wrapped checker flags
   case: fail
   kind: command
+
+# The `command:` argv wraps any CLI; `{path}` is substituted with each matched
+# file's path, and the violation message is the subprocess's captured output.
+# Here a `grep` one-liner fails the file when it still carries a `TODO` marker,
+# so `src/a.rs` fires (carrying the grep hit) while the clean `src/b.rs` stays
+# silent.
 
 given:
   tree:
     src:
-      a.rs: "fn a() {}\n"
+      a.rs: "// TODO: drop the debug hook before release\nfn a() {}\n"
       b.rs: "fn b() {}\n"
   config: |
     version: 1
     rules:
-      - id: trivial-fail
+      - id: no-todo-markers
         kind: command
         paths: "src/**/*.rs"
-        command: ["/bin/false"]
+        command: ["sh", "-c", "if grep -n TODO \"{path}\"; then exit 1; fi"]
         level: error
 
 when: [check]
 
 expect:
   - violations:
-      - {rule: trivial-fail, level: error, path: src/a.rs}
-      - {rule: trivial-fail, level: error, path: src/b.rs}
+      - {rule: no-todo-markers, level: error, path: src/a.rs}

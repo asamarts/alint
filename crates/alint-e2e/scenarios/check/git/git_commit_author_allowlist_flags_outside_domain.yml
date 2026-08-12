@@ -2,7 +2,7 @@ name: git_commit_author_allowlist fires on an author outside the domain
 tags: [check, git_commit_author_allowlist, git, failing]
 
 # HEAD mode (no `since:`): the harness commits as
-# `alint test <test@alint.test>` (see the e2e git setup). The
+# `alint scenario <scenario@alint.test>` (see the e2e git setup). The
 # allowlist requires `@example.com`, so the tip commit's author
 # fails the pattern and fires once.
 
@@ -24,7 +24,8 @@ given:
   git:
     init: true
     commits:
-      - "feat: a change from an outside author"
+      - message: "feat: a change from an outside author"
+        date: "2024-01-15T09:00:00+00:00"
 
 when: [check]
 

@@ -1,0 +1,36 @@
+name: toml_path_matches flags a crate version that isn't strict semver
+tags: [check, toml_path_matches, structured]
+
+docs:
+  title: A crate version that isn't valid semver
+  case: fail
+  kind: toml_path_matches
+
+given:
+  tree:
+    crates:
+      a:
+        "Cargo.toml": |
+          [package]
+          name = "a"
+          version = "1.2.3"
+      b:
+        "Cargo.toml": |
+          [package]
+          name = "b"
+          version = "0.4"
+  config: |
+    version: 1
+    rules:
+      - id: pinned-version
+        kind: toml_path_matches
+        paths: "crates/*/Cargo.toml"
+        path: "$.package.version"
+        matches: '^\d+\.\d+\.\d+$'
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pinned-version, level: error, path: crates/b/Cargo.toml}

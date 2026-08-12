@@ -22,7 +22,8 @@ given:
   git:
     init: true
     commits:
-      - "fixup! feat: the original change"
+      - message: "fixup! feat: the original change"
+        date: "2024-01-15T09:00:00+00:00"
 
 when: [check]
 

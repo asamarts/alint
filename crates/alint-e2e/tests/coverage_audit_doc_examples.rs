@@ -340,6 +340,12 @@ fn every_doc_config_example_loads() {
     // config examples live in documented scenarios' `given.config`, not inline
     // in the docs.
     for (src, config) in fixture_configs(&root) {
+        // Documented scenarios are hermetic (`validate_documented` rejects a
+        // network `extends:`), but guard defensively so a future one never
+        // triggers a live fetch inside this gate test.
+        if has_network_extends(&config) {
+            continue;
+        }
         let config = inject_default_levels(&config);
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(".alint.yml"), &config).unwrap();
@@ -495,6 +501,10 @@ fn every_rule_kind_rejects_an_unknown_option() {
     // examples live in the documented scenarios' `given.config`, not inline in
     // the docs, so the DOC_FILES corpus alone no longer covers 30+ kinds.
     for (_src, config) in fixture_configs(&root) {
+        // Hermetic by construction (see the loads-gate); guard defensively.
+        if has_network_extends(&config) {
+            continue;
+        }
         let config = inject_default_levels(&config);
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(".alint.yml"), &config).unwrap();

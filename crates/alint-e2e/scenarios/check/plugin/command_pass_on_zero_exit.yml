@@ -1,33 +1,29 @@
-name: command plugin is silent when the wrapped CLI exits 0
-# Tagged `linux-only` because /bin/true behaves differently on
-# the GitHub-hosted macOS runner (the rule fires unexpectedly —
-# whether due to a stripped userland, sandboxing, or env-var
-# size limits hasn't been pinned down). Linux runners exercise
-# the happy path; macOS divergence is tracked separately.
-tags: [check, command, plugin, passing, linux-only]
-
-# Uses `/bin/true` so the test stays portable on any Unix-like
-# system without depending on a specific tool being installed.
-# The Windows runner has no `/bin/true`, but the trycmd CLI tests
-# already cover that platform — these e2e scenarios are unix-only
-# in practice, mirroring the testkit's tree-spec materialisation.
+name: command plugin is silent when the wrapped checker passes every file
+# linux-only: the wrapped command is a POSIX `sh` one-liner; the command rule's
+# macOS runner behaviour (env-var limits / sandboxing) is tracked separately, so
+# the happy path is exercised on Linux and the CLI trycmd tests cover Windows.
+tags: [check, command, plugin, linux-only, passing]
 
 docs:
-  title: A wrapped command that exits zero for every matched file
+  title: Files the wrapped checker passes
   case: pass
   kind: command
+
+# The same wrapped `grep` checker as the fail case, over a tree with no `TODO`
+# markers: every matched file exits 0, so the rule is silent.
 
 given:
   tree:
     src:
       main.rs: "fn main() {}\n"
+      lib.rs: "pub fn ok() {}\n"
   config: |
     version: 1
     rules:
-      - id: trivial-pass
+      - id: no-todo-markers
         kind: command
         paths: "src/**/*.rs"
-        command: ["/bin/true"]
+        command: ["sh", "-c", "if grep -n TODO \"{path}\"; then exit 1; fi"]
         level: error
 
 when: [check]
