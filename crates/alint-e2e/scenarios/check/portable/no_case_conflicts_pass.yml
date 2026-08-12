@@ -1,6 +1,11 @@
 name: no_case_conflicts is silent when every path is unique regardless of case
 tags: [check, no_case_conflicts, portable, passing]
 
+docs:
+  title: Filenames that stay unique when case is ignored
+  case: pass
+  kind: no_case_conflicts
+
 given:
   tree:
     README.md: "# hi"

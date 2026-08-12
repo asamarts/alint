@@ -347,13 +347,6 @@ Checks that reject tree shapes which work on one OS but break checkouts elsewher
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
-```yaml
-- id: no-case-colliding-paths
-  kind: no_case_conflicts
-  paths: "**"
-  level: error
-```
-
 ### `no_illegal_windows_names`
 
 **Categories:** Portable metadata, Naming
@@ -363,13 +356,6 @@ Reject path components Windows can't represent:
 - Reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) — case-insensitive, regardless of extension. `con.txt` fails; `COM10` and `confused` correctly pass.
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
-
-```yaml
-- id: portable-names
-  kind: no_illegal_windows_names
-  paths: "**"
-  level: warning
-```
 
 ---
 

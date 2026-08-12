@@ -7,6 +7,11 @@ name: no_case_conflicts flags pairs that differ only by case
 # leaving nothing for the rule to flag.
 tags: [check, no_case_conflicts, portable, requires-case-sensitive-fs]
 
+docs:
+  title: A repo containing both README.md and readme.md
+  case: fail
+  kind: no_case_conflicts
+
 given:
   tree:
     README.md: "# upper"

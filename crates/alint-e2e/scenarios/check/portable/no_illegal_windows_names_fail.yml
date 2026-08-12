@@ -8,6 +8,11 @@ name: no_illegal_windows_names flags reserved and forbidden names
 # macOS also creates these names freely.
 tags: [check, no_illegal_windows_names, portable, unix-only]
 
+docs:
+  title: Files using reserved Windows device names and a trailing dot
+  case: fail
+  kind: no_illegal_windows_names
+
 given:
   tree:
     README.md: "# fine"

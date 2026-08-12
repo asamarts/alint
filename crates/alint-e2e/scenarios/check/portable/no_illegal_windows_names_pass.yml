@@ -1,6 +1,11 @@
 name: no_illegal_windows_names is silent on normal paths
 tags: [check, no_illegal_windows_names, portable, passing]
 
+docs:
+  title: Names that resemble reserved Windows names but stay legal
+  case: pass
+  kind: no_illegal_windows_names
+
 given:
   tree:
     README.md: ""
