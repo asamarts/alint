@@ -1,6 +1,11 @@
 name: no_submodules flags .gitmodules at the repo root
 tags: [check, no_submodules, git]
 
+docs:
+  title: A repo that declares a git submodule
+  case: fail
+  kind: no_submodules
+
 given:
   tree:
     README.md: "# demo"

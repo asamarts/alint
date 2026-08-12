@@ -6,6 +6,11 @@ tags: [check, git_commit_author_allowlist, git, failing]
 # allowlist requires `@example.com`, so the tip commit's author
 # fails the pattern and fires once.
 
+docs:
+  title: A commit authored from outside the allowed email domain
+  case: fail
+  kind: git_commit_author_allowlist
+
 given:
   tree:
     README.md: "# demo\n"

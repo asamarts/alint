@@ -1,6 +1,11 @@
 name: markdown_paths_resolve passes when every backticked path resolves
 tags: [check, markdown_paths_resolve]
 
+docs:
+  title: Every backticked path in the doc resolves to a real file
+  case: pass
+  kind: markdown_paths_resolve
+
 given:
   tree:
     src:

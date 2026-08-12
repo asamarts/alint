@@ -1,0 +1,29 @@
+name: git_commit_no_fixup is silent when HEAD is a normal commit
+tags: [check, git_commit_no_fixup, git, passing]
+
+docs:
+  title: A normal commit with no leftover fixup
+  case: pass
+  kind: git_commit_no_fixup
+
+# HEAD mode (no `since:`): the tip commit is an ordinary commit whose
+# subject is not prefixed `fixup! ` / `squash! `, so the rule is silent.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-fixup
+        kind: git_commit_no_fixup
+        level: error
+  git:
+    init: true
+    commits:
+      - "feat: a normal change"
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,6 +1,11 @@
 name: markdown_paths_resolve flags backticked paths that don't resolve
 tags: [check, markdown_paths_resolve]
 
+docs:
+  title: Backticked file paths in Markdown that do not exist
+  case: fail
+  kind: markdown_paths_resolve
+
 given:
   tree:
     src:

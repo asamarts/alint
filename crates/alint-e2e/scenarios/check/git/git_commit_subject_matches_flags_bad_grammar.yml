@@ -4,6 +4,11 @@ tags: [check, git_commit_subject_matches, git, failing]
 # HEAD mode (no `since:`): the tip commit's subject is uppercase /
 # wrong shape, so the `component: lowercase summary` grammar fails.
 
+docs:
+  title: A commit subject that breaks the required grammar
+  case: fail
+  kind: git_commit_subject_matches
+
 given:
   tree:
     README.md: "# demo\n"

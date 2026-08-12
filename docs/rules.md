@@ -401,14 +401,6 @@ Every file starting with `#!` must have `+x` set. Catches scripts that got their
 
 Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`. For general "file X must not exist" checks, use `file_absent`.
 
-```yaml
-- id: no-submods
-  kind: no_submodules
-  level: warning
-  fix:
-    file_remove: {}
-```
-
 Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.git/modules/` are still on the user.
 
 ### `commented_out_code`
@@ -416,22 +408,6 @@ Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.g
 **Categories:** Git hygiene, Content
 
 Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). For each consecutive run of comment lines (`min_lines+`), counts the fraction of non-whitespace characters that are structural punctuation strongly biased toward code (`( ) { } [ ] ; = < > & | ^`). Scores ≥ `threshold` mark the block as code-shaped.
-
-```yaml
-- id: no-commented-code
-  kind: commented_out_code
-  paths:
-    include: ["src/**/*.{ts,tsx,js,jsx,rs,py,go,java}"]
-    exclude:
-      - "**/*test*/**"
-      - "**/__tests__/**"
-      - "**/fixtures/**"
-  language: auto              # auto | rust | typescript | python | go | java | c | cpp | ruby | shell
-  min_lines: 3                # consecutive comment lines required (default 3)
-  threshold: 0.5              # 0.0-1.0 (default 0.5 = midpoint between obvious-prose and obvious-code)
-  skip_leading_lines: 30      # skip the first N lines (license headers — default 30)
-  level: warning
-```
 
 The scorer deliberately ignores identifier-token density (English prose has identifier-shaped words too) and excludes backticks / quotes (rustdoc / TSDoc prose uses backticks to delimit code references). Runs of 5+ identical characters (`============`, `----`, `####`) are dropped before scoring so ASCII-art separator banners don't flag as code.
 
@@ -444,21 +420,6 @@ Heuristic, with a non-zero false-positive surface — defaults are `warning`-lev
 **Categories:** Git hygiene, Cross-file
 
 Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. Targets the AGENTS.md / CLAUDE.md / `.cursorrules` staleness problem: agent-context files reference paths in inline backticks (`` `src/api/users.ts` ``), and those paths drift as the codebase evolves. The `agent-context-no-stale-paths` rule shipped in v0.6 surfaces *candidates* via a regex; this rule does the precise existence check.
-
-```yaml
-- id: agents-md-paths-resolve
-  kind: markdown_paths_resolve
-  paths:
-    - AGENTS.md
-    - CLAUDE.md
-    - .cursorrules
-    - "docs/**/*.md"
-  prefixes:
-    - src/
-    - crates/
-    - docs/
-  level: warning
-```
 
 The `prefixes` list is **required** — a backticked token must start with one of these to be considered a path candidate. No defaults: every project's layout differs, and a missing prefix is silent while a wrong default trips false positives.
 
@@ -473,19 +434,6 @@ Check-only — auto-fixing a stale path means guessing the new location, which i
 **Categories:** Git hygiene, Security / Unicode sanity
 
 Fire when any tracked file matches a configured glob denylist. The absence-axis companion of `git_tracked_only`: instead of asking "does this tracked path exist?", it asks "is anything tracked that matches my denylist?" One rule covers what would otherwise need one `file_absent` per pattern. Reports every matching denylist entry per offending path so a single file hitting two patterns surfaces both.
-
-```yaml
-- id: no-secrets-or-keys
-  kind: git_no_denied_paths
-  denied:
-    - "*.env"
-    - ".env*"
-    - "*.pem"
-    - "id_rsa"
-    - "secrets/**"
-  level: error
-  message: "Don't commit secrets or credentials."
-```
 
 An optional `since: <git-ref>` scopes the check to denied paths that changed in the `<ref>...HEAD` diff — the PR-scoped shape, which catches a secret added in the PR even if HEAD's tree still tracks an older one. It accepts the `{{env.X}}` interpolation (e.g. `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`); an unresolvable ref hard-fails with a shallow-clone hint.
 
@@ -553,19 +501,6 @@ jobs:
 
 Assert every commit in scope carries a DCO (Developer Certificate of Origin) `Signed-off-by:` trailer — required by every CNCF / Linux Foundation / kernel-style project. A commit lacking the trailer fires one violation, with the short SHA + subject snippet so you know which to amend (`git commit --amend -s` or `git rebase --signoff`).
 
-```yaml
-# HEAD-only: the tip commit must be signed off.
-- id: dco
-  kind: git_commit_signed_off
-  level: error
-
-# Range mode for PR CI: every commit in the PR must be signed off.
-- id: pr-dco
-  kind: git_commit_signed_off
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
-
 The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override `pattern:` to enforce a stricter form (e.g. a corporate-domain email). Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes (silent outside a git repo; a bad `since:` ref hard-fails with a shallow-clone hint). See [variable interpolation](/docs/concepts/variable-interpolation/) for the `{{env.X}}` form.
 
 ### `git_commit_no_fixup`
@@ -573,14 +508,6 @@ The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+
 **Categories:** Git hygiene
 
 Fail on residual `fixup!` / `squash!` / `amend!` commits left in scope — the ones `git commit --fixup` / `--squash` produce, meant to be collapsed by `git rebase --autosquash` before merging. Forgetting to rebase is the universal case; this rule catches the leftover so it doesn't land on the main branch.
-
-```yaml
-# Range mode for PR CI: no un-squashed fixups may merge.
-- id: no-fixup
-  kind: git_commit_no_fixup
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
 
 No configuration knobs — the matched subject prefixes are exactly what `--autosquash` understands. Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes.
 
@@ -590,28 +517,11 @@ No configuration knobs — the matched subject prefixes are exactly what `--auto
 
 Each commit's subject line (the first line of its message) must match the `matches:` regex — the subject-grammar member of the commit family. Enforces a prefix + shape convention like go / Gerrit's `pkg/path: lowercase summary`, node's `subsystem: description`, or conventional-commit types. The regex is anchored to the **subject alone** (so `^…$` describes the first line exactly), unlike `git_commit_message`'s `pattern:` which matches the whole subject + body; for a subject-length cap use `git_commit_message`'s `subject_max_length:`. Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes (HEAD-only when `since:` is unset, `<since>..HEAD` when set; silent outside a git repo; a bad `since:` ref hard-fails with a shallow-clone hint).
 
-```yaml
-- id: subject-grammar
-  kind: git_commit_subject_matches
-  matches: '^[a-z0-9_/.-]+: [a-z].{0,70}$'   # `component: lowercase summary`
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
-
 ### `git_commit_author_allowlist`
 
 **Categories:** Git hygiene, Security / Unicode sanity
 
 Assert every commit author in scope matches an allowed email and/or name pattern. At least one of `email_pattern:` / `name_pattern:` is required; specifying both means BOTH must match (AND). A commit whose author fails any specified pattern fires one violation. Demand: enterprise repos enforcing contributor identity against a corporate domain; OSS projects catching commits from sock-puppet or compromised accounts.
-
-```yaml
-# Every commit in the PR must be authored from the corporate domain.
-- id: org-authors-only
-  kind: git_commit_author_allowlist
-  email_pattern: '^.+@example\.com$'
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
 
 `email_pattern:` matches `git log %ae`; `name_pattern:` matches `git log %an`. Both are Rust regexes. Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes (silent outside a git repo; a bad `since:` ref hard-fails with a shallow-clone hint).
 
@@ -620,14 +530,6 @@ Assert every commit author in scope matches an allowed email and/or name pattern
 **Categories:** Git hygiene, Security / Unicode sanity
 
 Assert every commit in scope has a verifying signature (`git verify-commit` exits 0). A commit that is unsigned — or signed with a key that doesn't verify against the local keyring — fires one violation. Demand: kernel maintainers, security-sensitive OSS, anyone using GitHub's "Require signed commits" branch protection.
-
-```yaml
-# Every commit in the PR must carry a verifying signature.
-- id: signed-commits
-  kind: git_commit_gpg_signed
-  since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"
-  level: error
-```
 
 The rule reflects git's own verdict and deliberately does **not** distinguish "unsigned" from "signed with an untrusted key" — trust is git's GPG config / `.git/allowed_signers`, not this rule's job. No configuration knobs. Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes.
 

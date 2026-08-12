@@ -1,0 +1,31 @@
+name: git_commit_author_allowlist is silent when the author matches the allowlist
+tags: [check, git_commit_author_allowlist, git, passing]
+
+docs:
+  title: A commit from an allowed author domain
+  case: pass
+  kind: git_commit_author_allowlist
+
+# HEAD mode (no `since:`): the harness commits as
+# `alint scenario <scenario@alint.test>`, which matches the allowlist
+# pattern, so the tip commit's author clears the rule.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: org-authors
+        kind: git_commit_author_allowlist
+        email_pattern: '^.+@alint\.test$'
+        level: error
+  git:
+    init: true
+    commits:
+      - "feat: a change from an allowed author"
+
+when: [check]
+
+expect:
+  - violations: []

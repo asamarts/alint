@@ -1,6 +1,11 @@
 name: no_submodules is silent when .gitmodules is absent
 tags: [check, no_submodules, git, passing]
 
+docs:
+  title: A repo with no submodules declared
+  case: pass
+  kind: no_submodules
+
 given:
   tree:
     README.md: "# demo"

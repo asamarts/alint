@@ -1,6 +1,11 @@
 name: commented_out_code passes on prose comments and license headers
 tags: [check, commented_out_code]
 
+docs:
+  title: Only prose comments, license headers, and doc comments
+  case: pass
+  kind: commented_out_code
+
 given:
   tree:
     src:

@@ -5,6 +5,11 @@ tags: [check, git_commit_signed_off, git, failing]
 # trailer, so the rule fires once. The default pattern is the
 # canonical DCO sign-off shape.
 
+docs:
+  title: A HEAD commit with no DCO sign-off trailer
+  case: fail
+  kind: git_commit_signed_off
+
 given:
   tree:
     README.md: "# demo\n"

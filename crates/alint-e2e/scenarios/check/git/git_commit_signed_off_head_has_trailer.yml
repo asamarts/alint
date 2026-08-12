@@ -1,0 +1,29 @@
+name: git_commit_signed_off is silent when HEAD carries the DCO trailer
+tags: [check, git_commit_signed_off, git, passing]
+
+docs:
+  title: A commit signed off with the DCO trailer
+  case: pass
+  kind: git_commit_signed_off
+
+# HEAD mode (no `since:`): the tip commit's message ends with a
+# `Signed-off-by:` trailer matching the author, so the rule is silent.
+
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: dco
+        kind: git_commit_signed_off
+        level: error
+  git:
+    init: true
+    commits:
+      - message: "feat: a change\n\nSigned-off-by: alint scenario <scenario@alint.test>"
+
+when: [check]
+
+expect:
+  - violations: []

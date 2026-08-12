@@ -1,6 +1,11 @@
 name: commented_out_code flags blocks of code-shaped commented lines
 tags: [check, commented_out_code]
 
+docs:
+  title: Blocks of real code left behind as comments
+  case: fail
+  kind: commented_out_code
+
 given:
   tree:
     src:

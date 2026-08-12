@@ -1,6 +1,11 @@
 name: git_commit_subject_matches is silent when the subject follows the grammar
 tags: [check, git_commit_subject_matches, git, passing]
 
+docs:
+  title: "A commit subject that follows the `component: summary` grammar"
+  case: pass
+  kind: git_commit_subject_matches
+
 given:
   tree:
     README.md: "# demo\n"

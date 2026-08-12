@@ -5,6 +5,11 @@ tags: [check, git_commit_gpg_signed, git, failing]
 # so `git verify-commit` exits non-zero on the tip commit and the
 # rule fires once.
 
+docs:
+  title: An unsigned HEAD commit
+  case: fail
+  kind: git_commit_gpg_signed
+
 given:
   tree:
     README.md: "# demo\n"
