@@ -393,13 +393,12 @@ fn generate_rules_pages(
     let registry = alint_rules::builtin_registry();
     let known_kinds: HashSet<String> = registry.known_kinds().map(str::to_string).collect();
 
-    // Aliases declared in rules.md H3 titles via `(alias: \`X\`)`.
-    // The registry has no concept of "alias" — both canonical and
-    // alias names are registered as independent builders that
-    // happen to share an implementation. We harvest the alias
-    // names from rules.md so the "registered but missing" check
-    // below doesn't false-positive on aliases that ARE
-    // documented, just under their canonical name's heading.
+    // Alias names declared in rules.md H3 titles via `(alias: \`X\`)`. The
+    // registry now records alias->canonical too (`canonical_kind`), and the
+    // gen-facts gate cross-checks the two agree; we harvest from rules.md here so
+    // the "registered but missing" page check validates the documentation's own
+    // alias declarations. Excludes aliases that ARE documented under their
+    // canonical name's heading so that check doesn't false-positive on them.
     let aliases: HashSet<String> = harvest_aliases(&src);
 
     // Source of truth for the per-rule "## Options" tables: the
@@ -474,6 +473,7 @@ fn generate_rules_pages(
             &mut missing_examples,
             &mut wrong_kind_examples,
             &documented,
+            &registry,
             released,
         )?;
         families_meta.push((h2.title.clone(), family_order, family_slug.clone()));
@@ -556,6 +556,7 @@ fn process_family_h3s(
     missing_examples: &mut Vec<String>,
     wrong_kind_examples: &mut Vec<String>,
     documented: &std::collections::BTreeMap<String, Vec<examples::RenderedExample>>,
+    registry: &alint_core::RuleRegistry,
     released: Option<crate::rule_options_table::Version>,
 ) -> Result<()> {
     let mut kind_order: u32 = 0;
@@ -594,17 +595,21 @@ fn process_family_h3s(
         // is fine. Scan EVERY yaml block, not just the leading one: a documented
         // kind can keep a non-config recipe as its first block (git_commit_message
         // keeps a CI-workflow yaml), so a stale config re-added after it would sit
-        // in a later block. Match only against `documented` kind names, so an
-        // incidental `kind:` in a recipe can't false-fire. Atomic-swap (ADR-0014).
+        // in a later block. Match against `documented` kind names (which are
+        // canonical) after canonicalising each block kind, so a stale config using
+        // the ALIAS spelling (e.g. `kind: header` under a documented `file_header`)
+        // is caught too, and an incidental `kind:` in a recipe can't false-fire.
+        // Atomic-swap (ADR-0014).
         if let Some(ex_kind) = example_block_kinds(&h3.body)
             .into_iter()
-            .find(|k| documented.contains_key(k))
+            .find(|k| documented.contains_key(registry.canonical_kind(k)))
         {
             anyhow::bail!(
-                "docs/rules.md H3 '{}' documents `{ex_kind}` via a `docs:` scenario \
-                 but still contains a hand-written config example for it - remove the \
-                 hand-written block; the example now renders from the fixture.",
+                "docs/rules.md H3 '{}' documents `{}` via a `docs:` scenario but still \
+                 contains a hand-written config example (`kind: {ex_kind}`) for it - remove \
+                 the hand-written block; the example now renders from the fixture.",
                 h3.title,
+                registry.canonical_kind(&ex_kind),
             );
         }
         // The example must demonstrate the H3's CANONICAL kind, not an alias:

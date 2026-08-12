@@ -113,8 +113,9 @@ fn findings_of(
 ) {
     let mut cache: BTreeMap<PathBuf, Option<Vec<u8>>> = BTreeMap::new();
     for r in &report.results {
-        // `id_kind` values are already canonicalised at build time, so use them
-        // as-is; fall back to the rule id when the kind is unknown.
+        // Both call sites (scenarios + multi-fixtures) build `id_kind` with
+        // canonical kinds, so use the value as-is; fall back to the rule id when
+        // the kind is unknown.
         let kind = id_kind
             .get(r.rule_id.as_ref())
             .map_or_else(|| r.rule_id.to_string(), Clone::clone);
@@ -140,6 +141,7 @@ fn findings_of(
 
 /// Run every scenario under `dir` and collect findings + which kinds fired.
 fn collect_from_scenarios(dir: &Path, all: &mut Vec<Vec<Finding>>, fired: &mut BTreeSet<String>) {
+    let registry = builtin_registry();
     for path in yml_files(dir) {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
@@ -147,7 +149,13 @@ fn collect_from_scenarios(dir: &Path, all: &mut Vec<Vec<Finding>>, fired: &mut B
         let Ok(scenario) = serde_yaml_ng::from_str::<Scenario>(&text) else {
             continue;
         };
-        let id_kind = id_to_kind(&scenario.given.config);
+        // Canonicalise the id -> kind map (matching `collect_from_multi_fixtures`)
+        // so an alias-spelled `kind:` resolves to its canonical, keeping `fired`
+        // and the finding labels in a single namespace.
+        let id_kind: BTreeMap<String, String> = id_to_kind(&scenario.given.config)
+            .into_iter()
+            .map(|(id, kind)| (id, registry.canonical_kind(&kind).to_string()))
+            .collect();
         let Ok(run) = run_scenario(&scenario) else {
             continue;
         };
