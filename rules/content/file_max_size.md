@@ -51,6 +51,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- big.txt --------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2munder-10-bytes[0m
+              file exceeds 10 byte(s) (actual: 42)
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file is under the byte limit
 
 This repository is compliant:
@@ -82,5 +94,11 @@ rules:
     paths: "**/*.txt"
     max_bytes: 10
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

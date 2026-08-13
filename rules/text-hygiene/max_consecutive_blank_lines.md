@@ -60,6 +60,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- docs/gappy.md --------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-dbl-blank[0m
+              [2m3:1[0m  more than 1 consecutive blank line(s)
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Blank-line runs stay within the limit
 
 This repository is compliant:
@@ -98,5 +110,11 @@ rules:
     paths: "docs/**/*.md"
     max: 1
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

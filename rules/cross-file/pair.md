@@ -60,6 +60,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/beta.c -----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mc-requires-h[0m
+              src/beta.c has no matching partner at src/beta.h (template:
+              {dir}/{stem}.h)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every C source file has its header partner
 
 This repository is compliant:
@@ -106,5 +119,11 @@ rules:
     primary: "src/**/*.c"
     partner: "{dir}/{stem}.h"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

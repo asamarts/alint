@@ -54,6 +54,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- tiny.txt -------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mmin-50[0m
+              file below 50 byte(s) (actual: 10)
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A file that clears the byte floor
 
 This repository is compliant:
@@ -80,5 +92,11 @@ rules:
     paths: "**/*.md"
     min_bytes: 10
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

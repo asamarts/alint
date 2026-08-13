@@ -55,6 +55,18 @@ rules:
     level: info
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- stub.md --------------------------------------------------------------------[0m
+  [36mi  info   [0m  [2mmin-3-lines[0m
+              file has 2 line(s); at least 3 required
+
+[2mSummary (1 violation):[0m
+  [36mi 1 info[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A file that clears the line floor
 
 This repository is compliant:
@@ -83,5 +95,11 @@ rules:
     paths: "**/*.md"
     min_lines: 4
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

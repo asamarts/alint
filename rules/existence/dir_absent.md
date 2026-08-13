@@ -55,6 +55,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- target ---------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-target[0m
+              directory is forbidden (matches [**/target]): target
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A repository without a build directory
 
 This repository is compliant:
@@ -87,5 +99,11 @@ rules:
     kind: dir_absent
     paths: "**/target"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

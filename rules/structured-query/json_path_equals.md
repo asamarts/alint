@@ -65,6 +65,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- packages/bad/package.json --------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mrequire-mit-license[0m
+              value at path does not equal expected: expected "MIT", got
+              "UNLICENSED"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every package.json declares an MIT license
 
 This repository is compliant:
@@ -100,6 +113,12 @@ rules:
     path: "$.license"
     equals: "MIT"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

@@ -81,6 +81,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- tests/unit/lexer.rs --------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2munit-has-snapshot[0m
+              expected a file matching [tests/snapshots/lexer.snap]
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every unit test has a snapshot file
 
 This repository is compliant:
@@ -107,6 +119,12 @@ rules:
       - kind: file_exists
         paths: "tests/snapshots/{stem}.snap"
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

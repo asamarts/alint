@@ -44,6 +44,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- packages -------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mcap[0m
+              packages has 4 files; max is 2
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every directory stays under the file-count cap
 
 This repository is compliant:
@@ -66,5 +78,11 @@ rules:
     paths: "**/*.md"
     max_files: 5
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

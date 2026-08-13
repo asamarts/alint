@@ -54,6 +54,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- .gitmodules ----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-submods[0m
+              `.gitmodules` present — git submodules are forbidden
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A repo with no submodules declared
 
 This repository is compliant:
@@ -91,5 +103,11 @@ rules:
   - id: no-submods
     kind: no_submodules
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -51,6 +51,20 @@ committed with this history (oldest first):
 2024-01-15T09:00:00+00:00  fixup! feat: the original change
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-fixup[0m
+              commit 8f408e3: is a fixup/squash/amend commit; rebase with
+              `--autosquash` before merging (subject: "fixup! feat: the original
+              change")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A normal commit with no leftover fixup
 
 This repository is compliant:
@@ -79,5 +93,11 @@ committed with this history (oldest first):
 
 ```text
 feat: a normal change
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

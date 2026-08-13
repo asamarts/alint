@@ -68,6 +68,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- packages/beta --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mevery-pkg-has-package-json[0m
+              expected a file matching [packages/beta/package.json]
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every package directory has a `package.json`
 
 This repository is compliant:
@@ -104,5 +116,11 @@ rules:
       - kind: file_exists
         paths: "{path}/package.json"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

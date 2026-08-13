@@ -55,6 +55,19 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- .gitignore -----------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mkeep-sorted[0m
+              [2m5:1[0m  ordered_block (start at line 2): "*.tmp" is out of order (it comes
+              after "node_modules/")
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A keep-sorted block in lexical order
 
 This repository is compliant:
@@ -86,5 +99,11 @@ rules:
     end: "# keep-sorted end"
     comparator: lexical
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

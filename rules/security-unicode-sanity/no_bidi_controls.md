@@ -49,6 +49,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/sneaky.rs --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-bidi[0m
+              [2m1:16[0m  Unicode bidi control U+202E at line 1 col 16 (Trojan-Source
+              defense)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Source files with ordinary emoji and no bidi controls
 
 This repository is compliant:
@@ -81,5 +94,11 @@ rules:
     kind: no_bidi_controls
     paths: "src/**/*.rs"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

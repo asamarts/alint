@@ -80,6 +80,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- .github/workflows/bad.yml --------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mworkflow-contents-read[0m
+              value at path does not equal expected: expected "read", got
+              "write"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every workflow sets contents permission to read
 
 This repository is compliant:
@@ -130,6 +143,12 @@ rules:
     path: "$.permissions.contents"
     equals: "read"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

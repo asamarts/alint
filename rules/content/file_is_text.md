@@ -49,6 +49,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/accidental_blob.rs -----------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msrc-is-text[0m
+              file is detected as binary; text is required here
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source file is UTF-8 text
 
 This repository is compliant:
@@ -80,5 +92,11 @@ rules:
     kind: file_is_text
     paths: "src/**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

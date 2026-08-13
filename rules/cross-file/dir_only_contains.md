@@ -43,6 +43,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/notes.txt --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msrc-only-rs[0m
+              src/notes.txt is not allowed in src (allow: [*.rs])
+
+[2m--- src/stray.py ---------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msrc-only-rs[0m
+              src/stray.py is not allowed in src (allow: [*.rs])
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### The `src` directory holds only Rust files
 
 This repository is compliant:
@@ -64,5 +80,11 @@ rules:
     select: "src"
     allow: ["*.rs"]
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

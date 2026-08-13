@@ -52,6 +52,19 @@ committed with this history (oldest first):
 2024-01-15T09:00:00+00:00  feat: a change with no sign-off
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mdco[0m
+              commit e50a8ab: is missing a `Signed-off-by:` trailer (subject:
+              "feat: a change with no sign-off")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A commit signed off with the DCO trailer
 
 This repository is compliant:
@@ -82,5 +95,11 @@ committed with this history (oldest first):
 feat: a change
 
 Signed-off-by: alint scenario <scenario@alint.test>
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

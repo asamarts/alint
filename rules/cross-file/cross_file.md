@@ -72,6 +72,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- used.json ------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mused-are-allowed[0m
+              used.json has value(s) not present in allowed.json: "x"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every used value appears in the allow-list
 
 This repository is compliant:
@@ -108,5 +120,11 @@ rules:
       extract: { json: "$.used[*]" }
     relation: superset
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

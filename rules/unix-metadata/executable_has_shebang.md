@@ -49,6 +49,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- scripts/run ----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mexec-shebang[0m
+              executable file has no shebang (#!)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### An executable script that has its shebang
 
 This repository is compliant:
@@ -81,5 +93,11 @@ rules:
     kind: executable_has_shebang
     paths: "scripts/**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

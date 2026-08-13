@@ -51,6 +51,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mhas-readme[0m
+              expected a file matching [README.md] at the repo root
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A repository with the README present
 
 This repository is compliant:
@@ -83,5 +95,11 @@ rules:
     paths: README.md
     root_only: true
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

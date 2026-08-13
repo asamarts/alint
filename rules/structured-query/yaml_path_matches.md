@@ -70,6 +70,19 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- .github/workflows/bad.yml --------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mpin-actions-to-sha[0m
+              value at path "actions/checkout@v4" does not match regex
+              ^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every workflow action is pinned to a commit SHA
 
 This repository is compliant:
@@ -105,6 +118,12 @@ rules:
     path: "$.jobs.*.steps[*].uses"
     matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

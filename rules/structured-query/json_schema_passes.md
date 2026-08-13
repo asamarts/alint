@@ -70,6 +70,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- package.json ---------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mpackage-conforms[0m
+              schema violation at `/version`: "v1.x" does not match
+              "^[0-9]+\.[0-9]+\.[0-9]+$"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A package.json that conforms to its JSON Schema
 
 This repository is compliant:
@@ -113,5 +126,11 @@ rules:
     paths: "package.json"
     schema_path: "schemas/package.schema.json"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

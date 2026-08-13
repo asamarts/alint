@@ -65,6 +65,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/Bad/Bad.csproj ---------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mcsproj-net8[0m
+              value at path does not equal expected: expected "net8.0", got
+              "net6.0"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every project file targets net8.0
 
 This repository is compliant:
@@ -92,6 +105,12 @@ rules:
     path: "$.Project.PropertyGroup.TargetFramework"
     equals: "net8.0"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

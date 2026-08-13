@@ -45,6 +45,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- tests/BadNamingHere.rs -----------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mtests-named-test-prefix[0m
+              filename stem "BadNamingHere" does not match /^test_[a-z0-9_]+$/
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every test file name matches the required `test_` prefix
 
 This repository is compliant:
@@ -67,5 +79,11 @@ rules:
     pattern: "^test_[a-z0-9_]+$"
     stem: true
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

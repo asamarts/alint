@@ -54,6 +54,18 @@ rules:
     require: false
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- docs/generate.sh -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mdocs-not-exec[0m
+              mode is 0o100755; +x bit must not be set
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Docs files that are not executable
 
 This repository is compliant:
@@ -86,5 +98,11 @@ rules:
     paths: "docs/**"
     level: error
     require: false
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

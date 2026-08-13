@@ -64,6 +64,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Cargo.toml -----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mworkspace-members-resolve[0m
+              Cargo.toml: entry "crates/cli" does not resolve to a directory on
+              disk
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every declared workspace member resolves on disk
 
 This repository is compliant:
@@ -110,5 +123,11 @@ rules:
     expect: dir
     must_contain: Cargo.toml
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -62,6 +62,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/main.rs ----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mfmt-clean[0m
+              src/main.rs: not formatter-clean
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A checker that exits clean
 
 This repository is compliant:
@@ -85,5 +97,11 @@ rules:
     kind: command_idempotent
     command: ["sh", "-c", "exit 0"]
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

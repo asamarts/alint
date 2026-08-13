@@ -54,6 +54,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- latest.rs ------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-links[0m
+              path is a symbolic link
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A repository with no symlinks
 
 This repository is compliant:
@@ -86,5 +98,11 @@ rules:
     kind: no_symlinks
     paths: "**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

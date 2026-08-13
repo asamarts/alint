@@ -63,6 +63,24 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- scripts/hardcoded.sh -------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mscripts-use-env-bash[0m
+              [2m1:1[0m  first line "#!/bin/bash" does not match required shebang
+              /^#!/usr/bin/env bash$/
+
+[2m--- scripts/missing.sh ---------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mscripts-use-env-bash[0m
+              [2m1:1[0m  first line "echo no shebang" does not match required shebang
+              /^#!/usr/bin/env bash$/
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every script uses the env-style shebang
 
 This repository is compliant:
@@ -98,5 +116,11 @@ rules:
     paths: "scripts/*.sh"
     shebang: '^#!/usr/bin/env bash$'
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

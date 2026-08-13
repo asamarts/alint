@@ -57,6 +57,20 @@ chore: base
 change the format struct  (adds src/format.rs)
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mformat-version[0m
+              the changeset `HEAD~1...HEAD` changes a path matching
+              `src/format.rs` but no path matching `FORMAT_VERSION` changed with
+              it
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A format change with the version bump
 
 This repository is compliant:
@@ -97,5 +111,11 @@ committed with this history (oldest first):
 ```text
 chore: base
 change the format struct and bump the version  (adds src/format.rs, FORMAT_VERSION)
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -63,6 +63,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/bad.go -----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mgo-tabs[0m
+              [2m4:1[0m  line 4 indented with the wrong character (expected tabs)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every Go file is indented with tabs
 
 This repository is compliant:
@@ -105,5 +117,11 @@ rules:
     paths: "src/**/*.go"
     style: tabs
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

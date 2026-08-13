@@ -58,6 +58,19 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/missing.rs -------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mlicense-footer[0m
+              last 3 line(s) do not match required footer /Licensed under the
+              Apache License/
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file ends with the license footer
 
 This repository is compliant:
@@ -94,5 +107,11 @@ rules:
     pattern: "Licensed under the Apache License"
     lines: 3
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

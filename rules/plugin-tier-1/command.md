@@ -77,6 +77,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/a.rs -------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-todo-markers[0m
+              `sh` failed (exit 1):
+              1:// TODO: drop the debug hook before release
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Files the wrapped checker passes
 
 This repository is compliant:
@@ -109,5 +122,11 @@ rules:
     paths: "src/**/*.rs"
     command: ["sh", "-c", "if grep -n TODO \"{path}\"; then exit 1; fi"]
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

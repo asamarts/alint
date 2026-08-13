@@ -58,6 +58,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/bloated.rs -------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mcap-source-file[0m
+              file has 7 line(s); at most 5 allowed
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A source file within the line cap
 
 This repository is compliant:
@@ -94,5 +106,11 @@ rules:
     paths: "src/**/*.rs"
     max_lines: 5
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

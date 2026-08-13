@@ -53,6 +53,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/half_merged.rs ---------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-conflict[0m
+              [2m1:1[0m  unresolved merge conflict marker on line 1: "<<<<<<<"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Source files with no leftover conflict markers
 
 This repository is compliant:
@@ -84,5 +96,11 @@ rules:
     kind: no_merge_conflict_markers
     paths: "src/**/*"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

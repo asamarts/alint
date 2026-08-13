@@ -49,6 +49,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- README.md ------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-case[0m
+              case-insensitive collision: README.md (collides with: readme.md)
+
+[2m--- readme.md ------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-case[0m
+              case-insensitive collision: readme.md (collides with: README.md)
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Filenames that stay unique when case is ignored
 
 This repository is compliant:
@@ -82,5 +98,11 @@ rules:
     kind: no_case_conflicts
     paths: "**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

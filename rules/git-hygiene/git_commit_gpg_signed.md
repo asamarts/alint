@@ -51,3 +51,16 @@ committed with this history (oldest first):
 2024-01-15T09:00:00+00:00  feat: an unsigned change
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msigned-commits[0m
+              commit 57cf94a: is not signed (or its signature did not verify)
+              (subject: "feat: an unsigned change")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+

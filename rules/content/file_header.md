@@ -58,6 +58,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/a.rs -------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mcopyright-header[0m
+              [2m1:1[0m  first 3 line(s) do not match required header /(?s)Copyright/
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source file carries the header
 
 This repository is compliant:
@@ -94,5 +106,11 @@ rules:
     pattern: "(?s)Copyright"
     lines: 3
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

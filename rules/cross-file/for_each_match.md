@@ -49,6 +49,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- CHANGELOG.md ---------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mchangelog-entries-well-formed[0m
+              [2m2:1[0m  for_each_match (line 2): captures must be equal but differ:
+              disp="5", url="9"
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every changelog entry matches the required grammar
 
 This repository is compliant:
@@ -77,5 +90,11 @@ rules:
       matches: ['\)\.$']
       equal: [disp, url]
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

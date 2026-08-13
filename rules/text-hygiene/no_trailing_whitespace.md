@@ -56,6 +56,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/bad.rs -----------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-ws[0m
+              [2m1:1[0m  trailing whitespace on line 1
+
+[2m--- src/tabbed.md --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-ws[0m
+              [2m1:1[0m  trailing whitespace on line 1
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source file is free of trailing whitespace
 
 This repository is compliant:
@@ -87,5 +103,11 @@ rules:
     kind: no_trailing_whitespace
     paths: "src/**/*.rs"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

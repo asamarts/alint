@@ -51,6 +51,30 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- COM1.md --------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-win-reserved[0m
+              clashes with a Windows reserved device name: "COM1.md"
+
+[2m--- NUL ------------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-win-reserved[0m
+              clashes with a Windows reserved device name: "NUL"
+
+[2m--- con.txt --------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-win-reserved[0m
+              clashes with a Windows reserved device name: "con.txt"
+
+[2m--- trailing_dot. --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-win-reserved[0m
+              Windows strips trailing dots on checkout: "trailing_dot."
+
+[2mSummary (4 violations):[0m
+  [1m[31mx 4 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Names that resemble reserved Windows names but stay legal
 
 This repository is compliant:
@@ -72,5 +96,11 @@ rules:
     kind: no_illegal_windows_names
     paths: "**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

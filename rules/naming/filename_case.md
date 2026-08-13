@@ -43,6 +43,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/BadModule.rs -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mrust-snake[0m
+              filename stem "BadModule" is not snake_case
+
+[2m--- src/OtherName.rs -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mrust-snake[0m
+              filename stem "OtherName" is not snake_case
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every Rust source file name is snake_case
 
 This repository is compliant:
@@ -65,5 +81,11 @@ rules:
     paths: "src/**/*.rs"
     case: snake
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

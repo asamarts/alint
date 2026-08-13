@@ -63,6 +63,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- a/util.rs ------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2munique-rs-stems[0m
+              duplicate key "util" shared by 2 file(s): a/util.rs, b/util.rs
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file has a distinct stem
 
 This repository is compliant:
@@ -84,5 +96,11 @@ rules:
     select: "**/*.rs"
     key: "{stem}"
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

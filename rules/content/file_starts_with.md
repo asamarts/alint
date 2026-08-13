@@ -63,6 +63,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/no_header.rs -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mspdx-header[0m
+              [2m1:1[0m  file does not start with the required prefix
+
+[2m--- src/wrong_spdx.rs ----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mspdx-header[0m
+              [2m1:1[0m  file does not start with the required prefix
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file begins with the SPDX prefix
 
 This repository is compliant:
@@ -97,6 +113,12 @@ rules:
     paths: "src/**/*.rs"
     prefix: "// SPDX-License-Identifier: MIT\n"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

@@ -66,6 +66,19 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/api.ts -----------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-commented-code[0m
+              [2m7:1[0m  block of 3 commented-out lines (density 0.72); remove or convert
+              to runtime-checked branch
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Only prose comments, license headers, and doc comments
 
 This repository is compliant:
@@ -111,5 +124,11 @@ rules:
     threshold: 0.5
     skip_leading_lines: 5
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

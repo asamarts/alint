@@ -64,6 +64,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Cargo.lock.bak -------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-bak-files[0m
+              file is forbidden (matches [**/*.bak]): Cargo.lock.bak
+
+[2m--- src/main.rs.bak ------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-bak-files[0m
+              file is forbidden (matches [**/*.bak]): src/main.rs.bak
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A repository with no .bak files
 
 This repository is compliant:
@@ -96,5 +112,11 @@ rules:
     kind: file_absent
     paths: "**/*.bak"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

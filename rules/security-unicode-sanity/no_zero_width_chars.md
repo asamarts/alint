@@ -53,6 +53,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/obfuscated.rs ----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-zwsp[0m
+              [2m1:11[0m  zero-width character U+200B at line 1 col 11
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A file whose only zero-width codepoint is an allowed leading BOM
 
 This repository is compliant:
@@ -84,5 +96,11 @@ rules:
     kind: no_zero_width_chars
     paths: "src/**/*.rs"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

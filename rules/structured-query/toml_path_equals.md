@@ -69,6 +69,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- crates/bad/Cargo.toml ------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mrust-edition-2024[0m
+              value at path does not equal expected: expected "2024", got "2021"
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every crate targets the 2024 edition
 
 This repository is compliant:
@@ -108,6 +120,12 @@ rules:
     path: "$.package.edition"
     equals: "2024"
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

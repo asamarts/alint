@@ -55,6 +55,20 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- gen/list.txt ---------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mlist-fresh[0m
+              gen/list.txt: is stale — its committed contents differ from `sh
+              -c printf 'alpha\nbravo\ncharlie\n'` output (first differs at line
+              2)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A committed generated file matching its generator
 
 This repository is compliant:
@@ -82,5 +96,11 @@ rules:
     command: ["sh", "-c", "printf 'alpha\\nbravo\\ncharlie\\n'"]
     normalize: none
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

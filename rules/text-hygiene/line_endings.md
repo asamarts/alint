@@ -54,6 +54,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/has_crlf.rs ------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mlf-only[0m
+              [2m1:1[0m  line 1 does not use lf line endings
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source file uses LF line endings
 
 This repository is compliant:
@@ -87,5 +99,11 @@ rules:
     paths: "src/**/*.rs"
     target: lf
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

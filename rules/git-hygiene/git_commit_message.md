@@ -103,6 +103,19 @@ committed with this history (oldest first):
 wip nonsense  (adds README.md)
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mconventional-commits[0m
+              commit HEAD: commit message does not match pattern
+              `^(feat|fix|chore): ` (subject: "wip nonsense")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A commit that follows the convention
 
 This repository is compliant:
@@ -132,5 +145,11 @@ committed with this history (oldest first):
 
 ```text
 feat: add the readme  (adds README.md)
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -45,6 +45,22 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- placeholder.rs -------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-empty[0m
+              file is empty
+
+[2m--- stray.log ------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-empty[0m
+              file is empty
+
+[2mSummary (2 violations):[0m
+  [1m[33m! 2 warnings[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file carries at least one byte of content
 
 This repository is compliant:
@@ -76,5 +92,11 @@ rules:
     kind: no_empty_files
     paths: "**"
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

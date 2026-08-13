@@ -65,6 +65,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- proto/a.proto --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-proto-import-cycles[0m
+              dependency cycle (3 files): proto/a.proto → proto/b.proto →
+              proto/c.proto → proto/a.proto
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### An acyclic proto import graph
 
 This repository is compliant:
@@ -108,5 +121,11 @@ rules:
         resolve: relative_to_repo_root
     require: acyclic
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

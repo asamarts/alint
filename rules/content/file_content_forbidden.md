@@ -54,6 +54,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/main.rs ----------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-dbg[0m
+              [2m2:1[0m  forbidden pattern /\bdbg!\s*\(/ found
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Source with no forbidden macros
 
 This repository is compliant:
@@ -88,5 +100,11 @@ rules:
     paths: "src/**/*.rs"
     pattern: '\bdbg!\s*\('
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -67,6 +67,18 @@ committed with this history (oldest first):
 2000-01-01T00:00:00  add a todo  (adds src/main.rs)
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/main.rs ----------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mstale-todos[0m
+              [2m2:1[0m  This TODO is older than 30 days; address it or remove the marker.
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A freshly-added TODO
 
 This repository is compliant:
@@ -102,5 +114,11 @@ committed with this history (oldest first):
 
 ```text
 add a todo  (adds src/main.rs)
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

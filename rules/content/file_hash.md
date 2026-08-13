@@ -47,6 +47,21 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- reference.txt --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mlocked-content[0m
+              sha256 mismatch: expected
+              0000000000000000000000000000000000000000000000000000000000000000,
+              got
+              a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A file matching its pinned SHA-256
 
 This repository is compliant:
@@ -71,5 +86,11 @@ rules:
     paths: reference.txt
     sha256: "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

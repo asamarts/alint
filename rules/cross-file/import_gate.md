@@ -53,6 +53,19 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- staging/src/k8s.io/api/types.go --------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mstaging-no-main-module[0m
+              [2m5:1[0m  forbidden import "k8s.io/kubernetes/pkg/apis/core" at this scope
+              (matches /^k8s\.io/kubernetes//)
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Staging files import only allowed modules
 
 This repository is compliant:
@@ -83,5 +96,11 @@ rules:
     language: go
     forbid: "^k8s\\.io/kubernetes/"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

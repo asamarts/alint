@@ -80,6 +80,22 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- AGENTS.md ------------------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2magents-paths-resolve[0m
+              [2m4:11[0m  backticked path `src/missing.ts` doesn't resolve to a file or
+              directory
+  [1m[33m!  warning[0m  [2magents-paths-resolve[0m
+              [2m4:32[0m  backticked path `docs/gone.md` doesn't resolve to a file or
+              directory
+
+[2mSummary (2 violations):[0m
+  [1m[33m! 2 warnings[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every backticked path in the doc resolves to a real file
 
 This repository is compliant:
@@ -135,5 +151,11 @@ rules:
     paths: ["AGENTS.md"]
     prefixes: ["src/", "docs/"]
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -82,6 +82,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/beta -------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mevery-module-has-mod[0m
+              expected a file matching [src/beta/mod.rs]
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every module directory has a `mod.rs`
 
 This repository is compliant:
@@ -118,6 +130,12 @@ rules:
       - kind: file_exists
         paths: "{path}/mod.rs"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

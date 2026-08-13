@@ -56,6 +56,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- hello.txt ------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msums-pins-sources[0m
+              hello.txt is not listed in manifest SHA256SUMS
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source digest matches its checksum manifest line
 
 This repository is compliant:
@@ -89,5 +101,11 @@ rules:
     algorithm: sha256
     format: sums-line
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

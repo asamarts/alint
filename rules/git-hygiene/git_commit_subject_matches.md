@@ -51,6 +51,19 @@ committed with this history (oldest first):
 2024-01-15T09:00:00+00:00  WIP: Capitalised and the wrong shape
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2msubject-grammar[0m
+              commit e103bea: subject does not match `^[a-z0-9_/.-]+: [a-z].*$`
+              (subject: "WIP: Capitalised and the wrong shape")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A commit subject that follows the `component: summary` grammar
 
 This repository is compliant:
@@ -80,5 +93,11 @@ committed with this history (oldest first):
 
 ```text
 pkg/net: add a thing
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

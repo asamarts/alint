@@ -53,6 +53,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- pom.xml --------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mpom-deps-pinned[0m
+              value at path "${revision}" does not match regex ^\d
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every Maven dependency declares a concrete version
 
 This repository is compliant:
@@ -84,6 +96,12 @@ rules:
     path: "$.project.dependencies.dependency[*].version"
     matches: '^\d'
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

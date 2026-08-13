@@ -54,6 +54,20 @@ committed with this history (oldest first):
 2024-01-15T09:00:00+00:00  feat: a change from an outside author
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- Repository-level -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2morg-authors[0m
+              commit e3a1641: author "alint scenario <scenario@alint.test>" is
+              not in the allowlist (subject: "feat: a change from an outside
+              author")
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A commit from an allowed author domain
 
 This repository is compliant:
@@ -83,5 +97,11 @@ committed with this history (oldest first):
 
 ```text
 feat: a change from an allowed author
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

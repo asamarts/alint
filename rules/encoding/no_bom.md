@@ -51,6 +51,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- docs/with_bom.md -----------------------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mno-bom[0m
+              [2m1:1[0m  file begins with a UTF-8 BOM
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Markdown files saved as plain UTF-8 with no BOM
 
 This repository is compliant:
@@ -82,5 +94,11 @@ rules:
     kind: no_bom
     paths: "docs/**/*.md"
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

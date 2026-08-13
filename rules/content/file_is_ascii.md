@@ -54,6 +54,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/unicode.rs -------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mascii-only[0m
+              non-ASCII byte 0xE2 at offset 7
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every source file is pure ASCII
 
 This repository is compliant:
@@ -85,5 +97,11 @@ rules:
     kind: file_is_ascii
     paths: "src/**/*.rs"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

@@ -67,6 +67,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- scripts/build.py -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mshebang-needs-x[0m
+              shebang script is not marked executable
+
+[2m--- scripts/hello.sh -----------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mshebang-needs-x[0m
+              shebang script is not marked executable
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A shebang script that carries the executable bit
 
 This repository is compliant:
@@ -99,5 +115,11 @@ rules:
     kind: shebang_has_executable
     paths: "scripts/**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

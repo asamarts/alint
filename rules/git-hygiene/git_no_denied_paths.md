@@ -58,6 +58,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- .env -----------------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mno-tracked-secrets[0m
+              tracked path matches denied patterns `*.env`, `.env*`
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### A tracked tree where nothing matches the denylist
 
 This repository is compliant:
@@ -92,5 +104,11 @@ rules:
       - "*.pem"
       - "secrets/**"
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

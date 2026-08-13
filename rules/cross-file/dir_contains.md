@@ -70,6 +70,22 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- packages/beta --------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mpackages-have-readme-and-license[0m
+              packages/beta is missing a child matching "LICENSE*"
+
+[2m--- packages/gamma -------------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mpackages-have-readme-and-license[0m
+              packages/gamma is missing a child matching "README.md"
+
+[2mSummary (2 violations):[0m
+  [1m[31mx 2 errors[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every package directory has a README and a license
 
 This repository is compliant:
@@ -118,5 +134,11 @@ rules:
     select: "packages/*"
     require: ["README.md", "LICENSE*"]
     level: error
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 

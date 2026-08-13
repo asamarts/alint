@@ -61,6 +61,18 @@ rules:
     level: error
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- crates/b/Cargo.toml --------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mpinned-version[0m
+              value at path "0.4" does not match regex ^\d+\.\d+\.\d+$
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every crate version matches the semver pattern
 
 This repository is compliant:
@@ -100,6 +112,12 @@ rules:
     path: "$.package.version"
     matches: '^\d+\.\d+\.\d+$'
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
 ## See also

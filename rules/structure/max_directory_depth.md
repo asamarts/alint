@@ -44,6 +44,18 @@ rules:
     level: warning
 ```
 
+`alint check` reports:
+
+```ansi
+[2m--- src/deep/nested/way_down/lost.rs -------------------------------------------[0m
+  [1m[33m!  warning[0m  [2mshallow[0m
+              src/deep/nested/way_down/lost.rs is at depth 5; max is 3
+
+[2mSummary (1 violation):[0m
+  [1m[33m! 1 warning[0m
+  0 passing [2m*[0m 1 failing
+```
+
 ### Every file stays within the directory-depth cap
 
 This repository is compliant:
@@ -66,5 +78,11 @@ rules:
     paths: "**"
     max_depth: 3
     level: warning
+```
+
+`alint check` reports:
+
+```ansi
+[1m[32mv All 1 rule(s) passed.[0m
 ```
 
