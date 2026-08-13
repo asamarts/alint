@@ -33,11 +33,11 @@ pub(crate) struct RenderedExample {
 /// (fail before pass, then by `order`). An empty map means no kind has opted
 /// in yet, so nothing is rendered and the legacy hand-written examples stand.
 ///
-/// `capture_output` controls whether the live `alint check` run is captured:
-/// the full export passes `true`; the `--rules-only` docs-bundle bridge passes
-/// `false` so it renders tree + config only and never cold-builds the release
-/// binary (the cost `--rules-only` exists to avoid). Validation gates run in
-/// both modes.
+/// `capture_output` controls whether the live `alint check` run is captured.
+/// Both the full export and the `--rules-only` docs-bundle bridge pass `true`,
+/// so a doc-only refresh still renders each page's `alint check` output block
+/// from a real run (ADR-0014 Phase 5). Passing `false` renders tree + config
+/// only, skipping the release build. Validation gates run in either mode.
 pub(crate) fn render_documented(
     workspace: &Path,
     capture_output: bool,

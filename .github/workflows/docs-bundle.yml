@@ -198,9 +198,15 @@ jobs:
           # hygiene and safe if the job ever moves to a persistent host.
           trap 'git worktree remove --force "$main_tree" >/dev/null 2>&1 || true; rm -rf "$main_tree"' EXIT
           # --rules-only: the bridge reads only rules/ below, so skip the rest of
-          # the export — most importantly the CLI-reference step's `cargo build
-          # --release -p alint`, which this second (cold) build would otherwise
-          # redo from scratch on top of the tag build above.
+          # the export (long-form prose, the CLI reference, arch diagrams, …).
+          # This DOES build the alint release binary once, from main: each rule
+          # page's `alint check` block is the live output of a real run, so a
+          # doc-only refresh deploys pages WITH their output rather than a
+          # stripped-down tree+config (ADR-0014 Phase 5 — the whole point of the
+          # #82 "deploy rule-page fixes without a release" bridge). What
+          # --rules-only still skips is the CLI-reference step's SECOND
+          # `cargo build --release -p alint`; this one build (~7 min, on top of
+          # the tag build above) is the price of faithful, current output.
           #
           # --released-version: this bridge runs MAIN's docs-export against MAIN's
           # schema/rules.md, so an option (schema `x-since`) or prose block

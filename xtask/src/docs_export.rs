@@ -124,12 +124,16 @@ pub(crate) fn docs_export(
     eprintln!("[xtask] docs-export → {}", target_dir.display());
 
     if rules_only {
-        // The docs-bundle rule-page bridge overlays ONLY the per-rule
-        // reference pages from main, so generate just those and skip the rest
-        // of the export — most importantly step 5 (`generate_cli_reference`),
-        // which builds the alint release binary. That redundant build is the
-        // bulk of the bridge's cost, and the bridge never reads its output.
-        generate_rules_pages(&workspace, &target_dir, released, false)?;
+        // The docs-bundle rule-page bridge overlays ONLY the per-rule reference
+        // pages from main, so generate just those and skip the rest of the
+        // export (`copy_site_tree`, `generate_cli_reference`, the arch diagrams,
+        // …). We pass `capture_output: true`: each rule page's `alint check`
+        // block renders from a real run of the freshly built binary, so a
+        // doc-only refresh deploys pages WITH their live output — not a
+        // stripped-down tree+config (ADR-0014 Phase 5). That costs one release
+        // build; the redundant *second* build --rules-only still avoids is
+        // `generate_cli_reference`'s (the bridge never reads the CLI reference).
+        generate_rules_pages(&workspace, &target_dir, released, true)?;
         eprintln!(
             "[xtask] docs-export --rules-only wrote {}/rules",
             target_dir.display()

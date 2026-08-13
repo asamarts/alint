@@ -237,10 +237,11 @@ enum Commands {
         #[arg(long)]
         check: bool,
         /// Generate ONLY the per-rule reference pages (`rules/`), skipping the
-        /// rest of the bundle — most importantly the CLI-reference step, which
-        /// builds the alint release binary. Used by the docs-bundle rule-page
-        /// bridge, which overlays only those pages from main; the redundant
-        /// release build was the bulk of that bridge's cost.
+        /// rest of the bundle (long-form prose, the CLI reference, arch
+        /// diagrams, …). Used by the docs-bundle rule-page bridge, which
+        /// overlays only those pages from main. Still builds the release binary
+        /// once so each page's live `alint check` output renders from a real
+        /// run; what it skips is the CLI-reference step's *second* release build.
         #[arg(long)]
         rules_only: bool,
         /// The released version the per-rule reference pages must not document

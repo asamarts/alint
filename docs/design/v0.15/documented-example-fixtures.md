@@ -161,8 +161,9 @@ Two structural points the review surfaced:
   (~line 171) - where both the output-capture and the upgraded gate now live. So
   "as it already does for `--help`" hides an ordering change: Phase 1 must **hoist
   `build_release_binary()` above `generate_rules_pages`** and thread the path into
-  the emit path and the gate. (The `--rules-only` mode has no binary at all - the
-  same root as the Phase-5 bridge conflict.)
+  the emit path and the gate. (The `--rules-only` mode originally built no binary
+  at all - the same root as the Phase-5 bridge conflict, now resolved in #98 by
+  having that mode capture output too.)
 - **The shared setup helper is the tree + git, not the config.** Extract a shared
   `materialize(tree, root)` (already exists) and a `setup_git(root, spec)` helper
   that `run_scenario` and docs-export both call. The runner writes `.alint.yml`
@@ -457,14 +458,17 @@ Once all seven fixtures fire natively, `NATIVE_FIRES_ALLOWLIST` is deleted and
   `probed` floors are already lowered per-family, so only the final scoping
   remains.
 - **Phase 5 - alint.org presentation.** An Astro component renders the blocks
-  consistently. **Resolve the `--rules-only` bridge conflict** (it binds once the
-  pilot injects real output): the docs-bundle bridge runs `docs-export --rules-only`
-  to skip the release build, but the output block needs a real `alint check` spawn.
-  Recommended: the bridge builds the binary + takes `alint-testkit` in its
-  worktree (undoing the `--rules-only` speed optimisation but preserving the #82
-  "deploy rule-page fixes without a release" contract for the output block); the
-  alternative skips output-injection under `--rules-only` and ships that block only
-  via a release-tag export. Tree + config blocks deploy via the bridge regardless.
+  consistently. **The `--rules-only` bridge conflict is resolved (#98):** the
+  docs-bundle bridge still runs `docs-export --rules-only` to skip the rest of the
+  export, but that mode now passes `capture_output: true`, so it builds the alint
+  release binary once and each rule page's output block renders from a real
+  `alint check` spawn (the recommended option). `alint-testkit` is already a
+  workspace member, so the origin/main worktree the bridge builds in has it. The
+  `--rules-only` speed optimisation is undone for the examples' one build only; the
+  CLI-reference step's *second* release build stays skipped. This keeps the #82
+  "deploy rule-page fixes without a release" contract intact for the output block:
+  a doc-only refresh deploys pages whose `alint check` output is byte-identical to
+  a full release-tag export (verified by diffing the two `rules/` subtrees).
 
 ## Determinism and cost
 
@@ -512,8 +516,11 @@ Once all seven fixtures fire natively, `NATIVE_FIRES_ALLOWLIST` is deleted and
 1. **Output-block length** - some kinds emit verbose output; decide full stdout vs
    a bounded, elided form (leaning: full, since a minimal fixture's output is
    short and real).
-2. **`--rules-only` bridge** - confirm the recommended "build the binary in the
-   bridge worktree" option against the docs-bundle build-time budget (Phase 5).
+2. **`--rules-only` bridge** - RESOLVED (#98): the recommended "build the binary in
+   the bridge worktree" option shipped. The bridge accepts one ~7 min release build
+   from the origin/main worktree (on top of the tag build) as the cost of faithful,
+   current output; measured against the docs-bundle budget it is acceptable for a
+   background workflow that gates no merges.
 3. **`.gitignore` in a documented tree** - a `given.tree` may include a
    `.gitignore`, which the run respects (as a real repo would), so the shown tree
    can list files alint skips. Leaning: allow it but prefer trees without one
