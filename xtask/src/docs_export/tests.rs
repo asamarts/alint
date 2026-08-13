@@ -535,6 +535,19 @@ fn rule_meta_descriptions_are_well_formed() {
                         "punctuation artifact {bad:?} in {kind} description: {desc:?}"
                     );
                 }
+                // The plain-text SERP snippet must not leak markdown emphasis or
+                // unicode arrows (`strip_markup` folds them): a `<meta>`
+                // description shows literal "**regex**" / "⇒" otherwise.
+                assert!(
+                    !desc.contains("**"),
+                    "markdown bold leaked into {kind} description: {desc:?}"
+                );
+                for arrow in ['→', '⇒', '←', '⇐', '↔'] {
+                    assert!(
+                        !desc.contains(arrow),
+                        "unicode arrow {arrow:?} in {kind} description: {desc:?}"
+                    );
+                }
                 // The opening sentence must not have been cut at an abbreviation,
                 // jamming the suffix onto the fragment.
                 for ab in ABBREV_DOT {

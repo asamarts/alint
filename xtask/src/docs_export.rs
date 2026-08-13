@@ -990,9 +990,10 @@ pub(crate) fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
 /// Repair the tail a hard length cap can leave mid-clause. A word-boundary cut
 /// inside a parenthetical strands an unclosed `(` (`… comparator (lexical /`,
 /// `ordered_block`); dropping from the last unmatched `(` rebalances it, and
-/// trimming trailing separators/operators removes what the cut left dangling.
-/// A cut at a real sentence end (trailing `.`) is already balanced and passes
-/// through untouched.
+/// trimming trailing separators/operators — including a folded arrow half like
+/// `=>` (`command_idempotent`'s `⇒`) — removes what the cut left dangling. A cut
+/// at a real sentence end (trailing `.`) is already balanced and passes through
+/// untouched.
 fn tidy_truncated_tail(s: &str) -> String {
     let mut t = s.to_string();
     while t.matches('(').count() > t.matches(')').count() {
@@ -1000,8 +1001,10 @@ fn tidy_truncated_tail(s: &str) -> String {
         t.truncate(p);
         t = t.trim_end().to_string();
     }
-    t.trim_end_matches([' ', '\t', ',', ';', ':', '/', '-', '&', '|', '('])
-        .to_string()
+    t.trim_end_matches([
+        ' ', '\t', ',', ';', ':', '/', '-', '&', '|', '(', '<', '>', '=',
+    ])
+    .to_string()
 }
 
 /// Build the per-rule SERP description: lead with what the rule
@@ -1018,7 +1021,11 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
     // represent:") composes to a "…:. alint …" artifact, which the final
     // `meta_desc_clean` collapses (it drops a `[:;,]` left directly before a
     // period — also the `allow:.` a backtick-wrapped `allow:` leaves behind).
-    let summary = meta_desc_clean(&first_sentence(body), 140);
+    // `strip_markup` first, so `**bold**` / `*italic*` emphasis and unicode
+    // arrows don't leak into the plain-text SERP snippet as literal `**regex**`
+    // (`*_path_matches`) or `⇒` (`command_idempotent`) — the website rule index
+    // keeps the markdown (it renders it), but a `<meta>` description must not.
+    let summary = meta_desc_clean(&strip_markup(&first_sentence(body)), 140);
     let family = family_title.to_lowercase();
     let composed = if summary.len() < 25 {
         // Doc-comment opener too thin to be a useful snippet —
