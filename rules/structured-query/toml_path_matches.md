@@ -1,6 +1,6 @@
 ---
 title: 'toml_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
+description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint toml_path_matches rule, structured query family.'
 sidebar:
   order: 7
 categories: ['structured-query']

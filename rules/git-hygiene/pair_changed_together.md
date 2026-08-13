@@ -1,6 +1,6 @@
 ---
 title: 'pair_changed_together'
-description: 'If the <since>...HEAD diff changes any path matching if_changed:, at least one path matching then_changed: must change in the same range,.'
+description: 'If the <since>...HEAD diff changes any path matching if_changed:, at least one path matching then_changed: must change in the same range.'
 sidebar:
   order: 13
 categories: ['git-hygiene', 'cross-file']

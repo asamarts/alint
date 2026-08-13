@@ -1,6 +1,6 @@
 ---
 title: 'changeset_requires_path'
-description: 'The <since>...HEAD diff must **add** (git status A) at least one path matching add_glob:, the "did you add a changelog entry?" gate.'
+description: 'The <since>...HEAD diff must add (git status A) at least one path matching add_glob:, the "did you add a changelog entry?" gate.'
 sidebar:
   order: 12
 categories: ['git-hygiene', 'cross-file']

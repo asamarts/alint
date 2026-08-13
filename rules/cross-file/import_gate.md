@@ -1,6 +1,6 @@
 ---
 title: 'import_gate'
-description: 'Forbid imports whose **extracted target** matches a forbid regex, within the paths scope, an architectural import firewall (staging-layer.'
+description: 'Forbid imports whose extracted target matches a forbid regex, within the paths scope, an architectural import firewall.'
 sidebar:
   order: 9
 categories: ['cross-file', 'security-unicode-sanity']

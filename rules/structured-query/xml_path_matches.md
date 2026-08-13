@@ -1,6 +1,6 @@
 ---
 title: 'xml_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a **regex** matched against string values.'
+description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint xml_path_matches rule, structured query family.'
 sidebar:
   order: 8
 categories: ['structured-query']
