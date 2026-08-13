@@ -848,84 +848,15 @@ fn harvest_aliases(src: &str) -> std::collections::HashSet<String> {
 /// first markdown paragraph of an H3 body, strips trailing
 /// whitespace, takes up to the first sentence-ending `.`. Skips
 /// blank lines / fenced code at the top.
+/// The opening sentence of a rule's `docs/rules.md` prose: the first paragraph
+/// (code blocks skipped, wrapped lines joined) cut at the first `". "` whose
+/// preceding word is NOT a known abbreviation (`e.g.`, `i.e.`, `vs.`, …). The
+/// abbreviation guard keeps a clause like "differ only by case (e.g. …)" from
+/// being cut at the "g." (`no_case_conflicts`); a decimal like "v1.2." is not
+/// mistaken for an abbreviation and correctly ends the sentence. Markdown is
+/// left intact — the website rule index renders it directly; `kind_summary`
+/// (terminal) and `rule_meta_description` (SERP) strip it for their surfaces.
 fn first_sentence(body: &str) -> String {
-    let mut paragraph = String::new();
-    let mut in_code_block = false;
-    for line in body.lines() {
-        if line.trim_start().starts_with("```") {
-            in_code_block = !in_code_block;
-            continue;
-        }
-        if in_code_block {
-            continue;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            if !paragraph.is_empty() {
-                break;
-            }
-            continue;
-        }
-        if !paragraph.is_empty() {
-            paragraph.push(' ');
-        }
-        paragraph.push_str(trimmed);
-    }
-    if let Some(idx) = paragraph.find(". ") {
-        paragraph.truncate(idx + 1);
-    }
-    paragraph.trim().to_string()
-}
-
-/// Terminal-ready one-line summary of a rule kind's `docs/rules.md` prose, for
-/// the in-binary docs bridge (ADR-0011). Unlike [`first_sentence`] (which feeds
-/// the website and leaves markdown intact), this yields clean plaintext: the
-/// opening sentence with abbreviation-aware splitting, `**bold**` / `*italic*`
-/// and inline backticks stripped, em/en-dashes folded and arrows ASCII-ized,
-/// whitespace collapsed, a colon/comma lead-in trimmed, and length-capped with an
-/// honest `...` marker. Input is the `**Categories:**`-stripped H3 body.
-pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
-    let sentence = strip_markup(&guarded_first_sentence(clean_body));
-    let cleaned = meta_desc_clean(&sentence, usize::MAX);
-    // A colon / comma / semicolon lead-in (a sentence that introduces a list) is
-    // not a self-contained one-liner; drop the trailing punctuation.
-    let cleaned = cleaned.trim_end_matches([':', ';', ',', ' ']);
-    if cleaned.chars().count() <= max_chars {
-        return cleaned.to_string();
-    }
-    // Longer than one terminal line: word-cap it (leaving room for the marker),
-    // drop a dangling open quote the cap may have created plus any trailing
-    // punctuation, and end with an ASCII `...` so the truncation is honest.
-    let capped = meta_desc_clean(cleaned, max_chars.saturating_sub(3));
-    let capped: &str = match (capped.matches('"').count() % 2, capped.rfind('"')) {
-        (1, Some(q)) => &capped[..q],
-        _ => capped.as_str(),
-    };
-    let trimmed = capped.trim_end_matches([',', ';', ':', ' ', '(', '"', '\'']);
-    format!("{trimmed}...")
-}
-
-/// Strip markdown emphasis (`**bold**`, `*italic*`) and fold non-ASCII arrows to
-/// ASCII, so the terminal summary is plain text. A bare, unbalanced `*` (e.g. the
-/// `*_equals` wildcard family) is left intact.
-fn strip_markup(s: &str) -> String {
-    static ITALIC: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\*([^*\n]+)\*").unwrap());
-    ITALIC
-        .replace_all(&s.replace("**", ""), "$1")
-        .replace('→', "->")
-        .replace('⇒', "=>")
-        .replace('←', "<-")
-        .replace('⇐', "<=")
-        .replace('↔', "<->")
-}
-
-/// Like the paragraph-gather in [`first_sentence`], but ends the sentence at the
-/// first `". "` whose preceding word is NOT a known abbreviation (`e.g.`, `i.e.`,
-/// `vs.`, ...). Without this a clause like "differ only by case (e.g. ...)" is cut
-/// at the "g." (`no_case_conflicts`); a decimal like "v1.2." is not mistaken for
-/// an abbreviation and correctly ends the sentence.
-fn guarded_first_sentence(body: &str) -> String {
     const ABBREV: &[&str] = &[
         "e.g", "i.e", "vs", "cf", "etc", "al", "resp", "approx", "fig", "no",
     ];
@@ -967,6 +898,49 @@ fn guarded_first_sentence(body: &str) -> String {
     paragraph[..cut].trim().to_string()
 }
 
+/// Terminal-ready one-line summary of a rule kind's `docs/rules.md` prose, for
+/// the in-binary docs bridge (ADR-0011). Unlike [`first_sentence`] (which feeds
+/// the website rule index and leaves markdown intact), this yields clean
+/// plaintext: the same opening sentence, with `**bold**` / `*italic*` and inline
+/// backticks stripped, em/en-dashes folded and arrows ASCII-ized, whitespace
+/// collapsed, a colon/comma lead-in trimmed, and length-capped with an honest
+/// `...` marker. Input is the `**Categories:**`-stripped H3 body.
+pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
+    let sentence = strip_markup(&first_sentence(clean_body));
+    let cleaned = meta_desc_clean(&sentence, usize::MAX);
+    // A colon / comma / semicolon lead-in (a sentence that introduces a list) is
+    // not a self-contained one-liner; drop the trailing punctuation.
+    let cleaned = cleaned.trim_end_matches([':', ';', ',', ' ']);
+    if cleaned.chars().count() <= max_chars {
+        return cleaned.to_string();
+    }
+    // Longer than one terminal line: word-cap it (leaving room for the marker),
+    // drop a dangling open quote the cap may have created plus any trailing
+    // punctuation, and end with an ASCII `...` so the truncation is honest.
+    let capped = meta_desc_clean(cleaned, max_chars.saturating_sub(3));
+    let capped: &str = match (capped.matches('"').count() % 2, capped.rfind('"')) {
+        (1, Some(q)) => &capped[..q],
+        _ => capped.as_str(),
+    };
+    let trimmed = capped.trim_end_matches([',', ';', ':', ' ', '(', '"', '\'']);
+    format!("{trimmed}...")
+}
+
+/// Strip markdown emphasis (`**bold**`, `*italic*`) and fold non-ASCII arrows to
+/// ASCII, so the terminal summary is plain text. A bare, unbalanced `*` (e.g. the
+/// `*_equals` wildcard family) is left intact.
+fn strip_markup(s: &str) -> String {
+    static ITALIC: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\*([^*\n]+)\*").unwrap());
+    ITALIC
+        .replace_all(&s.replace("**", ""), "$1")
+        .replace('→', "->")
+        .replace('⇒', "=>")
+        .replace('←', "<-")
+        .replace('⇐', "<=")
+        .replace('↔', "<->")
+}
+
 /// SERP `<meta description>` line normaliser. Strips markdown
 /// inline backticks (they read as literal grave accents in a
 /// search snippet), collapses whitespace, removes em/en dashes
@@ -990,6 +964,12 @@ pub(crate) fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
     // Tidy any ", ." / ".," artifacts the substitution can leave
     // when a dash sat next to existing punctuation.
     s = s.replace(", .", ".").replace(". ,", ".").replace(" ,", ",");
+    // A `,`/`;`/`:` sitting directly before a period is an artifact, never real
+    // prose: a backtick-wrapped term that ended in a colon (`allow:` → `allow:.`
+    // once the backticks are gone) or a list lead-in that had the composed
+    // "alint <kind> rule" suffix appended after its trailing colon. Collapse to
+    // the period so the SERP line reads cleanly.
+    s = s.replace(":.", ".").replace(";.", ".").replace(",.", ".");
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() <= max_chars {
         return s;
@@ -997,13 +977,31 @@ pub(crate) fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
     // Over the cap: prefer cutting at the last sentence end that
     // still fits; else cut at the last word boundary that fits.
     let truncated: String = s.chars().take(max_chars).collect();
-    if let Some(idx) = truncated.rfind(". ") {
-        return truncated[..=idx].trim().to_string();
+    let cut = if let Some(idx) = truncated.rfind(". ") {
+        &truncated[..=idx]
+    } else if let Some(idx) = truncated.rfind(' ') {
+        &truncated[..idx]
+    } else {
+        truncated.as_str()
+    };
+    tidy_truncated_tail(cut.trim())
+}
+
+/// Repair the tail a hard length cap can leave mid-clause. A word-boundary cut
+/// inside a parenthetical strands an unclosed `(` (`… comparator (lexical /`,
+/// `ordered_block`); dropping from the last unmatched `(` rebalances it, and
+/// trimming trailing separators/operators removes what the cut left dangling.
+/// A cut at a real sentence end (trailing `.`) is already balanced and passes
+/// through untouched.
+fn tidy_truncated_tail(s: &str) -> String {
+    let mut t = s.to_string();
+    while t.matches('(').count() > t.matches(')').count() {
+        let Some(p) = t.rfind('(') else { break };
+        t.truncate(p);
+        t = t.trim_end().to_string();
     }
-    if let Some(idx) = truncated.rfind(' ') {
-        return truncated[..idx].trim().to_string();
-    }
-    truncated.trim().to_string()
+    t.trim_end_matches([' ', '\t', ',', ';', ':', '/', '-', '&', '|', '('])
+        .to_string()
 }
 
 /// Build the per-rule SERP description: lead with what the rule
@@ -1013,6 +1011,13 @@ pub(crate) fn meta_desc_clean(raw: &str, max_chars: usize) -> String {
 /// Falls back to a family-scoped sentence when the rule body's
 /// opening line is too terse to stand alone.
 fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
+    // `first_sentence` is abbreviation-aware, so a clause like "differ only by
+    // case (e.g. ...)" is not cut at the "g." (`no_case_conflicts`). A first
+    // sentence that is a bare list lead-in ending in a colon
+    // (`no_illegal_windows_names`: "Reject path components Windows can't
+    // represent:") composes to a "…:. alint …" artifact, which the final
+    // `meta_desc_clean` collapses (it drops a `[:;,]` left directly before a
+    // period — also the `allow:.` a backtick-wrapped `allow:` leaves behind).
     let summary = meta_desc_clean(&first_sentence(body), 140);
     let family = family_title.to_lowercase();
     let composed = if summary.len() < 25 {

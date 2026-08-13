@@ -483,3 +483,67 @@ fn no_residual_categories_marker_after_strip() {
         }
     }
 }
+
+/// Every generated rule summary is well-formed prose, on BOTH surfaces that
+/// share the `first_sentence` splitter: the SERP `description:` frontmatter
+/// (`rule_meta_description`) and the website rule-index one-liner (`KindEntry`,
+/// via bare `first_sentence`). Checked against the real docs/rules.md so a
+/// regression is caught by `cargo test`, not only at bundle-build time. Guards
+/// the #97 failure modes: an opening sentence cut at an abbreviation ("differ
+/// only by case (e.g. ...)" → "...(e.g.", `no_case_conflicts`), a list lead-in
+/// ending in a colon composing to ":." (`no_illegal_windows_names`,
+/// `file_is_ascii`), and a cap that strands an unclosed "(" (`ordered_block`).
+#[test]
+fn rule_meta_descriptions_are_well_formed() {
+    // Abbreviation forms `first_sentence` must not treat as a sentence end. If
+    // one lands immediately before the composed " alint <kind>" suffix, the
+    // opening sentence was truncated mid-abbreviation.
+    const ABBREV_DOT: &[&str] = &[
+        "e.g.", "i.e.", "vs.", "cf.", "etc.", "al.", "resp.", "approx.", "fig.", "no.",
+    ];
+    let balanced = |s: &str| s.matches('(').count() == s.matches(')').count();
+    let root = crate::workspace_root().expect("workspace root");
+    let src = std::fs::read_to_string(root.join("docs/rules.md")).expect("read docs/rules.md");
+    for h2 in split_h2_sections(&src) {
+        for h3 in split_h3_sections(&h2.body) {
+            let (_cats, clean) = crate::categories_line::split_categories_line(&h3.body);
+            // The rule-index summary is the same first sentence, markdown intact.
+            // A cut at an abbreviation strands an unclosed "(" ("...case (e.g.").
+            let idx_summary = first_sentence(&clean);
+            assert!(
+                balanced(&idx_summary),
+                "unbalanced parens in {:?} index summary: {idx_summary:?}",
+                h3.title
+            );
+            for kind in extract_kinds(&h3.title) {
+                let desc = rule_meta_description(&kind, &h2.title, &clean);
+                assert!(
+                    desc.ends_with('.') && desc.len() > 10,
+                    "{kind} description is empty/unterminated: {desc:?}"
+                );
+                // A sentence cut mid-clause (inside "(e.g. ...)") leaves a
+                // dangling open paren.
+                assert!(
+                    balanced(&desc),
+                    "unbalanced parens in {kind} description: {desc:?}"
+                );
+                // Composing the " alint <kind> rule…" suffix onto a lead-in that
+                // still carries trailing punctuation leaves these artifacts.
+                for bad in [":.", ";.", ",."] {
+                    assert!(
+                        !desc.contains(bad),
+                        "punctuation artifact {bad:?} in {kind} description: {desc:?}"
+                    );
+                }
+                // The opening sentence must not have been cut at an abbreviation,
+                // jamming the suffix onto the fragment.
+                for ab in ABBREV_DOT {
+                    assert!(
+                        !desc.contains(&format!("{ab} alint ")),
+                        "{kind} description split at abbreviation {ab:?}: {desc:?}"
+                    );
+                }
+            }
+        }
+    }
+}
