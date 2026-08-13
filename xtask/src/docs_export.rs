@@ -86,6 +86,15 @@ fn copy_c4_model(workspace: &Path, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether the per-rule reference pages render each documented example's live
+/// `alint check` output (ADR-0014 Phase 5). The full export and the
+/// `--rules-only` docs-bundle bridge MUST pass the same value: a doc-only
+/// refresh has to deploy pages byte-identical to a release-tag export, so the
+/// bridge cannot omit the output a release build would emit. `--check` exercises
+/// only the full path, so it would not catch the two call sites diverging — a
+/// single source of truth keeps them from silently drifting.
+const RULE_PAGES_CAPTURE_OUTPUT: bool = true;
+
 pub(crate) fn docs_export(
     out: Option<PathBuf>,
     check: bool,
@@ -127,13 +136,13 @@ pub(crate) fn docs_export(
         // The docs-bundle rule-page bridge overlays ONLY the per-rule reference
         // pages from main, so generate just those and skip the rest of the
         // export (`copy_site_tree`, `generate_cli_reference`, the arch diagrams,
-        // …). We pass `capture_output: true`: each rule page's `alint check`
-        // block renders from a real run of the freshly built binary, so a
-        // doc-only refresh deploys pages WITH their live output — not a
-        // stripped-down tree+config (ADR-0014 Phase 5). That costs one release
-        // build; the redundant *second* build --rules-only still avoids is
-        // `generate_cli_reference`'s (the bridge never reads the CLI reference).
-        generate_rules_pages(&workspace, &target_dir, released, true)?;
+        // …). It still passes RULE_PAGES_CAPTURE_OUTPUT, so each rule page's
+        // `alint check` block renders from a real run of the freshly built
+        // binary and a doc-only refresh deploys exactly what a release export
+        // would — not a stripped-down tree+config (ADR-0014 Phase 5). One
+        // release build is the cost; what --rules-only still saves is
+        // `generate_cli_reference`'s SECOND build, which the bridge never reads.
+        generate_rules_pages(&workspace, &target_dir, released, RULE_PAGES_CAPTURE_OUTPUT)?;
         eprintln!(
             "[xtask] docs-export --rules-only wrote {}/rules",
             target_dir.display()
@@ -172,7 +181,8 @@ pub(crate) fn docs_export(
     // overviews and a master alphabetical index. Returns a
     // kind → family-slug map used below to render kind names
     // as links from the bundled-ruleset pages.
-    let kind_to_family = generate_rules_pages(&workspace, &target_dir, released, true)?;
+    let kind_to_family =
+        generate_rules_pages(&workspace, &target_dir, released, RULE_PAGES_CAPTURE_OUTPUT)?;
 
     // 3. Per-bundled-ruleset reference page. `kind_to_family`
     //    drives the cross-links from `**kind**: <name>` →
