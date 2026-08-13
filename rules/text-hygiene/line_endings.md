@@ -8,16 +8,6 @@ categories: ['text-hygiene', 'portable-metadata']
 
 Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single file fail.
 
-```yaml
-- id: lf-only
-  kind: line_endings
-  paths: ["**/*.rs", "**/*.md"]
-  target: lf
-  level: warning
-  fix:
-    file_normalize_line_endings: {}
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -25,3 +15,77 @@ Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single fi
 | `target` | one of `lf` \| `crlf` | yes |  | Required line ending style: `lf` or `crlf`. Mixed endings within a file also fail. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A source file with CRLF line endings under an LF policy
+
+The rule fires on this repository:
+
+```text
+src/
+src/has_crlf.rs
+src/pure_lf.rs
+```
+
+`src/has_crlf.rs`:
+
+```rust
+fn c() {}
+fn d() {}
+```
+
+`src/pure_lf.rs`:
+
+```rust
+fn a() {}
+fn b() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: lf-only
+    kind: line_endings
+    paths: "src/**/*.rs"
+    target: lf
+    level: error
+```
+
+### Every source file uses LF line endings
+
+This repository is compliant:
+
+```text
+src/
+src/a.rs
+src/b.rs
+```
+
+`src/a.rs`:
+
+```rust
+fn a() {}
+fn b() {}
+```
+
+`src/b.rs`:
+
+```rust
+fn c() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: lf-only
+    kind: line_endings
+    paths: "src/**/*.rs"
+    target: lf
+    level: error
+```
+

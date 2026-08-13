@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-```yaml
-- id: crate-version-is-semver
-  kind: toml_path_matches
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-
-
-- id: semver-version
-  kind: json_path_matches
-  paths: "packages/*/package.json"
-  path: "$.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-
-- id: pin-actions-to-sha
-  kind: yaml_path_matches
-  paths: ".github/workflows/*.yml"
-  path: "$.jobs.*.steps[*].uses"
-  matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
-  level: warning
-
-- id: packageref-has-version
-  kind: xml_path_matches
-  paths: "**/*.csproj"
-  path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
-  matches: '^\d'
-  level: error```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -47,6 +17,90 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A crate version that isn't valid semver
+
+The rule fires on this repository:
+
+```text
+crates/
+crates/a/
+crates/a/Cargo.toml
+crates/b/
+crates/b/Cargo.toml
+```
+
+`crates/a/Cargo.toml`:
+
+```toml
+[package]
+name = "a"
+version = "1.2.3"
+```
+
+`crates/b/Cargo.toml`:
+
+```toml
+[package]
+name = "b"
+version = "0.4"
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: pinned-version
+    kind: toml_path_matches
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.version"
+    matches: '^\d+\.\d+\.\d+$'
+    level: error
+```
+
+### Every crate version matches the semver pattern
+
+This repository is compliant:
+
+```text
+crates/
+crates/a/
+crates/a/Cargo.toml
+crates/b/
+crates/b/Cargo.toml
+```
+
+`crates/a/Cargo.toml`:
+
+```toml
+[package]
+name = "a"
+version = "1.2.3"
+```
+
+`crates/b/Cargo.toml`:
+
+```toml
+[package]
+name = "b"
+version = "0.4.5"
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: pinned-version
+    kind: toml_path_matches
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.version"
+    matches: '^\d+\.\d+\.\d+$'
+    level: warning
+```
 
 ## See also
 

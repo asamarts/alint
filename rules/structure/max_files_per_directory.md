@@ -8,14 +8,6 @@ categories: ['structure']
 
 Per-directory fanout may not exceed `max_files`. Useful for vendor directories that accidentally grow to thousands of entries.
 
-```yaml
-- id: vendor-dir-fanout-cap
-  kind: max_files_per_directory
-  paths: "vendor/**"
-  max_files: 200
-  level: warning
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -23,3 +15,56 @@ Per-directory fanout may not exceed `max_files`. Useful for vendor directories t
 | `max_files` | integer (>= 1) | yes |  | Maximum number of in-scope files allowed as immediate children of any one directory (non-recursive). |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A directory holding more files than the cap allows
+
+The rule fires on this repository:
+
+```text
+other/
+other/single.md
+packages/
+packages/a.md
+packages/b.md
+packages/c.md
+packages/d.md
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: cap
+    kind: max_files_per_directory
+    paths: "**/*.md"
+    max_files: 2
+    level: warning
+```
+
+### Every directory stays under the file-count cap
+
+This repository is compliant:
+
+```text
+docs/
+docs/a.md
+docs/b.md
+src/
+src/c.md
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: cap
+    kind: max_files_per_directory
+    paths: "**/*.md"
+    max_files: 5
+    level: warning
+```
+

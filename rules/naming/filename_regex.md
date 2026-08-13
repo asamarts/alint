@@ -8,15 +8,6 @@ categories: ['naming']
 
 Basename matches a regex. Use `stem: true` to match the stem only.
 
-```yaml
-- id: toml-kebab-or-cargo
-  kind: filename_regex
-  paths: "**/*.toml"
-  stem: true
-  pattern: "[a-z][a-z0-9_-]*|Cargo"
-  level: warning
-```
-
 ---
 
 ## Options
@@ -27,3 +18,54 @@ Basename matches a regex. Use `stem: true` to match the stem only.
 | `stem` | boolean |  | `false` | Match the file stem (no extension) instead of the full basename. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A test file whose name ignores the required `test_` prefix
+
+The rule fires on this repository:
+
+```text
+tests/
+tests/BadNamingHere.rs
+tests/test_lexer.rs
+tests/test_parser.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: tests-named-test-prefix
+    kind: filename_regex
+    paths: "tests/**/*.rs"
+    pattern: "^test_[a-z0-9_]+$"
+    stem: true
+    level: error
+```
+
+### Every test file name matches the required `test_` prefix
+
+This repository is compliant:
+
+```text
+tests/
+tests/test_eval_123.rs
+tests/test_lexer.rs
+tests/test_parser.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: tests-named-test-prefix
+    kind: filename_regex
+    paths: "tests/**/*.rs"
+    pattern: "^test_[a-z0-9_]+$"
+    stem: true
+    level: error
+```
+

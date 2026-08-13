@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
-```yaml
-- id: workflow-contents-read
-  kind: yaml_path_equals
-  paths: ".github/workflows/*.yml"
-  path: "$.permissions.contents"
-  equals: "read"
-  level: error
-
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning
-
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-```
-
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
@@ -55,6 +25,112 @@ Query a structured document with a JSONPath expression and assert every match de
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A workflow that sets contents permission to write
+
+The rule fires on this repository:
+
+```text
+.github/
+.github/workflows/
+.github/workflows/bad.yml
+.github/workflows/ci.yml
+```
+
+`.github/workflows/bad.yml`:
+
+```yaml
+name: Bad
+on: push
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+```
+
+`.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+on: push
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: workflow-contents-read
+    kind: yaml_path_equals
+    paths: ".github/workflows/*.yml"
+    path: "$.permissions.contents"
+    equals: "read"
+    level: error
+```
+
+### Every workflow sets contents permission to read
+
+This repository is compliant:
+
+```text
+.github/
+.github/workflows/
+.github/workflows/ci.yml
+.github/workflows/release.yml
+```
+
+`.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+```
+
+`.github/workflows/release.yml`:
+
+```yaml
+name: Release
+on: push
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: workflow-default-permissions
+    kind: yaml_path_equals
+    paths: ".github/workflows/*.yml"
+    path: "$.permissions.contents"
+    equals: "read"
+    level: error
+```
 
 ## See also
 

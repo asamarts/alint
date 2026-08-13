@@ -10,21 +10,6 @@ Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document
 
 Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml`); pass `format:` to override.
 
-```yaml
-- id: package-json-shape
-  kind: json_schema_passes
-  paths: "packages/*/package.json"
-  schema_path: "schemas/package.schema.json"
-  level: error
-
-- id: workflow-shape
-  kind: json_schema_passes
-  paths: ".github/workflows/*.yml"
-  schema_path: "schemas/workflow.schema.json"
-  format: yaml
-  level: warning
-```
-
 Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
 
 ---
@@ -37,3 +22,96 @@ Check-only — fixing schema violations is a "the user knows what value belongs 
 | `schema_path` | string | yes |  | Path to a JSON Schema file relative to the lint root. The schema must itself be JSON even when validating YAML / TOML targets. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A package.json that violates its JSON Schema
+
+The rule fires on this repository:
+
+```text
+package.json
+schemas/
+schemas/package.schema.json
+```
+
+`package.json`:
+
+```json
+{
+  "name": "demo",
+  "version": "v1.x"
+}
+```
+
+`schemas/package.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["name", "version"],
+  "properties": {
+    "name": {"type": "string"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  }
+}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: package-conforms
+    kind: json_schema_passes
+    paths: "package.json"
+    schema_path: "schemas/package.schema.json"
+    level: error
+```
+
+### A package.json that conforms to its JSON Schema
+
+This repository is compliant:
+
+```text
+package.json
+schemas/
+schemas/package.schema.json
+```
+
+`package.json`:
+
+```json
+{
+  "name": "demo",
+  "version": "1.2.3"
+}
+```
+
+`schemas/package.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["name", "version"],
+  "properties": {
+    "name": {"type": "string"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  }
+}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: package-conforms
+    kind: json_schema_passes
+    paths: "package.json"
+    schema_path: "schemas/package.schema.json"
+    level: error
+```
+

@@ -8,27 +8,7 @@ categories: ['cross-file']
 
 For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["src/*", "!src/internal"]`).
 
-```yaml
-- id: every-pkg-has-readme
-  kind: for_each_dir
-  select: "packages/*"
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-```
-
 **`when_iter:` — per-iteration filter.** Optional expression in the `when:` grammar, with one extra namespace: `iter.*` references the entry currently being iterated. Iterations whose verdict is false are skipped before any nested rule is built — the canonical use case for monorepos shaped like Cargo / pnpm / Bazel workspaces:
-
-```yaml
-- id: workspace-member-has-readme
-  kind: for_each_dir
-  select: "crates/*"
-  when_iter: 'iter.has_file("Cargo.toml")'
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-  level: error
-```
 
 The `iter` namespace exposes:
 
@@ -53,6 +33,92 @@ The `iter` namespace exposes:
 | `when_iter` | string |  |  | Per-iteration `when:` filter — evaluated against `iter.*` in the iterated entry's context. Iterations whose verdict is false are skipped before any nested rule is built. Examples: `iter.has_file("Cargo.toml")`, `iter.basename matches "^pkg-"`. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A module directory missing its `mod.rs`
+
+The rule fires on this repository:
+
+```text
+src/
+src/alpha/
+src/alpha/mod.rs
+src/beta/
+src/beta/lib.rs
+src/gamma/
+src/gamma/mod.rs
+```
+
+`src/alpha/mod.rs`:
+
+```rust
+pub fn a() {}
+```
+
+`src/beta/lib.rs`:
+
+```rust
+pub fn b() {}
+```
+
+`src/gamma/mod.rs`:
+
+```rust
+pub fn c() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: every-module-has-mod
+    kind: for_each_dir
+    select: "src/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/mod.rs"
+    level: error
+```
+
+### Every module directory has a `mod.rs`
+
+This repository is compliant:
+
+```text
+src/
+src/alpha/
+src/alpha/mod.rs
+src/beta/
+src/beta/mod.rs
+```
+
+`src/alpha/mod.rs`:
+
+```rust
+pub fn a() {}
+```
+
+`src/beta/mod.rs`:
+
+```rust
+pub fn b() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: every-module-has-mod
+    kind: for_each_dir
+    select: "src/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/mod.rs"
+    level: error
+```
 
 ## See also
 

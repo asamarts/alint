@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
-```yaml
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
-- id: workflow-contents-read
-  kind: yaml_path_equals
-  paths: ".github/workflows/*.yml"
-  path: "$.permissions.contents"
-  equals: "read"
-  level: error
-
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning
-
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-```
-
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
@@ -55,6 +25,82 @@ Query a structured document with a JSONPath expression and assert every match de
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A package.json whose license is not MIT
+
+The rule fires on this repository:
+
+```text
+packages/
+packages/bad/
+packages/bad/package.json
+packages/ok/
+packages/ok/package.json
+```
+
+`packages/bad/package.json`:
+
+```json
+{"name": "@demo/bad", "license": "UNLICENSED"}
+```
+
+`packages/ok/package.json`:
+
+```json
+{"name": "@demo/ok", "license": "MIT"}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: require-mit-license
+    kind: json_path_equals
+    paths: "packages/*/package.json"
+    path: "$.license"
+    equals: "MIT"
+    level: error
+```
+
+### Every package.json declares an MIT license
+
+This repository is compliant:
+
+```text
+packages/
+packages/a/
+packages/a/package.json
+packages/b/
+packages/b/package.json
+```
+
+`packages/a/package.json`:
+
+```json
+{"name": "@demo/a", "license": "MIT"}
+```
+
+`packages/b/package.json`:
+
+```json
+{"name": "@demo/b", "license": "MIT"}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: require-mit-license
+    kind: json_path_equals
+    paths: "packages/*/package.json"
+    path: "$.license"
+    equals: "MIT"
+    level: error
+```
 
 ## See also
 

@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
-```yaml
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-
-
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
-- id: workflow-contents-read
-  kind: yaml_path_equals
-  paths: ".github/workflows/*.yml"
-  path: "$.permissions.contents"
-  equals: "read"
-  level: error
-
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning```
-
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
@@ -55,6 +25,74 @@ Query a structured document with a JSONPath expression and assert every match de
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A project file targeting the wrong .NET framework
+
+The rule fires on this repository:
+
+```text
+src/
+src/Bad/
+src/Bad/Bad.csproj
+src/Ok/
+src/Ok/Ok.csproj
+```
+
+`src/Bad/Bad.csproj`:
+
+```text
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net6.0</TargetFramework></PropertyGroup></Project>
+```
+
+`src/Ok/Ok.csproj`:
+
+```text
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: csproj-net8
+    kind: xml_path_equals
+    paths: "src/*/*.csproj"
+    path: "$.Project.PropertyGroup.TargetFramework"
+    equals: "net8.0"
+    level: error
+```
+
+### Every project file targets net8.0
+
+This repository is compliant:
+
+```text
+src/
+src/App/
+src/App/App.csproj
+```
+
+`src/App/App.csproj`:
+
+```text
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable></PropertyGroup></Project>
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: csproj-net8
+    kind: xml_path_equals
+    paths: "src/*/*.csproj"
+    path: "$.Project.PropertyGroup.TargetFramework"
+    equals: "net8.0"
+    level: error
+```
 
 ## See also
 

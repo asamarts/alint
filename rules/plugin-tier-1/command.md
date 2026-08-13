@@ -8,14 +8,6 @@ categories: ['plugin-tier-1']
 
 Shell out to an external CLI per matched file. Exit `0` is a pass; non-zero is one violation whose message is the (truncated) stdout+stderr. Working directory is the repo root; stdin is closed.
 
-```yaml
-- id: workflows-clean
-  kind: command
-  paths: ".github/workflows/*.{yml,yaml}"
-  command: ["actionlint", "{path}"]
-  level: error
-```
-
 Argv tokens accept the same path-template substitutions as `pair` and `for_each_dir`: `{path}`, `{dir}`, `{stem}`, `{ext}`, `{basename}`, `{parent_name}`. The first token is the program (looked up via `PATH` if it's a bare name).
 
 Environment threaded into the child:
@@ -47,3 +39,75 @@ Environment threaded into the child:
 | `timeout` | integer (>= 1) |  | `null` | Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A file the wrapped checker flags
+
+The rule fires on this repository:
+
+```text
+src/
+src/a.rs
+src/b.rs
+```
+
+`src/a.rs`:
+
+```rust
+// TODO: drop the debug hook before release
+fn a() {}
+```
+
+`src/b.rs`:
+
+```rust
+fn b() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-todo-markers
+    kind: command
+    paths: "src/**/*.rs"
+    command: ["sh", "-c", "if grep -n TODO \"{path}\"; then exit 1; fi"]
+    level: error
+```
+
+### Files the wrapped checker passes
+
+This repository is compliant:
+
+```text
+src/
+src/lib.rs
+src/main.rs
+```
+
+`src/lib.rs`:
+
+```rust
+pub fn ok() {}
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-todo-markers
+    kind: command
+    paths: "src/**/*.rs"
+    command: ["sh", "-c", "if grep -n TODO \"{path}\"; then exit 1; fi"]
+    level: error
+```
+

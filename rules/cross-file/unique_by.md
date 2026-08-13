@@ -8,14 +8,6 @@ categories: ['cross-file']
 
 No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). Catches basename collisions across subdirectories. With `case_insensitive: true` the key is folded to lowercase before grouping, so `README.md` and `readme.md` collide — the case-insensitive-filesystem hazard (Windows / macOS).
 
-```yaml
-- id: unique-basenames
-  kind: unique_by
-  select: "src/**/*.rs"
-  key: "{stem}"
-  level: warning
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -25,3 +17,72 @@ No two files matching `select` may share the value of `key` (a path template; to
 | `select` | string | yes |  | Glob selecting the files to deduplicate. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### Two files colliding on the same stem
+
+The rule fires on this repository:
+
+```text
+a/
+a/util.rs
+b/
+b/util.rs
+c/
+c/other.rs
+```
+
+`a/util.rs`:
+
+```rust
+pub fn a() {}
+```
+
+`b/util.rs`:
+
+```rust
+pub fn b() {}
+```
+
+`c/other.rs`:
+
+```rust
+pub fn c() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: unique-rs-stems
+    kind: unique_by
+    select: "**/*.rs"
+    key: "{stem}"
+    level: warning
+```
+
+### Every file has a distinct stem
+
+This repository is compliant:
+
+```text
+src/
+src/alpha.rs
+src/beta.rs
+src/gamma.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: unique-rs-stems
+    kind: unique_by
+    select: "**/*.rs"
+    key: "{stem}"
+    level: warning
+```
+

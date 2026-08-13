@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.
 
-```yaml
-- id: rust-edition-2024
-  kind: toml_path_equals
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.edition"
-  equals: "2024"
-  level: warning
-
-- id: require-mit-license
-  kind: json_path_equals
-  paths: "packages/*/package.json"
-  path: "$.license"
-  equals: "MIT"
-  level: error
-
-- id: workflow-contents-read
-  kind: yaml_path_equals
-  paths: ".github/workflows/*.yml"
-  path: "$.permissions.contents"
-  equals: "read"
-  level: error
-
-- id: csproj-targets-net8
-  kind: xml_path_equals
-  paths: "**/*.csproj"
-  path: "$.Project.PropertyGroup.TargetFramework"
-  equals: "net8.0"
-  level: error
-```
-
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
@@ -55,6 +25,90 @@ Query a structured document with a JSONPath expression and assert every match de
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`), array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every other RFC 9535 construct. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A crate pinned to an older Rust edition
+
+The rule fires on this repository:
+
+```text
+crates/
+crates/bad/
+crates/bad/Cargo.toml
+crates/ok/
+crates/ok/Cargo.toml
+```
+
+`crates/bad/Cargo.toml`:
+
+```toml
+[package]
+name = "bad"
+edition = "2021"
+```
+
+`crates/ok/Cargo.toml`:
+
+```toml
+[package]
+name = "ok"
+edition = "2024"
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: rust-edition-2024
+    kind: toml_path_equals
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.edition"
+    equals: "2024"
+    level: warning
+```
+
+### Every crate targets the 2024 edition
+
+This repository is compliant:
+
+```text
+crates/
+crates/a/
+crates/a/Cargo.toml
+crates/b/
+crates/b/Cargo.toml
+```
+
+`crates/a/Cargo.toml`:
+
+```toml
+[package]
+name = "a"
+edition = "2024"
+```
+
+`crates/b/Cargo.toml`:
+
+```toml
+[package]
+name = "b"
+edition = "2024"
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: rust-edition-2024
+    kind: toml_path_equals
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.edition"
+    equals: "2024"
+    level: warning
+```
 
 ## See also
 

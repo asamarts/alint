@@ -11,24 +11,6 @@ A committed artefact must equal what a declared `command` generator produces, in
 - **stdout mode** (`file:`) — the generator writes its single output to stdout; alint captures it and compares to the one committed `file`. Never writes the tree.
 - **mutating / in-place mode** (`outputs:`, a glob or list) — for the common `make gen && git diff --exit-code` pattern, where the generator rewrites files in place. alint **snapshots** the `outputs`, runs the generator, **diffs** (flagging each stale / newly-created / removed file), and **restores the snapshot** — so `alint check` leaves the working tree byte-identical (the restore is panic-safe). The generator must confine its writes to `outputs`.
 
-```yaml
-# stdout mode — diff the generator's stdout against one committed file
-- id: bindings-fresh
-  kind: generated_file_fresh
-  file: crates/ffi/include/core.h
-  command: ["cbindgen", "--config", "cbindgen.toml", "crates/core"]
-  normalize: final-newline
-  level: error
-
-# mutating mode — run the in-place generator and assert nothing changed
-- id: commands-def-fresh
-  kind: generated_file_fresh
-  outputs: "src/commands.def"          # glob or list; selects mutating mode
-  command: ["make", "commands.def"]
-  timeout: 300
-  level: error
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -41,3 +23,64 @@ A committed artefact must equal what a declared `command` generator produces, in
 | `workdir` | string |  | `null` | Generator cwd, relative to the lint root (default: lint root). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A committed generated file gone stale
+
+The rule fires on this repository:
+
+```text
+gen/list.txt
+```
+
+`gen/list.txt`:
+
+```text
+alpha
+STALE
+charlie
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: list-fresh
+    kind: generated_file_fresh
+    file: gen/list.txt
+    command: ["sh", "-c", "printf 'alpha\\nbravo\\ncharlie\\n'"]
+    normalize: none
+    level: error
+```
+
+### A committed generated file matching its generator
+
+This repository is compliant:
+
+```text
+gen/list.txt
+```
+
+`gen/list.txt`:
+
+```text
+alpha
+bravo
+charlie
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: list-fresh
+    kind: generated_file_fresh
+    file: gen/list.txt
+    command: ["sh", "-c", "printf 'alpha\\nbravo\\ncharlie\\n'"]
+    normalize: none
+    level: error
+```
+

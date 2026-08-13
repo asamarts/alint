@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-```yaml
-- id: packageref-has-version
-  kind: xml_path_matches
-  paths: "**/*.csproj"
-  path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
-  matches: '^\d'
-  level: error
-
-- id: semver-version
-  kind: json_path_matches
-  paths: "packages/*/package.json"
-  path: "$.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-
-- id: pin-actions-to-sha
-  kind: yaml_path_matches
-  paths: ".github/workflows/*.yml"
-  path: "$.jobs.*.steps[*].uses"
-  matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
-  level: warning
-
-- id: crate-version-is-semver
-  kind: toml_path_matches
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -47,6 +17,74 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A Maven dependency whose version is not a concrete release
+
+The rule fires on this repository:
+
+```text
+pom.xml
+```
+
+`pom.xml`:
+
+```text
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <dependencies>
+    <dependency><artifactId>guava</artifactId><version>33.0.0-jre</version></dependency>
+    <dependency><artifactId>internal</artifactId><version>${revision}</version></dependency>
+  </dependencies>
+</project>
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: pom-deps-pinned
+    kind: xml_path_matches
+    paths: "pom.xml"
+    path: "$.project.dependencies.dependency[*].version"
+    matches: '^\d'
+    level: error
+```
+
+### Every Maven dependency declares a concrete version
+
+This repository is compliant:
+
+```text
+pom.xml
+```
+
+`pom.xml`:
+
+```text
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <dependencies>
+    <dependency><groupId>com.google.guava</groupId><artifactId>guava</artifactId><version>33.0.0-jre</version></dependency>
+    <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version></dependency>
+  </dependencies>
+</project>
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: pom-deps-versioned
+    kind: xml_path_matches
+    paths: "pom.xml"
+    path: "$.project.dependencies.dependency[*].version"
+    matches: '^\d'
+    level: error
+```
 
 ## See also
 

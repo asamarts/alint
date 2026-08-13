@@ -8,36 +8,6 @@ categories: ['structured-query']
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-```yaml
-- id: semver-version
-  kind: json_path_matches
-  paths: "packages/*/package.json"
-  path: "$.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-
-- id: pin-actions-to-sha
-  kind: yaml_path_matches
-  paths: ".github/workflows/*.yml"
-  path: "$.jobs.*.steps[*].uses"
-  matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
-  level: warning
-
-- id: packageref-has-version
-  kind: xml_path_matches
-  paths: "**/*.csproj"
-  path: "$.Project.ItemGroup.PackageReference[*]['@Version']"
-  matches: '^\d'
-  level: error
-
-- id: crate-version-is-semver
-  kind: toml_path_matches
-  paths: "crates/*/Cargo.toml"
-  path: "$.package.version"
-  matches: '^\d+\.\d+\.\d+$'
-  level: error
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -47,6 +17,82 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A package version that is not valid semver
+
+The rule fires on this repository:
+
+```text
+packages/
+packages/bad/
+packages/bad/package.json
+packages/ok/
+packages/ok/package.json
+```
+
+`packages/bad/package.json`:
+
+```json
+{"name": "@demo/bad", "version": "not-a-semver"}
+```
+
+`packages/ok/package.json`:
+
+```json
+{"name": "@demo/ok", "version": "1.2.3"}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: require-semver-version
+    kind: json_path_matches
+    paths: "packages/*/package.json"
+    path: "$.version"
+    matches: '^\d+\.\d+\.\d+$'
+    level: error
+```
+
+### Every package version is valid semver
+
+This repository is compliant:
+
+```text
+packages/
+packages/a/
+packages/a/package.json
+packages/b/
+packages/b/package.json
+```
+
+`packages/a/package.json`:
+
+```json
+{"name": "@demo/a", "version": "1.2.3"}
+```
+
+`packages/b/package.json`:
+
+```json
+{"name": "@demo/b", "version": "0.10.0"}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: semver-versions
+    kind: json_path_matches
+    paths: "packages/*/package.json"
+    path: "$.version"
+    matches: '^\d+\.\d+\.\d+$'
+    level: warning
+```
 
 ## See also
 

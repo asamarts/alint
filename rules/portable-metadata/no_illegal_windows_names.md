@@ -12,13 +12,6 @@ Reject path components Windows can't represent:
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
 
-```yaml
-- id: portable-names
-  kind: no_illegal_windows_names
-  paths: "**"
-  level: warning
-```
-
 ---
 
 ## Options
@@ -26,3 +19,58 @@ Reject path components Windows can't represent:
 _This rule takes no kind-specific options._
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### Files using reserved Windows device names and a trailing dot
+
+The rule fires on this repository:
+
+```text
+COM1.md
+NUL
+README.md
+con.txt
+trailing_dot.
+```
+
+`README.md`:
+
+```markdown
+# fine
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-win-reserved
+    kind: no_illegal_windows_names
+    paths: "**"
+    level: error
+```
+
+### Names that resemble reserved Windows names but stay legal
+
+This repository is compliant:
+
+```text
+COM10.cfg
+README.md
+src/
+src/controllers.rs
+src/lib.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-win-reserved
+    kind: no_illegal_windows_names
+    paths: "**"
+    level: error
+```
+

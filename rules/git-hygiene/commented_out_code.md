@@ -8,22 +8,6 @@ categories: ['git-hygiene', 'content']
 
 Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). For each consecutive run of comment lines (`min_lines+`), counts the fraction of non-whitespace characters that are structural punctuation strongly biased toward code (`( ) { } [ ] ; = < > & | ^`). Scores ≥ `threshold` mark the block as code-shaped.
 
-```yaml
-- id: no-commented-code
-  kind: commented_out_code
-  paths:
-    include: ["src/**/*.{ts,tsx,js,jsx,rs,py,go,java}"]
-    exclude:
-      - "**/*test*/**"
-      - "**/__tests__/**"
-      - "**/fixtures/**"
-  language: auto              # auto | rust | typescript | python | go | java | c | cpp | ruby | shell
-  min_lines: 3                # consecutive comment lines required (default 3)
-  threshold: 0.5              # 0.0-1.0 (default 0.5 = midpoint between obvious-prose and obvious-code)
-  skip_leading_lines: 30      # skip the first N lines (license headers — default 30)
-  level: warning
-```
-
 The scorer deliberately ignores identifier-token density (English prose has identifier-shaped words too) and excludes backticks / quotes (rustdoc / TSDoc prose uses backticks to delimit code references). Runs of 5+ identical characters (`============`, `----`, `####`) are dropped before scoring so ASCII-art separator banners don't flag as code.
 
 Doc-comment blocks (`///`, `//!`, `/** */`) are skipped automatically. Files whose extension the language resolver doesn't recognise are skipped silently — pass `language:` explicitly to override the auto-detection.
@@ -40,3 +24,92 @@ Heuristic, with a non-zero false-positive surface — defaults are `warning`-lev
 | `threshold` | number (0..1) |  | `0.5` | Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### Blocks of real code left behind as comments
+
+The rule fires on this repository:
+
+```text
+src/
+src/api.ts
+```
+
+`src/api.ts`:
+
+```ts
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Acme Corp
+//
+// This file is licensed under MIT.
+
+export function api(input: string): string {
+  // const oldRate = lookupOldRate(input);
+  // if (oldRate > 0.5) { return input.toUpperCase(); }
+  // log("legacy path:", oldRate);
+  return input;
+}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-commented-code
+    kind: commented_out_code
+    paths: "src/**/*.{ts,tsx,js,jsx}"
+    min_lines: 3
+    threshold: 0.5
+    skip_leading_lines: 5
+    level: warning
+```
+
+### Only prose comments, license headers, and doc comments
+
+This repository is compliant:
+
+```text
+src/
+src/api.ts
+```
+
+`src/api.ts`:
+
+```ts
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Acme Corp
+//
+// This file is licensed under MIT.
+
+// ============================================
+// Section: Public API
+// ============================================
+
+// This module exports the api() function.
+// It accepts a string input and returns a string.
+// Validation happens at the boundary; see input-types.
+
+export function api(input: string): string {
+  /// This rustdoc-style comment block is fine.
+  /// Documentation, not commented-out code.
+  /// Should not fire even though it's three lines.
+  return input;
+}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: no-commented-code
+    kind: commented_out_code
+    paths: "src/**/*.{ts,tsx,js,jsx}"
+    min_lines: 3
+    threshold: 0.5
+    skip_leading_lines: 5
+    level: warning
+```
+

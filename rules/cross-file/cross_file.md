@@ -19,39 +19,6 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 
 `normalize` relaxes the value comparison — a single transform or an ordered list applied left-to-right (`normalize: [trim, semver-minor]`): `trim`, `lower`, `semver-major` (the leading `MAJOR` band — the dotnet SDK shape), and `semver-minor` (the leading `MAJOR.MINOR` band, each token's leading digits with a non-digit prefix stripped — so `4.36-dev`, `4.36.0`, `pnpm@11.3.0` and `>=22.13` reconcile; the protobuf / pnpm version-format case). `identical` reads whole files byte-for-byte (`normalize`/`extract` do not apply), with an optional `skip_header_lines` to ignore a differing license/header; `resolves` extracts paths from the `source` (no `targets`) and checks each exists relative to the source file's directory. Non-literal extracted values (interpolation / antiquotation) are skipped, not failed — **except** a `whole_file: {}` source/target, whose single value (the entire file content) is compared verbatim even when it embeds `${…}`/`{{…}}` markers (those mark interpolated *paths*, not content); `whole_file` still honours `normalize`, so it sits between a query-extract and a no-normalize `identical`. `allow_missing_target` controls absent files/values. `equals` requires the `source` to extract **exactly one** value; to pull the latest entry from a multi-match file (e.g. the newest version in a multi-release `CHANGELOG.md`), anchor the regex so it captures only the first match — `regex: '(?s)\A.*?## (\d+\.\d+\.\d+)'` (`(?s)` makes `.` cross newlines, `\A` anchors at the start, `.*?` reaches the first heading lazily) yields a single value (a leading `## Unreleased` is skipped because the version pattern doesn't match it). The released `cross_file_value_equals` is a **byte-compatible alias** (`relation` defaults to `equals`). Cross-file.
 
-```yaml
-# equals (the default; the cross_file_value_equals shape)
-- id: workspace-versions-coherent
-  kind: cross_file
-  source:  { file: Cargo.toml, extract: { toml: "$.workspace.package.version" } }
-  targets: { files: "crates/*/Cargo.toml", extract: { toml: "$.package.version" } }
-  relation: equals
-  level: error
-
-# subset — every catalog reference must resolve to a declared catalog key
-- id: pnpm-catalog-refs-resolve
-  kind: cross_file
-  source:  { file: pnpm-workspace.yaml, extract: { yaml: "$.catalog.*" } }
-  targets: { files: "packages/**/package.json", extract: { regex: 'catalog:(\S+)' } }
-  relation: subset
-  level: error
-
-# identical — each crate README must mirror the workspace README byte-for-byte
-- id: readme-mirrors-root
-  kind: cross_file
-  source:  { file: README.md }
-  targets: { files: "crates/*/README.md" }
-  relation: identical
-  level: error
-
-# resolves — every declared workspace member path must exist on disk
-- id: workspace-members-exist
-  kind: cross_file
-  source: { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
-  relation: resolves
-  level: error
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -64,3 +31,82 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 | `targets` | TargetsSpec |  |  | The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the filesystem). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A used value missing from the allow-list
+
+The rule fires on this repository:
+
+```text
+allowed.json
+used.json
+```
+
+`allowed.json`:
+
+```json
+{"allowed": ["a", "b"]}
+```
+
+`used.json`:
+
+```json
+{"used": ["a", "x"]}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: used-are-allowed
+    kind: cross_file
+    source:
+      file: allowed.json
+      extract: { json: "$.allowed[*]" }
+    targets:
+      files: "used.json"
+      extract: { json: "$.used[*]" }
+    relation: superset
+    level: error
+```
+
+### Every used value appears in the allow-list
+
+This repository is compliant:
+
+```text
+allowed.json
+used.json
+```
+
+`allowed.json`:
+
+```json
+{"allowed": ["a", "b", "c"]}
+```
+
+`used.json`:
+
+```json
+{"used": ["a", "c"]}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: used-are-allowed
+    kind: cross_file
+    source:
+      file: allowed.json
+      extract: { json: "$.allowed[*]" }
+    targets:
+      files: "used.json"
+      extract: { json: "$.used[*]" }
+    relation: superset
+    level: error
+```
+

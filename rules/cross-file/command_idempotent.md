@@ -22,17 +22,6 @@ never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
 
-```yaml
-- id: code-is-formatted
-  kind: command_idempotent
-  command: ["cargo", "fmt", "--all", "--", "--check"]
-  workdir: "."
-  files_from: stderr
-  files_pattern: "Diff in (.+) at"
-  level: error
-  message: "run `cargo fmt` — code is not formatter-clean"
-```
-
 ## Options
 
 | Option | Type | Required | Default | Description |
@@ -44,3 +33,57 @@ top-level config.
 | `workdir` | string |  | `null` | Checker cwd, relative to the lint root (default: lint root). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A checker that flags an offending file
+
+The rule fires on this repository:
+
+```text
+src/main.rs
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: fmt-clean
+    kind: command_idempotent
+    command: ["sh", "-c", "printf 'src/main.rs\\n'; exit 1"]
+    files_from: stdout
+    level: error
+```
+
+### A checker that exits clean
+
+This repository is compliant:
+
+```text
+src/main.rs
+```
+
+`src/main.rs`:
+
+```rust
+fn main() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: fmt-clean
+    kind: command_idempotent
+    command: ["sh", "-c", "exit 0"]
+    level: error
+```
+

@@ -8,27 +8,7 @@ categories: ['cross-file']
 
 For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["src/*", "!src/internal"]`).
 
-```yaml
-- id: every-pkg-has-readme
-  kind: for_each_dir
-  select: "packages/*"
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-```
-
 **`when_iter:` — per-iteration filter.** Optional expression in the `when:` grammar, with one extra namespace: `iter.*` references the entry currently being iterated. Iterations whose verdict is false are skipped before any nested rule is built — the canonical use case for monorepos shaped like Cargo / pnpm / Bazel workspaces:
-
-```yaml
-- id: workspace-member-has-readme
-  kind: for_each_dir
-  select: "crates/*"
-  when_iter: 'iter.has_file("Cargo.toml")'
-  require:
-    - kind: file_exists
-      paths: "{path}/README.md"
-  level: error
-```
 
 The `iter` namespace exposes:
 
@@ -53,6 +33,81 @@ The `iter` namespace exposes:
 | `when_iter` | string |  |  | Per-iteration `when:` filter — see rule_for_each_dir.when_iter. `iter.has_file(...)` always evaluates to false on file iteration; useful predicates here include `iter.basename`, `iter.ext`, `iter.parent_name`. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+
+## Example
+
+### A unit test with no snapshot file
+
+The rule fires on this repository:
+
+```text
+tests/
+tests/snapshots/
+tests/snapshots/parser.snap
+tests/unit/
+tests/unit/lexer.rs
+tests/unit/parser.rs
+```
+
+`tests/snapshots/parser.snap`:
+
+```text
+output
+```
+
+`tests/unit/lexer.rs`:
+
+```rust
+fn t2() {}
+```
+
+`tests/unit/parser.rs`:
+
+```rust
+fn t1() {}
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: unit-has-snapshot
+    kind: for_each_file
+    select: "tests/unit/*.rs"
+    require:
+      - kind: file_exists
+        paths: "tests/snapshots/{stem}.snap"
+    level: warning
+```
+
+### Every unit test has a snapshot file
+
+This repository is compliant:
+
+```text
+tests/
+tests/snapshots/
+tests/snapshots/lexer.snap
+tests/snapshots/parser.snap
+tests/unit/
+tests/unit/lexer.rs
+tests/unit/parser.rs
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: unit-has-snapshot
+    kind: for_each_file
+    select: "tests/unit/*.rs"
+    require:
+      - kind: file_exists
+        paths: "tests/snapshots/{stem}.snap"
+    level: warning
+```
 
 ## See also
 
