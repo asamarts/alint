@@ -422,10 +422,10 @@ fn generate_rules_pages(
     // (title, display order, slug) per family, for the second-pass family Overview
     // render (categories-based membership needs all_kinds complete first).
     let mut families_meta: Vec<(String, u32, String)> = Vec::new();
-    // Per-rule H3 sections in `docs/rules.md` must contain a
-    // ```yaml usage example. Accumulated across all families and
-    // surfaced as a single hard failure so a docs PR sees every
-    // missing example at once instead of fixing them one at a
+    // Per-rule H3 sections in `docs/rules.md` must be backed by a documented
+    // `docs:` example fixture (ADR-0014 Phase 4). Accumulated across all families
+    // and surfaced as a single hard failure so a docs PR sees every missing
+    // example at once instead of fixing them one at a
     // time. Reflected on alint.org/docs/rules/<family>/<kind>/.
     let mut missing_examples: Vec<String> = Vec::new();
     // Rule examples whose top-level `kind:` is an alias (or otherwise not the
@@ -576,16 +576,19 @@ fn process_family_h3s(
         if group_kinds.is_empty() {
             continue;
         }
-        // Every per-rule H3 must include at least one fenced
-        // ```yaml block. Surfaced collectively at the end of
-        // generate_rules_pages so authors see all gaps in one
-        // pass. Multi-kind headings (e.g. the structured-query
-        // family's three path_equals kinds) share one body, so
-        // one example per heading covers the group.
-        // A kind rendered from a documented `docs:` scenario (ADR-0014) needs
-        // no hand-written ```yaml block - its example is generated. Exempt an
-        // H3 only when every kind it documents is covered that way.
-        if !h3.body.contains("```yaml") && !group_kinds.iter().all(|k| documented.contains_key(k)) {
+        // Phase 4 hard-flip (ADR-0014): every rule H3 MUST be backed by a
+        // documented `docs:` scenario - its worked example is a real `alint check`
+        // run, not a hand-written ```yaml block. The legacy "...or an inline yaml
+        // example" escape is retired now that all kinds are migrated, so a new
+        // rule kind can no longer ship with only a hand-written (unverified)
+        // example. Multi-kind headings (e.g. the structured-query path_equals
+        // kinds) must have every kind documented. Canonicalise so an alias-titled
+        // token resolves to its documented (canonical) kind. Gaps are surfaced
+        // collectively at the end of generate_rules_pages.
+        if !group_kinds
+            .iter()
+            .all(|k| documented.contains_key(registry.canonical_kind(k)))
+        {
             missing_examples.push(format!("{} → {}", h2.title, h3.title));
         }
         // ...and a documented kind must NOT keep a hand-written CONFIG example
@@ -1115,20 +1118,21 @@ fn example_block_kinds(body: &str) -> Vec<String> {
 }
 
 /// Enforce the two per-rule-example docs gates and bail on the first failure:
-/// `missing` = H3 sections with no fenced yaml example; `wrong_kind` = examples
-/// whose top-level `kind:` is an alias (or otherwise not the H3's canonical
-/// kind). Enforced (not warned) so a regressing docs/rules.md fails the
-/// docs-bundle build before it can publish a broken example to alint.org.
-/// Split out of `generate_rules_pages` to keep that orchestrator within the
-/// clippy line budget.
+/// `missing` = H3 sections not backed by a documented example fixture;
+/// `wrong_kind` = examples whose top-level `kind:` is an alias (or otherwise not
+/// the H3's canonical kind). Enforced (not warned) so a regressing docs/rules.md
+/// fails the docs-bundle build before it can publish a broken example to
+/// alint.org. Split out of `generate_rules_pages` to keep that orchestrator
+/// within the clippy line budget.
 fn enforce_example_gates(missing: &[String], wrong_kind: &[String]) -> Result<()> {
     if !missing.is_empty() {
         anyhow::bail!(
-            "{} rule kind H3 section(s) in docs/rules.md are missing a \
-             ```yaml usage example:\n  - {}\n\n\
-             Each per-rule heading must include at least one fenced \
-             ```yaml block before the next heading. The block becomes \
-             the usage example shown on alint.org/docs/rules/<family>/<kind>/.",
+            "{} rule kind H3 section(s) in docs/rules.md are not backed by a \
+             documented example fixture:\n  - {}\n\n\
+             Every rule kind's worked example renders from a `docs:` scenario in \
+             crates/alint-e2e/scenarios (ADR-0014, Phase 4): add a documented \
+             fail+pass scenario for the kind. A hand-written ```yaml block no \
+             longer satisfies this gate.",
             missing.len(),
             missing.join("\n  - "),
         );
