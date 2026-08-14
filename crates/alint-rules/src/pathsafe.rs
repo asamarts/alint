@@ -127,7 +127,6 @@ pub(crate) fn confine_read(path: &Path, root: &Path, allow_escape: bool) -> Conf
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_confined;
     use std::path::Path;
 
     #[cfg(unix)]
@@ -136,7 +135,7 @@ mod tests {
         // H1 regression: `normalize_confined` is symlink-blind, so a
         // lexically-confined path (`link/secret`) can read out of the tree
         // when `link` is an in-repo symlink. `confine_read` must catch it.
-        use super::{Confined, confine_read, resolved_within_root};
+        use super::{Confined, confine_read, normalize_confined, resolved_within_root};
         use std::os::unix::fs::symlink;
 
         let root = tempfile::tempdir().unwrap();
