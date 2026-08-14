@@ -459,15 +459,21 @@ impl Engine {
         // per-file dispatch reads the per-file `Scope::matches` cache.
         self.resolve_changed_paths(root, index)?;
         // Resolve manifest path sets against the FULL index (so the manifest
-        // itself is reachable even when it didn't change), then copy the result
-        // onto the `--changed` filtered index that per-file dispatch actually
-        // matches against — otherwise an `include`/`exclude` manifest predicate
-        // silently sees an empty set under `--changed`.
+        // itself is reachable even when it didn't change).
         self.resolve_manifest_paths(root, index);
-        if let Some(fi) = &filtered_index
-            && let Some(map) = index.manifest_paths_map()
-        {
-            fi.set_manifest_paths(map.clone());
+        // Copy BOTH resolved caches onto the `--changed` filtered index that
+        // per-file dispatch actually matches against: the manifest sets AND the
+        // `changed_since:` diffs. The filtered index is rebuilt from the changed
+        // files with fresh caches, so without the copy an `include`/`exclude`
+        // manifest predicate — or a `scope_filter.changed_since:` — silently sees
+        // an empty set under `--changed`.
+        if let Some(fi) = &filtered_index {
+            if let Some(map) = index.manifest_paths_map() {
+                fi.set_manifest_paths(map.clone());
+            }
+            if let Some(map) = index.changed_paths_map() {
+                fi.set_changed_paths(map.clone());
+            }
         }
 
         // Per-file partition: file-major loop reads each file
@@ -900,12 +906,15 @@ impl Engine {
         // fix pass respects per-rule diff scoping too.
         self.resolve_changed_paths(root, index)?;
         self.resolve_manifest_paths(root, index);
-        // Propagate the manifest sets onto the `--changed` filtered index (see
-        // `run`), so `fix --changed` scopes excluded files out of the fix too.
-        if let Some(fi) = &filtered_index
-            && let Some(map) = index.manifest_paths_map()
-        {
-            fi.set_manifest_paths(map.clone());
+        // Propagate BOTH resolved caches onto the `--changed` filtered index (see
+        // `run`), so `fix --changed` respects manifest scope AND `changed_since:`.
+        if let Some(fi) = &filtered_index {
+            if let Some(map) = index.manifest_paths_map() {
+                fi.set_manifest_paths(map.clone());
+            }
+            if let Some(map) = index.changed_paths_map() {
+                fi.set_changed_paths(map.clone());
+            }
         }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
@@ -1209,10 +1218,15 @@ impl Engine {
         if index.manifest_paths_initialized() {
             return;
         }
-        // Dedup by cache key: identical configs resolve once. BTreeMap keeps the
-        // resolution order deterministic (ADR-0003).
-        let mut preds: std::collections::BTreeMap<&str, &crate::scope_filter::ManifestPredicate> =
-            std::collections::BTreeMap::new();
+        // Group predicates by cache key: rules sharing a `(source, extract,
+        // derive_target)` config resolve once. BTreeMap keeps the resolution
+        // order deterministic (ADR-0003). The key deliberately omits `sense` /
+        // `expect_nonempty` (the resolved SET doesn't depend on them), so a group
+        // can mix `include` and `exclude` predicates over the same manifest.
+        let mut groups: std::collections::BTreeMap<
+            &str,
+            Vec<&crate::scope_filter::ManifestPredicate>,
+        > = std::collections::BTreeMap::new();
         for entry in &self.entries {
             let scope = entry
                 .rule
@@ -1223,38 +1237,44 @@ impl Engine {
                 && let Some(filter) = scope.scope_filter()
             {
                 for pred in filter.manifest_predicates() {
-                    preds.entry(pred.cache_key()).or_insert(pred);
+                    groups.entry(pred.cache_key()).or_default().push(pred);
                 }
             }
         }
-        if preds.is_empty() {
+        if groups.is_empty() {
             return;
         }
         let mut map = std::collections::HashMap::new();
-        for (key, pred) in preds {
-            // Read the manifest through the walked index, not a raw path read:
-            // `find_file` returns None for a source that is absent OR an escaping
-            // symlink the walk pruned (ADR-0004 confinement) — so a symlinked
-            // `source` can't read out-of-tree bytes. `read_capped_or_skip` bounds
-            // the read with the walk-time size (a huge / device manifest is
-            // skipped, not slurped), matching how `registry_paths_resolve` /
-            // `file_graph` read their extract sources. Either way -> empty set,
-            // and the predicate contributes nothing.
-            let set = match index.find_file(pred.source()) {
+        for (key, group) in groups {
+            // Every predicate in the group shares one `(source, extract,
+            // derive_target)`, so any member resolves the same set. Read it
+            // through the walked index, not a raw path read: `find_file` returns
+            // None for a source that is absent OR an escaping symlink the walk
+            // pruned (ADR-0004 confinement) — so a symlinked `source` can't read
+            // out-of-tree bytes. `read_capped_or_skip` bounds the read with the
+            // walk-time size (a huge / device manifest is skipped, not slurped),
+            // matching how `registry_paths_resolve` / `file_graph` read their
+            // extract sources. Either way -> empty set, contributing nothing.
+            let rep = group[0];
+            let set = match index.find_file(rep.source()) {
                 Some(entry) => {
                     match crate::walker::read_capped_or_skip(&root.join(&entry.path), entry.size) {
-                        Some(bytes) => pred.resolve_set(&String::from_utf8_lossy(&bytes)),
+                        Some(bytes) => rep.resolve_set(&String::from_utf8_lossy(&bytes)),
                         None => std::collections::HashSet::new(),
                     }
                 }
                 None => std::collections::HashSet::new(),
             };
-            if set.is_empty() && pred.warns_on_empty() {
+            // Warn per group, not per first-iterated predicate: an `include` that
+            // expects a non-empty set must be flagged even when an `exclude`
+            // sharing the manifest sorted first (the empty-include silent no-op is
+            // exactly the footgun `expect_nonempty` guards).
+            if set.is_empty() && group.iter().any(|p| p.warns_on_empty()) {
                 tracing::warn!(
                     "scope_filter.include_manifest_paths: `{}` resolved to no paths (the manifest \
                      is missing, unreadable, or declares none), so the rule matches nothing. Set \
                      `expect_nonempty: false` if that is intended.",
-                    pred.source().display()
+                    rep.source().display()
                 );
             }
             map.insert(key.to_string(), set);

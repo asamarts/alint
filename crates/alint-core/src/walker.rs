@@ -263,6 +263,16 @@ impl FileIndex {
         let _ = self.changed_paths.set(map);
     }
 
+    /// The whole resolved `changed_since` diff map, if populated. Like
+    /// [`Self::manifest_paths_map`], the engine resolves diffs against the FULL
+    /// index and copies the result onto the pre-filtered `--changed` index (whose
+    /// own entries omit the ref-diff set), so a per-file `scope_filter.changed_since:`
+    /// still resolves under `--changed` instead of silently matching nothing.
+    #[must_use]
+    pub fn changed_paths_map(&self) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
+        self.changed_paths.get()
+    }
+
     /// Look up the cached manifest-derived path set for a predicate's cache key.
     /// `None` means the cache wasn't populated for this key (manifest absent /
     /// unresolved); the predicate treats it as the empty set.

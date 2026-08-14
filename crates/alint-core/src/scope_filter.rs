@@ -230,10 +230,14 @@ impl ManifestPredicate {
         };
         let dt_key = derive_target
             .as_ref()
-            .map(|(from, to)| format!("{}=>{to}", from.as_str()))
+            .map(|(from, to)| format!("{}\u{0}{to}", from.as_str()))
             .unwrap_or_default();
         // `Extract`'s Debug is a stable, injective rendering of the resolved
-        // extractor — enough to co-cache two rules with an identical config.
+        // extractor. NUL (`\0`) delimits every component — it can't occur in a
+        // YAML scalar (`source`/`from`/`to`) — so the key is injective: two rules
+        // co-cache iff their `(source, extract, derive_target)` is identical.
+        // (A plain `=>` between `from`/`to` would let `{from:"a", to:"b=>c"}` and
+        // `{from:"a=>b", to:"c"}` forge one key and share a wrong set.)
         let cache_key = format!("{}\u{0}{extract:?}\u{0}{dt_key}", source.display());
         Ok(Self {
             cache_key,
@@ -1153,6 +1157,25 @@ mod tests {
     }
 
     #[test]
+    fn distinct_derive_targets_do_not_share_a_cache_key() {
+        // Regression: the `derive_target` component of the cache key must be
+        // injective. A plain `=>` join let `{from:"a", to:"b=>c"}` and
+        // `{from:"a=>b", to:"c"}` forge one key (identical source+extract) and
+        // silently share a wrong resolved set. NUL-delimiting keeps them distinct.
+        let a = manifest_filter(
+            "include_manifest_paths:\n  source: package.json\n  extract: { json: \"$.bin.*\" }\n  derive_target: { from: \"a\", to: \"b=>c\" }",
+        );
+        let b = manifest_filter(
+            "include_manifest_paths:\n  source: package.json\n  extract: { json: \"$.bin.*\" }\n  derive_target: { from: \"a=>b\", to: \"c\" }",
+        );
+        assert_ne!(
+            a.manifest_predicates()[0].cache_key(),
+            b.manifest_predicates()[0].cache_key(),
+            "distinct derive_targets must not forge one cache key"
+        );
+    }
+
+    #[test]
     fn read_manifest_confined_reads_in_root_and_refuses_escape() {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
@@ -1205,6 +1228,35 @@ mod tests {
                 .unwrap()
                 .contains(Path::new("crates/a")),
             "the resolved set is visible on the filtered index after the copy"
+        );
+    }
+
+    #[test]
+    fn changed_since_diff_copies_onto_the_filtered_changed_index() {
+        // Sibling of the manifest copy: a `scope_filter.changed_since:` diff is
+        // resolved on the FULL index and must be copied onto the fresh `--changed`
+        // filtered index too, else a `changed_since` rule silently matches nothing
+        // under `--changed` (the diff cache would be unpopulated on the filtered
+        // index).
+        let full = idx(&["a.rs"]);
+        let mut m = std::collections::HashMap::new();
+        m.insert(
+            "REF".to_string(),
+            [PathBuf::from("a.rs")].into_iter().collect(),
+        );
+        full.set_changed_paths(m);
+        let filtered = idx(&["a.rs"]); // fresh filtered index, empty cache
+        assert!(
+            filtered.changed_paths("REF").is_none(),
+            "filtered index starts with no changed-paths cache"
+        );
+        filtered.set_changed_paths(full.changed_paths_map().unwrap().clone());
+        assert!(
+            filtered
+                .changed_paths("REF")
+                .unwrap()
+                .contains(Path::new("a.rs")),
+            "the changed_since diff is visible on the filtered index after the copy"
         );
     }
 }

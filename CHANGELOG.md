@@ -53,6 +53,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `scope_filter.changed_since:` now resolves under `--changed` / `--base`. Its
+  per-rule diff set was cached only on the full index, so a `changed_since` rule
+  dispatched against the `--changed` filtered index matched nothing (a silent
+  false negative); the resolved diff is now copied onto the filtered index, the
+  same way the manifest path sets are.
 - Diagnostic warnings now write to stderr, never stdout, so a `warn!` (such as an
   empty `include_manifest_paths` set) no longer corrupts the machine-readable
   `--format json` / SARIF output that consumers read from stdout.
