@@ -251,6 +251,33 @@ fn scope_rule(rule: &mut Mapping, prefix: &str, source: &str) -> Result<()> {
         }
     }
 
+    // A manifest predicate's `source:` is a path relative to this config's
+    // directory (like `paths:`), so rebase it under the nested prefix — else a
+    // nested rule would read the repo-root manifest, not its own package's, and
+    // silently mis-scope. `has_ancestor:` / `changed_since:` need no rebasing (a
+    // bare filename walked up the tree / a git ref). Not counted toward
+    // `any_scoped`: a per-file rule still needs its own `paths:` base glob.
+    if let Some(sf) = rule
+        .get_mut("scope_filter")
+        .and_then(serde_yaml_ng::Value::as_mapping_mut)
+    {
+        for key in ["include_manifest_paths", "exclude_manifest_paths"] {
+            if let Some(src) = sf
+                .get_mut(key)
+                .and_then(serde_yaml_ng::Value::as_mapping_mut)
+                .and_then(|mp| mp.get_mut("source"))
+                && let serde_yaml_ng::Value::String(s) = src
+            {
+                *s = scope_glob(s, prefix).map_err(|e| {
+                    Error::rule_config(
+                        &id_hint,
+                        format!("scoping `scope_filter.{key}.source` in {source}: {e}"),
+                    )
+                })?;
+            }
+        }
+    }
+
     if !any_scoped {
         return Err(Error::rule_config(
             &id_hint,

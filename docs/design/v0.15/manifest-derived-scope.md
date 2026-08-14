@@ -197,9 +197,12 @@ the decision taken on each:
    `exclude_manifest_paths`, not one with a `mode:`. This sits with `has_ancestor` (also a
    predicate, not a mode) and the roadmap's mooted `has_sibling`.
 4. **Empty-set default.** RESOLVED: `exclude_manifest_paths` with an empty set excludes
-   nothing (the rule runs full-scope — safe), logged at debug. `include_manifest_paths` with
-   an empty set would silently no-op the rule (a "silent cap" the constitution forbids), so it
-   WARNS by default; `expect_nonempty: false` opts out for a rule that tolerates an empty set.
+   nothing, so the rule runs full-scope — safe, and the resulting over-firing is *visible*
+   (more violations, not fewer), so no warning is needed. `include_manifest_paths` with an
+   empty set would silently no-op the rule (silent under-firing — a "silent cap" the
+   constitution forbids), so it WARNS by default; `expect_nonempty: false` opts out for a rule
+   that tolerates an empty set. (An absent, unreadable, or root-escaping manifest resolves to
+   the empty set through the same paths.)
 5. **Manifest-absent default.** RESOLVED: the predicate contributes nothing, consistent with
    `has_ancestor`. `exclude_manifest_paths` → full-scope; `include_manifest_paths` → scopes
    nothing and warns (same footgun as the empty set).

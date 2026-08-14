@@ -1,0 +1,39 @@
+name: include_manifest_paths in a nested config reads the nested package's own manifest
+tags: [check, scope_filter, no_trailing_whitespace, nested]
+
+# A packages/foo/.alint.yml rule with `source: package.json` must resolve to
+# packages/foo/package.json (rebased to the nested dir), not the repo-root one,
+# and its declared paths resolve under that dir. Guards the nested-source rebase:
+# lib/a.ts (declared in src) fires; other/b.ts (not declared) is out of scope.
+
+given:
+  config: |
+    version: 1
+    nested_configs: true
+    rules: []
+  tree:
+    packages:
+      foo:
+        "package.json": |
+          { "src": ["lib"] }
+        ".alint.yml": |
+          version: 1
+          rules:
+            - id: nws
+              kind: no_trailing_whitespace
+              paths: "**/*.ts"
+              level: warning
+              scope_filter:
+                include_manifest_paths:
+                  source: package.json
+                  extract: { json: "$.src[*]" }
+        lib:
+          "a.ts": "const a = 1; \n"
+        other:
+          "b.ts": "const b = 1; \n"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: nws, level: warning, path: packages/foo/lib/a.ts}

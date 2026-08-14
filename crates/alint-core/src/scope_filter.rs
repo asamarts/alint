@@ -300,6 +300,33 @@ pub struct ResolvedManifestScope {
     pub paths: Vec<PathBuf>,
 }
 
+/// Read a manifest for `explain`'s resolved-set display, which (unlike the
+/// engine) has no `FileIndex` to read through: confine against a `source` that
+/// resolves — via a symlink — outside `root` (the canonical target must stay
+/// under the canonical root, ADR-0004), and cap the read at the analysis limit.
+/// Returns "" if the manifest is absent, escapes the root, or is too large; the
+/// predicate then shows the empty set.
+fn read_manifest_confined(root: &Path, rel: &Path) -> String {
+    let abs = root.join(rel);
+    let (Ok(croot), Ok(cabs)) = (root.canonicalize(), abs.canonicalize()) else {
+        return String::new();
+    };
+    if !cabs.starts_with(&croot) {
+        return String::new(); // a symlinked source that escapes the root
+    }
+    let Ok(meta) = std::fs::metadata(&cabs) else {
+        return String::new();
+    };
+    // Only a regular file is a manifest: a FIFO / device / socket would block or
+    // hang the read (the walker applies the same is_file filter for the engine).
+    if !meta.is_file() {
+        return String::new();
+    }
+    crate::walker::read_capped_or_skip(&cabs, meta.len())
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default()
+}
+
 impl ScopeFilter {
     /// Build from the deserialised spec, validating every
     /// `has_ancestor` entry. Returns `Error::rule_config` on
@@ -448,7 +475,7 @@ impl ScopeFilter {
         self.manifest_predicates
             .iter()
             .map(|p| {
-                let text = std::fs::read_to_string(root.join(&p.source)).unwrap_or_default();
+                let text = read_manifest_confined(root, &p.source);
                 let mut paths: Vec<PathBuf> = p.resolve_set(&text).into_iter().collect();
                 paths.sort();
                 ResolvedManifestScope {
@@ -1122,6 +1149,62 @@ mod tests {
         assert_eq!(
             a.manifest_predicates()[0].cache_key(),
             b.manifest_predicates()[0].cache_key()
+        );
+    }
+
+    #[test]
+    fn read_manifest_confined_reads_in_root_and_refuses_escape() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        std::fs::write(root.join("m.json"), r#"{"x":1}"#).unwrap();
+        // A regular in-root manifest reads.
+        assert_eq!(
+            read_manifest_confined(root, Path::new("m.json")),
+            r#"{"x":1}"#
+        );
+        // Absent -> "".
+        assert!(read_manifest_confined(root, Path::new("missing.json")).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_manifest_confined_refuses_escaping_symlink() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let outside_dir = tempfile::tempdir().unwrap(); // a different tree, not under root
+        let root = root_dir.path();
+        std::fs::write(outside_dir.path().join("secret.json"), "SECRET").unwrap();
+        std::os::unix::fs::symlink(
+            outside_dir.path().join("secret.json"),
+            root.join("link.json"),
+        )
+        .unwrap();
+        // The symlink resolves outside root -> refused (empty), no out-of-tree read.
+        assert!(
+            read_manifest_confined(root, Path::new("link.json")).is_empty(),
+            "an escaping-symlink source must not be read"
+        );
+    }
+
+    #[test]
+    fn manifest_set_copies_onto_the_filtered_changed_index() {
+        // The `--changed` fix: the engine resolves manifests against the full
+        // index (where the manifest is reachable), then copies the resolved map
+        // onto the fresh filtered index that per-file `matches` reads. Guards
+        // that copy so an `include`/`exclude` predicate isn't silently empty
+        // under `--changed`.
+        let full = idx_with_manifest(&["a.rs"], "KEY", &["crates/a"]);
+        let filtered = idx(&["a.rs"]); // a fresh filtered index, empty cache
+        assert!(
+            filtered.manifest_paths("KEY").is_none(),
+            "filtered index starts with no manifest cache"
+        );
+        filtered.set_manifest_paths(full.manifest_paths_map().unwrap().clone());
+        assert!(
+            filtered
+                .manifest_paths("KEY")
+                .unwrap()
+                .contains(Path::new("crates/a")),
+            "the resolved set is visible on the filtered index after the copy"
         );
     }
 }

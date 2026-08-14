@@ -458,7 +458,17 @@ impl Engine {
         // Resolve `scope_filter.changed_since:` diffs once, before the
         // per-file dispatch reads the per-file `Scope::matches` cache.
         self.resolve_changed_paths(root, index)?;
+        // Resolve manifest path sets against the FULL index (so the manifest
+        // itself is reachable even when it didn't change), then copy the result
+        // onto the `--changed` filtered index that per-file dispatch actually
+        // matches against — otherwise an `include`/`exclude` manifest predicate
+        // silently sees an empty set under `--changed`.
         self.resolve_manifest_paths(root, index);
+        if let Some(fi) = &filtered_index
+            && let Some(map) = index.manifest_paths_map()
+        {
+            fi.set_manifest_paths(map.clone());
+        }
 
         // Per-file partition: file-major loop reads each file
         // once and dispatches to every per-file rule whose scope
@@ -890,6 +900,13 @@ impl Engine {
         // fix pass respects per-rule diff scoping too.
         self.resolve_changed_paths(root, index)?;
         self.resolve_manifest_paths(root, index);
+        // Propagate the manifest sets onto the `--changed` filtered index (see
+        // `run`), so `fix --changed` scopes excluded files out of the fix too.
+        if let Some(fi) = &filtered_index
+            && let Some(map) = index.manifest_paths_map()
+        {
+            fi.set_manifest_paths(map.clone());
+        }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         for entry in &self.entries {
@@ -1215,15 +1232,28 @@ impl Engine {
         }
         let mut map = std::collections::HashMap::new();
         for (key, pred) in preds {
-            let manifest = root.join(pred.source());
-            let set = match std::fs::read_to_string(&manifest) {
-                Ok(text) => pred.resolve_set(&text),
-                Err(_) => std::collections::HashSet::new(),
+            // Read the manifest through the walked index, not a raw path read:
+            // `find_file` returns None for a source that is absent OR an escaping
+            // symlink the walk pruned (ADR-0004 confinement) — so a symlinked
+            // `source` can't read out-of-tree bytes. `read_capped_or_skip` bounds
+            // the read with the walk-time size (a huge / device manifest is
+            // skipped, not slurped), matching how `registry_paths_resolve` /
+            // `file_graph` read their extract sources. Either way -> empty set,
+            // and the predicate contributes nothing.
+            let set = match index.find_file(pred.source()) {
+                Some(entry) => {
+                    match crate::walker::read_capped_or_skip(&root.join(&entry.path), entry.size) {
+                        Some(bytes) => pred.resolve_set(&String::from_utf8_lossy(&bytes)),
+                        None => std::collections::HashSet::new(),
+                    }
+                }
+                None => std::collections::HashSet::new(),
             };
             if set.is_empty() && pred.warns_on_empty() {
                 tracing::warn!(
-                    "scope_filter.include_manifest_paths: `{}` extracted no paths, so the rule \
-                     matches nothing. Set `expect_nonempty: false` if that is intended.",
+                    "scope_filter.include_manifest_paths: `{}` resolved to no paths (the manifest \
+                     is missing, unreadable, or declares none), so the rule matches nothing. Set \
+                     `expect_nonempty: false` if that is intended.",
                     pred.source().display()
                 );
             }

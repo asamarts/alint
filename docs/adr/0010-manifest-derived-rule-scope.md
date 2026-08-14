@@ -79,7 +79,13 @@ predicates). Concretely, we will:
   path-confinement gate (ADR-0004).
 
 The one-line invariant: **manifest VALUES may gate WHICH files a rule sees, never WHAT the
-rule decides about a file.**
+rule decides about a file.** Precisely: a manifest value parametrizes the *domain* of files a
+rule is evaluated over — exactly as a static `paths:` glob does — and never crosses into the
+per-file decision function (`evaluate_file`), a message template, a violation's fields, a
+fix, or a `when:` expression. (A rule with a constant per-file verdict, e.g. "flag every
+in-scope file", still has its whole finding set shaped by the domain; that is the same
+domain-level effect a `paths.exclude` glob already has, and is the accepted "legibility
+erodes" consequence below — not a verdict leak.)
 
 The mechanism details deliberately left to the design doc — the exact predicate names,
 whether to ship a narrow `scope_filter` variant or a general named `path_sets:` block, and

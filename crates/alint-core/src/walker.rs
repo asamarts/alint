@@ -284,6 +284,17 @@ impl FileIndex {
         let _ = self.manifest_paths.set(map);
     }
 
+    /// The whole resolved manifest-paths map, if populated. The engine resolves
+    /// manifests against the FULL index (so `find_file` reaches them) and copies
+    /// the result onto the pre-filtered `--changed` index (whose own entries omit
+    /// unchanged manifests), so per-file `matches` against the filtered index
+    /// still sees the set. The declared path set is independent of which files
+    /// the run visits, so the same map is valid for both.
+    #[must_use]
+    pub fn manifest_paths_map(&self) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
+        self.manifest_paths.get()
+    }
+
     pub fn files(&self) -> impl Iterator<Item = &FileEntry> {
         self.entries.iter().filter(|e| !e.is_dir)
     }
