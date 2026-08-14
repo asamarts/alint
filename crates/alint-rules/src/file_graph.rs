@@ -53,11 +53,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::slice;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
+    extract_values, is_non_literal,
+};
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::extract::{Extract, ExtractSpec, extract_values, is_non_literal};
 use crate::pair_hash::Algorithm;
 
 /// How a content-extracted reference string is turned into a path.
@@ -405,19 +407,22 @@ impl FileGraphRule {
     ) -> Vec<PathBuf> {
         if let EdgeSource::DeriveTarget { from, to } = &self.edges {
             let node_str = node.to_string_lossy();
-            let Some(caps) = from.captures(&node_str) else {
-                return Vec::new();
-            };
-            let mut derived = String::new();
-            caps.expand(to, &mut derived);
-            let Some(target) = crate::pathsafe::normalize_confined(Path::new(&derived)) else {
+            if let Some(target) = alint_core::derive_target(from, to, &node_str) {
+                return vec![target];
+            }
+            // `None` is either "the node doesn't match `from`" (no edge, silent)
+            // or "it matches but derives an out-of-repo target" (an escape).
+            // Re-check the match to tell them apart, and reconstruct the derived
+            // string only for the escape message — the path itself is never read.
+            if let Some(caps) = from.captures(&node_str) {
+                let mut derived = String::new();
+                caps.expand(to, &mut derived);
                 out.push(Self::node_violation(
                     node,
                     &format!("derives the out-of-repo target {derived:?} (escapes the repo root)"),
                 ));
-                return Vec::new();
-            };
-            return vec![target];
+            }
+            return Vec::new();
         }
         let EdgeSource::FromContent { extract, resolve } = &self.edges else {
             return Vec::new();

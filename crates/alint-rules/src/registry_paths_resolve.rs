@@ -25,11 +25,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
+    extract_values, is_non_literal,
+};
 use regex::Regex;
 use serde::Deserialize;
-
-use crate::extract::{Extract, ExtractSpec, extract_values, is_non_literal};
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -543,7 +544,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extract::LinesOpts;
+    use alint_core::LinesOpts;
     use alint_core::{FileEntry, FileIndex};
 
     fn index(files: &[&str], dirs: &[&str]) -> FileIndex {

@@ -34,12 +34,10 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{Context, Error, Format, Level, Result, Rule, RuleSpec, Scope, Violation};
 use jsonschema::Validator;
 use serde::Deserialize;
 use serde_json::Value;
-
-use crate::structured_path::Format;
 
 /// The `format:` override values for `json_schema_passes`. Distinct from
 /// `structured_path::Format` (which has `xml`, not `yml`): this validator targets

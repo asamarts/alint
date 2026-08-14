@@ -77,7 +77,6 @@ pub mod dir_only_contains;
 pub mod every_matching_has;
 pub mod executable_bit;
 pub mod executable_has_shebang;
-mod extract;
 pub mod file_absent;
 pub mod file_content_forbidden;
 pub mod file_content_matches;

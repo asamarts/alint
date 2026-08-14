@@ -90,14 +90,19 @@ version = "0.14.2"
 dependencies = [
  "globset",
  "ignore",
+ "proptest",
  "rayon",
  "regex",
+ "roxmltree",
+ "schemars",
  "serde",
  "serde_json",
+ "serde_json_path",
  "serde_yaml_ng",
  "sha2",
  "tempfile",
  "thiserror 2.0.19",
+ "toml",
  "tracing",
 ]
 

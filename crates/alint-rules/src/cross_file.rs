@@ -37,10 +37,11 @@
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
+    extract_values, is_non_literal,
+};
 use serde::Deserialize;
-
-use crate::extract::{Extract, ExtractSpec, extract_values, is_non_literal};
 
 /// The file whose extracted value(s) form the reference side of the relation:
 /// a single `{ file, extract }`, or (set relations only) `{ files: <glob>,
@@ -1371,7 +1372,7 @@ mod tests {
             Extract::Json("$.sdk.version".into()),
             Targets::List(vec![(
                 "Directory.Build.props".into(),
-                Some(Extract::Lines(crate::extract::LinesOpts::default())),
+                Some(Extract::Lines(alint_core::LinesOpts::default())),
             )]),
             Relation::Equals,
             Normalize::SemverMajor,
@@ -1422,7 +1423,7 @@ mod tests {
             Extract::Json("$.v".into()),
             Targets::List(vec![(
                 "protobuf_version.bzl".into(),
-                Some(Extract::Lines(crate::extract::LinesOpts::default())),
+                Some(Extract::Lines(alint_core::LinesOpts::default())),
             )]),
             Relation::Equals,
             Normalize::SemverMinor,
@@ -1901,7 +1902,7 @@ mod tests {
         let idx = index(&["manifest.txt", "src/a.rs", "src/b.rs"]);
         let r = resolves_rule(
             "manifest.txt",
-            Extract::Lines(crate::extract::LinesOpts::default()),
+            Extract::Lines(alint_core::LinesOpts::default()),
         );
         assert!(eval(&r, root, &idx).is_empty());
     }

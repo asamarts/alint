@@ -1,20 +1,20 @@
 //! Shared structured / line / regex extraction for the
 //! manifest-driven cross-file rules (`registry_paths_resolve`,
-//! `cross_file`, `file_graph`). One place so the one-of decode
-//! (`serde_yaml` can't decode an externally-tagged enum from a
-//! `{ key: value }` map; an untagged enum can't tell the three
-//! `JSONPath` string variants apart) and the non-literal skip
+//! `cross_file`, `file_graph`) and core-side predicates. One place so
+//! the one-of decode (`serde_yaml` can't decode an externally-tagged
+//! enum from a `{ key: value }` map; an untagged enum can't tell the
+//! three `JSONPath` string variants apart) and the non-literal skip
 //! can't drift between consumers.
 
 use regex::Regex;
 use serde::Deserialize;
 use serde_json_path::JsonPath;
 
-use crate::structured_path::Format;
+use crate::structured_format::Format;
 
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
 #[derive(Debug, Clone)]
-pub(crate) enum Extract {
+pub enum Extract {
     /// Structured-query (RFC 9535 `JSONPath` over the parsed tree).
     Toml(String),
     Json(String),
@@ -35,7 +35,7 @@ pub(crate) enum Extract {
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "extract_spec", extend("minProperties" = 1, "maxProperties" = 1))]
-pub(crate) struct ExtractSpec {
+pub struct ExtractSpec {
     #[serde(default)]
     toml: Option<String>,
     #[serde(default)]
@@ -51,7 +51,7 @@ pub(crate) struct ExtractSpec {
 }
 
 impl ExtractSpec {
-    pub(crate) fn resolve(self) -> std::result::Result<Extract, String> {
+    pub fn resolve(self) -> std::result::Result<Extract, String> {
         let set: Vec<&str> = [
             ("toml", self.toml.is_some()),
             ("json", self.json.is_some()),
@@ -109,11 +109,11 @@ impl From<Extract> for ExtractSpec {
 /// breaking change.
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct WholeFileOpts {}
+pub struct WholeFileOpts {}
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct LinesOpts {
+pub struct LinesOpts {
     /// Lines starting with this (after trim) are skipped.
     #[serde(default = "default_comment")]
     pub(crate) comment: String,
@@ -146,7 +146,7 @@ impl Default for LinesOpts {
 /// intentionally silent; visibly surfacing skipped entries is a
 /// tracked v0.11 item (`alint check` has no `--explain` /
 /// informational-finding channel).
-pub(crate) fn is_non_literal(entry: &str) -> bool {
+pub fn is_non_literal(entry: &str) -> bool {
     entry.contains("${") || entry.contains("$(") || entry.contains("{{") || entry.contains("+ ")
 }
 
@@ -154,10 +154,7 @@ pub(crate) fn is_non_literal(entry: &str) -> bool {
 /// applies [`is_non_literal`] filtering as it needs). Structured
 /// modes yield string-valued `JSONPath` matches; `lines` yields
 /// trimmed non-comment lines; `regex` yields capture group 1.
-pub(crate) fn extract_values(
-    extract: &Extract,
-    text: &str,
-) -> std::result::Result<Vec<String>, String> {
+pub fn extract_values(extract: &Extract, text: &str) -> std::result::Result<Vec<String>, String> {
     Ok(match extract {
         Extract::Toml(q) => structured(Format::Toml, q, text)?,
         Extract::Json(q) => structured(Format::Json, q, text)?,
