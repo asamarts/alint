@@ -49,7 +49,7 @@ pub use rule::{
 };
 pub use scope::Scope;
 pub use scope_filter::{
-    ManifestDeriveTarget, ManifestPathSpec, ScopeFilter, ScopeFilterSpec,
+    ManifestDeriveTarget, ManifestPathSpec, ResolvedManifestScope, ScopeFilter, ScopeFilterSpec,
     reject_scope_filter_on_cross_file, reject_scope_filter_with_reason,
 };
 pub use structured_format::{Format, MAX_XML_DEPTH};

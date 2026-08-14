@@ -288,6 +288,18 @@ impl ManifestPredicate {
     }
 }
 
+/// One manifest predicate's resolved path set, for `alint explain` to surface
+/// what the manifest scope resolves to (the design's legibility mitigation).
+#[derive(Debug, Clone)]
+pub struct ResolvedManifestScope {
+    /// `true` for `include_manifest_paths`, `false` for `exclude_manifest_paths`.
+    pub include: bool,
+    /// The manifest source (repo-root-relative).
+    pub source: PathBuf,
+    /// The resolved, confined declared paths, sorted.
+    pub paths: Vec<PathBuf>,
+}
+
 impl ScopeFilter {
     /// Build from the deserialised spec, validating every
     /// `has_ancestor` entry. Returns `Error::rule_config` on
@@ -401,11 +413,15 @@ impl ScopeFilter {
         for pred in &self.manifest_predicates {
             // The manifest set is resolved once per run and cached on the index
             // (like `changed_since`); a missing entry (manifest absent /
-            // unresolved) is the empty set. `include` keeps only files whose
-            // path is IN the set; `exclude` drops files whose path is IN it.
+            // unresolved) is the empty set. Membership is component-wise prefix:
+            // a declared FILE (`bin` -> `src/cli.ts`) matches itself, and a
+            // declared DIRECTORY (`Cargo.toml` `workspace.members` -> `crates/a`)
+            // matches every file under it. `Path::starts_with` respects component
+            // boundaries, so `crates/a` does not match `crates/ab/x.rs`. `include`
+            // keeps files IN the set; `exclude` drops files IN it.
             let in_set = index
                 .manifest_paths(pred.cache_key())
-                .is_some_and(|set| set.contains(file));
+                .is_some_and(|set| set.iter().any(|declared| file.starts_with(declared)));
             let keep = match pred.sense {
                 ManifestSense::Include => in_set,
                 ManifestSense::Exclude => !in_set,
@@ -421,6 +437,27 @@ impl ScopeFilter {
     /// from every per-file rule to resolve each declared path set once per run.
     pub(crate) fn manifest_predicates(&self) -> &[ManifestPredicate] {
         &self.manifest_predicates
+    }
+
+    /// Resolve each manifest predicate's declared path set against `root`, for
+    /// display by `alint explain`. Reads each manifest (absent → empty set).
+    /// Not the hot path — the engine caches these on the [`FileIndex`] for
+    /// [`matches`](Self::matches).
+    #[must_use]
+    pub fn resolved_manifest_sets(&self, root: &Path) -> Vec<ResolvedManifestScope> {
+        self.manifest_predicates
+            .iter()
+            .map(|p| {
+                let text = std::fs::read_to_string(root.join(&p.source)).unwrap_or_default();
+                let mut paths: Vec<PathBuf> = p.resolve_set(&text).into_iter().collect();
+                paths.sort();
+                ResolvedManifestScope {
+                    include: p.sense == ManifestSense::Include,
+                    source: p.source.clone(),
+                    paths,
+                }
+            })
+            .collect()
     }
 
     /// The `has_ancestor` walk, factored out so [`matches`](Self::matches)
@@ -915,6 +952,34 @@ mod tests {
         assert!(
             !f.matches(Path::new("vendor/x.rs"), &i),
             "out-of-set file dropped"
+        );
+    }
+
+    #[test]
+    fn manifest_membership_is_directory_aware_prefix() {
+        // A declared DIRECTORY (`workspace.members` -> `crates/a`) matches files
+        // UNDER it; a shared-prefix sibling (`crates/ab`) does NOT match, because
+        // membership is component-wise, not string-prefix.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: Cargo.toml\n  extract: { toml: \"$.workspace.members[*]\" }",
+        );
+        let key = f.manifest_predicates()[0].cache_key();
+        let i = idx_with_manifest(
+            &["crates/a/lib.rs", "crates/ab/x.rs", "vendor/y.rs"],
+            key,
+            &["crates/a"],
+        );
+        assert!(
+            f.matches(Path::new("crates/a/lib.rs"), &i),
+            "file under declared dir kept"
+        );
+        assert!(
+            !f.matches(Path::new("crates/ab/x.rs"), &i),
+            "shared-prefix sibling dir not matched (component boundary)"
+        );
+        assert!(
+            !f.matches(Path::new("vendor/y.rs"), &i),
+            "file outside members dropped"
         );
     }
 

@@ -141,6 +141,13 @@ impl RuleEntry {
         self.spec.as_ref().and_then(|s| s.paths.as_ref())
     }
 
+    /// The rule's `scope_filter:` config, if set — for `alint explain` to render
+    /// the manifest / diff / ancestor gates the `paths:` glob alone doesn't show.
+    #[must_use]
+    pub fn scope_filter(&self) -> Option<&crate::ScopeFilterSpec> {
+        self.spec.as_ref().and_then(|s| s.scope_filter.as_ref())
+    }
+
     /// The rule's custom `message:`, if set (see [`RuleEntry::spec`]).
     #[must_use]
     pub fn message(&self) -> Option<&str> {
