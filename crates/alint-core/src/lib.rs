@@ -49,8 +49,8 @@ pub use rule::{
 };
 pub use scope::Scope;
 pub use scope_filter::{
-    ScopeFilter, ScopeFilterSpec, reject_scope_filter_on_cross_file,
-    reject_scope_filter_with_reason,
+    ManifestDeriveTarget, ManifestPathSpec, ScopeFilter, ScopeFilterSpec,
+    reject_scope_filter_on_cross_file, reject_scope_filter_with_reason,
 };
 pub use structured_format::{Format, MAX_XML_DEPTH};
 pub use walker::{FileEntry, FileIndex, MAX_ANALYZE_BYTES, WalkOptions, read_capped_or_skip, walk};

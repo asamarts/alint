@@ -451,6 +451,7 @@ impl Engine {
         // Resolve `scope_filter.changed_since:` diffs once, before the
         // per-file dispatch reads the per-file `Scope::matches` cache.
         self.resolve_changed_paths(root, index)?;
+        self.resolve_manifest_paths(root, index);
 
         // Per-file partition: file-major loop reads each file
         // once and dispatches to every per-file rule whose scope
@@ -730,6 +731,7 @@ impl Engine {
         // Per-file rules may carry `scope_filter.changed_since:`; resolve
         // (and cache) the diff before any `Scope::matches` reads it.
         self.resolve_changed_paths(root, index)?;
+        self.resolve_manifest_paths(root, index);
 
         let ctx = Context {
             root,
@@ -880,6 +882,7 @@ impl Engine {
         // Same `scope_filter.changed_since:` resolution as `run`, so a
         // fix pass respects per-rule diff scoping too.
         self.resolve_changed_paths(root, index)?;
+        self.resolve_manifest_paths(root, index);
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         for entry in &self.entries {
@@ -1167,6 +1170,59 @@ impl Engine {
         }
         index.set_changed_paths(map);
         Ok(())
+    }
+
+    /// Resolve every per-file rule's manifest-derived path set once per run and
+    /// cache them on the index, mirroring [`resolve_changed_paths`](Self::resolve_changed_paths).
+    /// Keyed by each predicate's cache key, so rules sharing a `(source,
+    /// extract, derive_target)` config resolve once. A manifest that is absent /
+    /// unreadable yields the empty set (the predicate contributes nothing,
+    /// consistent with `has_ancestor`); an empty set on an
+    /// `include_manifest_paths:` predicate that expects one is warned about (an
+    /// empty include would otherwise silently no-op the whole rule). Reads are
+    /// confined to the repo root; `source` was confined at build time.
+    fn resolve_manifest_paths(&self, root: &Path, index: &FileIndex) {
+        if index.manifest_paths_initialized() {
+            return;
+        }
+        // Dedup by cache key: identical configs resolve once. BTreeMap keeps the
+        // resolution order deterministic (ADR-0003).
+        let mut preds: std::collections::BTreeMap<&str, &crate::scope_filter::ManifestPredicate> =
+            std::collections::BTreeMap::new();
+        for entry in &self.entries {
+            let scope = entry
+                .rule
+                .as_per_file()
+                .map(super::rule::PerFileRule::path_scope)
+                .or_else(|| entry.rule.path_scope());
+            if let Some(scope) = scope
+                && let Some(filter) = scope.scope_filter()
+            {
+                for pred in filter.manifest_predicates() {
+                    preds.entry(pred.cache_key()).or_insert(pred);
+                }
+            }
+        }
+        if preds.is_empty() {
+            return;
+        }
+        let mut map = std::collections::HashMap::new();
+        for (key, pred) in preds {
+            let manifest = root.join(pred.source());
+            let set = match std::fs::read_to_string(&manifest) {
+                Ok(text) => pred.resolve_set(&text),
+                Err(_) => std::collections::HashSet::new(),
+            };
+            if set.is_empty() && pred.warns_on_empty() {
+                tracing::warn!(
+                    "scope_filter.include_manifest_paths: `{}` extracted no paths, so the rule \
+                     matches nothing. Set `expect_nonempty: false` if that is intended.",
+                    pred.source().display()
+                );
+            }
+            map.insert(key.to_string(), set);
+        }
+        index.set_manifest_paths(map);
     }
 }
 

@@ -203,9 +203,11 @@ the decision taken on each:
 5. **Manifest-absent default.** RESOLVED: the predicate contributes nothing, consistent with
    `has_ancestor`. `exclude_manifest_paths` → full-scope; `include_manifest_paths` → scopes
    nothing and warns (same footgun as the empty set).
-6. **`allow_out_of_root` and confinement.** RESOLVED: honored. `source:` is repo-root-confined
-   under ADR-0004 by default; a rule that sets the existing `allow_out_of_root:` escape lifts
-   the confinement for its manifest read too — no new knob.
+6. **`allow_out_of_root` and confinement.** RESOLVED: `source:` is ALWAYS repo-root-confined
+   (an escaping `source` is a build-time error). A manifest a rule scopes by lives in the repo,
+   so v1 does not honor `allow_out_of_root:` for the manifest read: the policy is a load-time
+   per-rule resolution not reachable from `ScopeFilter::from_spec`, and an out-of-root manifest
+   source is not a real use case. Revisit only if one appears.
 7. **Relationship to `has_sibling`.** RESOLVED: `has_sibling` is NOT bundled into v0.15 (a
    separate scope generalisation). The manifest-path predicate is named and shaped as a
    `scope_filter` membership predicate so `has_sibling` joins the same family later without a
