@@ -137,7 +137,14 @@ fn url_encode(s: &str) -> String {
 fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
     let filter = EnvFilter::try_from_env("ALINT_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
-    let _ = fmt().with_env_filter(filter).with_target(false).try_init();
+    // Diagnostics go to stderr, never stdout: a `warn!` (e.g. an empty
+    // `include_manifest_paths` set) must not corrupt `--format json`/SARIF, which
+    // machine consumers read from stdout. `fmt()`'s default writer is stdout.
+    let _ = fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 fn run(mut cli: Cli) -> Result<ExitCode> {

@@ -51,6 +51,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   completes the explain output: id, kind, categories, level, paths, options,
   message, policy_url, when, and fix.
 
+### Fixed
+
+- Diagnostic warnings now write to stderr, never stdout, so a `warn!` (such as an
+  empty `include_manifest_paths` set) no longer corrupts the machine-readable
+  `--format json` / SARIF output that consumers read from stdout.
+
 ## [0.14.2] - 2026-08-06
 
 A fixes-and-hardening patch on top of 0.14.1. The `hygiene-no-macos-junk`
