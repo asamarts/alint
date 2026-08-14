@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-06
 decision-makers: asamarts
 ---
@@ -8,11 +8,15 @@ decision-makers: asamarts
 
 ## Status
 
-Proposed. (One of: Proposed | Accepted | Rejected | Deprecated | Superseded by ADR-NNNN.)
+Accepted. (One of: Proposed | Accepted | Rejected | Deprecated | Superseded by ADR-NNNN.)
 
-Proposed pending the companion design doc (`docs/design/v0.15/manifest-derived-scope.md`)
-and its implementation phases. The boundary this ADR draws is settled; the mechanism
-details (predicate shape, source-versus-output handling) are the design doc's to resolve.
+Accepted 2026-08-13 for the v0.15 cut. The companion design doc
+(`docs/design/v0.15/manifest-derived-scope.md`) resolved the mechanism details left open
+here: a narrow `scope_filter` predicate pair, `include_manifest_paths` /
+`exclude_manifest_paths` (not a top-level `path_sets:` block), with `derive_target`
+output-to-source mapping shipping in the same release so the motivating `package.json`
+`bin` case works on arrival rather than as a fast-follow. The boundary this ADR draws is
+unchanged.
 
 ## Context
 
