@@ -37,6 +37,13 @@ pub struct DirAbsentRule {
 }
 
 impl Rule for DirAbsentRule {
+    /// Expose the per-file scope so the engine resolves this rule's
+    /// `scope_filter` (manifest sets, `changed_since:`) before dispatch and
+    /// can `--changed`-skip it (see `Rule::path_scope`).
+    fn path_scope(&self) -> Option<&Scope> {
+        Some(&self.scope)
+    }
+
     alint_core::rule_common_impl!();
     fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
         if self.git_tracked_only {

@@ -58,6 +58,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dispatched against the `--changed` filtered index matched nothing (a silent
   false negative); the resolved diff is now copied onto the filtered index, the
   same way the manifest path sets are.
+- `scope_filter` now applies on rule kinds dispatched in the rule-major partition
+  (`filename_case`, `filename_regex`, `file_max_size`, `file_min_size`,
+  `executable_bit`, `no_empty_files`, `json_schema_passes`, and others), not only
+  per-file content rules. Those kinds applied their scope per file but didn't
+  expose it for the engine to pre-resolve, and the scope caches were resolved
+  after the rule-major dispatch — so a `changed_since:` predicate silently
+  matched nothing on them (affected since v0.11). A per-file rule that applies a
+  scope now exposes it (also enabling `--changed` to skip it), and the scope
+  caches resolve before every dispatch path.
 - Diagnostic warnings now write to stderr, never stdout, so a `warn!` (such as an
   empty `include_manifest_paths` set) no longer corrupts the machine-readable
   `--format json` / SARIF output that consumers read from stdout.

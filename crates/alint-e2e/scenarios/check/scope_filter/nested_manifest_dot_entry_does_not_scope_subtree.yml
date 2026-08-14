@@ -1,0 +1,38 @@
+name: a nested manifest '.' entry does not scope the whole subtree
+tags: [check, scope_filter, nested, file_content_forbidden]
+
+# Regression (round-3 audit): a nested-manifest entry that normalizes to nothing
+# on its own (`.`, ``, `x/..`) must be dropped, not resolved to the manifest's own
+# directory -- otherwise `base.join(".")` == base and the entry would scope the
+# manifest's WHOLE subtree. Here an exclude with `"."` must therefore resolve to
+# the EMPTY set (full scope), so the forbidden `console.` still fires.
+
+given:
+  config: |
+    version: 1
+    nested_configs: true
+    rules: []
+  tree:
+    pkg:
+      "tsconfig.json": |
+        { "include": ["."] }
+      ".alint.yml": |
+        version: 1
+        rules:
+          - id: forbid
+            kind: file_content_forbidden
+            paths: "**/*.ts"
+            pattern: "console\\."
+            level: error
+            scope_filter:
+              exclude_manifest_paths:
+                source: tsconfig.json
+                extract: { json: "$.include[*]" }
+      src:
+        "app.ts": "console.log(1)\n"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: forbid, level: error, path: pkg/src/app.ts}

@@ -269,7 +269,9 @@ impl FileIndex {
     /// own entries omit the ref-diff set), so a per-file `scope_filter.changed_since:`
     /// still resolves under `--changed` instead of silently matching nothing.
     #[must_use]
-    pub fn changed_paths_map(&self) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
+    pub(crate) fn changed_paths_map(
+        &self,
+    ) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
         self.changed_paths.get()
     }
 
@@ -277,7 +279,7 @@ impl FileIndex {
     /// `None` means the cache wasn't populated for this key (manifest absent /
     /// unresolved); the predicate treats it as the empty set.
     #[must_use]
-    pub fn manifest_paths(&self, cache_key: &str) -> Option<&HashSet<std::path::PathBuf>> {
+    pub(crate) fn manifest_paths(&self, cache_key: &str) -> Option<&HashSet<std::path::PathBuf>> {
         self.manifest_paths.get()?.get(cache_key)
     }
 
@@ -301,7 +303,9 @@ impl FileIndex {
     /// still sees the set. The declared path set is independent of which files
     /// the run visits, so the same map is valid for both.
     #[must_use]
-    pub fn manifest_paths_map(&self) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
+    pub(crate) fn manifest_paths_map(
+        &self,
+    ) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
         self.manifest_paths.get()
     }
 

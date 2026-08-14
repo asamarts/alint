@@ -954,7 +954,7 @@
           "type": "object"
         },
         "expect_nonempty": {
-          "description": "`include_manifest_paths` only: warn when the extracted set is empty (default true). An empty include set silently no-ops the whole rule; set false for a rule that legitimately tolerates it.",
+          "description": "`include_manifest_paths` only: warn when the extracted set is empty (default true). An empty include set silently no-ops the whole rule; set false for a rule that legitimately tolerates it. Ignored on `exclude_manifest_paths` (an empty exclude set is safe: full scope, visible over-firing).",
           "type": "boolean"
         },
         "extract": {

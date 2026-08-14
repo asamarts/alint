@@ -1,0 +1,39 @@
+name: include_manifest_paths resolves for a non-per-file rule (filename_case)
+tags: [check, scope_filter, filename_case]
+
+# Regression (round-3 audit): manifest scope must resolve for rules dispatched in
+# the rule-major partition too, not only PerFileRule content rules. filename_case
+# applies its scope per file but isn't a PerFileRule, so the resolver used to miss
+# it (it exposed no path_scope) AND resolution ran after the rule-major loop --
+# both fixed. BadName.rs under the declared member fires; the non-member one is
+# out of scope. All four shipped scope_filter e2e scenarios used content rules,
+# which is why this class slipped.
+
+given:
+  config: |
+    version: 1
+    rules:
+      - id: names
+        kind: filename_case
+        case: snake
+        paths: "**/*.rs"
+        level: error
+        scope_filter:
+          include_manifest_paths:
+            source: Cargo.toml
+            extract: { toml: "$.workspace.members[*]" }
+  tree:
+    "Cargo.toml": |
+      [workspace]
+      members = ["crates/a"]
+    crates:
+      a:
+        "BadName.rs": "fn a() {}\n"
+    vendor:
+      "OtherBad.rs": "fn v() {}\n"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: names, level: error, path: crates/a/BadName.rs}

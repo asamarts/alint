@@ -210,7 +210,11 @@ the decision taken on each:
    (an escaping `source` is a build-time error). A manifest a rule scopes by lives in the repo,
    so v1 does not honor `allow_out_of_root:` for the manifest read: the policy is a load-time
    per-rule resolution not reachable from `ScopeFilter::from_spec`, and an out-of-root manifest
-   source is not a real use case. Revisit only if one appears.
+   source is not a real use case. Revisit only if one appears. The `source:` is read
+   directly and confined by canonicalisation (as `registry_paths_resolve` / `file_graph`
+   read their sources), NOT through the walked file index — so a `.gitignore`'d or `ignore:`'d
+   manifest is still read (`.gitignore` governs lint *targets*, not a referenced config
+   source), and `alint explain` shows the same resolved set the engine uses.
 7. **Relationship to `has_sibling`.** RESOLVED: `has_sibling` is NOT bundled into v0.15 (a
    separate scope generalisation). The manifest-path predicate is named and shaped as a
    `scope_filter` membership predicate so `has_sibling` joins the same family later without a

@@ -286,6 +286,7 @@ impl Engine {
     #[allow(clippy::too_many_lines)]
     pub fn run(&self, root: &Path, index: &FileIndex) -> Result<Report> {
         let t_total = Instant::now();
+        self.ensure_manifest_scope_resolvable()?;
         // Empty changed-set fast path: nothing to lint, return
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.
@@ -368,6 +369,36 @@ impl Engine {
             iter: None,
             env: None,
         };
+
+        // Resolve `scope_filter.changed_since:` diffs + manifest path sets ONCE,
+        // before ANY dispatch. BOTH the cross-file/rule-major partition below and
+        // the per-file partition read these caches via `Scope::matches` — a
+        // non-per-file rule (e.g. `filename_case`) dispatches in the rule-major
+        // loop, so resolving *after* it silently emptied its manifest/diff scope.
+        // Resolve against the FULL index (so the manifest is reachable even when
+        // unchanged), then copy the maps onto every alternate index a context may
+        // dispatch against (the `--changed` filtered index and the git-tracked
+        // file-only / dir-aware indexes) — each is a fresh FileIndex with empty
+        // caches, and the declared set is independent of which files it holds.
+        self.resolve_changed_paths(root, index)?;
+        self.resolve_manifest_paths(root, index);
+        let alt_indexes = [
+            filtered_index.as_ref(),
+            git_tracked_indexes
+                .as_ref()
+                .and_then(|g| g.file_only.as_ref()),
+            git_tracked_indexes
+                .as_ref()
+                .and_then(|g| g.dir_aware.as_ref()),
+        ];
+        for fi in alt_indexes.into_iter().flatten() {
+            if let Some(map) = index.manifest_paths_map() {
+                fi.set_manifest_paths(map.clone());
+            }
+            if let Some(map) = index.changed_paths_map() {
+                fi.set_changed_paths(map.clone());
+            }
+        }
 
         // Per-rule wall-time accumulator for the cross-file
         // partition. One AtomicU64 per entry, indexed by
@@ -455,26 +486,9 @@ impl Engine {
             }
         }
 
-        // Resolve `scope_filter.changed_since:` diffs once, before the
-        // per-file dispatch reads the per-file `Scope::matches` cache.
-        self.resolve_changed_paths(root, index)?;
-        // Resolve manifest path sets against the FULL index (so the manifest
-        // itself is reachable even when it didn't change).
-        self.resolve_manifest_paths(root, index);
-        // Copy BOTH resolved caches onto the `--changed` filtered index that
-        // per-file dispatch actually matches against: the manifest sets AND the
-        // `changed_since:` diffs. The filtered index is rebuilt from the changed
-        // files with fresh caches, so without the copy an `include`/`exclude`
-        // manifest predicate — or a `scope_filter.changed_since:` — silently sees
-        // an empty set under `--changed`.
-        if let Some(fi) = &filtered_index {
-            if let Some(map) = index.manifest_paths_map() {
-                fi.set_manifest_paths(map.clone());
-            }
-            if let Some(map) = index.changed_paths_map() {
-                fi.set_changed_paths(map.clone());
-            }
-        }
+        // (`scope_filter.changed_since:` diffs + manifest path sets were resolved
+        // and propagated to every index before the cross-file partition above, so
+        // both partitions see a populated `Scope::matches` cache.)
 
         // Per-file partition: file-major loop reads each file
         // once and dispatches to every per-file rule whose scope
@@ -834,6 +848,7 @@ impl Engine {
     /// result, same as [`Engine::run`]'s usual behaviour.
     #[allow(clippy::too_many_lines)]
     pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
+        self.ensure_manifest_scope_resolvable()?;
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
             return Ok(FixReport {
                 results: Vec::new(),
@@ -906,9 +921,20 @@ impl Engine {
         // fix pass respects per-rule diff scoping too.
         self.resolve_changed_paths(root, index)?;
         self.resolve_manifest_paths(root, index);
-        // Propagate BOTH resolved caches onto the `--changed` filtered index (see
-        // `run`), so `fix --changed` respects manifest scope AND `changed_since:`.
-        if let Some(fi) = &filtered_index {
+        // Propagate BOTH resolved caches onto every alternate index the fix loop
+        // may `pick_ctx` (see `run`): the `--changed` filtered index and the
+        // git-tracked file-only / dir-aware indexes, so `fix` respects manifest
+        // scope AND `changed_since:` on every dispatch path.
+        let alt_indexes = [
+            filtered_index.as_ref(),
+            git_tracked_indexes
+                .as_ref()
+                .and_then(|g| g.file_only.as_ref()),
+            git_tracked_indexes
+                .as_ref()
+                .and_then(|g| g.dir_aware.as_ref()),
+        ];
+        for fi in alt_indexes.into_iter().flatten() {
             if let Some(map) = index.manifest_paths_map() {
                 fi.set_manifest_paths(map.clone());
             }
@@ -1214,6 +1240,34 @@ impl Engine {
     /// `include_manifest_paths:` predicate that expects one is warned about (an
     /// empty include would otherwise silently no-op the whole rule). Reads are
     /// confined to the repo root; `source` was confined at build time.
+    /// Fail loud if a rule declares a manifest-derived scope (`include`/
+    /// `exclude_manifest_paths`) but exposes no scope for the engine to resolve
+    /// (`as_per_file` and `path_scope` both `None`). Without this the predicate
+    /// silently no-ops: the resolver never discovers it, so its cache stays empty
+    /// and `Scope::matches` reads the empty set (include matches nothing, exclude
+    /// excludes nothing) — the exact silent-no-op class fuzzing found on rule
+    /// kinds that apply a scope but forgot to expose it (see `Rule::path_scope`).
+    fn ensure_manifest_scope_resolvable(&self) -> Result<()> {
+        for entry in &self.entries {
+            let Some(sf) = entry.scope_filter() else {
+                continue;
+            };
+            if sf.include_manifest_paths.is_none() && sf.exclude_manifest_paths.is_none() {
+                continue;
+            }
+            if entry.rule.as_per_file().is_none() && entry.rule.path_scope().is_none() {
+                return Err(Error::rule_config(
+                    entry.rule.id(),
+                    "this rule kind does not support `scope_filter.include_manifest_paths` / \
+                     `exclude_manifest_paths`: it exposes no per-file scope for the engine to \
+                     resolve, so the manifest set would silently never apply"
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn resolve_manifest_paths(&self, root: &Path, index: &FileIndex) {
         if index.manifest_paths_initialized() {
             return;
@@ -1247,24 +1301,21 @@ impl Engine {
         let mut map = std::collections::HashMap::new();
         for (key, group) in groups {
             // Every predicate in the group shares one `(source, extract,
-            // derive_target)`, so any member resolves the same set. Read it
-            // through the walked index, not a raw path read: `find_file` returns
-            // None for a source that is absent OR an escaping symlink the walk
-            // pruned (ADR-0004 confinement) — so a symlinked `source` can't read
-            // out-of-tree bytes. `read_capped_or_skip` bounds the read with the
-            // walk-time size (a huge / device manifest is skipped, not slurped),
-            // matching how `registry_paths_resolve` / `file_graph` read their
-            // extract sources. Either way -> empty set, contributing nothing.
+            // derive_target)`, so any member resolves the same set. Read the
+            // manifest with the same confined direct read `explain` uses
+            // (`read_manifest_confined`: canonicalize-confined + is_file +
+            // size-capped), NOT through the walked index: `find_file` also honors
+            // `.gitignore`, so a gitignored manifest would resolve to the empty
+            // set here while `explain` (a direct read) showed a non-empty set — a
+            // legibility split undercutting ADR-0010's "explain shows the resolved
+            // set". A direct confined read matches `registry_paths_resolve` /
+            // `file_graph`, which read their sources via `read_capped(root.join())`
+            // regardless of the walk. Absent / oversized / escaping -> empty set.
             let rep = group[0];
-            let set = match index.find_file(rep.source()) {
-                Some(entry) => {
-                    match crate::walker::read_capped_or_skip(&root.join(&entry.path), entry.size) {
-                        Some(bytes) => rep.resolve_set(&String::from_utf8_lossy(&bytes)),
-                        None => std::collections::HashSet::new(),
-                    }
-                }
-                None => std::collections::HashSet::new(),
-            };
+            let set = rep.resolve_set(&crate::scope_filter::read_manifest_confined(
+                root,
+                rep.source(),
+            ));
             // Warn per group, not per first-iterated predicate: an `include` that
             // expects a non-empty set must be flagged even when an `exclude`
             // sharing the manifest sorted first (the empty-include silent no-op is

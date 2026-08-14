@@ -134,7 +134,9 @@ pub struct ManifestPathSpec {
     pub derive_target: Option<ManifestDeriveTarget>,
     /// `include_manifest_paths:` only — warn when the extracted set is empty
     /// (default `true`). An empty include set silently no-ops the whole rule, a
-    /// footgun; set `false` for a rule that legitimately tolerates it.
+    /// footgun; set `false` for a rule that legitimately tolerates it. Ignored on
+    /// `exclude_manifest_paths:` — an empty exclude set is safe (full scope,
+    /// visible over-firing), so there is nothing to warn about.
     #[serde(default)]
     pub expect_nonempty: Option<bool>,
 }
@@ -202,6 +204,28 @@ impl ManifestPredicate {
     /// Build + validate from the config half: confine `source`, resolve the
     /// extractor, compile the `derive_target` regex, and compute the cache key.
     fn from_spec(rule_id: &str, spec: ManifestPathSpec, sense: ManifestSense) -> Result<Self> {
+        // The cache key NUL-delimits its components; a NUL byte in any of them
+        // would break its injectivity (a double-quoted `"a\0b"` YAML scalar
+        // decodes to a literal NUL). A NUL in a path / regex / template is
+        // meaningless anyway — reject it so the delimiter stays sound.
+        for (field, val) in [
+            ("source", spec.source.as_str()),
+            (
+                "derive_target.from",
+                spec.derive_target.as_ref().map_or("", |d| d.from.as_str()),
+            ),
+            (
+                "derive_target.to",
+                spec.derive_target.as_ref().map_or("", |d| d.to.as_str()),
+            ),
+        ] {
+            if val.contains('\u{0}') {
+                return Err(Error::rule_config(
+                    rule_id,
+                    format!("scope_filter manifest `{field}:` must not contain a NUL byte"),
+                ));
+            }
+        }
         let source = normalize_confined(Path::new(&spec.source)).ok_or_else(|| {
             Error::rule_config(
                 rule_id,
@@ -233,10 +257,10 @@ impl ManifestPredicate {
             .map(|(from, to)| format!("{}\u{0}{to}", from.as_str()))
             .unwrap_or_default();
         // `Extract`'s Debug is a stable, injective rendering of the resolved
-        // extractor. NUL (`\0`) delimits every component — it can't occur in a
-        // YAML scalar (`source`/`from`/`to`) — so the key is injective: two rules
-        // co-cache iff their `(source, extract, derive_target)` is identical.
-        // (A plain `=>` between `from`/`to` would let `{from:"a", to:"b=>c"}` and
+        // extractor. NUL (`\0`) delimits every component and is rejected above in
+        // `source`/`from`/`to`, so the key is injective: two rules co-cache iff
+        // their `(source, extract, derive_target)` is identical. (A plain `=>`
+        // between `from`/`to` would let `{from:"a", to:"b=>c"}` and
         // `{from:"a=>b", to:"c"}` forge one key and share a wrong set.)
         let cache_key = format!("{}\u{0}{extract:?}\u{0}{dt_key}", source.display());
         Ok(Self {
@@ -280,11 +304,20 @@ impl ManifestPredicate {
         raw.into_iter()
             .filter(|e| !is_non_literal(e))
             .filter_map(|entry| {
-                let mapped = match &self.derive_target {
-                    // A non-matching entry is not a mapped output — dropped,
-                    // matching file_graph's derive_target.
-                    Some((from, to)) => derive_target(from, to, &entry)?,
-                    None => PathBuf::from(entry),
+                // A non-matching derive_target entry is not a mapped output —
+                // dropped, matching file_graph's derive_target.
+                let mapped = if let Some((from, to)) = &self.derive_target {
+                    derive_target(from, to, &entry)?
+                } else {
+                    // Reject an entry that is vacuous or escaping on its own
+                    // (``, `.`, `x/..`, `../y`) BEFORE joining `base`, mirroring
+                    // the derive_target branch. Otherwise, for a nested manifest,
+                    // `base.join("")` == `base`, so a stray `.` / empty entry
+                    // would scope the manifest's WHOLE subtree — the silent
+                    // footgun the empty-set safety is meant to prevent (at the
+                    // repo root such entries already normalize to `None` below).
+                    normalize_confined(Path::new(&entry))?;
+                    PathBuf::from(entry)
                 };
                 normalize_confined(&base.join(mapped))
             })
@@ -310,7 +343,7 @@ pub struct ResolvedManifestScope {
 /// under the canonical root, ADR-0004), and cap the read at the analysis limit.
 /// Returns "" if the manifest is absent, escapes the root, or is too large; the
 /// predicate then shows the empty set.
-fn read_manifest_confined(root: &Path, rel: &Path) -> String {
+pub(crate) fn read_manifest_confined(root: &Path, rel: &Path) -> String {
     let abs = root.join(rel);
     let (Ok(croot), Ok(cabs)) = (root.canonicalize(), abs.canonicalize()) else {
         return String::new();
@@ -1173,6 +1206,43 @@ mod tests {
             b.manifest_predicates()[0].cache_key(),
             "distinct derive_targets must not forge one cache key"
         );
+    }
+
+    #[test]
+    fn from_spec_rejects_nul_in_derive_target() {
+        // A double-quoted YAML `"a\0b"` decodes to a literal NUL, which would
+        // break the NUL-delimited cache key's injectivity -> rejected at build.
+        let spec: ScopeFilterSpec = serde_yaml_ng::from_str(
+            "include_manifest_paths:\n  source: m.json\n  extract: { json: \"$.x[*]\" }\n  derive_target: { from: \"x\", to: \"a\\0b\" }",
+        )
+        .expect("scope_filter parses");
+        let err = ScopeFilter::from_spec("r", spec).unwrap_err();
+        assert!(
+            err.to_string().contains("NUL"),
+            "expected a NUL rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_set_drops_vacuous_nested_entry() {
+        // A nested manifest's `.` / `` / self-canceling entry must be dropped, not
+        // resolved to the manifest's own directory (`base.join(".")` == base),
+        // which would silently scope the manifest's whole subtree. A real child is
+        // still kept, resolved under the manifest dir.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: pkg/tsconfig.json\n  extract: { json: \"$.include[*]\" }",
+        );
+        let set =
+            f.manifest_predicates()[0].resolve_set(r#"{"include": [".", "", "a/..", "src"]}"#);
+        assert!(
+            !set.contains(Path::new("pkg")),
+            "a vacuous entry must not scope the whole subtree: {set:?}"
+        );
+        assert!(
+            set.contains(Path::new("pkg/src")),
+            "a real child resolves under the manifest dir: {set:?}"
+        );
+        assert_eq!(set.len(), 1, "only the real child survives: {set:?}");
     }
 
     #[test]
