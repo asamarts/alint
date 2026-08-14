@@ -161,7 +161,7 @@ Common per-rule fields:
 - **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
 - **`when`**: bounded expression gating the rule on facts / vars.
-- **`scope_filter`**: closest-ancestor manifest scoping for per-file rules (see below). Cross-file rules reject this field at build time.
+- **`scope_filter`**: extra per-file scoping — by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
 - **`policy_url`**: link surfaced when the rule fires.
@@ -196,7 +196,45 @@ rules:
     level: error
 ```
 
-It accepts the `{{env.X}}` interpolation, resolves the diff once per run, matches nothing outside a git repo (silent), and hard-errors on an unresolvable ref with a shallow-clone hint. `has_ancestor:` and `changed_since:` AND-compose when both are set; at least one must be present.
+It accepts the `{{env.X}}` interpolation, resolves the diff once per run, matches nothing outside a git repo (silent), and hard-errors on an unresolvable ref with a shallow-clone hint. The `scope_filter:` predicates AND-compose when more than one is set; at least one of `has_ancestor:`, `changed_since:`, `include_manifest_paths:`, or `exclude_manifest_paths:` must be present.
+
+`include_manifest_paths:` / `exclude_manifest_paths:` (v0.15+) scope a per-file rule by membership in a path set a **manifest** declares, so the manifest that owns the truth and the rule that depends on it stay in one place instead of a hand-maintained `paths.exclude` that drifts. `exclude_manifest_paths:` drops files in the set; `include_manifest_paths:` keeps only files in it.
+
+Exempt the `package.json` `bin` entrypoints from a `no-console` rule — even though `bin` names the *build output* (`dist/cli.js`), `derive_target:` maps it back to source:
+
+```yaml
+rules:
+  - id: no-stray-console
+    kind: file_content_forbidden
+    paths: "src/**/*.ts"
+    pattern: 'console\.(log|debug|info)\('
+    scope_filter:
+      exclude_manifest_paths:
+        source: package.json              # the manifest (always repo-root-confined)
+        extract: { json: "$.bin.*" }      # the shared extract one-of
+        derive_target:                    # optional: map declared output -> source
+          from: '^dist/(.*)\.js$'
+          to:   'src/$1.ts'
+    level: error
+```
+
+Or scope a rule to only the source directories a workspace manifest declares:
+
+```yaml
+rules:
+  - id: rust-hygiene
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    scope_filter:
+      include_manifest_paths:
+        source: Cargo.toml
+        extract: { toml: "$.workspace.members[*]" }
+    level: warning
+```
+
+Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty — an empty include set would otherwise silently no-op the whole rule.
+
+Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing — the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
 
 Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field; gate them via the rule's `paths:` glob instead.
 

@@ -1,0 +1,36 @@
+name: include_manifest_paths scopes a rule to only the declared Cargo.toml workspace members
+tags: [check, scope_filter, no_trailing_whitespace]
+
+# Cargo.toml `workspace.members` declares DIRECTORIES (crates/a).
+# `include_manifest_paths` keeps only files UNDER a declared member:
+# crates/a/lib.rs (trailing space) fires; vendor/x.rs (trailing space but not a
+# member) is silently out of scope. Exercises directory-aware prefix membership.
+
+given:
+  tree:
+    Cargo.toml: |
+      [workspace]
+      members = ["crates/a"]
+    crates:
+      a:
+        lib.rs: "fn a() {} \n"
+    vendor:
+      x.rs: "fn x() {} \n"
+  config: |
+    version: 1
+    rules:
+      - id: nws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        level: warning
+        scope_filter:
+          include_manifest_paths:
+            source: Cargo.toml
+            extract: { toml: "$.workspace.members[*]" }
+
+when: [check]
+
+expect:
+  # Only the file under the declared member fires; vendor/x.rs is out of scope.
+  - violations:
+      - {rule: nws, level: warning, path: crates/a/lib.rs}

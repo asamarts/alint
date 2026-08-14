@@ -8,6 +8,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `scope_filter:` gains `include_manifest_paths:` / `exclude_manifest_paths:`
+  (ADR-0010): scope a per-file rule by membership in a path set a manifest
+  declares, instead of a hand-maintained `paths.exclude` that drifts from the
+  manifest that owns the truth. Each takes a `source:` manifest, the shared
+  `{json|toml|yaml|lines|regex}` `extract:`, and an optional
+  `derive_target: {from, to}` that maps a declared build output (`package.json`
+  `bin`'s `dist/cli.js`) back to source (`src/cli.ts`). Membership is
+  directory-aware (a declared `workspace.members` entry scopes a rule to files
+  under it); the set resolves once per run; a manifest value gates which files a
+  rule sees, never what it decides about a file. `alint explain` prints the
+  resolved set.
 - `alint explain <rule>` now shows a one-line `summary:` of what the rule's KIND
   checks, plus a `docs:` deep link to the full reference. Both are compiled into
   the binary from `docs/rules.md` (so they work offline); `--no-docs` suppresses

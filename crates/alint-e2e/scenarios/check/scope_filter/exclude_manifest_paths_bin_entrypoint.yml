@@ -1,0 +1,37 @@
+name: exclude_manifest_paths exempts the package.json bin entrypoint via derive_target
+tags: [check, scope_filter, file_content_forbidden]
+
+# The motivating case (ADR-0010): package.json `bin` declares a build output
+# (dist/cli.js). `derive_target` maps it back to src/cli.ts, which
+# `exclude_manifest_paths` exempts from a no-console rule. src/lib.ts (not an
+# entrypoint the manifest declares) still fires. This exercises the whole path:
+# extract -> derive_target -> confine -> per-file exclusion.
+
+given:
+  tree:
+    package.json: |
+      { "bin": { "cli": "dist/cli.js" } }
+    src:
+      cli.ts: "console.log('entrypoint');\n"
+      lib.ts: "console.log('lib');\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-console
+        kind: file_content_forbidden
+        paths: "src/**/*.ts"
+        pattern: 'console\.(log|debug|info)\('
+        level: error
+        scope_filter:
+          exclude_manifest_paths:
+            source: package.json
+            extract: { json: "$.bin.*" }
+            derive_target: { from: '^dist/(.*)\.js$', to: 'src/$1.ts' }
+
+when: [check]
+
+expect:
+  # src/cli.ts is the declared (mapped) entrypoint -> silently exempt.
+  # If the exclusion were a no-op, src/cli.ts would also fire and this fails.
+  - violations:
+      - {rule: no-console, level: error, path: src/lib.ts}

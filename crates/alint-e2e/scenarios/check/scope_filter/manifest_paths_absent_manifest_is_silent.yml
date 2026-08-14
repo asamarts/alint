@@ -1,0 +1,31 @@
+name: exclude_manifest_paths with an absent manifest scopes nothing (rule runs full-scope)
+tags: [check, scope_filter, no_trailing_whitespace]
+
+# No package.json exists. `exclude_manifest_paths` resolves to the empty set, so
+# the exclusion drops nothing and the rule runs over its full `paths:` glob - the
+# has_ancestor-consistent silent degrade for a missing manifest, not an error.
+
+given:
+  tree:
+    src:
+      a.rs: "fn a() {} \n"
+      b.rs: "fn b() {} \n"
+  config: |
+    version: 1
+    rules:
+      - id: nws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: warning
+        scope_filter:
+          exclude_manifest_paths:
+            source: package.json
+            extract: { json: "$.bin.*" }
+
+when: [check]
+
+expect:
+  # Both files fire: the absent manifest excludes nothing.
+  - violations:
+      - {rule: nws, level: warning, path: src/a.rs}
+      - {rule: nws, level: warning, path: src/b.rs}
