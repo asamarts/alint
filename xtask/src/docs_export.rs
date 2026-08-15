@@ -13,8 +13,17 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use alint_testkit::DocsCase;
+
 use crate::rule_options_table::{build_kind_branch_index, load_config_schema, options_section};
 use crate::{build_release_binary, git_sha, now_iso, walkdir_plain, workspace_root};
+
+/// Rule kinds documented with a `fail` example but no `pass` — the explicit
+/// exemption to ADR-0014's "both states, always". `git_commit_gpg_signed`'s
+/// compliant state needs a real GPG signature the fixture sandbox has no key
+/// for, so it ships fail-only by reviewed decision (the pairing gate in
+/// `process_family_h3s` would otherwise red). Add a kind here ONLY with a reason.
+const FAIL_ONLY_KINDS: &[&str] = &["git_commit_gpg_signed"];
 
 // ---- docs-export ----------------------------------------------------------
 
@@ -557,7 +566,7 @@ fn generate_rules_pages(
 // Threads the read-only registry/schema context plus the four
 // accumulators through one family's H3 sections; bundling these into
 // a struct would obscure more than it clarifies.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn process_family_h3s(
     h2: &H2Section,
     family_dir: &Path,
@@ -599,11 +608,29 @@ fn process_family_h3s(
         // kinds) must have every kind documented. Canonicalise so an alias-titled
         // token resolves to its documented (canonical) kind. Gaps are surfaced
         // collectively at the end of generate_rules_pages.
-        if !group_kinds
-            .iter()
-            .all(|k| documented.contains_key(registry.canonical_kind(k)))
-        {
-            missing_examples.push(format!("{} → {}", h2.title, h3.title));
+        // ADR-0014 "both states, always": a documented kind must show BOTH a
+        // `fail` and a `pass` example, not merely >=1. `FAIL_ONLY_KINDS` is the
+        // explicit, reasoned exemption for a kind whose compliant state the
+        // fixture harness cannot construct (git_commit_gpg_signed needs a real GPG
+        // signature the sandbox has no key for). Canonicalise so an alias-titled
+        // token resolves to its documented (canonical) kind.
+        for k in &group_kinds {
+            let canon = registry.canonical_kind(k);
+            let cases = documented.get(canon);
+            let has = |c: DocsCase| cases.is_some_and(|v| v.iter().any(|e| e.case == c));
+            let missing = if !has(DocsCase::Fail) {
+                Some("fail")
+            } else if !has(DocsCase::Pass) && !FAIL_ONLY_KINDS.contains(&canon) {
+                Some("pass")
+            } else {
+                None
+            };
+            if let Some(which) = missing {
+                missing_examples.push(format!(
+                    "{} → {} (missing {which} example)",
+                    h2.title, canon
+                ));
+            }
         }
         // ...and a documented kind must NOT keep a hand-written CONFIG example
         // (a ```yaml block whose top-level `kind:` is the documented kind), or
@@ -898,6 +925,28 @@ fn first_sentence(body: &str) -> String {
     paragraph[..cut].trim().to_string()
 }
 
+/// Drop trailing "stop words" (articles / prepositions / conjunctions) that a
+/// hard word-cap can leave dangling right before the "..." marker, re-trimming
+/// punctuation each pass, e.g. a summary cut after "matching the" reads better as
+/// "matching". Auxiliaries ("is"/"are"/"be") are NOT dropped, since "must be"
+/// reads worse as "must".
+fn drop_trailing_stopwords(s: &str) -> String {
+    const STOP: &[&str] = &[
+        "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "for", "with", "by", "from",
+        "as", "that", "this", "its", "into", "than", "per",
+    ];
+    const TRIM: [char; 7] = [',', ';', ':', ' ', '(', '"', '\''];
+    let mut t = s.trim_end_matches(TRIM);
+    while let Some(sp) = t.rfind(' ') {
+        if STOP.contains(&t[sp + 1..].to_ascii_lowercase().as_str()) {
+            t = t[..sp].trim_end_matches(TRIM);
+        } else {
+            break;
+        }
+    }
+    t.to_string()
+}
+
 /// Terminal-ready one-line summary of a rule kind's `docs/rules.md` prose, for
 /// the in-binary docs bridge (ADR-0011). Unlike [`first_sentence`] (which feeds
 /// the website rule index and leaves markdown intact), this yields clean
@@ -922,7 +971,7 @@ pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
         (1, Some(q)) => &capped[..q],
         _ => capped.as_str(),
     };
-    let trimmed = capped.trim_end_matches([',', ';', ':', ' ', '(', '"', '\'']);
+    let trimmed = drop_trailing_stopwords(capped);
     format!("{trimmed}...")
 }
 

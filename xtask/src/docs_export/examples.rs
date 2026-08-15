@@ -349,7 +349,13 @@ fn push_file_contents(md: &mut String, tree: &TreeSpec) {
                 &format!("(binary content, {} bytes)", content.len()),
             );
         } else {
-            push_fenced(md, lang_for(&path), content);
+            // Escape invisible / bidi / zero-width chars to a visible `<U+XXXX>`
+            // token before fencing: the unicode-safety rules' fixtures carry them
+            // deliberately (they ARE what the rule catches), and emitting them raw
+            // into a published page ships a live Trojan-Source override / invisible
+            // byte. The escaped form still SHOWS the reader where the offending
+            // char is. (`\0` files are already noted as binary above.)
+            push_fenced(md, lang_for(&path), &escape_docs_control_chars(content));
         }
     }
 }
@@ -384,6 +390,40 @@ fn lang_for(path: &str) -> &'static str {
 /// still rendered verbatim.
 fn looks_binary(content: &str) -> bool {
     content.contains('\0')
+}
+
+/// True for a char that must never be emitted RAW into a generated docs page:
+/// it is invisible or reorders the surrounding text (a Trojan-Source vector).
+/// Tab and newline are kept (ordinary layout). Covers bidi embeddings/overrides
+/// (U+202A..U+202E) and isolates (U+2066..U+2069), zero-width chars + BOM
+/// (U+200B..U+200D, U+FEFF), C0 controls, and DEL + C1 controls.
+pub(crate) fn is_dangerous_docs_char(c: char) -> bool {
+    let cp = c as u32;
+    (0x202A..=0x202E).contains(&cp)
+        || (0x2066..=0x2069).contains(&cp)
+        || matches!(cp, 0x200B..=0x200D | 0xFEFF)
+        || (cp < 0x20 && c != '\t' && c != '\n')
+        || (0x7F..=0x9F).contains(&cp)
+}
+
+/// Render `content` with every [`is_dangerous_docs_char`] replaced by a visible
+/// `<U+XXXX>` token, so a fixture that deliberately carries an invisible / bidi
+/// char (the unicode-safety rules) still SHOWS where it is without shipping the
+/// live control char into the published page.
+fn escape_docs_control_chars(content: &str) -> String {
+    if !content.chars().any(is_dangerous_docs_char) {
+        return content.to_string();
+    }
+    content
+        .chars()
+        .map(|c| {
+            if is_dangerous_docs_char(c) {
+                format!("<U+{:04X}>", c as u32)
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
 /// Strip OSC-8 hyperlink sequences (`ESC ] 8 ; ... ST`) while keeping SGR colour
@@ -527,6 +567,30 @@ mod tests {
         let t = tree("Cargo.toml: \"x\"\nsrc:\n  main.rs: \"y\"\n");
         // Files sort with their paths; the directory gets a trailing slash.
         assert_eq!(render_tree(&t), "Cargo.toml\nsrc/\nsrc/main.rs");
+    }
+
+    #[test]
+    fn escape_docs_control_chars_neutralizes_dangerous_chars() {
+        // A fixture carrying a bidi override / zero-width char / BOM (the very
+        // inputs the unicode-safety rules catch) must render as a visible token,
+        // never the raw char - emitting it raw ships a Trojan-Source override /
+        // invisible byte into the published page. Ordinary text (incl. tab/newline)
+        // is untouched.
+        let raw = "let c = \"\u{202e}reversed\u{200b}\u{feff}\";";
+        let esc = escape_docs_control_chars(raw);
+        assert!(
+            !esc.chars().any(is_dangerous_docs_char),
+            "no raw dangerous char survives: {esc:?}"
+        );
+        assert!(
+            esc.contains("<U+202E>") && esc.contains("<U+200B>") && esc.contains("<U+FEFF>"),
+            "shows each char's location: {esc:?}"
+        );
+        assert_eq!(
+            escape_docs_control_chars("plain ascii\n\twith tab"),
+            "plain ascii\n\twith tab",
+            "ordinary text + tab/newline are untouched"
+        );
     }
 
     #[test]

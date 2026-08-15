@@ -506,6 +506,52 @@ mod registry_tests {
     }
 
     #[test]
+    fn kind_summaries_are_terminal_ready() {
+        // The generated ADR-0011 bridge is only guarded by a byte-exact `--check`
+        // drift gate, which ratifies whatever `kind_summary` emits (the very
+        // anti-pattern ADR-0012 warns against). Assert well-formedness over the
+        // shipped artifact directly, so a malformed summary (residual markup,
+        // unbalanced parens/quotes, over-cap, or a dangling function word before
+        // the "..." marker - the class found on 9 kinds) can't ship silently.
+        const STOP: &[&str] = &[
+            "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "for", "with", "by",
+            "from", "as", "that", "this", "its", "into", "than", "per",
+        ];
+        for (kind, summary) in crate::kind_docs::KIND_SUMMARIES {
+            assert!(
+                summary.chars().count() <= 100,
+                "{kind}: summary over 100 chars ({}): {summary:?}",
+                summary.chars().count()
+            );
+            assert!(
+                !summary.contains('`') && !summary.contains("**"),
+                "{kind}: residual markdown markup in summary: {summary:?}"
+            );
+            assert_eq!(
+                summary.matches('(').count(),
+                summary.matches(')').count(),
+                "{kind}: unbalanced parens in summary: {summary:?}"
+            );
+            assert_eq!(
+                summary.matches('"').count() % 2,
+                0,
+                "{kind}: unbalanced quotes in summary: {summary:?}"
+            );
+            if let Some(body) = summary.strip_suffix("...") {
+                let last = body
+                    .trim_end_matches([',', ' ', ':'])
+                    .rsplit(' ')
+                    .next()
+                    .unwrap_or("");
+                assert!(
+                    !STOP.contains(&last.to_ascii_lowercase().as_str()),
+                    "{kind}: summary truncates on a dangling stop-word {last:?}: {summary:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_documented_kind_is_registered() {
         let r = builtin_registry();
         let known: Vec<&str> = r.known_kinds().collect();
