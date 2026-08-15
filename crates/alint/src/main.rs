@@ -1304,19 +1304,22 @@ fn write_scope_filter_explain(
                 } else {
                     "exclude_manifest_paths"
                 };
+                // Forward-slash every path so `explain` reads identically on
+                // Windows and Unix (matching violation paths / SARIF), not the
+                // OS-native separator a bare `PathBuf` Display would emit.
                 let paths = if res.paths.is_empty() {
                     "(no paths resolved)".to_string()
                 } else {
                     res.paths
                         .iter()
-                        .map(|p| p.display().to_string())
+                        .map(|p| p.display().to_string().replace('\\', "/"))
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
                 writeln!(
                     out,
                     "  {dim}{key}:{dim:#} {} -> {paths}",
-                    res.source.display()
+                    res.source.display().to_string().replace('\\', "/")
                 )?;
             }
         }
@@ -1476,8 +1479,13 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
                         } else {
                             "exclude_manifest_paths"
                         },
-                        "source": r.source,
-                        "paths": r.paths,
+                        // Forward-slash for a portable JSON contract (a bare
+                        // PathBuf serializes with the OS-native separator).
+                        "source": r.source.display().to_string().replace('\\', "/"),
+                        "paths": r.paths
+                            .iter()
+                            .map(|p| p.display().to_string().replace('\\', "/"))
+                            .collect::<Vec<_>>(),
                     })
                 })
                 .collect();
