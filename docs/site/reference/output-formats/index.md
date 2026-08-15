@@ -27,7 +27,7 @@ Each format is shown by example in the [quickstart](/docs/getting-started/quicks
 
 ## Streams: report on stdout, diagnostics on stderr
 
-The selected format is the *only* thing written to **stdout** — so `alint check --format json > report.json` (or `sarif` / `gitlab` / `github` / `junit` / `agent`) captures byte-clean machine output with nothing to strip. Everything else — progress, the human summary footer, and any diagnostic `warning:` (for example an empty `include_manifest_paths` set) — is written to **stderr**. Redirect it separately (`2> alint.log`) or discard it (`2>/dev/null`) without touching the report.
+A machine format is the *only* thing written to **stdout** — so `alint check --format json > report.json` (or `sarif` / `gitlab` / `github` / `junit` / `agent`) captures byte-clean output with nothing to strip. Progress and any diagnostic warning (for example an empty `include_manifest_paths` set) are written to **stderr**. Redirect it separately (`2> alint.log`) or discard it (`2>/dev/null`) without touching the report. (In the `human` format, the `Summary` footer is part of the human report and stays on stdout with the findings.)
 
 ## Stable fingerprints
 

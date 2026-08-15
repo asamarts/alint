@@ -125,8 +125,6 @@ working; the only change in what gets flagged is fewer false positives from
   SHA, enforced by alint's own `gha-pin-actions-to-sha` dogfood rule (OpenSSF
   Scorecard Pinned-Dependencies hardening).
 
-## [Unreleased]
-
 ## [0.14.1] - 2026-07-24
 
 A performance patch. v0.14.0's OOM/TOCTOU read cap inadvertently regressed

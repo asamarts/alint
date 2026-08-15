@@ -186,10 +186,12 @@ rules:
     scope_filter:
       include_manifest_paths:
         source: Cargo.toml
-        extract: { toml: "$.workspace.members[*]" }   # e.g. ["crates/*"] — directory-aware
+        extract: { toml: "$.workspace.members[*]" }   # e.g. ["crates/app", "crates/lib"]
     level: error
 # fires on crates/app/BadName.rs (under a declared member); skips vendor/Third_Party.rs
 ```
+
+Declared paths are matched **literally**, not glob-expanded: a `Cargo.toml` that uses `members = ["crates/*"]` resolves to the literal string `crates/*`, which matches no files — a silent no-op that `expect_nonempty` does not catch, because the set holds one (dead) entry rather than being empty. List explicit member directories, or scope a glob-defined workspace with `has_ancestor: Cargo.toml` (above) instead.
 
 Exempt the declared build entrypoints from a source-only rule. Even though the manifest names the *output* (`dist/cli.js`), `derive_target:` maps it back to source (`src/cli.ts`) before matching:
 
@@ -203,8 +205,10 @@ rules:
       exclude_manifest_paths:
         source: package.json
         extract: { json: "$.bin.*" }
-        derive_target: { from: '^dist/(.*)\.js$', to: 'src/$1.ts' }
+        derive_target: { from: '^(?:\./)?dist/(.*)\.js$', to: 'src/$1.ts' }
     level: error
 ```
 
-Membership is directory-aware (a declared `crates/app` scopes every file under it), the set resolves once per run and is cached like `changed_since:`, and `alint explain <rule>` prints the resolved paths so you can see exactly what a rule sees. Full reference: [Configuration](/docs/configuration/).
+The `from:` regex must match the manifest's literal string: the optional `(?:\./)?` tolerates a leading `./` (npm often writes `"./dist/cli.js"`), and `$.bin.*` assumes the object form of `bin:` (a scalar `"bin": "dist/cli.js"` needs `$.bin`). An entry that does not match `from:` is dropped, so a mismatch silently widens scope rather than erroring — check `alint explain <rule>` to confirm the resolved set.
+
+Membership is directory-aware (a declared `crates/app` scopes every file under it), the set resolves once per run and is cached like `changed_since:`, and `alint explain <rule>` prints the resolved paths for the literal declared members. Full reference: [Configuration](/docs/configuration/).

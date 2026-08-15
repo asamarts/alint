@@ -11,7 +11,10 @@ Each rule is one line in your `.alint.yml` under `rules:` — see
 [ARCHITECTURE.md §DSL](design/ARCHITECTURE.md#dsl) for the common
 fields (`id`, `level`, `paths`, `message`, `policy_url`, `when`,
 `fix`). The JSON Schema at [`schemas/v1/config.json`](../schemas/v1/config.json)
-is the authoritative source for option types.
+is the authoritative source for option types. Per-file and rule-major kinds also
+accept `scope_filter:` to narrow where a rule fires — by ancestor manifest, git
+diff (`changed_since:`), or a manifest-declared path set (`include_manifest_paths:`
+/ `exclude_manifest_paths:`, v0.15+); see [Configuration](/docs/configuration/).
 
 ## Contents
 

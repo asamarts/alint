@@ -233,12 +233,14 @@ rules:
 
 Constraints:
 
-- **Per-file rules only.** `scope_filter:` is honoured by `PerFileRule` rules,
-  which consult it in the file-major dispatch loop. Cross-file rules (`pair`,
-  `for_each_dir`, `file_exists`, and the like) reject `scope_filter:` at build
-  time with a pointer to the `for_each_dir` plus `when_iter:` pattern. Rule-major
-  rules such as `filename_case` ignore `scope_filter:`, so gate those with the
-  rule's `paths:` glob instead.
+- **Per-file and rule-major rules.** `scope_filter:` is honoured by `PerFileRule`
+  rules, which consult it in the file-major dispatch loop, and — as of v0.15 — by
+  rule-major kinds (`filename_case`, `filename_regex`, `file_max_size`, and the
+  like): a rule-major rule that applies a scope exposes it via its `Scope`, so the
+  engine resolves the manifest / `changed_since` sets before every dispatch path.
+  Cross-file rules (`pair`, `for_each_dir`, `file_exists`, and the like) reject
+  `scope_filter:` at build time with a pointer to the `for_each_dir` plus
+  `when_iter:` pattern.
 - **Literal filenames, not globs.** Each `has_ancestor:` entry is a filename such
   as `Cargo.toml` or `package.json`, with no `**/` prefix and no path
   separators. The walk reaches "anywhere up the tree" by traversing parent
