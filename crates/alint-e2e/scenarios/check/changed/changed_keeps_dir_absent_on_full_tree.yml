@@ -1,0 +1,39 @@
+name: --changed keeps dir_absent (a directory rule) evaluating on the full tree
+tags: [check, check_changed, changed, dir_absent]
+
+# Complement to `changed_skips_existence_rule_when_scope_disjoint` (file_absent):
+# a forbidden `build/` dir was committed; the current diff only adds an untracked
+# `src/foo.rs`. Unlike a FILE pattern (`**/.env`, which intersects the diff when
+# the file changes), dir_absent's DIRECTORY pattern (`**/build`) can never appear
+# in a file-path changed-set — so it must NOT be `--changed`-skipped, or it would
+# never fire. dir_absent (like dir_exists) is `requires_full_index` with no
+# `path_scope`, so it always evaluates on the full tree and still flags the
+# standing forbidden dir. Regression guard: round-3 briefly gave dir_absent a
+# `path_scope`, which made `--changed` skip it and silently miss standing dirs.
+
+given:
+  tree:
+    README.md: "# demo\n"
+    build:
+      out.o: "x\n"
+    src:
+      foo.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-build
+        kind: dir_absent
+        paths: "**/build"
+        level: error
+  git:
+    init: true
+    add: [README.md, build/out.o]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: no-build, level: error, path: "build"}
+  - violations:
+      - {rule: no-build, level: error, path: "build"}

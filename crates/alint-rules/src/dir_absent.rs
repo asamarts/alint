@@ -37,13 +37,14 @@ pub struct DirAbsentRule {
 }
 
 impl Rule for DirAbsentRule {
-    /// Expose the per-file scope so the engine resolves this rule's
-    /// `scope_filter` (manifest sets, `changed_since:`) before dispatch and
-    /// can `--changed`-skip it (see `Rule::path_scope`).
-    fn path_scope(&self) -> Option<&Scope> {
-        Some(&self.scope)
-    }
-
+    // Deliberately NO `path_scope` override (mirrors `dir_exists`): this is a
+    // directory rule (`requires_full_index = true`, scope matches dir paths), and
+    // a directory scope doesn't intersect a file-path-based `--changed` set, so
+    // exposing `path_scope` would let `skip_for_changed` wrongly skip a standing
+    // forbidden dir on every `--changed` run. `has_ancestor` still works (it
+    // resolves inside `evaluate`); manifest `scope_filter` is rejected loud by the
+    // engine's `ensure_manifest_scope_resolvable` guard rather than silently
+    // no-op'ing -- manifest-set scope isn't meaningful on a whole-tree dir rule.
     alint_core::rule_common_impl!();
     fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
         if self.git_tracked_only {

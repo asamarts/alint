@@ -309,17 +309,21 @@ impl ManifestPredicate {
                 let mapped = if let Some((from, to)) = &self.derive_target {
                     derive_target(from, to, &entry)?
                 } else {
-                    // Reject an entry that is vacuous or escaping on its own
-                    // (``, `.`, `x/..`, `../y`) BEFORE joining `base`, mirroring
-                    // the derive_target branch. Otherwise, for a nested manifest,
-                    // `base.join("")` == `base`, so a stray `.` / empty entry
-                    // would scope the manifest's WHOLE subtree — the silent
-                    // footgun the empty-set safety is meant to prevent (at the
-                    // repo root such entries already normalize to `None` below).
-                    normalize_confined(Path::new(&entry))?;
                     PathBuf::from(entry)
                 };
-                normalize_confined(&base.join(mapped))
+                let resolved = normalize_confined(&base.join(mapped))?;
+                // Drop an entry that resolves to EXACTLY the manifest's own
+                // directory (``, `.`, `x/..` — `base.join` collapses to `base`):
+                // it would silently scope the manifest's WHOLE subtree, the footgun
+                // the empty-set safety guards. A sibling (`../shared` ->
+                // `packages/shared`) or a child resolves elsewhere and is kept — a
+                // nested `tsconfig` referencing a sibling package via `../` is a
+                // documented supported case. (At the repo root `base` is empty and
+                // vacuous entries already normalize to `None` above, a no-op here.)
+                if resolved.as_path() == base {
+                    return None;
+                }
+                Some(resolved)
             })
             .collect()
     }
@@ -1243,6 +1247,32 @@ mod tests {
             "a real child resolves under the manifest dir: {set:?}"
         );
         assert_eq!(set.len(), 1, "only the real child survives: {set:?}");
+    }
+
+    #[test]
+    fn resolve_set_keeps_nested_sibling_reference() {
+        // Only an entry collapsing to the manifest's OWN dir is dropped; an
+        // in-root `../sibling` reference (a nested `tsconfig` pointing at a sibling
+        // package, a documented supported case) resolves elsewhere and is KEPT.
+        // (Regression: an over-broad standalone-`..` drop silently unscoped it.)
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: packages/web/tsconfig.json\n  extract: { json: \"$.include[*]\" }",
+        );
+        let set =
+            f.manifest_predicates()[0].resolve_set(r#"{"include": ["src", "../shared/src", "."]}"#);
+        assert!(
+            set.contains(Path::new("packages/web/src")),
+            "the child `src` is kept: {set:?}"
+        );
+        assert!(
+            set.contains(Path::new("packages/shared/src")),
+            "the in-root sibling `../shared/src` is kept: {set:?}"
+        );
+        assert!(
+            !set.contains(Path::new("packages/web")),
+            "the vacuous `.` is dropped (not the whole subtree): {set:?}"
+        );
+        assert_eq!(set.len(), 2, "src + shared/src, not `.`: {set:?}");
     }
 
     #[test]
