@@ -285,7 +285,9 @@ rules:
     level: warning
 ```
 
-`scope_filter:` is supported on per-file rules only. Cross-file rules (`pair`, `for_each_dir`, `file_exists`, and so on) reject it at build time and direct you to the `for_each_dir + when_iter:` pattern instead.
+`scope_filter:` works on per-file rules and, since v0.15, on the rule-major kinds (`filename_case`, `file_max_size`, and similar); cross-file rules (`pair`, `for_each_dir`, `file_exists`, and so on) reject it at build time and direct you to the `for_each_dir + when_iter:` pattern instead.
+
+The `has_ancestor:` predicate scopes by an ancestor manifest's *presence*. When the manifest also *declares* which paths belong — a workspace's `members`, a package's `bin` entrypoints — `include_manifest_paths:` / `exclude_manifest_paths:` scope by that declaration instead of a hand-maintained glob (v0.15+). See [alint and monorepos](/docs/about/monorepos/) for worked `include` / `exclude` + `derive_target` examples.
 
 ## 12. Cross-file relationships
 

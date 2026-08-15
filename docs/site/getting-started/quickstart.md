@@ -37,19 +37,65 @@ error    needs-readme  file_exists [fix]
 warning  no-bak  file_absent
 ```
 
-`alint explain <id>` resolves a single rule to its full definition — kind and categories, level, the `paths:` scope, any kind-specific options, the author `message:`, the `when:` clause as authored, and a one-line description of the auto-fix:
+`alint explain <id>` resolves a single rule to its full definition — its kind and categories, a one-line `summary:` of what the kind checks plus a `docs:` link to the reference, the level, the `paths:` scope, any kind-specific `options:`, the author `message:`, the `when:` clause as authored, and a one-line description of the auto-fix:
 
 ```text
 id:         needs-readme
 kind:       file_exists
 categories: existence
+summary:    Every glob match in paths must correspond to a real file.
+docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      error
 paths:      README.md
 message:    README.md must exist.
 fix:        create README.md (8 bytes)
 ```
 
-Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+A rule whose kind takes options shows them under an `options:` block — here a `file_max_size` rule:
+
+```text
+id:         readme-size-cap
+kind:       file_max_size
+categories: content, structure
+summary:    File must be at most max_bytes in size.
+docs:       https://alint.org/docs/rules/content/file_max_size/
+level:      warning
+paths:      **/*.md
+options:    max_bytes: 10240
+```
+
+Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+
+## Discovering rule kinds
+
+`alint list` and `alint explain` describe the rules configured in *this* repo. To browse the whole catalog of rule kinds alint ships — independent of any config, so it works in any directory — use `alint rules`:
+
+```bash
+alint rules list                     # every kind, with its categories and a one-line summary
+alint rules list --search "at most"  # match the kind name, its aliases, AND the summary text
+alint rules show file_header         # one kind in detail (accepts an alias, e.g. `header`)
+```
+
+`--search` matches summary text now, so a concept surfaces its kinds even when their names don't contain the word:
+
+```text
+Rule catalog (2 kinds)
+
+  file_max_lines  Content, Structure  (alias: max_lines)
+                  File must have at most max_lines lines, using the same accounting as file_min_lines.
+  file_max_size   Content, Structure  (alias: max_size)
+                  File must be at most max_bytes in size.
+```
+
+`alint rules show <kind>` prints one kind's summary, categories, aliases, and docs link (and accepts an alias, resolving to the canonical kind):
+
+```text
+file_header
+  The first N lines must match a regex (line-oriented).
+  categories: Content
+  aliases:    header
+  docs:       https://alint.org/docs/rules/content/file_header/
+```
 
 ## Output formats
 

@@ -236,7 +236,7 @@ Each predicate takes a **`source:`** (the manifest file, always repo-root-confin
 
 Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing — the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
 
-Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major rules like `filename_case` silently ignore the field; gate them via the rule's `paths:` glob instead.
+Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major kinds — `filename_case`, `filename_regex`, `file_max_size`, `file_min_size`, `executable_bit`, `no_empty_files`, `json_schema_passes`, and their siblings — honor `scope_filter:` too as of v0.15. (Before v0.15 they applied their own `paths:` glob but silently ignored a `changed_since:` or manifest predicate, so a scope that depended on one matched nothing on them.)
 
 ### `fix_size_limit`
 
