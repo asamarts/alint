@@ -1,0 +1,41 @@
+name: include_manifest_paths expands a glob workspace member (crates/*)
+tags: [check, scope_filter, filename_case]
+
+# A real Cargo/npm workspace declares GLOB members (`members = ["crates/*"]`,
+# `"packages/*"`). These are expanded, so a rule scoped by include_manifest_paths
+# fires on files under EACH matching member directory. Before v0.15's
+# glob-expansion the glob matched literally and scoped nothing (a silent no-op the
+# existing literal-member scenarios did not catch, because the alint repo and
+# every fixture used literal members).
+
+given:
+  config: |
+    version: 1
+    rules:
+      - id: names
+        kind: filename_case
+        case: snake
+        paths: "**/*.rs"
+        level: error
+        scope_filter:
+          include_manifest_paths:
+            source: Cargo.toml
+            extract: { toml: "$.workspace.members[*]" }
+  tree:
+    "Cargo.toml": |
+      [workspace]
+      members = ["crates/*"]
+    crates:
+      app:
+        "BadName.rs": "fn a() {}\n"
+      lib:
+        "AlsoBad.rs": "fn b() {}\n"
+    vendor:
+      "OtherBad.rs": "fn v() {}\n"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: names, level: error, path: crates/app/BadName.rs}
+      - {rule: names, level: error, path: crates/lib/AlsoBad.rs}

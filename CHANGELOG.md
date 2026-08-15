@@ -17,8 +17,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `bin`'s `dist/cli.js`) back to source (`src/cli.ts`); `include_manifest_paths:`
   additionally accepts `expect_nonempty:` (default `true`) to warn when the
   resolved set is empty. Membership is
-  directory-aware (a declared `workspace.members` entry scopes a rule to files
-  under it); the set resolves once per run; a manifest value gates which files a
+  directory-aware (a declared `workspace.members` entry, including a glob such as
+  `crates/*`, scopes a rule to files under each matching directory); the set
+  resolves once per run; a manifest value gates which files a
   rule sees, never what it decides about a file. `alint explain` prints the
   resolved set.
 - `alint explain <rule>` now shows a one-line `summary:` of what the rule's KIND

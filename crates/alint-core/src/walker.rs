@@ -182,7 +182,7 @@ pub struct FileIndex {
     /// the engine before per-file dispatch (a missing key = empty set, so the
     /// predicate contributes nothing). Read lock-free in the hot loop after
     /// `set`.
-    manifest_paths: OnceLock<HashMap<String, HashSet<std::path::PathBuf>>>,
+    manifest_paths: OnceLock<HashMap<String, crate::scope_filter::ManifestSet>>,
     /// Evaluated `facts:` values, cached so repeated [`Engine::run_for_file`]
     /// calls (the LSP per-keystroke path) don't re-scan the tree.
     /// ASSUMPTION: a given index is evaluated by one engine's fact set
@@ -279,7 +279,10 @@ impl FileIndex {
     /// `None` means the cache wasn't populated for this key (manifest absent /
     /// unresolved); the predicate treats it as the empty set.
     #[must_use]
-    pub(crate) fn manifest_paths(&self, cache_key: &str) -> Option<&HashSet<std::path::PathBuf>> {
+    pub(crate) fn manifest_paths(
+        &self,
+        cache_key: &str,
+    ) -> Option<&crate::scope_filter::ManifestSet> {
         self.manifest_paths.get()?.get(cache_key)
     }
 
@@ -292,7 +295,7 @@ impl FileIndex {
     /// Populate the manifest-paths cache (engine-only, once per run, before
     /// parallel dispatch). A no-op if already set, so re-using one index across
     /// `run` + `fix` is safe.
-    pub fn set_manifest_paths(&self, map: HashMap<String, HashSet<std::path::PathBuf>>) {
+    pub fn set_manifest_paths(&self, map: HashMap<String, crate::scope_filter::ManifestSet>) {
         let _ = self.manifest_paths.set(map);
     }
 
@@ -305,7 +308,7 @@ impl FileIndex {
     #[must_use]
     pub(crate) fn manifest_paths_map(
         &self,
-    ) -> Option<&HashMap<String, HashSet<std::path::PathBuf>>> {
+    ) -> Option<&HashMap<String, crate::scope_filter::ManifestSet>> {
         self.manifest_paths.get()
     }
 

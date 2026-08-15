@@ -1312,9 +1312,8 @@ impl Engine {
             // `file_graph`, which read their sources via `read_capped(root.join())`
             // regardless of the walk. Absent / oversized / escaping -> empty set.
             let rep = group[0];
-            let set = rep.resolve_set(&crate::scope_filter::read_manifest_confined(
-                root,
-                rep.source(),
+            let set = crate::scope_filter::ManifestSet::from_paths(rep.resolve_set(
+                &crate::scope_filter::read_manifest_confined(root, rep.source()),
             ));
             // Warn per group, not per first-iterated predicate: an `include` that
             // expects a non-empty set must be flagged even when an `exclude`

@@ -47,6 +47,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
@@ -329,6 +330,84 @@ impl ManifestPredicate {
     }
 }
 
+/// A manifest predicate's resolved membership set, cached on the [`FileIndex`]
+/// (resolved once per run). Splits the declared entries into literal paths and
+/// glob-pattern members, compiling the globs once:
+///
+/// - A **literal** entry (`crates/app`, `bin` -> `src/cli.ts`) uses the
+///   directory-aware `starts_with` rule: it matches itself and every file under
+///   it, respecting component boundaries.
+/// - A **glob** entry (`crates/*`, the form a real `Cargo.toml` /
+///   `package.json` workspace declares) matches a file when some component-prefix
+///   of the file matches the glob — the glob analog of the literal rule, so
+///   `members = ["crates/*"]` scopes every file under each matching `crates/<x>`.
+#[derive(Debug, Clone, Default)]
+pub struct ManifestSet {
+    literals: HashSet<PathBuf>,
+    globs: GlobSet,
+    glob_patterns: Vec<String>,
+}
+
+impl ManifestSet {
+    /// Split a resolved path set (from [`ManifestPathSpec::resolve_set`]) into
+    /// literals and glob members, compiling the globs once. An entry with a glob
+    /// metacharacter (`*`, `?`, `[`) is a glob; any other entry is a literal path.
+    /// `literal_separator(true)` keeps `*` within one component, like the rule
+    /// `paths:` globs and Cargo's own member semantics. A malformed glob is
+    /// dropped (the same fail-soft as an unparseable extract).
+    #[must_use]
+    pub(crate) fn from_paths(paths: HashSet<PathBuf>) -> Self {
+        let mut literals = HashSet::new();
+        let mut builder = GlobSetBuilder::new();
+        let mut glob_patterns = Vec::new();
+        for p in paths {
+            let s = p.to_string_lossy();
+            if s.contains(['*', '?', '[']) {
+                if let Ok(glob) = GlobBuilder::new(&s).literal_separator(true).build() {
+                    builder.add(glob);
+                    glob_patterns.push(s.into_owned());
+                }
+            } else {
+                literals.insert(p);
+            }
+        }
+        let globs = builder.build().unwrap_or_else(|_| GlobSet::empty());
+        Self {
+            literals,
+            globs,
+            glob_patterns,
+        }
+    }
+
+    /// Empty when it holds neither a literal path nor a glob member — the state
+    /// the `expect_nonempty` warning guards. A glob member counts as non-empty
+    /// even before it matches any file (it is a real, resolvable scope).
+    #[must_use]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.literals.is_empty() && self.glob_patterns.is_empty()
+    }
+
+    /// True if `file` is in the declared set: under some literal declared path, or
+    /// with a component-prefix matching some glob member (directory-aware).
+    #[must_use]
+    pub(crate) fn contains_file(&self, file: &Path) -> bool {
+        if self.literals.iter().any(|d| file.starts_with(d)) {
+            return true;
+        }
+        if self.glob_patterns.is_empty() {
+            return false;
+        }
+        let mut prefix = PathBuf::new();
+        for comp in file.components() {
+            prefix.push(comp);
+            if self.globs.is_match(&prefix) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// One manifest predicate's resolved path set, for `alint explain` to surface
 /// what the manifest scope resolves to (the design's legibility mitigation).
 #[derive(Debug, Clone)]
@@ -481,15 +560,15 @@ impl ScopeFilter {
         for pred in &self.manifest_predicates {
             // The manifest set is resolved once per run and cached on the index
             // (like `changed_since`); a missing entry (manifest absent /
-            // unresolved) is the empty set. Membership is component-wise prefix:
-            // a declared FILE (`bin` -> `src/cli.ts`) matches itself, and a
-            // declared DIRECTORY (`Cargo.toml` `workspace.members` -> `crates/a`)
-            // matches every file under it. `Path::starts_with` respects component
-            // boundaries, so `crates/a` does not match `crates/ab/x.rs`. `include`
-            // keeps files IN the set; `exclude` drops files IN it.
+            // unresolved) is the empty set. Membership is directory-aware: a
+            // declared FILE (`bin` -> `src/cli.ts`) matches itself, a declared
+            // DIRECTORY (`crates/a`) matches every file under it (component-wise
+            // `starts_with`, so `crates/a` does not match `crates/ab/x.rs`), and a
+            // declared GLOB (`crates/*`) matches a file whose component-prefix
+            // matches it. `include` keeps files IN the set; `exclude` drops them.
             let in_set = index
                 .manifest_paths(pred.cache_key())
-                .is_some_and(|set| set.iter().any(|declared| file.starts_with(declared)));
+                .is_some_and(|set| set.contains_file(file));
             let keep = match pred.sense {
                 ManifestSense::Include => in_set,
                 ManifestSense::Exclude => !in_set,
@@ -980,7 +1059,10 @@ mod tests {
     fn idx_with_manifest(paths: &[&str], key: &str, set: &[&str]) -> FileIndex {
         let i = idx(paths);
         let mut map = std::collections::HashMap::new();
-        map.insert(key.to_string(), set.iter().map(PathBuf::from).collect());
+        map.insert(
+            key.to_string(),
+            ManifestSet::from_paths(set.iter().map(PathBuf::from).collect()),
+        );
         i.set_manifest_paths(map);
         i
     }
@@ -1020,6 +1102,63 @@ mod tests {
         assert!(
             !f.matches(Path::new("vendor/x.rs"), &i),
             "out-of-set file dropped"
+        );
+    }
+
+    #[test]
+    fn include_manifest_paths_expands_glob_members() {
+        // `members = ["crates/*"]` (the common Cargo/npm workspace form) is a
+        // GLOB: a file under any directory matching `crates/*` is in scope; a
+        // sibling outside is not. Regression guard for the silent-no-op footgun
+        // where a glob member was matched literally and scoped nothing.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: Cargo.toml\n  extract: { toml: \"$.workspace.members[*]\" }",
+        );
+        let key = f.manifest_predicates()[0].cache_key();
+        let i = idx_with_manifest(
+            &[
+                "crates/app/bad.rs",
+                "crates/lib/ok.rs",
+                "vendor/third.rs",
+                "cratesx/y.rs",
+            ],
+            key,
+            &["crates/*"],
+        );
+        assert!(
+            f.matches(Path::new("crates/app/bad.rs"), &i),
+            "file under a `crates/*` member is in scope"
+        );
+        assert!(
+            f.matches(Path::new("crates/lib/ok.rs"), &i),
+            "another `crates/*` member subtree is in scope"
+        );
+        assert!(
+            !f.matches(Path::new("vendor/third.rs"), &i),
+            "a sibling outside `crates/*` is dropped"
+        );
+        assert!(
+            !f.matches(Path::new("cratesx/y.rs"), &i),
+            "`crates/*` respects component boundaries (does not match `cratesx/`)"
+        );
+    }
+
+    #[test]
+    fn exclude_manifest_paths_expands_glob_members() {
+        // The `exclude` complement: files under a `crates/*` member are dropped,
+        // everything else kept.
+        let f = manifest_filter(
+            "exclude_manifest_paths:\n  source: Cargo.toml\n  extract: { toml: \"$.workspace.members[*]\" }",
+        );
+        let key = f.manifest_predicates()[0].cache_key();
+        let i = idx_with_manifest(&["crates/app/x.rs", "tools/y.rs"], key, &["crates/*"]);
+        assert!(
+            !f.matches(Path::new("crates/app/x.rs"), &i),
+            "file under an excluded `crates/*` member is dropped"
+        );
+        assert!(
+            f.matches(Path::new("tools/y.rs"), &i),
+            "file outside the excluded glob is kept"
         );
     }
 
@@ -1085,7 +1224,10 @@ mod tests {
             "loose/c.rs",
         ]);
         let mut map = std::collections::HashMap::new();
-        map.insert(key, [PathBuf::from("crates/x/b.rs")].into_iter().collect());
+        map.insert(
+            key,
+            ManifestSet::from_paths([PathBuf::from("crates/x/b.rs")].into_iter().collect()),
+        );
         i.set_manifest_paths(map);
         assert!(
             f.matches(Path::new("crates/x/a.rs"), &i),
@@ -1326,7 +1468,7 @@ mod tests {
             filtered
                 .manifest_paths("KEY")
                 .unwrap()
-                .contains(Path::new("crates/a")),
+                .contains_file(Path::new("crates/a")),
             "the resolved set is visible on the filtered index after the copy"
         );
     }
