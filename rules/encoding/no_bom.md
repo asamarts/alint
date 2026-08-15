@@ -37,7 +37,7 @@ docs/with_bom.md
 `docs/with_bom.md`:
 
 ```markdown
-﻿# hi
+<U+FEFF># hi
 ```
 
 With this `.alint.yml`:

@@ -39,7 +39,7 @@ pub fn normal() {}
 `src/obfuscated.rs`:
 
 ```rust
-pub fn sec​ret() {}
+pub fn sec<U+200B>ret() {}
 ```
 
 With this `.alint.yml`:
@@ -84,7 +84,7 @@ pub fn ok2() {}
 `src/with_bom.rs`:
 
 ```rust
-﻿pub fn ok() {}
+<U+FEFF>pub fn ok() {}
 ```
 
 With this `.alint.yml`:

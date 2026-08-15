@@ -35,7 +35,7 @@ pub fn ok() {}
 `src/sneaky.rs`:
 
 ```rust
-let comment = "‮gnitcepsnI ydobon emah sih";
+let comment = "<U+202E>gnitcepsnI ydobon emah sih";
 ```
 
 With this `.alint.yml`:

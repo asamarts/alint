@@ -31,7 +31,7 @@ src/pure_lf.rs
 `src/has_crlf.rs`:
 
 ```rust
-fn c() {}
+fn c() {}<U+000D>
 fn d() {}
 ```
 
