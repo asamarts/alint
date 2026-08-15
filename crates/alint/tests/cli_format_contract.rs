@@ -1073,9 +1073,16 @@ fn explain_surfaces_manifest_scope_filter() {
     // scope resolves to. Every other explain field got a completeness gate; the
     // scope_filter human + JSON rendering shipped without one.
     let dir = tempfile::tempdir().expect("tempdir");
+    // Nest the manifest under a subdir so BOTH rendered halves - the `source`
+    // path AND each resolved member path - are multi-component. A root-level
+    // `Cargo.toml` source has no path separator, so it renders identically with
+    // or without the `\`->`/` normalisation and would silently leave the source
+    // half of that fix unguarded (a Windows-only regression). A member resolves
+    // relative to the manifest's dir, so `a` becomes `pkg/a`.
+    std::fs::create_dir(dir.path().join("pkg")).unwrap();
     std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[workspace]\nmembers = [\"crates/a\"]\n",
+        dir.path().join("pkg/Cargo.toml"),
+        "[workspace]\nmembers = [\"a\"]\n",
     )
     .unwrap();
     std::fs::write(
@@ -1088,7 +1095,7 @@ fn explain_surfaces_manifest_scope_filter() {
         \x20   level: warning\n\
         \x20   scope_filter:\n\
         \x20     include_manifest_paths:\n\
-        \x20       source: Cargo.toml\n\
+        \x20       source: pkg/Cargo.toml\n\
         \x20       extract: { toml: \"$.workspace.members[*]\" }\n",
     )
     .unwrap();
@@ -1101,17 +1108,18 @@ fn explain_surfaces_manifest_scope_filter() {
         .expect("explain json dropped scope_filter.manifest_scopes");
     assert_eq!(scopes.len(), 1, "expected one manifest scope: {v}");
     assert_eq!(scopes[0]["predicate"], "include_manifest_paths");
-    assert_eq!(scopes[0]["source"], "Cargo.toml");
+    // Multi-component on purpose: guards the source-half `\`->`/` normalisation.
+    assert_eq!(scopes[0]["source"], "pkg/Cargo.toml");
     assert!(
         scopes[0]["paths"]
             .as_array()
-            .is_some_and(|p| p.iter().any(|x| x == "crates/a")),
-        "explain json didn't resolve the manifest scope to crates/a: {v}"
+            .is_some_and(|p| p.iter().any(|x| x == "pkg/a")),
+        "explain json didn't resolve the manifest scope to pkg/a: {v}"
     );
 
     let out = run(dir.path(), &["explain", "rs-members"]);
     let s = String::from_utf8_lossy(&out.stdout);
-    for needle in ["include_manifest_paths", "Cargo.toml", "crates/a"] {
+    for needle in ["include_manifest_paths", "pkg/Cargo.toml", "pkg/a"] {
         assert!(s.contains(needle), "explain human dropped {needle:?}:\n{s}");
     }
 }

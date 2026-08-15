@@ -270,6 +270,7 @@ pub(crate) fn docs_export(
     if check {
         crate::family_index::check_ascii(&target_dir)?;
         crate::docs_checks::check_titles_no_backticks(&target_dir)?;
+        crate::docs_checks::check_no_invisible_controls(&target_dir)?;
         eprintln!("[xtask] docs-export --check OK");
     } else {
         eprintln!("[xtask] docs-export wrote {}", target_dir.display());
@@ -530,6 +531,7 @@ fn generate_rules_pages(
     // warnings, so a regressing PR fails the docs-bundle build before it can
     // publish a broken example to alint.org.
     enforce_example_gates(&missing_examples, &wrong_kind_examples)?;
+    enforce_fail_only_allowlist_live(&documented, &registry)?;
     enforce_documented_page_targets(&documented, &kind_to_family)?;
 
     // Family Overview pages: categories-based membership. Each family lists every
@@ -1221,6 +1223,47 @@ fn enforce_example_gates(missing: &[String], wrong_kind: &[String]) -> Result<()
              not an alias declared in `(alias: …)`.",
             wrong_kind.len(),
             wrong_kind.join("\n  - "),
+        );
+    }
+    Ok(())
+}
+
+/// Keep the [`FAIL_ONLY_KINDS`] exemption list honest: every entry must be
+/// load-bearing - a canonical kind documented with a `fail` example that
+/// genuinely has NO `pass` example. Without this, a stale entry (a typo, an alias
+/// spelling that `canonical_kind` never matches, or a kind that has since gained
+/// a `pass`) would sit in the allowlist silently suppressing the fail+pass
+/// pairing gate for a name that no longer needs the exemption - the exact "gate
+/// ratifies whatever it emits" trap ADR-0012 warns against, one level up.
+fn enforce_fail_only_allowlist_live(
+    documented: &std::collections::BTreeMap<String, Vec<examples::RenderedExample>>,
+    registry: &alint_core::RuleRegistry,
+) -> Result<()> {
+    let mut stale: Vec<String> = Vec::new();
+    for &kind in FAIL_ONLY_KINDS {
+        let canon = registry.canonical_kind(kind);
+        let cases = documented.get(canon);
+        let has = |c: DocsCase| cases.is_some_and(|v| v.iter().any(|e| e.case == c));
+        let reason = if canon != kind {
+            Some(format!("not a canonical kind (resolves to `{canon}`)"))
+        } else if !has(DocsCase::Fail) {
+            Some("no documented `fail` example".to_string())
+        } else if has(DocsCase::Pass) {
+            Some("has a `pass` example, so the exemption is unnecessary".to_string())
+        } else {
+            None
+        };
+        if let Some(why) = reason {
+            stale.push(format!("`{kind}`: {why}"));
+        }
+    }
+    if !stale.is_empty() {
+        stale.sort();
+        bail!(
+            "FAIL_ONLY_KINDS has {} stale entr(y/ies) - remove so the fail+pass pairing gate \
+             stays un-suppressed for kinds that no longer need the exemption:\n  - {}",
+            stale.len(),
+            stale.join("\n  - "),
         );
     }
     Ok(())
@@ -2331,6 +2374,10 @@ fn write_manifest(target_dir: &Path) -> Result<()> {
 }
 
 mod examples;
+// Shared with `docs_checks::check_no_invisible_controls` so the recurrence gate
+// forbids exactly the set the generator escapes (the single source of truth for
+// "dangerous in a docs page").
+pub(crate) use examples::is_dangerous_docs_char;
 
 mod counts;
 

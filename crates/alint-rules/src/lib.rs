@@ -538,8 +538,12 @@ mod registry_tests {
                 "{kind}: unbalanced quotes in summary: {summary:?}"
             );
             if let Some(body) = summary.strip_suffix("...") {
+                // Trim the SAME trailing punctuation the generator's
+                // `drop_trailing_stopwords` strips (plus `)`), or a dangling
+                // stop-word followed by `"` / `)` / `'` / `;` would slip the gate
+                // (`last` would be e.g. `the"` and miss the STOP match).
                 let last = body
-                    .trim_end_matches([',', ' ', ':'])
+                    .trim_end_matches([',', ';', ':', ' ', '(', ')', '"', '\''])
                     .rsplit(' ')
                     .next()
                     .unwrap_or("");
