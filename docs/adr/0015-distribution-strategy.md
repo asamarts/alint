@@ -20,9 +20,10 @@ alint distributes through nine channels today, all auto-published on the `v*` ta
 and the story is solid but grew by accretion. A distribution and documentation
 audit surfaced three things worth a durable decision rather than ad-hoc reaction:
 
-- **Trust is asserted, not verifiable.** `SECURITY.md` names supply-chain
-  integrity as a core value, but the only channel with real provenance is
-  crates.io (keyless OIDC). Release tarballs and the ghcr image carry no
+- **Trust is asserted, not verifiable.** `SECURITY.md`'s threat framing puts
+  supply-chain integrity for everyone who uses it at stake, but no binary artifact
+  is verifiable: crates.io has keyless *publishing* (OIDC), which is not the same as
+  a consumer-verifiable *attestation*. Release tarballs and the ghcr image carry no
   signature, SLSA provenance, or SBOM; the `.sha256` companions ship from the
   same release as the tarball, so they prove transit, not authenticity.
 - **Reach has holes and unclaimed near-free wins.** Windows is thin (the official
@@ -57,18 +58,24 @@ chain**, not a maximal channel count. Concretely:
    CI-automated *and* covered by the version-pin gate before it ships.
 
 3. **Harden the supply chain to a keyless-verifiable standard** (design doc
-   section 5): add SLSA build-provenance attestation, Sigstore/cosign signing, and
-   an attached SBOM for every Release tarball and the ghcr image, with optional
-   best-effort verification in `install.sh` and the npm shim. Extend the OIDC
-   posture crates.io already has; add no long-lived signing secret.
+   section 6): add SLSA build-provenance attestation, Sigstore/cosign signing (incl.
+   the aggregate `SHA256SUMS`), npm's own `npm publish --provenance` (which rides the
+   OIDC migration), and an attached SBOM — for every Release tarball, the npm package,
+   and the ghcr image — with optional best-effort verification in `install.sh` and the
+   npm shim. Extend the keyless OIDC posture crates.io already has; add no long-lived
+   signing secret. This proves *origin*, not benevolence: a compromised publishing
+   account remains the root of trust (see Consequences).
 
 4. **Defer Tier-2 channels to eligibility or demand** and **skip Tier-3**:
-   Homebrew core waits on the notability bar (keep the tap regardless); nixpkgs,
-   conda-forge, a self-owned COPR, and PyPI (maturin `bindings="bin"` wheels, only
-   for the `uvx`/pre-commit reach) are demand-gated; cargo-dist is an optional
-   future *consolidation*, not a dependency. `go install` (structurally impossible
-   for a non-Go binary), Flatpak, Alpine aports, official Debian/Fedora (sponsor-
-   gated), and a bespoke asdf plugin are skipped.
+   Homebrew core waits on the notability bar — and because a repo-owner self-submission
+   triggers Homebrew's 3x multiplier (`≥225 stars` vs the third-party `75`), the
+   realistic path is a community packager submitting it (keep the tap regardless);
+   nixpkgs, conda-forge, a self-owned COPR, PyPI (maturin `bindings="bin"` wheels, only
+   for the `uvx`/pre-commit reach), and Snap (classic-confinement review) are
+   demand-gated; cargo-dist is an optional future *consolidation*, not a dependency.
+   `go install` (structurally impossible for a non-Go binary), Chocolatey (Scoop +
+   WinGet already cover Windows), Flatpak, Alpine aports, official Debian/Fedora
+   (sponsor-gated), and a bespoke asdf plugin are skipped.
 
 5. **Every owned channel is keyless where the registry allows it.** Migrate npm to
    OIDC trusted publishing (retiring the `NPM_TOKEN` PAT), and prefer OIDC/keyless
@@ -83,8 +90,8 @@ package manifests, attestation/signing steps, and docs.
 Easier:
 
 - **Trust becomes verifiable.** `gh attestation verify` / `cosign verify` let any
-  consumer (or a hardened CI) prove an artifact's origin — delivering what
-  `SECURITY.md` claims, keylessly.
+  consumer (or a hardened CI) prove an artifact's *origin* keylessly — the biggest
+  step toward what `SECURITY.md` frames, short of the account-compromise case below.
 - **A decision rule replaces case-by-case debate.** New "package alint for X"
   requests resolve against the tiers: own it only if it is high-reach and
   CI-automatable, else point the requester at the community-packager path.
@@ -105,6 +112,14 @@ Harder, and accepted:
   careful testing under `bunx`/`--ignore-scripts`/offline.
 - **Deliberately unclaimed channels** mean some users find only community packages
   we do not control; we accept that in exchange for bounded maintenance.
+- **Attestation does not defend against account compromise.** OIDC roots trust in the
+  GitHub org that runs the release; a compromised account produces validly-attested
+  artifacts, and the force-moved `v0` tag is repointable. The org stays the ultimate
+  SPOF; we mitigate with account hardening, protected tags, minimal `id-token` scope,
+  and SHA-pinning guidance — not with attestation alone.
+- **The npm migration has a bootstrap cost:** OIDC cannot publish a package's first
+  version, so each new per-platform sub-package needs a one-time token to seed it, and
+  the win-arm64 build target must exist before its npm sub-package can ship.
 
 ## Considered Options
 
