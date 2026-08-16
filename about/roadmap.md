@@ -12,11 +12,18 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.14.2** (2026-08-06), a fixes-and-hardening patch: the
-macOS-junk hygiene rule stops flagging Hadoop checksum sidecars, SARIF gains a
-stable per-run fingerprint, `alint --help` wraps legibly on narrow terminals,
-and CI actions are SHA-pinned. It follows v0.14.1 (2026-07-24), a performance
-patch restoring content-read throughput over v0.14.0. The v0.14.0 adoption
+**Latest release: v0.15.0** (2026-08-16): `alint explain` now surfaces a rule's
+full configured detail with a `docs:` link and a one-line summary, `alint rules
+show` / `list --search` browse the catalog offline, and a new `scope_filter:
+include_manifest_paths:` / `exclude_manifest_paths:` scopes a per-file rule by
+the paths a manifest declares (a workspace's members, glob or literal; a
+package's `bin` entrypoints via `derive_target:`), so a rule tracks the manifest
+that owns the truth instead of a drifting hand-maintained glob. It follows
+v0.14.2 (2026-08-06), a fixes-and-hardening patch: the macOS-junk hygiene rule
+stops flagging Hadoop checksum sidecars, SARIF gains a stable per-run
+fingerprint, `alint --help` wraps legibly on narrow terminals, and CI actions
+are SHA-pinned. Before that, v0.14.1 (2026-07-24), a performance patch restoring
+content-read throughput over v0.14.0. The v0.14.0 adoption
 release: `alint baseline`
 snapshots a repo's existing violations behind a content fingerprint, so `alint
 check` reports and gates only on new findings, making alint a drop-in blocking
@@ -1255,6 +1262,28 @@ closed seven more real bugs, each with a revert-sensitive regression test. See
 - Output / CLI / baseline hardening: non-UTF-8 paths no longer crash `json` /
   `agent`, exit code 3 for internal errors, `fix --format` gated, SARIF /
   GitLab / JUnit correctness, and the baseline artifact kept out of the walk.
+
+## v0.15: Rule legibility + manifest-derived scoping
+
+The cut that makes a rule legible and a monorepo first-class. `alint explain`
+now surfaces the whole configured rule (kind and categories, a one-line summary
+of what the kind checks, options, message, the `when:` clause, and the auto-fix)
+with a `docs:` deep link compiled into the binary; `alint rules show <kind>` and
+`alint rules list --search` browse the ships-with catalog offline. A new
+`scope_filter: include_manifest_paths:` / `exclude_manifest_paths:` (ADR-0010)
+scopes a per-file rule by the paths a manifest declares, glob-expanding a
+workspace's `members` and mapping a package's `bin` entrypoints back to source
+via `derive_target:`. See
+[`v0.15/manifest-derived-scope.md`](v0.15/manifest-derived-scope.md) and CHANGELOG
+`[0.15.0]`.
+
+- `alint explain` full-detail output plus `docs:` links; `rules show` / `list
+  --search` catalog discovery.
+- `scope_filter` manifest-derived scoping (`include_manifest_paths` /
+  `exclude_manifest_paths`, glob-expanded members, `derive_target` mapping);
+  ADR-0010.
+- `scope_filter` correctness: resolves under `--changed`, applies on rule-major
+  kinds, and diagnostics stay off stdout.
 
 ## v1.0: Stability
 

@@ -86,6 +86,12 @@
       "blurb": "Baseline grandfathering mode plus the post-v0.13 security and correctness audit: two spawn-gate RCE bypasses closed, path confinement made symlink-aware, and the fail-loudly contract tightened across output, CLI, and baseline handling."
     },
     {
+      "version": "0.15",
+      "title": "Rule legibility + manifest-derived scoping",
+      "kind": "release",
+      "blurb": "alint explain surfaces a rule's full detail with a docs link and a one-line summary, rules show and list --search browse the catalog offline, and scope_filter gains manifest-derived path scoping so a rule tracks the manifest that declares its members instead of a drifting hand-maintained glob."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
