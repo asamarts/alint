@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.15.0",
+      "date": "2026-08-16",
+      "headline": "v0.15 makes rules legible and monorepos first-class.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18105.34794508,
+          "stddev_ms": 144.97312034459836,
+          "display": "18.11 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17603.364582566664,
+          "stddev_ms": 213.93333114529048,
+          "display": "17.60 s ± 0.21"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16058.859545293333,
+          "stddev_ms": 189.04125617185755,
+          "display": "16.06 s ± 0.19"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11966.624482199999,
+          "stddev_ms": 320.71179397716327,
+          "display": "11.97 s ± 0.32"
+        }
+      }
+    },
+    {
       "version": "v0.14.2",
       "date": "2026-08-06",
       "headline": "A fixes-and-hardening patch on top of 0.14.1.",
