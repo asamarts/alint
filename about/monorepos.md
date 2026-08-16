@@ -168,3 +168,47 @@ rules:
 ```
 
 `every_matching_has` works well for known-shape glob patterns like `services/*` or `apps/*`. For arbitrary-depth Bazel packages (`BUILD` files anywhere in the tree), the per-iteration `when:` filter on `for_each_dir` planned for v0.5 lands the right idiom: "for every directory containing a `BUILD` file, require X."
+
+### Manifest-derived scoping (v0.15+)
+
+The recipes above scope rules by *ancestor manifest* (`scope_filter: { has_ancestor: Cargo.toml }` — a `.rs` file counts when some ancestor directory holds a `Cargo.toml`). When the manifest itself *declares which paths belong* — a workspace's `members`, a package's `bin` entrypoints — scope by that declaration directly with `include_manifest_paths:` / `exclude_manifest_paths:`, so the manifest that owns the truth and the rule that depends on it stay in one place instead of a hand-maintained `paths.exclude` that drifts as the workspace grows.
+
+Scope a rule to just the workspace's declared members. A rule-major kind like `filename_case` honors `scope_filter:` too (v0.15+):
+
+```yaml
+# .alint.yml
+version: 1
+rules:
+  - id: rust-files-snake-case
+    kind: filename_case
+    case: snake
+    paths: "**/*.rs"
+    scope_filter:
+      include_manifest_paths:
+        source: Cargo.toml
+        extract: { toml: "$.workspace.members[*]" }   # e.g. ["crates/*"] or ["crates/app", ...]
+    level: error
+# fires on crates/app/BadName.rs (under a crates/* member); skips vendor/Third_Party.rs
+```
+
+Members are directory-aware: a glob (`crates/*`, the form a real `Cargo.toml` declares) scopes every file under each matching `crates/<x>` directory, and a literal member (`crates/app`) scopes its own subtree — both respecting component boundaries (`crates/*` does not match `cratesx/`).
+
+Exempt the declared build entrypoints from a source-only rule. Even though the manifest names the *output* (`dist/cli.js`), `derive_target:` maps it back to source (`src/cli.ts`) before matching:
+
+```yaml
+rules:
+  - id: no-stray-console
+    kind: file_content_forbidden
+    paths: "src/**/*.ts"
+    pattern: 'console\.(log|debug|info)\('
+    scope_filter:
+      exclude_manifest_paths:
+        source: package.json
+        extract: { json: "$.bin.*" }
+        derive_target: { from: '^(?:\./)?dist/(.*)\.js$', to: 'src/$1.ts' }
+    level: error
+```
+
+The `from:` regex must match the manifest's literal string: the optional `(?:\./)?` tolerates a leading `./` (npm often writes `"./dist/cli.js"`), and `$.bin.*` assumes the object form of `bin:` (a scalar `"bin": "dist/cli.js"` needs `$.bin`). An entry that does not match `from:` is dropped, so a mismatch silently widens scope rather than erroring — check `alint explain <rule>` to confirm the resolved set.
+
+The set resolves once per run and is cached like `changed_since:`, and `alint explain <rule>` prints the resolved scope. Full reference: [Configuration](/docs/configuration/).

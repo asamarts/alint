@@ -929,6 +929,49 @@
       ],
       "type": "string"
     },
+    "manifest_path_set": {
+      "additionalProperties": false,
+      "description": "A manifest-derived path set (ADR-0010). The set is extracted from `source` once per run, optionally mapped by `derive_target`, resolved relative to the manifest's own directory, and confined to the repo root. `include_manifest_paths` keeps only files whose path is in the set; `exclude_manifest_paths` drops files whose path is in it. Manifest values gate which files the rule sees, never what it decides about a file (a content rule never reads the manifest).",
+      "properties": {
+        "derive_target": {
+          "additionalProperties": false,
+          "description": "Optional {from, to} regex mapping applied to each extracted path, e.g. mapping a package.json `bin` build output (dist/cli.js) back to its source (src/cli.ts). An entry that does not match `from` is dropped, as file_graph's derive_target drops a non-matching node.",
+          "properties": {
+            "from": {
+              "description": "Regex matched against each extracted path; $1-style capture groups substitute into `to`.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "to": {
+              "description": "The replacement template producing the mapped (source) path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "expect_nonempty": {
+          "description": "`include_manifest_paths` only: warn when the extracted set is empty (default true). An empty include set silently no-ops the whole rule; set false for a rule that legitimately tolerates it. Ignored on `exclude_manifest_paths` (an empty exclude set is safe: full scope, visible over-firing).",
+          "type": "boolean"
+        },
+        "extract": {
+          "$ref": "#/$defs/extract_spec"
+        },
+        "source": {
+          "description": "The manifest file, always repo-root-confined (a manifest a rule scopes by lives in the repo; an escaping source is a build-time error). Its declared paths resolve relative to its own directory.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "extract"
+      ],
+      "type": "object"
+    },
     "nested_rule": {
       "description": "A nested rule inside `require:`. Unlike top-level rules, `id` and `level` are synthesized from the parent; the user supplies only `kind` plus kind-specific options.",
       "properties": {
@@ -3669,14 +3712,27 @@
           "required": [
             "changed_since"
           ]
+        },
+        {
+          "required": [
+            "include_manifest_paths"
+          ]
+        },
+        {
+          "required": [
+            "exclude_manifest_paths"
+          ]
         }
       ],
-      "description": "Per-file rule scoping. `has_ancestor` (v0.9.6+) admits files whose ancestor chain contains a named manifest; `changed_since` (v0.11+) admits files in a `<ref>...HEAD` git diff. At least one must be set; setting both is an AND. Supported on per-file rules and on `dir_absent` (since v0.9.18). Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time. Combine with the rule's existing `paths:` glob — all gates must match for the rule to fire.",
+      "description": "Per-file rule scoping. `has_ancestor` (v0.9.6+) admits files whose ancestor chain contains a named manifest; `changed_since` (v0.11+) admits files in a `<ref>...HEAD` git diff. At least one must be set; setting both is an AND. Supported on per-file rules, on the rule-major kinds (`filename_case`, `filename_regex`, `file_max_size`, `file_min_size`, `executable_bit`, `no_empty_files`, `json_schema_passes`, and others) since v0.15, and on `dir_absent` (since v0.9.18). Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time. Combine with the rule's existing `paths:` glob — all gates must match for the rule to fire. `include_manifest_paths` / `exclude_manifest_paths` (v0.15+) admit or drop files by membership in a path set a manifest declares (ADR-0010).",
       "properties": {
         "changed_since": {
           "description": "Git ref; the rule only fires on files in the `<ref>...HEAD` diff (the same merge-base diff as `alint check --changed`). Right shape for grandfathering pre-existing files in a PR — e.g. require an SPDX header only on files the PR touched. Accepts the `{{env.X}}` interpolation (e.g. `changed_since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`). Outside a git repo the predicate matches nothing (silent); an unresolvable ref inside a repo is a hard error with a shallow-clone hint.",
           "minLength": 1,
           "type": "string"
+        },
+        "exclude_manifest_paths": {
+          "$ref": "#/$defs/manifest_path_set"
         },
         "has_ancestor": {
           "description": "Manifest filename (or list of filenames) whose presence in any ancestor directory of the linted file admits the rule. Each entry is a literal filename like `Cargo.toml` or `package.json` — no path separators, no glob metacharacters; the ancestor walk handles \"anywhere up the tree\" by traversing `Path::parent()` upward.",
@@ -3694,6 +3750,9 @@
               "type": "array"
             }
           ]
+        },
+        "include_manifest_paths": {
+          "$ref": "#/$defs/manifest_path_set"
         }
       },
       "type": "object"

@@ -1,6 +1,6 @@
 ---
 title: 'monorepo/yarn-workspace@v1'
-description: 'Workspace-aware overlay for Yarn / npm workspaces (both encode the workspace declaration in the root package.json under.'
+description: 'Workspace-aware overlay for Yarn / npm workspaces. alint bundled ruleset monorepo/yarn-workspace@v1.'
 ---
 
 Workspace-aware overlay for Yarn / npm workspaces (both

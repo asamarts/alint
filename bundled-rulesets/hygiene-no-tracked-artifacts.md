@@ -1,6 +1,6 @@
 ---
 title: 'hygiene/no-tracked-artifacts@v1'
-description: 'The set of paths/files that essentially no repository should track: build outputs, dependency caches, editor/OS junk,.'
+description: 'The set of paths/files that essentially no repository should track: build outputs, dependency caches, editor/OS junk.'
 ---
 
 The set of paths/files that essentially no repository should

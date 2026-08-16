@@ -1,6 +1,6 @@
 ---
 title: 'agent-hygiene@v1'
-description: 'Hygiene rules for the AI-coding era, patterns that show up disproportionately in commits authored or co-authored by Claude Code,.'
+description: 'Hygiene rules for the AI-coding era, patterns that show up disproportionately in commits authored or co-authored by Claude Code.'
 ---
 
 Hygiene rules for the AI-coding era — patterns that show up

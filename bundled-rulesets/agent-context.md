@@ -1,6 +1,6 @@
 ---
 title: 'agent-context@v1'
-description: 'Hygiene rules for the agent-instruction files coding agents read on every session, AGENTS.md (the cross-tool standard backed by.'
+description: 'Hygiene rules for the agent-instruction files coding agents read on every session, AGENTS.md. alint bundled ruleset agent-context@v1.'
 ---
 
 Hygiene rules for the agent-instruction files coding agents

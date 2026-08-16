@@ -14,6 +14,8 @@ Usage: alint rules [OPTIONS] <COMMAND>
 Commands:
   list        List rule kinds in the catalog, optionally filtered. Reads no config
   categories  List the rule categories: slug, title, and how many kinds each holds
+  show        Show one rule kind: its summary, categories, aliases, and docs link. Accepts an alias
+              (resolves to the canonical kind)
   help        Print this message or the help of the given subcommand(s)
 
 Options:

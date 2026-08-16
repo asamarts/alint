@@ -26,6 +26,7 @@ model {
   alint.tooling.xtask -> alint.cli.core
   alint.tooling.xtask -> alint.cli.dsl
   alint.tooling.xtask -> alint.cli.rules
+  alint.tooling.xtask -> alint.tooling.testkit
   // Dev/build-only edges (dashed via the `dev` kind).
   alint.cli.dsl -[dev]-> alint.cli.rules
   alint.tooling.e2e -[dev]-> alint.cli.core
