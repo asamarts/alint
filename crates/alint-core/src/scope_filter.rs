@@ -351,7 +351,9 @@ pub struct ManifestSet {
 impl ManifestSet {
     /// Split a resolved path set (from [`ManifestPathSpec::resolve_set`]) into
     /// literals and glob members, compiling the globs once. An entry with a glob
-    /// metacharacter (`*`, `?`, `[`) is a glob; any other entry is a literal path.
+    /// metacharacter (`*`, `?`, `[`, `{`) is a glob; any other entry is a literal
+    /// path. `{` matters: `packages/{app,lib}` (a common npm/pnpm workspace form)
+    /// is brace-alternation, which `globset` expands but a literal never would.
     /// `literal_separator(true)` keeps `*` within one component, like the rule
     /// `paths:` globs and Cargo's own member semantics. A malformed glob is
     /// dropped (the same fail-soft as an unparseable extract).
@@ -362,7 +364,7 @@ impl ManifestSet {
         let mut glob_patterns = Vec::new();
         for p in paths {
             let s = p.to_string_lossy();
-            if s.contains(['*', '?', '[']) {
+            if s.contains(['*', '?', '[', '{']) {
                 if let Ok(glob) = GlobBuilder::new(&s).literal_separator(true).build() {
                     builder.add(glob);
                     glob_patterns.push(s.into_owned());
@@ -1159,6 +1161,35 @@ mod tests {
         assert!(
             f.matches(Path::new("tools/y.rs"), &i),
             "file outside the excluded glob is kept"
+        );
+    }
+
+    #[test]
+    fn include_manifest_paths_expands_brace_glob_members() {
+        // `members = ["crates/{app,lib}"]` (npm/pnpm brace alternation, which
+        // globset expands) must be recognized as a glob, not matched literally.
+        // Regression guard: the detection set once omitted `{`, so a brace member
+        // silently scoped nothing.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: Cargo.toml\n  extract: { toml: \"$.workspace.members[*]\" }",
+        );
+        let key = f.manifest_predicates()[0].cache_key();
+        let i = idx_with_manifest(
+            &["crates/app/x.rs", "crates/lib/y.rs", "crates/skip/z.rs"],
+            key,
+            &["crates/{app,lib}"],
+        );
+        assert!(
+            f.matches(Path::new("crates/app/x.rs"), &i),
+            "brace alternation scopes crates/app"
+        );
+        assert!(
+            f.matches(Path::new("crates/lib/y.rs"), &i),
+            "brace alternation scopes crates/lib"
+        );
+        assert!(
+            !f.matches(Path::new("crates/skip/z.rs"), &i),
+            "brace alternation excludes an unlisted member"
         );
     }
 
