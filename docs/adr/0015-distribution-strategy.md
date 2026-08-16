@@ -51,36 +51,45 @@ chain**, not a maximal channel count. Concretely:
    their work. "Be everywhere ourselves" is explicitly rejected as a goal.
 
 2. **Adopt the Tier-1 set now** (design doc section 4): cargo-binstall (document;
-   verify naming), an in-repo `flake.nix`, podman + third-party-fetcher docs, mise,
-   a self-hosted Scoop bucket, WinGet via the releaser action, `.deb`/`.rpm`
-   attached to Releases, an AUR `alint-bin`, and the **npm migration to the
-   optionalDependencies model** (adding win-arm64). Each owned channel must be
-   CI-automated *and* covered by the version-pin gate before it ships.
+   verify naming), an in-repo `flake.nix`, listing the Action on the GitHub
+   Marketplace, podman + third-party-fetcher docs, mise, a self-hosted Scoop bucket,
+   WinGet via the releaser action, `.deb`/`.rpm` attached to Releases, an AUR
+   `alint-bin`, and the **npm migration to the optionalDependencies model** (adding
+   win-arm64). Each owned channel must be CI-automated *and* covered by the
+   version-pin gate before it ships, and the primary install paths (`install.sh`,
+   npm) must support an internal-mirror base-URL so air-gapped enterprises can
+   install without github.com egress.
 
 3. **Harden the supply chain to a keyless-verifiable standard** (design doc
-   section 6): add SLSA build-provenance attestation, Sigstore/cosign signing (incl.
-   the aggregate `SHA256SUMS`), npm's own `npm publish --provenance` (which rides the
-   OIDC migration), and an attached SBOM — for every Release tarball, the npm package,
-   and the ghcr image — with optional best-effort verification in `install.sh` and the
-   npm shim. Extend the keyless OIDC posture crates.io already has; add no long-lived
-   signing secret. This proves *origin*, not benevolence: a compromised publishing
-   account remains the root of trust (see Consequences).
+   section 6): add SLSA build-provenance attestation and Sigstore/cosign signing
+   (incl. the aggregate `SHA256SUMS`) for the Release tarballs and the ghcr image, and
+   attach an SBOM to the Release binary (the byte-identical image inherits it), with
+   optional best-effort verification in `install.sh` and the npm shim. The npm package
+   gets consumer-verifiable provenance via `npm publish --provenance` — but **only when
+   npmjs.com's trusted-publisher (OIDC) UI ships**, which is externally blocked today
+   (per `release.yml`), so npm keeps its PAT until then. Extend the keyless OIDC
+   posture crates.io already has; add no long-lived signing secret. This proves
+   *origin*, not benevolence: a compromised publishing account remains the root of
+   trust (see Consequences).
 
 4. **Defer Tier-2 channels to eligibility or demand** and **skip Tier-3**:
    Homebrew core waits on the notability bar — and because a repo-owner self-submission
-   triggers Homebrew's 3x multiplier (`≥225 stars` vs the third-party `75`), the
-   realistic path is a community packager submitting it (keep the tap regardless);
-   nixpkgs, conda-forge, a self-owned COPR, PyPI (maturin `bindings="bin"` wheels, only
-   for the `uvx`/pre-commit reach), and Snap (classic-confinement review) are
-   demand-gated; cargo-dist is an optional future *consolidation*, not a dependency.
-   `go install` (structurally impossible for a non-Go binary), Chocolatey (Scoop +
-   WinGet already cover Windows), Flatpak, Alpine aports, official Debian/Fedora
-   (sponsor-gated), and a bespoke asdf plugin are skipped.
+   triggers Homebrew's 3× multiplier (`≥225 stars` vs the third-party `75`, neither met
+   at 62 today), the realistic path is a community packager submitting it once it
+   crosses 75 (keep the tap regardless); nixpkgs, conda-forge, a self-owned COPR, PyPI
+   (maturin `bindings="bin"` wheels, only for the `uvx`/pre-commit reach), and Snap
+   (classic-confinement review) are demand-gated; cargo-dist is an optional future
+   *consolidation*, not a dependency. `go install` (structurally impossible for a
+   non-Go binary), Chocolatey (Scoop + WinGet already cover Windows), Flatpak, Alpine
+   aports, official Debian/Fedora (sponsor-gated), a bespoke asdf plugin, and **OS
+   code signing / notarization** (dominant paths escape both gatekeepers; no peer
+   signs; certs are the long-lived-secret anti-pattern) are skipped.
 
 5. **Every owned channel is keyless where the registry allows it.** Migrate npm to
-   OIDC trusted publishing (retiring the `NPM_TOKEN` PAT), and prefer OIDC/keyless
-   for any new channel, to shrink the expiring-token surface that today can produce
-   a split-brain release.
+   OIDC trusted publishing (retiring the `NPM_TOKEN` PAT) **once npmjs.com's
+   trusted-publisher UI ships — it is broken today, so this is not on our timeline**,
+   and prefer OIDC/keyless for any new channel, to shrink the expiring-token surface
+   that today can produce a split-brain release.
 
 This changes no rule behaviour and no `.alint.yml` semantics. It adds CI jobs,
 package manifests, attestation/signing steps, and docs.

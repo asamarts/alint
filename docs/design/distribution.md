@@ -2,7 +2,7 @@
 
 Status: Proposed (2026-08-16). (Draft | Proposed | Implemented in `<commit>` | Superseded by `<doc>`.)
 Decisions: [ADR-0015](../adr/0015-distribution-strategy.md) (distribution channel tiering and supply-chain hardening).
-Scope: how alint's binary and editor artifacts reach users, which channels we own vs automate vs delegate to community packagers, and how we make the supply chain verifiable. This is an evergreen strategy doc (like [`deterministic-perf-gating.md`](deterministic-perf-gating.md)), not a per-version rule-kind spec. It is the canonical, self-contained record of the distribution audit and expansion plan; the file:line evidence below is preserved so the register can be re-verified against the tree. Finding IDs are namespaced — `MP-*` machinery/pipeline, `VP-*` version-pin, `D-*` documentation — so section 9 can trace every one to a phase without collision.
+Scope: how alint's binary and editor artifacts reach users, which channels we own vs automate vs delegate to community packagers, and how we make the supply chain verifiable. This is an evergreen strategy doc (like [`deterministic-perf-gating.md`](deterministic-perf-gating.md)), not a per-version rule-kind spec. It is the canonical, self-contained record of the distribution audit and expansion plan; the file:line evidence below is preserved so the register can be re-verified against the tree. Finding IDs are namespaced — `MP-*` machinery/pipeline, `VP-*` version-pin, `D-*` documentation — so section 9 can trace every actionable one to a phase without collision.
 
 ---
 
@@ -28,9 +28,9 @@ accretion rather than to a plan. Three problems:
    manual-tarball path from the canonical install page and the official GitHub
    Action silently fails on Windows runners; several high-ROI channels that fall
    out of the *existing* release assets for almost no work (cargo-binstall, a Nix
-   flake, Scoop, WinGet, mise) are unclaimed; and the npm wrapper uses the
-   fragile postinstall-download model that breaks under `bunx`, `--ignore-scripts`,
-   and offline installs.
+   flake, Scoop, WinGet, mise) are unclaimed; the npm wrapper uses the fragile
+   postinstall-download model; and neither `install.sh` nor npm can be pointed at an
+   internal mirror, so an air-gapped enterprise cannot install (§7.2).
 
 3. **Small correctness debt.** A copy-paste-broken `brew install` command on the
    marketing site, npm advertised on a page that omits it, a Zed extension pinned
@@ -58,7 +58,7 @@ ourselves." It is to:
 
 ## 2. Current state
 
-### 2.1 Platform matrix
+### 2.1 Platform matrix and support floor
 
 Exactly **5 target triples** are built (`release.yml:107-121`); all Linux is
 **musl-only** (static, no glibc build):
@@ -76,17 +76,25 @@ Exactly **5 target triples** are built (`release.yml:107-121`); all Linux is
 **musl-only Linux is mostly a strength:** one static binary serves glibc distros,
 Alpine/musl, and the distroless Docker image with no gnu variant to maintain, and
 the DNS/NSS `getaddrinfo` concerns that dog musl are moot for a linter that does no
-networking. The **one real tradeoff**: musl's default allocator is materially
-slower than glibc's for allocation-heavy workloads (the documented reason ripgrep
-ships a gnu build or overrides the allocator), and alint sets no `jemalloc`/
-`mimalloc`/`global_allocator` override — a latent cost for a file-heavy linter that
-also runs a deterministic-perf-gating regime. We accept it for now; adding a
-`mimalloc` feature (not a gnu target) is the cheaper mitigation if a perf gap
-appears (§9 P3). The real reach hole is **Windows**: no arm64 build, and the
-win-x64 binary is reachable only via npm and `cargo` (not install.sh, not the
-Action, not a Windows package manager). Release assets are named
-`alint-v{version}-{target}.tar.gz` (+ `.sha256`), plus `install.sh` and
-`SHA256SUMS` (verified against the live v0.15.0 release).
+networking. The **one real tradeoff** is musl's default allocator, which is slower
+than glibc's under heavy *multithreaded* allocation (documented worst-case ~10x in
+lock-contended microbenchmarks; the reason ripgrep target-gates `tikv-jemallocator`
+for 64-bit musl). Whether alint is materially affected is profile-dependent and
+unmeasured — a latent cost we accept for now; the cheap mitigation, if perf work
+later shows a gap, is a `mimalloc` feature, not a gnu target. The real reach hole is
+**Windows**: no arm64 build, and the win-x64 binary is reachable only via npm and
+`cargo` (not install.sh, not the Action, not a Windows package manager). Release
+assets are named `alint-v{version}-{target}.tar.gz` (+ `.sha256`), plus `install.sh`
+and `SHA256SUMS` (verified against the live v0.15.0 release).
+
+**Support floor.** The musl-static Linux binary has effectively *no glibc floor* — it
+runs on old RHEL/CentOS and minimal containers, a genuine enterprise advantage worth
+stating explicitly. The **macOS floor is unpinned** (`MP-L7`): no
+`MACOSX_DEPLOYMENT_TARGET` is set in CI, so it silently tracks the GitHub runner
+image and can drop older-macOS support with no notice. The **source-build** channels
+(`cargo install`, the binstall source fallback, `cargo install --git`, and the
+`language: rust` pre-commit hook) require **rustc ≥ 1.85** (`Cargo.toml:21`);
+prebuilt-binary channels impose no toolchain requirement.
 
 ### 2.2 Live channels (nine auto-published on the `v*` tag, plus three manual/docs-only)
 
@@ -102,12 +110,12 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 
 | Channel | Mechanism | Coverage | Auth |
 |---|---|---|---|
-| **GitHub Releases** | tarball + per-file `.sha256` + concatenated `SHA256SUMS`; also force-moves the `v0` major tag so `@v0` tracks latest (see `MP-N2`) | all 5 triples | `GITHUB_TOKEN` |
+| **GitHub Releases** | tarball + per-file `.sha256` + concatenated `SHA256SUMS`; also force-moves the `v0` major tag (`release.yml:215-226`) so `@v0` tracks latest (see `MP-N2`) | all 5 triples | `GITHUB_TOKEN` |
 | **install.sh** (`curl \| bash` via alint.org) | platform-detect → SHA-256 verified download → `$HOME/.local/bin` (prints a PATH hint if that dir is not on `PATH`, `install.sh:104-108`) | 4 (no Windows) | none |
 | **GitHub Action** `asamarts/alint@v0` | composite; fetches install.sh at the consumer's pinned ref with 3x retry; binary version derives from the action ref | 4 (no Windows) | none |
 | **crates.io** `cargo install alint` | source build; publishes 6 crates in dep order; **keyless OIDC** publishing | any Rust target | OIDC |
 | **npm** `@asamarts/alint` | **postinstall-download** wrapper (no native bytes in the tarball; `install.js` downloads + SHA-256-verifies at install time) | 5 (declares win-arm64 it can't serve) | `NPM_TOKEN` (PAT) |
-| **Docker** `ghcr.io/asamarts/alint` | distroless-static, nonroot (UID 65532), re-extracts the *release* binaries so the image is byte-identical to the tarballs; tags `:vX.Y.Z`/`:X.Y.Z`/`:X.Y`/`:latest` | linux amd64+arm64 | `GITHUB_TOKEN` |
+| **Docker** `ghcr.io/asamarts/alint` | distroless-static, nonroot (UID 65532), re-extracts the *release* binaries so the image is byte-identical to the tarballs; OCI labels set in CI (`release.yml:313-317`); tags `:vX.Y.Z`/`:X.Y.Z`/`:X.Y`/`:latest` | linux amd64+arm64 | `GITHUB_TOKEN` |
 | **Homebrew tap** `asamarts/homebrew-alint` | formula regenerated from `SHA256SUMS` in CI (no rebuild), golden-tested in preflight, committed over SSH | macOS arm/intel + Linuxbrew x64/aarch64 | SSH deploy key |
 | **VS Code + Open VSX** | `vsce publish` + `ovsx publish`, version stamped from tag; real-client e2e in `editors-e2e.yml` | n/a | `VSCE_PAT`, `OVSX_PAT` |
 | **JetBrains Marketplace** | `gradle publishPlugin` (one LSP4IJ plugin covers the suite); hardened by a bytecode deny-scan finalizer | n/a | token + cert/key/password (4 secrets) |
@@ -122,9 +130,9 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 - **The Homebrew tap is already zero-touch:** `update-homebrew-formula.sh`
   regenerates the formula from the release manifest (no rebuild) and is
   golden-tested in preflight. No per-release human step.
-- **Docker is distroless-static + nonroot**, and re-extracts the *release*
-  binaries so the image is byte-identical to the tarballs. Being OCI-standard, it
-  runs unchanged under podman/containerd/nerdctl.
+- **Docker is distroless-static + nonroot**, re-extracts the *release* binaries
+  (byte-identical to the tarballs), sets OCI source/version/license labels, and is
+  OCI-standard so it runs unchanged under podman/containerd/nerdctl.
 - **The JetBrains internal-API deny-scan** (`verifyNoMarketplaceDeniedApis`) is a
   robust, well-engineered gate against a real class of mid-release rejection.
 - **No cross-repo version drift:** every authored surface in both repos pins
@@ -137,9 +145,9 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 ## 3. Findings register (harden)
 
 Deduplicated from a two-repo audit (release machinery + documentation), then
-independently fact-checked (every citation and structural claim verified against
-the tree; external claims verified against primary sources). Severity is impact x
-likelihood; `file:line` is evidence for re-verification, not exhaustive.
+independently fact-checked over two rounds (every citation and structural claim
+verified against the tree; external claims verified against primary sources).
+Severity is impact x likelihood; `file:line` is evidence for re-verification.
 
 ### 3.1 Machinery and pipeline (`MP-*`)
 
@@ -148,21 +156,25 @@ likelihood; `file:line` is evidence for re-verification, not exhaustive.
 | **MP-H1** | HIGH | No signing / SLSA provenance / SBOM / attestation on any binary artifact; `.sha256` proves transit only. | grep across `.github/`, `install.sh`, `Dockerfile`, `npm/`; v0.15.0 assets carry none; `release.yml:305-317` docker sets no attestation | §6 / P1 |
 | **MP-H2** | HIGH | Official GitHub Action silently fails on Windows runners (composite → install.sh hard-exits) though a win-x64 binary exists. | `action.yml:56-130` (`bash "$install_sh"` at `:129`), `install.sh:32-38` | Windows path in the Action / P2; doc note / P0 |
 | **MP-M1** | MED | Build matrix needlessly gates the irreversible crates.io publish (and docker). A flaky win/aarch64 leg blocks a publish needing zero binaries. | `release.yml:104` (`fail-fast:false`), `:329` (`publish-crates needs: build`) | `publish-crates` → `needs: preflight` / P0 (effect next tag) |
-| **MP-M2** | MED | Four expiring-token channels, each a split-brain single point of failure, all run after the Release exists. | `NPM_TOKEN release.yml:375`; `VSCE_PAT/OVSX_PAT :475-476`; the four JetBrains secrets `:525-528`; `HOMEBREW_TAP_DEPLOY_KEY :420` | migrate npm to OIDC / P1; rotation runbook / P0 |
+| **MP-M2** | MED | Four secret-bearing channels, each a split-brain single point of failure, all run after the Release exists. Three are expiring tokens; the Homebrew SSH key is long-lived (compromise, not expiry). | `NPM_TOKEN release.yml:375`; `VSCE_PAT/OVSX_PAT :475-476`; the four JetBrains secrets `:525-528`; `HOMEBREW_TAP_DEPLOY_KEY :420` | migrate npm to OIDC when available / P2; rotation runbook / P0 |
 | **MP-M3** | MED | npm declares `win32/arm64` (os×cpu) it cannot serve; hard postinstall error instead of clean `EBADPLATFORM`. | `npm/package.json:31-32`, `npm/install.js:52-58` | fix declaration / P0; add win-arm64 build+package / P2 |
+| **MP-M4** | MED | Air-gapped/enterprise install is impossible from the primary paths: `install.sh` hardcodes `api.github.com` + `github.com` and its `ALINT_REPO` overrides only the repo path, not the host; `npm/install.js`'s repo is a hardcoded const with no env override. | `install.sh:18,48,60`, `npm/install.js:26` | base-URL/host override + mirror docs / §7.2, P0 docs + P2 code |
 | **MP-L1** | LOW | install.sh resolves "latest" via the unauthenticated GitHub API (60 req/hr/IP); 403s on shared CI egress. | `install.sh:48` | doc `ALINT_VERSION` pin / P0 |
 | **MP-L2** | LOW | `action-selftest` pins `v0.12.0` though its comment says track the previous minor (should be v0.14.0). | `action-selftest.yml:94` | bump each release / P0 |
 | **MP-L3** | LOW | `cross` installed unpinned at release time (fresh unversioned build dep in the aarch64 hot path). | `release-binary.sh:34-40` | pin `--version` / P0 (effect next tag) |
 | **MP-L4** | LOW | Four editor channels (Zed/Neovim/Emacs/Sublime) are source-only, manual, post-release; only VS Code + JetBrains are tag-gated. | `RELEASING.md:208-218` | automate what can be / P2 |
-| **MP-L5** | LOW | The pre-commit hook compiles from source (`language: rust`) — the slowest install path, needs a full Rust toolchain. | `.pre-commit-hooks.yaml` | ship a prebuilt-binary hook, or a PyPI-wheel `language: python` hook once PyPI lands / P2-P3 |
+| **MP-L5** | LOW | The pre-commit hook compiles from source (`language: rust`) — the slowest install path, needs a full Rust toolchain (rustc ≥ 1.85). | `.pre-commit-hooks.yaml` | ship a prebuilt-binary hook, or a PyPI-wheel `language: python` hook once PyPI lands / P2-P3 |
+| **MP-L6** | LOW | The OCI image sets source/version/license labels but not `org.opencontainers.image.revision` (git SHA) or `.created`; labels sit on the image config, not the manifest-index annotations. | `release.yml:313-317` | add `.revision`/`.created`; use build-push `annotations:` / P2 |
+| **MP-L7** | LOW | The macOS binary's deployment-target floor is unpinned, so it silently tracks the GitHub runner image (drift can drop old-macOS support without notice). | no `MACOSX_DEPLOYMENT_TARGET` in `release.yml` | pin the deployment target / P2 |
 | **MP-N1** | NOTE | install.sh exists in three independently-updatable copies (release-pinned; `main` served via raw + the alint.org 302; the Action fetches at the consumer's ref). The headline `curl` pulls from mutable `main`. | `install.sh` header, `release.yml:190`, `action.yml:116`, alint.org `_redirects:9` | pair with signing (§6) |
-| **MP-N2** | NOTE | The `v0` major tag is force-moved each release, so `@v0` consumers auto-receive whatever it is repointed to — the same mutable-ref surface as `MP-N1`, one level up (a compromised account can repoint it; `@v0` also crosses 0.x breaking minors). | `release.yml` (`v0` force-move) | recommend SHA-pinning for security-sensitive consumers; note the auto-update tradeoff / §6 |
+| **MP-N2** | NOTE | The `v0` major tag is force-moved each release, so `@v0` consumers auto-receive whatever it is repointed to — the same mutable-ref surface as `MP-N1`, one level up (a compromised account can repoint it; `@v0` also crosses 0.x breaking minors). | `release.yml:215-226` | recommend SHA-pinning for security-sensitive consumers; note the auto-update tradeoff / §6 |
+| **MP-N3** | NOTE | No OS-level code signing or notarization (macOS Gatekeeper / Windows Authenticode-SmartScreen). **Deliberately deferred:** the primary paths (`install.sh`, brew *formula*, npm, cargo, Docker) carry no macOS quarantine or Windows MOTW so neither gatekeeper fires; no comparable Rust CLI signs; certs are long-lived secrets counter to §6; and post-2024 even an EV cert no longer buys instant SmartScreen reputation. Residual exposure is a manual browser-download + double-click. | (absence) | P0 manual-download doc caveat (`D-L7`); implementation P3/demand-gated only |
 
 ### 3.2 Version-pin blind spot (`VP-*`)
 
 | ID | Sev | Finding | Evidence | Fix / phase |
 |---|:--:|---|---|---|
-| **VP-M1** | MED | Zed extension pinned at 0.13.0 (two minors stale), manual PR, **not in the pin gate** — so the gate falsely implies "all versions match." | `editors/zed/extension.toml:3`, `editors/zed/Cargo.toml:3`; `check-version-pins.sh:51-58` scope | add every editor manifest to `check-version-pins.sh` / P0 |
+| **VP-M1** | MED | Zed extension pinned at 0.13.0 (two minors stale), manual PR, **not in the pin gate** — so the gate falsely implies "all versions match." The gate also does not assert the dual `Apache-2.0 OR MIT` license across manifests (a forward risk as new channels add Scoop/WinGet/AUR/nix manifests with divergent license syntax). | `editors/zed/extension.toml:3`, `editors/zed/Cargo.toml:3`; `check-version-pins.sh:51-58` scope | add editor manifests + a license-consistency assertion to `check-version-pins.sh` / P0 (editors), P2 (license, as channels land) |
 
 ### 3.3 Documentation (`D-*`)
 
@@ -178,6 +190,9 @@ likelihood; `file:line` is evidence for re-verification, not exhaustive.
 | **D-L4** | LOW | Homepage snippet omits `cargo`. | alint.org `index.astro:35-46` | add or accept as teaser / P0 |
 | **D-L5** | LOW | `about/index.md` project links omit npm + the GitHub Action (inconsistent with `SECURITY.md:43-51`). | `docs/site/about/index.md:30-36` | align / P0 |
 | **D-L6** | LOW | RELEASING.md says editor-marketplace prereqs are "NOT yet done" though the jobs demonstrably publish. | `RELEASING.md:195-206` | update runbook / P0 |
+| **D-L7** | LOW | No "manual download" caveat for the one OS-gatekeeper-exposed path (macOS Gatekeeper quarantine / Windows SmartScreen on a browser-downloaded tarball). | (absence; pairs with `MP-N3`) | add an install-page note with `xattr -d com.apple.quarantine ./alint` (macOS) + "More info → Run anyway" (Windows) / P0 |
+| **D-L8** | LOW | No uninstall instructions on any path (the footprint is a single binary; `install.sh` has no `--uninstall`). | (absence) | one-line "to uninstall, remove the binary"; optional `install.sh --uninstall` / P0 |
+| **D-L9** | LOW | `SECURITY.md` has no "Supported Versions" section — a standard enterprise-procurement expectation; and no stated EOL/support-window policy. | `SECURITY.md` (absence) | add "latest minor only; yanked on defect, never proactively removed" / P0 |
 | **D-N1** | NOTE | Local synced-docs show v0.14.2 — gitignored build artifacts re-synced from the tag at deploy; live site is correct. | `src/content/docs/docs/.../installation.md` | none (benign) |
 
 ### 3.4 Gaps (expected channels no surface documents)
@@ -190,10 +205,15 @@ Tier 3; the rest tiered).
 ### 3.5 npm packaging model
 
 The **postinstall-download** model breaks under **`bunx`/Bun** (blocks lifecycle
-scripts by default), **`npm install --ignore-scripts`** (common in hardened CI),
-and **offline/air-gapped** installs. Migrate to the **optionalDependencies** model
-(§4) and add the missing win-arm64 target — the packaging axis of `MP-M3`, scheduled
-in P2.
+scripts by default), **`npm install --ignore-scripts`** (common in hardened CI), and
+**offline/air-gapped** installs. A fourth, subtler failure: because the wrapper
+downloads the binary from the GitHub Release *at install time* (`release.yml:355-360`
+notes it "gates on the GH Release being live"), a deleted, yanked, or retagged
+release makes `npm install` 404 even though npmjs.com still lists the version — a
+coupling that also compounds the mutable `v0`/`main` refs (`MP-N1`/`MP-N2`). Migrate
+to the **optionalDependencies** model (§4), which removes all four failure modes (the
+binary ships inside the sub-package) and adds the missing win-arm64 target — the
+packaging axis of `MP-M3`, scheduled in P2.
 
 ---
 
@@ -213,9 +233,9 @@ secret; **L** = a multi-week external or social process.
 | **mise (`ubi`/`github` backend)** | S | `mise use ubi:asamarts/alint` resolves our releases live with no plugin or manifest (our conventional asset names already satisfy it); optional one-time registry PR for a bare shortname. Also covers asdf users, so no bespoke asdf plugin is needed. |
 | **Third-party fetchers + `cargo install --git` (docs only)** | S | `eget asamarts/alint`, `ubi`, `bin` pull our existing releases with zero work from us — one docs line, and the honest answer for "`go install`" users (Tier 3). `cargo install --git` is the zero-infra Rust fallback for unreleased `main`. |
 | **Scoop self-hosted bucket** | M | Self-updating on Windows: `checkver:github` + `autoupdate` + the Excavator action bump version and hash for us. Mirrors the Homebrew-tap pattern. |
-| **WinGet (WinGet Releaser action)** | M | Largest native-Windows audience (ships in Win11). The action auto-opens the manifest PR each release; the only friction is Microsoft's merge review. |
+| **WinGet (WinGet Releaser action)** | M | Largest native-Windows audience (ships in Win11). The action auto-opens the manifest PR each release; the only friction is Microsoft's merge review (no code-signing requirement). |
 | **`.deb` + `.rpm` on Releases** | M | `cargo-deb` and `cargo-generate-rpm` generate from `Cargo.toml` in CI and attach to the Release. **One musl-static package each** (we build no gnu binary — §2.1 — and a static binary installs fine on glibc hosts). Not an apt/dnf *repo* — just downloadable packages. |
-| **npm → optionalDependencies** | **M–L** | The heaviest Tier-1 item (the ADR calls it a breaking internal change) and coupled to the win-arm64 build (P2). Adopt Biome's pure model (per-platform `@asamarts/alint-<target>` packages tagged with `os`/`cpu`, a thin `bin` shim, **no install script** — confirmed on Biome 2.x), or esbuild's hybrid (optionalDeps + a postinstall fallback for `--no-optional`). Caveat: OIDC trusted publishing cannot publish a package's *initial* version, so each new per-platform sub-package needs a one-time token bootstrap. Then `npx alint` and `bunx alint` both work. |
+| **npm → optionalDependencies** | **M–L** | The heaviest Tier-1 item (the ADR calls it a breaking internal change), coupled to the win-arm64 build (P2), and it removes all four §3.5 failure modes at once. Adopt Biome's pure model (per-platform `@asamarts/alint-<target>` packages tagged with `os`/`cpu`, a thin `bin` shim, **no install script** — confirmed on Biome 2.x), or esbuild's hybrid (optionalDeps + a postinstall fallback for `--no-optional`). Add win-arm64. Then `npx alint` and `bunx alint` both work. |
 | **AUR `alint-bin`** | M | Arch users expect it; `github-actions-deploy-aur` pushes over SSH and regenerates `.SRCINFO`/checksums. We own it, fully CI-driven. |
 
 Reconciling with what we already do: the **Homebrew tap is already auto-bumped**
@@ -227,7 +247,7 @@ run` short-name discoverability is optional, low-priority.
 
 | Channel | Effort | Rationale |
 |---|:--:|---|
-| **Homebrew core** | M | Tap-less `brew install alint` + free BrewTestBot autobump. The notability bar is `≥75 stars OR ≥30 forks OR ≥30 watchers` for a *third-party* packager — but a **self-submission (the repo owner opening the PR) triggers a 3× multiplier → `≥225 stars OR ≥90 forks OR ≥90 watchers`** (`shared_audits.rb`), plus a real 30-day-age gate and no-HEAD-only rule. alint is at 62 stars / 1 fork (2026-08-16), so self-submission is far off; the realistic path is to let a third-party packager submit at the 75-star bar. **Keep the tap either way.** |
+| **Homebrew core** | M | Tap-less `brew install alint` + free BrewTestBot autobump. The notability bar is `≥75 stars OR ≥30 forks OR ≥30 watchers` for a *third-party* packager — but a **self-submission (the repo owner opening the PR) triggers a 3× multiplier → `≥225 stars OR ≥90 forks OR ≥90 watchers`** (`shared_audits.rb`), plus a real 30-day-age gate and no-HEAD-only rule. alint is at 62 stars / 1 fork (2026-08-16), so it clears *neither* the self-submission bar nor even the 75-star third-party bar yet; the eventual route is a third-party packager submitting once it crosses 75. **Keep the tap either way.** |
 | **nixpkgs** | M | Wide reach, mostly bot-maintained after entry — but do the in-repo flake first, and either use `importCargoLock`/`cargoLock` (no FOD hash) or wire a `passthru.updateScript` (`nix-update-script`), because r-ryantm cannot auto-bump Rust's `cargoHash`. |
 | **conda-forge** | M | Cheap to keep once in (regro autotick bot bumps; we merge), but the audience skews data-science — worth the one-time staged-recipes PR on demand. |
 | **Self-owned COPR** | M | Native `dnf install` UX for Fedora/RHEL via webhook auto-rebuild, no official-Fedora gatekeeper (precedent: bottom and ripgrep both have community COPRs). |
@@ -246,18 +266,19 @@ run` short-name discoverability is optional, low-priority.
 | **Official Debian/Ubuntu, official Fedora** | Need an external Debian-Developer / Fedora-packager sponsor (weeks-to-months, out of our control). The self-owned COPR (Tier 2) covers the `dnf` UX without the gate; revisit only on real popularity. |
 | **Bespoke asdf plugin** | Superseded by mise's `github`/`ubi` backend. |
 | **pkgx, GNU Guix, Spack, webi, Homebrew `--HEAD`** | Niche or community-owned; none needs upstream action. Named here so the omission is deliberate, not overlooked. |
-| **taiki-e/upload-rust-binary-action** | Not a channel — a build helper; its default naming is conveniently binstall-compatible, so it is an optional internal simplification of the release job, nothing more. |
+| **OS code signing / notarization** | Deferred, not adopted — see `MP-N3`: the dominant install paths escape both gatekeepers, no peer signs, and certs are the long-lived-secret anti-pattern §6 avoids. |
 
 ---
 
 ## 5. Precedent (comparable Rust CLIs)
 
 The compact evidence for the §1 frame. **SELF** = upstream-run (per-release CI);
-**COMMUNITY** = distro/packager-run (out of upstream's hands).
+**COMMUNITY** = distro/packager-run (out of upstream's hands). None of these notarize
+macOS or sign Windows binaries (confirming `MP-N3`).
 
 | Tool | SELF (upstream owns) | COMMUNITY (delegated) |
 |---|---|---|
-| **ripgrep** (gold standard) | crates.io + GitHub binaries (incl. a CI-built `.deb`) | Homebrew-core, Debian, Arch, Fedora, nixpkgs, Scoop, WinGet, Chocolatey, MacPorts, BSD ports; snap disowned |
+| **ripgrep** (gold standard) | crates.io + GitHub binaries (incl. a CI-built `.deb`) + build-provenance attestation | Homebrew-core, Debian, Arch, Fedora, nixpkgs, Scoop, WinGet, Chocolatey, MacPorts, BSD ports; snap disowned |
 | **ruff** (astral) | curl installer + PyPI(maturin) + GHCR + GH binaries | Homebrew-core, conda-forge, Arch, Alpine. **No npm CLI** (only `@astral-sh/ruff-wasm-*` library packages) |
 | **biome** | npm (optionalDependencies, no postinstall on 2.x) + standalone binaries + Docker | Homebrew-core. crates.io is a placeholder (`biome` = v0.0.0) |
 | **uv** (astral) | curl/PS installer + PyPI + GHCR + GH binaries | Homebrew, Scoop, **WinGet**, Nix, pacman (WinGet is bot/community-maintained, not upstream) |
@@ -268,8 +289,8 @@ The compact evidence for the §1 frame. **SELF** = upstream-run (per-release CI)
 Takeaways: (1) every one keeps SELF small; (2) the npm-CLI precedents are Biome and
 esbuild, **not** ruff (ruff has no npm CLI package); (3) PyPI adopters all have
 Python-developer users, but dprint's `dprint-py` shows the pre-commit niche can
-justify it; (4) `.deb`/`.rpm`-on-Releases + a (usually community) COPR is the
-common "native Linux UX without the distro gate" pattern.
+justify it; (4) `.deb`/`.rpm`-on-Releases + a (usually community) COPR is the common
+"native Linux UX without the distro gate" pattern; (5) *none* sign/notarize.
 
 ---
 
@@ -291,41 +312,61 @@ not a consumer-verifiable *attestation* a user can check — precisely the gap t
 section closes for binaries.
 
 1. **Build provenance / attestation (SLSA).** Add `actions/attest-build-provenance`
-   to `release.yml` for every Release tarball (`subject-path`) *and* the ghcr image
-   (`subject-digest` + `push-to-registry`) → signed, OIDC-backed provenance,
-   verifiable with `gh attestation verify <artifact> --repo asamarts/alint` (and
-   `oci://…` for the image). Keyless; no secret to expire.
+   to `release.yml` in **separate calls** for the Release tarballs (`subject-path`)
+   and the ghcr image (`subject-digest` + `push-to-registry`; the action takes
+   exactly one subject kind per call) → signed, OIDC-backed provenance, verifiable
+   with `gh attestation verify <artifact> --repo asamarts/alint` (and `oci://…` for
+   the image). Keyless; no secret to expire. (ripgrep does exactly this.)
 
-2. **Keyless signing (Sigstore / cosign).** `cosign sign-blob` the tarballs (and the
-   aggregate `SHA256SUMS`) and `cosign sign` the ghcr image, via OIDC/Fulcio/Rekor →
-   `cosign verify-blob` / `cosign verify`. Signing the single `SHA256SUMS` manifest is
-   cheaper leverage than per-tarball signatures and covers every asset at once.
+2. **Keyless signing (Sigstore / cosign).** `cosign sign-blob --bundle` the tarballs
+   (and the aggregate `SHA256SUMS`) and `cosign sign` the ghcr image, via OIDC/Fulcio/
+   Rekor → `cosign verify-blob --bundle …` / `cosign verify`. Signing the single
+   `SHA256SUMS` manifest is cheaper leverage than per-tarball signatures and covers
+   every asset at once.
 
-3. **npm provenance (near-free, pairs with the OIDC migration).** Once npm moves to
-   optionalDependencies (native bytes in the sub-packages) + OIDC trusted publishing,
-   `npm publish --provenance` (one flag + `id-token: write`) attaches Sigstore-backed,
-   consumer-verifiable SLSA provenance on npmjs.com. Caveat: the initial version of
-   each per-platform sub-package needs a one-time token bootstrap (OIDC cannot publish
-   a first version).
+3. **npm provenance — gated on an external blocker.** The optionalDependencies model
+   (native bytes in the sub-packages) + OIDC trusted publishing would let
+   `npm publish --provenance` attach Sigstore-backed, consumer-verifiable provenance
+   on npmjs.com. **But npm OIDC trusted publishing is currently blocked externally:**
+   npmjs.com's UI to enable a trusted publisher is broken (the same blocker hit at
+   v0.10.0, per `release.yml:371-374`), so the repo still uses the `NPM_TOKEN` PAT.
+   This therefore lands **in P2 with the optionalDependencies migration, and only when
+   npm ships that UI** — not on our own timeline. (A one-time token also has to seed
+   the first version of each per-platform sub-package: OIDC cannot publish a first
+   version.)
 
 4. **SBOM.** Build with `cargo auditable` (embeds the dep graph in a `.dep-v0` binary
    section, readable via `cargo audit bin`) and attach a CycloneDX/SPDX SBOM (via
-   `cargo cyclonedx` or syft, or `actions/attest-sbom`) to the Release. The
-   distroless-static image has near-zero OS surface, so we attest the *binary's* SBOM
-   and skip image OS-package CVE scanning as low-value.
+   `cargo cyclonedx` or syft, or `actions/attest-sbom`) to the Release; the byte-
+   identical image inherits it. The distroless-static base is *near*-zero surface but
+   not CVE-free — it ships a few Debian packages (ca-certificates, tzdata) that
+   scanners enumerate — so a scoped base-image scan is cheap insurance; the binary's
+   own dependency SBOM is where the real risk lives and is the priority.
 
 5. **Verification UX.** Teach `install.sh` and the npm shim to *optionally* verify
-   provenance/signature when `gh` or `cosign` is present (never a hard dependency), and
-   document `gh attestation verify` / `cosign verify` on the install page and in
-   `SECURITY.md`. Pair with the mutable-ref caveats (`MP-N1`, `MP-N2`): signing plus an
-   optionally tag-pinned installer and SHA-pinned `@vX.Y.Z` Action usage closes the loop.
+   provenance/signature when `gh` or `cosign` is present (never a hard dependency),
+   and document `gh attestation verify` / `cosign verify` on the install page and in
+   `SECURITY.md`. This **closes the loop for consumers who pin** the installer/Action
+   ref; it does *not* help the default `curl alint.org/install.sh | bash` user, whose
+   script still comes from mutable `main` (`MP-N1`) and whose binary signature does
+   not authenticate the *script*. For them we should also offer an inspectable path
+   (download-then-read-then-run, or a tag-pinned raw URL) and pair it with the
+   mutable-ref caveats (`MP-N1`, `MP-N2`).
+
+6. **Reproducible builds (P3, low priority).** Rust is often reproducible given a
+   pinned toolchain + `--remap-path-prefix`, but peers advertise attestation over
+   reproducibility (uv's "reproducible" is about lockfiles, not binaries), and
+   guaranteeing it across five cross-compiled triples is fiddly. At most a hygiene
+   step, not a headline feature.
 
 This is the single highest-trust-ROI item in the plan and the one most aligned with
 what alint claims to stand for.
 
 ---
 
-## 7. Maintenance model (free vs ongoing)
+## 7. Operations and maintenance
+
+### 7.1 Maintenance model (free vs ongoing)
 
 Classifying every channel by who does the per-release work makes the sprawl risk
 explicit. Prefer the top two bands.
@@ -348,6 +389,40 @@ explicit. Prefer the top two bands.
   (Zed/Neovim/Emacs/Sublime, `MP-L4`) and the source-compiling pre-commit hook
   (`MP-L5`) also live here until automated.
 
+### 7.2 Enterprise mirror / air-gapped install (`MP-M4`)
+
+alint targets governance-conscious enterprises, many of which block direct
+github.com egress — yet the primary paths hardcode it. **`install.sh`** hits
+`api.github.com` (`:48`) and `github.com` (`:60`), and `ALINT_REPO` (`:18`) overrides
+only the *owner/repo path*, never the *host*; **`npm/install.js`** has the repo as a
+hardcoded const (`:26`) with no env override. Fixes: add a base-URL/host override to
+both (precedent: rustup's `RUSTUP_DIST_SERVER`, esbuild's `ESBUILD_BINARY_PATH`), and
+recognize that the **optionalDependencies migration itself is the npm air-gap fix** (a
+private npm registry then serves the platform binaries with no github.com hop).
+Document the paths that already work: retag the OCI image into an internal registry,
+and `cargo` source-replacement for the source build. A short "enterprise mirror /
+offline install" subsection on the install page closes a real procurement question.
+
+### 7.3 Rollback / yank propagation
+
+"One tag fans out to every channel" (§2.3); the reverse is manual and per-channel.
+A bad release must be un-published through each mechanism: crates.io **yank** (the
+publish is irreversible — yank hides a version, never deletes it), `npm deprecate`
+(or unpublish within 72h), revert the Homebrew formula commit, re-point the Docker
+tag, and — critically — **re-point the force-moved `v0` tag** (`MP-N2`) so `@v0`
+consumers stop receiving the bad build. There is no single-command rollback; this
+playbook belongs in RELEASING.md alongside the existing yank note.
+
+### 7.4 Adoption instrumentation
+
+The phased success criteria (§9) measure whether a channel *works*, not whether it is
+*used* — yet the whole plan is a portfolio bet. Track the free passive signals:
+crates.io and npm per-version download counts, the GitHub Release
+`assets[].download_count` (which directly measures install.sh + Action + manual
+traffic), and GHCR pull totals. Two blind spots: Homebrew analytics cover only
+homebrew-core, never third-party taps (so our tap installs are invisible — a concrete
+future reason to pursue core), and npm counts miss private-mirror installs.
+
 ---
 
 ## 8. Answers to the specific questions asked
@@ -363,9 +438,10 @@ explicit. Prefer the top two bands.
   `cargoHash`.
 - **npm — is our approach best practice?** No — migrate. We are on the
   postinstall-download model (verified in-repo), which breaks under
-  Bun/`--ignore-scripts`/offline. Best practice is optionalDependencies (Biome pure
-  model on 2.x, or esbuild hybrid). Add win-arm64, and note OIDC can't publish a
-  sub-package's first version (one-time bootstrap).
+  Bun/`--ignore-scripts`/offline/deleted-release. Best practice is optionalDependencies
+  (Biome pure model on 2.x, or esbuild hybrid). Add win-arm64. Note that npm OIDC
+  provenance is blocked on npmjs.com's UI (§6.3), so the migration ships with the PAT
+  until then.
 - **PyPI — worth it for a non-Python tool?** Technically excellent and fully
   automatable (maturin `bindings="bin"`, per-platform wheels, OIDC — how ruff and
   typos ship), **but** the payoff is Python-ecosystem reach: `uvx`/`uv tool
@@ -378,69 +454,87 @@ explicit. Prefer the top two bands.
   genuinely free. Docker and podman are both OCI; one artifact also serves
   containerd/nerdctl/Kubernetes. Only action: document a fully-qualified registry.
 - **Homebrew — core vs tap?** Keep the tap now (full control, instant releases,
-  already zero-touch). Homebrew core is far off for *self*-submission (the 3×
-  owner-submission multiplier → 225 stars vs alint's 62); the realistic route is a
-  third-party packager submitting at the 75-star bar. You can have both.
+  already zero-touch). Homebrew core is far off: self-submission hits the 3× owner
+  multiplier (225 stars vs alint's 62), and alint is below even the 75-star
+  third-party bar today, so the eventual route is a community packager once it crosses
+  75. You can have both.
+- **SemVer across channels (pre-1.0).** alint is 0.x, where minors are breaking-
+  eligible, and the channels expose that differently: the Action's `@v0` float and
+  Homebrew always give latest-0.x (breaking minors included); npm's caret `^0.x` pins
+  to one minor; only a SHA-pinned `@vX.Y.Z` Action or an exact npm/cargo version is
+  fully stable. We document `@vX.Y.Z` pinning for consumers who need stability and
+  revisit the `v0`-float policy at 1.0.
 
 Research corrections folded into the above (so premises are not carried forward
 wrong): ruff has **no** npm CLI package (it is a PyPI precedent); dprint **is** on
-PyPI via the official `dprint-py` (only the unrelated squat is "not dprint"); `ubi`
-is written in Rust (only `eget`/`bin` are Go); cargo-dist is **not** deprecated
-(renamed `dist`, actively maintained), the real caveat is single-vendor bus-factor;
-uv's WinGet and bottom's COPR are community-maintained, not upstream.
+PyPI via the official `dprint-py`; `ubi` is written in Rust (only `eget`/`bin` are
+Go); cargo-dist is **not** deprecated (renamed `dist`, actively maintained), the real
+caveat is single-vendor bus-factor; uv's WinGet and bottom's COPR are community-
+maintained, not upstream.
 
 ---
 
 ## 9. Phased plan
 
 Each phase is independently shippable; nothing here changes rule semantics or
-`.alint.yml`. Ordering is by ROI and by what unblocks what. Every §3 finding is
-assigned below.
+`.alint.yml`. Ordering is by ROI and by what unblocks what. Every *actionable* §3
+finding is assigned below (the `-N` notes are dispositioned in §6/§7; `D-N1` is
+benign, no action).
 
 - **P0 — correctness + near-free wins (most need no release *to land*; the CI edits
   take effect and are first testable at the next `v*` tag).** Docs: `D-H1` broken
   brew, `D-H2` npm section + `D-L5` about links, `D-M1` Windows framing, `D-M2`
   homebrew form, `D-L1` anchor, `D-L2` docker tags, `D-L3` npm example, `D-L4`
-  homepage cargo, `D-L6` RELEASING note. Pin gate: `VP-M1` add editor manifests.
-  Pipeline: `MP-M1` decouple `publish-crates`, `MP-M3` fix the npm win-arm64
-  declaration, `MP-L1` document `ALINT_VERSION`, `MP-L2` bump the selftest pin,
-  `MP-L3` pin `cross`, `MP-M2` write the token-rotation runbook. Also a doc note for
-  `MP-H2` (the Action is Linux/macOS-only today). **Document** cargo-binstall (`G2`),
-  podman (fully-qualified), the third-party fetchers + `cargo install --git`, and
+  homepage cargo, `D-L6` RELEASING note, `D-L7` manual-download OS caveat, `D-L8`
+  uninstall line, `D-L9` `SECURITY.md` "Supported Versions". Pin gate: `VP-M1` add
+  editor manifests. Pipeline: `MP-M1` decouple `publish-crates`, `MP-M3` fix the npm
+  win-arm64 declaration, `MP-L1` document `ALINT_VERSION`, `MP-L2` bump the selftest
+  pin, `MP-L3` pin `cross`, `MP-M2` write the token-rotation runbook. Doc note for
+  `MP-H2` (Action is Linux/macOS-only today) and the `MP-M4` enterprise-mirror paths
+  that already work (image retag, cargo source-replacement). **Document** cargo-
+  binstall (`G2`), podman (fully-qualified), the fetchers + `cargo install --git`, and
   **list the Action on the GitHub Marketplace**.
 
-- **P1 — supply-chain hardening (next release).** §6: attestation + cosign (incl.
-  signing `SHA256SUMS`) + SBOM + verification docs, **plus migrating npm to OIDC
-  trusted publishing so `npm publish --provenance` rides along** (`MP-M1`/`MP-H1`/
-  `MP-M2` token reduction). Addresses `MP-N1`/`MP-N2` via signing + SHA-pin guidance.
-  Highest trust ROI; keyless, so no new secret debt.
+- **P1 — supply-chain hardening (next release).** §6.1/6.2/6.4: attestation + cosign
+  (incl. signing `SHA256SUMS`) + SBOM + verification docs, for the tarballs and the
+  ghcr image (`MP-H1` + the `MP-M2` provenance half for the keyless channels).
+  Addresses `MP-N1`/`MP-N2` via signing + SHA-pin guidance. Keyless, so no new secret
+  debt. (npm provenance is **not** here — it is blocked externally; see P2.)
 
 - **P2 — owned high-reach channels (one pipeline pass over 1-2 releases).** Add the
   **win-arm64 build target first**, then npm → optionalDependencies that ships it
-  (resolving the packaging axis of `MP-M3`); make the **Action work on Windows**
-  (`MP-H2`); Scoop bucket; WinGet Releaser; `.deb`/`.rpm` (musl-static) on Releases;
-  AUR `alint-bin`; in-repo `flake.nix`; mise registry entry; automate the editor
-  channels where possible (`MP-L4`) and ship a prebuilt-binary pre-commit hook
-  (`MP-L5`). Each is CI-automated and covered by the (expanded) version-pin gate.
+  (resolving `MP-M3` + all §3.5 failure modes), migrating npm to OIDC + `npm publish
+  --provenance` **when npmjs.com's trusted-publisher UI ships** (§6.3); make the
+  **Action work on Windows** (`MP-H2`); add the `MP-M4` base-URL/host override to
+  install.sh + npm; Scoop bucket; WinGet Releaser; `.deb`/`.rpm` (musl-static) on
+  Releases; AUR `alint-bin`; in-repo `flake.nix`; mise registry entry; add OCI
+  `.revision`/`.created` (`MP-L6`); pin the macOS deployment target (`MP-L7`);
+  automate the editor channels where possible (`MP-L4`); ship a prebuilt-binary
+  pre-commit hook (`MP-L5`); extend the pin gate to assert the dual license (`VP-M1`).
+  Each is CI-automated and covered by the version-pin gate.
 
 - **P3 — eligibility / demand-gated.** Homebrew core (only once the star bar is
   actually met — 225 self-submission or a third-party submit at 75), nixpkgs (after
   the flake), conda-forge, self-owned COPR, PyPI wheels (which also give a
-  `language: python` pre-commit hook), Snap, a cargo-dist consolidation evaluation,
-  and — if a perf gap appears — a `mimalloc` feature to offset the musl allocator.
+  `language: python` pre-commit hook), Snap, a cargo-dist consolidation evaluation, a
+  reproducible-builds hygiene step (§6.6), revisiting OS signing (`MP-N3`) only on a
+  cask/GUI or a Defender-false-positive support burden, and — if a perf gap appears —
+  a `mimalloc` feature to offset the musl allocator.
 
 ### Success criteria (per-phase definition of done)
 
 - **P0:** the version-pin gate is green across *all* editor manifests; `cargo
   binstall alint --dry-run` resolves the release; the canonical install page lists
-  every live channel including npm and a real Windows path; `publish-crates` no
-  longer `needs: build`.
+  every live channel including npm, a real Windows path, an uninstall line, and the
+  manual-download caveat; `SECURITY.md` has a "Supported Versions" section;
+  `publish-crates` no longer `needs: build`.
 - **P1:** `gh attestation verify` and `cosign verify-blob` succeed against a released
-  asset; `npm publish --provenance` shows a provenance badge on npmjs.com; an SBOM is
-  attached and attested.
+  tarball and the ghcr image; an SBOM is attached and attested.
 - **P2:** every *owned* channel (npm, Scoop, WinGet, deb/rpm, AUR, flake, mise) is
   produced by CI on the tag and is in the pin gate; a Windows-runner `asamarts/alint`
-  Action step succeeds; a win-arm64 binary exists and its npm sub-package installs.
+  Action step succeeds; a win-arm64 binary exists and its npm sub-package installs;
+  `install.sh ALINT_BASE_URL=<mirror>` installs with no github.com hop; and — if npm
+  OIDC has shipped — `npm publish --provenance` shows a provenance badge.
 - **P3:** each entry lands only when its gate clears (homebrew-core at the real star
   bar; PyPI when we want the Python reach), so "done" is per-channel, on demand.
 
@@ -451,12 +545,21 @@ assigned below.
 - **Non-goal: own every distro package.** Debian/Arch/Fedora/nixpkgs/MacPorts are
   community-packager territory; we make their job easy (stable tags, conventional
   asset names, an SBOM) rather than duplicate it.
+- **Non-goal: a bundled self-updater.** Peers like ripgrep/fd/bat deliberately omit
+  `self-update`; it fights the package-manager channels and adds another download-exec
+  path counter to §6. Users update via their package manager or by re-running
+  install.sh; an optional passive "newer version available" notice is a maybe.
+- **Non-goal (for now): OS code signing / notarization** (`MP-N3`) — the dominant
+  paths escape both gatekeepers, no peer signs, certs are the long-lived-secret
+  anti-pattern, and post-2024 EV no longer buys SmartScreen reputation.
 - **Risk: channel sprawl → maintenance drag.** Mitigation: every *owned* channel
   must be CI-automated and covered by the version-pin gate; prefer channels in the
-  top two maintenance bands (§7).
+  top two maintenance bands (§7.1).
 - **Risk: the publishing account is the ultimate SPOF.** Attestation proves origin,
-  not benevolence (§6); mitigate with account hardening, protected tags, and minimal
-  OIDC scope, and offer SHA-pinning to security-sensitive consumers (`MP-N2`).
+  not benevolence (§6); mitigate with account hardening, protected tags, minimal
+  OIDC scope, and SHA-pinning guidance for consumers (`MP-N2`).
+- **Risk: npm provenance is not on our timeline** — it is gated on npmjs.com fixing
+  its trusted-publisher UI (§6.3); until then npm keeps the PAT.
 - **Risk: cargo-dist single-vendor bus-factor.** Treat consolidation as optional; do
   not couple the release to it without an exit plan.
 - **Risk: PyPI positioning mismatch.** Shipping a language-agnostic tool on PyPI can
