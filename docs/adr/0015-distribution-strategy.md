@@ -55,8 +55,10 @@ chain**, not a maximal channel count. Concretely:
    Marketplace, podman + third-party-fetcher docs, mise, a self-hosted Scoop bucket,
    WinGet via the releaser action, `.deb`/`.rpm` attached to Releases, an AUR
    `alint-bin`, and the **npm migration to the optionalDependencies model** (adding
-   win-arm64). Each owned channel must be CI-automated *and* covered by the
-   version-pin gate before it ships, and air-gapped enterprises must be able to install
+   win-arm64). Each owned channel must be CI-automated; those whose manifest lives in
+   our repo (npm, editor manifests, flake, deb/rpm packaging) are also covered by the
+   version-pin gate, while external-hosted ones (Scoop/AUR/WinGet/mise) are
+   golden-tested instead. Air-gapped enterprises must be able to install
    without github.com egress — `install.sh` via an internal-mirror base-URL, npm via
    the optionalDependencies migration that makes it resolvable from the enterprise
    registry.
@@ -66,10 +68,13 @@ chain**, not a maximal channel count. Concretely:
    (incl. the aggregate `SHA256SUMS`) for the Release tarballs and the ghcr image, and
    attach an SBOM to the Release binary (the byte-identical image inherits it), with
    optional best-effort verification in `install.sh` and the npm shim. The npm package
-   gets consumer-verifiable provenance via `npm publish --provenance` — but **only when
-   npmjs.com's trusted-publisher (OIDC) UI ships**, which is externally blocked today
-   (per `release.yml`), so npm keeps its PAT until then. Extend the keyless OIDC
-   posture crates.io already has; add no long-lived signing secret. This proves
+   gets consumer-verifiable provenance via `npm publish --provenance` once the
+   optionalDependencies migration ships native bytes to attest; npm OIDC trusted
+   publishing is now GA (a stale `release.yml` comment claiming otherwise should be
+   removed). Also ship a third-party-license attribution bundle (`cargo about`) beside
+   the SBOM, and put `install.sh` in `SHA256SUMS` so cosign covers the script too.
+   Extend the keyless OIDC posture crates.io already has; add no long-lived signing
+   secret. This proves
    *origin*, not benevolence: a compromised publishing account remains the root of
    trust (see Consequences).
 
@@ -86,11 +91,13 @@ chain**, not a maximal channel count. Concretely:
    code signing / notarization** (dominant paths escape both gatekeepers; no peer
    signs; certs are the long-lived-secret anti-pattern) are skipped.
 
-5. **Every owned channel is keyless where the registry allows it.** Migrate npm to
-   OIDC trusted publishing (retiring the `NPM_TOKEN` PAT) **once npmjs.com's
-   trusted-publisher UI ships — it is broken today, so this is not on our timeline**,
-   and prefer OIDC/keyless for any new channel, to shrink the expiring-token surface
-   that today can produce a split-brain release.
+5. **Prefer keyless where the registry allows; account for the secrets it does not.**
+   Migrate npm to OIDC trusted publishing (now GA), retiring the `NPM_TOKEN` PAT, and
+   prefer OIDC/keyless for any new channel. But expansion is not uniformly keyless: AUR
+   (an SSH deploy key) and WinGet (a PAT) have *no* keyless path and net-add long-lived
+   secrets even as npm→OIDC removes one (Scoop's Excavator self-polls on `GITHUB_TOKEN`
+   and adds none). We accept AUR/WinGet's secrets and fold them into the `MP-M2` rotation
+   runbook rather than pretend the plan only shrinks the secret surface.
 
 This changes no rule behaviour and no `.alint.yml` semantics. It adds CI jobs,
 package manifests, attestation/signing steps, and docs.
@@ -112,9 +119,11 @@ Easier:
 
 Harder, and accepted:
 
-- **The release pipeline grows** attestation, signing, SBOM, and several publish
-  jobs — more surface to keep green, and the version-pin gate must expand to cover
-  the new manifests (including the editor manifests it misses today).
+- **The release pipeline grows** attestation, signing, SBOM, a third-party-license
+  bundle, and several publish jobs — more surface to keep green, and the version-pin
+  gate must expand to cover the new *in-repo* manifests (editor manifests, npm
+  sub-packages, flake, deb/rpm; external-hosted Scoop/AUR/WinGet/mise are golden-tested
+  instead).
 - **Owned Windows/Linux packaging is real per-release CI** even when automated;
   each channel is another thing that can fail mid-release.
 - **The npm migration is a breaking internal change** to how the package installs
