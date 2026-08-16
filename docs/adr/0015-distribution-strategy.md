@@ -56,9 +56,10 @@ chain**, not a maximal channel count. Concretely:
    WinGet via the releaser action, `.deb`/`.rpm` attached to Releases, an AUR
    `alint-bin`, and the **npm migration to the optionalDependencies model** (adding
    win-arm64). Each owned channel must be CI-automated *and* covered by the
-   version-pin gate before it ships, and the primary install paths (`install.sh`,
-   npm) must support an internal-mirror base-URL so air-gapped enterprises can
-   install without github.com egress.
+   version-pin gate before it ships, and air-gapped enterprises must be able to install
+   without github.com egress — `install.sh` via an internal-mirror base-URL, npm via
+   the optionalDependencies migration that makes it resolvable from the enterprise
+   registry.
 
 3. **Harden the supply chain to a keyless-verifiable standard** (design doc
    section 6): add SLSA build-provenance attestation and Sigstore/cosign signing
