@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install alint via Homebrew, install.sh, Docker, cargo, or from source.
+description: Install alint via Homebrew, install.sh, npm, cargo (or cargo-binstall), Docker/Podman, or from source.
 sidebar:
   order: 1
 ---
@@ -18,17 +18,51 @@ brew install alint
 
 The recommended path on macOS and Linux. The [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint) tap is auto-updated on every release; the formula resolves the matching pre-built tarball for your platform, verifies its SHA-256, and installs to the Homebrew cellar.
 
-## install.sh (Linux + macOS + Windows tarballs)
+## install.sh (Linux + macOS)
 
 ```bash
 curl -sSL https://alint.org/install.sh | bash
 ```
 
-Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases) directly.
+Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This path is shell-based, so it does not cover Windows; Windows users have [npm](#npm), [cargo](#cargo), or the manual tarball (see [Windows](#windows)).
+
+Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
+
+```bash
+ALINT_VERSION=v0.15.0 curl -sSL https://alint.org/install.sh | bash
+```
 
 Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.15.0/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
 
-## Docker
+## npm
+
+```bash
+npm install -g @asamarts/alint    # or: pnpm add -g @asamarts/alint
+```
+
+The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package is a thin wrapper: on install it downloads the platform-matched native binary from GitHub Releases and verifies its SHA-256. Handy in Node/JS projects and CI that already have npm. Zero-install works too:
+
+```bash
+npx @asamarts/alint check
+```
+
+Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts` or Bun's `bunx` (a future release moves to per-platform packages to lift those limits).
+
+## cargo
+
+```bash
+cargo install alint
+```
+
+Builds from source against the current stable Rust toolchain (requires rustc 1.85+ and `cargo` on `$PATH`). To install a **pre-built** binary instead of compiling, use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall alint
+```
+
+`cargo binstall` fetches the same release tarball the other channels use (verifying its checksum) rather than building from source, so it is much faster on CI and low-powered machines.
+
+## Docker / Podman
 
 A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghcr.io on each release:
 
@@ -40,21 +74,37 @@ docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.15.0 check
 ```
 
+The image is OCI-standard, so **Podman runs it unchanged** — just use the fully-qualified name (Podman does not assume a default registry):
+
+```bash
+podman run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest check
+```
+
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
 
 ```bash
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.15.0`).
+Also published: the `:<major>.<minor>` rolling channel and the raw git tag (`:v0.15.0`).
 
-## crates.io
+## Windows
 
-```bash
-cargo install alint
-```
+The `install.sh` one-liner is shell-based and does not cover Windows. On Windows, use:
 
-Builds from source against the current stable Rust toolchain. Requires `cargo` already on `$PATH`.
+- **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
+- **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
+- **manual:** download `alint-v0.15.0-x86_64-pc-windows-msvc.tar.gz` from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
+
+Note on manually-downloaded binaries: a tarball downloaded through a **browser** carries a "mark of the web", so the first run can trip Windows SmartScreen ("More info → Run anyway") or, on macOS, Gatekeeper quarantine — clear it with `xattr -d com.apple.quarantine ./alint`. Binaries fetched by `curl`/npm/cargo/Homebrew/Docker carry no such mark and run without prompts.
+
+## Enterprise mirror / offline install
+
+Air-gapped setups can install without direct github.com access:
+
+- **Docker:** re-tag and push the image into your internal registry, then pull from there.
+- **npm:** once a future release ships per-platform packages, point `.npmrc` `registry=` at your internal mirror; today the postinstall wrapper fetches from github.com.
+- **cargo:** use a [source replacement](https://doc.rust-lang.org/cargo/reference/source-replacement.html) mirror for the from-source build.
 
 ## From source
 
@@ -74,3 +124,7 @@ alint --version
 ```
 
 Should print `alint <version>` matching the channel you installed from.
+
+## Uninstall
+
+alint's footprint is a single binary and no managed config, cache, or data directory. Remove it with whatever installed it: `brew uninstall alint`, `npm uninstall -g @asamarts/alint`, `cargo uninstall alint`, or for `install.sh`, delete the binary (`rm ~/.local/bin/alint`).
