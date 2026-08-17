@@ -8,9 +8,9 @@ so reports are taken seriously and handled privately until a fix ships.
 
 alint is pre-1.0 and ships from a single line of development. Only the **latest
 released minor** is supported: fixes land in a new release, not as backports to older
-minors. Published versions are immutable (crates.io and npm are never deleted) and are
-**yanked or deprecated only on a confirmed defect**, never proactively removed, so
-pinned builds keep working. There is no separate LTS line.
+minors. Published versions are **removed only on a confirmed defect, never
+proactively**: crates.io versions can only be yanked (never deleted), and we do not
+unpublish npm releases, so pinned builds keep working. There is no separate LTS line.
 
 ## Reporting a vulnerability
 

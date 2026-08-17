@@ -130,6 +130,13 @@ for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
   [[ -f "$zf" ]] && sed -i -E "s/^(version = )\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" "$zf"
 done
 
+# 2d. npm README version example (@asamarts/alint@X.Y.Z + "alint vX.Y.Z").
+#     Illustrative, and outside the SCOPE pin-regex (which ignores @-prefixed
+#     pins), so keep it current here or it rots (it had gone 10 minors stale).
+if [[ -f npm/README.md ]]; then
+  sed -i -E "s#(@asamarts/alint@|alint v)${CUR_ESCAPED}#\1${NEW}#g" npm/README.md
+fi
+
 # 3. CHANGELOG stub at top so the release date is captured.
 #    The new entry is "TBD" — the author fills in what changed.
 #    We do NOT touch any existing `## [...]` entries (history).

@@ -117,7 +117,9 @@ done
 
 if [[ "$failed" -ne 0 ]]; then
   echo "" >&2
-  echo "Fix: bash ci/scripts/bump-version.sh $WORKSPACE_VER" >&2
+  echo "Fix: after a version bump, run 'bash ci/scripts/bump-version.sh <new-version>'." >&2
+  echo "     If the workspace is already at $WORKSPACE_VER, hand-edit the flagged file(s)" >&2
+  echo "     to match (bump-version.sh no-ops when current == target)." >&2
   exit 1
 fi
 

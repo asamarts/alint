@@ -34,7 +34,7 @@ BUILD_CMD="cargo"
 if [[ "$USE_CROSS" == "true" ]]; then
   if ! command -v cross >/dev/null 2>&1; then
     echo "==> Installing cross"
-    cargo install --locked cross --version 0.2.5
+    cargo install --locked cross --version '=0.2.5'
   fi
   BUILD_CMD="cross"
 fi
