@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-16
 decision-makers: asamarts
 ---
@@ -8,7 +8,7 @@ decision-makers: asamarts
 
 ## Status
 
-Proposed. Companion design doc:
+Accepted (2026-08-16). Companion design doc:
 [`docs/design/distribution.md`](../design/distribution.md), which carries the full
 two-repo audit, the platform matrix, the per-channel effort/automation assessment,
 and the phased plan. The decision below is the intended end-state; implementation

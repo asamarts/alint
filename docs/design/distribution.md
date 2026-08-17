@@ -1,6 +1,6 @@
 # Design doc: distribution and packaging strategy
 
-Status: Proposed (2026-08-16). (Draft | Proposed | Implemented in `<commit>` | Superseded by `<doc>`.)
+Status: Accepted (2026-08-16); P0 landing incrementally. (Draft | Proposed | Accepted | Implemented in `<commit>` | Superseded by `<doc>`.)
 Decisions: [ADR-0015](../adr/0015-distribution-strategy.md) (distribution channel tiering and supply-chain hardening).
 Scope: how alint's binary and editor artifacts reach users, which channels we own vs automate vs delegate to community packagers, and how we make the supply chain verifiable. This is an evergreen strategy doc (like [`deterministic-perf-gating.md`](deterministic-perf-gating.md)), not a per-version rule-kind spec. It is the canonical, self-contained record of the distribution audit and expansion plan; the file:line evidence below is preserved so the register can be re-verified against the tree. Finding IDs are namespaced — `MP-*` machinery/pipeline, `VP-*` version-pin, `D-*` documentation — so section 9 can trace every actionable one to a phase without collision.
 
