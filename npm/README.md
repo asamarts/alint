@@ -23,7 +23,7 @@ alint check
 ```
 
 The npm package version tracks alint releases exactly: `npm install
-@asamarts/alint@0.5.11` downloads alint v0.5.11.
+@asamarts/alint@0.15.0` downloads alint v0.15.0.
 
 ## Supported platforms
 
@@ -34,7 +34,7 @@ The npm package version tracks alint releases exactly: `npm install
 | Windows | x64                  |
 
 For unsupported platforms, install via `cargo install alint`,
-[Homebrew](https://github.com/asamarts/alint#homebrew), or by
+[Homebrew](https://github.com/asamarts/alint#homebrew-macos--linuxbrew), or by
 downloading the tarball directly from
 [GitHub Releases](https://github.com/asamarts/alint/releases).
 

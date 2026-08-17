@@ -192,8 +192,8 @@ See [`docs/development/release-credentials.md`](docs/development/release-credent
 for the full credential inventory, the secret-storage convention, and
 the OIDC (keyless) publishing setup for crates.io + npm.
 
-**One-time prerequisites (NOT yet done; do before the first editor
-release):**
+**One-time prerequisites (completed before the first editor release;
+retained here as the setup record):**
 
 1. Create the **VS Code Marketplace publisher** `asamarts` (Azure
    DevOps) and an **Open VSX** namespace; generate `VSCE_PAT` / `OVSX_PAT`.

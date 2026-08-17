@@ -4,6 +4,14 @@ alint is a build-time / CI-time tool that runs against repository contents.
 Vulnerabilities can affect supply-chain integrity for everyone who uses it,
 so reports are taken seriously and handled privately until a fix ships.
 
+## Supported versions
+
+alint is pre-1.0 and ships from a single line of development. Only the **latest
+released minor** is supported: fixes land in a new release, not as backports to older
+minors. Published versions are immutable (crates.io and npm are never deleted) and are
+**yanked or deprecated only on a confirmed defect**, never proactively removed, so
+pinned builds keep working. There is no separate LTS line.
+
 ## Reporting a vulnerability
 
 **Do not file a public GitHub issue for security vulnerabilities.**
