@@ -59,9 +59,10 @@ chain**, not a maximal channel count. Concretely:
    our repo (npm, editor manifests, flake, deb/rpm packaging) are also covered by the
    version-pin gate, while external-hosted ones (Scoop/AUR/WinGet/mise) are
    golden-tested instead. Air-gapped enterprises must be able to install
-   without github.com egress — `install.sh` via an internal-mirror base-URL, npm via
-   the optionalDependencies migration that makes it resolvable from the enterprise
-   registry.
+   without github.com egress — `install.sh` via an internal-mirror override (a
+   download-host base-URL *plus* a pinned version or API-host override, since it
+   hardcodes two hosts), npm via the optionalDependencies migration that makes it
+   resolvable from the enterprise registry.
 
 3. **Harden the supply chain to a keyless-verifiable standard** (design doc
    section 6): add SLSA build-provenance attestation and Sigstore/cosign signing

@@ -56,6 +56,29 @@ ourselves." It is to:
 
 ---
 
+## TL;DR — top priorities
+
+If you read nothing else: the plan is a **tiered portfolio + a keyless-verifiable trust
+chain**, not a channel land-grab. The six findings that carry the weight:
+
+1. **`MP-H1` — supply-chain signing / attestation / SBOM** (§6): the highest-trust-ROI
+   item; today nothing lets a consumer verify a downloaded binary.
+2. **`MP-H2` / `MP-M3` — Windows reach**: the official Action silently fails on Windows,
+   and npm declares a win-arm64 it cannot serve.
+3. **`MP-M4` — air-gap**: `install.sh` and npm hardcode github.com, so enterprises cannot
+   install from an internal mirror.
+4. **`MP-M5` — post-publish smoke**: nothing verifies a channel actually installs after
+   publish, and alint's owned surface is transformation-heavy.
+5. **`MP-M6` — third-party-license attribution**: the redistributed binary ships none.
+6. **npm → optionalDependencies** (§4): the one packaging migration that unblocks the npm
+   axis of several of the above.
+
+Everything else is a near-free win or a LOW/mechanical cleanup. **P0 is mechanical and can
+land ahead of ADR acceptance**; §6 hardening is P1; owned-channel expansion is P2;
+eligibility/demand-gated channels are P3.
+
+---
+
 ## 2. Current state
 
 ### 2.1 Platform matrix and support floor
@@ -145,11 +168,11 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
   v0.15.0 consistently, held by `check-version-pins.sh` and the alint.org pin gate.
 - **`alint.org/install.sh` is not broken:** it 302-redirects to the repo's `main`
   copy (a disclosed mutable-`main` caveat, `MP-N1`), not a stale static copy.
-- **Pure-Rust TLS + zero telemetry:** alint's only network path (opt-in remote
-  `extends:`) is `ureq`+rustls+ring — no OpenSSL/native-tls linkage, so the musl-static
-  build carries no system-crypto dependency or OpenSSL CVE surface, and it has no
-  telemetry / phone-home (`SECURITY.md`). The air-gap story (§7.2) can surface
-  offline-by-default as an enterprise-trust selling point.
+- **Statically-linked Rust TLS + zero telemetry:** alint's only network path (opt-in
+  remote `extends:`) is `ureq` + rustls (`ring` crypto) — no OpenSSL/native-tls linkage,
+  so the musl-static build carries no system-crypto dependency or OpenSSL CVE surface,
+  and it has no telemetry / phone-home (`SECURITY.md`). The air-gap story (§7.2) can
+  surface offline-by-default as an enterprise-trust selling point.
 
 ---
 
@@ -158,7 +181,10 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 Deduplicated from a two-repo audit (release machinery + documentation), then
 independently fact-checked over two rounds (every citation and structural claim
 verified against the tree; external claims verified against primary sources).
-Severity is impact x likelihood; `file:line` is evidence for re-verification.
+Severity is impact x likelihood; `file:line` is evidence for re-verification (**audited
+2026-08-16**). Line numbers rot as the tree moves; most of §3 becomes historical once
+P0–P2 land, at which point a `resolved-in <commit>` status column should replace the
+live citations.
 
 ### 3.1 Machinery and pipeline (`MP-*`)
 
@@ -171,7 +197,7 @@ Severity is impact x likelihood; `file:line` is evidence for re-verification.
 | **MP-M3** | MED | npm declares `win32/arm64` (os×cpu) it cannot serve; hard postinstall error instead of clean `EBADPLATFORM`. | `npm/package.json:31-32`, `npm/install.js:52-58` | fix declaration / P0; add win-arm64 build+package / P2 |
 | **MP-M4** | MED | Air-gapped/enterprise install is impossible from the primary paths: `install.sh` hardcodes `api.github.com` + `github.com` and its `ALINT_REPO` overrides only the repo path, not the host; `npm/install.js`'s repo is a hardcoded const with no env override. | `install.sh:18,48,60`, `npm/install.js:26` | install.sh base-URL override + npm made mirrorable by the optionalDeps migration + mirror docs / §7.2, P0 docs + P2 code |
 | **MP-M5** | MED | No automated post-publish install smoke: the release DAG ends at the publish jobs, and nothing installs from a live channel and runs `alint --version` afterward, so a broken npm postinstall, a missing/checksum-mismatched asset, or an unresolvable crates.io graph ships unnoticed until a user reports. alint's owned surface is transformation-heavy (npm downloads at install; brew regenerates the formula; docker re-extracts), unlike ripgrep's zero-transform surface. | grep of `.github/workflows/` (no `npm i -g`/`cargo install`/`docker run`/`brew install` post-publish); `action-selftest` runs the *local* action against the *previous* release | `post-publish-smoke` matrix job (advisory monitoring, not a merge gate) / P1 |
-| **MP-M6** | MED | No third-party/transitive license attribution ships with any artifact. The static binary links ~374 crates (`Cargo.lock`) under MIT/Apache-2.0 — both require reproducing their notices in binary redistribution — yet only alint's *own* `LICENSE-*` ship (in the tarball; the Docker image and npm package carry no license text at all), and there is no root `NOTICE`. `deny.toml` gates license *compatibility* but emits no attribution artifact. alint dogfoods `apache-2-notice-file-exists` + a `reuse` ruleset and would fail both on its own binary. | no `about.toml`/`cargo-about`/`NOTICE`/`THIRD-PARTY*`; `release-binary.sh:55` copies a non-existent `NOTICE` | `cargo about generate THIRD-PARTY-LICENSES` + a root `NOTICE`, staged into tarball/image/npm alongside the SBOM / P1 |
+| **MP-M6** | MED | No third-party/transitive license attribution ships with any artifact. The build resolves ~374 crates (`Cargo.lock`) under MIT/Apache-2.0 — both require reproducing their notices in binary redistribution — yet only alint's *own* `LICENSE-*` ship (in the tarball; the Docker image and npm package carry no license text at all), and there is no root `NOTICE`. `deny.toml` gates license *compatibility* but emits no attribution artifact. alint even *ships* `apache-2-notice-file-exists` (a `warning`-level `file_exists` rule) and a `reuse` ruleset as bundled rulesets, though it does not run them on its own repo (which would trip the NOTICE rule). | no `about.toml`/`cargo-about`/`NOTICE`/`THIRD-PARTY*`; `release-binary.sh:55` lists `NOTICE` in its staging loop but the `[[ -f ]]` guard skips the absent file | `cargo about generate THIRD-PARTY-LICENSES` + a root `NOTICE`, staged into tarball/image/npm alongside the SBOM / P1 |
 | **MP-L1** | LOW | install.sh resolves "latest" via the unauthenticated GitHub API (60 req/hr/IP); 403s on shared CI egress. | `install.sh:48` | doc `ALINT_VERSION` pin / P0 |
 | **MP-L2** | LOW | `action-selftest` pins `v0.12.0` though its comment says track the previous minor (should be v0.14.0). | `action-selftest.yml:94` | bump each release / P0 |
 | **MP-L3** | LOW | `cross` installed unpinned at release time (fresh unversioned build dep in the aarch64 hot path). | `release-binary.sh:34-40` | pin `--version` / P0 (effect next tag) |
@@ -651,9 +677,9 @@ benign, no action).
   (Excavator self-polls on `GITHUB_TOKEN`). We accept AUR/WinGet's secrets and fold them
   into `MP-M2`'s rotation runbook, which (written in P0) must be extended when they land
   (P2) — a sequencing note worth stating.
-- **Risk: the publishing account is the ultimate SPOF.** Attestation proves origin,
-  not benevolence (§6); mitigate with account hardening, protected tags, minimal
-  OIDC scope, and SHA-pinning guidance for consumers (`MP-N2`).
+- **Risk: the publishing account is the ultimate SPOF** — attestation proves origin, not
+  benevolence (see §6's threat model); mitigate with account hardening, protected tags,
+  and minimal OIDC scope.
 - **Cleanup: the stale npm-OIDC block.** `release.yml:371-374` still comments that npm
   OIDC is UI-blocked; that was resolved (npm OIDC is GA), so the comment should be
   removed and npm folded into the keyless plan (P2, with the optionalDeps migration).
