@@ -121,6 +121,15 @@ if [[ -f npm/package.json ]]; then
   sed -i -E "s/^([[:space:]]*\"version\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
 fi
 
+# 2c. Zed extension version. Unlike VS Code/JetBrains (which release.yml
+#     version-stamps from the tag at publish, so their committed value may
+#     lag intentionally), the Zed registry builds the extension from source
+#     at the committed version — so the committed value is what ships and
+#     must track the workspace version. check-version-pins.sh enforces it.
+for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
+  [[ -f "$zf" ]] && sed -i -E "s/^(version = )\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" "$zf"
+done
+
 # 3. CHANGELOG stub at top so the release date is captured.
 #    The new entry is "TBD" — the author fills in what changed.
 #    We do NOT touch any existing `## [...]` entries (history).

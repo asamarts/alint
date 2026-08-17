@@ -101,10 +101,24 @@ if [[ -f npm/package.json ]]; then
   fi
 fi
 
+# Zed extension manifests: the registry builds from source at the committed
+# version (no publish-time stamp), so the committed value ships and must match
+# the workspace. (VS Code/JetBrains are version-stamped at publish, so their
+# committed versions are intentionally allowed to lag and are NOT gated here.)
+for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
+  if [[ -f "$zf" ]]; then
+    ZED_VER=$(awk -F'"' '/^version = / { print $2; exit }' "$zf")
+    if [[ "$ZED_VER" != "$WORKSPACE_VER" ]]; then
+      echo "[version-pin] $zf: version $ZED_VER != workspace $WORKSPACE_VER" >&2
+      failed=1
+    fi
+  fi
+done
+
 if [[ "$failed" -ne 0 ]]; then
   echo "" >&2
   echo "Fix: bash ci/scripts/bump-version.sh $WORKSPACE_VER" >&2
   exit 1
 fi
 
-echo "[version-pin] OK — all ${#SCOPE[@]} install-snippet files + npm/package.json pin to $WORKSPACE_VER"
+echo "[version-pin] OK — all ${#SCOPE[@]} install-snippet files + npm/package.json + Zed manifests pin to $WORKSPACE_VER"

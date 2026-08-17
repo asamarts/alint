@@ -91,7 +91,7 @@ jobs:
           # recognize. Convention: track the previous minor
           # (i.e. when HEAD is 0.X+1, this sits at v0.X) so
           # the test catches CLI/.alint.yml drift one release out.
-          version: v0.12.0
+          version: v0.14.0
 
   action-config-single:
     name: config input (single path)
