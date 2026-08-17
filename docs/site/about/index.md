@@ -34,6 +34,8 @@ Scope is the filesystem shape and contents of a repository, not the semantics of
 - **Rust API docs**: [docs.rs/alint](https://docs.rs/alint), [docs.rs/alint-core](https://docs.rs/alint-core)
 - **Container**: [ghcr.io/asamarts/alint](https://ghcr.io/asamarts/alint)
 - **Homebrew**: [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint)
+- **npm**: [@asamarts/alint](https://www.npmjs.com/package/@asamarts/alint)
+- **GitHub Action**: [asamarts/alint@v0](../integrations/github-actions/)
 
 ## License
 
