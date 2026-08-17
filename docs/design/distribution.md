@@ -34,9 +34,7 @@ accretion rather than to a plan. Three problems:
 
 3. **Small correctness debt.** A copy-paste-broken `brew install` command on the
    marketing site, npm advertised on a page that omits it, a Zed extension pinned
-   two minors stale and invisible to the version-pin gate, and a release pipeline
-   that couples the irreversible crates.io publish to an unrelated build-matrix
-   leg.
+   two minors stale and invisible to the version-pin gate.
 
 **Strategic frame (the insight that should drive the plan).** A mature
 single-binary Rust CLI does *not* own every channel. ripgrep is the proof:
@@ -617,8 +615,9 @@ benign, no action).
 - **P0:** the version-pin gate is green across *all* editor manifests; `cargo
   binstall alint --dry-run` resolves the release; the canonical install page lists
   every live channel including npm, a real Windows path, an uninstall line, and the
-  manual-download caveat; `SECURITY.md` has a "Supported Versions" section;
-  `publish-crates` no longer `needs: build`.
+  manual-download caveat; `SECURITY.md` has a "Supported Versions" section; and
+  RELEASING.md documents the partial-release recovery runbook (`MP-M2` credential
+  rotation + `MP-M1` publish-crates re-run).
 - **P1:** `gh attestation verify` and `cosign verify-blob` succeed against a released
   tarball and the ghcr image; an SBOM + a `THIRD-PARTY-LICENSES` bundle are attached and
   attested; `SHA256SUMS` covers `install.sh`; and the `MP-M5` post-publish smoke job

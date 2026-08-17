@@ -131,8 +131,8 @@ for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
 done
 
 # 2d. npm README version example (@asamarts/alint@X.Y.Z + "alint vX.Y.Z").
-#     Illustrative, and outside the SCOPE pin-regex (which ignores @-prefixed
-#     pins), so keep it current here or it rots (it had gone 10 minors stale).
+#     Illustrative, and not in the SCOPE files (its @-prefixed pin wouldn't match the
+#     SCOPE regex anyway), so keep it current here or it rots (it had gone 10 minors stale).
 if [[ -f npm/README.md ]]; then
   sed -i -E "s#(@asamarts/alint@|alint v)${CUR_ESCAPED}#\1${NEW}#g" npm/README.md
 fi
