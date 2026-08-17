@@ -31,7 +31,7 @@ Working `.alint.yml` configs for 30 OSS repos (single-language workspaces, polyg
 ## 60-second quickstart
 
 ```sh
-# Install (Linux + macOS + Windows tarballs):
+# Install (Linux + macOS; Windows via npm/cargo):
 curl -sSL https://alint.org/install.sh | bash
 
 # Initialise a config in the current repo (uses bundled oss-baseline + auto-detected ecosystem rulesets):
@@ -94,13 +94,13 @@ Scope is the filesystem shape and contents of a repository, not the semantics of
 
 ## Install
 
-### install.sh (Linux + macOS + Windows tarballs)
+### install.sh (Linux + macOS)
 
 ```bash
 curl -sSL https://alint.org/install.sh | bash
 ```
 
-Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases).
+Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball, verifies the SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This shell path does not cover Windows; on Windows use `npm install -g @asamarts/alint`, `cargo install alint`, or download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases).
 
 ### Homebrew (macOS + Linuxbrew)
 
@@ -158,7 +158,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.13`) and the raw git tag (`:v0.15.0`).
+Also published: the `:<major>.<minor>` rolling channel and the raw git tag (`:v0.15.0`).
 
 ## Usage
 

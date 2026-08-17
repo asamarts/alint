@@ -37,7 +37,7 @@ Supply-chain note: the installer verifies the SHA-256 of the release tarball it 
 ## npm
 
 ```bash
-npm install -g @asamarts/alint    # or: pnpm add -g @asamarts/alint
+npm install -g @asamarts/alint
 ```
 
 The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package is a thin wrapper: on install it downloads the platform-matched native binary from GitHub Releases and verifies its SHA-256. Handy in Node/JS projects and CI that already have npm. Zero-install works too:
@@ -46,7 +46,7 @@ The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package i
 npx @asamarts/alint check
 ```
 
-Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts` or Bun's `bunx` (a future release moves to per-platform packages to lift those limits).
+Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts`, Bun's `bunx`, or **pnpm 10+** (which blocks dependency build scripts by default — run `pnpm approve-builds @asamarts/alint` to allow it). A future release moves to per-platform packages to lift those limits.
 
 ## cargo
 
@@ -60,7 +60,7 @@ Builds from source against the current stable Rust toolchain (requires rustc 1.8
 cargo binstall alint
 ```
 
-`cargo binstall` fetches the same release tarball the other channels use (verifying its checksum) rather than building from source, so it is much faster on CI and low-powered machines.
+`cargo binstall` attempts to fetch a pre-built release tarball (verifying its checksum) instead of compiling, falling back to a source build if it cannot resolve one — much faster on CI and low-powered machines when the pre-built path is taken.
 
 ## Docker / Podman
 
@@ -127,4 +127,4 @@ Should print `alint <version>` matching the channel you installed from.
 
 ## Uninstall
 
-alint's footprint is a single binary and no managed config, cache, or data directory. Remove it with whatever installed it: `brew uninstall alint`, `npm uninstall -g @asamarts/alint`, `cargo uninstall alint`, or for `install.sh`, delete the binary (`rm ~/.local/bin/alint`).
+alint's footprint is the binary itself (no managed config or data directory), plus — only if you used remote `extends:` rulesets — a cache under your platform cache dir (`~/.cache/alint/` on Linux). Remove the binary with whatever installed it: `brew uninstall alint`, `npm uninstall -g @asamarts/alint`, `cargo uninstall alint`, or for `install.sh`, `rm ~/.local/bin/alint`; delete the cache dir too if you used remote rulesets.
