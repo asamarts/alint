@@ -154,6 +154,26 @@ is permanent; see Yanking). The publish script is idempotent, so the
 recovery is: add the publisher, then `gh run rerun <id> --failed`
 (never re-tag). `alint-lsp` hit this on v0.11.1.
 
+## Recovering a partial release
+
+The publish jobs run *after* the GitHub Release exists (`needs: release`), so a
+mid-release failure leaves a split-brain state (binaries and some channels published,
+others stale). Recovery is always **rotate or fix, then re-run the failed job, never
+re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collide):
+
+- **Expiring credentials** (`MP-M2`). Four channels carry secrets that can expire: the
+  npm PAT (`NPM_TOKEN`), VS Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the
+  marketplace token + signing cert/key), and the Homebrew tap SSH deploy key. On a
+  401/403 from any, rotate the secret (inventory + storage in
+  [`release-credentials.md`](docs/development/release-credentials.md)), then
+  `gh run rerun <id> --failed`. (npm OIDC trusted publishing is now GA and will retire
+  the `NPM_TOKEN` PAT once the package migrates to per-platform sub-packages.)
+- **A build-matrix flake blocking crates.io** (`MP-M1`). `publish-crates` deliberately
+  `needs: build` (a cross-platform compile gate before the irreversible publish), so a
+  flaky windows or aarch64 leg can block it. Re-run once the leg heals with
+  `gh run rerun <id> --failed`; the publish script is idempotent, so already-published
+  crates are skipped.
+
 ## Editor extensions / IDE plugins
 
 The six editor integrations live under `editors/`. Two distribution

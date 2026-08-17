@@ -56,6 +56,7 @@ In scope:
 - The Docker image (`ghcr.io/asamarts/alint`)
 - The Homebrew formula (`asamarts/homebrew-alint`)
 - The npm package (`@asamarts/alint`)
+- The `install.sh` release installer (served from `alint.org/install.sh`)
 - The `xtask` build/release tooling
 
 Out of scope (report directly to upstream):

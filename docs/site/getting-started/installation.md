@@ -86,7 +86,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: the `:<major>.<minor>` rolling channel and the raw git tag (`:v0.15.0`).
+Also published: the bare semver (`:0.15.0`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.15.0`).
 
 ## Windows
 

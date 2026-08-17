@@ -7,6 +7,8 @@ sidebar:
 
 The official Action wraps the `install.sh` flow plus alint invocation into one step.
 
+**Runs on Linux and macOS runners only.** The Action wraps `install.sh` (shell-based), so on `windows-latest` it fails with `unsupported platform`. For Windows CI, install alint in a prior `run:` step (`npm install -g @asamarts/alint` or `cargo install alint`) and invoke `alint` directly.
+
 <likec4-view view-id="ciActionFlow"></likec4-view>
 
 ## Inline PR annotations (default)
