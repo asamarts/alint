@@ -46,6 +46,7 @@ DOCS=false
 BENCH=false
 EXAMPLES=false
 EDITORS=false
+SUPPLY_CHAIN=false
 
 # CI infrastructure or workspace manifest changes trigger all pipelines.
 if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$)'; then
@@ -55,6 +56,16 @@ if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.loc
   BENCH=true
   EXAMPLES=true
   EDITORS=true
+  SUPPLY_CHAIN=true
+fi
+
+# Supply-chain artifacts (SBOM + third-party license bundle) depend on the
+# dependency graph and the generator config. Regenerate + validate them when the
+# lockfile, any Cargo.toml, the cargo-about config/template, the license policy,
+# or the generator script changes, so a broken about.toml/template or an
+# out-of-policy license is caught pre-merge instead of only at release time.
+if echo "$CHANGED" | grep -qE '(^|/)Cargo\.(toml|lock)$|^(about\.(toml|hbs)|deny\.toml|ci/scripts/supply-chain-artifacts\.sh)$'; then
+  SUPPLY_CHAIN=true
 fi
 
 # Editor extensions/integrations (VS Code TS + Zed wasm get built in CI).
@@ -104,7 +115,7 @@ if echo "$CHANGED" | grep -qE '^(examples/|schemas/|crates/alint-rules/|crates/a
 fi
 
 echo ""
-echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}"
+echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}  supply_chain=${SUPPLY_CHAIN}"
 
 # ── Write GitHub Actions outputs ─────────────────────────────────────
 
@@ -115,5 +126,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "bench=${BENCH}"
     echo "examples=${EXAMPLES}"
     echo "editors=${EDITORS}"
+    echo "supply_chain=${SUPPLY_CHAIN}"
   } >> "$GITHUB_OUTPUT"
 fi

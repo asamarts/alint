@@ -56,6 +56,19 @@ for extra in LICENSE LICENSE-APACHE LICENSE-MIT README.md NOTICE; do
   [[ -f "$extra" ]] && cp "$extra" "$STAGING/" || true
 done
 
+# The third-party license bundle ships INSIDE the tarball (not just as a
+# top-level Release asset), so an offline archive is self-contained: the MIT /
+# BSD / ISC dependencies statically linked into the binary require their notices
+# to accompany the redistributed binary, and NOTICE only points at a URL.
+# THIRD_PARTY_BUNDLE is set to the generated bundle's path by release.yml's build
+# job (which downloads the supply-chain artifact); a local run leaves it unset
+# and just skips this (the tarball still carries NOTICE + LICENSE-*). Fail-closed
+# when set: a missing bundle aborts the build rather than shipping a tarball
+# whose NOTICE points at attribution the archive omits.
+if [[ -n "${THIRD_PARTY_BUNDLE:-}" ]]; then
+  cp "$THIRD_PARTY_BUNDLE" "$STAGING/THIRD-PARTY-LICENSES.html"
+fi
+
 # Always include the canonical architecture + methodology docs.
 mkdir -p "$STAGING/docs"
 for d in docs/design/ARCHITECTURE.md docs/design/ROADMAP.md docs/benchmarks/METHODOLOGY.md; do

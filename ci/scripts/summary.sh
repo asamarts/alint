@@ -53,6 +53,7 @@ row() {
   echo "| Bench                 | ${BENCH_CHANGED} |"
   echo "| Examples              | ${EXAMPLES_CHANGED} |"
   echo "| Editors               | ${EDITORS_CHANGED} |"
+  echo "| Supply chain          | ${SUPPLY_CHAIN_CHANGED} |"
   echo ""
 
   echo "### Rust Pipeline"
@@ -63,6 +64,7 @@ row() {
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
   row "Audit"        "$AUDIT_RESULT"       "$RUST_CHANGED"
   row "Deny"         "$DENY_RESULT"        "$RUST_CHANGED"
+  row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
   row "Build"        "$BUILD_RESULT"       "$RUST_CHANGED"
   row "Docs"         "$DOCS_JOB_RESULT"    "$RUST_CHANGED"
   row "Dogfood"      "$DOGFOOD_RESULT"     "$RUST_CHANGED"
@@ -93,9 +95,9 @@ row() {
 FAILED=false
 for result in \
   "$FMT_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
-  "$DENY_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" "$DOGFOOD_RESULT" \
-  "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" "$SHELL_TESTS_RESULT" \
-  "$EDITORS_RESULT"; do
+  "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
+  "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
+  "$SHELL_TESTS_RESULT" "$EDITORS_RESULT"; do
   if [[ "$result" == "failure" ]]; then
     FAILED=true
   fi

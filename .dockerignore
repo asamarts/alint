@@ -3,3 +3,10 @@
 *
 !linux-amd64/alint
 !linux-arm64/alint
+# License + attribution shipped in the image (see Dockerfile). LICENSE-* and
+# NOTICE are committed at the repo root; THIRD-PARTY-LICENSES.html is downloaded
+# into the context by the release workflow's docker job (supply-chain artifact).
+!LICENSE-APACHE
+!LICENSE-MIT
+!NOTICE
+!THIRD-PARTY-LICENSES.html

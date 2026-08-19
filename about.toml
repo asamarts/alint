@@ -33,6 +33,11 @@ accepted = [
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 
-# alint's own workspace crates (alint, alint-core, ...) are first-party and
-# publish under this repo's dual license; skip them in the third-party bundle.
+# `private.ignore` drops workspace members that are publish=false (alint-bench,
+# alint-e2e, alint-testkit, xtask). It does NOT drop the published first-party
+# crates (alint-core, alint-dsl, alint-lsp, alint-output, alint-rules): cargo-about
+# treats a crates.io-published crate as third-party, so those still appear in the
+# bundle under this repo's own dual license. That is accurate -- they are compiled
+# into the binary -- if redundant with LICENSE-* + NOTICE; cargo-about has no
+# switch to exclude only *published* workspace members.
 private = { ignore = true }

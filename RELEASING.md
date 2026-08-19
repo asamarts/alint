@@ -156,11 +156,19 @@ recovery is: add the publisher, then `gh run rerun <id> --failed`
 
 ## Recovering a partial release
 
-The publish jobs run *after* the GitHub Release exists (`needs: release`), so a
-mid-release failure leaves a split-brain state (binaries and some channels published,
-others stale). Recovery is always **rotate or fix, then re-run the failed job, never
-re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collide):
+Most publish jobs run *after* the GitHub Release exists (`needs: release`), but
+`docker` and `publish-crates` gate on `build` instead, so a failure once they have
+run leaves a split-brain state (crates.io / ghcr published, the Release or a token
+channel stale). Recovery is always **rotate or fix, then re-run the failed job,
+never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collide):
 
+- **A supply-chain generation failure** (`MP-M6`). The `supply-chain` job (the
+  CycloneDX SBOM + third-party license bundle) is a pre-`build` gate: `build` needs
+  it so each tarball and the image can embed `THIRD-PARTY-LICENSES.html`. If it
+  fails, `build` and everything downstream are skipped, so nothing publishes
+  (fail-closed, not a partial release). Fix the generator and
+  `gh run rerun <id> --failed`; ci.yml runs the same script pre-merge (the
+  `supply-chain` job), so a release-time failure should be rare.
 - **Expiring credentials** (`MP-M2`). Four channels carry secrets that can expire: the
   npm PAT (`NPM_TOKEN`), VS Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the
   marketplace token + signing cert/key), and the Homebrew tap SSH deploy key. On a

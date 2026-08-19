@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate alint's release supply-chain / attribution artifacts into OUT_DIR:
+# Generate alint's release supply-chain / attribution artifacts into OUT_DIR,
+# both scoped to the SHIPPED `alint` binary (crates/alint) so the two artifacts
+# describe the same graph -- not the whole dev workspace (which would attribute
+# bench/test/xtask-only crates that never ship in the binary):
 #
-#   THIRD-PARTY-LICENSES.html  every third-party crate compiled into the alint
-#                              binary, with its full license text (cargo-about,
-#                              driven by about.toml + about.hbs at the repo root).
+#   THIRD-PARTY-LICENSES.html  every crate compiled into the alint binary, with
+#                              its full license text (cargo-about, driven by
+#                              about.toml + about.hbs at the repo root).
 #   alint.cdx.json             a CycloneDX 1.5 software bill of materials for the
-#                              shipped `alint` binary and its transitive graph
-#                              (cargo-cyclonedx).
+#                              same binary + its transitive graph (cargo-cyclonedx).
 #
 # Single source of truth for two callers:
 #   * .github/workflows/release.yml -- generates both, folds them into
-#     SHA256SUMS, and attaches them to every GitHub Release (a later phase
-#     signs SHA256SUMS with cosign, so the attribution travels signed too).
-#   * .github/workflows/ci.yml -- runs it as a pre-merge gate: cargo-about
-#     FAILS generation on any dependency whose license is not in about.toml's
-#     `accepted` set, so an out-of-policy license is caught before a release,
-#     mirroring (at attribution time) the deny.toml policy gate.
+#     SHA256SUMS, stages them into every tarball + the ghcr image, and attaches
+#     them to every GitHub Release (a later phase signs SHA256SUMS with cosign,
+#     so the attribution travels signed too).
+#   * .github/workflows/ci.yml -- runs this whole script as a pre-merge gate (the
+#     `supply-chain` job), so a broken about.toml / about.hbs / lockfile, or an
+#     out-of-policy license, is caught on the PR rather than at release time.
 #
 # Bootstraps the two cargo subcommands on demand -- like ci/scripts/deny.sh --
-# so it works on a bare ubuntu-latest runner. Versions are pinned so the bundle
-# is reproducible across runs.
+# so it works on a bare ubuntu-latest runner. Tool versions are pinned AND
+# SOURCE_DATE_EPOCH is set, so both artifacts are byte-reproducible across runs
+# (a property P1-b's cosign signing over SHA256SUMS relies on).
 #
 # Usage: ci/scripts/supply-chain-artifacts.sh [OUT_DIR]
 #        OUT_DIR defaults to target/supply-chain (under the gitignored target/).
@@ -33,24 +36,41 @@ OUT_DIR="${1:-target/supply-chain}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"   # absolutise before any cwd-sensitive step
 
+# The shipped artifact: release-binary.sh builds `-p alint`, so both the license
+# bundle and the SBOM scope to this manifest, keeping them on the same graph.
+BINARY_MANIFEST="crates/alint/Cargo.toml"
+
 CARGO_ABOUT_VERSION="0.9.2"
 CARGO_CYCLONEDX_VERSION="0.5.9"
+
+# Byte-reproducible artifacts: pin cargo-cyclonedx's wall-clock stamps
+# (metadata.timestamp + the random serialNumber UUID) to the tagged commit's
+# date. Without this each run embeds now() + a fresh UUID, so a verifier
+# regenerating from the tag would compute a different hash than the signed one.
+SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --format=%ct 2>/dev/null || echo 0)"
+export SOURCE_DATE_EPOCH
 
 # cargo-cyclonedx has no package filter: it writes an SBOM next to EVERY
 # workspace member's Cargo.toml (crates/*/alint.json, xtask/alint.json). Sweep
 # those strays on every exit -- success or failure -- so neither a local run nor
-# the CI gate leaves the working tree dirty. No alint.json is tracked, so the
-# find can only ever match these generated strays (target/ is excluded anyway).
+# the CI gate leaves the working tree dirty. Scoped to the member roots
+# (crates/, xtask/) rather than the whole repo, so it can only ever match
+# cargo-cyclonedx's own output, never an unrelated alint.json elsewhere.
 cleanup_sboms() {
-  find "$REPO_ROOT" -name 'alint.json' -not -path '*/target/*' -delete 2>/dev/null || true
+  find "$REPO_ROOT/crates" "$REPO_ROOT/xtask" -maxdepth 2 -name 'alint.json' \
+    -not -path '*/target/*' -delete 2>/dev/null || true
 }
 trap cleanup_sboms EXIT
 
+# Install a pinned cargo subcommand if it is absent OR a different version is
+# active. A presence-only check would let a stale binary that rust-cache's
+# cache-bin persisted across a version bump silently defeat the pin; the version
+# probe uses cargo's subcommand resolution so it works regardless of PATH.
 ensure() {
   local bin="$1" crate="$2" version="$3"; shift 3
-  if ! command -v "$bin" >/dev/null 2>&1; then
+  if ! cargo "${bin#cargo-}" --version 2>/dev/null | grep -qF "$version"; then
     echo "==> installing ${crate} =${version}"
-    cargo install --locked "$crate" --version "=${version}" "$@"
+    cargo install --locked --force "$crate" --version "=${version}" "$@"
   fi
 }
 
@@ -59,16 +79,14 @@ ensure() {
 ensure cargo-about     cargo-about     "$CARGO_ABOUT_VERSION" --features cli
 ensure cargo-cyclonedx cargo-cyclonedx "$CARGO_CYCLONEDX_VERSION"
 
-echo "==> THIRD-PARTY-LICENSES.html (cargo about generate)"
-cargo about generate about.hbs --output-file "$OUT_DIR/THIRD-PARTY-LICENSES.html"
+echo "==> THIRD-PARTY-LICENSES.html (cargo about, scoped to the alint binary)"
+cargo about generate --manifest-path "$BINARY_MANIFEST" about.hbs \
+  --output-file "$OUT_DIR/THIRD-PARTY-LICENSES.html"
 
-echo "==> alint.cdx.json (cargo cyclonedx, CycloneDX 1.5)"
+echo "==> alint.cdx.json (cargo cyclonedx, CycloneDX 1.5, scoped to the alint binary)"
 # --target all   : cover every shipped triple's dependencies in one bundle.
 # --no-build-deps: build-time deps are not linked into the shipped binary.
-# The alint binary crate's SBOM (crates/alint/alint.json) is the one that
-# represents the shipped artifact + its full transitive graph; the rest are
-# per-member strays the trap sweeps.
-cargo cyclonedx --manifest-path crates/alint/Cargo.toml \
+cargo cyclonedx --manifest-path "$BINARY_MANIFEST" \
   --format json --target all --no-build-deps --spec-version 1.5 \
   --override-filename alint -q
 mv "crates/alint/alint.json" "$OUT_DIR/alint.cdx.json"

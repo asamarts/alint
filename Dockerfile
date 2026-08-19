@@ -28,6 +28,14 @@ ARG TARGETARCH
 # `arm64` for each platform in the buildx matrix.
 COPY --chmod=0755 linux-${TARGETARCH}/alint /usr/local/bin/alint
 
+# Attribution travels with the redistributed image: alint's own dual license,
+# the NOTICE, and the third-party crate license texts (MIT/BSD/ISC deps require
+# their notices accompany the binary). Distroless has no shell, but COPY still
+# works; files land world-readable for the nonroot user. Complements the
+# org.opencontainers.image.licenses label set by release.yml. THIRD-PARTY-
+# LICENSES.html is placed in the build context by the release docker job.
+COPY LICENSE-APACHE LICENSE-MIT NOTICE THIRD-PARTY-LICENSES.html /usr/local/share/doc/alint/
+
 WORKDIR /repo
 USER nonroot
 

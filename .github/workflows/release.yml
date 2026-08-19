@@ -99,7 +99,12 @@ jobs:
 
   build:
     name: build (${{ matrix.target }})
-    needs: preflight
+    # Also needs supply-chain so each tarball can embed THIRD-PARTY-LICENSES.html
+    # (release-binary.sh stages it). This makes supply-chain a hard pre-build
+    # gate: a generator failure blocks the whole release (nothing publishes)
+    # rather than leaving a partial release, since docker + publish-crates need
+    # build.
+    needs: [preflight, supply-chain]
     strategy:
       fail-fast: false
       matrix:
@@ -129,6 +134,12 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      - name: download supply-chain bundle (staged into each tarball)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: supply-chain
+          path: supply-chain
+
       - name: install musl-tools (native Linux musl only)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -139,6 +150,9 @@ jobs:
           TARGET: ${{ matrix.target }}
           USE_CROSS: ${{ matrix.use_cross }}
           VERSION: ${{ github.ref_name }}
+          # release-binary.sh copies this into the tarball; set here (not for
+          # local runs) so a missing bundle fails the release fail-closed.
+          THIRD_PARTY_BUNDLE: ${{ github.workspace }}/supply-chain/THIRD-PARTY-LICENSES.html
         run: ci/scripts/release-binary.sh
 
       - name: upload artifact
@@ -161,6 +175,8 @@ jobs:
     # cannot silently rot between releases.
     needs: preflight
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # only checks out + uploads an artifact (runtime token)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -270,7 +286,9 @@ jobs:
 
   docker:
     name: push Docker image to ghcr.io
-    needs: build
+    # supply-chain (transitively via build) provides THIRD-PARTY-LICENSES.html,
+    # which the Dockerfile COPYs into the image; listed explicitly for clarity.
+    needs: [build, supply-chain]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -304,6 +322,15 @@ jobs:
                "${GITHUB_WORKSPACE}/linux-${arch}/alint"
           done
           ls -la "${GITHUB_WORKSPACE}"/linux-*/
+
+      - name: download supply-chain bundle (staged into the image)
+        # THIRD-PARTY-LICENSES.html lands at the build-context root so the
+        # Dockerfile COPY (un-ignored in .dockerignore) picks it up. alint.cdx.json
+        # rides along unused and stays ignored.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: supply-chain
+          path: .
 
       # SHA-pinned per supply-chain hardening; bump alongside
       # any docker/* major-version bump. Dependabot raises a PR

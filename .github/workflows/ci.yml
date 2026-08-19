@@ -41,6 +41,7 @@ jobs:
       bench: ${{ steps.detect.outputs.bench }}
       examples: ${{ steps.detect.outputs.examples }}
       editors: ${{ steps.detect.outputs.editors }}
+      supply_chain: ${{ steps.detect.outputs.supply_chain }}
       runner: ${{ steps.route.outputs.runner }}
       untrusted: ${{ steps.route.outputs.untrusted }}
     steps:
@@ -157,6 +158,29 @@ jobs:
         with:
           key: ci-deny
       - run: ci/scripts/deny.sh
+
+  supply-chain:
+    name: Supply Chain
+    # Runs the SAME generator release.yml uses, so a broken about.toml/about.hbs,
+    # a lockfile cargo-about can't file-match, or an out-of-policy license fails
+    # the PR instead of first surfacing at release time (where it would block the
+    # GitHub Release after crates.io + ghcr have already published). Gated on the
+    # narrow `supply_chain` filter (lockfile / any Cargo.toml / about.* / deny.toml
+    # / the generator script), so it stays off source-only PRs.
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.supply_chain == 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ci-supply-chain
+      - run: ci/scripts/supply-chain-artifacts.sh
 
   build:
     name: Build
@@ -376,6 +400,7 @@ jobs:
       - test
       - audit
       - deny
+      - supply-chain
       - build
       - docs
       - dogfood
@@ -395,11 +420,13 @@ jobs:
           BENCH_CHANGED: ${{ needs.changes.outputs.bench }}
           EXAMPLES_CHANGED: ${{ needs.changes.outputs.examples }}
           EDITORS_CHANGED: ${{ needs.changes.outputs.editors }}
+          SUPPLY_CHAIN_CHANGED: ${{ needs.changes.outputs.supply_chain }}
           FMT_RESULT: ${{ needs.fmt.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           TEST_RESULT: ${{ needs.test.result }}
           AUDIT_RESULT: ${{ needs.audit.result }}
           DENY_RESULT: ${{ needs.deny.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_JOB_RESULT: ${{ needs.docs.result }}
           DOGFOOD_RESULT: ${{ needs.dogfood.result }}

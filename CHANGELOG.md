@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Supply-chain artifacts on every release (P1-a of the supply-chain-hardening
+  arc; ADR-0015): a CycloneDX 1.5 SBOM (`alint.cdx.json`) and a third-party
+  license bundle (`THIRD-PARTY-LICENSES.html`), both scoped to the shipped `alint`
+  binary, attached to the GitHub Release and embedded in every binary tarball and
+  the Docker image. A root `NOTICE` states the dual license and accompanies each
+  distribution. The image now also carries `LICENSE-APACHE` / `LICENSE-MIT`.
+
+### Security
+
+- `SHA256SUMS` now covers `install.sh` and the supply-chain artifacts, so a later
+  cosign signature over the manifest will protect the installer and the
+  attribution bundle, not only the tarballs (`MP-L8`).
+
 ## [0.15.0] - 2026-08-16
 
 v0.15 makes rules legible and monorepos first-class. `alint explain <rule>` now
