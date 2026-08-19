@@ -51,3 +51,9 @@ docs/design/architecture/model/*.c4 text eol=lf
 # Generated GitHub-facing Mermaid diagram gallery: `gen-mermaid --check`
 # byte-compares it against a `\n`-only rendered string (same hazard).
 docs/design/architecture/DIAGRAMS.md text eol=lf
+
+# Not a test fixture: NOTICE is copied verbatim into every release tarball by
+# ci/scripts/release-binary.sh, which runs on each target's own OS (incl.
+# windows-latest). Pin LF so all five per-platform tarballs ship a
+# byte-identical NOTICE instead of a CRLF outlier on the Windows build.
+NOTICE text eol=lf

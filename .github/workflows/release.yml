@@ -150,9 +150,39 @@ jobs:
             target/release-artifacts/alint-*.tar.gz.sha256
           if-no-files-found: error
 
+  supply-chain:
+    name: supply-chain artifacts (SBOM + third-party licenses)
+    # Generate the CycloneDX SBOM (alint.cdx.json) and the third-party license
+    # attribution bundle (THIRD-PARTY-LICENSES.html) once, off the tagged
+    # source, and hand them to the `release` job to attach and fold into
+    # SHA256SUMS. Runs in parallel with the build matrix; `needs: preflight` so
+    # a failing correctness gate still blocks it. ci.yml runs the SAME script
+    # (ci/scripts/supply-chain-artifacts.sh) as a pre-merge gate, so about.toml
+    # cannot silently rot between releases.
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: release-supply-chain
+      - name: generate SBOM + third-party license bundle
+        run: ci/scripts/supply-chain-artifacts.sh sc-out
+      - name: upload supply-chain bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: supply-chain
+          path: |
+            sc-out/THIRD-PARTY-LICENSES.html
+            sc-out/alint.cdx.json
+          if-no-files-found: error
+
   release:
     name: create GitHub Release
-    needs: build
+    needs: [build, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the GitHub Release
@@ -166,13 +196,23 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
-      - name: aggregate SHA256SUMS
+      - name: aggregate SHA256SUMS (tarballs + installer + supply-chain bundle)
         shell: bash
         run: |
           set -euo pipefail
+          # install.sh ships as a release asset users curl; stage it next to the
+          # tarballs BEFORE hashing so SHA256SUMS covers the installer too
+          # (MP-L8). The supply-chain bundle (THIRD-PARTY-LICENSES.html +
+          # alint.cdx.json) arrived via the merge-multiple download above.
+          cp "${GITHUB_WORKSPACE}/install.sh" release-artifacts/install.sh
+          chmod +x release-artifacts/install.sh
           cd release-artifacts
-          # Each per-file .sha256 carries the hash + basename; concatenate.
+          # Per-tarball .sha256 carries "<hash>  <basename>"; concatenate, then
+          # append the same-format hash of every other published asset so a later
+          # `cosign sign-blob SHA256SUMS` covers the whole release -- installer
+          # and attribution bundle included, not just the tarballs.
           cat *.tar.gz.sha256 > SHA256SUMS
+          sha256sum install.sh THIRD-PARTY-LICENSES.html alint.cdx.json >> SHA256SUMS
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
 
@@ -185,15 +225,15 @@ jobs:
         run: |
           set -euo pipefail
           cd release-artifacts
-          # install.sh lives at the repo root and is committed; copy it alongside
-          # the binary tarballs so users can `curl -sSL <url>/install.sh | bash`.
-          cp "${GITHUB_WORKSPACE}/install.sh" ./install.sh
-          chmod +x install.sh
+          # install.sh + the supply-chain bundle (THIRD-PARTY-LICENSES.html,
+          # alint.cdx.json) were staged / downloaded above and are already
+          # recorded in SHA256SUMS by the aggregate step.
           gh release create "$TAG" \
             --repo "$REPO" \
             --title "alint $TAG" \
             --generate-notes \
             install.sh SHA256SUMS \
+            THIRD-PARTY-LICENSES.html alint.cdx.json \
             alint-*.tar.gz alint-*.tar.gz.sha256
 
       - name: trigger docs-bundle rebuild from the freshly-published Release

@@ -1,0 +1,38 @@
+# cargo-about configuration: drives `cargo about generate`, which renders
+# THIRD-PARTY-LICENSES.html (the attribution bundle attached to every release).
+# See ci/scripts/supply-chain-artifacts.sh.
+#
+# The `accepted` list mirrors deny.toml's [licenses].allow (the policy gate that
+# already fails CI on an out-of-policy license). Keep the two in sync: cargo-about
+# FAILS generation if a dependency carries a license not accepted here, so this
+# doubles as an attribution-time check that no surprise license slipped into the
+# graph. deny.toml remains the authoritative *policy* (it scopes MPL-2.0 to the
+# single option-ext crate via a per-crate exception); about.toml accepts MPL-2.0
+# globally only so the bundle can render that crate's text.
+
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "BSL-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+
+# Build- and dev-only dependencies are not compiled into the shipped binary, so
+# their licenses carry no redistribution obligation and stay out of the bundle.
+# Mirrors deny.toml's intent.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# alint's own workspace crates (alint, alint-core, ...) are first-party and
+# publish under this repo's dual license; skip them in the third-party bundle.
+private = { ignore = true }
