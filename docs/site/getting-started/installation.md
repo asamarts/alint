@@ -125,6 +125,28 @@ alint --version
 
 Should print `alint <version>` matching the channel you installed from.
 
+### Verify the release signature and provenance
+
+From the release that introduced signing onward, every release is cosign-signed
+and carries GitHub build provenance, so you can confirm a download was built by
+alint's CI from alint's source before you trust it. `install.sh` does this
+automatically when `cosign` is present (best-effort: it never blocks the install,
+and you can opt out with `ALINT_SKIP_VERIFY=1`). To verify by hand:
+
+```bash
+# Build provenance, with the GitHub CLI:
+gh attestation verify alint-<version>-<target>.tar.gz --repo asamarts/alint
+
+# Signature over the checksum manifest, with cosign v3+ (no GitHub account needed):
+cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+See [SECURITY.md](https://github.com/asamarts/alint/blob/main/SECURITY.md#verifying-release-artifacts)
+for the full set (the container image signature, macOS notes, and prerequisites).
+
 ## Uninstall
 
 alint's footprint is the binary itself (no managed config or data directory), plus — only if you used remote `extends:` rulesets — a cache under your platform cache dir (`~/.cache/alint/` on Linux). Remove the binary with whatever installed it: `brew uninstall alint`, `npm uninstall -g @asamarts/alint`, `cargo uninstall alint`, or for `install.sh`, `rm ~/.local/bin/alint`; delete the cache dir too if you used remote rulesets.
