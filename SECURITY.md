@@ -16,14 +16,18 @@ unpublish npm releases, so pinned builds keep working. There is no separate LTS 
 
 Releases are signed and carry build provenance, so you can confirm a download was
 built by this repo's CI from this repo's source before you run it. This defends
-against tampered mirrors and typosquats. It does not by itself defend a
+against tampered mirrors and tampered downloads. It does not by itself defend a
 compromised publishing account (that account is the root of trust), so the org is
 hardened with 2FA and minimal token scopes alongside these steps. Signing and
 attestation are keyless (Sigstore / GitHub OIDC): there is no long-lived signing
 key to leak, and every signature is logged in the public Rekor transparency log.
 
-**Build provenance, any release asset** (tarballs, installer, SBOM, license
-bundle), with the GitHub CLI:
+The `gh` commands need an authenticated GitHub CLI (`gh auth login`, or a
+`GH_TOKEN`); the `cosign` commands need cosign v3+ (the signatures use the
+new-format Sigstore bundle) but no GitHub account.
+
+**Build provenance** (GitHub CLI). Each tarball, the installer, the SBOM, the
+license bundle, and the container image are attested:
 
 ```
 gh attestation verify alint-<version>-<target>.tar.gz --repo asamarts/alint
@@ -36,17 +40,17 @@ manifest, then check any downloaded asset against it:
 
 ```
 cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
-  --certificate-identity-regexp '^https://github.com/asamarts/alint/' \
+  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
 ```
 
-**Container image signature**, verified by digest:
+**Container image signature.** cosign resolves the tag to the digest it signed:
 
 ```
 cosign verify ghcr.io/asamarts/alint:<version> \
-  --certificate-identity-regexp '^https://github.com/asamarts/alint/' \
+  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

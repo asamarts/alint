@@ -141,10 +141,12 @@ checklist so the release-gated pieces land and nothing drifts:
 | **`bench-record.yml`** | tag push only | **Self-hosted full publish-grade `xtask bench-scale` matrix (S1-S14 × {1k, 10k, 100k, 1m} × {full, changed}) at `--warmup 3 --runs 10`. Opens a PR adding the new per-version macro/results dir + criterion micro snapshot.** | **~3.5 hr** |
 
 Signing and attestation (the `release`/`docker` cosign + `attest-build-provenance`
-/ `attest-sbom` steps) are **keyless** via Sigstore + GitHub OIDC: they need only
-`id-token: write` + `attestations: write` job permissions, no stored secret, so
-there is nothing here to rotate or that can expire mid-release. Consumer-side
-verification commands live in [SECURITY.md](SECURITY.md#verifying-release-artifacts).
+/ `attest-sbom` steps) are **keyless** via Sigstore + GitHub OIDC: they add
+`id-token: write` + `attestations: write` job permissions (the image path also
+uses the `docker` job's existing `packages: write` to store its signature and
+attestation in ghcr), no stored secret, so there is nothing here to rotate or that
+can expire mid-release. Consumer-side verification commands live in
+[SECURITY.md](SECURITY.md#verifying-release-artifacts).
 
 ## Adding a new published crate
 
@@ -175,6 +177,14 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   (fail-closed, not a partial release). Fix the generator and
   `gh run rerun <id> --failed`; ci.yml runs the same script pre-merge (the
   `supply-chain` job), so a release-time failure should be rare.
+- **A signing / attestation failure** (`MP-H1`). The `release` job's cosign + attest
+  steps run *before* `create GitHub Release` and depend on public-good Sigstore
+  (Fulcio + Rekor) plus the GitHub attestations API. A transient Sigstore outage, or
+  a cosign / attest-action error, fails the release job before the Release exists,
+  while `docker` and `publish-crates` (both `needs: build`) may already have
+  published to ghcr / crates.io. Re-run the release job: the cosign + attest steps are
+  idempotent and precede Release creation, so a clean re-run re-signs and then creates
+  the Release. Never re-tag.
 - **Expiring credentials** (`MP-M2`). Four channels carry secrets that can expire: the
   npm PAT (`NPM_TOKEN`), VS Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the
   marketplace token + signing cert/key), and the Homebrew tap SSH deploy key. On a
