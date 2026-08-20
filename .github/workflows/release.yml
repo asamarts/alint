@@ -686,3 +686,24 @@ jobs:
           # Use the pinned wrapper (./gradlew) so release matches what CI
           # validates, not the setup-action's provisioned Gradle.
           ./gradlew -PpluginVersion="$ver" publishPlugin
+
+  post-publish-smoke:
+    name: dispatch post-publish smoke
+    # Advisory (MP-M5): once every CLI channel has published, fire the
+    # post-publish-smoke workflow to install alint from each and assert the
+    # version. `needs` the CLI-channel publishers so it runs only after they
+    # succeed; a broken publish surfaces as a red smoke run, not a user report.
+    # Not gated by editor channels (vscode/jetbrains), which the smoke doesn't
+    # cover. workflow_dispatch is the documented anti-recursion exception (same
+    # pattern as the docs-bundle dispatch), so the token-triggered run fires.
+    needs: [release, docker, publish-crates, publish-npm, homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write   # workflow_dispatch the smoke workflow
+    steps:
+      - name: dispatch post-publish-smoke.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh workflow run post-publish-smoke.yml --repo "$REPO" --ref main -f tag="$TAG"

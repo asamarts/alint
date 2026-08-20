@@ -139,6 +139,7 @@ checklist so the release-gated pieces land and nothing drifts:
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
 | **`bench-record.yml`** | tag push only | **Self-hosted full publish-grade `xtask bench-scale` matrix (S1-S14 × {1k, 10k, 100k, 1m} × {full, changed}) at `--warmup 3 --runs 10`. Opens a PR adding the new per-version macro/results dir + criterion micro snapshot.** | **~3.5 hr** |
+| `post-publish-smoke.yml` | dispatched by `release.yml` after the CLI channels publish (+ weekly cron) | Install alint from each CLI channel (install.sh, cargo, cargo-binstall, npm, docker, homebrew) and assert `alint --version` matches the tag. Advisory (`MP-M5`): a red run flags a broken/stale publish, blocks nothing. | ~5-10 min |
 
 Signing and attestation (the `release`/`docker` cosign + `attest-build-provenance`
 / `attest-sbom` steps) are **keyless** via Sigstore + GitHub OIDC: they add

@@ -1,0 +1,86 @@
+name: Post-publish smoke
+
+# MP-M5: advisory post-publish install smoke. Installs alint from each live
+# distribution channel and asserts `alint --version` matches the released tag, so
+# a broken or stale publish (a channel serving the wrong version, a propagation
+# gap, a de-listed package) is caught by CI rather than by a user. This is NOT a
+# release gate -- it runs AFTER publishing (dispatched by release.yml) and on a
+# weekly cron; a red run is a signal to investigate, it blocks nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to smoke (e.g. v0.16.0); blank = latest release"
+        required: false
+        default: ""
+  schedule:
+    # Weekly (Mon 06:00 UTC): catch a channel that breaks AFTER release day.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-publish-smoke-${{ github.event.inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="$(gh release view --repo "$REPO" --json tagName --jq '.tagName')"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "smoking release tag: ${tag}"
+
+  smoke:
+    name: smoke ${{ matrix.channel }}
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Advisory: one channel failing must not cancel the others -- each is an
+      # independent signal about that channel.
+      fail-fast: false
+      matrix:
+        include:
+          - { channel: install.sh, os: ubuntu-latest }
+          - { channel: docker, os: ubuntu-latest }
+          - { channel: npm, os: ubuntu-latest }
+          - { channel: cargo-binstall, os: ubuntu-latest }
+          - { channel: cargo, os: ubuntu-latest }
+          - { channel: homebrew, os: macos-latest }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: set up Node (npm channel)
+        if: matrix.channel == 'npm'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "20"
+
+      - name: set up Rust (cargo + cargo-binstall channels)
+        if: matrix.channel == 'cargo' || matrix.channel == 'cargo-binstall'
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+
+      - name: install cargo-binstall (cargo-binstall channel)
+        if: matrix.channel == 'cargo-binstall'
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+
+      - name: smoke ${{ matrix.channel }}
+        run: ci/scripts/smoke-channel.sh "${{ matrix.channel }}" "${{ needs.resolve.outputs.tag }}"
