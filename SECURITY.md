@@ -12,6 +12,47 @@ minors. Published versions are **removed only on a confirmed defect, never
 proactively**: crates.io versions can only be yanked (never deleted), and we do not
 unpublish npm releases, so pinned builds keep working. There is no separate LTS line.
 
+## Verifying release artifacts
+
+Releases are signed and carry build provenance, so you can confirm a download was
+built by this repo's CI from this repo's source before you run it. This defends
+against tampered mirrors and typosquats. It does not by itself defend a
+compromised publishing account (that account is the root of trust), so the org is
+hardened with 2FA and minimal token scopes alongside these steps. Signing and
+attestation are keyless (Sigstore / GitHub OIDC): there is no long-lived signing
+key to leak, and every signature is logged in the public Rekor transparency log.
+
+**Build provenance, any release asset** (tarballs, installer, SBOM, license
+bundle), with the GitHub CLI:
+
+```
+gh attestation verify alint-<version>-<target>.tar.gz --repo asamarts/alint
+gh attestation verify oci://ghcr.io/asamarts/alint:<version> --repo asamarts/alint
+```
+
+**Signature over the checksum manifest**, no GitHub CLI needed. `SHA256SUMS` is
+cosign-signed; the signature travels as `SHA256SUMS.cosign.bundle`. Verify the
+manifest, then check any downloaded asset against it:
+
+```
+cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp '^https://github.com/asamarts/alint/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+**Container image signature**, verified by digest:
+
+```
+cosign verify ghcr.io/asamarts/alint:<version> \
+  --certificate-identity-regexp '^https://github.com/asamarts/alint/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Provenance and signatures are attached to every release from the version that
+introduced them onward; a release that predates it has none to verify.
+
 ## Reporting a vulnerability
 
 **Do not file a public GitHub issue for security vulnerabilities.**

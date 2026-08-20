@@ -135,10 +135,16 @@ checklist so the release-gated pieces land and nothing drifts:
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
 | `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit, deny, build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
-| `release.yml` | tag push only | preflight gate → cross-platform build matrix → GitHub Release → ghcr.io Docker → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
+| `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
 | **`bench-record.yml`** | tag push only | **Self-hosted full publish-grade `xtask bench-scale` matrix (S1-S14 × {1k, 10k, 100k, 1m} × {full, changed}) at `--warmup 3 --runs 10`. Opens a PR adding the new per-version macro/results dir + criterion micro snapshot.** | **~3.5 hr** |
+
+Signing and attestation (the `release`/`docker` cosign + `attest-build-provenance`
+/ `attest-sbom` steps) are **keyless** via Sigstore + GitHub OIDC: they need only
+`id-token: write` + `attestations: write` job permissions, no stored secret, so
+there is nothing here to rotate or that can expire mid-release. Consumer-side
+verification commands live in [SECURITY.md](SECURITY.md#verifying-release-artifacts).
 
 ## Adding a new published crate
 

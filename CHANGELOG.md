@@ -17,9 +17,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
-- `SHA256SUMS` now covers `install.sh` and the supply-chain artifacts, so a later
-  cosign signature over the manifest will protect the installer and the
-  attribution bundle, not only the tarballs (`MP-L8`).
+- Releases are now signed and carry build provenance (P1-b of the
+  supply-chain-hardening arc): `SHA256SUMS` is cosign-signed keyless
+  (`SHA256SUMS.cosign.bundle`), every release asset gets a GitHub build-provenance
+  attestation (verifiable with `gh attestation verify`), the CycloneDX SBOM is
+  attested, and the container image is both attested (pushed to the registry) and
+  cosign-signed by digest. All keyless via Sigstore / GitHub OIDC, so there is no
+  signing secret to manage. See [SECURITY.md](SECURITY.md) for the verification
+  commands.
+- `SHA256SUMS` covers `install.sh` and the supply-chain artifacts, so the cosign
+  signature over the manifest protects the installer and the attribution bundle,
+  not only the tarballs (`MP-L8`).
 
 ## [0.15.0] - 2026-08-16
 
