@@ -142,6 +142,8 @@ cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
   --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS
+# then confirm your downloaded tarball is one of the signed entries:
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
 ```
 
 See [SECURITY.md](https://github.com/asamarts/alint/blob/main/SECURITY.md#verifying-release-artifacts)
