@@ -31,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.r.outputs.tag }}
+      is_latest: ${{ steps.r.outputs.is_latest }}
     steps:
       - id: r
         env:
@@ -39,13 +40,20 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
+          latest="$(gh release view --repo "$REPO" --json tagName --jq '.tagName')"
           if [ -n "${INPUT_TAG}" ]; then
             tag="${INPUT_TAG}"
           else
-            tag="$(gh release view --repo "$REPO" --json tagName --jq '.tagName')"
+            tag="${latest}"
           fi
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "smoking release tag: ${tag}"
+          # is_latest gates the floating-pointer + homebrew checks: those only make
+          # sense when the smoked tag is what `latest` / `:latest` / the tap serve.
+          if [ "${tag}" = "${latest}" ]; then is_latest=1; else is_latest=0; fi
+          {
+            echo "tag=${tag}"
+            echo "is_latest=${is_latest}"
+          } >> "$GITHUB_OUTPUT"
+          echo "smoking release tag: ${tag} (is_latest=${is_latest}, latest=${latest})"
 
   smoke:
     name: smoke ${{ matrix.channel }}
@@ -82,5 +90,19 @@ jobs:
         if: matrix.channel == 'cargo-binstall'
         uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
+      - name: install cosign (so the install.sh leg exercises its verify path)
+        # With cosign v3 present, install.sh's opt-in verification actually runs
+        # against the release's real signed assets -- so a SAN-regexp drift, a
+        # renamed .cosign.bundle, or a broken verify surfaces here, not in a user's
+        # install. (On an unsigned release it just skips, as install.sh is designed.)
+        if: matrix.channel == 'install.sh'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.0.6"
+
       - name: smoke ${{ matrix.channel }}
+        env:
+          # 1 when the smoked tag is the latest release: enables the floating
+          # (`latest` / `:latest` / homebrew) pointer checks in the script.
+          SMOKE_FLOATING: ${{ needs.resolve.outputs.is_latest }}
         run: ci/scripts/smoke-channel.sh "${{ matrix.channel }}" "${{ needs.resolve.outputs.tag }}"
