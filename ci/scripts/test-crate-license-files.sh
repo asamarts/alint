@@ -3,11 +3,13 @@ set -euo pipefail
 
 # Each crates.io-published member carries its OWN copy of the dual-license texts
 # + NOTICE, so its published `.crate` is self-contained: cargo inherits the SPDX
-# `license` field from the workspace root but NOT the license *files*, and a
-# `../`-escaping `include` is rejected (see the include_str-stays-in-crate rule).
-# Symlinks are ruled out by the repo's own `no_symlinks` dogfood rule. So the
-# copies are committed -- and this harness asserts they stay byte-identical to the
-# root originals (no drift) and that every published crate has them.
+# `license` field from the workspace root but NOT the license *files*. The
+# single-file `license-file` manifest key can't carry all three (Apache + MIT +
+# NOTICE) and would clobber the machine-readable dual-license SPDX expression;
+# symlinks are ruled out by the repo's own `no_symlinks` dogfood rule (they would
+# warn on alint itself). So the copies are committed -- and this harness asserts
+# they stay byte-identical to the root originals (no drift) and that every
+# published crate has them.
 #
 # The published-crate list is DERIVED from ci/scripts/publish-crates.sh, so a
 # newly-added published crate that forgets its license copies fails here.
@@ -19,7 +21,7 @@ FILES=(LICENSE-APACHE LICENSE-MIT NOTICE)
 
 # Parse the CRATES=( ... ) array out of publish-crates.sh (single source of truth).
 mapfile -t CRATES < <(
-  awk '/^CRATES=\(/ { f = 1; next } f && /^\)/ { f = 0 } f { gsub(/[ \t]/, ""); if ($0 != "") print }' \
+  awk '/^CRATES=\(/ { f = 1; next } f && /^\)/ { f = 0 } f { sub(/#.*/, ""); gsub(/[ \t]/, ""); if ($0 != "") print }' \
     ci/scripts/publish-crates.sh
 )
 
@@ -27,6 +29,15 @@ if [ "${#CRATES[@]}" -eq 0 ]; then
   echo "[crate-license] FAIL: parsed no crates from ci/scripts/publish-crates.sh CRATES=()" >&2
   exit 1
 fi
+
+# Check the root originals first: a missing root file would make cmp below error
+# and mis-report as a "differs" on the crate copy.
+for f in "${FILES[@]}"; do
+  if [ ! -f "$f" ]; then
+    echo "[crate-license] FAIL: root ${f} is missing (the source of every crate copy)" >&2
+    exit 1
+  fi
+done
 
 rc=0
 for crate in "${CRATES[@]}"; do

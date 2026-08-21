@@ -52,8 +52,12 @@ docs/design/architecture/model/*.c4 text eol=lf
 # byte-compares it against a `\n`-only rendered string (same hazard).
 docs/design/architecture/DIAGRAMS.md text eol=lf
 
-# Not a test fixture: NOTICE is copied verbatim into every release tarball by
-# ci/scripts/release-binary.sh, which runs on each target's own OS (incl.
-# windows-latest). Pin LF so all five per-platform tarballs ship a
-# byte-identical NOTICE instead of a CRLF outlier on the Windows build.
+# Not test fixtures: LICENSE-APACHE, LICENSE-MIT, and NOTICE are copied verbatim
+# into every release tarball by ci/scripts/release-binary.sh (which runs on each
+# target's own OS, incl. windows-latest) AND committed into each published crate
+# dir (crates/*/). Pin LF (bare patterns, so they match at any depth) so all five
+# per-platform tarballs and the six per-crate copies stay byte-identical instead
+# of a CRLF outlier on the Windows build.
+LICENSE-APACHE text eol=lf
+LICENSE-MIT text eol=lf
 NOTICE text eol=lf
