@@ -43,10 +43,13 @@ BINARY_MANIFEST="crates/alint/Cargo.toml"
 CARGO_ABOUT_VERSION="0.9.2"
 CARGO_CYCLONEDX_VERSION="0.5.9"
 
-# Byte-reproducible artifacts: pin cargo-cyclonedx's wall-clock stamps
-# (metadata.timestamp + the random serialNumber UUID) to the tagged commit's
-# date. Without this each run embeds now() + a fresh UUID, so a verifier
+# Byte-reproducible artifacts: pin cargo-cyclonedx's metadata.timestamp to the
+# tagged commit's date. Without this each run embeds now(), so a verifier
 # regenerating from the tag would compute a different hash than the signed one.
+# (cargo-cyclonedx OMITS the optional CycloneDX serialNumber under
+# SOURCE_DATE_EPOCH -- a random per-run UUID cannot be reproducible -- so a
+# deterministic serialNumber is injected after generation below; actions/attest
+# rejects an SBOM that carries none.)
 SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --format=%ct 2>/dev/null || echo 0)"
 export SOURCE_DATE_EPOCH
 
@@ -90,6 +93,30 @@ cargo cyclonedx --manifest-path "$BINARY_MANIFEST" \
   --format json --target all --no-build-deps --spec-version 1.5 \
   --override-filename alint -q
 mv "crates/alint/alint.json" "$OUT_DIR/alint.cdx.json"
+
+# actions/attest's checkIsCycloneDX treats serialNumber as MANDATORY, though the
+# CycloneDX spec marks it optional -- and cargo-cyclonedx emits none under
+# SOURCE_DATE_EPOCH (see above), so `attest-sbom` rejects the bundle with
+# "Unsupported SBOM format. Must be valid SPDX or CycloneDX JSON." Inject a
+# DETERMINISTIC RFC-4122 v5 URN derived from the crate version: reproducible
+# across runs (preserving the byte-identity cosign-over-SHA256SUMS relies on) yet
+# unique per release. python3's uuid5 is portable across Linux + macOS dev boxes
+# (uuidgen's v5 flags are Linux-only).
+sbom_version="$(jq -r '.metadata.component.version' "$OUT_DIR/alint.cdx.json")"
+serial_uuid="$(python3 -c 'import uuid, sys; print(uuid.uuid5(uuid.NAMESPACE_URL, "https://alint.org/sbom/alint@" + sys.argv[1]))' "$sbom_version")"
+sbom_tmp="$(mktemp)"
+jq --arg sn "urn:uuid:${serial_uuid}" '.serialNumber = $sn' "$OUT_DIR/alint.cdx.json" > "$sbom_tmp"
+mv "$sbom_tmp" "$OUT_DIR/alint.cdx.json"
+echo "==> injected deterministic serialNumber (urn:uuid:${serial_uuid})"
+
+# Gate the invariant this whole fix rests on: actions/attest's checkIsCycloneDX
+# requires bomFormat + specVersion + a serialNumber. Assert the generated SBOM
+# carries a urn:uuid: serialNumber HERE -- run by the ci.yml `supply-chain` job
+# and the release preflight -- so a regression (e.g. a cargo-cyclonedx bump that
+# changes its serialNumber behaviour) fails a PR or the preflight, never
+# mid-release the way v0.15.1's attest-sbom did.
+jq -e '(.serialNumber // "") | startswith("urn:uuid:")' "$OUT_DIR/alint.cdx.json" >/dev/null \
+  || { echo "FATAL: alint.cdx.json lacks a urn:uuid: serialNumber; attest-sbom would reject it" >&2; exit 1; }
 
 echo "==> supply-chain artifacts written to ${OUT_DIR}:"
 ls -la "$OUT_DIR/THIRD-PARTY-LICENSES.html" "$OUT_DIR/alint.cdx.json"

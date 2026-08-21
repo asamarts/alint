@@ -256,25 +256,13 @@ jobs:
           #     SHA256SUMS
           cosign sign-blob --yes --bundle SHA256SUMS.cosign.bundle SHA256SUMS
 
-      - name: attest build provenance for every asset in SHA256SUMS
-        # subject-checksums reads SHA256SUMS and attests each listed file's digest,
-        # so `gh attestation verify <tarball> --repo asamarts/alint` works for the
-        # tarballs, installer, SBOM, and license bundle in one attestation. (Not
-        # SHA256SUMS itself, the .cosign.bundle, or the .sha256 sidecars.)
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-checksums: release-artifacts/SHA256SUMS
-
-      - name: attest the CycloneDX SBOM against the tarballs
-        # attest-sbom is deprecated in favour of actions/attest with an SBOM
-        # predicate, but is SHA-pinned here so it keeps working; it still wraps
-        # actions/attest and handles the CycloneDX predicate for us. Migrate when
-        # convenient.
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
-        with:
-          subject-path: "release-artifacts/alint-*.tar.gz"
-          sbom-path: release-artifacts/alint.cdx.json
-
+      # Create the Release + its cosign-signed assets FIRST, then attest. The two
+      # attestations below are best-effort (continue-on-error): a broken
+      # attestation must never block the Release itself or the downstream publishes
+      # that `needs:` this job (npm/homebrew/editors). This ordering is the direct
+      # lesson of v0.15.1, where a rejected SBOM attestation -- ordered BEFORE this
+      # step -- skipped the Release even though crates.io + Docker had already
+      # published, stranding a half-released version.
       - name: create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -295,6 +283,36 @@ jobs:
             install.sh SHA256SUMS SHA256SUMS.cosign.bundle \
             THIRD-PARTY-LICENSES.html alint.cdx.json \
             alint-*.tar.gz alint-*.tar.gz.sha256
+
+      - name: attest build provenance for every asset in SHA256SUMS
+        id: attest_provenance
+        continue-on-error: true   # best-effort: never block a published Release
+        # subject-checksums reads SHA256SUMS and attests each listed file's digest,
+        # so `gh attestation verify <tarball> --repo asamarts/alint` works for the
+        # tarballs, installer, SBOM, and license bundle in one attestation. (Not
+        # SHA256SUMS itself, the .cosign.bundle, or the .sha256 sidecars.)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release-artifacts/SHA256SUMS
+
+      - name: attest the CycloneDX SBOM against the tarballs
+        id: attest_sbom
+        continue-on-error: true   # best-effort: never block a published Release
+        # attest-sbom is deprecated in favour of actions/attest with an SBOM
+        # predicate, but is SHA-pinned here so it keeps working; it still wraps
+        # actions/attest and handles the CycloneDX predicate for us. Migrate when
+        # convenient. NOTE: actions/attest's checkIsCycloneDX REQUIRES a
+        # serialNumber (optional in the spec); supply-chain-artifacts.sh injects a
+        # deterministic one, without which this step fails "Unsupported SBOM format".
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: "release-artifacts/alint-*.tar.gz"
+          sbom-path: release-artifacts/alint.cdx.json
+
+      - name: surface any incomplete attestation (non-blocking)
+        if: steps.attest_provenance.outcome != 'success' || steps.attest_sbom.outcome != 'success'
+        run: |
+          echo "::warning::Release shipped but an attestation did not succeed (build-provenance=${{ steps.attest_provenance.outcome }}, sbom=${{ steps.attest_sbom.outcome }}). Investigate before relying on 'gh attestation verify'."
 
       - name: trigger docs-bundle rebuild from the freshly-published Release
         env:
