@@ -1,0 +1,16 @@
+alint
+Copyright (c) 2026 alint contributors
+
+This product is dual-licensed under either of
+
+  * Apache License, Version 2.0 (see LICENSE-APACHE), or
+  * MIT license (see LICENSE-MIT)
+
+at your option.
+
+alint's release binaries statically link third-party open-source crates. The
+copyright notices and full license texts for those crates are published as the
+THIRD-PARTY-LICENSES.html asset attached to each GitHub release
+(https://github.com/asamarts/alint/releases), regenerated from the exact
+dependency graph of that build. A CycloneDX software bill of materials
+(alint.cdx.json) is attached to the same release.
