@@ -8,6 +8,45 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-21
+
+A supply-chain-hardening release. The alint tool is unchanged from 0.15.0, but
+every release is now cryptographically verifiable end to end: releases are
+cosign-signed and carry GitHub build provenance, a CycloneDX SBOM and a
+third-party license bundle ship with every artifact, `install.sh` verifies the
+signature when `cosign` is present, and each published crate carries its license
+texts. See [SECURITY.md](SECURITY.md#verifying-release-artifacts) to verify a
+download. Implements ADR-0015.
+
+### Added
+
+- Supply-chain artifacts on every release (P1-a of the supply-chain-hardening
+  arc; ADR-0015): a CycloneDX 1.5 SBOM (`alint.cdx.json`) and a third-party
+  license bundle (`THIRD-PARTY-LICENSES.html`), both scoped to the shipped `alint`
+  binary, attached to the GitHub Release and embedded in every binary tarball and
+  the Docker image. A root `NOTICE` states the dual license and accompanies each
+  distribution. The image now also carries `LICENSE-APACHE` / `LICENSE-MIT`, and
+  each published crate ships its `LICENSE-*` + `NOTICE` in the crates.io archive.
+- `install.sh` verifies the release signature when `cosign` (v3+) is present
+  (best-effort: `ALINT_SKIP_VERIFY=1` skips, `ALINT_REQUIRE_VERIFY=1` fails closed
+  on an untrusted network). Its header documents a tag-pinned installer URL for
+  inspection before running.
+
+### Security
+
+- Releases are now signed and carry build provenance (P1-b of the
+  supply-chain-hardening arc): `SHA256SUMS` is cosign-signed keyless
+  (`SHA256SUMS.cosign.bundle`), every asset recorded in `SHA256SUMS` (tarballs,
+  installer, SBOM, license bundle) gets a GitHub build-provenance attestation
+  (verifiable with `gh attestation verify`), the CycloneDX SBOM is attested, and
+  the container image is both attested (pushed to the registry) and cosign-signed
+  by digest. All keyless via Sigstore / GitHub OIDC, so there is no signing secret
+  to manage. Verify with cosign v3+ or `gh attestation verify`; see
+  [SECURITY.md](SECURITY.md) for the commands.
+- `SHA256SUMS` covers `install.sh` and the supply-chain artifacts, so the cosign
+  signature over the manifest protects the installer and the attribution bundle,
+  not only the tarballs (`MP-L8`).
+
 ## [0.15.0] - 2026-08-16
 
 v0.15 makes rules legible and monorepos first-class. `alint explain <rule>` now
@@ -6531,7 +6570,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/asamarts/alint/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/asamarts/alint/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/asamarts/alint/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/asamarts/alint/compare/v0.14.0...v0.14.1

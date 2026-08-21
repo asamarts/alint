@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install alint via Homebrew, install.sh, Docker, cargo, or from source.
+description: Install alint via Homebrew, install.sh, npm, cargo (or cargo-binstall), Docker/Podman, or from source.
 sidebar:
   order: 1
 ---
@@ -18,17 +18,51 @@ brew install alint
 
 The recommended path on macOS and Linux. The [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint) tap is auto-updated on every release; the formula resolves the matching pre-built tarball for your platform, verifies its SHA-256, and installs to the Homebrew cellar.
 
-## install.sh (Linux + macOS + Windows tarballs)
+## install.sh (Linux + macOS)
 
 ```bash
 curl -sSL https://alint.org/install.sh | bash
 ```
 
-Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). Windows users download the Windows tarball from the [Releases page](https://github.com/asamarts/alint/releases) directly.
+Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This path is shell-based, so it does not cover Windows; Windows users have [npm](#npm), [cargo](#cargo), or the manual tarball (see [Windows](#windows)).
 
-Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.15.0/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
+Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
 
-## Docker
+```bash
+ALINT_VERSION=v0.15.1 curl -sSL https://alint.org/install.sh | bash
+```
+
+Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.15.1/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
+
+## npm
+
+```bash
+npm install -g @asamarts/alint
+```
+
+The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package is a thin wrapper: on install it downloads the platform-matched native binary from GitHub Releases and verifies its SHA-256. Handy in Node/JS projects and CI that already have npm. Zero-install works too:
+
+```bash
+npx @asamarts/alint check
+```
+
+Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts`, Bun's `bunx`, or **pnpm 10+** (which blocks dependency build scripts by default — run `pnpm approve-builds @asamarts/alint` to allow it). A future release moves to per-platform packages to lift those limits.
+
+## cargo
+
+```bash
+cargo install alint
+```
+
+Builds from source against the current stable Rust toolchain (requires rustc 1.85+ and `cargo` on `$PATH`). To install a **pre-built** binary instead of compiling, use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall alint
+```
+
+`cargo binstall` attempts to fetch a pre-built release tarball (verifying its checksum) instead of compiling, falling back to a source build if it cannot resolve one — much faster on CI and low-powered machines when the pre-built path is taken.
+
+## Docker / Podman
 
 A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghcr.io on each release:
 
@@ -37,7 +71,13 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.15.0 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.15.1 check
+```
+
+The image is OCI-standard, so **Podman runs it unchanged** — just use the fully-qualified name (Podman does not assume a default registry):
+
+```bash
+podman run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -46,15 +86,25 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: `:<major>.<minor>` (e.g. `:0.10`) and the raw git tag (`:v0.15.0`).
+Also published: the bare semver (`:0.15.1`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.15.1`).
 
-## crates.io
+## Windows
 
-```bash
-cargo install alint
-```
+The `install.sh` one-liner is shell-based and does not cover Windows. On Windows, use:
 
-Builds from source against the current stable Rust toolchain. Requires `cargo` already on `$PATH`.
+- **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
+- **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
+- **manual:** download `alint-v0.15.1-x86_64-pc-windows-msvc.tar.gz` from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
+
+Note on manually-downloaded binaries: a tarball downloaded through a **browser** carries a "mark of the web", so the first run can trip Windows SmartScreen ("More info → Run anyway") or, on macOS, Gatekeeper quarantine — clear it with `xattr -d com.apple.quarantine ./alint`. Binaries fetched by `curl`/npm/cargo/Homebrew/Docker carry no such mark and run without prompts.
+
+## Enterprise mirror / offline install
+
+Air-gapped setups can install without direct github.com access:
+
+- **Docker:** re-tag and push the image into your internal registry, then pull from there.
+- **npm:** once a future release ships per-platform packages, point `.npmrc` `registry=` at your internal mirror; today the postinstall wrapper fetches from github.com.
+- **cargo:** use a [source replacement](https://doc.rust-lang.org/cargo/reference/source-replacement.html) mirror for the from-source build.
 
 ## From source
 
@@ -74,3 +124,31 @@ alint --version
 ```
 
 Should print `alint <version>` matching the channel you installed from.
+
+### Verify the release signature and provenance
+
+From the release that introduced signing onward, every release is cosign-signed
+and carries GitHub build provenance, so you can confirm a download was built by
+alint's CI from alint's source before you trust it. `install.sh` does this
+automatically when `cosign` is present (best-effort: it never blocks the install,
+and you can opt out with `ALINT_SKIP_VERIFY=1`). To verify by hand:
+
+```bash
+# Build provenance, with the GitHub CLI:
+gh attestation verify alint-<version>-<target>.tar.gz --repo asamarts/alint
+
+# Signature over the checksum manifest, with cosign v3+ (no GitHub account needed):
+cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+# then confirm your downloaded tarball is one of the signed entries:
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+```
+
+See [SECURITY.md](https://github.com/asamarts/alint/blob/main/SECURITY.md#verifying-release-artifacts)
+for the full set (the container image signature, macOS notes, and prerequisites).
+
+## Uninstall
+
+alint's footprint is the binary itself (no managed config or data directory), plus — only if you used remote `extends:` rulesets — a cache under your platform cache dir (`~/.cache/alint/` on Linux). Remove the binary with whatever installed it: `brew uninstall alint`, `npm uninstall -g @asamarts/alint`, `cargo uninstall alint`, or for `install.sh`, `rm ~/.local/bin/alint`; delete the cache dir too if you used remote rulesets.

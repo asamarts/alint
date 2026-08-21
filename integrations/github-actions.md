@@ -7,12 +7,14 @@ sidebar:
 
 The official Action wraps the `install.sh` flow plus alint invocation into one step.
 
+**Runs on Linux and macOS runners only.** The Action wraps `install.sh` (shell-based), so on `windows-latest` it fails with `unsupported platform`. For Windows CI, install alint in a prior `run:` step (`npm install -g @asamarts/alint` or `cargo install alint`) and invoke `alint` directly.
+
 <likec4-view view-id="ciActionFlow"></likec4-view>
 
 ## Inline PR annotations (default)
 
 ```yaml
-- uses: asamarts/alint@v0.15.0
+- uses: asamarts/alint@v0.15.1
 ```
 
 This runs `alint check --format github` against `.` and emits findings as `::error::` / `::warning::` workflow commands, which GitHub renders inline on the PR.
@@ -20,9 +22,9 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 ## Inputs (all optional)
 
 ```yaml
-- uses: asamarts/alint@v0.15.0
+- uses: asamarts/alint@v0.15.1
   with:
-    version: v0.15.0        # release tag; omit to follow the pinned action ref
+    version: v0.15.1        # release tag; omit to follow the pinned action ref
     path: .                # directory to lint (default: .)
     working-directory: .   # dir the action runs in (default: the runner workspace)
     format: github         # human | json | sarif | github (default)
@@ -37,7 +39,7 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 Use `format: sarif` and pipe to the standard upload action:
 
 ```yaml
-- uses: asamarts/alint@v0.15.0
+- uses: asamarts/alint@v0.15.1
   id: alint
   with:
     format: sarif
@@ -57,7 +59,7 @@ alint's SARIF carries a stable [`partialFingerprints`](/docs/reference/output-fo
 For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/docs/bundled-rulesets/) bundled ruleset), pin the action to a commit SHA:
 
 ```yaml
-- uses: asamarts/alint@<40-char-sha>  # v0.15.0
+- uses: asamarts/alint@<40-char-sha>  # v0.15.1
 ```
 
 Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags).
@@ -86,7 +88,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@v0.15.0
+        uses: asamarts/alint@v0.15.1
 ```
 
 The rule in `.alint.yml`:
