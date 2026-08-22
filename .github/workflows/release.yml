@@ -525,20 +525,28 @@ jobs:
     # being live.
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC token for npm Trusted Publishing (tokenless publish)
+      contents: read    # checkout only; no writes needed here
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "20"
+          node-version: "22"   # Trusted Publishing needs Node >= 22.14
           registry-url: "https://registry.npmjs.org"
+      - name: use an OIDC-capable npm (Trusted Publishing needs npm >= 11.5.1; pin the latest 11.x)
+        run: npm install -g npm@11.19.0   # not 12.x: it may drop Node 22 support
       - name: stamp package version from tag + publish
         env:
-          # PAT auth (NPM_TOKEN). npm OIDC Trusted Publishing is now GA, but npm
-          # provenance is only meaningful once the package ships native bytes via
-          # the optionalDependencies migration (ADR-0015 / P2) -- the current
-          # postinstall-download shim has nothing to attest. Until that lands this
-          # stays on the PAT; the migration switches to keyless `--provenance`.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Tokenless publish via npm Trusted Publishing (OIDC): no NPM_TOKEN, so
+          # nothing here can expire mid-release (the v0.15.1 failure mode). Requires a
+          # Trusted Publisher on npmjs.com for @asamarts/alint (repo=asamarts/alint,
+          # workflow=release.yml); npm validates it only at publish time, so a missing
+          # entry fails THIS job on the next release (fix it, then rerun --failed). The
+          # auto-provenance attests only this shim (install script + bin shim), NOT the
+          # binaries it downloads from GitHub Releases -- those carry their own
+          # build-provenance. The optionalDependencies migration (ADR-0015 / P2) will
+          # ship native bytes so the same provenance covers real payload.
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
@@ -557,7 +565,9 @@ jobs:
             fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "==> package.json version set to $ver"
-          npm publish --access public
+          # --provenance rides the OIDC id-token; with Trusted Publishing npm also
+          # generates provenance automatically, so this is explicit-and-belt.
+          npm publish --access public --provenance
 
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)

@@ -33,7 +33,7 @@ to rotate.
 |---|---|---|---|---|
 | `GITHUB_TOKEN` | ghcr.io Docker | built-in | per-run | already keyless |
 | `CARGO_REGISTRY_TOKEN` | crates.io | crates.io account | manual | **yes → migrate to Trusted Publishing** |
-| `NPM_TOKEN` | npm (`@asamarts/alint`) | npmjs.com | **yes (bit us in v0.10.0)** | yes, but deferred (npmjs trusted-publisher UI is broken) |
+| `NPM_TOKEN` | npm (`@asamarts/alint`) | npmjs.com | retired | **migrated → Trusted Publishing (tokenless)** |
 | `HOMEBREW_TAP_DEPLOY_KEY` | `asamarts/homebrew-alint` | ssh-keygen + repo deploy key | no (SSH key) | n/a (use a GitHub App for org scale) |
 | `VSCE_PAT` | VS Code Marketplace | Azure DevOps PAT | **yes (max 1 yr)** | no (Azure DevOps has no GH OIDC) |
 | `OVSX_PAT` | Open VSX | open-vsx.org token | no | no |
@@ -47,12 +47,11 @@ to rotate.
 Both crates.io and npm support **GitHub OIDC Trusted Publishing**
 (launched 2025). **crates.io is live on it:** the `publish-crates` job
 carries `id-token: write` and mints a short-lived token, so there is no
-`CARGO_REGISTRY_TOKEN` to rotate. **npm is deferred** to the
-`NPM_TOKEN` PAT: npmjs.com's UI to enable a trusted publisher is
-currently broken (the same blocker hit at v0.10.0), so the
-`publish-npm` job still uses `NODE_AUTH_TOKEN`. Revisit npm OIDC when
-that UI ships; it would eliminate the one token with a recurring
-expiry-failure history.
+`CARGO_REGISTRY_TOKEN` to rotate. **npm is now live on it too:** the
+`publish-npm` job carries `id-token: write` and publishes tokenlessly
+via Trusted Publishing, so the `NPM_TOKEN` PAT is retired. This
+eliminated the one token with a recurring expiry-failure history (it
+bit us again at v0.15.1, the trigger for the migration).
 
 - **crates.io:** configure a Trusted Publisher (crate Settings →
   Trusted Publishing: repo `asamarts/alint`, the release workflow file,
@@ -63,12 +62,12 @@ expiry-failure history.
 - **npm:** configure a Trusted Publisher on the package
   (npmjs.com → package → Settings → Trusted Publisher → GitHub Actions:
   `asamarts/alint` + workflow + optional environment). The
-  `publish-npm` job needs `permissions: id-token: write` and a recent
-  npm; `npm publish` then authenticates via OIDC (no `NODE_AUTH_TOKEN`)
-  and gets build provenance for free.
+  `publish-npm` job needs `permissions: id-token: write`, npm CLI
+  `>= 11.5.1`, and Node `>= 22.14`; `npm publish` then authenticates via
+  OIDC (no `NODE_AUTH_TOKEN`) and gets build provenance for free.
 
-crates.io is migrated, so `CARGO_REGISTRY_TOKEN` can be deleted.
-`NPM_TOKEN` stays in use until npm's trusted-publisher UI is fixed.
+crates.io and npm are both migrated, so `CARGO_REGISTRY_TOKEN` and
+`NPM_TOKEN` can both be deleted once each first OIDC release proves out.
 
 ## Per-channel setup runbook
 

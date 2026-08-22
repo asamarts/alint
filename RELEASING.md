@@ -163,6 +163,22 @@ is permanent; see Yanking). The publish script is idempotent, so the
 recovery is: add the publisher, then `gh run rerun <id> --failed`
 (never re-tag). `alint-lsp` hit this on v0.11.1.
 
+## npm Trusted Publishing
+
+npm publishes tokenlessly via **npm Trusted Publishing** (OIDC), the same
+keyless model as the crates.io publisher above: no `NPM_TOKEN`, so nothing here
+can expire mid-release. One-time setup on npmjs.com: package `@asamarts/alint`
+→ Settings → Trusted Publisher → repo `asamarts/alint`, workflow `release.yml`,
+no environment. npm validates this only at publish time, so a missing or
+mismatched entry fails the `publish npm` job on the next release; recovery is
+add/fix the entry, then `gh run rerun <id> --failed` (never re-tag). The
+`publish-npm` job needs `id-token: write`, npm CLI `>= 11.5.1`, and Node
+`>= 22.14`. Trusted Publishing auto-attaches provenance; today it attests only
+the download shim (install script + bin shim), not the binaries the shim
+fetches from GitHub Releases (those carry their own build-provenance). When the
+optionalDependencies migration ships native bytes, the same provenance covers
+real payload.
+
 ## Recovering a partial release
 
 Most publish jobs run *after* the GitHub Release exists (`needs: release`), but
@@ -186,13 +202,13 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   published to ghcr / crates.io. Re-run the release job: the cosign + attest steps are
   idempotent and precede Release creation, so a clean re-run re-signs and then creates
   the Release. Never re-tag.
-- **Expiring credentials** (`MP-M2`). Four channels carry secrets that can expire: the
-  npm PAT (`NPM_TOKEN`), VS Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the
-  marketplace token + signing cert/key), and the Homebrew tap SSH deploy key. On a
-  401/403 from any, rotate the secret (inventory + storage in
+- **Expiring credentials** (`MP-M2`). Three channels carry secrets that can expire: VS
+  Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the marketplace token + signing
+  cert/key), and the Homebrew tap SSH deploy key. On a 401/403 from any, rotate the
+  secret (inventory + storage in
   [`release-credentials.md`](docs/development/release-credentials.md)), then
-  `gh run rerun <id> --failed`. (npm OIDC trusted publishing is now GA and will retire
-  the `NPM_TOKEN` PAT once the package migrates to per-platform sub-packages.)
+  `gh run rerun <id> --failed`. (npm no longer carries a PAT: it publishes tokenlessly
+  via OIDC Trusted Publishing, see [npm Trusted Publishing](#npm-trusted-publishing).)
 - **A build-matrix flake blocking crates.io** (`MP-M1`). `publish-crates` deliberately
   `needs: build` (a cross-platform compile gate before the irreversible publish), so a
   flaky windows or aarch64 leg can block it. Re-run once the leg heals with
