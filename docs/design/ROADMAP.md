@@ -10,11 +10,13 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.15.1** (2026-08-21): a supply-chain-hardening release. The
-alint tool is unchanged from v0.15.0, but every release is now cosign-signed with
-GitHub build provenance, ships a CycloneDX SBOM and a third-party license bundle,
-`install.sh` verifies signatures when `cosign` is present, and each published
-crate carries its license texts (ADR-0015). The prior v0.15.0 (2026-08-16) made
+**Latest release: v0.15.2** (2026-08-22): a release-infrastructure patch, binaries
+unchanged from v0.15.1. npm now publishes via keyless OIDC Trusted Publishing
+(tokenless, with a provenance attestation), retiring the `NPM_TOKEN` PAT. The
+prior v0.15.1 (2026-08-21) was a supply-chain-hardening release: every release is
+cosign-signed with GitHub build provenance, ships a CycloneDX SBOM and a
+third-party license bundle, `install.sh` verifies signatures when `cosign` is
+present, and each published crate carries its license texts (ADR-0015). The prior v0.15.0 (2026-08-16) made
 `alint explain` surface a rule's
 full configured detail with a `docs:` link and a one-line summary, `alint rules
 show` / `list --search` browse the catalog offline, and a new `scope_filter:

@@ -10,7 +10,7 @@ alint ships a [pre-commit](https://pre-commit.com/) hook definition. Add it to y
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.15.1
+    rev: v0.15.2
     hooks:
       - id: alint
 ```
@@ -36,7 +36,7 @@ Pin to a tagged release. Updating the `rev:` is how you upgrade alint:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.15.1
+    rev: v0.15.2
     hooks:
       - id: alint
         # Pass extra args here if you need to:
