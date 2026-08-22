@@ -64,7 +64,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Engine-unchanged guard. A tag whose binary is byte-identical to the previous
+  # release -- no crates/**/*.rs changed, e.g. a supply-chain or CI-only patch
+  # like v0.15.1/v0.15.2 -- can only record bench-host noise against the prior
+  # baseline (spurious short-run swings while 100k/1m stay flat), so skip the
+  # ~3.5h run and its review PR; the prior release's bench already represents the
+  # identical binary. Keyed on .rs only, since Cargo.lock's workspace-version
+  # entries churn on every release; a dependency-only perf change (rare in a
+  # patch) would be missed here, so bench it via workflow_dispatch. A manual
+  # workflow_dispatch always benches -- the maintainer asked for it explicitly.
+  guard:
+    name: engine-change guard
+    runs-on: ubuntu-latest
+    outputs:
+      should_bench: ${{ steps.decide.outputs.should_bench }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "push" ]; then
+            echo "should_bench=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::workflow_dispatch -- benching unconditionally."
+            exit 0
+          fi
+          # The release immediately preceding this tag in version order (NOT merely
+          # the highest other tag, so a re-pushed / non-latest tag still compares
+          # against its true predecessor).
+          prev="$(git tag --list 'v*.*.*' --sort=-v:refname | awk -v t="$TAG" '$0==t{f=1;next} f{print;exit}')"
+          if [ -z "$prev" ]; then
+            echo "should_bench=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::no prior release tag -- benching."
+            exit 0
+          fi
+          # .rs only: Cargo.lock's workspace-version entries churn every release, so
+          # they cannot distinguish a real engine change from the version bump.
+          rs_changed="$(git diff --name-only "${prev}..${TAG}" -- crates/ | grep -c '\.rs$' || true)"
+          if [ "${rs_changed:-0}" -gt 0 ]; then
+            echo "should_bench=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${rs_changed} crates/**/*.rs changed ${prev}..${TAG} -- benching."
+          else
+            echo "should_bench=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no crates/**/*.rs changed ${prev}..${TAG} -- byte-identical binary; skipping bench (the ${prev} bench represents it)."
+          fi
+
   bench:
+    needs: guard
+    if: needs.guard.outputs.should_bench == 'true'
     name: bench (linux-x86_64)
     # The canonical baseline runner is kbench (label `bench`), NOT the
     # `alint` CI runner (the 3900X dev box) — bench moved to a dedicated,
