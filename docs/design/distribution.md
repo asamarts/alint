@@ -141,7 +141,7 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 | **install.sh** (`curl \| bash` via alint.org) | platform-detect → SHA-256 verified download → `$HOME/.local/bin` (prints a PATH hint if that dir is not on `PATH`, `install.sh:104-108`) | 4 (no Windows) | none |
 | **GitHub Action** `asamarts/alint@v0` | composite; fetches install.sh at the consumer's pinned ref with 3x retry; binary version derives from the action ref | 4 (no Windows) | none |
 | **crates.io** `cargo install alint` | source build; publishes 6 crates in dep order; **keyless OIDC** publishing | any Rust target | OIDC |
-| **npm** `@asamarts/alint` | **postinstall-download** wrapper (no native bytes in the tarball; `install.js` downloads + SHA-256-verifies at install time) | 5 (declares win-arm64 it can't serve) | `NPM_TOKEN` (PAT) |
+| **npm** `@asamarts/alint` | **postinstall-download** wrapper (no native bytes in the tarball; `install.js` downloads + SHA-256-verifies at install time); keyless OIDC publishing | 5 (declares win-arm64 it can't serve) | OIDC |
 | **Docker** `ghcr.io/asamarts/alint` | distroless-static, nonroot (UID 65532), re-extracts the *release* binaries so the image is byte-identical to the tarballs; OCI labels set in CI (`release.yml:313-317`); tags `:vX.Y.Z`/`:X.Y.Z`/`:X.Y`/`:latest` | linux amd64+arm64 | `GITHUB_TOKEN` |
 | **Homebrew tap** `asamarts/homebrew-alint` | formula regenerated from `SHA256SUMS` in CI (no rebuild), golden-tested in preflight, committed over SSH | macOS arm/intel + Linuxbrew x64/aarch64 | SSH deploy key |
 | **VS Code + Open VSX** | `vsce publish` + `ovsx publish`, version stamped from tag; real-client e2e in `editors-e2e.yml` | n/a | `VSCE_PAT`, `OVSX_PAT` |

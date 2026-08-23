@@ -645,9 +645,9 @@ jobs:
           #   VSCE_PAT — Azure DevOps PAT for the `asamarts` VS Code
           #              Marketplace publisher (Marketplace → Manage).
           #   OVSX_PAT — Open VSX access token (open-vsx.org → settings).
-          # Same mid-release-token-expiry risk as NPM_TOKEN: if either
-          # 401s, rotate it and `gh run rerun <id> --failed` — no new
-          # tag needed (the .vsix is idempotent per version).
+          # Expiring PATs (unlike the keyless crates.io / npm OIDC
+          # publishes): if either 401s, rotate it and `gh run rerun <id>
+          # --failed` — no new tag needed (the .vsix is idempotent per version).
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
           TAG: ${{ github.ref_name }}

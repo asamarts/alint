@@ -19,7 +19,7 @@ to rotate.
 
   ```sh
   # single-line token (prompts, or pipe from a password manager):
-  gh secret set NPM_TOKEN --repo asamarts/alint
+  gh secret set VSCE_PAT --repo asamarts/alint
 
   # multi-line value (SSH key, cert chain) from a file:
   gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo asamarts/alint < deploy_key
@@ -33,7 +33,7 @@ to rotate.
 |---|---|---|---|---|
 | `GITHUB_TOKEN` | ghcr.io Docker | built-in | per-run | already keyless |
 | `CARGO_REGISTRY_TOKEN` | crates.io | crates.io account | manual | **yes → migrate to Trusted Publishing** |
-| `NPM_TOKEN` | npm (`@asamarts/alint`) | npmjs.com | retired | **migrated → Trusted Publishing (tokenless)** |
+| `NPM_TOKEN` *(deleted 2026-08-22)* | npm (`@asamarts/alint`) | n/a | n/a | **replaced by keyless OIDC Trusted Publishing** |
 | `HOMEBREW_TAP_DEPLOY_KEY` | `asamarts/homebrew-alint` | ssh-keygen + repo deploy key | no (SSH key) | n/a (use a GitHub App for org scale) |
 | `VSCE_PAT` | VS Code Marketplace | Azure DevOps PAT | **yes (max 1 yr)** | no (Azure DevOps has no GH OIDC) |
 | `OVSX_PAT` | Open VSX | open-vsx.org token | no | no |
@@ -66,8 +66,9 @@ bit us again at v0.15.1, the trigger for the migration).
   `>= 11.5.1`, and Node `>= 22.14`; `npm publish` then authenticates via
   OIDC (no `NODE_AUTH_TOKEN`) and gets build provenance for free.
 
-crates.io and npm are both migrated, so `CARGO_REGISTRY_TOKEN` and
-`NPM_TOKEN` can both be deleted once each first OIDC release proves out.
+crates.io and npm are both migrated. `NPM_TOKEN` was **deleted 2026-08-22**
+after v0.15.2 proved OIDC live end to end; `CARGO_REGISTRY_TOKEN` can be
+deleted once a crates.io release proves out the same way.
 
 ## Per-channel setup runbook
 
@@ -78,10 +79,10 @@ two that go keyless if you take the OIDC path).
 2. **crates.io** — keyless: add the Trusted Publisher (above). Token
    fallback: crates.io → Account Settings → API Tokens → new token
    scoped to publish; `gh secret set CARGO_REGISTRY_TOKEN`.
-3. **npm** — currently the token path (OIDC deferred, npmjs UI bug):
-   npmjs.com → Access Tokens → Granular, `@asamarts` scope, read+write
-   packages, set a calendar reminder for the expiry; `gh secret set
-   NPM_TOKEN`.
+3. **npm** — keyless via Trusted Publishing (OIDC), no secret. One-time:
+   npmjs.com → `@asamarts/alint` → Settings → Trusted Publisher → GitHub
+   Actions: repo `asamarts/alint`, workflow `release.yml`, no environment
+   (see the keyless section above).
 4. **Homebrew tap** — `ssh-keygen -t ed25519 -f tap_key -N ""`; add
    `tap_key.pub` as a **write** deploy key on `asamarts/homebrew-alint`;
    `gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo asamarts/alint < tap_key`;
@@ -104,11 +105,11 @@ two that go keyless if you take the OIDC path).
 
 After the one-time setup, the only recurring human steps are:
 
-- **VS Code Azure DevOps PAT** and **`NPM_TOKEN`** rotation (the two
-  credentials with expiry; npm has no keyless path yet, VS Code never
-  will). Minimize: set the maximum expiry, add a calendar reminder, and
-  on a `401` rotate + `gh run rerun <id> --failed` (no new tag, the
-  artifacts are idempotent per version).
+- **VS Code Azure DevOps PAT** rotation (a 1-yr-max PAT with no keyless
+  path, now that npm went keyless via OIDC; the JetBrains signing cert
+  also expires, but is set long-lived). Minimize: set the maximum expiry,
+  add a calendar reminder, and on a `401` rotate + `gh run rerun <id>
+  --failed` (no new tag, the artifacts are idempotent per version).
 - **Zed extension version bump.** The Zed registry pins a version, so
   each release needs a one-line bump PR to `zed-industries/extensions`.
   This is the only per-release PR; it can be automated later with a
