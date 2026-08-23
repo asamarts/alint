@@ -74,6 +74,7 @@ run test          bash ci/scripts/test.sh                         || true
 run doc           bash ci/scripts/docs.sh                         || true
 run version-pins  bash ci/scripts/check-version-pins.sh           || true
 run dep-floors    bash ci/scripts/check-workspace-dep-floors.sh   || true
+run secrets-inv   bash ci/scripts/check-secrets-inventory.sh      || true
 run dogfood       bash ci/scripts/dogfood.sh                      || true
 
 if [[ "$failed" -ne 0 ]]; then

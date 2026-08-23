@@ -69,6 +69,7 @@ row() {
   row "Docs"         "$DOCS_JOB_RESULT"    "$RUST_CHANGED"
   row "Dogfood"      "$DOGFOOD_RESULT"     "$RUST_CHANGED"
   row "Shell tests"  "$SHELL_TESTS_RESULT" "$RUST_CHANGED"
+  row "Secrets inventory" "$SECRETS_INVENTORY_RESULT" "true"
   echo ""
 
   echo "### Bench Pipeline"
@@ -94,6 +95,7 @@ row() {
 
 FAILED=false
 for result in \
+  "$SECRETS_INVENTORY_RESULT" \
   "$FMT_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
