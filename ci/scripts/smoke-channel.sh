@@ -124,7 +124,11 @@ case "$CHANNEL" in
     while true; do
       brew update >/dev/null 2>&1 || true
       brew reinstall alint >/dev/null 2>&1 || brew install alint || true
-      hb_got="$(alint --version 2>&1 | awk '/^alint [0-9]/ { print $2; exit }')"
+      # `|| true`: when the install did not land (transient bottle blip, a tap still
+      # catching up, trust not cleared), `alint` exits 127 and pipefail would abort
+      # the whole script HERE -- killing the very retry loop this lives in. Swallow
+      # it so an empty hb_got falls through to the retry / graceful-FAIL logic below.
+      hb_got="$(alint --version 2>&1 | awk '/^alint [0-9]/ { print $2; exit }')" || true
       [ "$hb_got" = "$VER" ] && break
       if [ "$hb_n" -ge "$RETRY_MAX" ]; then
         echo "  [smoke] FAIL: homebrew serves '${hb_got:-<none>}', expected '${VER}' after ${RETRY_MAX} attempts" >&2
