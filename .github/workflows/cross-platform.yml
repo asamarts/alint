@@ -19,10 +19,6 @@ concurrency:
   group: cross-platform-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege: both jobs only check out and read the public releases API.
-permissions:
-  contents: read
-
 env:
   # Mirrored verbatim across ci.yml / coverage.yml / release.yml /
   # cross-platform.yml — keep identical (see ci.yml for rationale).
@@ -60,39 +56,3 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace --locked
-
-  # Pre-merge counterpart to the post-publish-smoke homebrew leg: brew-install the
-  # LATEST published alint from the tap on a fresh macOS runner, so an install-path
-  # regression (e.g. Homebrew 6.x's tap-trust gate -- the v0.15.1/v0.15.2 blocker)
-  # is caught HERE, before a release, not after. Reuses ci/scripts/smoke-channel.sh
-  # so the pre- and post-release paths can't drift. A new formula's tarball only
-  # exists post-tag, so this validates the install MECHANICS against the current
-  # release, not the PR's version (the actual new-version install stays the job of
-  # post-publish-smoke). GitHub-hosted macOS (free on this public repo; no VM).
-  homebrew-install:
-    name: Homebrew install (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Resolve the tag in its OWN step so GH_TOKEN never shares an environment with
-      # the reused smoke script (fork-PR least-exposure; the token is read-only on
-      # forks anyway, but the install step has no business seeing it).
-      - name: Resolve the latest published release tag
-        id: rel
-        env:
-          GH_TOKEN: ${{ github.token }}          # authenticate the releases API call (rate limit)
-        run: |
-          set -euo pipefail
-          # Capture curl separately: piping it straight into a truncating filter lets
-          # that filter close the pipe early, so curl exits 23 (write error) and
-          # pipefail aborts before we resolve the tag.
-          resp="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest")"
-          tag="$(printf '%s\n' "$resp" | sed -nE 's/.*"tag_name": *"([^"]+)".*/\1/p' | head -1)"
-          echo "==> latest published release: ${tag}"
-          [ -n "${tag}" ] || { echo "could not resolve the latest release tag" >&2; exit 1; }
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-      - name: brew install the latest published alint via the tap
-        env:
-          SMOKE_FLOATING: "1"                    # tag == latest, so the leg runs (not skips)
-        run: ci/scripts/smoke-channel.sh homebrew "${{ steps.rel.outputs.tag }}"
