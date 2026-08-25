@@ -1524,7 +1524,6 @@ fn emit_rules_master_index(
 /// The architecture view embedded atop a generated concept page, if any.
 pub(crate) fn concept_view_id(slug: &str) -> Option<&'static str> {
     match slug {
-        "fix-operations" => Some("fixFlow"),
         "nested-configs" => Some("monorepoNesting"),
         _ => None,
     }

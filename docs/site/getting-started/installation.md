@@ -7,8 +7,6 @@ sidebar:
 
 alint ships as a single native executable with no language runtime, no JVM, and nothing else to install. Pick whichever path matches your environment.
 
-<likec4-view view-id="distributionFlow"></likec4-view>
-
 ## Homebrew (macOS + Linuxbrew)
 
 ```bash
