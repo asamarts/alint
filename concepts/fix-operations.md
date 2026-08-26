@@ -3,8 +3,6 @@ title: 'Fix operations'
 description: 'alint concept: fix operations.'
 ---
 
-<likec4-view view-id="fixFlow"></likec4-view>
-
 Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.
 
 **Path-only** (ignore `fix_size_limit`):
