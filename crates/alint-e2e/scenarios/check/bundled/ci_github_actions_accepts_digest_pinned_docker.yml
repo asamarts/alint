@@ -1,0 +1,32 @@
+name: alint://bundled/ci/github-actions — digest-pinned Docker actions are not flagged
+tags: [check, extends, bundled, ci, github-actions, passing, regression]
+
+# A digest-pinned Docker action (`docker://img@sha256:<64-hex>`) is immutably
+# pinned, so gha-pin-actions-to-sha must NOT flag it. (A tag-pinned
+# `docker://img:tag` still fires -- covered by the ill-formed scenario.) The
+# workflow is otherwise Scorecard-clean, so `violations: []` isolates the
+# Docker-digest case.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: docker://ghcr.io/acme/tool@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  - violations: []

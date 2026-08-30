@@ -1,0 +1,32 @@
+name: alint://bundled/ci/github-actions — tag-pinned Docker actions ARE flagged
+tags: [check, extends, bundled, ci, github-actions, regression]
+
+# A tag-pinned Docker action (`docker://img:tag`) is mutable, so
+# gha-pin-actions-to-sha must still flag it -- contrast the digest-pinned
+# scenario, which passes. The workflow is otherwise clean, so exactly one
+# gha-pin violation is expected.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: docker://alpine:3.18
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: gha-pin-actions-to-sha, level: warning, path: .github/workflows/ci.yml}

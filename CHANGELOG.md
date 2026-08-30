@@ -14,6 +14,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now exempts any `./`-prefixed `uses:` value, matching the exemption alint's own
   dogfooded copy already carried. Reported by @ivml.
   ([#208](https://github.com/asamarts/alint/issues/208))
+- The same `gha-pin-actions-to-sha` rule no longer flags **digest-pinned Docker
+  actions** (`uses: docker://img@sha256:<64-hex>`). A digest is an immutable pin, so it
+  is exempt; a tag-pinned `docker://img:tag` still fires.
 
 ## [0.15.2] - 2026-08-22
 

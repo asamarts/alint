@@ -939,7 +939,7 @@ Hardening for `.github/workflows/*.y{,a}ml`, guided by the two OpenSSF Scorecard
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
 | `gha-workflow-contents-read` | `yaml_path_equals` (`$.permissions.contents == "read"`) | warning | — |
-| `gha-pin-actions-to-sha` | `yaml_path_matches` (40-hex SHA on third-party `uses:`; local `./` refs exempt) | warning | — |
+| `gha-pin-actions-to-sha` | `yaml_path_matches` (40-hex SHA on third-party `uses:`; local `./` and digest-pinned `docker://` refs exempt) | warning | — |
 | `gha-workflow-has-name` | `yaml_path_matches` (`$.name`) | info | — |
 
 ### `alint://bundled/agent-hygiene@v1`
