@@ -128,6 +128,21 @@ fn dogfood_rules_match_their_bundled_twins() {
         }
     }
 
+    // Guard against a vacuous pass. Read/parse errors are swallowed into empty maps
+    // (see `rules_by_id`), so if `.alint.yml` or the bundled rulesets ever fail to
+    // parse -- or the last shared rule id is renamed away -- the drift loop below
+    // would iterate nothing and pass without checking anything. Require at least one
+    // non-allowlisted twin present on both sides so the gate can't silently no-op.
+    let compared = dogfood
+        .keys()
+        .filter(|id| !ALLOWLIST.contains(&id.as_str()) && bundled.contains_key(id.as_str()))
+        .count();
+    assert!(
+        compared > 0,
+        "drift gate found zero dogfood<->bundled twins to compare -- either a config \
+         failed to parse or no shared rule id remains; the gate would pass vacuously."
+    );
+
     let mut drifts: Vec<String> = Vec::new();
     for (id, drule) in &dogfood {
         if ALLOWLIST.contains(&id.as_str()) {
