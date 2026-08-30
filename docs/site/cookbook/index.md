@@ -112,12 +112,14 @@ rules:
   # Security practice: pin third-party actions to a full commit SHA,
   # not a mutable @v4-style tag. `$.jobs.*.steps[*].uses` iterates
   # every step across every job. `if_present: true` skips workflows
-  # that have no `uses:` at all.
+  # that have no `uses:` at all. The regex also exempts local `./`
+  # actions and digest-pinned `docker://...@sha256:` refs -- both are
+  # already immutable or same-repo, so SHA-pinning doesn't apply.
   - id: pin-actions-to-sha
     kind: yaml_path_matches
     paths: ".github/workflows/*.yml"
     path: "$.jobs.*.steps[*].uses"
-    matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+    matches: '^(\./.*|docker://[^@]+@sha256:[a-f0-9]{64}|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
     if_present: true
     level: warning
 ```
