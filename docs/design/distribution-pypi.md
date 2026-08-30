@@ -104,23 +104,53 @@ Mirror the existing tokenless posture (`publish-crates` via `crates-io-auth-acti
   in `release-credentials.md` -- Keyless "yes -> Trusted Publishing" -- is optional. If a
   `PYPI_API_TOKEN` fallback were ever wired, it *would* need a row in the same PR.)
 
-## 5. The pre-commit hook (retires `MP-L5`) -- a small second repo
+## 5. Pre-commit integration (a cross-language front-end, not a Python thing)
 
-pre-commit's `language: python` clones the hook repo at `rev` and runs `pip install .` on
-that checkout; pointing it at the alint workspace root would compile from source. The
-established fix (ruff's model) is a trivial **mirror repo**:
+This is the one net-new artifact, so it is worth framing precisely: it is a **pre-commit
+repo, not a Python repo**. pre-commit (pre-commit.com) is a language-agnostic git-hook
+framework used by Go, JS, Rust, and polyglot-monorepo projects alike; a hook is
+distributed as a git repo carrying a `.pre-commit-hooks.yaml`, referenced by consumers via
+`repo:` + `rev:`. The **PyPI channel itself does not need this repo** -- `uvx` / `pipx` /
+`pip install alint` all work without it. The repo is purely the pre-commit front-end, and
+it *rides* the PyPI wheel only as its install vehicle: pre-commit's `language: python`
+backend runs `pip install alint==<ver>`, pulling the prebuilt wheel (fast, no toolchain).
+That `language:` line is plumbing, not a Python dependency for anyone using the hook.
 
-- New public repo **`asamarts/alint-pre-commit`**: a `pyproject.toml` with
-  `dependencies = ["alint==<version>"]` (no package code) + a `.pre-commit-hooks.yaml`
-  (`id: alint`, `entry: alint`, `language: python`, `pass_filenames: false`,
-  `require_serial: true`) + an optional `mirror.py` that pins the version and `git tag
-  v<version>` per alint release.
-- Consumers add `repo: https://github.com/asamarts/alint-pre-commit`, `rev: v<version>`,
-  `hooks: [{id: alint}]`. `pip install .` pulls the prebuilt `alint==<version>` wheel --
-  no Rust toolchain -- and runs the native binary. This is the direct `MP-L5` remedy.
-- **Decision flagged:** this is a second (tiny, public, auto-synced) repo. It cannot live
-  inside the alint repo (the `pip install .` would compile). Low ongoing cost; `mirror.py`
-  automates the per-release bump.
+**Reuse, consumer side: fully cross-language.** alint lints repo *structure*, so the same
+hook serves every stack -- a Go, TypeScript, or Java-monorepo team all add the identical
+`repo: asamarts/alint-pre-commit`, `rev: v<version>`, `hooks: [{id: alint}]`. It is the
+opposite of Python-specific in practice.
+
+**Reuse, as a container for other ecosystem front-ends: no.** A Homebrew tap, a GitHub
+Action, and a pre-commit mirror each pin conflicting root-file conventions (`Formula/` vs
+`action.yml` vs `.pre-commit-hooks.yaml` + pip-installability at root), so they stay
+separate repos -- alint already keeps `asamarts/homebrew-alint` apart for the same reason.
+There is no single "integrations" repo; this is specifically the pre-commit one.
+
+**Recommended: the mirror repo** (ruff's `ruff-pre-commit` model). A trivial public
+`asamarts/alint-pre-commit`: a `pyproject.toml` with `dependencies = ["alint==<version>"]`
+(no package code) + a `.pre-commit-hooks.yaml` (`id: alint`, `entry: alint`,
+`language: python`, `pass_filenames: false`, `require_serial: true`) + a `mirror.py` that
+re-pins the version and `git tag v<version>` per alint release. It **decouples the
+pre-commit `rev` from the release tag** -- the mirror re-tags only *after* the wheel is
+confirmed live on PyPI, sidestepping the tag-exists-before-wheel-published race -- and
+keeps the alint repo clean.
+
+**Alternatives that avoid a second repo (with trade-offs), so the call is informed:**
+- *Status quo, keep `language: rust`* (in the main repo): compiles alint from source on
+  every dev machine. No second repo, no PyPI needed, but slow + needs rustc -- this *is*
+  `MP-L5`, the thing PyPI is meant to retire.
+- *`language: docker_image`* (in the main repo's `.pre-commit-hooks.yaml`): runs alint from
+  the ghcr image. No second repo *and* no PyPI dependency; the trade-off is a local Docker
+  requirement and a heavier per-run.
+- *A root `pyproject.toml` in the alint repo* pinning `alint==<version>`: technically
+  avoids a second repo (alint's root has no pyproject today, unlike ruff's maturin one),
+  but it makes the Rust repo oddly `pip install`-able, clutters the root, and reintroduces
+  the publish-timing race the mirror avoids.
+
+**Decision:** the mirror is the price of a *fast* pre-commit hook, and it pays off for
+every language's alint users, not Python's. If the pre-commit hook is not wanted, drop the
+mirror and PyPI shrinks to `uvx`/`pipx`/`pip` (still useful, a smaller win).
 
 ## 6. CI / release integration
 
@@ -184,8 +214,9 @@ Path B given the P1 investment.
 
 1. **Path A vs Path B** -- recommend **B** (byte-identical, single provenance chain, reuses
    the matrix). Accept the ~150-250 line assembler.
-2. **The `alint-pre-commit` mirror repo** -- a second small public repo; approve creating
-   it (it is the only way to a fast `language: python` hook).
+2. **The `alint-pre-commit` mirror repo** -- a second small public repo (a cross-language
+   pre-commit front-end, not a Python artifact; see §5); the clean path to a fast
+   pre-commit hook. §5 covers the docker-image / root-pyproject alternatives that avoid it.
 3. **Name** -- claim `alint` (recommended) vs `alint-cli` fallback.
 4. **Promote now or stay demand-gated** -- this doc makes it buildable; the trigger is a
    go decision, given PyPI is reach-not-home for a language-agnostic tool.
