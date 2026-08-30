@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The bundled `ci/github-actions@v1` ruleset's `gha-pin-actions-to-sha` rule no
+  longer flags **local composite-action references** (`uses: ./...`). Local actions
+  live in the same repo (the same trust boundary) and cannot be SHA-pinned; the rule
+  now exempts any `./`-prefixed `uses:` value, matching the exemption alint's own
+  dogfooded copy already carried. Reported by @ivml.
+  ([#208](https://github.com/asamarts/alint/issues/208))
+
 ## [0.15.2] - 2026-08-22
 
 A release-infrastructure patch: the alint binary and rules are unchanged from

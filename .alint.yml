@@ -127,6 +127,10 @@ rules:
     message: "The Cargo build directory `target/` must not be tracked."
 
   # --- Naming -------------------------------------------------------------
+  # `rust-sources-snake-case` is a deliberately-narrowed twin of the bundled
+  # `rust@v1` rule (scoped to this workspace's `crates/**/src`; the bundled copy
+  # is repo-agnostic `**/src/**` plus compiler-fixture excludes that no-op here).
+  # The dogfood/bundled drift gate (dogfood_bundled_no_drift.rs) allowlists it.
   - id: rust-sources-snake-case
     kind: filename_case
     paths: "crates/**/src/**/*.rs"

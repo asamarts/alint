@@ -1,0 +1,35 @@
+name: alint://bundled/ci/github-actions — local `./` composite-action refs are not flagged (issue #208)
+tags: [check, extends, bundled, ci, github-actions, passing, regression]
+
+# Regression test for issue #208: gha-pin-actions-to-sha must NOT flag a
+# local composite-action reference (`uses: ./...`). Local refs live in the
+# same repo (same trust boundary) and cannot be SHA-pinned. The workflow is
+# otherwise Scorecard-clean (name + contents: read + a SHA-pinned third-party
+# action), so `violations: []` isolates the local-ref behavior — with the
+# pre-fix regex the `./.github/actions/printout` step raised a warning.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b
+                - uses: ./.github/actions/printout
+                - run: echo hi
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  - violations: []

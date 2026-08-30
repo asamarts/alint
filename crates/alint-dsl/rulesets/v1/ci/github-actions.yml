@@ -51,16 +51,20 @@ rules:
     # `@v4`, `@main`, or `@v4.1.1`. Teams that trust specific
     # publishers (e.g. `actions/*`) typically tighten or relax
     # via a follow-up rule.
+    #
+    # Local `./` composite-action references are exempt: they live in
+    # the same repo (same trust boundary) and cannot be SHA-pinned.
     kind: yaml_path_matches
     paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
     path: "$.jobs.*.steps[*].uses"
-    matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+    matches: '^(\./.*|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
     if_present: true
     level: warning
     message: >-
       Third-party action is not pinned to a commit SHA. Pin with
       `@<40-char-sha>  # v4.1.1` so a compromised tag can't
-      silently change what runs.
+      silently change what runs. Local `./` action references are
+      allowed (they share the repo's trust boundary).
     policy_url: "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions"
 
   - id: gha-workflow-has-name
