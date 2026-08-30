@@ -1,0 +1,44 @@
+name: alint://bundled/ci/github-actions — workflow-level write permissions ARE flagged
+tags: [check, extends, bundled, ci, github-actions, regression]
+
+# gha-workflow-contents-read fires when a workflow grants write to the
+# GITHUB_TOKEN at the workflow level: `write-all` or `contents: write`. (The
+# "no permissions declared anywhere" case is covered by
+# ci_github_actions_flags_unpinned_and_permissive_workflows.) Each workflow is
+# otherwise clean (named, run-only), so exactly one contents-read violation
+# fires per file -- proving the yaml_path_absent filter does not fan out.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "write-all.yml": |
+          name: A
+          on: push
+          permissions: write-all
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        "contents-write.yml": |
+          name: B
+          on: push
+          permissions:
+            contents: write
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: gha-workflow-contents-read, level: warning, path: .github/workflows/contents-write.yml}
+      - {rule: gha-workflow-contents-read, level: warning, path: .github/workflows/write-all.yml}

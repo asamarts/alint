@@ -454,6 +454,11 @@ rules:
     matches: "^read$"
     level: warning
     if_present: true
+  - id: no-workflow-write-all
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.yml"
+    path: "$[?($.permissions == 'write-all')]"
+    level: warning
   - id: cargo-edition-2024
     kind: toml_path_equals
     paths: "Cargo.toml"

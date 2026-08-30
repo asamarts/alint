@@ -1,0 +1,38 @@
+name: yaml_path_absent is silent when the forbidden path is absent
+tags: [check, yaml_path_absent]
+
+docs:
+  title: A workflow that restricts the token to read
+  case: pass
+  kind: yaml_path_absent
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions:
+            contents: read
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: no-write-all-token
+        kind: yaml_path_absent
+        paths: ".github/workflows/*.yml"
+        path: "$[?($.permissions == 'write-all')]"
+        level: error
+        message: >-
+          Workflow grants `write-all` to the GITHUB_TOKEN; restrict it to
+          `contents: read` (or narrower).
+
+when: [check]
+
+expect:
+  - violations: []

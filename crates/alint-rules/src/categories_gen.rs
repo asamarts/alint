@@ -85,6 +85,7 @@ pub static KIND_CATEGORIES: &[(&str, &[Category])] = &[
     ("unique_by", &[Category::CrossFile]),
     ("xml_path_equals", &[Category::StructuredQuery]),
     ("xml_path_matches", &[Category::StructuredQuery]),
+    ("yaml_path_absent", &[Category::StructuredQuery]),
     ("yaml_path_equals", &[Category::StructuredQuery]),
     ("yaml_path_matches", &[Category::StructuredQuery]),
 ];

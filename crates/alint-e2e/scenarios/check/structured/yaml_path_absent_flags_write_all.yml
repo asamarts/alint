@@ -1,0 +1,41 @@
+name: yaml_path_absent flags a workflow that grants write-all
+tags: [check, yaml_path_absent]
+
+docs:
+  title: A workflow that grants write-all to the GITHUB_TOKEN
+  case: fail
+  kind: yaml_path_absent
+
+given:
+  tree:
+    ".github":
+      workflows:
+        # A `$[?…]` filter selects the whole root when the predicate holds, so a
+        # value-op rule would warn once per top-level key. yaml_path_absent fires
+        # exactly one file-level violation instead.
+        "ci.yml": |
+          name: CI
+          on: push
+          permissions: write-all
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    rules:
+      - id: no-write-all-token
+        kind: yaml_path_absent
+        paths: ".github/workflows/*.yml"
+        path: "$[?($.permissions == 'write-all')]"
+        level: error
+        message: >-
+          Workflow grants `write-all` to the GITHUB_TOKEN; restrict it to
+          `contents: read` (or narrower).
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-write-all-token, level: error, path: .github/workflows/ci.yml}

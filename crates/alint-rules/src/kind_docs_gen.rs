@@ -84,6 +84,7 @@ pub static KIND_SUMMARIES: &[(&str, &str)] = &[
     ("unique_by", "No two files matching select may share the value of key..."),
     ("xml_path_equals", "Query a structured document with a JSONPath expression and assert every match deep-equals..."),
     ("xml_path_matches", "Same shape as the *_equals variants, but the asserted value is a regex matched against string..."),
+    ("yaml_path_absent", "Assert a JSONPath query over a YAML file matches nothing; one file-level violation if present."),
     ("yaml_path_equals", "Query a structured document with a JSONPath expression and assert every match deep-equals..."),
     ("yaml_path_matches", "Same shape as the *_equals variants, but the asserted value is a regex matched against string..."),
 ];

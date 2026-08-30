@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- New rule kind `yaml_path_absent`: asserts a JSONPath query over a YAML file
+  matches nothing, firing one file-level violation when it does -- the existence
+  sibling of the value-checking structured kinds (mirrors `file_absent` for a
+  path). A root-level `$[?...]` filter that fans out over every top-level key
+  still yields a single violation.
+
 ### Fixed
 
 - The bundled `ci/github-actions@v1` ruleset's `gha-pin-actions-to-sha` rule no
@@ -17,6 +25,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The same `gha-pin-actions-to-sha` rule no longer flags **digest-pinned Docker
   actions** (`uses: docker://img@sha256:<64-hex>`). A digest is an immutable pin, so it
   is exempt; a tag-pinned `docker://img:tag` still fires.
+- The bundled `ci/github-actions@v1` `gha-workflow-contents-read` rule no longer
+  false-fires on `permissions: read-all`, `permissions: {}`, `contents: none`, or
+  per-job-only permissions. It now fires only when a workflow grants (or defaults
+  to) write access to the GITHUB_TOKEN -- no permissions declared anywhere,
+  `write-all`, or `contents: write` at the workflow level. Rebuilt on the new
+  `yaml_path_absent` kind.
 
 ## [0.15.2] - 2026-08-22
 

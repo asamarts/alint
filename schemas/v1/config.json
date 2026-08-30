@@ -2774,6 +2774,9 @@
           "$ref": "#/$defs/rule_yaml_path_matches"
         },
         {
+          "$ref": "#/$defs/rule_yaml_path_absent"
+        },
+        {
           "$ref": "#/$defs/rule_toml_path_equals"
         },
         {
@@ -3638,6 +3641,26 @@
         "paths",
         "path",
         "matches"
+      ],
+      "type": "object"
+    },
+    "rule_yaml_path_absent": {
+      "description": "Existence assertion: the query must match nothing (the YAML sibling of `file_absent`, for a path).",
+      "properties": {
+        "kind": {
+          "const": "yaml_path_absent"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent).",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path"
       ],
       "type": "object"
     },

@@ -299,6 +299,10 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             structured_path::matches_options_schema(),
         ),
         (
+            "rule_yaml_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
             "rule_json_schema_passes",
             json_schema_passes::options_schema(),
         ),
@@ -369,6 +373,8 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("xml_path_equals", structured_path::xml_path_equals_build);
     registry.register("xml_path_matches", structured_path::xml_path_matches_build);
+    // Existence assertion (yaml only for now; see the structured_path module docs).
+    registry.register("yaml_path_absent", structured_path::yaml_path_absent_build);
     registry.register("json_schema_passes", json_schema_passes::build);
     registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
     registry.register("commented_out_code", commented_out_code::build);

@@ -1,8 +1,9 @@
 //! Structured-query rule family:
-//! `{json,yaml,toml,xml}_path_{equals,matches}`.
+//! `{json,yaml,toml,xml}_path_{equals,matches}`, plus the
+//! `yaml_path_absent` existence assertion.
 //!
-//! Eight rule kinds share a single implementation that varies
-//! along two axes:
+//! The eight value-checking kinds share a single implementation
+//! that varies along two axes:
 //!
 //! - **Format** — `Json`, `Yaml`, `Toml`, or `Xml`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
@@ -39,6 +40,16 @@
 //! e.g. "every `uses:` in a GitHub Actions workflow must be
 //! pinned to a commit SHA" (a workflow with only `run:` steps
 //! has no `uses:` at all and shouldn't be flagged).
+//!
+//! ## `yaml_path_absent`
+//!
+//! A third op — **existence** — mirrors `file_absent` for a path:
+//! the query must select *nothing*, and any match produces exactly
+//! one file-level violation (never per-match, so a `$[?…]` filter
+//! that fans out over every root key still yields one violation).
+//! `equals` / `matches` / `if_present` don't apply. Only `yaml` is
+//! wired today (its one consumer, `gha-workflow-contents-read`); the
+//! `json` / `toml` / `xml` siblings are a trivial symmetric follow-up.
 //!
 //! Unparseable files (bad JSON / YAML / TOML, not-well-formed
 //! XML) produce one violation per file. An unparseable file is a
@@ -97,6 +108,12 @@ pub enum Op {
     /// A non-string match produces a violation with a clear
     /// `expected string, got <kind>` message.
     Matches(Regex),
+    /// Existence assertion: the query must match **nothing**. Any
+    /// match produces exactly one file-level violation (no per-match
+    /// value check). Resolved early in `evaluate_file`; the per-match
+    /// helpers (`check_match`, `match_baseline_key`) are never reached
+    /// with this variant.
+    Absent,
 }
 
 // ---------------------------------------------------------------
@@ -147,6 +164,23 @@ pub fn equals_options_schema() -> serde_json::Value {
 pub fn matches_options_schema() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(MatchesOptions))
         .expect("MatchesOptions JSON schema serializes")
+}
+
+/// Options for the `*_path_absent` kinds. Existence-only: there is no value to
+/// compare and no `if_present` (the rule *is* a presence check).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AbsentOptions {
+    /// `JSONPath` expression rooted at `$`. The rule fires one violation per
+    /// file if the query matches any node (the path must be absent).
+    path: String,
+}
+
+/// schemars-derived options schema for the `*_path_absent` kinds.
+#[must_use]
+pub fn absent_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(AbsentOptions))
+        .expect("AbsentOptions JSON schema serializes")
 }
 
 // ---------------------------------------------------------------
@@ -271,6 +305,25 @@ impl PerFileRule for StructuredPathRule {
             }
         };
         let matches = self.path_expr.query(&root_value);
+        // Existence assertion: the query must select nothing. Any match is
+        // exactly one file-level violation -- never per-match, so a `$[?...]`
+        // filter that fans out over every root key still yields one violation.
+        if matches!(self.op, Op::Absent) {
+            if matches.is_empty() {
+                return Ok(Vec::new());
+            }
+            let msg = self.message.clone().unwrap_or_else(|| {
+                format!(
+                    "JSONPath `{}` matched, but this rule requires it to be absent",
+                    self.path_src
+                )
+            });
+            return Ok(vec![
+                Violation::new(msg)
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    .with_baseline_key(format!("{}\u{0}absent", self.path_src)),
+            ]);
+        }
         if matches.is_empty() {
             if self.if_present {
                 return Ok(Vec::new());
@@ -319,6 +372,8 @@ fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
     let op_descr = match op {
         Op::Equals(expected) => format!("== {expected}"),
         Op::Matches(re) => format!("=~ {}", re.as_str()),
+        // Unreached: `Absent` violations are file-level (built in `evaluate_file`).
+        Op::Absent => "absent".to_string(),
     };
     format!("{path_src}\u{0}{op_descr}\u{0}got {m}")
 }
@@ -326,6 +381,9 @@ fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
 /// Return `Some(message)` if the match fails the op; `None` if it passes.
 fn check_match(m: &Value, op: &Op) -> Option<String> {
     match op {
+        // `Absent` is resolved file-level in `evaluate_file` and never reaches
+        // the per-match loop; a stray call is a pass.
+        Op::Absent => None,
         Op::Equals(expected) => {
             if m == expected {
                 None
@@ -424,6 +482,38 @@ pub fn xml_path_equals_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
 pub fn xml_path_matches_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     build_matches(spec, Format::Xml, "xml_path_matches")
+}
+
+pub fn yaml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Yaml, "yaml_path_absent")
+}
+
+fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box<dyn Rule>> {
+    let paths = spec.paths.as_ref().ok_or_else(|| {
+        Error::rule_config(&spec.id, format!("{kind_label} requires a `paths` field"))
+    })?;
+    let opts: AbsentOptions = spec
+        .deserialize_options()
+        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+    let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
+        Error::rule_config(
+            &spec.id,
+            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+        )
+    })?;
+    Ok(Box::new(StructuredPathRule {
+        id: spec.id.clone(),
+        level: spec.level,
+        policy_url: spec.policy_url.clone(),
+        message: spec.message.clone(),
+        scope: Scope::from_spec(spec)?,
+        literal_paths: extract_literal_paths(paths),
+        format,
+        path_expr,
+        path_src: opts.path,
+        op: Op::Absent,
+        if_present: false,
+    }))
 }
 
 fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box<dyn Rule>> {
@@ -690,6 +780,90 @@ mod tests {
             tempdir_with_files(&[("action.yml", b"runs:\n  using: node20\n  main: index.js\n")]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "bracket notation should match: {v:?}");
+    }
+
+    // ─── yaml_path_absent ────────────────────────────────────
+
+    #[test]
+    fn yaml_path_absent_passes_when_query_matches_nothing() {
+        // The path the rule forbids isn't there -> pass.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_absent\n\
+             paths: \".github/workflows/*.yml\"\n\
+             path: \"$.permissions\"\n\
+             level: error\n",
+        );
+        let rule = yaml_path_absent_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            ".github/workflows/ci.yml",
+            b"name: CI\non: push\njobs: {}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "absent path should pass: {v:?}");
+    }
+
+    #[test]
+    fn yaml_path_absent_fires_once_when_query_matches() {
+        // The forbidden path exists -> exactly one file-level violation.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_absent\n\
+             paths: \".github/workflows/*.yml\"\n\
+             path: \"$.permissions\"\n\
+             level: error\n",
+        );
+        let rule = yaml_path_absent_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            ".github/workflows/ci.yml",
+            b"name: CI\npermissions: write-all\non: push\njobs: {}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "present path should fire once: {v:?}");
+    }
+
+    #[test]
+    fn yaml_path_absent_filter_fanout_collapses_to_one_violation() {
+        // A root-level filter `$[?…]` selects *every* top-level key when the
+        // predicate holds (N nodes). Absent-mode must still yield exactly ONE
+        // file-level violation -- this is the whole point of the kind (vs. a
+        // `yaml_path_equals` + sentinel filter, which fans out to N warnings).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_absent\n\
+             paths: \"w.yml\"\n\
+             path: \"$[?($.permissions == 'write-all')]\"\n\
+             level: error\n",
+        );
+        let rule = yaml_path_absent_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "w.yml",
+            b"name: CI\npermissions: write-all\non: push\njobs: {}\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "filter fan-out must collapse to one file-level violation: {v:?}"
+        );
+    }
+
+    #[test]
+    fn yaml_path_absent_rejects_value_and_if_present_options() {
+        // `if_present` / `equals` / `matches` are not valid on an absent rule
+        // (deny_unknown_fields).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: yaml_path_absent\n\
+             paths: \"w.yml\"\n\
+             path: \"$.x\"\n\
+             if_present: true\n\
+             level: error\n",
+        );
+        assert!(
+            yaml_path_absent_build(&spec).is_err(),
+            "if_present must be rejected on yaml_path_absent"
+        );
     }
 
     // ─── toml_path_* ─────────────────────────────────────────

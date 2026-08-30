@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 89,
+    "rule_kinds": 90,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -97,6 +97,7 @@
     "unique_by",
     "xml_path_equals",
     "xml_path_matches",
+    "yaml_path_absent",
     "yaml_path_equals",
     "yaml_path_matches"
   ],
@@ -445,6 +446,9 @@
     "xml_path_matches": [
       "structured-query"
     ],
+    "yaml_path_absent": [
+      "structured-query"
+    ],
     "yaml_path_equals": [
       "structured-query"
     ],
@@ -553,6 +557,7 @@
     "unique_by": "unique_by",
     "xml_path_equals": "structured_path",
     "xml_path_matches": "structured_path",
+    "yaml_path_absent": "structured_path",
     "yaml_path_equals": "structured_path",
     "yaml_path_matches": "structured_path"
   },

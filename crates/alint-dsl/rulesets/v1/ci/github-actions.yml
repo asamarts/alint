@@ -26,18 +26,31 @@ version: 1
 
 rules:
   - id: gha-workflow-contents-read
-    # OpenSSF Scorecard Token-Permissions check. Workflows that
-    # need write permissions should override this rule per-file
-    # or set `level: off` in the root config.
-    kind: yaml_path_equals
+    # OpenSSF Scorecard Token-Permissions check: a workflow should
+    # restrict the GITHUB_TOKEN so a compromised step can't push to
+    # the repo. Fires only when a workflow grants (or defaults to)
+    # write -- it declares NO permissions anywhere (no workflow-level
+    # block AND no per-job block, so it inherits the broad default),
+    # OR declares `write-all`, OR `contents: write` at the workflow
+    # level. PASSES `contents: read`/`none`, `read-all`, `{}` (empty),
+    # and per-job-only permissions.
+    #
+    # The `$[?...]` filter selects the bad state; `yaml_path_absent`
+    # emits ONE file-level violation when it matches (a value-op kind
+    # would fan out to one warning per top-level key). Telling "no
+    # permissions at all" apart from "per-job permissions" needs this
+    # two-path disjunction, which the value-comparison kinds can't
+    # express.
+    kind: yaml_path_absent
     paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
-    path: "$.permissions.contents"
-    equals: "read"
+    path: "$[?((!$.permissions && count($.jobs[*].permissions)==0) || $.permissions=='write-all' || $.permissions.contents=='write')]"
     level: warning
     message: >-
-      GitHub workflows should declare `permissions.contents: read`
-      at the workflow level. Workflows that truly need write can
-      override this rule or set per-job permissions.
+      Workflow grants (or defaults to) write access to the
+      GITHUB_TOKEN. Restrict it: declare `permissions: contents:
+      read` (or `read-all`, or `{}`) at the workflow level, or set
+      per-job `permissions:`, so a compromised step can't push to
+      the repo.
     policy_url: "https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token"
 
   - id: gha-pin-actions-to-sha

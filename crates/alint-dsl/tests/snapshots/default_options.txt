@@ -1671,6 +1671,78 @@ StructuredPathRule {
     if_present: true,
 }
 
+=== kind: yaml_path_absent | id: no-workflow-write-all ===
+StructuredPathRule {
+    id: "no-workflow-write-all",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: None,
+    format: Yaml,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Filter(
+                                Filter(
+                                    LogicalOrExpr(
+                                        [
+                                            LogicalAndExpr(
+                                                [
+                                                    Paren(
+                                                        LogicalOrExpr(
+                                                            [
+                                                                LogicalAndExpr(
+                                                                    [
+                                                                        Relation(
+                                                                            ComparisonExpr {
+                                                                                left: SingularQuery(
+                                                                                    SingularQuery {
+                                                                                        kind: Absolute,
+                                                                                        segments: [
+                                                                                            Name(
+                                                                                                Name(
+                                                                                                    "permissions",
+                                                                                                ),
+                                                                                            ),
+                                                                                        ],
+                                                                                    },
+                                                                                ),
+                                                                                op: EqualTo,
+                                                                                right: Literal(
+                                                                                    String(
+                                                                                        "write-all",
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                ),
+                                                            ],
+                                                        ),
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$[?($.permissions == 'write-all')]",
+    op: Absent,
+    if_present: false,
+}
+
 === kind: yaml_path_equals | id: workflow-uses-checkout ===
 StructuredPathRule {
     id: "workflow-uses-checkout",

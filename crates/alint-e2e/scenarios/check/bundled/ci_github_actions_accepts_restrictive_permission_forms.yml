@@ -1,0 +1,61 @@
+name: alint://bundled/ci/github-actions — restrictive permission forms are not flagged
+tags: [check, extends, bundled, ci, github-actions, passing, regression]
+
+# gha-workflow-contents-read must PASS every restrictive GITHUB_TOKEN
+# declaration, not only `contents: read`: `contents: none`, `read-all`, `{}`
+# (empty = most locked-down), and per-job-only permissions. Firing on any of
+# these was the false positive fixed by the yaml_path_absent rewrite. Every
+# workflow here is otherwise clean (named, run-only steps), so `violations: []`
+# isolates the contents-read behavior.
+
+given:
+  tree:
+    ".github":
+      workflows:
+        "none.yml": |
+          name: A
+          on: push
+          permissions:
+            contents: none
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        "read-all.yml": |
+          name: B
+          on: push
+          permissions: read-all
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        "empty.yml": |
+          name: C
+          on: push
+          permissions: {}
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo hi
+        "per-job.yml": |
+          name: D
+          on: push
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              permissions:
+                contents: read
+              steps:
+                - run: echo hi
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/ci/github-actions@v1
+
+when: [check]
+
+expect:
+  - violations: []
