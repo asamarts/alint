@@ -66,10 +66,14 @@ fn curated_suggestion(kind: &str, wrong: &str) -> Option<&'static str> {
         // `matches:` because that's what the family's name suggests,
         // but `*_path_equals` only accepts `equals:`). Catches the
         // inverse mistake too.
-        ("json_path_equals" | "yaml_path_equals" | "toml_path_equals", "matches") => Some("equals"),
-        ("json_path_matches" | "yaml_path_matches" | "toml_path_matches", "equals") => {
-            Some("matches")
-        }
+        (
+            "json_path_equals" | "yaml_path_equals" | "toml_path_equals" | "xml_path_equals",
+            "matches",
+        ) => Some("equals"),
+        (
+            "json_path_matches" | "yaml_path_matches" | "toml_path_matches" | "xml_path_matches",
+            "equals",
+        ) => Some("matches"),
 
         _ => None,
     }
@@ -296,6 +300,27 @@ mod tests {
         let out = enrich("command", msg);
         assert!(out.contains("did you mean: `command`"), "out: {out}");
         assert!(!out.contains("did you mean: `paths`"), "out: {out}");
+    }
+
+    #[test]
+    fn equals_matches_hint_covers_every_format() {
+        // Parity: the equals<->matches confusion hint must cover every format's
+        // `<fmt>_path_{equals,matches}`, so xml (and future formats) aren't left
+        // with a generic error. Iterates the SSOT `Format::ALL`.
+        use crate::structured_format::Format;
+        for f in Format::ALL {
+            let fmt = f.label().to_lowercase();
+            assert_eq!(
+                super::curated_suggestion(&format!("{fmt}_path_equals"), "matches"),
+                Some("equals"),
+                "{fmt}_path_equals should suggest `equals`"
+            );
+            assert_eq!(
+                super::curated_suggestion(&format!("{fmt}_path_matches"), "equals"),
+                Some("matches"),
+                "{fmt}_path_matches should suggest `matches`"
+            );
+        }
     }
 
     // --- Pass-through: no enrichment when not applicable ---------------

@@ -1,5 +1,5 @@
 //! `json_schema_passes` — assert that a set of JSON / YAML /
-//! TOML files validates against a JSON Schema.
+//! TOML / XML files validates against a JSON Schema.
 //!
 //! Closes the last unshipped structured-query primitive
 //! (`json_path_*` shipped in v0.4.4). JSON Schema sees use far
@@ -18,10 +18,12 @@
 //!   repository-level violation rather than one violation per
 //!   target file.
 //! - The target's format is auto-detected from its extension
-//!   (`.json` / `.yaml` / `.yml` / `.toml`); pass `format:` to
-//!   override. YAML and TOML coerce through serde into the
-//!   same `serde_json::Value` tree the schema validates against
-//!   — same trick `json_path_*` uses.
+//!   (`.json` / `.yaml` / `.yml` / `.toml` / `.xml` and the
+//!   `.csproj` / `.props` / `.targets` family); pass `format:`
+//!   to override. YAML and TOML coerce through serde into the
+//!   same `serde_json::Value` tree the schema validates against,
+//!   and XML maps in via the xmltodict-style `xml_to_value`
+//!   convention — same trick `json_path_*` uses.
 //! - Each schema-validation error becomes one violation, with
 //!   the message including the failing instance path and the
 //!   schema's error description. A target that fails to parse
@@ -39,9 +41,9 @@ use jsonschema::Validator;
 use serde::Deserialize;
 use serde_json::Value;
 
-/// The `format:` override values for `json_schema_passes`. Distinct from
-/// `structured_path::Format` (which has `xml`, not `yml`): this validator targets
-/// json/yaml/toml documents and accepts `yml` as a `yaml` alias.
+/// The `format:` override values for `json_schema_passes`: the same formats as
+/// `structured_path::Format` (json / yaml / toml / xml), plus `yml` accepted as a
+/// `yaml` alias.
 #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum TargetFormat {
@@ -49,6 +51,18 @@ enum TargetFormat {
     Yaml,
     Yml,
     Toml,
+    Xml,
+}
+
+impl TargetFormat {
+    fn to_format(self) -> Format {
+        match self {
+            TargetFormat::Json => Format::Json,
+            TargetFormat::Yaml | TargetFormat::Yml => Format::Yaml,
+            TargetFormat::Toml => Format::Toml,
+            TargetFormat::Xml => Format::Xml,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -58,7 +72,8 @@ struct Options {
     /// itself be JSON even when validating YAML / TOML targets.
     schema_path: PathBuf,
     /// Override the auto-detected target format. When omitted, format is inferred
-    /// from each target file's extension (.json / .yaml / .yml / .toml).
+    /// from each target file's extension (.json / .yaml / .yml / .toml / .xml and
+    /// the .csproj / .props / .targets XML family).
     #[serde(default)]
     format: Option<TargetFormat>,
 }
@@ -189,7 +204,7 @@ impl Rule for JsonSchemaPassesRule {
                 violations.push(
                     Violation::new(
                         "could not detect format from extension; pass `format:` \
-                         (`json` / `yaml` / `toml`) on the rule",
+                         (`json` / `yaml` / `toml` / `xml`) on the rule",
                     )
                     .with_path(entry.path.clone()),
                 );
@@ -260,11 +275,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
 
-    let format_override = opts.format.map(|f| match f {
-        TargetFormat::Json => Format::Json,
-        TargetFormat::Yaml | TargetFormat::Yml => Format::Yaml,
-        TargetFormat::Toml => Format::Toml,
-    });
+    let format_override = opts.format.map(TargetFormat::to_format);
 
     if spec.fix.is_some() {
         return Err(Error::rule_config(
@@ -474,6 +485,36 @@ mod tests {
             Format::detect_from_path(std::path::Path::new("Makefile")),
             None
         );
+    }
+
+    #[test]
+    fn target_format_covers_every_format() {
+        // Parity: every Format::ALL variant is requestable as `format: <label>`
+        // and maps back to it, so json_schema_passes can't silently lack a format.
+        for f in Format::ALL {
+            let label = f.label().to_lowercase();
+            let tf: TargetFormat = serde_json::from_value(json!(label))
+                .unwrap_or_else(|e| panic!("`format: {label}` should deserialize: {e}"));
+            assert_eq!(
+                tf.to_format(),
+                *f,
+                "format: {label} must map to Format::{f:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn xml_targets_are_auto_detected() {
+        // The .csproj / .props / .xml family auto-detects as XML -- a
+        // formerly-latent path, now documented and tested (see
+        // docs/design/format-coverage.md, section 7 question 2).
+        for p in ["App.csproj", "Directory.Build.props", "config.xml"] {
+            assert_eq!(
+                Format::detect_from_path(std::path::Path::new(p)),
+                Some(Format::Xml),
+                "{p} should detect as XML"
+            );
+        }
     }
 
     #[test]

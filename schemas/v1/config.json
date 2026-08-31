@@ -360,12 +360,13 @@
       "type": "object"
     },
     "TargetFormat": {
-      "description": "The `format:` override values for `json_schema_passes`. Distinct from `structured_path::Format` (which has `xml`, not `yml`): this validator targets json/yaml/toml documents and accepts `yml` as a `yaml` alias.",
+      "description": "The `format:` override values for `json_schema_passes`: the same formats as `structured_path::Format` (json / yaml / toml / xml), plus `yml` accepted as a `yaml` alias.",
       "enum": [
         "json",
         "yaml",
         "yml",
-        "toml"
+        "toml",
+        "xml"
       ],
       "type": "string"
     },
@@ -2724,7 +2725,7 @@
               "type": "null"
             }
           ],
-          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .xml and the .csproj / .props / .targets XML family)."
         },
         "kind": {
           "const": "json_schema_passes"
