@@ -41,7 +41,7 @@ Legend: J=JSON, Y=YAML, T=TOML, X=XML. `lines`/`regex`/`whole_file` are the form
 | 5 | `registry_paths_resolve` | `registry_paths_resolve.rs:79,325` | Y | Y | Y | **no** | inherits #3 + `exclude_query` fallback misroutes XML to TOML (`:325`) |
 | 6 | `file_graph` (`edges.from_content.extract`) | `file_graph.rs:82`; `lib.rs:431` | Y | Y | Y | **no** | inherits #3 |
 | 7 | `json_schema_passes` (`TargetFormat`) | `json_schema_passes.rs:47` | Y | Y | Y | latent | `format: xml` unrequestable; auto-detected XML validated but undocumented/untested |
-| 8 | `did_you_mean` field hint | `did_you_mean.rs:69` | Y | Y | Y | **no** | `xml_path_*` typos get a generic error |
+| 8 | `did_you_mean` equals/matches hint | `alint-core/src/did_you_mean.rs:69` | Y | Y | Y | **no** | `xml_path_*` typos get a generic error, no "did you mean" |
 
 Surfaces 1 and 2 are already complete. Surfaces 3 through 8 are the work.
 
@@ -75,10 +75,12 @@ No new option *keys* are introduced beyond the `xml:` extract mode and the `xml`
 
 ### 3.2 The parity mechanism (the architectural core, ADR-0016)
 
-The decision this doc asks to record: **`Format` is the single source of truth for the config-format axis, and every format-specific surface must handle every `Format` variant.** Two complementary enforcement layers:
+The decision this doc asks to record: **`Format` is the single source of truth for the config-format axis, and every format-specific surface must cover every `Format` variant.**
 
-1. **Structural (preferred where cheap):** derive the per-format handling from `Format` instead of re-listing it. `Extract`'s three structured arms are a hand-copy of `Format`'s json/yaml/toml variants; they can instead iterate `Format`. `TargetFormat` in `json_schema_passes` exists only to add a `yml` spelling alias and (accidentally) drop `xml`; it should be folded into `Format` plus an alias table, collapsing three enums toward one.
-2. **A parity gate (backstop):** a registry/enum test, in the spirit of `structured_family_is_symmetric`, that asserts each format-specific surface covers all `Format` variants. This catches a hand-maintained surface (like `did_you_mean`) that a macro does not reach. It is the same mutation-proven pattern: remove a variant, the test fails.
+The runtime is already uniform: `extract.rs`'s `structured()` takes any `Format`, and all parsing flows through `Format::parse`. The drift lives entirely in the config-facing *enumerations* that name formats by hand: `ExtractSpec`'s `toml`/`json`/`yaml` fields, the `<fmt>_path_*` kind names, `TargetFormat`'s variants, and the `did_you_mean` arms. serde needs an explicit field per format and the registry needs an explicit kind, so these cannot be *fully* auto-derived. The enforceable guarantee is therefore a parity gate, with an optional structural cleanup on top.
+
+1. **Parity gate (the guarantee).** Add a canonical `Format::ALL` list to `structured_format.rs` (the SSOT owning its own inventory), then one test per surface asserting it covers `Format::ALL`, in the spirit of `structured_family_is_symmetric` (which already asserts the 12 kinds cover 4 formats x 3 ops). Concretely: `ExtractSpec` exposes a structured field for every variant (read from its schemars properties); `TargetFormat` maps every variant; the `did_you_mean` equals/matches arms cover every variant. Each is mutation-proof: drop a variant's coverage and the test fails. This reaches the hand-maintained surfaces a macro cannot.
+2. **Structural cleanup (bounded, optional).** The `Extract` *runtime* enum can collapse its three structured variants into one `Structured(Format, String)`, since dispatch already just calls `Format::parse`; and `TargetFormat` (whose only non-redundant job is the `yml` spelling alias) can fold into `Format` plus an alias table. This shrinks the per-format edit surface but does not remove the serde-level config fields, which the gate still guards. It is a cleanup, not the guarantee.
 
 ### 3.3 `json_schema_passes` and XML
 
@@ -87,7 +89,7 @@ A JSON Schema validates any `serde_json::Value`, and XML already maps to one. So
 ## 4. False-positive surface
 
 - **XML's lossy, stringly-typed tree.** Every XML leaf is a string, attributes are `@name`, repeated elements are arrays, namespaces are flattened (documented at `structured_format.rs:6-13`). An `xml:` extract or an `xml` schema target inherits all of that. A `cross_file` `equals` over two XML leaves compares strings, which is correct for versions; a `json_schema_passes` `type: number` assertion over XML will always fail. Mitigation: the existing `xml_path` docs already cover this; the design doc and rule docs must cross-reference them for the new surfaces, and the `format: xml` docs must state the string-typing rule explicitly.
-- **`registry_paths_resolve` exclude-query misroute.** The `exclude_query` fallback at `registry_paths_resolve.rs:325` maps Json/Yaml/else->Toml; an XML registry's `exclude_query` would parse as TOML and silently drop everything. This is a real bug that the XML work must fix in lockstep (add the `Xml` arm), not a new risk introduced by leveling.
+- **`registry_paths_resolve` exclude-query trap.** The `exclude_query` fallback at `registry_paths_resolve.rs:325` maps Json and Yaml explicitly and everything else (today Toml/Lines/Regex/WholeFile) to a TOML read. It is not a bug today because there is no `Extract::Xml`, but adding the `xml:` mode without a matching `Extract::Xml(_) => Extract::Xml(q)` arm here would silently parse an XML registry's `exclude_query` as TOML and drop every exclusion. The XML work must add that arm in the same change; a regression test locks it.
 - **No new false positives in the extract path itself.** Because `structured()` is unchanged and XML parsing is the same code the rule family already ships, the `xml:` extract mode cannot behave differently from `xml_path_*`, which is corpus-tested.
 
 ## 5. Implementation notes
@@ -99,44 +101,57 @@ The audit confirms parsing is centralized, so this is mechanical, not parser wor
 - `crates/alint-core/src/extract.rs` (the only logic file): add `Xml(String)` to `Extract`; `xml: Option<String>` to `ExtractSpec`; the `xml` arm to `resolve()`, `From<Extract>`, and `extract_values` (`=> structured(Format::Xml, q, text)`). `structured()` needs zero changes. This single file propagates XML to `cross_file`, `file_graph`, and `registry_paths_resolve`.
 - `crates/alint-rules/src/registry_paths_resolve.rs:325`: add the `Extract::Xml` arm to the `exclude_query` fallback.
 - `crates/alint-rules/src/json_schema_passes.rs:47,264`: add `Xml` to `TargetFormat` and its `Format` mapping (or fold `TargetFormat` into `Format`; see 5.2).
-- `crates/alint-rules/src/did_you_mean.rs:69`: add the `xml_path_equals`/`xml_path_matches` arms.
+- `crates/alint-core/src/did_you_mean.rs:69`: add `xml_path_equals`/`xml_path_matches` to the equals/matches confusion match arms.
 - Regen: `xtask gen-schema` (the `ExtractSpec` schemars derive refreshes `schemas/v1/config.json` at `:497,:1625,:3404,:3433`), plus the Rust doc-comments that enumerate "toml/json/yaml" in `extract.rs`, `file_graph`, and `registry` module docs. `gen-facts` if the kind/mode inventory is counted.
 
 No new dependency. `xml_to_value` stays private; reuse is through the already-public `Format::Xml.parse()`.
 
 ### 5.2 Collapsing the three enums (the durable fix)
 
-Adding XML variant-by-variant closes today's gap but leaves the drift risk. The durable change is to reduce the three parallel enums to one authority:
+Adding XML variant-by-variant closes today's gap but leaves the drift risk. The durable change is the parity gate from 3.2 (a `Format::ALL`-covered test per surface); it is what actually prevents the next format from shipping half-wired. The bounded structural cleanup rides on top of it:
 
-- Derive `Extract`'s structured arms from `Format` (iterate variants) rather than hand-listing json/yaml/toml.
+- Collapse `Extract`'s three structured runtime variants into `Structured(Format, String)` (dispatch already calls `Format::parse`). The `ExtractSpec` config fields stay per-format (a serde requirement) but are now guarded by the gate.
 - Fold `TargetFormat` into `Format` + an alias map (its only non-redundant job is the `yml` spelling).
-- Keep `did_you_mean` hand-maintained but gate it with the parity test.
+- Leave `did_you_mean` hand-maintained; the gate covers it.
 
 Constitution note: the constitution requires every registered kind to have firing and silent scenarios (section 8) and the structured family to stay symmetric; ADR-0016 extends that invariant to the extract and schema-target surfaces.
 
-### 5.3 New formats (Phase 2, evaluation)
+### 5.3 Phase 1.5: dotenv (full wiring)
 
-The single plug-in seam is one arm in `Format::parse` + `label` + `detect_from_path`. Once a format yields the shared `Value` tree it flows into the 12 structured_path kinds (add the three `<fmt>_path_*` builders), `json_schema_passes` (free via detect), and extract (add the `Extract::<Fmt>` variant, or free if 5.2 lands). Evaluation of candidate formats:
+dotenv is greenlit alongside the XML work: it is cheap and ubiquitous, and it exercises the `Format::ALL` seam end to end. Because a `Format` variant is all-or-nothing under the parity gate, `Format::Dotenv` is wired on every surface:
 
-| format | tree fit | parser | effort | demand | recommendation |
-|---|---|---|---|---|---|
-| dotenv (`.env`) | flat key=value -> flat object of strings | trivial / hand-written | low | high (ubiquitous) | strong candidate first |
-| Java properties | key=value, dotted keys | `java-properties` crate or hand-written | low-med | moderate (JVM) | candidate; decide flat vs dotted-nesting mapping |
-| INI / `.cfg` | sections -> nested map | `rust-ini` / `serde_ini` | medium | moderate | candidate; needs duplicate-key + section conventions |
-| HCL (Terraform) | labeled/repeated blocks + attrs | `hcl-rs` | high | high (infra) | defer or scope separately; block semantics need XML-level mapping design |
+- `Format`: add `Dotenv`, a `.env` arm in `parse` (via `dotenvy` 0.15, MIT, the maintained fork of the RUSTSEC-2021-0141 `dotenv`), a `label`, and `detect_from_path` (`.env`). The mapper is ~10 lines: `dotenvy` yields `(String, String)` pairs, folded into a flat `Value::Object` of strings. `${VAR}` references are left literal (no expansion); values are not coerced (stringly-typed, like XML).
+- structured_path: three `dotenv_path_{equals,matches,absent}` builders + registrations. **Kind count 93 -> 96.** Flat keys make these useful: `dotenv_path_equals $.NODE_ENV == "production"`, `dotenv_path_absent $.AWS_SECRET_ACCESS_KEY`.
+- extract (`Structured(Format::Dotenv, q)`), `json_schema_passes` (`format: dotenv`), and the `did_you_mean` arms.
+- The full drift sweep the XML/absent work already exercised: schema branches + dispatch, all_kinds fixture, facts (96), a docs H3 + fail/pass `docs:` scenarios per kind, README/about counts, C4 model, options snapshot.
 
-Each new format needs the same up-front `Value`-mapping design XML got (type coercion, key conventions), which is where the real cost is, not the parsing. Recommendation: do not add a new format speculatively. Add one only behind a case-study or issue demand signal, dotenv first if any, and land 5.2 before the second format so the cost is one arm, not three.
+Complexity: low. One new dependency, `dotenvy` (MIT, cargo-deny-clean). The parity gate turns "wire it everywhere" into a checklist, not a judgment call, which is exactly why dotenv is a safe first exercise of the seam.
+
+### 5.4 New formats (Phase 2, demand-gated)
+
+The remaining candidates stay out of this change and are added only behind a concrete case-study or issue demand signal. The seam is the same as dotenv's: one arm in `Format::parse` + `label` + `detect_from_path`, then the parity gate makes the rest a checklist. All have a maintained, cargo-deny-clean crate; the cost is the up-front `Value`-mapping design, not the parsing.
+
+| format | leading crate (license) | value fit | effort | biggest mapping risk |
+|---|---|---|---|---|
+| Java `.properties` | `java-properties` 2.0 (MIT) | flat `HashMap<String,String>` to a flat Object | low | dotted keys (`a.b.c`) are ONE opaque key in Java; flat is faithful, nesting-on-`.` diverges and hits alint's JSONPath dotted-key bracket quirk |
+| INI / `.cfg` | `ini` (rust-ini) 0.21 (MIT) | 2-level section-key map | low-med | duplicate keys (rust-ini can keep them as an array; avoid `configparser`, which lowercases keys and is last-wins) plus where the pre-section "global" keys live |
+| HCL (Terraform) | `hcl` (hcl-rs) 0.19 (MIT/Apache) | `hcl::Value` is JSON-native, no mapper | med | a block type is an object when it appears once but an ARRAY when repeated (path shape depends on the file); `var.x` / `${...}` expressions arrive unevaluated as opaque strings |
+
+Effort is driven by mapping semantics, not parsing: HCL has the easiest parse (native `Value`) but the leakiest projection, so it is `med`, not `high`. With 5.2's runtime collapse landed, each is one `Format::parse` arm plus its config fields, not three enums.
 
 ## 6. Tests
 
-- **Parity gate** (generalized `structured_family_is_symmetric`): assert `Extract` covers every `Format` structured variant and (if kept) `TargetFormat` maps every `Format`; mutation-proof it (remove a variant -> fail).
-- **e2e scenarios** for each newly XML-covered surface, firing and silent, per constitution 8 and ADR-0014 (executed-fixture examples): `cross_file` with `extract: { xml: ... }` (a `.csproj` version match and mismatch); `file_graph` over an XML reference; `registry_paths_resolve` with an XML registry and an `exclude_query`; `json_schema_passes` `format: xml` (valid and invalid `.csproj`).
-- **Unit**: `extract_values` over `Extract::Xml`; the `registry` `exclude_query` XML arm; `did_you_mean` on `xml_path_*`.
-- **Regression**: a test that the `registry_paths_resolve` XML `exclude_query` no longer parses as TOML.
+- **Parity gate** (per surface, against `Format::ALL`): `ExtractSpec` exposes a structured field for every variant; `TargetFormat` (if kept) maps every variant; the `did_you_mean` arms cover every variant; and the existing `structured_family_is_symmetric` covers the rule kinds. Each is mutation-proofed (drop a variant's coverage -> fail).
+- **XML e2e scenarios**, firing and silent, per constitution 8 and ADR-0014: `cross_file` with `extract: { xml: ... }` (a `.csproj` version match and mismatch); `file_graph` over an XML reference; `registry_paths_resolve` with an XML registry and an `exclude_query`; `json_schema_passes` `format: xml`, plus the auto-detected `.csproj` path with no explicit `format:` (locking the 7.2 behavior).
+- **dotenv e2e scenarios**: fail/pass for each of `dotenv_path_{equals,matches,absent}`, plus a `cross_file` `extract: { dotenv: ... }` and a `json_schema_passes` `format: dotenv`.
+- **Unit**: `extract_values` over `Extract::Xml` and `Extract::Dotenv`; the `registry` `exclude_query` XML arm; `did_you_mean` on `xml_path_*` / `dotenv_path_*`; the dotenv mapper (flat object, literal `${VAR}`).
+- **Regression**: the `registry_paths_resolve` XML `exclude_query` no longer parses as TOML.
 
 ## 7. Open questions
 
-1. **Mechanism weighting.** Derive-from-`Format` (structural) for `Extract`, fold `TargetFormat` into `Format`, and keep the parity gate as the backstop, vs. gate-only (leave the three enums, just add a test that fails on drift). Recommendation: do both structural collapses and the gate; the gate alone leaves the hand-copy that caused the gap. Resolve inline when the work lands.
-2. **Latent XML in `json_schema_passes`.** Auto-detected `.csproj` targets are validated today with no `format: xml` and no tests. Make it explicit and tested now, or gate XML behind an explicit `format:` to remove the surprise? Recommendation: document and test the existing behavior; add explicit `format: xml`.
-3. **New-format scope.** Do we add the full structured_path family (`<fmt>_path_*`, 3 kinds) for a new format, or only the extract mode, when demand appears? A new format in the rule family is a larger, kind-count-bumping surface than an extract mode. Recommendation: extract mode first, rule kinds only on separate demand.
-4. **Prioritization.** Ship Phase 1 (XML leveling + parity gate) on its own; treat Phase 2 (new formats) as demand-gated and out of this change. Confirm.
+All four resolved with the maintainer (2026-08-31):
+
+1. **Mechanism weighting.** **Resolved: gate + bounded cleanup.** The `Format::ALL` parity gate is the guarantee; on top of it, collapse `Extract`'s runtime to `Structured(Format, q)` and fold `TargetFormat` into `Format`, so a future format is one code path (5.2).
+2. **Latent XML in `json_schema_passes`.** **Resolved: document and test it, add explicit `format: xml`.** No breaking change; the accidental auto-detect path (`.csproj` -> XML) becomes an intentional, tested capability.
+3. **New-format scope.** **Resolved: a supported `Format` variant is wired on every surface**, enforced by the parity gate. Extract-only "partial formats" are not a maintained tier; adding a `Format` variant means adding it everywhere.
+4. **Prioritization.** **Resolved: dotenv is greenlit as Phase 1.5** (full wiring, 5.3), shipped alongside the XML leveling. Java `.properties`, INI, and HCL stay demand-gated (5.4).
