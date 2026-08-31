@@ -2714,7 +2714,7 @@
       "type": "object"
     },
     "rule_json_schema_passes": {
-      "description": "Validate every JSON / YAML / TOML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
+      "description": "Validate every JSON / YAML / TOML / XML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
       "properties": {
         "format": {
           "anyOf": [

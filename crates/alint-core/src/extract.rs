@@ -333,4 +333,43 @@ mod tests {
             "malformed XML must surface as an extract error"
         );
     }
+
+    #[test]
+    fn xml_element_cardinality_is_data_dependent() {
+        // XML has no array type: a single <Ref> is an object, but repeated <Ref>
+        // become an array. So a `[*]` wildcard does NOT normalize cardinality --
+        // the same query yields different results for one vs many, a documented
+        // footgun (docs/rules.md #xml-mapping). Recursive descent (`$..`) is the
+        // cardinality-independent idiom a rule should use when it must handle both.
+        use crate::structured_format::Format;
+        let xv = |q: &str, xml: &str| {
+            super::extract_values(&super::Extract::Structured(Format::Xml, q.into()), xml).unwrap()
+        };
+        let one = r#"<Project><ItemGroup><Ref Include="x.csproj"/></ItemGroup></Project>"#;
+        let many =
+            r#"<Project><ItemGroup><Ref Include="a"/><Ref Include="b"/></ItemGroup></Project>"#;
+
+        // The `[*]['@Include']` idiom (as used in the csproj scenarios) silently
+        // extracts NOTHING for a single element -- the false-negative footgun ...
+        assert!(
+            xv("$.Project.ItemGroup.Ref[*]['@Include']", one).is_empty(),
+            "single element + [*] is the documented silent-miss footgun"
+        );
+        // ... but works for two or more.
+        assert_eq!(
+            xv("$.Project.ItemGroup.Ref[*]['@Include']", many),
+            vec!["a", "b"]
+        );
+
+        // Recursive descent from the element handles BOTH cardinalities -- the
+        // idiom the docs recommend for cardinality-independent XML extraction.
+        assert_eq!(
+            xv("$.Project.ItemGroup.Ref..['@Include']", one),
+            vec!["x.csproj"]
+        );
+        assert_eq!(
+            xv("$.Project.ItemGroup.Ref..['@Include']", many),
+            vec!["a", "b"]
+        );
+    }
 }

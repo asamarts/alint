@@ -24,6 +24,12 @@
 //!   same `serde_json::Value` tree the schema validates against,
 //!   and XML maps in via the xmltodict-style `xml_to_value`
 //!   convention — same trick `json_path_*` uses.
+//! - **XML targets are stringly-typed.** Every XML leaf maps to a
+//!   JSON string, so type XML fields as `string` (with a
+//!   `pattern`) — `type: integer` / `boolean` / `number` always
+//!   fail against XML, and `type: array` / `object` depend on
+//!   cardinality (a single vs. repeated element is an object vs.
+//!   an array). See the XML-mapping notes in `docs/rules.md`.
 //! - Each schema-validation error becomes one violation, with
 //!   the message including the failing instance path and the
 //!   schema's error description. A target that fails to parse
@@ -505,16 +511,35 @@ mod tests {
 
     #[test]
     fn xml_targets_are_auto_detected() {
-        // The .csproj / .props / .xml family auto-detects as XML -- a
-        // formerly-latent path, now documented and tested (see
-        // docs/design/format-coverage.md, section 7 question 2).
-        for p in ["App.csproj", "Directory.Build.props", "config.xml"] {
+        // The full .csproj / .props / .targets / .vbproj / .fsproj / .nuspec /
+        // .xml family auto-detects as XML -- a formerly-latent path, now
+        // documented and tested (docs/design/format-coverage.md, section 7 Q2).
+        // Every extension in structured_format's XML arm is covered here.
+        for p in [
+            "App.csproj",
+            "Directory.Build.props",
+            "Directory.Build.targets",
+            "Legacy.vbproj",
+            "Lib.fsproj",
+            "Pkg.nuspec",
+            "config.xml",
+        ] {
             assert_eq!(
                 Format::detect_from_path(std::path::Path::new(p)),
                 Some(Format::Xml),
                 "{p} should detect as XML"
             );
         }
+    }
+
+    #[test]
+    fn format_yml_is_a_yaml_alias() {
+        // `format: yml` is a documented alias for YAML. The parity test iterates
+        // Format::ALL, which has no `yml`, so this pins the alias explicitly:
+        // `yml` deserializes and maps to Format::Yaml (not, say, a silent error).
+        let tf: TargetFormat =
+            serde_json::from_value(json!("yml")).expect("`format: yml` should deserialize");
+        assert_eq!(tf.to_format(), Format::Yaml, "`yml` must map to YAML");
     }
 
     #[test]

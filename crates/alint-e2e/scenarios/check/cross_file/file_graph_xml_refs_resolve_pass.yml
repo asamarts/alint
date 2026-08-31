@@ -1,6 +1,10 @@
 name: file_graph over xml extract is silent when every ProjectReference resolves
 tags: [check, file_graph, cross_file, xml, passing]
 
+# Same recursive-descent idiom as the fail case; here both references resolve,
+# so no_dangling is silent. Proves the idiom reads every @Include for the
+# many-element (array) shape.
+
 given:
   tree:
     "A.csproj": |
@@ -24,7 +28,7 @@ given:
         nodes: "*.csproj"
         edges:
           from_content:
-            extract: { xml: "$.Project.ItemGroup.ProjectReference[*]['@Include']" }
+            extract: { xml: "$.Project.ItemGroup.ProjectReference..['@Include']" }
             resolve: relative_to_repo_root
         require: no_dangling
         level: error

@@ -76,7 +76,7 @@ Keys (defaults are in Open questions, not yet fixed):
 
 - `source:` — the manifest path, repo-root-confined (ADR-0004). `allow_out_of_root:`
   interplay TBD.
-- `extract:` — the shared one-of: `{ toml | json | yaml: <JSONPath> }`, `{ lines: ... }`, or
+- `extract:` — the shared one-of: `{ toml | json | yaml | xml: <JSONPath> }`, `{ lines: ... }`, or
   `{ regex: <capture> }`. Non-literal / interpolated entries are dropped, not failed
   (existing extract convention).
 - `derive_target:` (optional) — `{ from: <regex on the extracted path>, to: <template> }`,

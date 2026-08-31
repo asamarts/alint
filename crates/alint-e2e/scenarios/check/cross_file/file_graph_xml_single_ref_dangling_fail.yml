@@ -1,0 +1,36 @@
+name: file_graph over xml fires on a SINGLE dangling ProjectReference
+tags: [check, file_graph, cross_file, xml]
+
+# Regression lock for the single-vs-array XML footgun. A.csproj has exactly ONE
+# <ProjectReference>, which maps to an object (not a 1-element array). With the
+# old `ProjectReference[*]['@Include']` idiom this dangling reference was
+# SILENTLY MISSED (0 violations); recursive descent `ProjectReference..['@Include']`
+# reads it whether there is one or many. If this scenario ever passes clean, the
+# cardinality-independent extraction regressed.
+
+given:
+  tree:
+    "A.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <ItemGroup>
+          <ProjectReference Include="Missing.csproj" />
+        </ItemGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-refs-resolve
+        kind: file_graph
+        nodes: "*.csproj"
+        edges:
+          from_content:
+            extract: { xml: "$.Project.ItemGroup.ProjectReference..['@Include']" }
+            resolve: relative_to_repo_root
+        require: no_dangling
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: csproj-refs-resolve, level: error, path: A.csproj}

@@ -1,10 +1,14 @@
 name: file_graph over xml extract fires on a dangling ProjectReference
 tags: [check, file_graph, cross_file, xml]
 
-# file_graph's from_content extract now accepts `xml:`. A.csproj references two
-# projects via <ProjectReference Include="...">; one resolves, one dangles, so
-# no_dangling fires on A. Two references make ProjectReference an array, so
-# `[*]['@Include']` reads both.
+# file_graph's from_content extract accepts `xml:`. A.csproj references two
+# projects; one resolves, one dangles, so no_dangling fires on A.
+#
+# The query uses recursive descent (`ProjectReference..['@Include']`), NOT
+# `ProjectReference[*]['@Include']`: XML has no array type, so a SINGLE
+# <ProjectReference> is an object and `[*]` would silently extract nothing
+# (see file_graph_xml_single_ref_dangling_fail.yml and docs/rules.md
+# #xml-mapping). Recursive descent reads the `@Include` of one or many.
 
 given:
   tree:
@@ -26,7 +30,7 @@ given:
         nodes: "*.csproj"
         edges:
           from_content:
-            extract: { xml: "$.Project.ItemGroup.ProjectReference[*]['@Include']" }
+            extract: { xml: "$.Project.ItemGroup.ProjectReference..['@Include']" }
             resolve: relative_to_repo_root
         require: no_dangling
         level: error

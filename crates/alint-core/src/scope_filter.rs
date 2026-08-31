@@ -123,7 +123,7 @@ pub struct ManifestPathSpec {
     /// by lives in the repo; an escaping `source` is a build-time error). Its
     /// declared paths resolve relative to its own directory.
     pub source: String,
-    /// The `{toml|json|yaml|lines|regex}` extractor shared with
+    /// The `{toml|json|yaml|xml|lines|regex}` extractor shared with
     /// `registry_paths_resolve` / `file_graph`. Non-literal / interpolated
     /// entries are dropped, not failed.
     pub extract: ExtractSpec,
