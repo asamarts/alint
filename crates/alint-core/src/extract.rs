@@ -278,9 +278,14 @@ mod tests {
         // here. The field names are lowercase; `label()` is uppercase, so case-fold.
         let schema = serde_json::to_value(schemars::schema_for!(super::ExtractSpec))
             .expect("ExtractSpec schema serializes");
-        let props = schema["properties"]
-            .as_object()
-            .expect("schema has a properties object");
+        // schemars may inline the root or emit a $ref to $defs/extract_spec; read
+        // properties from whichever carries them, so a schemars upgrade doesn't
+        // silently turn this into a false RED.
+        let props = schema
+            .get("properties")
+            .or_else(|| schema.pointer("/$defs/extract_spec/properties"))
+            .and_then(|v| v.as_object())
+            .expect("ExtractSpec schema exposes a properties object");
         for fmt in crate::structured_format::Format::ALL {
             let name = fmt.label().to_lowercase();
             assert!(
@@ -288,5 +293,41 @@ mod tests {
                 "ExtractSpec is missing a `{name}` field for Format::{fmt:?} (format parity)"
             );
         }
+    }
+
+    #[test]
+    fn xml_and_toml_both_set_is_rejected() {
+        // The one-of guard still holds with the new `xml` field in the mix.
+        let spec: super::ExtractSpec =
+            serde_yaml_ng::from_str("xml: \"$.a\"\ntoml: \"$.b\"").expect("parse two-set spec");
+        assert!(
+            spec.resolve().is_err(),
+            "two structured modes must be rejected"
+        );
+    }
+
+    #[test]
+    fn xml_extract_drops_non_string_nodes() {
+        // A path landing on a subtree (object) is not a string, so it is dropped --
+        // the same string-only filter the other structured modes apply.
+        let extract = super::Extract::Xml("$.Project.PropertyGroup".into());
+        let xml = "<Project><PropertyGroup><Version>1.0</Version></PropertyGroup></Project>";
+        assert!(
+            super::extract_values(&extract, xml)
+                .expect("extract")
+                .is_empty(),
+            "an object node yields no string value"
+        );
+    }
+
+    #[test]
+    fn xml_extract_malformed_propagates_error() {
+        // A malformed XML target surfaces as an extract error (the consumer turns
+        // it into a per-file violation), same as the other structured modes.
+        let extract = super::Extract::Xml("$.a".into());
+        assert!(
+            super::extract_values(&extract, "<a><unclosed>").is_err(),
+            "malformed XML must surface as an extract error"
+        );
     }
 }

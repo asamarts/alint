@@ -1,0 +1,34 @@
+name: registry_paths_resolve over xml extract, with an xml exclude_query
+tags: [check, registry_paths_resolve, cross_file, xml, passing]
+
+# Exercises the XML extract mode AND the exclude_query fix together. The registry
+# lists two projects; `generated` is excluded via an xml exclude_query, so only
+# `core` must resolve on disk. If exclude_query misrouted to the TOML parser (the
+# pre-fix behavior), the XML would fail to parse, nothing would be excluded, and
+# `generated` (which has no directory) would fire. So a green run proves the
+# exclude_query `Extract::Xml` arm parses as XML.
+
+given:
+  tree:
+    "projects.xml": |
+      <Projects>
+        <Project>core</Project>
+        <Project>generated</Project>
+      </Projects>
+    core:
+      ".keep": ""
+  config: |
+    version: 1
+    rules:
+      - id: projects-resolve
+        kind: registry_paths_resolve
+        source: "projects.xml"
+        extract: { xml: "$.Projects.Project[*]" }
+        exclude_query: "$.Projects.Project[1]"
+        expect: dir
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

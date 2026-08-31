@@ -24,11 +24,13 @@ pub enum Format {
 }
 
 impl Format {
-    /// The canonical inventory of config formats. Every format-specific surface
-    /// (the structured-query kinds, `extract`, `json_schema_passes`, the
-    /// `did_you_mean` hints) must cover every variant here; parity tests assert
-    /// it, so a new variant cannot ship half-wired. See
-    /// `docs/design/format-coverage.md`.
+    /// The canonical inventory of config formats and the single source of truth
+    /// for the config-format axis. Format-specific surfaces (`extract`, the
+    /// structured-query kinds, `json_schema_passes`, the `did_you_mean` hints)
+    /// should cover every variant; a per-surface parity test asserts that as each
+    /// surface is leveled (today `extract_spec_covers_every_format`; the rest land
+    /// with the format-coverage rollout). `format_all_is_complete` guards this
+    /// list itself. See `docs/design/format-coverage.md`.
     pub const ALL: &'static [Format] = &[Format::Json, Format::Yaml, Format::Toml, Format::Xml];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
@@ -387,5 +389,36 @@ mod tests {
         assert!(xml_depth_within_limit(
             "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
         ));
+    }
+
+    #[test]
+    fn format_all_is_complete() {
+        // The format-parity gates iterate `Format::ALL`, so a variant missing from
+        // ALL silently bypasses them. This guards ALL's completeness: the
+        // exhaustive `match` makes a NEW `Format` variant a compile error until it
+        // is added to `variants`, and the asserts then fail until `Format::ALL`
+        // matches.
+        let variants = [Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+        for f in variants {
+            // Distinct arms (clippy-clean) keep the match exhaustive, so a new
+            // Format variant is a compile error here until it is added.
+            let _label = match f {
+                Format::Json => "json",
+                Format::Yaml => "yaml",
+                Format::Toml => "toml",
+                Format::Xml => "xml",
+            };
+        }
+        assert_eq!(
+            Format::ALL.len(),
+            variants.len(),
+            "Format::ALL is out of sync with the Format variants; update both"
+        );
+        for f in variants {
+            assert!(
+                Format::ALL.contains(&f),
+                "Format::{f:?} is missing from Format::ALL"
+            );
+        }
     }
 }

@@ -1,0 +1,35 @@
+name: file_graph over xml extract is silent when every ProjectReference resolves
+tags: [check, file_graph, cross_file, xml, passing]
+
+given:
+  tree:
+    "A.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <ItemGroup>
+          <ProjectReference Include="B.csproj" />
+          <ProjectReference Include="C.csproj" />
+        </ItemGroup>
+      </Project>
+    "B.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+      </Project>
+    "C.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-refs-resolve
+        kind: file_graph
+        nodes: "*.csproj"
+        edges:
+          from_content:
+            extract: { xml: "$.Project.ItemGroup.ProjectReference[*]['@Include']" }
+            resolve: relative_to_repo_root
+        require: no_dangling
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

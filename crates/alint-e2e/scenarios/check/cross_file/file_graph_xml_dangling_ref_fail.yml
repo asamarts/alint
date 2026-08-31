@@ -1,0 +1,38 @@
+name: file_graph over xml extract fires on a dangling ProjectReference
+tags: [check, file_graph, cross_file, xml]
+
+# file_graph's from_content extract now accepts `xml:`. A.csproj references two
+# projects via <ProjectReference Include="...">; one resolves, one dangles, so
+# no_dangling fires on A. Two references make ProjectReference an array, so
+# `[*]['@Include']` reads both.
+
+given:
+  tree:
+    "A.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <ItemGroup>
+          <ProjectReference Include="B.csproj" />
+          <ProjectReference Include="Missing.csproj" />
+        </ItemGroup>
+      </Project>
+    "B.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-refs-resolve
+        kind: file_graph
+        nodes: "*.csproj"
+        edges:
+          from_content:
+            extract: { xml: "$.Project.ItemGroup.ProjectReference[*]['@Include']" }
+            resolve: relative_to_repo_root
+        require: no_dangling
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: csproj-refs-resolve, level: error, path: A.csproj}
