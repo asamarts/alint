@@ -3,7 +3,7 @@
 //! `cross_file`, `file_graph`) and core-side predicates. One place so
 //! the one-of decode (`serde_yaml` can't decode an externally-tagged
 //! enum from a `{ key: value }` map; an untagged enum can't tell the
-//! three `JSONPath` string variants apart) and the non-literal skip
+//! structured `JSONPath` string variants apart) and the non-literal skip
 //! can't drift between consumers.
 
 use regex::Regex;
@@ -15,11 +15,10 @@ use crate::structured_format::Format;
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
 #[derive(Debug, Clone)]
 pub enum Extract {
-    /// Structured-query (RFC 9535 `JSONPath` over the parsed tree).
-    Toml(String),
-    Json(String),
-    Yaml(String),
-    Xml(String),
+    /// Structured-query (RFC 9535 `JSONPath` over the parsed tree) against any
+    /// [`Format`]; dispatch runs `Format::parse` then applies the query, so a
+    /// new format reaches every structured consumer without a new variant here.
+    Structured(Format, String),
     /// One path per non-blank, non-comment line.
     Lines(LinesOpts),
     /// Capture group 1 of each match is the value.
@@ -73,13 +72,13 @@ impl ExtractSpec {
                     .to_string(),
             ),
             [_] => Ok(if let Some(q) = self.toml {
-                Extract::Toml(q)
+                Extract::Structured(Format::Toml, q)
             } else if let Some(q) = self.json {
-                Extract::Json(q)
+                Extract::Structured(Format::Json, q)
             } else if let Some(q) = self.yaml {
-                Extract::Yaml(q)
+                Extract::Structured(Format::Yaml, q)
             } else if let Some(q) = self.xml {
-                Extract::Xml(q)
+                Extract::Structured(Format::Xml, q)
             } else if let Some(o) = self.lines {
                 Extract::Lines(o)
             } else if let Some(q) = self.regex {
@@ -99,10 +98,10 @@ impl From<Extract> for ExtractSpec {
     fn from(e: Extract) -> Self {
         let mut s = ExtractSpec::default();
         match e {
-            Extract::Toml(q) => s.toml = Some(q),
-            Extract::Json(q) => s.json = Some(q),
-            Extract::Yaml(q) => s.yaml = Some(q),
-            Extract::Xml(q) => s.xml = Some(q),
+            Extract::Structured(Format::Toml, q) => s.toml = Some(q),
+            Extract::Structured(Format::Json, q) => s.json = Some(q),
+            Extract::Structured(Format::Yaml, q) => s.yaml = Some(q),
+            Extract::Structured(Format::Xml, q) => s.xml = Some(q),
             Extract::Lines(o) => s.lines = Some(o),
             Extract::Regex(q) => s.regex = Some(q),
             Extract::WholeFile => s.whole_file = Some(WholeFileOpts::default()),
@@ -163,10 +162,7 @@ pub fn is_non_literal(entry: &str) -> bool {
 /// trimmed non-comment lines; `regex` yields capture group 1.
 pub fn extract_values(extract: &Extract, text: &str) -> std::result::Result<Vec<String>, String> {
     Ok(match extract {
-        Extract::Toml(q) => structured(Format::Toml, q, text)?,
-        Extract::Json(q) => structured(Format::Json, q, text)?,
-        Extract::Yaml(q) => structured(Format::Yaml, q, text)?,
-        Extract::Xml(q) => structured(Format::Xml, q, text)?,
+        Extract::Structured(fmt, q) => structured(*fmt, q, text)?,
         Extract::Lines(opts) => text
             .lines()
             .map(str::trim)
@@ -263,7 +259,10 @@ mod tests {
             serde_yaml_ng::from_str("xml: \"$.Project.PropertyGroup.Version\"")
                 .expect("parse xml spec");
         let extract = spec.resolve().expect("resolve xml");
-        assert!(matches!(extract, super::Extract::Xml(_)));
+        assert!(matches!(
+            extract,
+            super::Extract::Structured(crate::structured_format::Format::Xml, _)
+        ));
         let xml = "<Project><PropertyGroup><Version>1.2.3</Version></PropertyGroup></Project>";
         assert_eq!(
             super::extract_values(&extract, xml).expect("extract xml"),
@@ -310,7 +309,10 @@ mod tests {
     fn xml_extract_drops_non_string_nodes() {
         // A path landing on a subtree (object) is not a string, so it is dropped --
         // the same string-only filter the other structured modes apply.
-        let extract = super::Extract::Xml("$.Project.PropertyGroup".into());
+        let extract = super::Extract::Structured(
+            crate::structured_format::Format::Xml,
+            "$.Project.PropertyGroup".into(),
+        );
         let xml = "<Project><PropertyGroup><Version>1.0</Version></PropertyGroup></Project>";
         assert!(
             super::extract_values(&extract, xml)
@@ -324,7 +326,8 @@ mod tests {
     fn xml_extract_malformed_propagates_error() {
         // A malformed XML target surfaces as an extract error (the consumer turns
         // it into a per-file violation), same as the other structured modes.
-        let extract = super::Extract::Xml("$.a".into());
+        let extract =
+            super::Extract::Structured(crate::structured_format::Format::Xml, "$.a".into());
         assert!(
             super::extract_values(&extract, "<a><unclosed>").is_err(),
             "malformed XML must surface as an extract error"
