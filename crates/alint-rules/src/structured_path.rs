@@ -1,9 +1,8 @@
 //! Structured-query rule family:
-//! `{json,yaml,toml,xml}_path_{equals,matches}`, plus the
-//! `yaml_path_absent` existence assertion.
+//! `{json,yaml,toml,xml}_path_{equals,matches,absent}`.
 //!
-//! The eight value-checking kinds share a single implementation
-//! that varies along two axes:
+//! The eight value-checking kinds (`equals` / `matches`) share a
+//! single implementation that varies along two axes:
 //!
 //! - **Format** — `Json`, `Yaml`, `Toml`, or `Xml`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
@@ -41,15 +40,15 @@
 //! pinned to a commit SHA" (a workflow with only `run:` steps
 //! has no `uses:` at all and shouldn't be flagged).
 //!
-//! ## `yaml_path_absent`
+//! ## `{json,yaml,toml,xml}_path_absent`
 //!
 //! A third op — **existence** — mirrors `file_absent` for a path:
 //! the query must select *nothing*, and any match produces exactly
 //! one file-level violation (never per-match, so a `$[?…]` filter
 //! that fans out over every root key still yields one violation).
-//! `equals` / `matches` / `if_present` don't apply. Only `yaml` is
-//! wired today (its one consumer, `gha-workflow-contents-read`); the
-//! `json` / `toml` / `xml` siblings are a trivial symmetric follow-up.
+//! `equals` / `matches` / `if_present` don't apply. Shipped for all
+//! four formats, kept symmetric with `equals`/`matches` by the
+//! `structured_family_is_symmetric` test.
 //!
 //! Unparseable files (bad JSON / YAML / TOML, not-well-formed
 //! XML) produce one violation per file. An unparseable file is a

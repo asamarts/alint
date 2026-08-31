@@ -35,6 +35,11 @@ rules:
     # level. PASSES `contents: read`/`none`, `read-all`, `{}` (empty),
     # and per-job-only permissions.
     #
+    # Scope note: the write checks are workflow-level. A job-level
+    # `write-all`/`contents: write`, or a workflow where only SOME jobs
+    # declare permissions, is treated as declared and passes -- per-job
+    # scoping is the deliberate escape hatch.
+    #
     # The `$[?...]` filter selects the bad state; `yaml_path_absent`
     # emits ONE file-level violation when it matches (a value-op kind
     # would fan out to one warning per top-level key). Telling "no
