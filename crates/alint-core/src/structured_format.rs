@@ -24,6 +24,13 @@ pub enum Format {
 }
 
 impl Format {
+    /// The canonical inventory of config formats. Every format-specific surface
+    /// (the structured-query kinds, `extract`, `json_schema_passes`, the
+    /// `did_you_mean` hints) must cover every variant here; parity tests assert
+    /// it, so a new variant cannot ship half-wired. See
+    /// `docs/design/format-coverage.md`.
+    pub const ALL: &'static [Format] = &[Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
         match self {
             // Try strict JSON first (the common, fast path — plain

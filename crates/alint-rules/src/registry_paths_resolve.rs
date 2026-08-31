@@ -325,6 +325,7 @@ impl RegistryPathsResolveRule {
         let ex = match &self.extract {
             Extract::Json(_) => Extract::Json(q.clone()),
             Extract::Yaml(_) => Extract::Yaml(q.clone()),
+            Extract::Xml(_) => Extract::Xml(q.clone()),
             _ => Extract::Toml(q.clone()),
         };
         extract_values(&ex, text)

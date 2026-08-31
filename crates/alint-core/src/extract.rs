@@ -19,6 +19,7 @@ pub enum Extract {
     Toml(String),
     Json(String),
     Yaml(String),
+    Xml(String),
     /// One path per non-blank, non-comment line.
     Lines(LinesOpts),
     /// Capture group 1 of each match is the value.
@@ -28,7 +29,7 @@ pub enum Extract {
     WholeFile,
 }
 
-/// Exactly one of: toml/json/yaml (RFC 9535 `JSONPath` string), lines (object;
+/// Exactly one of: toml/json/yaml/xml (RFC 9535 `JSONPath` string), lines (object;
 /// optional `comment` prefix, default `#`), regex (string; capture group 1 is
 /// the value), `whole_file` (object `{}`; the entire file content as one value,
 /// for byte-level `cross_file` comparison; the non-literal skip does not apply).
@@ -43,6 +44,8 @@ pub struct ExtractSpec {
     #[serde(default)]
     yaml: Option<String>,
     #[serde(default)]
+    xml: Option<String>,
+    #[serde(default)]
     lines: Option<LinesOpts>,
     #[serde(default)]
     regex: Option<String>,
@@ -56,6 +59,7 @@ impl ExtractSpec {
             ("toml", self.toml.is_some()),
             ("json", self.json.is_some()),
             ("yaml", self.yaml.is_some()),
+            ("xml", self.xml.is_some()),
             ("lines", self.lines.is_some()),
             ("regex", self.regex.is_some()),
             ("whole_file", self.whole_file.is_some()),
@@ -65,7 +69,7 @@ impl ExtractSpec {
         .collect();
         match set.as_slice() {
             [] => Err(
-                "`extract` must set exactly one of toml/json/yaml/lines/regex/whole_file (none set)"
+                "`extract` must set exactly one of toml/json/yaml/xml/lines/regex/whole_file (none set)"
                     .to_string(),
             ),
             [_] => Ok(if let Some(q) = self.toml {
@@ -74,6 +78,8 @@ impl ExtractSpec {
                 Extract::Json(q)
             } else if let Some(q) = self.yaml {
                 Extract::Yaml(q)
+            } else if let Some(q) = self.xml {
+                Extract::Xml(q)
             } else if let Some(o) = self.lines {
                 Extract::Lines(o)
             } else if let Some(q) = self.regex {
@@ -82,7 +88,7 @@ impl ExtractSpec {
                 Extract::WholeFile
             }),
             many => Err(format!(
-                "`extract` must set exactly one of toml/json/yaml/lines/regex/whole_file (got {})",
+                "`extract` must set exactly one of toml/json/yaml/xml/lines/regex/whole_file (got {})",
                 many.join(", ")
             )),
         }
@@ -96,6 +102,7 @@ impl From<Extract> for ExtractSpec {
             Extract::Toml(q) => s.toml = Some(q),
             Extract::Json(q) => s.json = Some(q),
             Extract::Yaml(q) => s.yaml = Some(q),
+            Extract::Xml(q) => s.xml = Some(q),
             Extract::Lines(o) => s.lines = Some(o),
             Extract::Regex(q) => s.regex = Some(q),
             Extract::WholeFile => s.whole_file = Some(WholeFileOpts::default()),
@@ -159,6 +166,7 @@ pub fn extract_values(extract: &Extract, text: &str) -> std::result::Result<Vec<
         Extract::Toml(q) => structured(Format::Toml, q, text)?,
         Extract::Json(q) => structured(Format::Json, q, text)?,
         Extract::Yaml(q) => structured(Format::Yaml, q, text)?,
+        Extract::Xml(q) => structured(Format::Xml, q, text)?,
         Extract::Lines(opts) => text
             .lines()
             .map(str::trim)
@@ -245,5 +253,40 @@ mod tests {
         let spec: super::ExtractSpec =
             serde_yaml_ng::from_str("whole_file: {}\nregex: '(x)'").expect("parse spec");
         assert!(spec.resolve().is_err(), "two sources must be rejected");
+    }
+
+    #[test]
+    fn resolve_and_extract_over_xml() {
+        // The `xml:` extract mode reuses `Format::Xml.parse` -- an XML leaf comes
+        // back as its string value, exactly like the other structured modes.
+        let spec: super::ExtractSpec =
+            serde_yaml_ng::from_str("xml: \"$.Project.PropertyGroup.Version\"")
+                .expect("parse xml spec");
+        let extract = spec.resolve().expect("resolve xml");
+        assert!(matches!(extract, super::Extract::Xml(_)));
+        let xml = "<Project><PropertyGroup><Version>1.2.3</Version></PropertyGroup></Project>";
+        assert_eq!(
+            super::extract_values(&extract, xml).expect("extract xml"),
+            vec!["1.2.3".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_spec_covers_every_format() {
+        // Parity gate: every `Format::ALL` variant must have a structured extract
+        // field, so a format wired into the rule family / schema can't be forgotten
+        // here. The field names are lowercase; `label()` is uppercase, so case-fold.
+        let schema = serde_json::to_value(schemars::schema_for!(super::ExtractSpec))
+            .expect("ExtractSpec schema serializes");
+        let props = schema["properties"]
+            .as_object()
+            .expect("schema has a properties object");
+        for fmt in crate::structured_format::Format::ALL {
+            let name = fmt.label().to_lowercase();
+            assert!(
+                props.contains_key(&name),
+                "ExtractSpec is missing a `{name}` field for Format::{fmt:?} (format parity)"
+            );
+        }
     }
 }
