@@ -18,4 +18,8 @@ Rule kinds in the **Structured query** family. Each rule below links to its own 
 | [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/) | Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. |
 | [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) | Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. |
 | [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/) | Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. |
+| [`json_path_absent`](/docs/rules/structured-query/json_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
+| [`yaml_path_absent`](/docs/rules/structured-query/yaml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
+| [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
+| [`xml_path_absent`](/docs/rules/structured-query/xml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
 | [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) | Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. |

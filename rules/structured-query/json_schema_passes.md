@@ -2,7 +2,7 @@
 title: 'json_schema_passes'
 description: 'Validate every JSON / YAML / TOML file in paths against a JSON Schema document. alint json_schema_passes rule, structured query family.'
 sidebar:
-  order: 9
+  order: 13
 categories: ['structured-query']
 ---
 

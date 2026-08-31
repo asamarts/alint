@@ -6,13 +6,13 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 89 rule kinds across 13 families (78 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 93 rule kinds across 13 families (82 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
 - [Content](/docs/rules/content/) — 17 rules
-- [Structured query](/docs/rules/structured-query/) — 9 rules
+- [Structured query](/docs/rules/structured-query/) — 13 rules
 - [Naming](/docs/rules/naming/) — 4 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 13 rules
@@ -72,6 +72,7 @@ alint ships 89 rule kinds across 13 families (78 distinct rule behaviors plus 11
 - [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`import_gate`](/docs/rules/cross-file/import_gate/) — Forbid imports whose **extracted target** matches a `forbid` regex, within the `paths` scope — an architectural import firewall (staging-layer isolation, core/providers separation, private-API gates). _(Cross-file)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_
+- [`json_path_absent`](/docs/rules/structured-query/json_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`json_path_equals`](/docs/rules/structured-query/json_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`json_path_matches`](/docs/rules/structured-query/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. _(Structured query)_
@@ -97,10 +98,13 @@ alint ships 89 rule kinds across 13 families (78 distinct rule behaviors plus 11
 - [`pair_hash`](/docs/rules/cross-file/pair_hash/) — The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). _(Cross-file)_
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
+- [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`unique_by`](/docs/rules/cross-file/unique_by/) — No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). _(Cross-file)_
+- [`xml_path_absent`](/docs/rules/structured-query/xml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`xml_path_equals`](/docs/rules/structured-query/xml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
+- [`yaml_path_absent`](/docs/rules/structured-query/yaml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
