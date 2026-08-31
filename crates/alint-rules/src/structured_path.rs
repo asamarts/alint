@@ -484,8 +484,20 @@ pub fn xml_path_matches_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     build_matches(spec, Format::Xml, "xml_path_matches")
 }
 
+pub fn json_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Json, "json_path_absent")
+}
+
 pub fn yaml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     build_absent(spec, Format::Yaml, "yaml_path_absent")
+}
+
+pub fn toml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Toml, "toml_path_absent")
+}
+
+pub fn xml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Xml, "xml_path_absent")
 }
 
 fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box<dyn Rule>> {

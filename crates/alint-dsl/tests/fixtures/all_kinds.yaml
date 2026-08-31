@@ -459,6 +459,21 @@ rules:
     paths: ".github/workflows/*.yml"
     path: "$[?($.permissions == 'write-all')]"
     level: warning
+  - id: no-postinstall-script
+    kind: json_path_absent
+    paths: "package.json"
+    path: "$.scripts.postinstall"
+    level: warning
+  - id: no-cargo-patch-section
+    kind: toml_path_absent
+    paths: "Cargo.toml"
+    path: "$.patch"
+    level: warning
+  - id: no-unsafe-blocks
+    kind: xml_path_absent
+    paths: "*.csproj"
+    path: "$.Project.PropertyGroup.AllowUnsafeBlocks"
+    level: warning
   - id: cargo-edition-2024
     kind: toml_path_equals
     paths: "Cargo.toml"

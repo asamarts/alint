@@ -203,16 +203,16 @@ Query a structured document with a JSONPath expression and assert every match de
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-### `yaml_path_absent`
+### `json_path_absent`, `yaml_path_absent`, `toml_path_absent`, `xml_path_absent`
 
 **Categories:** Structured query
 
-Assert a JSONPath query over a YAML file matches nothing; one file-level violation if present.
+Assert a JSONPath query over the document matches nothing; one file-level violation if present.
 
 **Semantics**:
 - The query must select zero nodes. Any match fires exactly one violation for the file — never per-match, so a `$[?…]` filter that fans out over every top-level key still yields a single violation.
 - The existence sibling of the value-checking kinds; mirrors `file_absent` for a path. `equals` / `matches` / `if_present` don't apply.
-- Only `yaml` is wired today (its consumer, the bundled `gha-workflow-contents-read`); the `json` / `toml` / `xml` siblings are a symmetric follow-up.
+- Useful for forbidding a key: a `postinstall` script in `package.json`, a `[patch]` table in `Cargo.toml`, or `write-all` permissions in a workflow.
 
 ### `json_schema_passes`
 

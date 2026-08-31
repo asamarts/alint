@@ -1,0 +1,31 @@
+name: json_path_absent is silent when package.json has no postinstall
+tags: [check, json_path_absent]
+
+docs:
+  title: A package.json with no lifecycle scripts
+  case: pass
+  kind: json_path_absent
+
+given:
+  tree:
+    "package.json": |
+      {
+        "name": "demo",
+        "version": "1.0.0",
+        "scripts": {
+          "build": "tsc"
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-postinstall-script
+        kind: json_path_absent
+        paths: "package.json"
+        path: "$.scripts.postinstall"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

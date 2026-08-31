@@ -1070,6 +1070,43 @@ FileIsTextRule {
     scope: Scope { ... },
 }
 
+=== kind: json_path_absent | id: no-postinstall-script ===
+StructuredPathRule {
+    id: "no-postinstall-script",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "package.json",
+        ],
+    ),
+    format: Json,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "scripts",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "postinstall",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.scripts.postinstall",
+    op: Absent,
+    if_present: false,
+}
+
 === kind: json_path_equals | id: package-name-matches ===
 StructuredPathRule {
     id: "package-name-matches",
@@ -1468,6 +1505,37 @@ ShebangHasExecutableRule {
     scope: Scope { ... },
 }
 
+=== kind: toml_path_absent | id: no-cargo-patch-section ===
+StructuredPathRule {
+    id: "no-cargo-patch-section",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "Cargo.toml",
+        ],
+    ),
+    format: Toml,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "patch",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.patch",
+    op: Absent,
+    if_present: false,
+}
+
 === kind: toml_path_equals | id: cargo-edition-2024 ===
 StructuredPathRule {
     id: "cargo-edition-2024",
@@ -1565,6 +1633,45 @@ UniqueByRule {
     select_scope: Scope { ... },
     key_template: "{stem}",
     case_insensitive: true,
+}
+
+=== kind: xml_path_absent | id: no-unsafe-blocks ===
+StructuredPathRule {
+    id: "no-unsafe-blocks",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: None,
+    format: Xml,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "Project",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "PropertyGroup",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "AllowUnsafeBlocks",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.Project.PropertyGroup.AllowUnsafeBlocks",
+    op: Absent,
+    if_present: false,
 }
 
 === kind: xml_path_equals | id: csproj-targets-net8 ===

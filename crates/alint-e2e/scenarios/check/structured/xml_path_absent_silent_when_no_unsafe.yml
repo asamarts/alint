@@ -1,0 +1,29 @@
+name: xml_path_absent is silent when the csproj has no unsafe opt-in
+tags: [check, xml_path_absent]
+
+docs:
+  title: A .csproj that stays safe
+  case: pass
+  kind: xml_path_absent
+
+given:
+  tree:
+    "App.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <PropertyGroup>
+          <TargetFramework>net8.0</TargetFramework>
+        </PropertyGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: no-unsafe-blocks
+        kind: xml_path_absent
+        paths: "*.csproj"
+        path: "$.Project.PropertyGroup.AllowUnsafeBlocks"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

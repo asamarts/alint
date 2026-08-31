@@ -2626,6 +2626,26 @@
       ],
       "type": "object"
     },
+    "rule_json_path_absent": {
+      "description": "Existence assertion: the query must match nothing (the JSON sibling of `file_absent`, for a path).",
+      "properties": {
+        "kind": {
+          "const": "json_path_absent"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent).",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path"
+      ],
+      "type": "object"
+    },
     "rule_json_path_equals": {
       "description": "Value at a JSONPath (RFC 9535) expression in every JSON file in `paths` must deep-equal `equals`. Multiple matches all must match; zero matches is a violation (value missing) unless `if_present: true`. Typical use: `$.license == \"MIT\"` on every `packages/*/package.json`.",
       "properties": {
@@ -2774,9 +2794,6 @@
           "$ref": "#/$defs/rule_yaml_path_matches"
         },
         {
-          "$ref": "#/$defs/rule_yaml_path_absent"
-        },
-        {
           "$ref": "#/$defs/rule_toml_path_equals"
         },
         {
@@ -2787,6 +2804,18 @@
         },
         {
           "$ref": "#/$defs/rule_xml_path_matches"
+        },
+        {
+          "$ref": "#/$defs/rule_json_path_absent"
+        },
+        {
+          "$ref": "#/$defs/rule_yaml_path_absent"
+        },
+        {
+          "$ref": "#/$defs/rule_toml_path_absent"
+        },
+        {
+          "$ref": "#/$defs/rule_xml_path_absent"
         },
         {
           "$ref": "#/$defs/rule_json_schema_passes"
@@ -3500,6 +3529,26 @@
       ],
       "type": "object"
     },
+    "rule_toml_path_absent": {
+      "description": "Existence assertion: the query must match nothing (the TOML sibling of `file_absent`, for a path).",
+      "properties": {
+        "kind": {
+          "const": "toml_path_absent"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent).",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path"
+      ],
+      "type": "object"
+    },
     "rule_toml_path_equals": {
       "description": "TOML sibling of `json_path_equals`. Typical use: enforce `[package].edition == \"2024\"` on every `Cargo.toml`.",
       "properties": {
@@ -3582,6 +3631,26 @@
       },
       "required": [
         "select"
+      ],
+      "type": "object"
+    },
+    "rule_xml_path_absent": {
+      "description": "Existence assertion: the query must match nothing (the XML sibling of `file_absent`, for a path).",
+      "properties": {
+        "kind": {
+          "const": "xml_path_absent"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent).",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path"
       ],
       "type": "object"
     },

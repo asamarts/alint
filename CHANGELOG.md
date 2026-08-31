@@ -8,11 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New rule kind `yaml_path_absent`: asserts a JSONPath query over a YAML file
-  matches nothing, firing one file-level violation when it does -- the existence
-  sibling of the value-checking structured kinds (mirrors `file_absent` for a
-  path). A root-level `$[?...]` filter that fans out over every top-level key
-  still yields a single violation.
+- New rule kinds `json_path_absent` / `yaml_path_absent` / `toml_path_absent` /
+  `xml_path_absent`: assert a JSONPath query over the document matches nothing,
+  firing one file-level violation when it does -- the existence sibling of the
+  value-checking structured kinds (mirrors `file_absent` for a path). A root-level
+  `$[?...]` filter that fans out over every top-level key still yields a single
+  violation.
 
 ### Fixed
 

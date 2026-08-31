@@ -1,0 +1,34 @@
+name: toml_path_absent flags a Cargo.toml with a [patch] table
+tags: [check, toml_path_absent]
+
+docs:
+  title: A Cargo.toml that overrides a dependency via [patch]
+  case: fail
+  kind: toml_path_absent
+
+given:
+  tree:
+    "Cargo.toml": |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+
+      [patch.crates-io]
+      serde = { git = "https://github.com/example/serde" }
+  config: |
+    version: 1
+    rules:
+      - id: no-cargo-patch
+        kind: toml_path_absent
+        paths: "Cargo.toml"
+        path: "$.patch"
+        level: error
+        message: >-
+          Cargo.toml carries a `[patch]` table; patched dependencies are easy to
+          forget and hard to audit. Prefer a normal version requirement.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-cargo-patch, level: error, path: Cargo.toml}

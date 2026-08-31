@@ -1,0 +1,30 @@
+name: toml_path_absent is silent when Cargo.toml has no [patch]
+tags: [check, toml_path_absent]
+
+docs:
+  title: A Cargo.toml with only normal dependencies
+  case: pass
+  kind: toml_path_absent
+
+given:
+  tree:
+    "Cargo.toml": |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+
+      [dependencies]
+      serde = "1"
+  config: |
+    version: 1
+    rules:
+      - id: no-cargo-patch
+        kind: toml_path_absent
+        paths: "Cargo.toml"
+        path: "$.patch"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

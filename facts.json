@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 90,
+    "rule_kinds": 93,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -62,6 +62,7 @@
     "import_gate",
     "indent_style",
     "is_text",
+    "json_path_absent",
     "json_path_equals",
     "json_path_matches",
     "json_schema_passes",
@@ -92,9 +93,11 @@
     "registry_paths_resolve",
     "shebang",
     "shebang_has_executable",
+    "toml_path_absent",
     "toml_path_equals",
     "toml_path_matches",
     "unique_by",
+    "xml_path_absent",
     "xml_path_equals",
     "xml_path_matches",
     "yaml_path_absent",
@@ -342,6 +345,9 @@
     "indent_style": [
       "text-hygiene"
     ],
+    "json_path_absent": [
+      "structured-query"
+    ],
     "json_path_equals": [
       "structured-query"
     ],
@@ -431,6 +437,9 @@
       "unix-metadata",
       "content"
     ],
+    "toml_path_absent": [
+      "structured-query"
+    ],
     "toml_path_equals": [
       "structured-query"
     ],
@@ -439,6 +448,9 @@
     ],
     "unique_by": [
       "cross-file"
+    ],
+    "xml_path_absent": [
+      "structured-query"
     ],
     "xml_path_equals": [
       "structured-query"
@@ -522,6 +534,7 @@
     "import_gate": "import_gate",
     "indent_style": "indent_style",
     "is_text": "file_is_text",
+    "json_path_absent": "structured_path",
     "json_path_equals": "structured_path",
     "json_path_matches": "structured_path",
     "json_schema_passes": "json_schema_passes",
@@ -552,9 +565,11 @@
     "registry_paths_resolve": "registry_paths_resolve",
     "shebang": "file_shebang",
     "shebang_has_executable": "shebang_has_executable",
+    "toml_path_absent": "structured_path",
     "toml_path_equals": "structured_path",
     "toml_path_matches": "structured_path",
     "unique_by": "unique_by",
+    "xml_path_absent": "structured_path",
     "xml_path_equals": "structured_path",
     "xml_path_matches": "structured_path",
     "yaml_path_absent": "structured_path",

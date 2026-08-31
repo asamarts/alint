@@ -299,7 +299,19 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             structured_path::matches_options_schema(),
         ),
         (
+            "rule_json_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
             "rule_yaml_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
+            "rule_toml_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
+            "rule_xml_path_absent",
             structured_path::absent_options_schema(),
         ),
         (
@@ -373,8 +385,12 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("xml_path_equals", structured_path::xml_path_equals_build);
     registry.register("xml_path_matches", structured_path::xml_path_matches_build);
-    // Existence assertion (yaml only for now; see the structured_path module docs).
+    // Existence assertion for the full {json,yaml,toml,xml} family. Symmetry with
+    // the equals/matches ops is enforced by `structured_family_is_symmetric`.
+    registry.register("json_path_absent", structured_path::json_path_absent_build);
     registry.register("yaml_path_absent", structured_path::yaml_path_absent_build);
+    registry.register("toml_path_absent", structured_path::toml_path_absent_build);
+    registry.register("xml_path_absent", structured_path::xml_path_absent_build);
     registry.register("json_schema_passes", json_schema_passes::build);
     registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
     registry.register("commented_out_code", commented_out_code::build);
@@ -509,6 +525,47 @@ mod registry_tests {
         // The 11 known aliases: the 10 short-name `file_*` forms + is_text, plus
         // `cross_file_value_equals`. A drift in that count is a deliberate change.
         assert_eq!(alias_count, 11, "unexpected number of registered aliases");
+    }
+
+    #[test]
+    fn structured_family_is_symmetric() {
+        // Every config-format-specific op (`<fmt>_path_<op>`) must exist for ALL
+        // four formats. Guards against shipping an asymmetric structured-query
+        // family -- e.g. a lone `yaml_path_absent` with no json/toml/xml siblings
+        // (the gap that motivated this test). Adding a new op or a new format means
+        // adding every (format, op) pair, or this fails.
+        const FORMATS: &[&str] = &["json", "yaml", "toml", "xml"];
+        let r = builtin_registry();
+        let known: std::collections::HashSet<&str> = r.known_kinds().collect();
+        // Discover ops: any `<fmt>_path_<op>` kind contributes the suffix `path_<op>`.
+        let mut ops: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for kind in &known {
+            for &fmt in FORMATS {
+                if let Some(rest) = kind.strip_prefix(fmt).and_then(|r| r.strip_prefix('_')) {
+                    if rest.starts_with("path_") {
+                        ops.insert(rest);
+                    }
+                }
+            }
+        }
+        assert!(
+            !ops.is_empty(),
+            "no structured-query ops discovered -- the test is vacuous (naming scheme change?)"
+        );
+        let mut missing = Vec::new();
+        for op in &ops {
+            for fmt in FORMATS {
+                let kind = format!("{fmt}_{op}");
+                if !known.contains(kind.as_str()) {
+                    missing.push(kind);
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "structured-query family is asymmetric -- every op must exist for all of \
+             {FORMATS:?}. Missing: {missing:?}"
+        );
     }
 
     #[test]

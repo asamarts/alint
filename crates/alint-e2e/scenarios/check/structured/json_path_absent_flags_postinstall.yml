@@ -1,0 +1,35 @@
+name: json_path_absent flags a package.json with a postinstall script
+tags: [check, json_path_absent]
+
+docs:
+  title: A package.json that runs a postinstall script
+  case: fail
+  kind: json_path_absent
+
+given:
+  tree:
+    "package.json": |
+      {
+        "name": "demo",
+        "version": "1.0.0",
+        "scripts": {
+          "postinstall": "node ./scripts/setup.js"
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-postinstall-script
+        kind: json_path_absent
+        paths: "package.json"
+        path: "$.scripts.postinstall"
+        level: error
+        message: >-
+          package.json declares a `postinstall` script; these run automatically
+          on `npm install` and are a common supply-chain foothold.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-postinstall-script, level: error, path: package.json}

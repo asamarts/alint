@@ -1,0 +1,34 @@
+name: xml_path_absent flags a csproj that enables unsafe blocks
+tags: [check, xml_path_absent]
+
+docs:
+  title: A .csproj that opts into unsafe code
+  case: fail
+  kind: xml_path_absent
+
+given:
+  tree:
+    "App.csproj": |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <PropertyGroup>
+          <TargetFramework>net8.0</TargetFramework>
+          <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        </PropertyGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: no-unsafe-blocks
+        kind: xml_path_absent
+        paths: "*.csproj"
+        path: "$.Project.PropertyGroup.AllowUnsafeBlocks"
+        level: error
+        message: >-
+          Project enables AllowUnsafeBlocks; unsafe code bypasses the memory
+          guarantees the rest of the codebase relies on.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-unsafe-blocks, level: error, path: App.csproj}
