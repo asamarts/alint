@@ -23,7 +23,7 @@
 
 - ⚡ **Fast at scale.** ~1.1 s on a 100K-file workspace bundle, ~12 s at 1M files. [Public benchmarks per release.](docs/benchmarks/HISTORY.md)
 - 🤖 **Agent-aware.** First-class `agent` output format with per-violation `agent_instruction` strings; bundled `agent-hygiene` and `agent-context` rulesets for AI-touched repos.
-- 🧰 **Powerful + extensible.** 99 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix ops, 8 output formats, structured-query rules with full RFC 9535 JSONPath, cross-file relational rules, conditional `when:` gates over per-run facts, and `extends:` composition with SRI-pinned URLs.
+- 🧰 **Powerful + extensible.** 102 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix ops, 8 output formats, structured-query rules with full RFC 9535 JSONPath, cross-file relational rules, conditional `when:` gates over per-run facts, and `extends:` composition with SRI-pinned URLs.
 - 📦 **One static Rust binary.** Any language, any repo. No plugin install, no Node/JVM/Python runtime needed.
 
 Working `.alint.yml` configs for 30 OSS repos (single-language workspaces, polyglot monorepos, scale stress-tests) live under [`examples/`](examples/README.md), each with a writeup of what alint catches that the repo's existing tooling misses.
@@ -55,7 +55,7 @@ Most bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has
 
 ## Core capabilities
 
-- **99 rule kinds** across 13 families: existence, content, naming, structured query (RFC 9535 JSONPath over JSON/YAML/TOML/XML/dotenv/properties), text hygiene, security/unicode, encoding, structure, portable metadata, Unix metadata, git hygiene, cross-file relations, plugin (`command` shellout). Full reference: [`docs/rules.md`](docs/rules.md).
+- **102 rule kinds** across 13 families: existence, content, naming, structured query (RFC 9535 JSONPath over JSON/YAML/TOML/XML/dotenv/properties/INI), text hygiene, security/unicode, encoding, structure, portable metadata, Unix metadata, git hygiene, cross-file relations, plugin (`command` shellout). Full reference: [`docs/rules.md`](docs/rules.md).
 - **22 bundled rulesets**, compiled into the binary with no network round-trip: `oss-baseline` (a migration starting point for [Repolinter](https://github.com/todogroup/repolinter), archived in 2026: its 42-entry matrix maps 30 defaults fully, 8 partially, and 4 without a clean equivalent), seven language sets, `ci/github-actions`, a `monorepo` base plus Cargo / pnpm / Yarn workspace overlays, hygiene, tooling, ADR docs, compliance (`reuse`, `apache-2`), Apache TLP governance, and two agent-aware sets. Per-ruleset detail: [Bundled rulesets](#bundled-rulesets) below.
 - **Auto-fix**: 12 ops covering content edits (whitespace, newlines, line endings, BOM/bidi/zero-width strip, blank-line collapse) and path ops (create/remove/rename/prepend/append). Preview with `alint fix --dry-run`. Configurable `fix_size_limit` (default 1 MiB) skips oversize files rather than rewriting them.
 - **Conditional rules**: a bounded `when:` expression language (boolean logic, comparisons, `matches`, `in`) gates rules on *facts* evaluated once per run (predicate kinds: `all_files_exist`, `any_file_exists`, `count_files`, `file_content_matches`, `git_branch`, `custom`).

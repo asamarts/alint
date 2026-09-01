@@ -1,0 +1,28 @@
+name: ini_path_matches flags a non-postgres JDBC url
+tags: [check, ini_path_matches]
+
+docs:
+  title: An .ini JDBC url on the wrong engine
+  case: fail
+  kind: ini_path_matches
+
+given:
+  tree:
+    "config.ini": |
+      [database]
+      url = jdbc:mysql://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: ini_path_matches
+        paths: "config.ini"
+        path: "$['database']['url']"
+        matches: "^jdbc:postgresql:"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: postgres-only, level: error, path: config.ini}

@@ -1,0 +1,32 @@
+name: cross_file over ini extract flags an app version out of sync with package.json
+tags: [check, cross_file, ini]
+
+# Exercises the `ini:` extract mode. The .ini [app] version must equal the
+# package.json version; a section + key is queried with bracket notation.
+
+given:
+  tree:
+    "config.ini": |
+      [app]
+      version = 1.2.3
+    "package.json": |
+      {"version": "1.2.4"}
+  config: |
+    version: 1
+    rules:
+      - id: app-version-synced
+        kind: cross_file
+        source:
+          file: "config.ini"
+          extract: { ini: "$['app']['version']" }
+        targets:
+          files: "package.json"
+          extract: { json: "$.version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-version-synced, level: error, path: package.json}

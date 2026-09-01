@@ -13,6 +13,7 @@ mod error;
 mod extract;
 pub mod facts;
 pub mod git;
+mod ini;
 pub mod jsonpath_diagnostics;
 mod level;
 mod pathsafe;

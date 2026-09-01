@@ -1,17 +1,18 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml,dotenv,properties}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv,properties,ini}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
-//! [`Format`] parses JSON / YAML / TOML / XML / dotenv / properties into one uniform
+//! [`Format`] parses JSON / YAML / TOML / XML / dotenv / properties / INI into one uniform
 //! `serde_json::Value` shape (YAML and TOML coerce through serde; XML
 //! maps via the xmltodict-style convention in `xml_to_value` — `@attr`
 //! / `#text` / repeated-element→array, leaf elements collapse to their
 //! text string, namespaces flatten to local names, every leaf is a
 //! string; dotenv and Java `.properties` are flat maps of literal-string
-//! values), so a single `JSONPath` engine only ever has to reason
-//! about one tree shape. XML design + open-question resolutions:
-//! `docs/design/v0.10/xml_path.md`.
+//! values, and INI is a 2-level `{ section: { key: value } }` map of the
+//! same, pre-section keys hoisted to the top level), so a single
+//! `JSONPath` engine only ever has to reason about one tree shape. XML
+//! design + open-question resolutions: `docs/design/v0.10/xml_path.md`.
 
 use serde_json::Value;
 
@@ -24,6 +25,7 @@ pub enum Format {
     Xml,
     Dotenv,
     Properties,
+    Ini,
 }
 
 impl Format {
@@ -41,6 +43,7 @@ impl Format {
         Format::Xml,
         Format::Dotenv,
         Format::Properties,
+        Format::Ini,
     ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
@@ -72,6 +75,7 @@ impl Format {
             Self::Xml => xml_to_value(text),
             Self::Dotenv => crate::dotenv::parse(text),
             Self::Properties => properties_to_value(text),
+            Self::Ini => crate::ini::parse(text),
         }
     }
 
@@ -83,6 +87,7 @@ impl Format {
             Self::Xml => "XML",
             Self::Dotenv => "dotenv",
             Self::Properties => "properties",
+            Self::Ini => "INI",
         }
     }
 
@@ -104,6 +109,7 @@ impl Format {
             "yaml" | "yml" => Some(Self::Yaml),
             "toml" => Some(Self::Toml),
             "properties" => Some(Self::Properties),
+            "ini" | "cfg" => Some(Self::Ini),
             "xml" | "csproj" | "props" | "targets" | "vbproj" | "fsproj" | "nuspec" => {
                 Some(Self::Xml)
             }
@@ -620,6 +626,31 @@ mod tests {
     }
 
     #[test]
+    fn ini_dispatches_to_a_two_level_section_map() {
+        // The `Format::Ini` arm reaches the hand-rolled parser: pre-section keys
+        // hoist to the top level, a `[section]` is a nested object, and both
+        // `=`/`:` separate. Full parser coverage lives in `crate::ini`.
+        let v = Format::Ini
+            .parse("root = true\n[server]\nhost = localhost\nport : 8080\n")
+            .expect("parse ini");
+        assert_eq!(v["root"], json!("true"), "global key hoisted to top level");
+        assert_eq!(v["server"]["host"], json!("localhost"));
+        assert_eq!(v["server"]["port"], json!("8080"), "`:` separator");
+    }
+
+    #[test]
+    fn ini_and_cfg_extensions_detect_as_ini() {
+        use std::path::Path;
+        for p in ["tox.ini", "pytest.ini", "setup.cfg", "app.cfg"] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Ini),
+                "{p} should detect as INI"
+            );
+        }
+    }
+
+    #[test]
     fn format_all_is_complete() {
         // Every parity gate iterates `Format::ALL`, so a variant missing from ALL
         // silently bypasses them. The real guard here is the exhaustive `match`
@@ -636,6 +667,7 @@ mod tests {
             Format::Xml,
             Format::Dotenv,
             Format::Properties,
+            Format::Ini,
         ];
         for f in variants {
             // Distinct arms (clippy-clean) keep the match exhaustive, so a new
@@ -647,6 +679,7 @@ mod tests {
                 Format::Xml => "xml",
                 Format::Dotenv => "dotenv",
                 Format::Properties => "properties",
+                Format::Ini => "ini",
             };
         }
         assert_eq!(

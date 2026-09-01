@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 99,
+    "rule_kinds": 102,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -64,6 +64,9 @@
     "header",
     "import_gate",
     "indent_style",
+    "ini_path_absent",
+    "ini_path_equals",
+    "ini_path_matches",
     "is_text",
     "json_path_absent",
     "json_path_equals",
@@ -360,6 +363,15 @@
     "indent_style": [
       "text-hygiene"
     ],
+    "ini_path_absent": [
+      "structured-query"
+    ],
+    "ini_path_equals": [
+      "structured-query"
+    ],
+    "ini_path_matches": [
+      "structured-query"
+    ],
     "json_path_absent": [
       "structured-query"
     ],
@@ -560,6 +572,9 @@
     "header": "file_header",
     "import_gate": "import_gate",
     "indent_style": "indent_style",
+    "ini_path_absent": "structured_path",
+    "ini_path_equals": "structured_path",
+    "ini_path_matches": "structured_path",
     "is_text": "file_is_text",
     "json_path_absent": "structured_path",
     "json_path_equals": "structured_path",

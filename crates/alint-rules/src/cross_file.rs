@@ -92,8 +92,12 @@ enum TargetsSpec {
     #[schemars(extend("additionalProperties" = false))]
     Glob {
         files: String,
+        // Boxed so this inline variant does not dwarf `List` (a `Vec`): the
+        // `ExtractSpec` one-of has grown one `Option<String>` per config format,
+        // and unboxed it trips clippy's `large_enum_variant`. Transparent to
+        // serde and schemars, and `resolve()` moves through the `Box` unchanged.
         #[serde(default)]
-        extract: Option<ExtractSpec>,
+        extract: Option<Box<ExtractSpec>>,
     },
     /// Form b: a sequence of heterogeneous `{ file, extract }` pins.
     List(Vec<TargetEntrySpec>),

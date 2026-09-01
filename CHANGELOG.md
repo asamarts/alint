@@ -31,6 +31,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (via `java-properties`; `${...}` placeholders are the application's job, kept
   verbatim); dotted keys stay one key, queried with bracket notation (`$['db.host']`).
   Auto-detects by the `.properties` extension.
+- **INI / `.cfg` as a config format.** New `ini_path_{equals,matches,absent}` rule kinds,
+  `format: ini` in `json_schema_passes`, and `extract: { ini: ... }` in the cross-file
+  rules. An INI file maps to a 2-level `{ section: { key: "value" } }` object of literal
+  strings (a small hand-rolled parser, zero new dependencies); pre-section keys hoist to
+  the top level, values stay literal (quotes and inline `;`/`#` kept), a key repeated
+  within one scope becomes a file-order array, and section names / keys are
+  case-preserving. Query a section with bracket notation (`$['server']['port']`).
+  Auto-detects by the `.ini` / `.cfg` extension.
 
 ### Fixed
 

@@ -1,0 +1,26 @@
+name: ini_path_absent is silent when the debug flag is absent
+tags: [check, ini_path_absent, structured, passing]
+
+docs:
+  title: An .ini with no debug flag
+  case: pass
+  kind: ini_path_absent
+
+given:
+  tree:
+    "config.ini": |
+      [server]
+      port = 8080
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: ini_path_absent
+        paths: "config.ini"
+        path: "$['server']['debug']"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
