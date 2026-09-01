@@ -1,0 +1,26 @@
+name: dotenv_path_matches is silent when DATABASE_URL is postgres
+tags: [check, dotenv_path_matches, structured, passing]
+
+docs:
+  title: A .env DATABASE_URL on postgres
+  case: pass
+  kind: dotenv_path_matches
+
+given:
+  tree:
+    ".env": |
+      DATABASE_URL=postgres://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: dotenv_path_matches
+        paths: ".env"
+        path: "$.DATABASE_URL"
+        matches: "^postgres://"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

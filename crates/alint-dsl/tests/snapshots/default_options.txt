@@ -272,6 +272,105 @@ DirOnlyContainsRule {
     allow_matcher: GlobSet { ... },
 }
 
+=== kind: dotenv_path_absent | id: dotenv-no-debug-flag ===
+StructuredPathRule {
+    id: "dotenv-no-debug-flag",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            ".env",
+        ],
+    ),
+    format: Dotenv,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "DEBUG",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.DEBUG",
+    op: Absent,
+    if_present: false,
+}
+
+=== kind: dotenv_path_equals | id: dotenv-node-env-production ===
+StructuredPathRule {
+    id: "dotenv-node-env-production",
+    level: Error,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            ".env.production",
+        ],
+    ),
+    format: Dotenv,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "NODE_ENV",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.NODE_ENV",
+    op: Equals(
+        String("production"),
+    ),
+    if_present: true,
+}
+
+=== kind: dotenv_path_matches | id: dotenv-database-url-postgres ===
+StructuredPathRule {
+    id: "dotenv-database-url-postgres",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            ".env",
+        ],
+    ),
+    format: Dotenv,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "DATABASE_URL",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.DATABASE_URL",
+    op: Matches(
+        Regex(
+            "^postgres://",
+        ),
+    ),
+    if_present: true,
+}
+
 === kind: every_matching_has | id: every-pkg-has-src ===
 EveryMatchingHasRule {
     id: "every-pkg-has-src",

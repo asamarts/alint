@@ -14,6 +14,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value-checking structured kinds (mirrors `file_absent` for a path). A root-level
   `$[?...]` filter that fans out over every top-level key still yields a single
   violation.
+- **XML across every format-aware rule.** `json_schema_passes` gains `format: xml`
+  (and auto-detects `.csproj` / `.props` / `.targets` / `.xml`), and the cross-file
+  rules (`cross_file`, `file_graph`, `registry_paths_resolve`) accept
+  `extract: { xml: ... }`. XML maps to the query tree via the xmltodict-style
+  convention: attributes are `@name` keys, repeated sibling elements become an
+  array, and every leaf value is a string.
+- **dotenv (`.env`) as a config format.** New `dotenv_path_{equals,matches,absent}`
+  rule kinds, `format: dotenv` in `json_schema_passes`, and `extract: { dotenv: ... }`
+  in the cross-file rules. A `.env` maps to a flat `{ KEY: "value" }` object of
+  literal strings with no `${VAR}` expansion (deterministic, environment-independent
+  static analysis); `.env` / `.env.*` auto-detect by filename.
 
 ### Fixed
 

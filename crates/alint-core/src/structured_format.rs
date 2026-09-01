@@ -1,26 +1,28 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
-//! [`Format`] parses JSON / YAML / TOML / XML into one uniform
+//! [`Format`] parses JSON / YAML / TOML / XML / dotenv into one uniform
 //! `serde_json::Value` shape (YAML and TOML coerce through serde; XML
 //! maps via the xmltodict-style convention in `xml_to_value` — `@attr`
 //! / `#text` / repeated-element→array, leaf elements collapse to their
 //! text string, namespaces flatten to local names, every leaf is a
-//! string), so a single `JSONPath` engine only ever has to reason
+//! string; dotenv is a flat map of literal-string values), so a single
+//! `JSONPath` engine only ever has to reason
 //! about one tree shape. XML design + open-question resolutions:
 //! `docs/design/v0.10/xml_path.md`.
 
 use serde_json::Value;
 
-/// Which YAML-flavoured parser to use on the target file.
+/// Which config format the target file is parsed as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Json,
     Yaml,
     Toml,
     Xml,
+    Dotenv,
 }
 
 impl Format {
@@ -31,7 +33,13 @@ impl Format {
     /// surface is leveled (today `extract_spec_covers_every_format`; the rest land
     /// with the format-coverage rollout). `format_all_is_complete` guards this
     /// list itself. See `docs/design/format-coverage.md`.
-    pub const ALL: &'static [Format] = &[Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+    pub const ALL: &'static [Format] = &[
+        Format::Json,
+        Format::Yaml,
+        Format::Toml,
+        Format::Xml,
+        Format::Dotenv,
+    ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
         match self {
@@ -60,6 +68,7 @@ impl Format {
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
             Self::Xml => xml_to_value(text),
+            Self::Dotenv => crate::dotenv::parse(text),
         }
     }
 
@@ -69,6 +78,7 @@ impl Format {
             Self::Yaml => "YAML",
             Self::Toml => "TOML",
             Self::Xml => "XML",
+            Self::Dotenv => "dotenv",
         }
     }
 
@@ -77,6 +87,14 @@ impl Format {
     /// (require an explicit `format:` override, default to JSON,
     /// emit a per-file violation, etc).
     pub fn detect_from_path(path: &std::path::Path) -> Option<Self> {
+        // dotenv is filename-based, not extension-based: a bare `.env` has no
+        // extension, and `.env.local` / `.env.production` carry the environment
+        // where an extension would be. Match the `.env` family by name first.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name == ".env" || name.starts_with(".env.") {
+                return Some(Self::Dotenv);
+            }
+        }
         match path.extension()?.to_str()? {
             "json" => Some(Self::Json),
             "yaml" | "yml" => Some(Self::Yaml),
@@ -464,6 +482,29 @@ mod tests {
     }
 
     #[test]
+    fn dotenv_files_detect_by_filename() {
+        use std::path::Path;
+        // dotenv detection is filename-based (a bare `.env` has no extension), the
+        // one piece of new control flow in the dotenv work. Positive cases:
+        for p in [".env", ".env.local", ".env.production", ".env.example"] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Dotenv),
+                "{p} should detect as dotenv"
+            );
+        }
+        // Near-misses must NOT match (the `.env.` boundary matters: a regression to
+        // `contains(\".env\")` would wrongly claim `.environment` / `foo.env`).
+        for p in [".environment", "env.local", "foo.env", "envrc", ".envision"] {
+            assert_ne!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Dotenv),
+                "{p} must NOT detect as dotenv"
+            );
+        }
+    }
+
+    #[test]
     fn format_all_is_complete() {
         // Every parity gate iterates `Format::ALL`, so a variant missing from ALL
         // silently bypasses them. The real guard here is the exhaustive `match`
@@ -473,7 +514,13 @@ mod tests {
         // `variants` to list the same set. Fully deriving ALL from the enum would
         // need a proc-macro (`strum`), which this crate deliberately avoids -- so
         // the compile error, not the assert, is what stops a half-wired variant.
-        let variants = [Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+        let variants = [
+            Format::Json,
+            Format::Yaml,
+            Format::Toml,
+            Format::Xml,
+            Format::Dotenv,
+        ];
         for f in variants {
             // Distinct arms (clippy-clean) keep the match exhaustive, so a new
             // Format variant is a compile error here until it is added.
@@ -482,6 +529,7 @@ mod tests {
                 Format::Yaml => "yaml",
                 Format::Toml => "toml",
                 Format::Xml => "xml",
+                Format::Dotenv => "dotenv",
             };
         }
         assert_eq!(

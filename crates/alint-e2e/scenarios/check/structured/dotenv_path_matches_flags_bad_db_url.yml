@@ -1,0 +1,27 @@
+name: dotenv_path_matches flags a DATABASE_URL that is not postgres
+tags: [check, dotenv_path_matches]
+
+docs:
+  title: A .env DATABASE_URL pointing at the wrong engine
+  case: fail
+  kind: dotenv_path_matches
+
+given:
+  tree:
+    ".env": |
+      DATABASE_URL=mysql://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: dotenv_path_matches
+        paths: ".env"
+        path: "$.DATABASE_URL"
+        matches: "^postgres://"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: postgres-only, level: error, path: .env}

@@ -1,0 +1,27 @@
+name: dotenv_path_equals is silent when .env.production is production
+tags: [check, dotenv_path_equals, structured, passing]
+
+docs:
+  title: A .env.production correctly set to production
+  case: pass
+  kind: dotenv_path_equals
+
+given:
+  tree:
+    ".env.production": |
+      NODE_ENV=production
+      PORT=8080
+  config: |
+    version: 1
+    rules:
+      - id: prod-node-env
+        kind: dotenv_path_equals
+        paths: ".env.production"
+        path: "$.NODE_ENV"
+        equals: "production"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

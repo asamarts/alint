@@ -1,10 +1,10 @@
 //! Structured-query rule family:
-//! `{json,yaml,toml,xml}_path_{equals,matches,absent}`.
+//! `{json,yaml,toml,xml,dotenv}_path_{equals,matches,absent}`.
 //!
 //! The eight value-checking kinds (`equals` / `matches`) share a
 //! single implementation that varies along two axes:
 //!
-//! - **Format** — `Json`, `Yaml`, `Toml`, or `Xml`. The file is
+//! - **Format** — `Json`, `Yaml`, `Toml`, `Xml`, or `Dotenv`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
 //!   TOML coerce through serde; XML maps via the xmltodict-style
 //!   convention in `xml_to_value` — `@attr` / `#text` /
@@ -40,17 +40,17 @@
 //! pinned to a commit SHA" (a workflow with only `run:` steps
 //! has no `uses:` at all and shouldn't be flagged).
 //!
-//! ## `{json,yaml,toml,xml}_path_absent`
+//! ## `{json,yaml,toml,xml,dotenv}_path_absent`
 //!
 //! A third op — **existence** — mirrors `file_absent` for a path:
 //! the query must select *nothing*, and any match produces exactly
 //! one file-level violation (never per-match, so a `$[?…]` filter
 //! that fans out over every root key still yields one violation).
 //! `equals` / `matches` / `if_present` don't apply. Shipped for all
-//! four formats, kept symmetric with `equals`/`matches` by the
+//! five formats, kept symmetric with `equals`/`matches` by the
 //! `structured_family_is_symmetric` test.
 //!
-//! Unparseable files (bad JSON / YAML / TOML, not-well-formed
+//! Unparseable files (bad JSON / YAML / TOML / dotenv, not-well-formed
 //! XML) produce one violation per file. An unparseable file is a
 //! documentation problem, not the structured rule's concern —
 //! but better to surface it than silently skip.
@@ -149,7 +149,7 @@ struct MatchesOptions {
     if_present: bool,
 }
 
-/// schemars-derived options schema for the four `*_path_equals` kinds; composed
+/// schemars-derived options schema for the five `*_path_equals` kinds; composed
 /// into their `$defs` branches by `xtask gen-schema`. See
 /// [`crate::migrated_option_schemas`].
 #[must_use]
@@ -158,7 +158,7 @@ pub fn equals_options_schema() -> serde_json::Value {
         .expect("EqualsOptions JSON schema serializes")
 }
 
-/// schemars-derived options schema for the four `*_path_matches` kinds.
+/// schemars-derived options schema for the five `*_path_matches` kinds.
 #[must_use]
 pub fn matches_options_schema() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(MatchesOptions))
@@ -497,6 +497,18 @@ pub fn toml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
 pub fn xml_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     build_absent(spec, Format::Xml, "xml_path_absent")
+}
+
+pub fn dotenv_path_equals_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_equals(spec, Format::Dotenv, "dotenv_path_equals")
+}
+
+pub fn dotenv_path_matches_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_matches(spec, Format::Dotenv, "dotenv_path_matches")
+}
+
+pub fn dotenv_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Dotenv, "dotenv_path_absent")
 }
 
 fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box<dyn Rule>> {

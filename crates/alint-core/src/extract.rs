@@ -28,7 +28,7 @@ pub enum Extract {
     WholeFile,
 }
 
-/// Exactly one of: toml/json/yaml/xml (RFC 9535 `JSONPath` string), lines (object;
+/// Exactly one of: toml/json/yaml/xml/dotenv (RFC 9535 `JSONPath` string), lines (object;
 /// optional `comment` prefix, default `#`), regex (string; capture group 1 is
 /// the value), `whole_file` (object `{}`; the entire file content as one value,
 /// for byte-level `cross_file` comparison; the non-literal skip does not apply).
@@ -45,6 +45,8 @@ pub struct ExtractSpec {
     #[serde(default)]
     xml: Option<String>,
     #[serde(default)]
+    dotenv: Option<String>,
+    #[serde(default)]
     lines: Option<LinesOpts>,
     #[serde(default)]
     regex: Option<String>,
@@ -59,6 +61,7 @@ impl ExtractSpec {
             ("json", self.json.is_some()),
             ("yaml", self.yaml.is_some()),
             ("xml", self.xml.is_some()),
+            ("dotenv", self.dotenv.is_some()),
             ("lines", self.lines.is_some()),
             ("regex", self.regex.is_some()),
             ("whole_file", self.whole_file.is_some()),
@@ -68,7 +71,7 @@ impl ExtractSpec {
         .collect();
         match set.as_slice() {
             [] => Err(
-                "`extract` must set exactly one of toml/json/yaml/xml/lines/regex/whole_file (none set)"
+                "`extract` must set exactly one of toml/json/yaml/xml/dotenv/lines/regex/whole_file (none set)"
                     .to_string(),
             ),
             [_] => Ok(if let Some(q) = self.toml {
@@ -79,6 +82,8 @@ impl ExtractSpec {
                 Extract::Structured(Format::Yaml, q)
             } else if let Some(q) = self.xml {
                 Extract::Structured(Format::Xml, q)
+            } else if let Some(q) = self.dotenv {
+                Extract::Structured(Format::Dotenv, q)
             } else if let Some(o) = self.lines {
                 Extract::Lines(o)
             } else if let Some(q) = self.regex {
@@ -87,7 +92,7 @@ impl ExtractSpec {
                 Extract::WholeFile
             }),
             many => Err(format!(
-                "`extract` must set exactly one of toml/json/yaml/xml/lines/regex/whole_file (got {})",
+                "`extract` must set exactly one of toml/json/yaml/xml/dotenv/lines/regex/whole_file (got {})",
                 many.join(", ")
             )),
         }
@@ -102,6 +107,7 @@ impl From<Extract> for ExtractSpec {
             Extract::Structured(Format::Json, q) => s.json = Some(q),
             Extract::Structured(Format::Yaml, q) => s.yaml = Some(q),
             Extract::Structured(Format::Xml, q) => s.xml = Some(q),
+            Extract::Structured(Format::Dotenv, q) => s.dotenv = Some(q),
             Extract::Lines(o) => s.lines = Some(o),
             Extract::Regex(q) => s.regex = Some(q),
             Extract::WholeFile => s.whole_file = Some(WholeFileOpts::default()),
