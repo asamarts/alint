@@ -1,0 +1,27 @@
+name: ini_path_matches is silent when the JDBC url is postgres
+tags: [check, ini_path_matches, structured, passing]
+
+docs:
+  title: An .ini JDBC url on postgres
+  case: pass
+  kind: ini_path_matches
+
+given:
+  tree:
+    "config.ini": |
+      [database]
+      url = jdbc:postgresql://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: ini_path_matches
+        paths: "config.ini"
+        path: "$['database']['url']"
+        matches: "^jdbc:postgresql:"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

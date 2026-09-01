@@ -1,0 +1,33 @@
+name: json_schema_passes auto-detects an .ini and flags a missing required section
+tags: [check, json_schema_passes, structured, ini, failing]
+
+# The .ini extension auto-detects (no explicit format:); the 2-level
+# { section: { key: "value" } } object is validated against a JSON Schema that
+# requires a `server` section which is absent -> one schema violation.
+
+given:
+  tree:
+    schemas:
+      app.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["server"]
+        }
+    "config.ini": |
+      [app]
+      name = demo
+  config: |
+    version: 1
+    rules:
+      - id: app-has-server
+        kind: json_schema_passes
+        paths: "config.ini"
+        schema_path: "schemas/app.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-has-server, level: error, path: config.ini}

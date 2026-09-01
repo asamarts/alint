@@ -1,0 +1,28 @@
+name: ini_path_equals flags an .ini whose server port is wrong
+tags: [check, ini_path_equals]
+
+docs:
+  title: An .ini on the wrong port
+  case: fail
+  kind: ini_path_equals
+
+given:
+  tree:
+    "config.ini": |
+      [server]
+      port = 9090
+  config: |
+    version: 1
+    rules:
+      - id: canonical-port
+        kind: ini_path_equals
+        paths: "config.ini"
+        path: "$['server']['port']"
+        equals: "8080"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: canonical-port, level: error, path: config.ini}

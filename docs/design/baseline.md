@@ -177,7 +177,7 @@ violation (§3.1 branch 3), a rule sets `baseline_key` **only** when its identit
 genuinely isn't `(rule_id, path)` — i.e. when it emits *more than one* finding per
 `(rule_id, path)`, has *no* path, or is a *first-offender* line rule:
 
-- **Structured-query** (`json/yaml/toml/xml/dotenv/properties_path_*`): emit N path-only violations
+- **Structured-query** (`json/yaml/toml/xml/dotenv/properties/ini_path_*`): emit N path-only violations
   per file, so the empty default would collapse them — and the message embeds the
   matched *value*, which churns. Key = the JSONPath + operator (+ expected value
   for `_equals`). *(This was the headline review bug.)*

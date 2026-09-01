@@ -72,7 +72,8 @@ fn curated_suggestion(kind: &str, wrong: &str) -> Option<&'static str> {
             | "toml_path_equals"
             | "xml_path_equals"
             | "dotenv_path_equals"
-            | "properties_path_equals",
+            | "properties_path_equals"
+            | "ini_path_equals",
             "matches",
         ) => Some("equals"),
         (
@@ -81,7 +82,8 @@ fn curated_suggestion(kind: &str, wrong: &str) -> Option<&'static str> {
             | "toml_path_matches"
             | "xml_path_matches"
             | "dotenv_path_matches"
-            | "properties_path_matches",
+            | "properties_path_matches"
+            | "ini_path_matches",
             "equals",
         ) => Some("matches"),
 

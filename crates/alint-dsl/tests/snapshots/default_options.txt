@@ -1164,6 +1164,159 @@ IndentStyleRule {
     ),
 }
 
+=== kind: ini_path_absent | id: ini-no-debug ===
+StructuredPathRule {
+    id: "ini-no-debug",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "config.ini",
+        ],
+    ),
+    format: Ini,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "server",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "debug",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['server']['debug']",
+    op: Absent,
+    if_present: false,
+}
+
+=== kind: ini_path_equals | id: ini-server-port ===
+StructuredPathRule {
+    id: "ini-server-port",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "config.ini",
+        ],
+    ),
+    format: Ini,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "server",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "port",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['server']['port']",
+    op: Equals(
+        String("8080"),
+    ),
+    if_present: true,
+}
+
+=== kind: ini_path_matches | id: ini-database-url ===
+StructuredPathRule {
+    id: "ini-database-url",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "config.ini",
+        ],
+    ),
+    format: Ini,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "database",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "url",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['database']['url']",
+    op: Matches(
+        Regex(
+            "^jdbc:postgresql:",
+        ),
+    ),
+    if_present: true,
+}
+
 === kind: is_text | id: is-text-alias ===
 FileIsTextRule {
     id: "is-text-alias",

@@ -539,6 +539,25 @@ rules:
     paths: "application.properties"
     path: "$['debug.enabled']"
     level: warning
+  - id: ini-server-port
+    kind: ini_path_equals
+    paths: "config.ini"
+    path: "$['server']['port']"
+    equals: "8080"
+    level: warning
+    if_present: true
+  - id: ini-database-url
+    kind: ini_path_matches
+    paths: "config.ini"
+    path: "$['database']['url']"
+    matches: "^jdbc:postgresql:"
+    level: warning
+    if_present: true
+  - id: ini-no-debug
+    kind: ini_path_absent
+    paths: "config.ini"
+    path: "$['server']['debug']"
+    level: warning
   - id: package-conforms-to-schema
     kind: json_schema_passes
     paths: "package.json"

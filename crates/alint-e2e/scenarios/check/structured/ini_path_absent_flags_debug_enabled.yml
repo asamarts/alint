@@ -1,0 +1,30 @@
+name: ini_path_absent flags a debug flag in a production .ini
+tags: [check, ini_path_absent]
+
+docs:
+  title: An .ini that leaves debug enabled
+  case: fail
+  kind: ini_path_absent
+
+given:
+  tree:
+    "config.ini": |
+      [server]
+      port = 8080
+      debug = true
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: ini_path_absent
+        paths: "config.ini"
+        path: "$['server']['debug']"
+        level: error
+        message: >-
+          debug is set in a production .ini; remove it.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: config.ini}
