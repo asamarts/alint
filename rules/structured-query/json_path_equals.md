@@ -132,3 +132,4 @@ rules:
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/)
 - [`xml_path_equals`](/docs/rules/structured-query/xml_path_equals/)
 - [`dotenv_path_equals`](/docs/rules/structured-query/dotenv_path_equals/)
+- [`properties_path_equals`](/docs/rules/structured-query/properties_path_equals/)

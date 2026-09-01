@@ -2,7 +2,7 @@
 title: 'json_path_matches'
 description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint json_path_matches rule, structured query family.'
 sidebar:
-  order: 6
+  order: 7
 categories: ['structured-query']
 ---
 
@@ -118,3 +118,4 @@ rules:
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/)
 - [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/)
 - [`dotenv_path_matches`](/docs/rules/structured-query/dotenv_path_matches/)
+- [`properties_path_matches`](/docs/rules/structured-query/properties_path_matches/)

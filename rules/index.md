@@ -6,13 +6,13 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 96 rule kinds across 13 families (85 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 99 rule kinds across 13 families (88 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
 - [Content](/docs/rules/content/) — 17 rules
-- [Structured query](/docs/rules/structured-query/) — 16 rules
+- [Structured query](/docs/rules/structured-query/) — 19 rules
 - [Naming](/docs/rules/naming/) — 4 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 13 rules
@@ -78,7 +78,7 @@ alint ships 96 rule kinds across 13 families (85 distinct rule behaviors plus 11
 - [`json_path_absent`](/docs/rules/structured-query/json_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`json_path_equals`](/docs/rules/structured-query/json_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`json_path_matches`](/docs/rules/structured-query/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
-- [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv file in `paths` against a JSON Schema document. _(Structured query)_
+- [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties file in `paths` against a JSON Schema document. _(Structured query)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
@@ -99,6 +99,9 @@ alint ships 96 rule kinds across 13 families (85 distinct rule behaviors plus 11
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
 - [`pair_changed_together`](/docs/rules/git-hygiene/pair_changed_together/) — If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. _(Git hygiene)_
 - [`pair_hash`](/docs/rules/cross-file/pair_hash/) — The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). _(Cross-file)_
+- [`properties_path_absent`](/docs/rules/structured-query/properties_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
+- [`properties_path_equals`](/docs/rules/structured-query/properties_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`properties_path_matches`](/docs/rules/structured-query/properties_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
 - [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_

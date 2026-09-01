@@ -1,14 +1,14 @@
 ---
 title: 'json_schema_passes'
-description: 'Validate every JSON / YAML / TOML / XML / dotenv file in paths against a JSON Schema document. alint json_schema_passes rule, structured query family.'
+description: 'Validate every JSON / YAML / TOML / XML / dotenv / properties file in paths against a JSON Schema document.'
 sidebar:
-  order: 16
+  order: 19
 categories: ['structured-query']
 ---
 
-Validate every JSON / YAML / TOML / XML / dotenv file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
+Validate every JSON / YAML / TOML / XML / dotenv / properties file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
 
-Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml` / `.xml` and the `.csproj` / `.props` / `.targets` family), or by filename for the `.env` family; pass `format:` to override.
+Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml` / `.properties` / `.xml` and the `.csproj` / `.props` / `.targets` family), or by filename for the `.env` family; pass `format:` to override.
 
 Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
 
@@ -18,7 +18,7 @@ Check-only — fixing schema violations is a "the user knows what value belongs 
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `format` | one of `json` \| `yaml` \| `yml` \| `toml` \| `xml` \| `dotenv` |  |  | Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family. |
+| `format` | one of `json` \| `yaml` \| `yml` \| `toml` \| `xml` \| `dotenv` \| `properties` |  |  | Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family. |
 | `schema_path` | string | yes |  | Path to a JSON Schema file relative to the lint root. The schema must itself be JSON even when validating YAML / TOML targets. |
 
 Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
