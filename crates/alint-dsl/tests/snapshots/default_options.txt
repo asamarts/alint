@@ -95,7 +95,8 @@ CrossFileRule {
     source_file: "pnpm-workspace.yaml",
     source_glob: None,
     source_extract: Some(
-        Yaml(
+        Structured(
+            Yaml,
             "$.catalog.*",
         ),
     ),
@@ -103,7 +104,8 @@ CrossFileRule {
         Glob {
             scope: Scope { ... },
             extract: Some(
-                Json(
+                Structured(
+                    Json,
                     "$.dependencies.*",
                 ),
             ),
@@ -184,7 +186,8 @@ CrossFileRule {
     source_file: "Cargo.toml",
     source_glob: None,
     source_extract: Some(
-        Toml(
+        Structured(
+            Toml,
             "$.workspace.package.version",
         ),
     ),
@@ -192,7 +195,8 @@ CrossFileRule {
         Glob {
             scope: Scope { ... },
             extract: Some(
-                Toml(
+                Structured(
+                    Toml,
                     "$.package.version",
                 ),
             ),
@@ -1462,7 +1466,8 @@ RegistryPathsResolveRule {
     message: None,
     source: "Cargo.toml",
     registry_scope: None,
-    extract: Toml(
+    extract: Structured(
+        Toml,
         "$.workspace.members[*]",
     ),
     base: RegistryDir,

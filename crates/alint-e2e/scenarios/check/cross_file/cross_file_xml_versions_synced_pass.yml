@@ -1,0 +1,44 @@
+name: cross_file over xml extract is silent when .csproj versions agree
+tags: [check, cross_file, xml, passing]
+
+given:
+  tree:
+    "Directory.Build.props": |
+      <Project>
+        <PropertyGroup>
+          <Version>2.1.0</Version>
+        </PropertyGroup>
+      </Project>
+    src:
+      A:
+        "A.csproj": |
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <Version>2.1.0</Version>
+            </PropertyGroup>
+          </Project>
+      B:
+        "B.csproj": |
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <Version>2.1.0</Version>
+            </PropertyGroup>
+          </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-versions-coherent
+        kind: cross_file
+        source:
+          file: "Directory.Build.props"
+          extract: { xml: "$.Project.PropertyGroup.Version" }
+        targets:
+          files: "src/*/*.csproj"
+          extract: { xml: "$.Project.PropertyGroup.Version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

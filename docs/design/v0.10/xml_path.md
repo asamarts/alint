@@ -208,11 +208,19 @@ the family, with one more `Format`):
   data, not prose markup; documented as out of scope, not a
   silent wrong answer.
 - **Single vs. array.** A path with exactly one
-  `<dependency>` maps it to an object, not a 1-element array,
-  so `dependency[*]` still matches (RFC 9535 wildcard over an
-  object's member) but `dependency[0]` would not. Documented;
-  the recommended idiom is `[*]` (works for one or many),
-  matching how the family already treats JSON.
+  `<dependency>` maps it to an object (a string for a leaf
+  element), not a 1-element array. So `dependency[*]` does NOT
+  reliably paper over cardinality: over a single leaf it matches
+  nothing, and `dependency[*]['@id']` / `dependency[*].child`
+  read the members of the lone object instead of descending — so
+  the single case is a silent miss while the many case works.
+  The cardinality-independent idiom is recursive descent
+  (`dependency..['@id']`, scoped under a parent so it does not
+  over-match), used when a rule must handle both one and many;
+  otherwise write the query for the data's actual shape. (This
+  corrects the original note, which claimed `[*]` "works for one
+  or many" — it does not for leaf elements or child/attribute
+  descents.)
 - **`@`/`#text` collision.** An XML attribute literally named
   `text` is `@text`; a child element named `#text` cannot occur
   (`#` is not a valid XML name start char), so the sentinel is

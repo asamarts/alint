@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
+    Context, Error, Extract, ExtractSpec, Format, Level, Result, Rule, RuleSpec, Scope, Violation,
     extract_values, is_non_literal,
 };
 use regex::Regex;
@@ -319,13 +319,14 @@ impl RegistryPathsResolveRule {
         let Some(q) = &self.exclude_query else {
             return HashSet::new();
         };
-        // exclude_query is a structured query; for line/regex
-        // registries it has no meaning, so fall back to a TOML
-        // read (a misconfig surfaces as an empty set, not a panic).
+        // exclude_query is a structured query; reuse the registry's own
+        // structured format so a JSON / YAML / XML / ... registry excludes
+        // against the right parse. Line / regex / whole_file registries carry
+        // no structured format, so fall back to a TOML read (a misconfig
+        // surfaces as an empty set, not a panic).
         let ex = match &self.extract {
-            Extract::Json(_) => Extract::Json(q.clone()),
-            Extract::Yaml(_) => Extract::Yaml(q.clone()),
-            _ => Extract::Toml(q.clone()),
+            Extract::Structured(fmt, _) => Extract::Structured(*fmt, q.clone()),
+            _ => Extract::Structured(Format::Toml, q.clone()),
         };
         extract_values(&ex, text)
             .map(|v| v.into_iter().collect())
@@ -684,7 +685,10 @@ mod tests {
             "[workspace]\nmembers = [\"crates/core\", \"crates/cli\"]\n",
         )
         .unwrap();
-        let mut o = opts("Cargo.toml", Extract::Toml("$.workspace.members[*]".into()));
+        let mut o = opts(
+            "Cargo.toml",
+            Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
+        );
         o.expect = Expect::Dir;
         o.must_contain = Some("Cargo.toml".into());
         let r = rule(o);
@@ -752,7 +756,10 @@ mod tests {
             "[workspace]\nmembers = [\"crates/*\"]\n",
         )
         .unwrap();
-        let mut o = opts("Cargo.toml", Extract::Toml("$.workspace.members[*]".into()));
+        let mut o = opts(
+            "Cargo.toml",
+            Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
+        );
         o.entries_are_globs = true;
         let r = rule(o);
         // No crates/* on disk -> the glob matched nothing.
@@ -769,7 +776,10 @@ mod tests {
             "[workspace]\nmembers = [\"crates/a\"]\n",
         )
         .unwrap();
-        let mut o = opts("Cargo.toml", Extract::Toml("$.workspace.members[*]".into()));
+        let mut o = opts(
+            "Cargo.toml",
+            Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
+        );
         o.orphans = Some(OrphansSpec {
             space: "crates/*/Cargo.toml".into(),
             unreferenced: Severity::Error,
@@ -795,7 +805,10 @@ mod tests {
             "[workspace]\nmembers = [\"a\", \"b\"]\nexclude = [\"b\"]\n",
         )
         .unwrap();
-        let mut o = opts("Cargo.toml", Extract::Toml("$.workspace.members[*]".into()));
+        let mut o = opts(
+            "Cargo.toml",
+            Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
+        );
         o.exclude_query = Some("$.workspace.exclude[*]".into());
         o.expect = Expect::Dir;
         let r = rule(o);

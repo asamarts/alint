@@ -1,0 +1,32 @@
+name: registry_paths_resolve over xml fires when an extracted entry does not resolve
+tags: [check, registry_paths_resolve, cross_file, xml]
+
+# The XML fail counterpart to the exclude_query pass scenario (constitution 8:
+# every kind's XML surface gets a firing case too). An XML registry lists two
+# dirs; `missing` has no directory on disk, so its entry does not resolve and
+# the rule fires on the source manifest.
+
+given:
+  tree:
+    "projects.xml": |
+      <Projects>
+        <Project>core</Project>
+        <Project>missing</Project>
+      </Projects>
+    core:
+      ".keep": ""
+  config: |
+    version: 1
+    rules:
+      - id: projects-resolve
+        kind: registry_paths_resolve
+        source: "projects.xml"
+        extract: { xml: "$.Projects.Project[*]" }
+        expect: dir
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: projects-resolve, level: error, path: projects.xml}

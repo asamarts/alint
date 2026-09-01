@@ -1103,7 +1103,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{FileEntry, FileIndex};
+    use alint_core::{FileEntry, FileIndex, Format};
     use proptest::prelude::*;
 
     #[test]
@@ -1247,10 +1247,13 @@ mod tests {
         let idx = index(&["Cargo.toml", "crates/a/Cargo.toml", "crates/b/Cargo.toml"]);
         let r = value_rule(
             "Cargo.toml",
-            Extract::Toml("$.workspace.package.version".into()),
+            Extract::Structured(Format::Toml, "$.workspace.package.version".into()),
             Targets::Glob {
                 scope: Scope::from_patterns(&["crates/*/Cargo.toml".to_string()]).unwrap(),
-                extract: Some(Extract::Toml("$.package.version".into())),
+                extract: Some(Extract::Structured(
+                    Format::Toml,
+                    "$.package.version".into(),
+                )),
             },
             Relation::Equals,
             Normalize::None,
@@ -1274,10 +1277,10 @@ mod tests {
         let make = || {
             value_rule(
                 "source.toml",
-                Extract::Toml("$.v".into()),
+                Extract::Structured(Format::Toml, "$.v".into()),
                 Targets::Glob {
                     scope: Scope::from_patterns(&["target.toml".to_string()]).unwrap(),
-                    extract: Some(Extract::Toml("$.missing".into())),
+                    extract: Some(Extract::Structured(Format::Toml, "$.missing".into())),
                 },
                 Relation::Equals,
                 Normalize::None,
@@ -1332,10 +1335,10 @@ mod tests {
         let idx = index(&["m.json"]);
         let r = value_rule(
             "m.json",
-            Extract::Json("$.v[*]".into()),
+            Extract::Structured(Format::Json, "$.v[*]".into()),
             Targets::List(vec![(
                 "m.json".into(),
-                Some(Extract::Json("$.v[0]".into())),
+                Some(Extract::Structured(Format::Json, "$.v[0]".into())),
             )]),
             Relation::Equals,
             Normalize::None,
@@ -1369,7 +1372,7 @@ mod tests {
         let idx = index(&["global.json", "Directory.Build.props"]);
         let r = value_rule(
             "global.json",
-            Extract::Json("$.sdk.version".into()),
+            Extract::Structured(Format::Json, "$.sdk.version".into()),
             Targets::List(vec![(
                 "Directory.Build.props".into(),
                 Some(Extract::Lines(alint_core::LinesOpts::default())),
@@ -1420,7 +1423,7 @@ mod tests {
         let idx = index(&["version.json", "protobuf_version.bzl"]);
         let r = value_rule(
             "version.json",
-            Extract::Json("$.v".into()),
+            Extract::Structured(Format::Json, "$.v".into()),
             Targets::List(vec![(
                 "protobuf_version.bzl".into(),
                 Some(Extract::Lines(alint_core::LinesOpts::default())),
@@ -1469,7 +1472,7 @@ mod tests {
     fn set_targets() -> Targets {
         Targets::List(vec![(
             "tgt.json".into(),
-            Some(Extract::Json("$.have[*]".into())),
+            Some(Extract::Structured(Format::Json, "$.have[*]".into())),
         )])
     }
 
@@ -1481,7 +1484,7 @@ mod tests {
         write_sets(root, "{\"need\":[\"a\",\"b\"]}", "{\"have\":[\"a\",\"c\"]}");
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::Subset,
         );
@@ -1504,7 +1507,7 @@ mod tests {
         );
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::Subset,
         );
@@ -1519,7 +1522,7 @@ mod tests {
         write_sets(root, "{\"need\":[\"a\",\"b\"]}", "{\"have\":[\"a\",\"z\"]}");
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::Superset,
         );
@@ -1537,7 +1540,7 @@ mod tests {
         write_sets(root, "{\"need\":[\"a\",\"b\"]}", "{\"have\":[\"a\",\"z\"]}");
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::SetEquals,
         );
@@ -1556,7 +1559,7 @@ mod tests {
         write_sets(root, "{\"need\":[\"b\",\"a\"]}", "{\"have\":[\"a\",\"b\"]}");
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::SetEquals,
         );
@@ -1687,7 +1690,7 @@ mod tests {
         );
         let idx = index(&["src.json", "tgt.json"]);
         let r = set_rule(
-            Extract::Json("$.need[*]".into()),
+            Extract::Structured(Format::Json, "$.need[*]".into()),
             set_targets(),
             Relation::Subset,
         );
@@ -1887,7 +1890,10 @@ mod tests {
         .unwrap();
         // crates/a exists (a dir); crates/gone does not.
         let idx = index_with_dirs(&["Cargo.toml"], &["crates/a"]);
-        let r = resolves_rule("Cargo.toml", Extract::Toml("$.workspace.members[*]".into()));
+        let r = resolves_rule(
+            "Cargo.toml",
+            Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
+        );
         let v = eval(&r, root, &idx);
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(v[0].message.contains("crates/gone"));

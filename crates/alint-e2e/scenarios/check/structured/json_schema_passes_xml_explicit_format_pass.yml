@@ -1,0 +1,53 @@
+name: json_schema_passes honors an explicit format xml on a non-standard extension
+tags: [check, json_schema_passes, structured, xml, passing]
+
+docs:
+  title: An explicit format xml parses an .config file that conforms to the schema
+  case: pass
+  kind: json_schema_passes
+
+given:
+  tree:
+    schemas:
+      project.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["Project"],
+          "properties": {
+            "Project": {
+              "type": "object",
+              "required": ["@Sdk", "PropertyGroup"],
+              "properties": {
+                "@Sdk": {"type": "string"},
+                "PropertyGroup": {
+                  "type": "object",
+                  "required": ["TargetFramework"],
+                  "properties": {
+                    "TargetFramework": {"type": "string", "pattern": "^net[0-9]+\\.[0-9]+$"}
+                  }
+                }
+              }
+            }
+          }
+        }
+    app.config: |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <PropertyGroup>
+          <TargetFramework>net8.0</TargetFramework>
+        </PropertyGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: config-conforms
+        kind: json_schema_passes
+        paths: "app.config"
+        schema_path: "schemas/project.schema.json"
+        format: xml
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,50 @@
+name: cross_file over xml extract fires when a .csproj version drifts
+tags: [check, cross_file, xml]
+
+# The new `extract: { xml: ... }` mode lets cross_file sync a value across XML
+# manifests. Here a Directory.Build.props version is the source of truth and each
+# .csproj must match it; B has drifted, so it fires. XML leaves are strings, so
+# the `equals` comparison is a string compare (correct for versions).
+
+given:
+  tree:
+    "Directory.Build.props": |
+      <Project>
+        <PropertyGroup>
+          <Version>2.1.0</Version>
+        </PropertyGroup>
+      </Project>
+    src:
+      A:
+        "A.csproj": |
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <Version>2.1.0</Version>
+            </PropertyGroup>
+          </Project>
+      B:
+        "B.csproj": |
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <Version>2.0.0</Version>
+            </PropertyGroup>
+          </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-versions-coherent
+        kind: cross_file
+        source:
+          file: "Directory.Build.props"
+          extract: { xml: "$.Project.PropertyGroup.Version" }
+        targets:
+          files: "src/*/*.csproj"
+          extract: { xml: "$.Project.PropertyGroup.Version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: csproj-versions-coherent, level: error, path: src/B/B.csproj}

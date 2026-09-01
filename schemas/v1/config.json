@@ -360,12 +360,13 @@
       "type": "object"
     },
     "TargetFormat": {
-      "description": "The `format:` override values for `json_schema_passes`. Distinct from `structured_path::Format` (which has `xml`, not `yml`): this validator targets json/yaml/toml documents and accepts `yml` as a `yaml` alias.",
+      "description": "The `format:` override values for `json_schema_passes`: the same formats as `structured_path::Format` (json / yaml / toml / xml), plus `yml` accepted as a `yaml` alias.",
       "enum": [
         "json",
         "yaml",
         "yml",
-        "toml"
+        "toml",
+        "xml"
       ],
       "type": "string"
     },
@@ -494,7 +495,7 @@
     },
     "extract_spec": {
       "additionalProperties": false,
-      "description": "Exactly one of: toml/json/yaml (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
+      "description": "Exactly one of: toml/json/yaml/xml (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
       "maxProperties": 1,
       "minProperties": 1,
       "properties": {
@@ -537,6 +538,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "xml": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
           ]
         },
         "yaml": {
@@ -1622,7 +1630,7 @@
       "type": "object"
     },
     "rule_file_graph": {
-      "description": "Assemble the repo's file→file reference graph and assert a global structural property the 1-level cross-file kinds can't. `nodes` (glob) selects the graph's files. `edges` is one of `from_content` (extract one reference per match — the `extract` one-of: toml/json/yaml JSONPath, lines, or regex capture group 1 — and resolve it to a path via `resolve`: relative_to_file default, or relative_to_repo_root; bare module names, absolute paths, URLs, computed/interpolated references, and paths that escape the repo root are dropped, not mis-resolved) or `derive_target` (a `from`→`to` name template deriving the target from the node path). `require` is one of: `acyclic` (no dependency cycle among the nodes); `no_dangling` (every path-shaped edge resolves to an existing path — with `derive_target`, the derived sibling must exist); `no_orphans` (no node unreferenced by another, bare or `{ no_orphans: { roots: [...] } }`); `{ forbidden_edges: [{ from, to }] }` (the layering firewall — no edge whose source matches `from` and resolved target matches `to`); or `{ fresh: { hash, marker } }` (the `derive_target` output embeds the source's current content hash, captured by `marker`). Pure-parse, cross-file (no spawn).",
+      "description": "Assemble the repo's file→file reference graph and assert a global structural property the 1-level cross-file kinds can't. `nodes` (glob) selects the graph's files. `edges` is one of `from_content` (extract one reference per match — the `extract` one-of: toml/json/yaml/xml JSONPath, lines, or regex capture group 1 — and resolve it to a path via `resolve`: relative_to_file default, or relative_to_repo_root; bare module names, absolute paths, URLs, computed/interpolated references, and paths that escape the repo root are dropped, not mis-resolved) or `derive_target` (a `from`→`to` name template deriving the target from the node path). `require` is one of: `acyclic` (no dependency cycle among the nodes); `no_dangling` (every path-shaped edge resolves to an existing path — with `derive_target`, the derived sibling must exist); `no_orphans` (no node unreferenced by another, bare or `{ no_orphans: { roots: [...] } }`); `{ forbidden_edges: [{ from, to }] }` (the layering firewall — no edge whose source matches `from` and resolved target matches `to`); or `{ fresh: { hash, marker } }` (the `derive_target` output embeds the source's current content hash, captured by `marker`). Pure-parse, cross-file (no spawn).",
       "properties": {
         "edges": {
           "additionalProperties": false,
@@ -2706,7 +2714,7 @@
       "type": "object"
     },
     "rule_json_schema_passes": {
-      "description": "Validate every JSON / YAML / TOML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
+      "description": "Validate every JSON / YAML / TOML / XML file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
       "properties": {
         "format": {
           "anyOf": [
@@ -2717,7 +2725,7 @@
               "type": "null"
             }
           ],
-          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml)."
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .xml and the .csproj / .props / .targets XML family)."
         },
         "kind": {
           "const": "json_schema_passes"
@@ -3401,7 +3409,7 @@
       "type": "object"
     },
     "rule_registry_paths_resolve": {
-      "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
+      "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml/xml, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
       "properties": {
         "base": {
           "default": null,
@@ -3430,7 +3438,7 @@
         },
         "extract": {
           "$ref": "#/$defs/extract_spec",
-          "description": "Exactly one of: toml/json/yaml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path).",
+          "description": "Exactly one of: toml/json/yaml/xml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path).",
           "not": {
             "required": [
               "whole_file"

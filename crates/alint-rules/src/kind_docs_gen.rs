@@ -57,7 +57,7 @@ pub static KIND_SUMMARIES: &[(&str, &str)] = &[
     ("json_path_absent", "Assert a JSONPath query over the document matches nothing; one file-level violation if present."),
     ("json_path_equals", "Query a structured document with a JSONPath expression and assert every match deep-equals..."),
     ("json_path_matches", "Same shape as the *_equals variants, but the asserted value is a regex matched against string..."),
-    ("json_schema_passes", "Validate every JSON / YAML / TOML file in paths against a JSON Schema document."),
+    ("json_schema_passes", "Validate every JSON / YAML / TOML / XML file in paths against a JSON Schema document."),
     ("line_endings", "Every line ending matches target: lf or crlf."),
     ("line_max_width", "Cap line length in characters (not bytes, code points)."),
     ("markdown_paths_resolve", "Validate that backticked workspace paths in markdown files resolve to real files or directories..."),

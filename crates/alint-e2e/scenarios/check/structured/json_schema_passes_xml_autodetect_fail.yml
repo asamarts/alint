@@ -1,0 +1,53 @@
+name: json_schema_passes auto-detects a .csproj as XML and flags a schema violation
+tags: [check, json_schema_passes, structured, xml, failing]
+
+docs:
+  title: A .csproj auto-detected as XML that violates its JSON Schema
+  case: fail
+  kind: json_schema_passes
+
+given:
+  tree:
+    schemas:
+      project.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["Project"],
+          "properties": {
+            "Project": {
+              "type": "object",
+              "required": ["@Sdk", "PropertyGroup"],
+              "properties": {
+                "@Sdk": {"type": "string"},
+                "PropertyGroup": {
+                  "type": "object",
+                  "required": ["TargetFramework"],
+                  "properties": {
+                    "TargetFramework": {"type": "string", "pattern": "^net[0-9]+\\.[0-9]+$"}
+                  }
+                }
+              }
+            }
+          }
+        }
+    App.csproj: |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <PropertyGroup>
+          <TargetFramework>banana</TargetFramework>
+        </PropertyGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-conforms
+        kind: json_schema_passes
+        paths: "App.csproj"
+        schema_path: "schemas/project.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: csproj-conforms, level: error, path: App.csproj}

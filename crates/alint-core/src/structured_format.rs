@@ -24,6 +24,15 @@ pub enum Format {
 }
 
 impl Format {
+    /// The canonical inventory of config formats and the single source of truth
+    /// for the config-format axis. Format-specific surfaces (`extract`, the
+    /// structured-query kinds, `json_schema_passes`, the `did_you_mean` hints)
+    /// should cover every variant; a per-surface parity test asserts that as each
+    /// surface is leveled (today `extract_spec_covers_every_format`; the rest land
+    /// with the format-coverage rollout). `format_all_is_complete` guards this
+    /// list itself. See `docs/design/format-coverage.md`.
+    pub const ALL: &'static [Format] = &[Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
         match self {
             // Try strict JSON first (the common, fast path — plain
@@ -266,7 +275,20 @@ fn xml_to_value(text: &str) -> std::result::Result<Value, String> {
             "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
         ));
     }
-    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+    let doc = roxmltree::Document::parse(text).map_err(|e| {
+        let msg = e.to_string();
+        // roxmltree runs with DTD processing disabled (a billion-laughs / XXE
+        // safety limit). Make the wholesale rejection actionable instead of the
+        // terse upstream "XML with DTD detected".
+        if msg.contains("DTD") {
+            format!(
+                "{msg}: alint parses XML with DTDs disabled for safety, so \
+                 DTD-bearing files (Checkstyle, Spring, Ant, log4j) cannot be linted"
+            )
+        } else {
+            msg
+        }
+    })?;
     let root = doc.root_element();
     let mut obj = serde_json::Map::new();
     obj.insert(
@@ -336,6 +358,7 @@ fn element_to_value(node: roxmltree::Node, depth: usize) -> std::result::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     // ─── JSONC tolerance ──────────────────────────────────────
 
@@ -380,5 +403,97 @@ mod tests {
         assert!(xml_depth_within_limit(
             "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
         ));
+    }
+
+    #[test]
+    fn xml_dtd_is_rejected_with_an_actionable_message() {
+        // roxmltree runs with DTD processing disabled (billion-laughs / XXE
+        // safety); the wholesale rejection must say WHY, not just the terse
+        // upstream "XML with DTD detected".
+        let err = Format::Xml
+            .parse("<!DOCTYPE note SYSTEM \"note.dtd\"><note/>")
+            .unwrap_err();
+        assert!(err.contains("DTD"), "names the cause: {err}");
+        assert!(
+            err.contains("disabled for safety"),
+            "explains the limit: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_to_value_maps_attributes_text_arrays_and_empty() {
+        // Pins the xmltodict-style contract (module docs): the root element wraps
+        // the tree, attributes are `@name`, a leaf collapses to its text, repeated
+        // siblings become an array, loose text alongside attributes/children is
+        // `#text`, and an empty element is null. A silent drift here changes what
+        // EVERY XML-consuming surface sees (extract, json_schema_passes, xml_path_*).
+        let xml = r#"
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net8.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <Ref Include="a" />
+                <Ref Include="b" />
+              </ItemGroup>
+              <Empty/>
+              <Mixed Attr="x">hello</Mixed>
+            </Project>
+        "#;
+        let v = Format::Xml.parse(xml).expect("parse xml");
+        // Root element wraps the tree; attributes become `@name` keys.
+        assert_eq!(v["Project"]["@Sdk"], json!("Microsoft.NET.Sdk"));
+        // A leaf element collapses to its text string.
+        assert_eq!(
+            v["Project"]["PropertyGroup"]["TargetFramework"],
+            json!("net8.0")
+        );
+        // Repeated siblings become a document-order array of objects.
+        assert_eq!(
+            v["Project"]["ItemGroup"]["Ref"],
+            json!([{"@Include": "a"}, {"@Include": "b"}])
+        );
+        // An empty element is null (NOT an empty object/string).
+        assert_eq!(v["Project"]["Empty"], Value::Null);
+        // Text alongside an attribute is `#text` -- the element is an object, not
+        // the bare string "hello" (the `Condition=`-attribute reshaping footgun).
+        assert_eq!(
+            v["Project"]["Mixed"],
+            json!({"@Attr": "x", "#text": "hello"})
+        );
+    }
+
+    #[test]
+    fn format_all_is_complete() {
+        // Every parity gate iterates `Format::ALL`, so a variant missing from ALL
+        // silently bypasses them. The real guard here is the exhaustive `match`
+        // below: a NEW `Format` variant is a COMPILE error until a reviewer adds an
+        // arm, so no variant reaches the codebase without a human editing this
+        // test with `Format::ALL` in view; the asserts then require ALL and
+        // `variants` to list the same set. Fully deriving ALL from the enum would
+        // need a proc-macro (`strum`), which this crate deliberately avoids -- so
+        // the compile error, not the assert, is what stops a half-wired variant.
+        let variants = [Format::Json, Format::Yaml, Format::Toml, Format::Xml];
+        for f in variants {
+            // Distinct arms (clippy-clean) keep the match exhaustive, so a new
+            // Format variant is a compile error here until it is added.
+            let _label = match f {
+                Format::Json => "json",
+                Format::Yaml => "yaml",
+                Format::Toml => "toml",
+                Format::Xml => "xml",
+            };
+        }
+        assert_eq!(
+            Format::ALL.len(),
+            variants.len(),
+            "Format::ALL is out of sync with the Format variants; update both"
+        );
+        for f in variants {
+            assert!(
+                Format::ALL.contains(&f),
+                "Format::{f:?} is missing from Format::ALL"
+            );
+        }
     }
 }

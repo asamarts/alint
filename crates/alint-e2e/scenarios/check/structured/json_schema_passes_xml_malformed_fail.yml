@@ -1,0 +1,34 @@
+name: json_schema_passes flags a malformed XML target with one parse-error violation
+tags: [check, json_schema_passes, structured, xml, failing]
+
+# The XML parse-error path, distinct from the schema-violation fail scenario: a
+# malformed .csproj auto-detects as XML, fails to parse, and yields exactly ONE
+# parse-error violation ("not a valid XML document") -- not a flood of schema
+# errors against junk.
+
+given:
+  tree:
+    schemas:
+      any.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object"
+        }
+    Broken.csproj: |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <PropertyGroup>
+      </Project>
+  config: |
+    version: 1
+    rules:
+      - id: csproj-parses
+        kind: json_schema_passes
+        paths: "Broken.csproj"
+        schema_path: "schemas/any.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: csproj-parses, level: error, path: Broken.csproj}
