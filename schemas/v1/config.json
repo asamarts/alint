@@ -2685,7 +2685,7 @@
       "type": "object"
     },
     "rule_hcl_path_equals": {
-      "description": "HCL sibling of `json_path_equals` (Terraform / Nomad / Packer). A block nests by its type then labels, so `resource \"aws_instance\" \"web\"` is `$.resource.aws_instance.web`; values keep their HCL type (a number stays a number, so no quotes on a numeric `equals:`), and an unevaluated expression (`var.x`, `${...}`) is an opaque string. A block type REPEATED is an array, single is an object. Typical use: enforce `$.resource.aws_instance.web.count == 1`.",
+      "description": "HCL sibling of `json_path_equals` (Terraform / Nomad / Packer). A block nests by its type then labels, so `resource \"aws_instance\" \"web\"` is `$.resource.aws_instance.web`; values keep their HCL type (a number stays a number, so no quotes on a numeric `equals:` -- but write whole numbers as integers, since `hcl-rs` normalizes `1.0` to `1` and an integer does not equal a float), and an unevaluated expression (`var.x`, `${...}`) is an opaque string. A block type REPEATED is an array, single is an object. Typical use: enforce `$.resource.aws_instance.web.count == 1`.",
       "properties": {
         "equals": {
           "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
@@ -2994,7 +2994,7 @@
               "type": "null"
             }
           ],
-          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .ini / .cfg / .hcl / .tf / .tfvars / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family."
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .ini / .cfg / .hcl / .tf / .tfvars / .nomad / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family."
         },
         "kind": {
           "const": "json_schema_passes"

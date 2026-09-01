@@ -19,7 +19,7 @@
 //!   target file.
 //! - The target's format is auto-detected from its extension
 //!   (`.json` / `.yaml` / `.yml` / `.toml` / `.properties` / `.ini` /
-//!   `.cfg` / `.hcl` / `.tf` / `.tfvars` / `.xml` and the `.csproj` /
+//!   `.cfg` / `.hcl` / `.tf` / `.tfvars` / `.nomad` / `.xml` and the `.csproj` /
 //!   `.props` / `.targets` family, or `.env` by filename); pass `format:`
 //!   to override. YAML and TOML coerce through serde into the
 //!   same `serde_json::Value` tree the schema validates against,
@@ -88,7 +88,7 @@ struct Options {
     schema_path: PathBuf,
     /// Override the auto-detected target format. When omitted, format is inferred
     /// from each target file's extension (.json / .yaml / .yml / .toml / .properties /
-    /// .ini / .cfg / .hcl / .tf / .tfvars / .xml and the .csproj / .props / .targets XML
+    /// .ini / .cfg / .hcl / .tf / .tfvars / .nomad / .xml and the .csproj / .props / .targets XML
     /// family), or by filename
     /// for the `.env` family.
     #[serde(default)]

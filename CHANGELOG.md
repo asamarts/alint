@@ -48,9 +48,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`resource "aws_instance" "web" { … }` is `$.resource.aws_instance.web`), values keep
   their HCL type (a number stays a number), and an unevaluated expression (`var.x`,
   `${…}`, a function call) is an opaque string. A block type appearing once is an object
-  but repeated is an array (the XML cardinality footgun); a deeply-nested file is
-  rejected as one parse-error violation rather than overflowing the stack (parsing runs
-  on a large-stack thread behind a depth guard). Auto-detects by the
+  but repeated is an array (the XML cardinality footgun). `hcl-rs` is a
+  recursive-descent parser with no depth limit of its own, so a crafted deeply-nested
+  file could otherwise overflow the stack and abort the process; a file that nests too
+  deeply (structure, parentheses, or interpolation) or exceeds a size bound is rejected
+  as one parse-error violation, and parsing runs on a large-stack thread. Whole numbers
+  must be matched as integers (`hcl-rs` normalizes `1.0` to `1`). Auto-detects by the
   `.tf` / `.tfvars` / `.hcl` / `.nomad` extension.
 
 ### Fixed

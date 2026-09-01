@@ -415,108 +415,68 @@ fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
     Ok(Value::Object(map))
 }
 
-/// Maximum HCL structural-nesting depth `hcl_to_value` will parse. `hcl-rs` is a
-/// recursive-descent parser with very large per-level stack frames (tens of KB), so
-/// deeply-nested input OVERFLOWS THE STACK and ABORTS THE PROCESS (SIGABRT) -- the
-/// same hazard as [`MAX_XML_DEPTH`], but far shallower per level (the default
-/// 1-2 MB thread stack overflows below ~30 levels). Real HCL (Terraform, Nomad,
-/// Packer) is a handful of levels deep; 256 is far beyond any real config yet well
-/// below the depth that overflows even the large parse-thread stack. A deeper
-/// document is rejected as one per-file parse-error violation.
+/// Maximum HCL structural (`{` / `[`) nesting depth `hcl_to_value` will parse.
+/// `hcl-rs` is a recursive-descent parser with very large per-level stack frames
+/// (tens of KB for a block / object / tuple), so deeply-nested structure OVERFLOWS
+/// THE STACK and ABORTS THE PROCESS (SIGABRT) -- the same hazard as
+/// [`MAX_XML_DEPTH`], but far shallower per level (the default 1-2 MB thread stack
+/// overflows below ~30 levels). 256 is far beyond any real HCL yet well below the
+/// parse-thread ceiling. A deeper document is one per-file parse-error violation.
 pub const MAX_HCL_DEPTH: usize = 256;
 
-/// Conservatively bound HCL's `{`/`[` structural nesting BEFORE `hcl::from_str`
-/// recurses into it. Strings, `#` / `//` / `/* */` comments, and `<<TAG` heredocs
-/// are skipped so their braces don't count (and can't feign depth). Returns false
-/// for an over-deep document, which the caller turns into one parse-error violation
-/// instead of a stack abort.
+/// Maximum HCL input size `hcl_to_value` will parse. The [`MAX_HCL_DEPTH`] guard
+/// bounds `{` / `[` nesting, but `hcl-rs` ALSO recurses on EXPRESSION nesting that
+/// carries no delimiter to count -- long operator chains (`1 + 1 + …`,
+/// `a == a == …`), nested ternaries, and deeply-nested parentheses / function
+/// calls (in code AND inside `${…}` string / heredoc interpolation). A lexical
+/// scan cannot bound those, and they too overflow the stack (SIGABRT). They need
+/// tens of thousands of levels, though, and every level costs input bytes, so a
+/// size cap bounds them: a file this small cannot hold enough expression tokens to
+/// exceed the parse-thread stack. Real HCL is far smaller (Terraform best practice
+/// splits into modules); an oversize file is one per-file parse-error violation.
+/// Kept in step with the parse-thread `stack_size` in `hcl_to_value`.
+pub const MAX_HCL_BYTES: usize = 256 * 1024;
+
+/// Conservatively bound the HCL constructs `hcl-rs` recurses on, BEFORE
+/// `hcl::from_str` overflows the stack. Every one of these aborts the process on
+/// deep input, and none is caught by a naive `{`/`[` scan:
+/// - `{` / `[` / `(` nesting -- blocks, objects, tuples, index, **and
+///   parentheses / function-call args** (parens have a big frame: ~5 K levels
+///   abort). Counted EVERYWHERE, including inside strings / comments / heredocs,
+///   because `${…}` interpolation embeds real (parsed, recursing) sub-expressions
+///   there -- skipping those spans was a stack-abort BYPASS.
+/// - A run of prefix unary `-` / `!` (`----1`, `!!!!true`) -- no delimiter to
+///   count; whitespace does not break the run, any other byte does.
+///
+/// Binary-operator / ternary chains (`1 + 1 + …`, `1 ? … : …`) recurse too but
+/// cost >= 2 bytes per level, so they are bounded by [`MAX_HCL_BYTES`] instead of
+/// here. Over-counting (a literal brace / paren in a string or a long `-` run in a
+/// comment) can at worst turn a pathological value into a parse-error violation --
+/// never a crash. Returns false for an over-deep document.
 fn hcl_depth_within_limit(text: &str) -> bool {
-    let b = text.as_bytes();
-    let n = b.len();
-    let mut i = 0;
     let mut depth = 0usize;
-    while i < n {
-        match b[i] {
-            // `#` and `//` line comments run to end of line.
-            b'#' => {
-                while i < n && b[i] != b'\n' {
-                    i += 1;
-                }
-            }
-            b'/' if i + 1 < n && b[i + 1] == b'/' => {
-                while i < n && b[i] != b'\n' {
-                    i += 1;
-                }
-            }
-            // `/* ... */` block comment.
-            b'/' if i + 1 < n && b[i + 1] == b'*' => {
-                i += 2;
-                while i + 1 < n && !(b[i] == b'*' && b[i + 1] == b'/') {
-                    i += 1;
-                }
-                i = (i + 2).min(n);
-            }
-            // Quoted string (with `\` escapes); interior braces / `${...}` don't count.
-            b'"' => {
-                i += 1;
-                while i < n {
-                    match b[i] {
-                        b'\\' => i += 2,
-                        b'"' => {
-                            i += 1;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
-                }
-            }
-            // `<<TAG` / `<<-TAG` heredoc: skip the body up to a line that is just TAG.
-            b'<' if i + 1 < n && b[i + 1] == b'<' => {
-                let mut j = i + 2;
-                if j < n && b[j] == b'-' {
-                    j += 1;
-                }
-                let tag_start = j;
-                while j < n && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
-                    j += 1;
-                }
-                let tag = &b[tag_start..j];
-                if tag.is_empty() {
-                    i += 2; // not a heredoc opener; step past `<<`
-                    continue;
-                }
-                while j < n && b[j] != b'\n' {
-                    j += 1; // rest of the opening line
-                }
-                i = j;
-                loop {
-                    if i < n && b[i] == b'\n' {
-                        i += 1;
-                    }
-                    if i >= n {
-                        break;
-                    }
-                    let start = i;
-                    while i < n && b[i] != b'\n' {
-                        i += 1;
-                    }
-                    if b[start..i].trim_ascii() == tag {
-                        break; // closing delimiter line
-                    }
-                }
-            }
-            b'{' | b'[' => {
+    let mut unary_run = 0usize;
+    for &c in text.as_bytes() {
+        match c {
+            b'{' | b'[' | b'(' => {
                 depth += 1;
                 if depth > MAX_HCL_DEPTH {
                     return false;
                 }
-                i += 1;
+                unary_run = 0;
             }
-            b'}' | b']' => {
+            b'}' | b']' | b')' => {
                 depth = depth.saturating_sub(1);
-                i += 1;
+                unary_run = 0;
             }
-            _ => i += 1,
+            b'-' | b'!' => {
+                unary_run += 1;
+                if unary_run > MAX_HCL_DEPTH {
+                    return false;
+                }
+            }
+            b' ' | b'\t' | b'\r' | b'\n' => {}
+            _ => unary_run = 0,
         }
     }
     true
@@ -530,21 +490,29 @@ fn hcl_depth_within_limit(text: &str) -> bool {
 /// `${…}`, a function call) arrives as an opaque string. A block type appearing
 /// once is an object but REPEATED is an array (the XML cardinality footgun);
 /// duplicate attributes and malformed input are parse errors.
+///
+/// Three layers keep `hcl-rs`'s unbounded recursion from ABORTING the process on a
+/// crafted file: the [`MAX_HCL_BYTES`] size cap (bounds delimiter-less expression
+/// nesting), the [`hcl_depth_within_limit`] `{` / `[` depth guard (bounds
+/// big-frame structural nesting), and parsing on a large explicit-stack thread so
+/// a file at those limits still has headroom on every platform (the 1 MB Windows /
+/// ~2 MB rayon-worker default would crash on a tens-deep file). The returned
+/// `Value` is safe to drop on the caller's ordinary stack: expressions flatten to
+/// strings and structural nesting is bounded by the depth guard.
 fn hcl_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Reject over-deep HCL before `hcl::from_str` can overflow the stack.
+    if text.len() > MAX_HCL_BYTES {
+        return Err(format!(
+            "HCL input exceeds the maximum supported size ({MAX_HCL_BYTES} bytes)"
+        ));
+    }
     if !hcl_depth_within_limit(text) {
         return Err(format!(
             "HCL nesting exceeds the maximum supported depth ({MAX_HCL_DEPTH})"
         ));
     }
-    // Parse on a thread with a large, platform-consistent stack: hcl-rs's frames are
-    // huge, and the default stack (1 MB on Windows, ~2 MB on a rayon worker) would
-    // overflow -- ABORTING the whole process -- on a file only tens of levels deep,
-    // well under `MAX_HCL_DEPTH`. The 64 MB explicit size gives ample headroom on
-    // every platform; the depth guard above keeps input safely below its ceiling.
     std::thread::scope(|scope| {
         std::thread::Builder::new()
-            .stack_size(64 * 1024 * 1024)
+            .stack_size(512 * 1024 * 1024)
             .spawn_scoped(scope, || {
                 hcl::from_str::<Value>(text).map_err(|e| e.to_string())
             })
@@ -874,24 +842,74 @@ mod tests {
     }
 
     #[test]
-    fn hcl_depth_guard_ignores_braces_in_strings_comments_and_heredocs() {
-        // Braces inside a string / comment / heredoc body must NOT count toward depth,
-        // so a brace-heavy but structurally-shallow file is not falsely rejected.
-        let many = "{".repeat(MAX_HCL_DEPTH + 50);
+    fn hcl_depth_guard_counts_delimiters_everywhere_and_unary_runs() {
+        // The guard counts `{`/`[`/`(` WHEREVER they appear -- including inside a
+        // string / heredoc, since `${...}` interpolation embeds real recursing
+        // sub-expressions there (skipping those spans was a stack-abort bypass) --
+        // and bounds a prefix `-`/`!` run.
+        let over = MAX_HCL_DEPTH + 1;
+        assert!(!hcl_depth_within_limit(&"(".repeat(over)), "parens count");
         assert!(
-            hcl_depth_within_limit(&format!("x = \"{many}\"\n")),
-            "braces in a string don't count"
+            !hcl_depth_within_limit(&format!("x = \"{}\"\n", "[".repeat(over))),
+            "delimiters inside a string count"
         );
         assert!(
-            hcl_depth_within_limit(&format!("x = <<EOT\n{many}\nEOT\n")),
-            "braces in a heredoc body don't count"
+            !hcl_depth_within_limit(&format!("x = <<EOT\n{}\nEOT\n", "{".repeat(over))),
+            "delimiters inside a heredoc count"
         );
         assert!(
-            hcl_depth_within_limit(&format!("# {many}\nx = 1\n")),
-            "braces in a comment don't count"
+            !hcl_depth_within_limit(&"-".repeat(over)),
+            "a `-` run is bounded"
         );
-        // A genuinely over-deep structure is still caught.
-        assert!(!hcl_depth_within_limit(&"[".repeat(MAX_HCL_DEPTH + 1)));
+        assert!(
+            !hcl_depth_within_limit(&"! ".repeat(over)),
+            "whitespace does not reset a `!` run"
+        );
+        // A realistically shallow file passes (balanced parens, a unary `-`, a
+        // normal heredoc with a small JSON body).
+        assert!(hcl_depth_within_limit(
+            "x = max(1, -2)\npolicy = <<EOT\n{ \"a\": [1, 2] }\nEOT\n"
+        ));
+    }
+
+    #[test]
+    fn hcl_expression_bombs_are_rejected_not_a_stack_abort() {
+        // THE safety regression. Every construct hcl-rs recurses on -- deep parens /
+        // function calls / unary chains / interpolation-embedded nesting (caught by
+        // the depth guard), and oversize operator chains (caught by the size cap) --
+        // must yield an `Err`, NEVER a SIGABRT that takes down the whole run. Each
+        // input below aborts an unguarded hcl-rs; if this test ABORTS instead of
+        // failing, the guard / size cap / parse-thread stack regressed.
+        let d = 60_000; // past every measured crash threshold
+        let bombs = [
+            format!("x = {}1{}", "(".repeat(d), ")".repeat(d)), // parens
+            format!("x = {}1{}", "f(".repeat(d), ")".repeat(d)), // function calls
+            format!("x = {}1", "-".repeat(d)),                  // unary minus
+            format!("x = {}true", "!".repeat(d)),               // unary not
+            format!("x = \"${{{}1{}}}\"", "(".repeat(d), ")".repeat(d)), // interp parens
+            format!("x = \"${{{}1{}}}\"", "[".repeat(d), "]".repeat(d)), // interp tuple
+            format!("x = <<EOT\n${{{}1{}}}\nEOT\n", "[".repeat(d), "]".repeat(d)), // heredoc interp
+        ];
+        for b in &bombs {
+            assert!(
+                Format::Hcl.parse(b).is_err(),
+                "an expression bomb must be a parse error, not a crash"
+            );
+        }
+        // A bounded operator chain still parses (the size cap does not over-reject a
+        // normal file); an oversize input is size-rejected before it can recurse.
+        assert!(
+            Format::Hcl
+                .parse(&format!("x = {}1", "1 + ".repeat(5_000)))
+                .is_ok(),
+            "a bounded binary chain parses"
+        );
+        assert!(
+            Format::Hcl
+                .parse(&format!("x = {}1", "1 + ".repeat(MAX_HCL_BYTES)))
+                .is_err(),
+            "an oversize input is rejected by the byte cap"
+        );
     }
 
     #[test]
