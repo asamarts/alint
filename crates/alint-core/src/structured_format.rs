@@ -1,20 +1,21 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
-//! [`Format`] parses JSON / YAML / TOML / XML into one uniform
+//! [`Format`] parses JSON / YAML / TOML / XML / dotenv into one uniform
 //! `serde_json::Value` shape (YAML and TOML coerce through serde; XML
 //! maps via the xmltodict-style convention in `xml_to_value` — `@attr`
 //! / `#text` / repeated-element→array, leaf elements collapse to their
 //! text string, namespaces flatten to local names, every leaf is a
-//! string), so a single `JSONPath` engine only ever has to reason
+//! string; dotenv is a flat map of literal-string values), so a single
+//! `JSONPath` engine only ever has to reason
 //! about one tree shape. XML design + open-question resolutions:
 //! `docs/design/v0.10/xml_path.md`.
 
 use serde_json::Value;
 
-/// Which YAML-flavoured parser to use on the target file.
+/// Which config format the target file is parsed as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Json,
@@ -478,6 +479,29 @@ mod tests {
             v["Project"]["Mixed"],
             json!({"@Attr": "x", "#text": "hello"})
         );
+    }
+
+    #[test]
+    fn dotenv_files_detect_by_filename() {
+        use std::path::Path;
+        // dotenv detection is filename-based (a bare `.env` has no extension), the
+        // one piece of new control flow in the dotenv work. Positive cases:
+        for p in [".env", ".env.local", ".env.production", ".env.example"] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Dotenv),
+                "{p} should detect as dotenv"
+            );
+        }
+        // Near-misses must NOT match (the `.env.` boundary matters: a regression to
+        // `contains(\".env\")` would wrongly claim `.environment` / `foo.env`).
+        for p in [".environment", "env.local", "foo.env", "envrc", ".envision"] {
+            assert_ne!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Dotenv),
+                "{p} must NOT detect as dotenv"
+            );
+        }
     }
 
     #[test]

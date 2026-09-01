@@ -20,16 +20,32 @@
 //!   `\n \r \t \\ \"` escapes; every other backslash pair is kept verbatim.
 //!   Neither quote style expands variables.
 //! - Duplicate keys: last wins.
+//! - A leading UTF-8 BOM is tolerated (stripped before parsing).
+//!
+//! ## Notes
+//! - Detection is filename-based and best-effort: `.env` and `.env.*` (so
+//!   `.env.local` / `.env.production` / `.env.example`, but also `.env.bak` and
+//!   other suffixes). Pass an explicit `format: dotenv` for other names like
+//!   `app.env`, and keep backup files out via `.gitignore` / an `exclude:` glob.
+//! - Values are literal here, but `cross_file` value relations still skip
+//!   interpolation-looking values (`${VAR}` / `$(...)`) via the shared
+//!   non-literal filter -- use a `dotenv_path_*` rule to compare a literal
+//!   `${VAR}` value.
 //!
 //! Out of scope (a linter surfaces a parse error, one violation, like the other
 //! formats): a line with no `=`, a key containing whitespace, and an
-//! unterminated quote (multiline values are not supported).
+//! unterminated quote (multiline values are not supported; lines split on
+//! LF / CRLF only, not a lone classic-Mac `\r`).
 
 use serde_json::{Map, Value};
 
 /// Parse `.env` `text` into a flat `Value::Object` of string values, with no
 /// variable expansion. Returns `Err(message)` on a malformed line.
 pub(crate) fn parse(text: &str) -> Result<Value, String> {
+    // Tolerate a leading UTF-8 BOM (some Windows editors add one). Without this
+    // the first key parses as `\u{feff}KEY` -- a silent mis-parse, since
+    // `str::trim_start` does NOT strip U+FEFF (it is not White_Space).
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut map = Map::new();
     for (i, raw) in text.lines().enumerate() {
         let lineno = i + 1;
@@ -93,10 +109,12 @@ fn parse_value(raw: &str, lineno: usize) -> Result<String, String> {
             }
         }
     } else {
-        // Unquoted: value runs to an inline ` #` comment (a `#` with no leading
-        // space is part of the value), then trailing whitespace is trimmed.
-        let end = v.find(" #").unwrap_or(v.len());
-        Ok(v[..end].trim_end().to_string())
+        // Unquoted: an inline comment starts at ` #` (space-hash); a `#` with no
+        // leading space is part of the value. Detect it on `raw`, NOT the
+        // left-trimmed `v`, so `KEY= # c` (an empty value + a comment) reads as
+        // "" rather than the value `# c`. Value whitespace is insignificant.
+        let end = raw.find(" #").unwrap_or(raw.len());
+        Ok(raw[..end].trim().to_string())
     }
 }
 
@@ -195,6 +213,77 @@ mod tests {
         assert!(
             parse("Q=\"unterminated\n").is_err(),
             "an unterminated quote is a parse error (no multiline)"
+        );
+    }
+
+    #[test]
+    fn bom_is_stripped_from_the_first_key() {
+        // A leading UTF-8 BOM must not corrupt the first key (a silent mis-parse:
+        // the key would be `\u{feff}NODE_ENV`, so `$.NODE_ENV` would miss it).
+        let v = obj("\u{feff}NODE_ENV=production\nPORT=8080\n");
+        assert_eq!(v["NODE_ENV"], json!("production"), "BOM stripped");
+        assert_eq!(v.as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn equals_inside_a_value_is_kept() {
+        // Split on the FIRST `=`, so a connection string with `=` in its query
+        // survives verbatim (a very common real-world shape).
+        let v = obj("DATABASE_URL=postgres://u:p@h/db?sslmode=require\n");
+        assert_eq!(
+            v["DATABASE_URL"],
+            json!("postgres://u:p@h/db?sslmode=require")
+        );
+    }
+
+    #[test]
+    fn spaces_around_equals() {
+        let v = obj("KEY = value\nPADDED =  x \n");
+        assert_eq!(v["KEY"], json!("value"));
+        assert_eq!(v["PADDED"], json!("x"), "value whitespace is trimmed");
+    }
+
+    #[test]
+    fn double_quote_cr_backslash_and_unknown_escapes() {
+        let v = obj("CR=\"a\\rb\"\nBS=\"a\\\\b\"\nUNK=\"a\\qb\"\n");
+        assert_eq!(v["CR"], json!("a\rb"), "\\r escape");
+        assert_eq!(v["BS"], json!("a\\b"), "\\\\ escape");
+        assert_eq!(v["UNK"], json!("a\\qb"), "unknown escape kept verbatim");
+    }
+
+    #[test]
+    fn export_is_a_prefix_only_with_a_following_space() {
+        // `export=x` is a key literally named `export` (no trailing space).
+        assert_eq!(obj("export=x\n")["export"], json!("x"));
+    }
+
+    #[test]
+    fn unterminated_single_quote_and_trailing_backslash_are_errors() {
+        assert!(
+            parse("Q='unterminated\n").is_err(),
+            "unterminated single quote"
+        );
+        assert!(
+            parse("B=\"trailing\\").is_err(),
+            "a trailing backslash in a double-quoted value is an error"
+        );
+    }
+
+    #[test]
+    fn empty_value_with_inline_comment() {
+        // `KEY= # c` is an empty value plus a comment, NOT the value `# c`; the
+        // ` #` boundary must be found on the raw value, before left-trimming (a
+        // "secret must be non-empty" check would otherwise pass on a placeholder).
+        let v = obj("SECRET= # TODO fill before prod\nOK=x # keep\n");
+        assert_eq!(
+            v["SECRET"],
+            json!(""),
+            "empty value + comment reads as empty"
+        );
+        assert_eq!(
+            v["OK"],
+            json!("x"),
+            "value + comment still strips the comment"
         );
     }
 }
