@@ -1,0 +1,27 @@
+name: properties_path_equals flags a .properties whose server.port is wrong
+tags: [check, properties_path_equals]
+
+docs:
+  title: A .properties on the wrong port
+  case: fail
+  kind: properties_path_equals
+
+given:
+  tree:
+    "application.properties": |
+      server.port=9090
+  config: |
+    version: 1
+    rules:
+      - id: canonical-port
+        kind: properties_path_equals
+        paths: "application.properties"
+        path: "$['server.port']"
+        equals: "8080"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: canonical-port, level: error, path: application.properties}

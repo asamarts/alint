@@ -1,0 +1,29 @@
+name: properties_path_absent flags debug.enabled in a production .properties
+tags: [check, properties_path_absent]
+
+docs:
+  title: A .properties that leaves debug enabled
+  case: fail
+  kind: properties_path_absent
+
+given:
+  tree:
+    "application.properties": |
+      server.port=8080
+      debug.enabled=true
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: properties_path_absent
+        paths: "application.properties"
+        path: "$['debug.enabled']"
+        level: error
+        message: >-
+          debug.enabled is set in a production .properties; remove it.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: application.properties}

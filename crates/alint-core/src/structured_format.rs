@@ -1,15 +1,15 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml,dotenv}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv,properties}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
-//! [`Format`] parses JSON / YAML / TOML / XML / dotenv into one uniform
+//! [`Format`] parses JSON / YAML / TOML / XML / dotenv / properties into one uniform
 //! `serde_json::Value` shape (YAML and TOML coerce through serde; XML
 //! maps via the xmltodict-style convention in `xml_to_value` — `@attr`
 //! / `#text` / repeated-element→array, leaf elements collapse to their
 //! text string, namespaces flatten to local names, every leaf is a
-//! string; dotenv is a flat map of literal-string values), so a single
-//! `JSONPath` engine only ever has to reason
+//! string; dotenv and Java `.properties` are flat maps of literal-string
+//! values), so a single `JSONPath` engine only ever has to reason
 //! about one tree shape. XML design + open-question resolutions:
 //! `docs/design/v0.10/xml_path.md`.
 
@@ -23,6 +23,7 @@ pub enum Format {
     Toml,
     Xml,
     Dotenv,
+    Properties,
 }
 
 impl Format {
@@ -39,6 +40,7 @@ impl Format {
         Format::Toml,
         Format::Xml,
         Format::Dotenv,
+        Format::Properties,
     ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
@@ -69,6 +71,7 @@ impl Format {
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
             Self::Xml => xml_to_value(text),
             Self::Dotenv => crate::dotenv::parse(text),
+            Self::Properties => properties_to_value(text),
         }
     }
 
@@ -79,6 +82,7 @@ impl Format {
             Self::Toml => "TOML",
             Self::Xml => "XML",
             Self::Dotenv => "dotenv",
+            Self::Properties => "properties",
         }
     }
 
@@ -99,6 +103,7 @@ impl Format {
             "json" => Some(Self::Json),
             "yaml" | "yml" => Some(Self::Yaml),
             "toml" => Some(Self::Toml),
+            "properties" => Some(Self::Properties),
             "xml" | "csproj" | "props" | "targets" | "vbproj" | "fsproj" | "nuspec" => {
                 Some(Self::Xml)
             }
@@ -373,6 +378,30 @@ fn element_to_value(node: roxmltree::Node, depth: usize) -> std::result::Result<
     Ok(Value::Object(obj))
 }
 
+/// Java `.properties` -> a flat `{ key: "value" }` object of literal strings
+/// (via `java-properties`, decoded as UTF-8; it handles `=`/`:`/space separators,
+/// `#`/`!` comments, backslash line-continuations, and `\uXXXX` escapes). Dotted
+/// keys (`a.b.c`) stay ONE opaque key, faithful to Java -- query with `$['a.b.c']`.
+/// Values are literal: `${...}` placeholders are resolved by the application,
+/// not the file, so they are kept verbatim. Duplicate keys: last wins. Two
+/// upstream quirks vs Java's `Properties`: a `\uXXXX` surrogate PAIR (an emoji,
+/// say) is rejected as a parse error, and a trailing backslash at EOF drops that
+/// line.
+fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
+    // Decode as UTF-8: alint holds the file as UTF-8 (the caller lossy-decodes its
+    // bytes), but `java_properties::read` defaults to WINDOWS_1252, which would
+    // mojibake any non-ASCII value (`café` -> `cafÃ©`). A leading BOM is stripped
+    // so it cannot land on the first key.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut map = serde_json::Map::new();
+    java_properties::PropertiesIter::new_with_encoding(text.as_bytes(), encoding_rs::UTF_8)
+        .read_into(|k, v| {
+            map.insert(k, Value::String(v));
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(Value::Object(map))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,6 +534,92 @@ mod tests {
     }
 
     #[test]
+    fn properties_is_a_flat_literal_map() {
+        // `.properties` -> a flat object of literal strings: all three Java
+        // separators (`=` / `:` / space), dotted keys stay ONE key, and `${...}`
+        // placeholders are kept verbatim (resolved by the app, not the file).
+        let text = "# comment\n\
+                    db.host = localhost\n\
+                    db.port : 5432\n\
+                    app.name value with spaces\n\
+                    url=${NOT_EXPANDED}/x\n";
+        let v = Format::Properties.parse(text).expect("parse properties");
+        assert_eq!(
+            v["db.host"],
+            json!("localhost"),
+            "`=` separator, dotted key flat"
+        );
+        assert_eq!(v["db.port"], json!("5432"), "`:` separator");
+        assert_eq!(v["app.name"], json!("value with spaces"), "space separator");
+        assert_eq!(
+            v["url"],
+            json!("${NOT_EXPANDED}/x"),
+            "placeholders are literal"
+        );
+    }
+
+    #[test]
+    fn properties_non_ascii_is_utf8_not_latin1_with_bom() {
+        // Encoding regression guard: UTF-8 values must round-trip, not mojibake
+        // through Windows-1252 (`café` -> `cafÃ©`), and a leading BOM is stripped.
+        let v = Format::Properties
+            .parse("\u{feff}name=café\ngreeting=\u{65e5}\u{672c}\u{8a9e}\n")
+            .expect("parse utf-8 properties");
+        assert_eq!(
+            v["name"],
+            json!("café"),
+            "UTF-8 value + BOM stripped from key"
+        );
+        assert_eq!(v["greeting"], json!("日本語"), "CJK round-trips");
+    }
+
+    #[test]
+    fn properties_escapes_continuations_dups_and_comments() {
+        let v = Format::Properties
+            .parse(
+                "# comment\n\
+                 ! also a comment\n\
+                 unicode=caf\\u00e9\n\
+                 cont=line1\\\n  line2\n\
+                 dup=first\n\
+                 dup=second\n",
+            )
+            .expect("parse");
+        assert_eq!(v["unicode"], json!("café"), "\\uXXXX escape decoded");
+        assert_eq!(v["cont"], json!("line1line2"), "line-continuation joins");
+        assert_eq!(v["dup"], json!("second"), "duplicate keys: last wins");
+        let obj = v.as_object().unwrap();
+        assert!(!obj.contains_key("# comment"), "`#` comment excluded");
+        assert!(
+            !obj.contains_key("! also a comment"),
+            "`!` comment excluded"
+        );
+        assert_eq!(obj.len(), 3, "only unicode / cont / dup");
+    }
+
+    #[test]
+    fn properties_malformed_unicode_escape_is_an_error() {
+        // The parse-error path: java-properties rejects a bad `\u` escape.
+        assert!(Format::Properties.parse("k=\\uZZZZ\n").is_err());
+    }
+
+    #[test]
+    fn properties_and_props_extensions_are_distinct() {
+        use std::path::Path;
+        // `.properties` (Java config) detects as Properties; `.props` (an MSBuild
+        // XML file) detects as XML -- distinct extensions kept separate by the
+        // match arms, so neither is misparsed as the other.
+        assert_eq!(
+            Format::detect_from_path(Path::new("application.properties")),
+            Some(Format::Properties)
+        );
+        assert_eq!(
+            Format::detect_from_path(Path::new("Directory.Build.props")),
+            Some(Format::Xml)
+        );
+    }
+
+    #[test]
     fn format_all_is_complete() {
         // Every parity gate iterates `Format::ALL`, so a variant missing from ALL
         // silently bypasses them. The real guard here is the exhaustive `match`
@@ -520,6 +635,7 @@ mod tests {
             Format::Toml,
             Format::Xml,
             Format::Dotenv,
+            Format::Properties,
         ];
         for f in variants {
             // Distinct arms (clippy-clean) keep the match exhaustive, so a new
@@ -530,6 +646,7 @@ mod tests {
                 Format::Toml => "toml",
                 Format::Xml => "xml",
                 Format::Dotenv => "dotenv",
+                Format::Properties => "properties",
             };
         }
         assert_eq!(

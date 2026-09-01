@@ -1,0 +1,32 @@
+name: json_schema_passes auto-detects a .properties and flags a missing required key
+tags: [check, json_schema_passes, structured, properties, failing]
+
+# The .properties extension auto-detects (no explicit format:); the flat
+# { key: "value" } object is validated against a JSON Schema requiring a key
+# that is absent -> one schema violation.
+
+given:
+  tree:
+    schemas:
+      app.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["server.port"]
+        }
+    "application.properties": |
+      spring.application.name=demo
+  config: |
+    version: 1
+    rules:
+      - id: app-has-port
+        kind: json_schema_passes
+        paths: "application.properties"
+        schema_path: "schemas/app.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-has-port, level: error, path: application.properties}

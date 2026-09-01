@@ -25,6 +25,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in the cross-file rules. A `.env` maps to a flat `{ KEY: "value" }` object of
   literal strings with no `${VAR}` expansion (deterministic, environment-independent
   static analysis); `.env` / `.env.*` auto-detect by filename.
+- **Java `.properties` as a config format.** New `properties_path_{equals,matches,absent}` rule kinds, `format: properties` in
+  `json_schema_passes`, and `extract: { properties: ... }` in the cross-file rules.
+  A `.properties` file maps to a flat `{ key: "value" }` object of literal strings
+  (via `java-properties`; `${...}` placeholders are the application's job, kept
+  verbatim); dotted keys stay one key, queried with bracket notation (`$['db.host']`).
+  Auto-detects by the `.properties` extension.
 
 ### Fixed
 
