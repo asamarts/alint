@@ -554,7 +554,7 @@ mod registry_tests {
     #[test]
     fn structured_family_is_symmetric() {
         // Every config-format-specific op (`<fmt>_path_<op>`) must exist for ALL
-        // four formats. Guards against shipping an asymmetric structured-query
+        // six formats. Guards against shipping an asymmetric structured-query
         // family -- e.g. a lone `yaml_path_absent` with no json/toml/xml siblings
         // (the gap that motivated this test). Adding a new op or a new format means
         // adding every (format, op) pair, or this fails.

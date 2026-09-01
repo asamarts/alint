@@ -88,6 +88,7 @@ dependencies = [
 name = "alint-core"
 version = "0.15.2"
 dependencies = [
+ "encoding_rs",
  "globset",
  "ignore",
  "java-properties",

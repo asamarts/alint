@@ -18,8 +18,9 @@
 //!   repository-level violation rather than one violation per
 //!   target file.
 //! - The target's format is auto-detected from its extension
-//!   (`.json` / `.yaml` / `.yml` / `.toml` / `.xml` and the
-//!   `.csproj` / `.props` / `.targets` family); pass `format:`
+//!   (`.json` / `.yaml` / `.yml` / `.toml` / `.properties` / `.xml`
+//!   and the `.csproj` / `.props` / `.targets` family, or `.env` by
+//!   filename); pass `format:`
 //!   to override. YAML and TOML coerce through serde into the
 //!   same `serde_json::Value` tree the schema validates against,
 //!   and XML maps in via the xmltodict-style `xml_to_value`

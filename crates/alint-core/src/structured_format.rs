@@ -1,5 +1,5 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml,dotenv}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv,properties}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
@@ -379,18 +379,27 @@ fn element_to_value(node: roxmltree::Node, depth: usize) -> std::result::Result<
 }
 
 /// Java `.properties` -> a flat `{ key: "value" }` object of literal strings
-/// (via `java-properties`, which handles `=`/`:`/space separators, `#`/`!`
-/// comments, backslash line-continuations, and `\uXXXX` escapes). Dotted keys
-/// (`a.b.c`) stay ONE opaque key, faithful to Java -- query with `$['a.b.c']`.
+/// (via `java-properties`, decoded as UTF-8; it handles `=`/`:`/space separators,
+/// `#`/`!` comments, backslash line-continuations, and `\uXXXX` escapes). Dotted
+/// keys (`a.b.c`) stay ONE opaque key, faithful to Java -- query with `$['a.b.c']`.
 /// Values are literal: `${...}` placeholders are resolved by the application,
-/// not the file, so they are kept verbatim. Duplicate keys: last wins.
+/// not the file, so they are kept verbatim. Duplicate keys: last wins. Two
+/// upstream quirks vs Java's `Properties`: a `\uXXXX` surrogate PAIR (an emoji,
+/// say) is rejected as a parse error, and a trailing backslash at EOF drops that
+/// line.
 fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
-    let map = java_properties::read(text.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(Value::Object(
-        map.into_iter()
-            .map(|(k, v)| (k, Value::String(v)))
-            .collect(),
-    ))
+    // Decode as UTF-8: alint holds the file as UTF-8 (the caller lossy-decodes its
+    // bytes), but `java_properties::read` defaults to WINDOWS_1252, which would
+    // mojibake any non-ASCII value (`café` -> `cafÃ©`). A leading BOM is stripped
+    // so it cannot land on the first key.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut map = serde_json::Map::new();
+    java_properties::PropertiesIter::new_with_encoding(text.as_bytes(), encoding_rs::UTF_8)
+        .read_into(|k, v| {
+            map.insert(k, Value::String(v));
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(Value::Object(map))
 }
 
 #[cfg(test)]
@@ -546,6 +555,67 @@ mod tests {
             v["url"],
             json!("${NOT_EXPANDED}/x"),
             "placeholders are literal"
+        );
+    }
+
+    #[test]
+    fn properties_non_ascii_is_utf8_not_latin1_with_bom() {
+        // Encoding regression guard: UTF-8 values must round-trip, not mojibake
+        // through Windows-1252 (`café` -> `cafÃ©`), and a leading BOM is stripped.
+        let v = Format::Properties
+            .parse("\u{feff}name=café\ngreeting=\u{65e5}\u{672c}\u{8a9e}\n")
+            .expect("parse utf-8 properties");
+        assert_eq!(
+            v["name"],
+            json!("café"),
+            "UTF-8 value + BOM stripped from key"
+        );
+        assert_eq!(v["greeting"], json!("日本語"), "CJK round-trips");
+    }
+
+    #[test]
+    fn properties_escapes_continuations_dups_and_comments() {
+        let v = Format::Properties
+            .parse(
+                "# comment\n\
+                 ! also a comment\n\
+                 unicode=caf\\u00e9\n\
+                 cont=line1\\\n  line2\n\
+                 dup=first\n\
+                 dup=second\n",
+            )
+            .expect("parse");
+        assert_eq!(v["unicode"], json!("café"), "\\uXXXX escape decoded");
+        assert_eq!(v["cont"], json!("line1line2"), "line-continuation joins");
+        assert_eq!(v["dup"], json!("second"), "duplicate keys: last wins");
+        let obj = v.as_object().unwrap();
+        assert!(!obj.contains_key("# comment"), "`#` comment excluded");
+        assert!(
+            !obj.contains_key("! also a comment"),
+            "`!` comment excluded"
+        );
+        assert_eq!(obj.len(), 3, "only unicode / cont / dup");
+    }
+
+    #[test]
+    fn properties_malformed_unicode_escape_is_an_error() {
+        // The parse-error path: java-properties rejects a bad `\u` escape.
+        assert!(Format::Properties.parse("k=\\uZZZZ\n").is_err());
+    }
+
+    #[test]
+    fn properties_and_props_extensions_are_distinct() {
+        use std::path::Path;
+        // `.properties` (Java config) detects as Properties; `.props` (an MSBuild
+        // XML file) detects as XML -- distinct extensions kept separate by the
+        // match arms, so neither is misparsed as the other.
+        assert_eq!(
+            Format::detect_from_path(Path::new("application.properties")),
+            Some(Format::Properties)
+        );
+        assert_eq!(
+            Format::detect_from_path(Path::new("Directory.Build.props")),
+            Some(Format::Xml)
         );
     }
 

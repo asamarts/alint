@@ -1,10 +1,10 @@
 //! Structured-query rule family:
-//! `{json,yaml,toml,xml,dotenv}_path_{equals,matches,absent}`.
+//! `{json,yaml,toml,xml,dotenv,properties}_path_{equals,matches,absent}`.
 //!
-//! The eight value-checking kinds (`equals` / `matches`) share a
+//! The twelve value-checking kinds (`equals` / `matches`) share a
 //! single implementation that varies along two axes:
 //!
-//! - **Format** — `Json`, `Yaml`, `Toml`, `Xml`, or `Dotenv`. The file is
+//! - **Format** — `Json`, `Yaml`, `Toml`, `Xml`, `Dotenv`, or `Properties`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
 //!   TOML coerce through serde; XML maps via the xmltodict-style
 //!   convention in `xml_to_value` — `@attr` / `#text` /
@@ -40,17 +40,17 @@
 //! pinned to a commit SHA" (a workflow with only `run:` steps
 //! has no `uses:` at all and shouldn't be flagged).
 //!
-//! ## `{json,yaml,toml,xml,dotenv}_path_absent`
+//! ## `{json,yaml,toml,xml,dotenv,properties}_path_absent`
 //!
 //! A third op — **existence** — mirrors `file_absent` for a path:
 //! the query must select *nothing*, and any match produces exactly
 //! one file-level violation (never per-match, so a `$[?…]` filter
 //! that fans out over every root key still yields one violation).
 //! `equals` / `matches` / `if_present` don't apply. Shipped for all
-//! five formats, kept symmetric with `equals`/`matches` by the
+//! six formats, kept symmetric with `equals`/`matches` by the
 //! `structured_family_is_symmetric` test.
 //!
-//! Unparseable files (bad JSON / YAML / TOML / dotenv, not-well-formed
+//! Unparseable files (bad JSON / YAML / TOML / dotenv / properties, not-well-formed
 //! XML) produce one violation per file. An unparseable file is a
 //! documentation problem, not the structured rule's concern —
 //! but better to surface it than silently skip.
@@ -149,7 +149,7 @@ struct MatchesOptions {
     if_present: bool,
 }
 
-/// schemars-derived options schema for the five `*_path_equals` kinds; composed
+/// schemars-derived options schema for the six `*_path_equals` kinds; composed
 /// into their `$defs` branches by `xtask gen-schema`. See
 /// [`crate::migrated_option_schemas`].
 #[must_use]
@@ -158,7 +158,7 @@ pub fn equals_options_schema() -> serde_json::Value {
         .expect("EqualsOptions JSON schema serializes")
 }
 
-/// schemars-derived options schema for the five `*_path_matches` kinds.
+/// schemars-derived options schema for the six `*_path_matches` kinds.
 #[must_use]
 pub fn matches_options_schema() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(MatchesOptions))
@@ -288,10 +288,14 @@ impl PerFileRule for StructuredPathRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return Ok(Vec::new());
-        };
-        let root_value = match self.format.parse(text) {
+        // Lossy-decode (like `json_schema_passes` / `cross_file`) rather than a
+        // strict `from_utf8` + silent skip: a non-UTF-8 file -- e.g. a Latin-1
+        // `.properties`, the format's historical default -- must be ANALYZED, not
+        // silently ignored. Invalid bytes become U+FFFD; a genuinely-binary file
+        // caught by a broad glob then surfaces one parse-error violation rather
+        // than hiding (matching the other structured surfaces).
+        let text = String::from_utf8_lossy(bytes);
+        let root_value = match self.format.parse(&text) {
             Ok(v) => v,
             Err(err) => {
                 return Ok(vec![
@@ -690,6 +694,34 @@ mod tests {
             tempdir_with_files(&[("package.json", br#"{"name":"demo","version":"1.0.0"}"#)]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "matching value should pass: {v:?}");
+    }
+
+    #[test]
+    fn non_utf8_file_is_analyzed_not_silently_skipped() {
+        // A non-UTF-8 file (here a Latin-1 `.properties` with 0xE9 = é, the
+        // format's historical default encoding) must be lossy-decoded and
+        // ANALYZED, not silently dropped: the ASCII `server.port` still resolves,
+        // so the mismatch fires. Before, strict `from_utf8` skipped the whole file
+        // and this passed clean -- a silent false-negative.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: properties_path_equals\n\
+             paths: \"application.properties\"\n\
+             path: \"$['server.port']\"\n\
+             equals: \"9999\"\n\
+             level: error\n",
+        );
+        let rule = properties_path_equals_build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[(
+            "application.properties",
+            b"server.port=8080\nadmin.name=Ren\xe9\n",
+        )]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "the Latin-1 file must be analyzed (port 8080 != 9999): {v:?}"
+        );
     }
 
     #[test]
