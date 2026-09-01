@@ -22,4 +22,4 @@ Rule kinds in the **Structured query** family. Each rule below links to its own 
 | [`yaml_path_absent`](/docs/rules/structured-query/yaml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
 | [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
 | [`xml_path_absent`](/docs/rules/structured-query/xml_path_absent/) | Assert a JSONPath query over the document matches nothing; one file-level violation if present. |
-| [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) | Validate every JSON / YAML / TOML file in `paths` against a JSON Schema document. |
+| [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) | Validate every JSON / YAML / TOML / XML file in `paths` against a JSON Schema document. |

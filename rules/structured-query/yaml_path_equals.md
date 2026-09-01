@@ -14,7 +14,12 @@ Query a structured document with a JSONPath expression and assert every match de
 - Unparseable files — one violation per file (not silently skipped).
 
 <a id="xml-mapping"></a>
-**XML mapping** (`xml_path_*`): XML is mapped to the queryable tree with the xmltodict-style convention so the JSONPath reads like the XML — the document is `{ <root-element>: … }` (`$.Project…`, `$.project…`); attributes are `@name` keys (`['@Version']`); a leaf element collapses to its text (`<TargetFramework>net8.0</TargetFramework>` → `"net8.0"`); repeated sibling elements become an array (use `dependency[*]`, which works for one or many); namespaces flatten to the local name (Maven's default `pom.xml` namespace just works). **Every XML leaf value is a string** — quote the expected value (`equals: "4.0.0"`, not `equals: 4.0.0`) or use `xml_path_matches`. Full rationale and edge cases: `docs/design/v0.10/xml_path.md`.
+**XML mapping** applies to every XML surface: `xml_path_*`, `json_schema_passes` `format: xml`, and the `xml:` extract used by `cross_file` / `file_graph` / `registry_paths_resolve`. XML is mapped to the queryable tree with the xmltodict-style convention so the JSONPath reads like the XML — the document is `{ <root-element>: … }` (`$.Project…`, `$.project…`); attributes are `@name` keys (`['@Version']`, in bracket notation, since `.@Version` is not valid JSONPath); a leaf element collapses to its text (`<TargetFramework>net8.0</TargetFramework>` → `"net8.0"`); namespaces flatten to the local name (Maven's default `pom.xml` namespace just works). Two properties of XML's data model to keep in mind:
+
+- **Every XML leaf value is a string.** Quote expected values (`equals: "4.0.0"`, not `equals: 4.0.0`), reach for `*_path_matches`, and in a `json_schema_passes` schema type XML fields as `string` with a `pattern` — `type: integer` / `boolean` / `number` always fail against XML (every leaf is a string); `type: array` / `object` additionally depend on cardinality (next point).
+- **Cardinality is data-dependent.** A single `<dependency>` is an object (a string for a leaf element); two or more become an array. A `[*]` wildcard therefore does **not** normalize cardinality — `dependency[*]` reads nothing for one element but every element for many, and a leaf query flips the same way (an attribute such as MSBuild's `Condition=` also turns a would-be leaf string into a `{ "@Condition": …, "#text": … }` object). When a rule must handle both one and many, use recursive descent: `$.Project.ItemGroup.ProjectReference..['@Include']` reads the `@Include` of one or many. Scope the `..` under a parent element so it does not over-match a same-named key elsewhere.
+
+Full rationale and edge cases: `docs/design/v0.10/xml_path.md`.
 
 ## Options
 
