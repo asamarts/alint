@@ -511,6 +511,18 @@ pub fn dotenv_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     build_absent(spec, Format::Dotenv, "dotenv_path_absent")
 }
 
+pub fn properties_path_equals_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_equals(spec, Format::Properties, "properties_path_equals")
+}
+
+pub fn properties_path_matches_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_matches(spec, Format::Properties, "properties_path_matches")
+}
+
+pub fn properties_path_absent_build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    build_absent(spec, Format::Properties, "properties_path_absent")
+}
+
 fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box<dyn Rule>> {
     let paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, format!("{kind_label} requires a `paths` field"))

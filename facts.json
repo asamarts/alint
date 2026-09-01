@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 96,
+    "rule_kinds": 99,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -93,6 +93,9 @@
     "pair",
     "pair_changed_together",
     "pair_hash",
+    "properties_path_absent",
+    "properties_path_equals",
+    "properties_path_matches",
     "registry_paths_resolve",
     "shebang",
     "shebang_has_executable",
@@ -442,6 +445,15 @@
       "cross-file",
       "security-unicode-sanity"
     ],
+    "properties_path_absent": [
+      "structured-query"
+    ],
+    "properties_path_equals": [
+      "structured-query"
+    ],
+    "properties_path_matches": [
+      "structured-query"
+    ],
     "registry_paths_resolve": [
       "cross-file"
     ],
@@ -577,6 +589,9 @@
     "pair": "pair",
     "pair_changed_together": "pair_changed_together",
     "pair_hash": "pair_hash",
+    "properties_path_absent": "structured_path",
+    "properties_path_equals": "structured_path",
+    "properties_path_matches": "structured_path",
     "registry_paths_resolve": "registry_paths_resolve",
     "shebang": "file_shebang",
     "shebang_has_executable": "shebang_has_executable",

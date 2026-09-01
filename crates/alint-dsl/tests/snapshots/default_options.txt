@@ -1557,6 +1557,123 @@ PairHashRule {
     allow_out_of_root: false,
 }
 
+=== kind: properties_path_absent | id: properties-no-debug ===
+StructuredPathRule {
+    id: "properties-no-debug",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "application.properties",
+        ],
+    ),
+    format: Properties,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "debug.enabled",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['debug.enabled']",
+    op: Absent,
+    if_present: false,
+}
+
+=== kind: properties_path_equals | id: properties-server-port ===
+StructuredPathRule {
+    id: "properties-server-port",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "application.properties",
+        ],
+    ),
+    format: Properties,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "server.port",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['server.port']",
+    op: Equals(
+        String("8080"),
+    ),
+    if_present: true,
+}
+
+=== kind: properties_path_matches | id: properties-datasource-postgres ===
+StructuredPathRule {
+    id: "properties-datasource-postgres",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "application.properties",
+        ],
+    ),
+    format: Properties,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: LongHand(
+                        [
+                            Name(
+                                Name(
+                                    "spring.datasource.url",
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$['spring.datasource.url']",
+    op: Matches(
+        Regex(
+            "^jdbc:postgresql:",
+        ),
+    ),
+    if_present: true,
+}
+
 === kind: registry_paths_resolve | id: workspace-members-resolve ===
 RegistryPathsResolveRule {
     id: "workspace-members-resolve",

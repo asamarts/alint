@@ -1,0 +1,27 @@
+name: properties_path_matches flags a non-postgres JDBC url
+tags: [check, properties_path_matches]
+
+docs:
+  title: A .properties JDBC url on the wrong engine
+  case: fail
+  kind: properties_path_matches
+
+given:
+  tree:
+    "application.properties": |
+      spring.datasource.url=jdbc:mysql://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: properties_path_matches
+        paths: "application.properties"
+        path: "$['spring.datasource.url']"
+        matches: "^jdbc:postgresql:"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: postgres-only, level: error, path: application.properties}

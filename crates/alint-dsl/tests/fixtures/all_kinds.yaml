@@ -520,6 +520,25 @@ rules:
     matches: "^postgres://"
     level: warning
     if_present: true
+  - id: properties-server-port
+    kind: properties_path_equals
+    paths: "application.properties"
+    path: "$['server.port']"
+    equals: "8080"
+    level: warning
+    if_present: true
+  - id: properties-datasource-postgres
+    kind: properties_path_matches
+    paths: "application.properties"
+    path: "$['spring.datasource.url']"
+    matches: "^jdbc:postgresql:"
+    level: warning
+    if_present: true
+  - id: properties-no-debug
+    kind: properties_path_absent
+    paths: "application.properties"
+    path: "$['debug.enabled']"
+    level: warning
   - id: package-conforms-to-schema
     kind: json_schema_passes
     paths: "package.json"

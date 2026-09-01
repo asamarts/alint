@@ -1,0 +1,26 @@
+name: properties_path_equals is silent when server.port is canonical
+tags: [check, properties_path_equals, structured, passing]
+
+docs:
+  title: A .properties on the canonical port
+  case: pass
+  kind: properties_path_equals
+
+given:
+  tree:
+    "application.properties": |
+      server.port=8080
+  config: |
+    version: 1
+    rules:
+      - id: canonical-port
+        kind: properties_path_equals
+        paths: "application.properties"
+        path: "$['server.port']"
+        equals: "8080"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

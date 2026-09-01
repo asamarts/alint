@@ -1,0 +1,31 @@
+name: cross_file over properties extract flags an app.version out of sync with package.json
+tags: [check, cross_file, properties]
+
+# Exercises the `properties:` extract mode. The .properties app.version must equal
+# the package.json version; dotted keys are queried with bracket notation.
+
+given:
+  tree:
+    "application.properties": |
+      app.version=1.2.3
+    "package.json": |
+      {"version": "1.2.4"}
+  config: |
+    version: 1
+    rules:
+      - id: app-version-synced
+        kind: cross_file
+        source:
+          file: "application.properties"
+          extract: { properties: "$['app.version']" }
+        targets:
+          files: "package.json"
+          extract: { json: "$.version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-version-synced, level: error, path: package.json}

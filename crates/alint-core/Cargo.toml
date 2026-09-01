@@ -30,6 +30,7 @@ schemars.workspace = true
 serde_json_path.workspace = true
 toml.workspace = true
 roxmltree.workspace = true
+java-properties.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

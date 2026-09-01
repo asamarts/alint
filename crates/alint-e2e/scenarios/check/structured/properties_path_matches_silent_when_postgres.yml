@@ -1,0 +1,26 @@
+name: properties_path_matches is silent when the JDBC url is postgres
+tags: [check, properties_path_matches, structured, passing]
+
+docs:
+  title: A .properties JDBC url on postgres
+  case: pass
+  kind: properties_path_matches
+
+given:
+  tree:
+    "application.properties": |
+      spring.datasource.url=jdbc:postgresql://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: postgres-only
+        kind: properties_path_matches
+        paths: "application.properties"
+        path: "$['spring.datasource.url']"
+        matches: "^jdbc:postgresql:"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

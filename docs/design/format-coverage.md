@@ -131,7 +131,7 @@ Complexity: low. One new dependency, `dotenvy` (MIT, cargo-deny-clean). The pari
 
 ### 5.4 New formats (Phase 2, demand-gated)
 
-The remaining candidates stay out of this change and are added only behind a concrete case-study or issue demand signal. The seam is the same as dotenv's: one arm in `Format::parse` + `label` + `detect_from_path`, then the parity gate makes the rest a checklist. All have a maintained, cargo-deny-clean crate; the cost is the up-front `Value`-mapping design, not the parsing.
+The remaining candidates stay out of this change and are added only behind a concrete case-study or issue demand signal. **As built (Phase 2, 2026-09-01): Java `.properties` shipped first** (demand: user greenlight), using the `java-properties` crate (the doc's vetted-crate approach was chosen over hand-rolling, since unlike dotenvy it returns literal values; verified). `Format::Properties` + `properties_path_*` (kinds 96 -> 99) wired on every surface behind the parity gate; flat literal-string map, dotted keys stay one key. INI and HCL remain demand-gated below. The seam is the same as dotenv's: one arm in `Format::parse` + `label` + `detect_from_path`, then the parity gate makes the rest a checklist. All have a maintained, cargo-deny-clean crate; the cost is the up-front `Value`-mapping design, not the parsing.
 
 | format | leading crate (license) | value fit | effort | biggest mapping risk |
 |---|---|---|---|---|

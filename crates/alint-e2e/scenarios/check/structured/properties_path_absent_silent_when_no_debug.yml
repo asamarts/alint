@@ -1,0 +1,25 @@
+name: properties_path_absent is silent when debug.enabled is absent
+tags: [check, properties_path_absent, structured, passing]
+
+docs:
+  title: A .properties with no debug flag
+  case: pass
+  kind: properties_path_absent
+
+given:
+  tree:
+    "application.properties": |
+      server.port=8080
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: properties_path_absent
+        paths: "application.properties"
+        path: "$['debug.enabled']"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

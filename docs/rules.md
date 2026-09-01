@@ -181,9 +181,9 @@ Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in 
 
 ## Structured query
 
-JSONPath queries over structured documents per [RFC 9535](https://datatracker.ietf.org/doc/html/rfc9535). JSON / YAML / TOML / XML / dotenv targets coerce into the same `serde_json::Value` tree, so a single rule works across all five formats — Kubernetes manifests, GitHub Actions workflows, `package.json`, `Cargo.toml`, `pyproject.toml`, Maven `pom.xml`, .NET `.csproj` / `.props` / `.targets`, and `.env` files. JSON/YAML/TOML coerce through serde; XML maps via the [XML-mapping convention](#xml-mapping) documented below; a `.env` file maps to a flat `{ KEY: "value" }` object of literal strings (no `${VAR}` expansion), auto-detected by filename (`.env` / `.env.*`; pass `format: dotenv` for other names). In `cross_file` value relations a `${VAR}` value is skipped by the non-literal filter, so use `dotenv_path_*` for a literal comparison. JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … */` comments or trailing commas (`tsconfig.json`, `.vscode/*.json`, and other JS/TS-ecosystem files) still parses — strict JSON is tried first (and is byte-identical), the tolerant retry only kicks in on failure, and a genuinely-malformed document still reports the strict parser's error. The same tolerance applies to the `json:` extract used by `cross_file` / `registry_paths_resolve`.
+JSONPath queries over structured documents per [RFC 9535](https://datatracker.ietf.org/doc/html/rfc9535). JSON / YAML / TOML / XML / dotenv / properties targets coerce into the same `serde_json::Value` tree, so a single rule works across all six formats — Kubernetes manifests, GitHub Actions workflows, `package.json`, `Cargo.toml`, `pyproject.toml`, Maven `pom.xml`, .NET `.csproj` / `.props` / `.targets`, and `.env` / `.properties` files. JSON/YAML/TOML coerce through serde; XML maps via the [XML-mapping convention](#xml-mapping) documented below; a `.env` file maps to a flat `{ KEY: "value" }` object of literal strings (no `${VAR}` expansion), auto-detected by filename (`.env` / `.env.*`; pass `format: dotenv` for other names). In `cross_file` value relations a `${VAR}` value is skipped by the non-literal filter, so use `dotenv_path_*` for a literal comparison. A Java `.properties` file likewise maps to a flat object of literal strings; dotted keys stay ONE key, so query with bracket notation (`$['db.host']`). JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … */` comments or trailing commas (`tsconfig.json`, `.vscode/*.json`, and other JS/TS-ecosystem files) still parses — strict JSON is tried first (and is byte-identical), the tolerant retry only kicks in on failure, and a genuinely-malformed document still reports the strict parser's error. The same tolerance applies to the `json:` extract used by `cross_file` / `registry_paths_resolve`.
 
-### `json_path_equals`, `yaml_path_equals`, `toml_path_equals`, `xml_path_equals`, `dotenv_path_equals`
+### `json_path_equals`, `yaml_path_equals`, `toml_path_equals`, `xml_path_equals`, `dotenv_path_equals`, `properties_path_equals`
 
 **Categories:** Structured query
 
@@ -202,13 +202,13 @@ Query a structured document with a JSONPath expression and assert every match de
 
 Full rationale and edge cases: `docs/design/v0.10/xml_path.md`.
 
-### `json_path_matches`, `yaml_path_matches`, `toml_path_matches`, `xml_path_matches`, `dotenv_path_matches`
+### `json_path_matches`, `yaml_path_matches`, `toml_path_matches`, `xml_path_matches`, `dotenv_path_matches`, `properties_path_matches`
 
 **Categories:** Structured query
 
 Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. Non-string matches produce a clear "value is not a string" violation.
 
-### `json_path_absent`, `yaml_path_absent`, `toml_path_absent`, `xml_path_absent`, `dotenv_path_absent`
+### `json_path_absent`, `yaml_path_absent`, `toml_path_absent`, `xml_path_absent`, `dotenv_path_absent`, `properties_path_absent`
 
 **Categories:** Structured query
 
@@ -223,9 +223,9 @@ Assert a JSONPath query over the document matches nothing; one file-level violat
 
 **Categories:** Structured query
 
-Validate every JSON / YAML / TOML / XML / dotenv file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
+Validate every JSON / YAML / TOML / XML / dotenv / properties file in `paths` against a JSON Schema document. Targets coerce through serde into the same `serde_json::Value` tree the schema sees, so a JSON-format schema can validate a YAML config (Kubernetes manifests, GitHub Actions workflows, Helm `values.schema.json`) or a TOML manifest (`Cargo.toml`, `pyproject.toml`) without separate schemas per format. The schema is loaded + compiled lazily on first evaluation and cached on the rule.
 
-Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml` / `.xml` and the `.csproj` / `.props` / `.targets` family), or by filename for the `.env` family; pass `format:` to override.
+Each schema-validation error becomes one violation, with the failing instance path and the schema's error description in the message. A target that fails to parse produces a single parse-error violation, not a flood of schema errors against junk. Format is detected from the target's extension (`.json` / `.yaml` / `.yml` / `.toml` / `.properties` / `.xml` and the `.csproj` / `.props` / `.targets` family), or by filename for the `.env` family; pass `format:` to override.
 
 Check-only — fixing schema violations is a "the user knows what value belongs there" problem, not alint's.
 
