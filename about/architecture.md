@@ -205,7 +205,7 @@ Rules are grouped into thirteen families. Every kind shares the record shape abo
 
 - **Existence** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`): a path must, or must not, be present.
 - **Content** (`file_content_matches`, `file_header`, `file_hash`, `file_max_size`, `file_max_lines`, `file_is_text`, `file_shebang`, ...): assertions over a file's bytes or lines.
-- **Structured query** (`json_path_equals`, `yaml_path_matches`, `toml_path_equals`, `xml_path_matches`, `json_schema_passes`, ...): query a value inside a JSON / YAML / TOML / XML / dotenv / properties file via RFC 9535 JSONPath, or validate against a JSON Schema.
+- **Structured query** (`json_path_equals`, `yaml_path_matches`, `toml_path_equals`, `xml_path_matches`, `json_schema_passes`, ...): query a value inside a JSON / YAML / TOML / XML / dotenv / properties / INI file via RFC 9535 JSONPath, or validate against a JSON Schema.
 - **Naming** (`filename_case`, `filename_regex`): a basename matches a case convention or a regex.
 - **Text hygiene** (`no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines`): whitespace and line-shape checks, most with a fixer.
 - **Security / Unicode** (`no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars`): flag conflict markers and Trojan-Source bidi / zero-width characters.

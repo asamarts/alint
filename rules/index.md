@@ -6,13 +6,13 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 99 rule kinds across 13 families (88 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 102 rule kinds across 13 families (91 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
 - [Content](/docs/rules/content/) — 17 rules
-- [Structured query](/docs/rules/structured-query/) — 19 rules
+- [Structured query](/docs/rules/structured-query/) — 22 rules
 - [Naming](/docs/rules/naming/) — 4 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
 - [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 13 rules
@@ -75,10 +75,13 @@ alint ships 99 rule kinds across 13 families (88 distinct rule behaviors plus 11
 - [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) — Fire when any tracked file matches a configured glob denylist. _(Git hygiene)_
 - [`import_gate`](/docs/rules/cross-file/import_gate/) — Forbid imports whose **extracted target** matches a `forbid` regex, within the `paths` scope — an architectural import firewall (staging-layer isolation, core/providers separation, private-API gates). _(Cross-file)_
 - [`indent_style`](/docs/rules/text-hygiene/indent_style/) — Every non-blank line indents with the configured `style` (`tabs` or `spaces`). _(Text hygiene)_
+- [`ini_path_absent`](/docs/rules/structured-query/ini_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
+- [`ini_path_equals`](/docs/rules/structured-query/ini_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
+- [`ini_path_matches`](/docs/rules/structured-query/ini_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`json_path_absent`](/docs/rules/structured-query/json_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`json_path_equals`](/docs/rules/structured-query/json_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`json_path_matches`](/docs/rules/structured-query/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
-- [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties file in `paths` against a JSON Schema document. _(Structured query)_
+- [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties / INI file in `paths` against a JSON Schema document. _(Structured query)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_

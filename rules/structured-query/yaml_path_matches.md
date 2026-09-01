@@ -2,7 +2,7 @@
 title: 'yaml_path_matches'
 description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint yaml_path_matches rule, structured query family.'
 sidebar:
-  order: 8
+  order: 9
 categories: ['structured-query']
 ---
 
@@ -133,3 +133,4 @@ rules:
 - [`xml_path_matches`](/docs/rules/structured-query/xml_path_matches/)
 - [`dotenv_path_matches`](/docs/rules/structured-query/dotenv_path_matches/)
 - [`properties_path_matches`](/docs/rules/structured-query/properties_path_matches/)
+- [`ini_path_matches`](/docs/rules/structured-query/ini_path_matches/)
