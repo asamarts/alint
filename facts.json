@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 93,
+    "rule_kinds": 96,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -22,6 +22,9 @@
     "dir_contains",
     "dir_exists",
     "dir_only_contains",
+    "dotenv_path_absent",
+    "dotenv_path_equals",
+    "dotenv_path_matches",
     "every_matching_has",
     "executable_bit",
     "executable_has_shebang",
@@ -217,6 +220,15 @@
     "dir_only_contains": [
       "cross-file",
       "structure"
+    ],
+    "dotenv_path_absent": [
+      "structured-query"
+    ],
+    "dotenv_path_equals": [
+      "structured-query"
+    ],
+    "dotenv_path_matches": [
+      "structured-query"
     ],
     "every_matching_has": [
       "cross-file"
@@ -494,6 +506,9 @@
     "dir_contains": "dir_contains",
     "dir_exists": "dir_exists",
     "dir_only_contains": "dir_only_contains",
+    "dotenv_path_absent": "structured_path",
+    "dotenv_path_equals": "structured_path",
+    "dotenv_path_matches": "structured_path",
     "every_matching_has": "every_matching_has",
     "executable_bit": "executable_bit",
     "executable_has_shebang": "executable_has_shebang",

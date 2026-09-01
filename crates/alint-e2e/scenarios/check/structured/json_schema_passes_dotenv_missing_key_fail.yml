@@ -1,0 +1,33 @@
+name: json_schema_passes with format dotenv flags a .env missing a required key
+tags: [check, json_schema_passes, structured, dotenv, failing]
+
+# The .env family auto-detects as dotenv; here an explicit `format: dotenv`
+# validates the flat { KEY: "value" } object against a JSON Schema that requires
+# DATABASE_URL, which is absent -> one schema violation.
+
+given:
+  tree:
+    schemas:
+      env.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["DATABASE_URL"]
+        }
+    ".env": |
+      NODE_ENV=production
+  config: |
+    version: 1
+    rules:
+      - id: env-has-db-url
+        kind: json_schema_passes
+        paths: ".env"
+        schema_path: "schemas/env.schema.json"
+        format: dotenv
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: env-has-db-url, level: error, path: .env}

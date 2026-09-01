@@ -1,0 +1,32 @@
+name: cross_file over dotenv extract flags an APP_VERSION out of sync with package.json
+tags: [check, cross_file, dotenv]
+
+# Exercises the `dotenv:` extract mode: the .env APP_VERSION must equal the
+# package.json version. Values are literal strings (no ${VAR} expansion), so the
+# comparison is byte-exact.
+
+given:
+  tree:
+    ".env": |
+      APP_VERSION=1.2.3
+    "package.json": |
+      {"version": "1.2.4"}
+  config: |
+    version: 1
+    rules:
+      - id: app-version-synced
+        kind: cross_file
+        source:
+          file: ".env"
+          extract: { dotenv: "$.APP_VERSION" }
+        targets:
+          files: "package.json"
+          extract: { json: "$.version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-version-synced, level: error, path: package.json}

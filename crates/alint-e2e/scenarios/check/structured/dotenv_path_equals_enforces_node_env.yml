@@ -1,0 +1,28 @@
+name: dotenv_path_equals flags a .env.production whose NODE_ENV is not production
+tags: [check, dotenv_path_equals]
+
+docs:
+  title: A .env.production set to the wrong NODE_ENV
+  case: fail
+  kind: dotenv_path_equals
+
+given:
+  tree:
+    ".env.production": |
+      NODE_ENV=development
+      PORT=8080
+  config: |
+    version: 1
+    rules:
+      - id: prod-node-env
+        kind: dotenv_path_equals
+        paths: ".env.production"
+        path: "$.NODE_ENV"
+        equals: "production"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: prod-node-env, level: error, path: .env.production}

@@ -501,6 +501,25 @@ rules:
     matches: "^\\d"
     level: warning
     if_present: true
+  - id: dotenv-no-debug-flag
+    kind: dotenv_path_absent
+    paths: ".env"
+    path: "$.DEBUG"
+    level: warning
+  - id: dotenv-node-env-production
+    kind: dotenv_path_equals
+    paths: ".env.production"
+    path: "$.NODE_ENV"
+    equals: "production"
+    level: error
+    if_present: true
+  - id: dotenv-database-url-postgres
+    kind: dotenv_path_matches
+    paths: ".env"
+    path: "$.DATABASE_URL"
+    matches: "^postgres://"
+    level: warning
+    if_present: true
   - id: package-conforms-to-schema
     kind: json_schema_passes
     paths: "package.json"

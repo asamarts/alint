@@ -7,6 +7,7 @@ pub mod baseline;
 mod category;
 mod config;
 pub mod did_you_mean;
+mod dotenv;
 mod engine;
 mod error;
 mod extract;

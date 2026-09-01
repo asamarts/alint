@@ -67,11 +67,16 @@ fn curated_suggestion(kind: &str, wrong: &str) -> Option<&'static str> {
         // but `*_path_equals` only accepts `equals:`). Catches the
         // inverse mistake too.
         (
-            "json_path_equals" | "yaml_path_equals" | "toml_path_equals" | "xml_path_equals",
+            "json_path_equals" | "yaml_path_equals" | "toml_path_equals" | "xml_path_equals"
+            | "dotenv_path_equals",
             "matches",
         ) => Some("equals"),
         (
-            "json_path_matches" | "yaml_path_matches" | "toml_path_matches" | "xml_path_matches",
+            "json_path_matches"
+            | "yaml_path_matches"
+            | "toml_path_matches"
+            | "xml_path_matches"
+            | "dotenv_path_matches",
             "equals",
         ) => Some("matches"),
 
