@@ -11,9 +11,10 @@
 //! ## The `Value` shape (2-level section map)
 //! An INI file maps to `{ <global-key>: "v", <section>: { <key>: "v" } }`:
 //! - **Global (pre-section) keys hoist to the top level**, so `.editorconfig`'s
-//!   `root = true` is `$.root` and `php.ini`'s `memory_limit` is `$.memory_limit`.
-//! - A `[section]` is an object, so `[server] host = x` is `$.server.host`
-//!   (bracket-notation `$['server']['host']` for a section or key with a dot).
+//!   top-level `root = true` is `$.root`.
+//! - A `[section]` is an object, so `php.ini`'s `[PHP] memory_limit` is
+//!   `$['PHP']['memory_limit']` (bracket notation for a section or key with a dot,
+//!   since a `.` is a `JSONPath` child separator).
 //! - **Section names and keys are case-preserving** (the reason to hand-roll
 //!   rather than use `configparser`, which lowercases keys).
 //!
@@ -24,26 +25,37 @@
 //!   part of the value; `${...}` placeholders are kept verbatim; an inline `;`/`#`
 //!   is part of the value (only a FULL-LINE `;`/`#`, after optional leading
 //!   whitespace, is a comment). Leading/trailing value whitespace is trimmed.
+//! - **Indentation-continued multi-line values** (the configparser convention that
+//!   `tox.ini` / `setup.cfg` / `pytest.ini` rely on): a non-blank line indented
+//!   DEEPER than its key continues that key's value, the lines joined with `\n`.
+//!   So `deps =` followed by two indented lines is one `deps` value of two lines,
+//!   and a continuation that contains `:`/`=` stays value text (it is NOT split
+//!   into a bogus key). A line at the SAME or a shallower indent starts a new key
+//!   (or section), so sibling keys stay separate. Blank and comment lines inside a
+//!   value are transparent. Content is irrelevant to continuation: an indented
+//!   `[x]`-looking line is value text, not a section.
 //! - **Duplicate keys within one scope collapse to a document-order array** (like
 //!   the XML mapping's repeated-element rule). INI has no single duplicate-key
 //!   runtime semantic (configparser errors; Windows `GetPrivateProfileString`
 //!   takes the first), so alint surfaces every value rather than silently dropping
-//!   one. A single occurrence stays a string.
-//! - **A repeated `[section]` header merges** into the existing object.
-//! - A leading UTF-8 BOM is tolerated (stripped before parsing).
+//!   one. A single occurrence stays a string. (In `extract:` / `cross_file`, an
+//!   array node is not a scalar, so it is filtered out just like a repeated XML
+//!   element -- use `[*]` + a set relation to compare the values.)
+//! - A `[section]` header's name is the text between its first `[` and its LAST
+//!   `]`, so an editorconfig char-class glob `[*.[ch]]` is the single section
+//!   `*.[ch]`. A **repeated `[section]` merges** into the existing object. A
+//!   leading UTF-8 BOM is stripped.
 //!
-//! ## Out of scope (a linter surfaces a parse error, one violation, like the
-//! other formats)
-//! - An unclosed section header (`[server` with no `]`), and a header with
-//!   trailing content (`[server] ; note`): a header line must be exactly
-//!   `[name]`. Put the comment on its own line.
-//! - A non-blank line that is neither a comment, a section header, nor a
-//!   `key=value` (no `=`/`:`), and an empty key before the separator.
+//! ## Parse errors (one per-file violation, like the other formats)
+//! - A section header line that does not end with `]` (`[server`, or a header with
+//!   trailing content like `[server] ; note`): put the comment on its own line.
+//! - A non-blank, non-continuation line that is neither a comment, a section
+//!   header, nor a `key = value` (no `=`/`:`) -- this includes a bare valueless
+//!   flag key, rejected like configparser's default (`allow_no_value=False`).
+//! - An empty key before the separator.
 //! - A `[section]` whose name equals an existing top-level (global) key: the
 //!   projection would be ambiguous, so it is rejected rather than silently
 //!   overwriting.
-//! - Indentation-continued multi-line values (a configparser feature): an
-//!   indented line is parsed on its own (leading whitespace is not significant).
 
 use serde_json::{Map, Value};
 
@@ -59,19 +71,35 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
     // The current section name; `None` is the global (pre-section) scope, whose
     // keys live at the top level of `root`.
     let mut section: Option<String> = None;
+    // The key most recently assigned in the current section, and the indentation
+    // width of its line: a later non-blank line indented deeper than `cur_indent`
+    // continues `cur_key`'s value. Reset at every section header (a value never
+    // continues across a section boundary).
+    let mut cur_key: Option<String> = None;
+    let mut cur_indent = 0usize;
     for (i, raw) in text.lines().enumerate() {
         let lineno = i + 1;
+        let indent = raw.chars().take_while(|&c| c == ' ' || c == '\t').count();
         let line = raw.trim();
-        // Blank lines and full-line `;` / `#` comments (after optional leading
-        // whitespace, already removed by the trim above).
+        // Blank lines and full-line `;` / `#` comments are transparent: a value
+        // may span them, so they do NOT reset `cur_key`.
         if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
             continue;
         }
-        // Section header: `[name]` on its own line.
+        // Continuation: a line indented deeper than the current key's line extends
+        // that key's value (configparser style). The content is irrelevant here --
+        // an indented `[x]` or `k=v` is value text, not a section or key.
+        if let Some(key) = cur_key.clone() {
+            if indent > cur_indent {
+                append_continuation(scope_mut(&mut root, section.as_deref()), &key, line);
+                continue;
+            }
+        }
+        // Section header: name = the text between the first `[` and the LAST `]`.
         if let Some(rest) = line.strip_prefix('[') {
             let Some(name) = rest.strip_suffix(']') else {
                 return Err(format!(
-                    "line {lineno}: unclosed section header `{line}` (expected `[name]`)"
+                    "line {lineno}: malformed section header `{line}` (expected `[name]`)"
                 ));
             };
             let name = name.trim().to_string();
@@ -90,11 +118,11 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
                 }
             }
             section = Some(name);
+            cur_key = None;
             continue;
         }
-        // `key = value` / `key : value`: split on the earliest separator so a
-        // value containing the other separator (a URL's `:`, a query's `=`)
-        // survives verbatim.
+        // `key = value` / `key : value`: split on the earliest separator so a value
+        // containing the other separator (a URL's `:`, a query's `=`) survives.
         let Some(idx) = line.find(['=', ':']) else {
             return Err(format!(
                 "line {lineno}: expected `key = value` (or `key : value`), found `{line}`"
@@ -108,18 +136,49 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
             ));
         }
         let value = line[idx + 1..].trim().to_string();
-        // The top level for a global key, else the section object (materialized
-        // when its header line was read, so the `expect` cannot fire).
-        let scope = match &section {
-            None => &mut root,
-            Some(s) => root
-                .get_mut(s)
-                .and_then(Value::as_object_mut)
-                .expect("section object is materialized on its header line"),
-        };
-        insert_dup_aware(scope, key.to_string(), value);
+        insert_dup_aware(
+            scope_mut(&mut root, section.as_deref()),
+            key.to_string(),
+            value,
+        );
+        cur_key = Some(key.to_string());
+        cur_indent = indent;
     }
     Ok(Value::Object(root))
+}
+
+/// The map that keys are inserted into: the top level for a global (pre-section)
+/// key, else the current section's object -- materialized when its header line was
+/// read, so the `expect` cannot fire (a continuation or key only runs after a key
+/// was inserted into this same scope, or at the global scope).
+fn scope_mut<'a>(
+    root: &'a mut Map<String, Value>,
+    section: Option<&str>,
+) -> &'a mut Map<String, Value> {
+    match section {
+        None => root,
+        Some(s) => root
+            .get_mut(s)
+            .and_then(Value::as_object_mut)
+            .expect("section object is materialized on its header line"),
+    }
+}
+
+/// Append a continuation line to `key`'s existing value, joining with `\n`. An
+/// empty value (from `key =` with content only on the following indented lines)
+/// takes the first continuation without a leading newline. If the key was
+/// duplicated before its continuation, the most recent value is extended.
+fn append_continuation(scope: &mut Map<String, Value>, key: &str, line: &str) {
+    let slot = match scope.get_mut(key) {
+        Some(Value::Array(arr)) => arr.last_mut(),
+        other => other,
+    };
+    if let Some(Value::String(s)) = slot {
+        if !s.is_empty() {
+            s.push('\n');
+        }
+        s.push_str(line);
+    }
 }
 
 /// Insert `key` -> `value`, collapsing a key repeated within one scope into a
@@ -264,27 +323,92 @@ mod tests {
     }
 
     #[test]
-    fn indentation_is_not_significant() {
-        // Indented keys under a section are common; leading whitespace is trimmed,
-        // so they attach to the section (not treated as continuations).
-        let v = obj("[s]\n    a = 1\n\tb = 2\n");
+    fn multiline_continuation_joins_deeper_indented_lines() {
+        // configparser convention (tox.ini / setup.cfg / pytest.ini), the files
+        // this format auto-detects. Without it these valid files either false-error
+        // (a bare continuation) or silently mis-parse (a `:`-bearing continuation
+        // invents bogus keys) -- the two failure modes this test locks out.
+        let v = obj("[testenv]\ndeps =\n    pytest\n    coverage\ncommands = pytest\n");
+        assert_eq!(
+            v["testenv"]["deps"],
+            json!("pytest\ncoverage"),
+            "indented lines continue `deps`; empty first value -> no leading newline"
+        );
+        assert_eq!(
+            v["testenv"]["commands"],
+            json!("pytest"),
+            "a line back at the key indent starts a new key"
+        );
+        // A continuation containing `::` must stay value text (setup.cfg
+        // `classifiers`): no split into a bogus `License` key.
+        let c = obj("[metadata]\nclassifiers =\n    License :: OSI :: MIT\n");
+        assert_eq!(
+            c["metadata"]["classifiers"],
+            json!("License :: OSI :: MIT"),
+            "`::`-bearing continuation stays value text"
+        );
+        assert!(
+            c["metadata"].get("License").is_none(),
+            "no bogus key invented from the continuation"
+        );
+    }
+
+    #[test]
+    fn continuation_needs_a_deeper_indent_siblings_stay_separate() {
+        // Only a DEEPER indent continues; a same-or-shallower indent starts a new
+        // key, so indented sibling keys under a section remain distinct.
+        let v = obj("[s]\n  a = 1\n  b = 2\n");
         assert_eq!(v["s"]["a"], json!("1"));
-        assert_eq!(v["s"]["b"], json!("2"));
+        assert_eq!(
+            v["s"]["b"],
+            json!("2"),
+            "same indent -> new key, not a continuation of `a`"
+        );
+    }
+
+    #[test]
+    fn section_header_name_spans_to_the_last_bracket() {
+        // The name is between the first `[` and the LAST `]`, so an editorconfig
+        // char-class glob is a single section whose `[...]` is part of the name.
+        let v = obj("[*.[ch]]\nindent_style = tab\n");
+        assert_eq!(v["*.[ch]"]["indent_style"], json!("tab"));
+    }
+
+    #[test]
+    fn unicode_adjacent_to_separators_does_not_panic() {
+        // The `=`/`:` split and the empty-key slice (`&line[idx..=idx]`) are
+        // byte-indexed; multi-byte UTF-8 next to (or masquerading as) a separator
+        // must never slice a non-char-boundary. `find(['=', ':'])` only matches the
+        // ASCII bytes, so `idx` is always an ASCII boundary -- pin that.
+        for input in [
+            "café = ☕\n",      // multibyte key + value
+            "[⚙]\nkey = val\n", // multibyte section name
+            "＝ = x\n",         // full-width `=` before an ASCII one
+            "k：v\n",           // full-width colon only -> no ASCII separator
+            "= café\n",         // empty key, multibyte value
+        ] {
+            let _ = parse(input); // must return Ok/Err, never panic
+        }
+        assert_eq!(obj("café = ☕\n")["café"], json!("☕"));
+        assert_eq!(obj("[⚙]\nkey = val\n")["⚙"]["key"], json!("val"));
     }
 
     #[test]
     fn malformed_lines_are_parse_errors() {
+        // Unclosed and trailing-content headers share one "malformed" message.
+        let unclosed = parse("[server\nhost = x\n").unwrap_err();
         assert!(
-            parse("[server\nhost = x\n").is_err(),
-            "an unclosed section header is a parse error"
+            unclosed.contains("malformed section header"),
+            "unclosed header message: {unclosed}"
         );
+        let trailing = parse("[server] ; note\n").unwrap_err();
         assert!(
-            parse("[server] ; trailing\n").is_err(),
-            "trailing content after `]` is a parse error"
+            trailing.contains("malformed section header"),
+            "trailing-content header message: {trailing}"
         );
         assert!(
             parse("bareword\n").is_err(),
-            "a line with no `=`/`:` is a parse error"
+            "a bare valueless line (no `=`/`:`) is a parse error"
         );
         assert!(
             parse("= novalue\n").is_err(),

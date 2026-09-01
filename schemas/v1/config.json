@@ -2758,7 +2758,7 @@
       "type": "object"
     },
     "rule_ini_path_equals": {
-      "description": "INI sibling of `json_path_equals`. An INI file maps to a 2-level `{ section: { key: \"value\" } }` object of literal strings (pre-section keys hoist to the top level); a section or key with a dot uses bracket notation (`$['server']['port']`), and every value is a string (quote your `equals:`). Typical use: enforce `$['server']['port'] == \"8080\"`.",
+      "description": "INI sibling of `json_path_equals`. An INI file maps to a 2-level `{ section: { key: \"value\" } }` object of literal strings (pre-section keys hoist to the top level); query a nested value with bracket notation (`$['server']['port']`), which is also required for a section or key containing a `.`. Every value is a string (quote your `equals:`). Typical use: enforce `$['server']['port'] == \"8080\"`.",
       "properties": {
         "equals": {
           "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."

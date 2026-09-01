@@ -37,8 +37,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strings (a small hand-rolled parser, zero new dependencies); pre-section keys hoist to
   the top level, values stay literal (quotes and inline `;`/`#` kept), a key repeated
   within one scope becomes a file-order array, and section names / keys are
-  case-preserving. Query a section with bracket notation (`$['server']['port']`).
-  Auto-detects by the `.ini` / `.cfg` extension.
+  case-preserving. Multi-line values follow the configparser indentation-continuation
+  convention, so `tox.ini` / `setup.cfg` / `pytest.ini` parse correctly. Query a
+  section with bracket notation (`$['server']['port']`). Auto-detects by the
+  `.ini` / `.cfg` extension.
 
 ### Fixed
 

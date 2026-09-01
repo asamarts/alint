@@ -1,0 +1,35 @@
+name: ini_path_matches handles a multi-line tox.ini deps continuation
+tags: [check, ini_path_matches, structured, ini, passing]
+
+docs:
+  title: A tox.ini with a multi-line deps value
+  case: pass
+  kind: ini_path_matches
+
+# configparser indentation-continuation: `deps =` followed by more-indented lines
+# is ONE multi-line value. A regression to no-continuation would parse-error this
+# valid tox.ini (the bare `pytest` line has no `=`/`:`), so this pass scenario
+# guards the continuation support that lets alint lint tox.ini / setup.cfg.
+
+given:
+  tree:
+    "tox.ini": |
+      [testenv]
+      deps =
+          pytest
+          coverage
+      commands = pytest
+  config: |
+    version: 1
+    rules:
+      - id: deps-includes-pytest
+        kind: ini_path_matches
+        paths: "tox.ini"
+        path: "$['testenv']['deps']"
+        matches: "pytest"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
