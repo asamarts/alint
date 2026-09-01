@@ -1,0 +1,28 @@
+name: hcl_path_matches is silent when required_version is pessimistically pinned
+tags: [check, hcl_path_matches, structured, hcl, passing]
+
+docs:
+  title: A Terraform required_version with a pessimistic constraint
+  case: pass
+  kind: hcl_path_matches
+
+given:
+  tree:
+    "main.tf": |
+      terraform {
+        required_version = "~> 1.0"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: pin-terraform
+        kind: hcl_path_matches
+        paths: "main.tf"
+        path: "$.terraform.required_version"
+        matches: "^~>"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

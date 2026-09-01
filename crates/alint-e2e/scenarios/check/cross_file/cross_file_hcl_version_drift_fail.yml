@@ -1,0 +1,33 @@
+name: cross_file over hcl extract flags a locals version out of sync with package.json
+tags: [check, cross_file, hcl]
+
+# Exercises the `hcl:` extract mode. The .tf `locals.app_version` must equal the
+# package.json version; a block is queried by its type + attribute path.
+
+given:
+  tree:
+    "main.tf": |
+      locals {
+        app_version = "1.2.3"
+      }
+    "package.json": |
+      {"version": "1.2.4"}
+  config: |
+    version: 1
+    rules:
+      - id: app-version-synced
+        kind: cross_file
+        source:
+          file: "main.tf"
+          extract: { hcl: "$.locals.app_version" }
+        targets:
+          files: "package.json"
+          extract: { json: "$.version" }
+        relation: equals
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: app-version-synced, level: error, path: package.json}

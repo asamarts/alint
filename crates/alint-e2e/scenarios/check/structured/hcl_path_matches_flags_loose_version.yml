@@ -1,0 +1,29 @@
+name: hcl_path_matches flags a required_version that is not pessimistically pinned
+tags: [check, hcl_path_matches]
+
+docs:
+  title: A Terraform required_version without a pessimistic constraint
+  case: fail
+  kind: hcl_path_matches
+
+given:
+  tree:
+    "main.tf": |
+      terraform {
+        required_version = "1.0.0"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: pin-terraform
+        kind: hcl_path_matches
+        paths: "main.tf"
+        path: "$.terraform.required_version"
+        matches: "^~>"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: pin-terraform, level: error, path: main.tf}

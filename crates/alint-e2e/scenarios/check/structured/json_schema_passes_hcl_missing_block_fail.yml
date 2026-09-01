@@ -1,0 +1,34 @@
+name: json_schema_passes auto-detects a .tf and flags a missing required block
+tags: [check, json_schema_passes, structured, hcl, failing]
+
+# The .tf extension auto-detects as HCL (no explicit format:); the JSON-native
+# object is validated against a JSON Schema requiring a `terraform` block that is
+# absent -> one schema violation.
+
+given:
+  tree:
+    schemas:
+      tf.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["terraform"]
+        }
+    "main.tf": |
+      provider "aws" {
+        region = "us-east-1"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: has-terraform-block
+        kind: json_schema_passes
+        paths: "main.tf"
+        schema_path: "schemas/tf.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: has-terraform-block, level: error, path: main.tf}

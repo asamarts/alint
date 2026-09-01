@@ -1,0 +1,32 @@
+name: json_schema_passes flags a malformed .tf with one parse-error violation
+tags: [check, json_schema_passes, structured, hcl, failing]
+
+# The hcl parse-error path (symmetry with the dotenv/properties/ini/xml malformed
+# scenarios): an incomplete block fails to parse and yields exactly ONE parse-error
+# violation, not a flood.
+
+given:
+  tree:
+    schemas:
+      any.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object"
+        }
+    "main.tf": |
+      resource "aws_instance" "web" {
+        ami =
+  config: |
+    version: 1
+    rules:
+      - id: hcl-parse
+        kind: json_schema_passes
+        paths: "main.tf"
+        schema_path: "schemas/any.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: hcl-parse, level: error, path: main.tf}

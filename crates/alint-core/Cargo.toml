@@ -32,6 +32,7 @@ toml.workspace = true
 roxmltree.workspace = true
 java-properties.workspace = true
 encoding_rs.workspace = true
+hcl.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,5 +1,5 @@
 //! `json_schema_passes` — assert that a set of JSON / YAML /
-//! TOML / XML / dotenv / properties / INI files validates against a JSON Schema.
+//! TOML / XML / dotenv / properties / INI / HCL files validates against a JSON Schema.
 //!
 //! Closes the last unshipped structured-query primitive
 //! (`json_path_*` shipped in v0.4.4). JSON Schema sees use far
@@ -19,8 +19,8 @@
 //!   target file.
 //! - The target's format is auto-detected from its extension
 //!   (`.json` / `.yaml` / `.yml` / `.toml` / `.properties` / `.ini` /
-//!   `.cfg` / `.xml` and the `.csproj` / `.props` / `.targets` family,
-//!   or `.env` by filename); pass `format:`
+//!   `.cfg` / `.hcl` / `.tf` / `.tfvars` / `.xml` and the `.csproj` /
+//!   `.props` / `.targets` family, or `.env` by filename); pass `format:`
 //!   to override. YAML and TOML coerce through serde into the
 //!   same `serde_json::Value` tree the schema validates against,
 //!   and XML maps in via the xmltodict-style `xml_to_value`
@@ -49,7 +49,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// The `format:` override values for `json_schema_passes`: the same formats as
-/// `structured_path::Format` (json / yaml / toml / xml / dotenv / properties / ini), plus `yml`
+/// `structured_path::Format` (json / yaml / toml / xml / dotenv / properties / ini / hcl), plus `yml`
 /// accepted as a `yaml` alias.
 #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +62,7 @@ enum TargetFormat {
     Dotenv,
     Properties,
     Ini,
+    Hcl,
 }
 
 impl TargetFormat {
@@ -74,6 +75,7 @@ impl TargetFormat {
             TargetFormat::Dotenv => Format::Dotenv,
             TargetFormat::Properties => Format::Properties,
             TargetFormat::Ini => Format::Ini,
+            TargetFormat::Hcl => Format::Hcl,
         }
     }
 }
@@ -86,7 +88,8 @@ struct Options {
     schema_path: PathBuf,
     /// Override the auto-detected target format. When omitted, format is inferred
     /// from each target file's extension (.json / .yaml / .yml / .toml / .properties /
-    /// .ini / .cfg / .xml and the .csproj / .props / .targets XML family), or by filename
+    /// .ini / .cfg / .hcl / .tf / .tfvars / .xml and the .csproj / .props / .targets XML
+    /// family), or by filename
     /// for the `.env` family.
     #[serde(default)]
     format: Option<TargetFormat>,
@@ -218,7 +221,7 @@ impl Rule for JsonSchemaPassesRule {
                 violations.push(
                     Violation::new(
                         "could not detect format from extension; pass `format:` \
-                         (`json` / `yaml` / `toml` / `xml` / `dotenv` / `properties` / `ini`) on the rule",
+                         (`json` / `yaml` / `toml` / `xml` / `dotenv` / `properties` / `ini` / `hcl`) on the rule",
                     )
                     .with_path(entry.path.clone()),
                 );

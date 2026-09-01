@@ -41,6 +41,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   convention, so `tox.ini` / `setup.cfg` / `pytest.ini` parse correctly. Query a
   section with bracket notation (`$['server']['port']`). Auto-detects by the
   `.ini` / `.cfg` extension.
+- **HCL (Terraform / Nomad / Packer) as a config format.** New
+  `hcl_path_{equals,matches,absent}` rule kinds, `format: hcl` in `json_schema_passes`,
+  and `extract: { hcl: ... }` in the cross-file rules. HCL maps via the `hcl-rs` crate,
+  which is JSON-native: a block nests by its type then labels
+  (`resource "aws_instance" "web" { … }` is `$.resource.aws_instance.web`), values keep
+  their HCL type (a number stays a number), and an unevaluated expression (`var.x`,
+  `${…}`, a function call) is an opaque string. A block type appearing once is an object
+  but repeated is an array (the XML cardinality footgun); a deeply-nested file is
+  rejected as one parse-error violation rather than overflowing the stack (parsing runs
+  on a large-stack thread behind a depth guard). Auto-detects by the
+  `.tf` / `.tfvars` / `.hcl` / `.nomad` extension.
 
 ### Fixed
 
