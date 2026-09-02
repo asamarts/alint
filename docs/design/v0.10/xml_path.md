@@ -162,7 +162,9 @@ detector; depth recursion is the only XML DoS.)
 
 **Resolved (v0.10 post-audit P1):** `element_to_value` carries
 an explicit `depth` and refuses to descend past
-`MAX_XML_DEPTH` (256 — orders of magnitude beyond any real
+`MAX_XML_DEPTH` (256 at v0.10, lowered to 128 in the v0.16
+pre-release hardening for a wider overflow margin on 1 MB test /
+musl stacks — still orders of magnitude beyond any real
 `.csproj` / `pom.xml`, far below the overflow depth). Past the
 bound it returns an `Err` that flows through the **existing**
 parse-error path: one ordinary "not a valid XML document: XML

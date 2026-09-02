@@ -291,9 +291,13 @@ impl PerFileRule for StructuredPathRule {
         // Lossy-decode (like `json_schema_passes` / `cross_file`) rather than a
         // strict `from_utf8` + silent skip: a non-UTF-8 file -- e.g. a Latin-1
         // `.properties`, the format's historical default -- must be ANALYZED, not
-        // silently ignored. Invalid bytes become U+FFFD; a genuinely-binary file
-        // caught by a broad glob then surfaces one parse-error violation rather
-        // than hiding (matching the other structured surfaces).
+        // silently ignored. Invalid bytes become U+FFFD. For the STRICT formats
+        // (JSON / TOML / XML / HCL / INI / dotenv) a genuinely-binary file caught by
+        // a broad glob then surfaces one parse-error violation rather than hiding.
+        // The two PERMISSIVE formats do NOT: `.properties` maps almost any bytes to
+        // valueless keys and YAML reads bare bytes as a scalar string, so a
+        // mis-globbed binary file there yields a junk tree (the query just finds no
+        // match), not a parse error -- keep the glob narrow for those formats.
         let text = String::from_utf8_lossy(bytes);
         let root_value = match self.format.parse(&text) {
             Ok(v) => v,
@@ -1170,7 +1174,7 @@ mod tests {
         // The MAX_XML_DEPTH guard above is POST-parse; a document deep enough to
         // overflow `roxmltree::Document::parse` itself (tens of thousands of
         // levels) aborts the whole process before that guard runs. The pre-parse
-        // `xml_depth_within_limit` scan must reject it as an ordinary parse error.
+        // `xml_within_parse_limits` scan must reject it as an ordinary parse error.
         // (Without the pre-scan this test would SIGABRT the whole test binary.)
         let depth = 100_000;
         let xml = format!("{}deep{}", "<a>".repeat(depth), "</a>".repeat(depth));

@@ -280,12 +280,12 @@ alias is present to harvest.
 Many-to-many changes only per-category membership, not the headline counts. One
 pre-existing subtlety must be surfaced so the catalog is not mistaken for a drift:
 
-- `counts.rule_kinds` = 89, unchanged. That figure counts distinct `kind:` spellings in
-  `all_kinds.yaml`, which INCLUDE the 11 alias spellings, so the canonical kinds number
-  about 78.
-- The catalog (`alint rules list` and the family Overview pages) lists the ~78 CANONICAL
+- `counts.rule_kinds` = 105, unchanged by categorization. That figure counts distinct
+  `kind:` spellings in `all_kinds.yaml`, which INCLUDE the 11 alias spellings, so the
+  canonical kinds number 94.
+- The catalog (`alint rules list` and the family Overview pages) lists the 94 CANONICAL
   kinds, each annotating its aliases, so its row count is intentionally lower than the
-  89 headline. The gap is exactly the 11 aliases, not missing rules.
+  105 headline. The gap is exactly the 11 aliases, not missing rules.
 - `counts.families` = number of categories = 13, unchanged.
 - The sum of per-category kind counts now exceeds the canonical count (that is the
   point) and is not a headline number.

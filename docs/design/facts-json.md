@@ -41,18 +41,20 @@ volatile fields, so it is committed and content-diff gated like the schema.
 
 ```json
 {
-  "format_version": 1,
-  "alint_version": "0.13.0",
+  "format_version": 2,
+  "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 89,
+    "rule_kinds": 105,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
     "output_formats": 8,
-    "subcommands": 11
+    "subcommands": 12
   },
   "rule_kinds": ["commented_out_code", "cross_file", "..."],
   "families": ["Existence", "Content", "..."],
+  "categories": ["Existence", "Content", "..."],
+  "rule_categories": { "commented_out_code": ["Content"], "cross_file": ["Consistency"] },
   "bundled_rulesets": ["apache/governance", "go", "rust", "..."],
   "output_formats": ["agent", "github", "gitlab", "human", "json", "junit", "markdown", "sarif"],
   "subcommands": ["check", "explain", "export-agents-md", "..."],

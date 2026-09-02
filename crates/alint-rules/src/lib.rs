@@ -613,27 +613,30 @@ mod registry_tests {
     #[test]
     fn structured_family_is_symmetric() {
         // Every config-format-specific op (`<fmt>_path_<op>`) must exist for ALL
-        // eight formats. Guards against shipping an asymmetric structured-query
-        // family -- e.g. a lone `yaml_path_absent` with no json/toml/xml siblings
-        // (the gap that motivated this test). Adding a new op or a new format means
+        // formats. Guards against shipping an asymmetric structured-query family
+        // -- e.g. a lone `yaml_path_absent` with no json/toml/xml siblings (the
+        // gap that motivated this test). Adding a new op or a new format means
         // adding every (format, op) pair, or this fails.
-        const FORMATS: &[&str] = &[
-            "json",
-            "yaml",
-            "toml",
-            "xml",
-            "dotenv",
-            "properties",
-            "ini",
-            "hcl",
-        ];
+        //
+        // The format list is DERIVED from `Format::ALL` (the enum SSOT), not
+        // hardcoded: a 9th format added to `Format::ALL` is then automatically
+        // required to carry all three ops. A hardcoded list could silently omit
+        // the new format, and the extract/target/hint parity gates check wiring,
+        // not kind existence, so none of them would catch an asymmetric family.
+        let formats: Vec<String> = alint_core::Format::ALL
+            .iter()
+            .map(|f| f.label().to_lowercase())
+            .collect();
         let r = builtin_registry();
         let known: std::collections::HashSet<&str> = r.known_kinds().collect();
         // Discover ops: any `<fmt>_path_<op>` kind contributes the suffix `path_<op>`.
         let mut ops: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for kind in &known {
-            for &fmt in FORMATS {
-                if let Some(rest) = kind.strip_prefix(fmt).and_then(|r| r.strip_prefix('_')) {
+            for fmt in &formats {
+                if let Some(rest) = kind
+                    .strip_prefix(fmt.as_str())
+                    .and_then(|r| r.strip_prefix('_'))
+                {
                     if rest.starts_with("path_") {
                         ops.insert(rest);
                     }
@@ -646,7 +649,7 @@ mod registry_tests {
         );
         let mut missing = Vec::new();
         for op in &ops {
-            for fmt in FORMATS {
+            for fmt in &formats {
                 let kind = format!("{fmt}_{op}");
                 if !known.contains(kind.as_str()) {
                     missing.push(kind);
@@ -656,7 +659,7 @@ mod registry_tests {
         assert!(
             missing.is_empty(),
             "structured-query family is asymmetric -- every op must exist for all of \
-             {FORMATS:?}. Missing: {missing:?}"
+             {formats:?}. Missing: {missing:?}"
         );
     }
 

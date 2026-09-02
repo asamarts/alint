@@ -51,19 +51,30 @@ impl Format {
     ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
-        // Strip a leading UTF-8 BOM uniformly. Some libraries (serde_json, hcl-rs)
-        // reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
+        // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
+        // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
         // `package.json` / `config.hcl` (common from Windows editors) would
         // false-fire the structured rules; the hand-rolled dotenv/ini/properties
-        // parsers already strip it. Flagging a BOM is the `no_bom` rule's job.
-        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+        // parsers already strip it. `trim_start_matches` (not `strip_prefix`) so a
+        // rare double BOM can't leave a residual `\u{feff}` that survives the
+        // emptiness check below and mis-parses (YAML would otherwise read the
+        // residual as a scalar string). Flagging a BOM is the `no_bom` rule's job.
+        let text = text.trim_start_matches('\u{feff}');
         // An empty / whitespace-only file is "no config", not a broken document:
-        // return an empty document so `*_path_absent` is satisfied and `if_present`
-        // stays silent, uniformly. Otherwise the JSON / XML / YAML libraries reject
-        // an empty input as a syntax error -- a false positive for the absent family.
-        // Flagging an empty file is the `no_empty_files` rule's job.
+        // return an empty OBJECT (an empty document) so `*_path_absent` is
+        // satisfied, `if_present` stays silent, AND `json_schema_passes` validates
+        // it as `{}` -- which satisfies `{"type":"object"}`, since an empty config
+        // file IS a valid empty table. (Returning `Value::Null` here made
+        // `json_schema_passes` false-fire "null is not of type object" on an empty
+        // `.toml`/`.ini`/`.env`/`.properties`/`.hcl`, while a comment-only file of
+        // the same format parsed to `{}` and passed -- two "no config" files
+        // disagreeing.) Otherwise the JSON / XML libraries reject empty input as a
+        // syntax error -- a false positive for the absent family. Flagging an empty
+        // file is the `no_empty_files` rule's job. (TOML / dotenv / INI / properties
+        // already parse empty to `{}`; YAML's native empty is `null`, but one
+        // uniform empty document is less surprising than per-format null-vs-object.)
         if text.trim().is_empty() {
-            return Ok(Value::Null);
+            return Ok(Value::Object(serde_json::Map::new()));
         }
         match self {
             // Try strict JSON first (the common, fast path — plain
@@ -79,7 +90,7 @@ impl Format {
             Self::Yaml => {
                 // Bound flow-nesting before libyaml parses it super-linearly (a
                 // crafted `[[[…` file otherwise hangs the run) — the YAML analogue
-                // of the `xml_depth_within_limit` guard below. JSON (serde_json,
+                // of the `xml_within_parse_limits` guard below. JSON (serde_json,
                 // 128-deep) and TOML (toml, 80-deep) carry their own limits.
                 if !crate::yaml_depth::flow_depth_within_limit(text) {
                     return Err(format!(
@@ -116,26 +127,38 @@ impl Format {
     /// (require an explicit `format:` override, default to JSON,
     /// emit a per-file violation, etc).
     pub fn detect_from_path(path: &std::path::Path) -> Option<Self> {
+        // Extension detection first, case-INSENSITIVELY: `.JSON` / `.CSPROJ` /
+        // `.XML` (common on Windows and case-insensitive filesystems, or from Java
+        // tooling) are valid and must not yield a false "could not detect format".
+        // A KNOWN format extension also wins over the `.env` family below, so a
+        // `.env.json` / `.env.yaml` is parsed by its real format, not shadowed as
+        // dotenv.
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            match ext.to_ascii_lowercase().as_str() {
+                "json" => return Some(Self::Json),
+                "yaml" | "yml" => return Some(Self::Yaml),
+                "toml" => return Some(Self::Toml),
+                "properties" => return Some(Self::Properties),
+                "ini" | "cfg" => return Some(Self::Ini),
+                "hcl" | "tf" | "tfvars" | "nomad" => return Some(Self::Hcl),
+                "xml" | "csproj" | "props" | "targets" | "vbproj" | "fsproj" | "nuspec" => {
+                    return Some(Self::Xml);
+                }
+                _ => {}
+            }
+        }
         // dotenv is filename-based, not extension-based: a bare `.env` has no
         // extension, and `.env.local` / `.env.production` carry the environment
-        // where an extension would be. Match the `.env` family by name first.
+        // where an extension would be. Match the `.env` family by name, but only
+        // for a suffix that ISN'T itself a known format extension (handled above),
+        // so `.env.json` is JSON, not dotenv. Case-folded to match `.ENV` too.
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name == ".env" || name.starts_with(".env.") {
+            let lname = name.to_ascii_lowercase();
+            if lname == ".env" || lname.starts_with(".env.") {
                 return Some(Self::Dotenv);
             }
         }
-        match path.extension()?.to_str()? {
-            "json" => Some(Self::Json),
-            "yaml" | "yml" => Some(Self::Yaml),
-            "toml" => Some(Self::Toml),
-            "properties" => Some(Self::Properties),
-            "ini" | "cfg" => Some(Self::Ini),
-            "hcl" | "tf" | "tfvars" | "nomad" => Some(Self::Hcl),
-            "xml" | "csproj" | "props" | "targets" | "vbproj" | "fsproj" | "nuspec" => {
-                Some(Self::Xml)
-            }
-            _ => None,
-        }
+        None
     }
 }
 
@@ -248,25 +271,63 @@ fn strip_jsonc(src: &str) -> String {
 /// parse error (one per-file violation via the existing
 /// parse-error path) rather than recursed into — a crafted or
 /// accidental deeply-nested file must never abort the run. Unlike
-/// HCL, XML parses on the CALLING thread (a rayon worker, ~1-2 MB
-/// stack), and roxmltree overflows a 1 MB stack around depth
-/// ~256-350; 128 keeps a ~2x margin on the smallest stacks
-/// (macOS / musl / a constrained `RUST_MIN_STACK`), matching the
-/// JSON recursion limit and the `when`-parser's calibration. The
-/// other formats' parsers carry their own internal recursion
-/// limits; this is the XML arm's equivalent.
+/// HCL, XML parses on the CALLING thread (a rayon worker, ~2 MB
+/// stack by Rust's std-thread default). roxmltree recurses ~1
+/// frame per element; measured overflow is around depth ~350 on a
+/// 2 MB debug stack (the realistic worker) and ~175 on a
+/// constrained 1 MB stack, with far deeper limits in release
+/// (~3100 on 2 MB). 128 keeps a ~2.7x margin on the 2 MB worker
+/// (still ~1.4x even on a 1 MB stack), matching the JSON recursion
+/// limit and the `when`-parser's calibration. The other formats'
+/// parsers carry their own internal recursion limits; this is the
+/// XML arm's equivalent.
 pub const MAX_XML_DEPTH: usize = 128;
 
-/// Conservatively bound the raw XML's element-nesting depth BEFORE
-/// `roxmltree::Document::parse` sees it. `Document::parse` descends recursively
-/// per element and overflows the stack — **aborting the whole process** — on
-/// deeply-nested input (tens of thousands of levels); the `element_to_value`
-/// [`MAX_XML_DEPTH`] guard is post-parse, so it only catches depths the parser
-/// already survived. A cheap linear pre-scan rejects an over-deep document here
-/// (as one ordinary per-file parse-error violation) so a crafted or accidental
-/// `<a><a>…` file can never abort the run. Comment / CDATA / PI / declaration
-/// regions are skipped so their contents don't count toward depth.
-fn xml_depth_within_limit(text: &str) -> bool {
+/// The analytically-safe ceiling for [`MAX_XML_DEPTH`], enforced at compile time
+/// below. roxmltree recurses ~1 frame per element; the smallest stack alint
+/// realistically parses XML on is a ~2 MiB rayon worker, which overflows (debug)
+/// around ~350 elements deep, so ~half of that keeps a >=2x margin. Raising
+/// `MAX_XML_DEPTH` past this risks a stack-overflow process-abort on a constrained
+/// worker stack -- and the depth tests only exercise the REJECTION path (they run
+/// on a >=2 MiB harness stack where even 300-deep survives), so a careless
+/// re-widening would pass every runtime test. This static bound is the real guard.
+const SAFE_MAX_XML_DEPTH: usize = 160;
+const _: () = assert!(
+    MAX_XML_DEPTH <= SAFE_MAX_XML_DEPTH,
+    "MAX_XML_DEPTH exceeds its analytically-safe ceiling -- a deeply-nested XML \
+     file could overflow the rayon-worker stack inside roxmltree parsing (SIGABRT)."
+);
+
+/// Maximum attributes on a single XML element that `xml_to_value` will accept.
+/// roxmltree 0.20 validates per-element attribute UNIQUENESS in O(n^2) -- each new
+/// attribute is compared against every prior attribute on the same element -- so a
+/// single element bearing tens of thousands of distinct attributes turns a tiny
+/// file into MINUTES of parse time (`<r a0=".." a1=".." …/>`: ~64 K attrs ≈ 96 s,
+/// clean quadratic), an algorithmic-complexity `DoS` that NO nesting guard catches
+/// (all the depth guards bound height, not width). Bounding attributes per element
+/// makes total parse cost linear in the (already size-capped) input again: the
+/// worst case becomes `cap * total_attrs` = O(bytes). 1024 is 10-20x beyond any
+/// real element -- XML expresses repetition with child ELEMENTS, not thousands of
+/// attributes on one tag (a heavily-attributed `MSBuild` item or SVG node has
+/// dozens) -- yet bounds one element's validation to ~1024^2 ≈ 1 M compares (tens
+/// of ms). roxmltree can't be bumped to fix this (0.21 stack-overflows on nesting;
+/// pinned at 0.20), so the pre-scan below caps it. An over-cap element is rejected
+/// as one ordinary per-file parse-error violation.
+const MAX_XML_ATTRS_PER_ELEMENT: usize = 1024;
+
+/// Conservatively bound the raw XML's element-nesting DEPTH and per-element
+/// attribute WIDTH BEFORE `roxmltree::Document::parse` sees it, in one linear scan.
+/// `Document::parse` descends recursively per element and overflows the stack —
+/// **aborting the whole process** — on deeply-nested input (tens of thousands of
+/// levels); the `element_to_value` [`MAX_XML_DEPTH`] guard is post-parse, so it
+/// only catches depths the parser already survived. It also validates attribute
+/// uniqueness in O(n^2) per element (see [`MAX_XML_ATTRS_PER_ELEMENT`]), a separate
+/// wall-clock `DoS`. A cheap linear pre-scan rejects an over-deep OR over-wide
+/// document here (as one ordinary per-file parse-error violation) so a crafted or
+/// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
+/// Comment / CDATA / PI / declaration regions are skipped so their contents don't
+/// count toward depth or attributes. `Ok(())` when within both limits.
+fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
     let bytes = text.as_bytes();
     let mut pos = 0usize;
     let mut depth = 0usize;
@@ -289,9 +350,13 @@ fn xml_depth_within_limit(text: &str) -> bool {
         } else {
             // `<tag …>` or `<tag/>`: find the closing `>` respecting quoted
             // attribute values (a `>` inside `"…"`/`'…'` isn't the tag end).
+            // Count attributes by the `=` signs OUTSIDE quotes: XML requires
+            // quoted values, so each attribute contributes exactly one unquoted
+            // `=`, and a `=` inside a value is skipped with the quote run.
             let tag = rest.as_bytes();
             let mut end = 1usize;
             let mut quote: Option<u8> = None;
+            let mut attrs = 0usize;
             while end < tag.len() {
                 let ch = tag[end];
                 if let Some(q) = quote {
@@ -300,23 +365,40 @@ fn xml_depth_within_limit(text: &str) -> bool {
                     }
                 } else if ch == b'"' || ch == b'\'' {
                     quote = Some(ch);
+                } else if ch == b'=' {
+                    attrs += 1;
+                    // Bail the instant the cap is exceeded, so a pathological
+                    // single tag (up to `MAX_ANALYZE_BYTES`) can't even make the
+                    // pre-scan read to its end -- work stays bounded by the cap,
+                    // not the tag size.
+                    if attrs > MAX_XML_ATTRS_PER_ELEMENT {
+                        break;
+                    }
                 } else if ch == b'>' {
                     break;
                 }
                 end += 1;
+            }
+            if attrs > MAX_XML_ATTRS_PER_ELEMENT {
+                return Err(format!(
+                    "an XML element has more than the maximum supported number of \
+                     attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
+                ));
             }
             // Self-closing `<tag/>` opens and closes, so it adds no depth.
             let self_closing = end >= 2 && tag[end - 1] == b'/';
             if !self_closing {
                 depth += 1;
                 if depth > MAX_XML_DEPTH {
-                    return false;
+                    return Err(format!(
+                        "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
+                    ));
                 }
             }
             pos += end + 1;
         }
     }
-    true
+    Ok(())
 }
 
 /// Parse XML into the same `serde_json::Value` tree the rest of
@@ -324,12 +406,9 @@ fn xml_depth_within_limit(text: &str) -> bool {
 /// `{ <root-element-name>: <root value> }` so the root element is
 /// the first `JSONPath` segment (`$.Project…`, `$.project…`).
 fn xml_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Reject over-deep XML before `Document::parse` can overflow the stack.
-    if !xml_depth_within_limit(text) {
-        return Err(format!(
-            "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
-        ));
-    }
+    // Reject over-deep OR over-wide XML before `Document::parse` can overflow the
+    // stack (depth) or hang in O(n^2) attribute validation (width).
+    xml_within_parse_limits(text)?;
     let doc = roxmltree::Document::parse(text).map_err(|e| {
         let msg = e.to_string();
         // roxmltree runs with DTD processing disabled (a billion-laughs / XXE
@@ -458,6 +537,20 @@ pub const MAX_HCL_DEPTH: usize = 256;
 /// MUST be kept below (parse-thread `stack_size` / operator frame / 2 bytes).
 pub const MAX_HCL_BYTES: usize = 64 * 1024;
 
+/// The analytically-derived ceiling for [`MAX_HCL_BYTES`], enforced at compile
+/// time below. The 512 MB parse thread overflows a densest (~2 bytes/level)
+/// operator chain around ~75 000 levels (~150 KiB); half of that (a >=2x stack
+/// margin) is the largest cap that stays safe against per-level frame drift.
+/// Widening `MAX_HCL_BYTES` past this re-opens the operator-chain stack-overflow
+/// `DoS` that the 256 KiB cap let through (PR #223) -- and the bomb regression test
+/// only fails by CRASHING, which is fragile, so pin the bound statically too.
+const SAFE_MAX_HCL_BYTES: usize = 75 * 1024;
+const _: () = assert!(
+    MAX_HCL_BYTES <= SAFE_MAX_HCL_BYTES,
+    "MAX_HCL_BYTES exceeds its analytically-safe ceiling -- a crafted operator \
+     chain could again overflow the HCL parse thread (SIGABRT). See PR #223."
+);
+
 /// Conservatively bound the HCL constructs `hcl-rs` recurses on, BEFORE
 /// `hcl::from_str` overflows the stack. Every one of these aborts the process on
 /// deep input, and none is caught by a naive `{`/`[` scan:
@@ -581,16 +674,53 @@ mod tests {
     fn xml_depth_scan_does_not_count_comments_cdata_or_self_closing() {
         // The pre-scan must not over-count: comment/CDATA contents and
         // self-closing tags don't add nesting, so valid shallow docs pass.
-        assert!(xml_depth_within_limit(
-            "<r><!-- <a><a><a> --><c/><![CDATA[ <b><b> ]]><d attr=\"x>y\"/></r>"
-        ));
-        // A genuinely deep run is rejected.
+        assert!(
+            xml_within_parse_limits(
+                "<r><!-- <a><a><a> --><c/><![CDATA[ <b><b> ]]><d attr=\"x>y\"/></r>"
+            )
+            .is_ok()
+        );
+        // A genuinely deep run is rejected with a depth message.
         let deep = format!("{}{}", "<a>".repeat(300), "</a>".repeat(300));
-        assert!(!xml_depth_within_limit(&deep));
+        let err = xml_within_parse_limits(&deep).unwrap_err();
+        assert!(err.contains("depth"), "depth rejection: {err}");
         // Real manifest depth is fine.
-        assert!(xml_depth_within_limit(
+        assert!(xml_within_parse_limits(
             "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
-        ));
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn xml_scan_bounds_attribute_width_to_prevent_quadratic_parse() {
+        // roxmltree 0.20 validates per-element attribute uniqueness in O(n^2), so
+        // one element with tens of thousands of attributes is a wall-clock DoS the
+        // depth guard can't see. The pre-scan must reject an over-wide element as
+        // an ordinary parse error -- NOT hand it to roxmltree to grind on.
+        use std::fmt::Write as _;
+        let mut wide = String::from("<r");
+        for i in 0..(MAX_XML_ATTRS_PER_ELEMENT + 10) {
+            write!(wide, " a{i}=\"v\"").unwrap();
+        }
+        wide.push_str("/>");
+        let err = xml_within_parse_limits(&wide).unwrap_err();
+        assert!(
+            err.contains("attributes"),
+            "over-wide element rejected with an attribute message: {err}"
+        );
+        // And the full parse surfaces it as one parse-error (no hang), not a panic.
+        assert!(Format::Xml.parse(&wide).is_err());
+        // A normal, even generously-attributed, element is unaffected.
+        let mut ok = String::from("<Reference");
+        for i in 0..64 {
+            write!(ok, " p{i}=\"v\"").unwrap();
+        }
+        ok.push_str("/>");
+        assert!(xml_within_parse_limits(&ok).is_ok());
+        // `=` inside a quoted value is NOT an attribute and must not be counted:
+        // a single attribute whose value is packed with `=` stays one attribute.
+        let equals_in_value = format!("<r a=\"{}\"/>", "=".repeat(5000));
+        assert!(xml_within_parse_limits(&equals_in_value).is_ok());
     }
 
     #[test]
@@ -672,6 +802,50 @@ mod tests {
                 "{p} must NOT detect as dotenv"
             );
         }
+        // A KNOWN format extension after `.env.` wins over the dotenv family: a
+        // `.env.json` is JSON-format env config, NOT a flat dotenv map (parsing it
+        // with the dotenv parser would silently produce a wrong tree).
+        for (p, want) in [
+            (".env.json", Format::Json),
+            (".env.yaml", Format::Yaml),
+            (".env.toml", Format::Toml),
+        ] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(want),
+                "{p} should detect by its real extension, not be shadowed as dotenv"
+            );
+        }
+    }
+
+    #[test]
+    fn format_detection_is_case_insensitive() {
+        use std::path::Path;
+        // An uppercase extension (Windows / case-insensitive FS / Java tooling) is
+        // valid and must detect, not yield a false "could not detect format".
+        for (p, want) in [
+            ("Config.JSON", Format::Json),
+            ("data.YAML", Format::Yaml),
+            ("app.YML", Format::Yaml),
+            ("Cargo.TOML", Format::Toml),
+            ("App.CSPROJ", Format::Xml),
+            ("build.XML", Format::Xml),
+            ("main.TF", Format::Hcl),
+            ("settings.INI", Format::Ini),
+            ("db.PROPERTIES", Format::Properties),
+        ] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(want),
+                "{p} should detect case-insensitively"
+            );
+        }
+        // The `.env` family is case-folded too.
+        assert_eq!(
+            Format::detect_from_path(Path::new(".ENV")),
+            Some(Format::Dotenv),
+            ".ENV should detect as dotenv"
+        );
     }
 
     #[test]
@@ -934,6 +1108,118 @@ mod tests {
                 .is_ok(),
             "a bounded binary chain parses"
         );
+    }
+
+    #[test]
+    fn hcl_at_cap_operator_chain_parses_on_the_stack_thread() {
+        // CAP-RELATIVE companion to the bomb battery: a densest (~2 B/level)
+        // operator chain sized right up to `MAX_HCL_BYTES` is NOT size-rejected, so
+        // it reaches the parser and MUST parse without overflowing the 512 MB parse
+        // thread. This ties the margin to the CONSTANT itself: if `MAX_HCL_BYTES`
+        // is ever widened past the empirical overflow point, this builds a crashing
+        // chain and ABORTS the test binary loudly -- catching an unsafe re-widening
+        // even if the compile-time `SAFE_MAX_HCL_BYTES` ceiling were miscalibrated
+        // by hcl-rs frame-size drift. (The fixed-size bombs above all sit ABOVE the
+        // cap, so they can't catch a re-widening on their own -- the audit gap.)
+        let n = (MAX_HCL_BYTES - "x = 1".len()) / 2; // "+1" is 2 bytes per level
+        let at_cap = format!("x = 1{}", "+1".repeat(n));
+        assert!(
+            at_cap.len() <= MAX_HCL_BYTES,
+            "the chain must be within the cap so it reaches the parser"
+        );
+        assert!(
+            Format::Hcl.parse(&at_cap).is_ok(),
+            "a cap-sized operator chain must parse, not overflow the stack"
+        );
+    }
+
+    #[test]
+    fn xml_at_max_depth_parses_on_a_worker_sized_stack() {
+        // The depth REJECTION path is tested elsewhere; this gates the other half
+        // -- that a document AT `MAX_XML_DEPTH` actually PARSES without overflowing
+        // on the stack alint really parses XML on (a ~2 MiB rayon worker), not just
+        // on the test harness's larger stack. roxmltree recurses ~1 frame/element;
+        // if `MAX_XML_DEPTH` were raised past what a 2 MiB stack holds, this ABORTS
+        // loudly. (The compile-time `SAFE_MAX_XML_DEPTH` assert is the primary
+        // guard against re-widening; this is the empirical at-limit backstop.)
+        let deep = format!(
+            "{}x{}",
+            "<a>".repeat(MAX_XML_DEPTH),
+            "</a>".repeat(MAX_XML_DEPTH)
+        );
+        let ok = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || Format::Xml.parse(&deep).is_ok())
+            .expect("spawn worker-sized thread")
+            .join()
+            .expect("the parse thread must return, not abort the process");
+        assert!(
+            ok,
+            "an at-limit XML document must parse on a 2 MiB worker stack"
+        );
+    }
+
+    #[test]
+    fn every_format_tolerates_bom_and_empty_input() {
+        // GATE for the uniform BOM-strip + empty->{} handling at the top of
+        // `Format::parse`. A BOM-prefixed file must parse IDENTICALLY to its
+        // un-BOM'd form (JSON / HCL previously rejected a BOM as a syntax error),
+        // and an empty / whitespace-only file must parse to an empty OBJECT for
+        // EVERY format -- so `*_path_absent` is satisfied and `json_schema_passes`
+        // validates it as `{}` (which passes `{"type":"object"}`), NOT the
+        // false-firing `null` the first cut returned. Iterates `Format::ALL`, so a
+        // newly-added format cannot silently skip this contract.
+        let empty_doc = Value::Object(serde_json::Map::new());
+        for &f in Format::ALL {
+            assert_eq!(
+                f.parse(""),
+                Ok(empty_doc.clone()),
+                "{} empty input must be an empty object",
+                f.label()
+            );
+            assert_eq!(
+                f.parse("   \n\t  "),
+                Ok(empty_doc.clone()),
+                "{} whitespace-only input must be an empty object",
+                f.label()
+            );
+        }
+        // A minimal valid document per format; a single OR double BOM prefix must
+        // not change the parse. The sample table MUST cover every `Format::ALL`
+        // variant (asserted), so a new format forces a BOM sample here too.
+        let samples: &[(Format, &str)] = &[
+            (Format::Json, "{\"k\":\"v\"}"),
+            (Format::Yaml, "k: v"),
+            (Format::Toml, "k = \"v\""),
+            (Format::Xml, "<r><k>v</k></r>"),
+            (Format::Dotenv, "k=v"),
+            (Format::Properties, "k=v"),
+            (Format::Ini, "[s]\nk=v"),
+            (Format::Hcl, "k = \"v\""),
+        ];
+        let covered: std::collections::BTreeSet<&str> =
+            samples.iter().map(|(f, _)| f.label()).collect();
+        let all: std::collections::BTreeSet<&str> = Format::ALL.iter().map(|f| f.label()).collect();
+        assert_eq!(
+            covered, all,
+            "the BOM sample table must cover every Format::ALL variant"
+        );
+        for &(f, doc) in samples {
+            let plain = f.parse(doc);
+            assert!(plain.is_ok(), "{} sample must parse: {plain:?}", f.label());
+            assert_eq!(
+                f.parse(&format!("\u{feff}{doc}")),
+                plain,
+                "{} single-BOM must parse identically",
+                f.label()
+            );
+            assert_eq!(
+                f.parse(&format!("\u{feff}\u{feff}{doc}")),
+                plain,
+                "{} double-BOM must parse identically (no residual mis-parse)",
+                f.label()
+            );
+        }
     }
 
     #[test]

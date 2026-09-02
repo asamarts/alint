@@ -62,9 +62,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a BOM-prefixed or empty file.** A leading UTF-8 BOM (common on Windows-authored
   `package.json` / `tsconfig.json`) is now stripped for every format before parsing —
   JSON and HCL previously rejected it as a syntax error — and an empty / whitespace-only
-  file parses as an empty document (so `*_path_absent` is satisfied and `if_present`
-  stays silent) rather than a parse error. Flagging a BOM or an empty file remains the
-  `no_bom` / `no_empty_files` rules' job.
+  file parses as an empty object `{}` for every format, so `*_path_absent` is satisfied,
+  `if_present` stays silent, and `json_schema_passes` validates it against
+  `{"type":"object"}` instead of false-firing "null is not of type object". Flagging a
+  BOM or an empty file remains the `no_bom` / `no_empty_files` rules' job.
+- **Format auto-detection recognizes uppercase extensions and defers `.env.*` to a real
+  extension.** `json_schema_passes` (which auto-detects the target format) no longer
+  reports a false "could not detect format" on a `.JSON` / `.XML` / `.CSPROJ` file
+  (common on Windows and case-insensitive filesystems), and a `.env.json` / `.env.yaml`
+  is now parsed by its real format rather than shadowed by the `.env.*` dotenv rule.
 - The bundled `ci/github-actions@v1` ruleset's `gha-pin-actions-to-sha` rule no
   longer flags **local composite-action references** (`uses: ./...`). Local actions
   live in the same repo (the same trust boundary) and cannot be SHA-pinned; the rule
@@ -80,6 +86,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to) write access to the GITHUB_TOKEN -- no permissions declared anywhere,
   `write-all`, or `contents: write` at the workflow level. Rebuilt on the new
   `yaml_path_absent` kind.
+
+### Security
+
+- **Parser hardening: a crafted config file can no longer abort an `alint` run.**
+  `hcl-rs` is a recursive-descent parser with no depth limit of its own, so a
+  deeply-nested or expression-bomb `.tf` (structure, parentheses, unary runs, or long
+  binary / ternary operator chains, including inside `${...}` interpolation) could
+  overflow the stack and abort the whole process (SIGABRT). HCL parsing now runs behind
+  a depth pre-scan plus a 64 KiB size cap on a dedicated large-stack thread, so such a
+  file becomes one per-file parse-error violation instead of a crash. The XML depth
+  guard margin was also widened (`MAX_XML_DEPTH` 256 -> 128) to stay well below
+  `roxmltree`'s overflow point on a constrained worker stack. JSON, YAML, and TOML
+  already enforce their own recursion limits.
+- **XML parsing is no longer quadratic in attribute count.** `roxmltree` 0.20 validates
+  per-element attribute uniqueness in O(n^2), so a single element bearing tens of
+  thousands of attributes (a ~1.5 MB crafted `.xml` / `.csproj`) could stall a worker
+  for minutes -- an algorithmic-complexity DoS that no nesting guard caught. The pre-scan
+  now also caps attributes per element, restoring linear-time parsing; an over-wide
+  element is one per-file parse-error violation.
 
 ## [0.15.2] - 2026-08-22
 
