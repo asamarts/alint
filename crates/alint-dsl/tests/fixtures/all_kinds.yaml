@@ -558,6 +558,25 @@ rules:
     paths: "config.ini"
     path: "$['server']['debug']"
     level: warning
+  - id: hcl-instance-count
+    kind: hcl_path_equals
+    paths: "main.tf"
+    path: "$.resource.aws_instance.web.count"
+    equals: 1
+    level: warning
+    if_present: true
+  - id: hcl-required-version
+    kind: hcl_path_matches
+    paths: "main.tf"
+    path: "$.terraform.required_version"
+    matches: "^~>"
+    level: warning
+    if_present: true
+  - id: hcl-no-hardcoded-key
+    kind: hcl_path_absent
+    paths: "main.tf"
+    path: "$.provider.aws.access_key"
+    level: error
   - id: package-conforms-to-schema
     kind: json_schema_passes
     paths: "package.json"

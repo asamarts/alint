@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 102,
+    "rule_kinds": 105,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
@@ -61,6 +61,9 @@
     "git_commit_signed_off",
     "git_commit_subject_matches",
     "git_no_denied_paths",
+    "hcl_path_absent",
+    "hcl_path_equals",
+    "hcl_path_matches",
     "header",
     "import_gate",
     "indent_style",
@@ -356,6 +359,15 @@
       "git-hygiene",
       "security-unicode-sanity"
     ],
+    "hcl_path_absent": [
+      "structured-query"
+    ],
+    "hcl_path_equals": [
+      "structured-query"
+    ],
+    "hcl_path_matches": [
+      "structured-query"
+    ],
     "import_gate": [
       "cross-file",
       "security-unicode-sanity"
@@ -569,6 +581,9 @@
     "git_commit_signed_off": "git_commit_signed_off",
     "git_commit_subject_matches": "git_commit_subject_matches",
     "git_no_denied_paths": "git_no_denied_paths",
+    "hcl_path_absent": "structured_path",
+    "hcl_path_equals": "structured_path",
+    "hcl_path_matches": "structured_path",
     "header": "file_header",
     "import_gate": "import_gate",
     "indent_style": "indent_style",

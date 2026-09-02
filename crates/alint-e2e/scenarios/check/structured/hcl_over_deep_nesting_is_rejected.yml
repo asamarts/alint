@@ -1,0 +1,27 @@
+name: hcl over-deep nesting is rejected with one parse-error violation, not a crash
+tags: [check, hcl_path_absent, structured, hcl, failing]
+
+# SAFETY: hcl-rs stack-overflows (SIGABRT, whole-process abort) on deeply-nested
+# input. The `hcl_depth_within_limit` guard (MAX_HCL_DEPTH=256) must reject an
+# over-deep file as ONE parse-error violation through the real binary -- if the
+# guard or the large-stack parse thread regressed, `alint check` would crash here
+# instead of emitting this violation. The value is a 300-deep nested tuple.
+
+given:
+  tree:
+    "deep.tf": |
+      x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  config: |
+    version: 1
+    rules:
+      - id: probe
+        kind: hcl_path_absent
+        paths: "deep.tf"
+        path: "$.nonexistent"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: probe, level: error, path: deep.tf}

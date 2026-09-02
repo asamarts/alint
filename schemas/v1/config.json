@@ -360,7 +360,7 @@
       "type": "object"
     },
     "TargetFormat": {
-      "description": "The `format:` override values for `json_schema_passes`: the same formats as `structured_path::Format` (json / yaml / toml / xml / dotenv / properties / ini), plus `yml` accepted as a `yaml` alias.",
+      "description": "The `format:` override values for `json_schema_passes`: the same formats as `structured_path::Format` (json / yaml / toml / xml / dotenv / properties / ini / hcl), plus `yml` accepted as a `yaml` alias.",
       "enum": [
         "json",
         "yaml",
@@ -369,7 +369,8 @@
         "xml",
         "dotenv",
         "properties",
-        "ini"
+        "ini",
+        "hcl"
       ],
       "type": "string"
     },
@@ -498,11 +499,18 @@
     },
     "extract_spec": {
       "additionalProperties": false,
-      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
+      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
       "maxProperties": 1,
       "minProperties": 1,
       "properties": {
         "dotenv": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hcl": {
           "default": null,
           "type": [
             "string",
@@ -2656,6 +2664,85 @@
       ],
       "type": "object"
     },
+    "rule_hcl_path_absent": {
+      "description": "Existence assertion: the query must match nothing (the HCL sibling of `file_absent`, for an attribute or block). Typical use: forbid a hardcoded `$.provider.aws.access_key` in a `.tf` file.",
+      "properties": {
+        "kind": {
+          "const": "hcl_path_absent"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent).",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path"
+      ],
+      "type": "object"
+    },
+    "rule_hcl_path_equals": {
+      "description": "HCL sibling of `json_path_equals` (Terraform / Nomad / Packer). A block nests by its type then labels, so `resource \"aws_instance\" \"web\"` is `$.resource.aws_instance.web`; values keep their HCL type (a number stays a number, so no quotes on a numeric `equals:` -- but write whole numbers as integers, since `hcl-rs` normalizes `1.0` to `1` and an integer does not equal a float), and an unevaluated expression (`var.x`, `${...}`) is an opaque string. A block type REPEATED is an array, single is an object. Typical use: enforce `$.resource.aws_instance.web.count == 1`.",
+      "properties": {
+        "equals": {
+          "description": "Expected value. Any JSON type (string, number, boolean, null, array, object)."
+        },
+        "if_present": {
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "hcl_path_equals"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path",
+        "equals"
+      ],
+      "type": "object"
+    },
+    "rule_hcl_path_matches": {
+      "description": "HCL sibling of `json_path_matches` (same block-nesting mapping as `hcl_path_equals`); regex-matches a string value, e.g. an unevaluated expression. Typical use: `$.terraform.required_version` matches `^~>`.",
+      "properties": {
+        "if_present": {
+          "default": false,
+          "description": "When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations.",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "hcl_path_matches"
+        },
+        "matches": {
+          "description": "Rust-regex pattern to match against the value at `path`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "`JSONPath` expression rooted at `$`.",
+          "type": "string"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        }
+      },
+      "required": [
+        "paths",
+        "path",
+        "matches"
+      ],
+      "type": "object"
+    },
     "rule_id": {
       "description": "Unique kebab-case identifier for the rule.",
       "pattern": "^[a-z][a-z0-9_-]*$",
@@ -2907,7 +2994,7 @@
               "type": "null"
             }
           ],
-          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .ini / .cfg / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family."
+          "description": "Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .ini / .cfg / .hcl / .tf / .tfvars / .nomad / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family."
         },
         "kind": {
           "const": "json_schema_passes"
@@ -3033,6 +3120,15 @@
         },
         {
           "$ref": "#/$defs/rule_ini_path_absent"
+        },
+        {
+          "$ref": "#/$defs/rule_hcl_path_equals"
+        },
+        {
+          "$ref": "#/$defs/rule_hcl_path_matches"
+        },
+        {
+          "$ref": "#/$defs/rule_hcl_path_absent"
         },
         {
           "$ref": "#/$defs/rule_json_schema_passes"

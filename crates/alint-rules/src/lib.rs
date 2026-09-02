@@ -403,8 +403,10 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     );
     registry.register("ini_path_equals", structured_path::ini_path_equals_build);
     registry.register("ini_path_matches", structured_path::ini_path_matches_build);
-    // Existence assertion for the full {json,yaml,toml,xml,dotenv,properties,ini} family. Symmetry
-    // with the equals/matches ops is enforced by `structured_family_is_symmetric`.
+    registry.register("hcl_path_equals", structured_path::hcl_path_equals_build);
+    registry.register("hcl_path_matches", structured_path::hcl_path_matches_build);
+    // Existence assertion for the full {json,yaml,toml,xml,dotenv,properties,ini,hcl} family.
+    // Symmetry with the equals/matches ops is enforced by `structured_family_is_symmetric`.
     registry.register("json_path_absent", structured_path::json_path_absent_build);
     registry.register("yaml_path_absent", structured_path::yaml_path_absent_build);
     registry.register("toml_path_absent", structured_path::toml_path_absent_build);
@@ -418,6 +420,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         structured_path::properties_path_absent_build,
     );
     registry.register("ini_path_absent", structured_path::ini_path_absent_build);
+    registry.register("hcl_path_absent", structured_path::hcl_path_absent_build);
     registry.register("json_schema_passes", json_schema_passes::build);
     registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
     registry.register("commented_out_code", commented_out_code::build);
@@ -557,11 +560,20 @@ mod registry_tests {
     #[test]
     fn structured_family_is_symmetric() {
         // Every config-format-specific op (`<fmt>_path_<op>`) must exist for ALL
-        // seven formats. Guards against shipping an asymmetric structured-query
+        // eight formats. Guards against shipping an asymmetric structured-query
         // family -- e.g. a lone `yaml_path_absent` with no json/toml/xml siblings
         // (the gap that motivated this test). Adding a new op or a new format means
         // adding every (format, op) pair, or this fails.
-        const FORMATS: &[&str] = &["json", "yaml", "toml", "xml", "dotenv", "properties", "ini"];
+        const FORMATS: &[&str] = &[
+            "json",
+            "yaml",
+            "toml",
+            "xml",
+            "dotenv",
+            "properties",
+            "ini",
+            "hcl",
+        ];
         let r = builtin_registry();
         let known: std::collections::HashSet<&str> = r.known_kinds().collect();
         // Discover ops: any `<fmt>_path_<op>` kind contributes the suffix `path_<op>`.

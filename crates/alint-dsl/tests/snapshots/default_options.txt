@@ -1116,6 +1116,141 @@ GitNoDeniedPathsRule {
     since_raw: None,
 }
 
+=== kind: hcl_path_absent | id: hcl-no-hardcoded-key ===
+StructuredPathRule {
+    id: "hcl-no-hardcoded-key",
+    level: Error,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "main.tf",
+        ],
+    ),
+    format: Hcl,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "provider",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "aws",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "access_key",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.provider.aws.access_key",
+    op: Absent,
+    if_present: false,
+}
+
+=== kind: hcl_path_equals | id: hcl-instance-count ===
+StructuredPathRule {
+    id: "hcl-instance-count",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "main.tf",
+        ],
+    ),
+    format: Hcl,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "resource",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "aws_instance",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "web",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "count",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.resource.aws_instance.web.count",
+    op: Equals(
+        Number(1),
+    ),
+    if_present: true,
+}
+
+=== kind: hcl_path_matches | id: hcl-required-version ===
+StructuredPathRule {
+    id: "hcl-required-version",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    literal_paths: Some(
+        [
+            "main.tf",
+        ],
+    ),
+    format: Hcl,
+    path_expr: JsonPath(
+        Query {
+            kind: Root,
+            segments: [
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "terraform",
+                    ),
+                },
+                QuerySegment {
+                    kind: Child,
+                    segment: DotName(
+                        "required_version",
+                    ),
+                },
+            ],
+        },
+    ),
+    path_src: "$.terraform.required_version",
+    op: Matches(
+        Regex(
+            "^~>",
+        ),
+    ),
+    if_present: true,
+}
+
 === kind: header | id: header-alias ===
 FileHeaderRule {
     id: "header-alias",

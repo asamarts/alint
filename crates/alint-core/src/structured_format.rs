@@ -1,18 +1,20 @@
 //! Structured-document parsing shared by the structured-query rule
-//! family (`{json,yaml,toml,xml,dotenv,properties,ini}_path_*`) and core-side predicates
+//! family (`{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_*`) and core-side predicates
 //! that need to read a config / manifest into a `serde_json::Value`
 //! tree.
 //!
-//! [`Format`] parses JSON / YAML / TOML / XML / dotenv / properties / INI into one uniform
-//! `serde_json::Value` shape (YAML and TOML coerce through serde; XML
+//! [`Format`] parses JSON / YAML / TOML / XML / dotenv / properties / INI / HCL into one
+//! uniform `serde_json::Value` shape (YAML and TOML coerce through serde; XML
 //! maps via the xmltodict-style convention in `xml_to_value` — `@attr`
 //! / `#text` / repeated-element→array, leaf elements collapse to their
 //! text string, namespaces flatten to local names, every leaf is a
 //! string; dotenv and Java `.properties` are flat maps of literal-string
 //! values, and INI is a 2-level `{ section: { key: value } }` map of the
-//! same, pre-section keys hoisted to the top level), so a single
-//! `JSONPath` engine only ever has to reason about one tree shape. XML
-//! design + open-question resolutions: `docs/design/v0.10/xml_path.md`.
+//! same, pre-section keys hoisted to the top level; HCL maps via `hcl-rs`,
+//! JSON-native — blocks nest by type + labels, values keep their type, and
+//! an unevaluated expression is an opaque string), so a single `JSONPath`
+//! engine only ever has to reason about one tree shape. XML design +
+//! open-question resolutions: `docs/design/v0.10/xml_path.md`.
 
 use serde_json::Value;
 
@@ -26,6 +28,7 @@ pub enum Format {
     Dotenv,
     Properties,
     Ini,
+    Hcl,
 }
 
 impl Format {
@@ -44,6 +47,7 @@ impl Format {
         Format::Dotenv,
         Format::Properties,
         Format::Ini,
+        Format::Hcl,
     ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
@@ -76,6 +80,7 @@ impl Format {
             Self::Dotenv => crate::dotenv::parse(text),
             Self::Properties => properties_to_value(text),
             Self::Ini => crate::ini::parse(text),
+            Self::Hcl => hcl_to_value(text),
         }
     }
 
@@ -88,6 +93,7 @@ impl Format {
             Self::Dotenv => "dotenv",
             Self::Properties => "properties",
             Self::Ini => "INI",
+            Self::Hcl => "HCL",
         }
     }
 
@@ -110,6 +116,7 @@ impl Format {
             "toml" => Some(Self::Toml),
             "properties" => Some(Self::Properties),
             "ini" | "cfg" => Some(Self::Ini),
+            "hcl" | "tf" | "tfvars" | "nomad" => Some(Self::Hcl),
             "xml" | "csproj" | "props" | "targets" | "vbproj" | "fsproj" | "nuspec" => {
                 Some(Self::Xml)
             }
@@ -408,6 +415,113 @@ fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
     Ok(Value::Object(map))
 }
 
+/// Maximum HCL structural (`{` / `[`) nesting depth `hcl_to_value` will parse.
+/// `hcl-rs` is a recursive-descent parser with very large per-level stack frames
+/// (tens of KB for a block / object / tuple), so deeply-nested structure OVERFLOWS
+/// THE STACK and ABORTS THE PROCESS (SIGABRT) -- the same hazard as
+/// [`MAX_XML_DEPTH`], but far shallower per level (the default 1-2 MB thread stack
+/// overflows below ~30 levels). 256 is far beyond any real HCL yet well below the
+/// parse-thread ceiling. A deeper document is one per-file parse-error violation.
+pub const MAX_HCL_DEPTH: usize = 256;
+
+/// Maximum HCL input size `hcl_to_value` will parse. The [`MAX_HCL_DEPTH`] guard
+/// bounds `{` / `[` nesting, but `hcl-rs` ALSO recurses on EXPRESSION nesting that
+/// carries no delimiter to count -- long operator chains (`1 + 1 + …`,
+/// `a == a == …`), nested ternaries, and deeply-nested parentheses / function
+/// calls (in code AND inside `${…}` string / heredoc interpolation). A lexical
+/// scan cannot bound those, and they too overflow the stack (SIGABRT). They need
+/// tens of thousands of levels, though, and every level costs input bytes, so a
+/// size cap bounds them: a file this small cannot hold enough expression tokens to
+/// exceed the parse-thread stack. Real HCL is far smaller (Terraform best practice
+/// splits into modules); an oversize file is one per-file parse-error violation.
+/// Kept in step with the parse-thread `stack_size` in `hcl_to_value`.
+pub const MAX_HCL_BYTES: usize = 256 * 1024;
+
+/// Conservatively bound the HCL constructs `hcl-rs` recurses on, BEFORE
+/// `hcl::from_str` overflows the stack. Every one of these aborts the process on
+/// deep input, and none is caught by a naive `{`/`[` scan:
+/// - `{` / `[` / `(` nesting -- blocks, objects, tuples, index, **and
+///   parentheses / function-call args** (parens have a big frame: ~5 K levels
+///   abort). Counted EVERYWHERE, including inside strings / comments / heredocs,
+///   because `${…}` interpolation embeds real (parsed, recursing) sub-expressions
+///   there -- skipping those spans was a stack-abort BYPASS.
+/// - A run of prefix unary `-` / `!` (`----1`, `!!!!true`) -- no delimiter to
+///   count; whitespace does not break the run, any other byte does.
+///
+/// Binary-operator / ternary chains (`1 + 1 + …`, `1 ? … : …`) recurse too but
+/// cost >= 2 bytes per level, so they are bounded by [`MAX_HCL_BYTES`] instead of
+/// here. Over-counting (a literal brace / paren in a string or a long `-` run in a
+/// comment) can at worst turn a pathological value into a parse-error violation --
+/// never a crash. Returns false for an over-deep document.
+fn hcl_depth_within_limit(text: &str) -> bool {
+    let mut depth = 0usize;
+    let mut unary_run = 0usize;
+    for &c in text.as_bytes() {
+        match c {
+            b'{' | b'[' | b'(' => {
+                depth += 1;
+                if depth > MAX_HCL_DEPTH {
+                    return false;
+                }
+                unary_run = 0;
+            }
+            b'}' | b']' | b')' => {
+                depth = depth.saturating_sub(1);
+                unary_run = 0;
+            }
+            b'-' | b'!' => {
+                unary_run += 1;
+                if unary_run > MAX_HCL_DEPTH {
+                    return false;
+                }
+            }
+            b' ' | b'\t' | b'\r' | b'\n' => {}
+            _ => unary_run = 0,
+        }
+    }
+    true
+}
+
+/// Parse HCL (Terraform / Nomad / Packer) into the same `serde_json::Value` tree
+/// the family queries. `hcl::Value` is JSON-native, so `hcl::from_str` maps
+/// directly: a block is nested by its type then labels (`resource "t" "n" {…}` ->
+/// `$.resource.t.n`), values keep their HCL type (a number stays a number, unlike
+/// the stringly-typed dotenv/INI), and an unevaluated expression (`var.x`,
+/// `${…}`, a function call) arrives as an opaque string. A block type appearing
+/// once is an object but REPEATED is an array (the XML cardinality footgun);
+/// duplicate attributes and malformed input are parse errors.
+///
+/// Three layers keep `hcl-rs`'s unbounded recursion from ABORTING the process on a
+/// crafted file: the [`MAX_HCL_BYTES`] size cap (bounds delimiter-less expression
+/// nesting), the [`hcl_depth_within_limit`] `{` / `[` depth guard (bounds
+/// big-frame structural nesting), and parsing on a large explicit-stack thread so
+/// a file at those limits still has headroom on every platform (the 1 MB Windows /
+/// ~2 MB rayon-worker default would crash on a tens-deep file). The returned
+/// `Value` is safe to drop on the caller's ordinary stack: expressions flatten to
+/// strings and structural nesting is bounded by the depth guard.
+fn hcl_to_value(text: &str) -> std::result::Result<Value, String> {
+    if text.len() > MAX_HCL_BYTES {
+        return Err(format!(
+            "HCL input exceeds the maximum supported size ({MAX_HCL_BYTES} bytes)"
+        ));
+    }
+    if !hcl_depth_within_limit(text) {
+        return Err(format!(
+            "HCL nesting exceeds the maximum supported depth ({MAX_HCL_DEPTH})"
+        ));
+    }
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                hcl::from_str::<Value>(text).map_err(|e| e.to_string())
+            })
+            .expect("spawn HCL parse thread")
+            .join()
+            .unwrap_or_else(|_| Err("HCL parser panicked".to_string()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,6 +765,166 @@ mod tests {
     }
 
     #[test]
+    fn hcl_dispatches_to_a_json_native_value() {
+        // hcl-rs maps HCL directly: a block nests by type + labels, values keep their
+        // HCL type (a number stays a number, unlike stringly-typed dotenv/INI), and an
+        // unevaluated expression is an opaque string.
+        let v = Format::Hcl
+            .parse(
+                "region = \"us-east-1\"\n\
+                 resource \"aws_instance\" \"web\" {\n  ami = \"ami-1\"\n  count = 2\n}\n\
+                 locals {\n  name = var.env\n}\n",
+            )
+            .expect("parse hcl");
+        assert_eq!(v["region"], json!("us-east-1"));
+        assert_eq!(
+            v["resource"]["aws_instance"]["web"]["ami"],
+            json!("ami-1"),
+            "block nests by type -> label1 -> label2"
+        );
+        assert_eq!(
+            v["resource"]["aws_instance"]["web"]["count"],
+            json!(2),
+            "a number stays a JSON number"
+        );
+        assert_eq!(
+            v["locals"]["name"],
+            json!("${var.env}"),
+            "an unevaluated expression is an opaque string"
+        );
+    }
+
+    #[test]
+    fn hcl_repeated_block_is_an_array_single_is_an_object() {
+        // The cardinality footgun (same as XML repeated elements): a block type
+        // appearing once is an object, repeated is a document-order array.
+        assert_eq!(
+            Format::Hcl.parse("s {\n  a = 1\n}\n").expect("one")["s"],
+            json!({"a": 1})
+        );
+        assert_eq!(
+            Format::Hcl
+                .parse("s {\n  a = 1\n}\ns {\n  a = 2\n}\n")
+                .expect("many")["s"],
+            json!([{"a": 1}, {"a": 2}])
+        );
+    }
+
+    #[test]
+    fn hcl_extensions_detect_as_hcl() {
+        use std::path::Path;
+        for p in ["main.tf", "variables.tfvars", "config.hcl", "job.nomad"] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(Format::Hcl),
+                "{p} should detect as HCL"
+            );
+        }
+    }
+
+    #[test]
+    fn hcl_over_deep_nesting_is_rejected_not_a_stack_abort() {
+        // hcl-rs overflows the stack (process ABORT) on deep input; the guard must
+        // reject an over-limit file as an error, while a realistically-deep one still
+        // parses (on the large-stack thread). If this ever aborts instead of failing,
+        // the guard or the parse-thread stack regressed.
+        let over = format!(
+            "{}x=1\n{}",
+            "a {\n".repeat(MAX_HCL_DEPTH + 5),
+            "}\n".repeat(MAX_HCL_DEPTH + 5)
+        );
+        assert!(
+            Format::Hcl.parse(&over).is_err(),
+            "an over-deep HCL file must be a parse error, not a crash"
+        );
+        let ok = format!("{}x=1\n{}", "a {\n".repeat(40), "}\n".repeat(40));
+        assert!(Format::Hcl.parse(&ok).is_ok(), "a 40-deep file parses");
+    }
+
+    #[test]
+    fn hcl_depth_guard_counts_delimiters_everywhere_and_unary_runs() {
+        // The guard counts `{`/`[`/`(` WHEREVER they appear -- including inside a
+        // string / heredoc, since `${...}` interpolation embeds real recursing
+        // sub-expressions there (skipping those spans was a stack-abort bypass) --
+        // and bounds a prefix `-`/`!` run.
+        let over = MAX_HCL_DEPTH + 1;
+        assert!(!hcl_depth_within_limit(&"(".repeat(over)), "parens count");
+        assert!(
+            !hcl_depth_within_limit(&format!("x = \"{}\"\n", "[".repeat(over))),
+            "delimiters inside a string count"
+        );
+        assert!(
+            !hcl_depth_within_limit(&format!("x = <<EOT\n{}\nEOT\n", "{".repeat(over))),
+            "delimiters inside a heredoc count"
+        );
+        assert!(
+            !hcl_depth_within_limit(&"-".repeat(over)),
+            "a `-` run is bounded"
+        );
+        assert!(
+            !hcl_depth_within_limit(&"! ".repeat(over)),
+            "whitespace does not reset a `!` run"
+        );
+        // A realistically shallow file passes (balanced parens, a unary `-`, a
+        // normal heredoc with a small JSON body).
+        assert!(hcl_depth_within_limit(
+            "x = max(1, -2)\npolicy = <<EOT\n{ \"a\": [1, 2] }\nEOT\n"
+        ));
+    }
+
+    #[test]
+    fn hcl_expression_bombs_are_rejected_not_a_stack_abort() {
+        // THE safety regression. Every construct hcl-rs recurses on -- deep parens /
+        // function calls / unary chains / interpolation-embedded nesting (caught by
+        // the depth guard), and oversize operator chains (caught by the size cap) --
+        // must yield an `Err`, NEVER a SIGABRT that takes down the whole run. Each
+        // input below aborts an unguarded hcl-rs; if this test ABORTS instead of
+        // failing, the guard / size cap / parse-thread stack regressed.
+        let d = 60_000; // past every measured crash threshold
+        let bombs = [
+            format!("x = {}1{}", "(".repeat(d), ")".repeat(d)), // parens
+            format!("x = {}1{}", "f(".repeat(d), ")".repeat(d)), // function calls
+            format!("x = {}1", "-".repeat(d)),                  // unary minus
+            format!("x = {}true", "!".repeat(d)),               // unary not
+            format!("x = \"${{{}1{}}}\"", "(".repeat(d), ")".repeat(d)), // interp parens
+            format!("x = \"${{{}1{}}}\"", "[".repeat(d), "]".repeat(d)), // interp tuple
+            format!("x = <<EOT\n${{{}1{}}}\nEOT\n", "[".repeat(d), "]".repeat(d)), // heredoc interp
+        ];
+        for b in &bombs {
+            assert!(
+                Format::Hcl.parse(b).is_err(),
+                "an expression bomb must be a parse error, not a crash"
+            );
+        }
+        // A bounded operator chain still parses (the size cap does not over-reject a
+        // normal file); an oversize input is size-rejected before it can recurse.
+        assert!(
+            Format::Hcl
+                .parse(&format!("x = {}1", "1 + ".repeat(5_000)))
+                .is_ok(),
+            "a bounded binary chain parses"
+        );
+        assert!(
+            Format::Hcl
+                .parse(&format!("x = {}1", "1 + ".repeat(MAX_HCL_BYTES)))
+                .is_err(),
+            "an oversize input is rejected by the byte cap"
+        );
+    }
+
+    #[test]
+    fn hcl_malformed_and_duplicate_attr_are_parse_errors() {
+        assert!(
+            Format::Hcl.parse("resource \"x\" {\n  a =\n").is_err(),
+            "an incomplete block is a parse error"
+        );
+        assert!(
+            Format::Hcl.parse("a = 1\na = 2\n").is_err(),
+            "HCL rejects a duplicate attribute"
+        );
+    }
+
+    #[test]
     fn format_all_is_complete() {
         // Every parity gate iterates `Format::ALL`, so a variant missing from ALL
         // silently bypasses them. The real guard here is the exhaustive `match`
@@ -668,6 +942,7 @@ mod tests {
             Format::Dotenv,
             Format::Properties,
             Format::Ini,
+            Format::Hcl,
         ];
         for f in variants {
             // Distinct arms (clippy-clean) keep the match exhaustive, so a new
@@ -680,6 +955,7 @@ mod tests {
                 Format::Dotenv => "dotenv",
                 Format::Properties => "properties",
                 Format::Ini => "ini",
+                Format::Hcl => "hcl",
             };
         }
         assert_eq!(

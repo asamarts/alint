@@ -1,0 +1,31 @@
+name: hcl_path_absent flags a hardcoded provider access_key
+tags: [check, hcl_path_absent]
+
+docs:
+  title: A Terraform provider with a hardcoded credential
+  case: fail
+  kind: hcl_path_absent
+
+given:
+  tree:
+    "main.tf": |
+      provider "aws" {
+        region     = "us-east-1"
+        access_key = "AKIAIOSFODNN7EXAMPLE"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-hardcoded-key
+        kind: hcl_path_absent
+        paths: "main.tf"
+        path: "$.provider.aws.access_key"
+        level: error
+        message: >-
+          A hardcoded access_key is in a .tf file; use a variable or the provider chain.
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: no-hardcoded-key, level: error, path: main.tf}

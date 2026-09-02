@@ -1,0 +1,27 @@
+name: hcl_path_absent is silent when the provider has no hardcoded key
+tags: [check, hcl_path_absent, structured, hcl, passing]
+
+docs:
+  title: A Terraform provider with no hardcoded credential
+  case: pass
+  kind: hcl_path_absent
+
+given:
+  tree:
+    "main.tf": |
+      provider "aws" {
+        region = "us-east-1"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-hardcoded-key
+        kind: hcl_path_absent
+        paths: "main.tf"
+        path: "$.provider.aws.access_key"
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []
