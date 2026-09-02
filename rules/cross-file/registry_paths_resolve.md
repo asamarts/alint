@@ -6,7 +6,7 @@ sidebar:
 categories: ['cross-file']
 ---
 
-A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` RFC 9535 JSONPath), a line list (`lines`, optional `comment` prefix), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. Non-literal entries (interpolation / antiquotation) are skipped, not failed. Optional `orphans` adds the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the "new crate not wired into the workspace" detector). Cross-file: reads one manifest, resolves against the file index.
+A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a line list (`lines`, optional `comment` prefix), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. Non-literal entries (interpolation / antiquotation) are skipped, not failed. Optional `orphans` adds the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the "new crate not wired into the workspace" detector). Cross-file: reads one manifest, resolves against the file index.
 
 ## Options
 
@@ -16,7 +16,7 @@ A manifest file enumerates path entries; each must resolve to an on-disk artefac
 | `entries_are_globs` | boolean |  | `false` | Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation. |
 | `exclude_query` | string |  | `null` | A structured query selecting entries to subtract from the extracted list before resolution is checked. |
 | `expect` | one of `any` \| `file` \| `dir` |  |  | Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`. |
-| `extract` | extract spec | yes |  | Exactly one of: toml/json/yaml/xml (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path). |
+| `extract` | extract spec | yes |  | Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path). |
 | `must_contain` | string |  | `null` | When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation. |
 | `orphans` | OrphansSpec |  |  | Enable the reverse-completeness check (see `OrphansSpec`). |
 | `source` | string | yes |  | The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries. |
