@@ -134,3 +134,4 @@ rules:
 - [`dotenv_path_equals`](/docs/rules/structured-query/dotenv_path_equals/)
 - [`properties_path_equals`](/docs/rules/structured-query/properties_path_equals/)
 - [`ini_path_equals`](/docs/rules/structured-query/ini_path_equals/)
+- [`hcl_path_equals`](/docs/rules/structured-query/hcl_path_equals/)
