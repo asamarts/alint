@@ -14,6 +14,61 @@ use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 
+/// Run a parallel `job` inside an explicitly-built rayon pool, degrading gracefully
+/// if the OS refuses worker threads. `par_iter`'s LAZY global-pool init PANICS ("The
+/// global thread pool has not been initialized") when thread creation fails under
+/// `RLIMIT_NPROC` / pids.max pressure (common in hardened CI / containers -- the
+/// self-hosted runner has hit pids limits); a linter must degrade, not crash with
+/// the "alint crashed" banner. Building an explicit pool avoids that lazy init.
+///
+/// The pool is built ONCE and cached, via a fallback chain: the default (`num_cpus`)
+/// pool, else a single spawned thread, else a `use_current_thread` pool that spawns
+/// ZERO new threads (runs on the caller). Caching is REQUIRED, not just an
+/// optimization: a second `use_current_thread` build on the same thread fails ("the
+/// current thread is already part of another thread pool") and its drop does not
+/// release the thread in time, so a per-call build would panic at the SECOND
+/// dispatch site under pressure -- exactly the crash this guards. One cached pool is
+/// `install`d by both dispatch sites and every run. `install` only changes WHICH
+/// pool executes; `par_iter().collect()` preserves order regardless, so results are
+/// identical. (The HCL parse thread's spawn failure was hardened the same way; this
+/// is the rayon analogue.)
+///
+/// Caveat: the cached pool is process-global. If the third tier (the current-thread
+/// pool) is what builds, that pool is affine to whichever thread first initialized
+/// it, so a later run from a different thread would `install` onto that thread. This
+/// is unreachable for the CLI (a single main thread) and the per-file LSP path does
+/// not use this helper; it can only arise once both threaded tiers have already
+/// failed, and is the accepted trade for killing the real per-call crash.
+fn with_worker_pool<R: Send>(job: impl FnOnce() -> R + Send) -> R {
+    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
+    match POOL
+        .get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .build()
+                .or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build())
+                .or_else(|_| {
+                    rayon::ThreadPoolBuilder::new()
+                        .num_threads(1)
+                        .use_current_thread()
+                        .build()
+                })
+                .ok()
+        })
+        .as_ref()
+    {
+        Some(pool) => pool.install(job),
+        // The zero-new-thread (current-thread) pool essentially always builds, so
+        // `None` -- ALL three tiers failed -- is near-unreachable. If it ever does,
+        // `job()` runs `par_iter` with no pool installed, which re-enters rayon's
+        // LAZY global-pool init: the exact pre-guard behavior, NOT sequential
+        // execution (it parallelizes if the global pool can init, else panics as
+        // before). That is no worse than before this guard and requires rayon to be
+        // wholly unable to build even a current-thread pool (the process is already
+        // doomed at that point).
+        None => job(),
+    }
+}
+
 /// Cheap helper: emit a `tracing::info!` event with elapsed
 /// nanoseconds since `start` plus arbitrary key/value pairs.
 /// Used by the engine's phase + per-rule timing breakdown so a
@@ -417,37 +472,38 @@ impl Engine {
         // rules that haven't migrated yet). Same parallelism
         // shape as v0.9.2 — rule-major par_iter.
         let t_cross = Instant::now();
-        let cross_results: Vec<(usize, RuleResult)> = self
-            .entries
-            .par_iter()
-            .enumerate()
-            .filter_map(|(idx, entry)| {
-                if entry.rule.as_per_file().is_some() {
-                    return None;
-                }
-                if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
-                    return None;
-                }
-                let ctx = pick_ctx(
-                    entry.rule.as_ref(),
-                    &full_ctx,
-                    filtered_ctx.as_ref(),
-                    git_file_only_ctx.as_ref(),
-                    git_dir_aware_ctx.as_ref(),
-                );
-                let t_rule = Instant::now();
-                let result = run_entry(entry, ctx, &when_env, &fact_values);
-                // u128 → u64 saturating: same rationale as the
-                // `phase!` macro — elapsed_ns overflows u64 only
-                // after ~584 years per rule, and we want lossy
-                // truncation rather than a runtime panic on the
-                // hot path.
-                #[allow(clippy::cast_possible_truncation)]
-                let elapsed_ns = t_rule.elapsed().as_nanos() as u64;
-                cross_rule_ns[idx].fetch_add(elapsed_ns, Ordering::Relaxed);
-                result.map(|rr| (idx, rr))
-            })
-            .collect();
+        let cross_results: Vec<(usize, RuleResult)> = with_worker_pool(|| {
+            self.entries
+                .par_iter()
+                .enumerate()
+                .filter_map(|(idx, entry)| {
+                    if entry.rule.as_per_file().is_some() {
+                        return None;
+                    }
+                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
+                        return None;
+                    }
+                    let ctx = pick_ctx(
+                        entry.rule.as_ref(),
+                        &full_ctx,
+                        filtered_ctx.as_ref(),
+                        git_file_only_ctx.as_ref(),
+                        git_dir_aware_ctx.as_ref(),
+                    );
+                    let t_rule = Instant::now();
+                    let result = run_entry(entry, ctx, &when_env, &fact_values);
+                    // u128 → u64 saturating: same rationale as the
+                    // `phase!` macro — elapsed_ns overflows u64 only
+                    // after ~584 years per rule, and we want lossy
+                    // truncation rather than a runtime panic on the
+                    // hot path.
+                    #[allow(clippy::cast_possible_truncation)]
+                    let elapsed_ns = t_rule.elapsed().as_nanos() as u64;
+                    cross_rule_ns[idx].fetch_add(elapsed_ns, Ordering::Relaxed);
+                    result.map(|rr| (idx, rr))
+                })
+                .collect()
+        });
         phase!(
             t_cross,
             "cross_file_partition",
@@ -566,81 +622,84 @@ impl Engine {
         // uses Rayon's work-stealing slabs instead — same
         // observable iteration, no shared lock on the hot
         // path.
-        let by_file: Vec<(usize, Violation)> = per_file_ctx
-            .index
-            .entries
-            .par_iter()
-            .filter(|e| !e.is_dir)
-            .flat_map_iter(|file_entry| {
-                // 1. Decide which per-file rules apply to this
-                // file. Per-file rules expose their scope via
-                // `PerFileRule::path_scope`; we filter on it
-                // before any I/O so files no rule cares about
-                // never get read. Carrying `entry_idx` through
-                // here avoids an O(L) `position` lookup per
-                // applicable rule per file inside the inner
-                // dispatch loop below.
-                let applicable: Vec<(usize, &RuleEntry)> = live
-                    .iter()
-                    .filter(|(_, entry)| {
-                        // 1a. Path-scope glob — cheap, dropping
-                        // files no rule cares about before any
-                        // further work.
-                        // v0.9.10: `Scope::matches` consults both
-                        // path-glob AND `scope_filter` in one
-                        // call (Scope owns its optional filter
-                        // since the v0.9.10 structural fix). The
-                        // separate v0.9.6 `entry.rule.scope_filter()`
-                        // check this used to do is now folded in.
-                        entry
+        let by_file: Vec<(usize, Violation)> = with_worker_pool(|| {
+            per_file_ctx
+                .index
+                .entries
+                .par_iter()
+                .filter(|e| !e.is_dir)
+                .flat_map_iter(|file_entry| {
+                    // 1. Decide which per-file rules apply to this
+                    // file. Per-file rules expose their scope via
+                    // `PerFileRule::path_scope`; we filter on it
+                    // before any I/O so files no rule cares about
+                    // never get read. Carrying `entry_idx` through
+                    // here avoids an O(L) `position` lookup per
+                    // applicable rule per file inside the inner
+                    // dispatch loop below.
+                    let applicable: Vec<(usize, &RuleEntry)> = live
+                        .iter()
+                        .filter(|(_, entry)| {
+                            // 1a. Path-scope glob — cheap, dropping
+                            // files no rule cares about before any
+                            // further work.
+                            // v0.9.10: `Scope::matches` consults both
+                            // path-glob AND `scope_filter` in one
+                            // call (Scope owns its optional filter
+                            // since the v0.9.10 structural fix). The
+                            // separate v0.9.6 `entry.rule.scope_filter()`
+                            // check this used to do is now folded in.
+                            entry
+                                .rule
+                                .as_per_file()
+                                .expect("live entries are per-file rules by construction")
+                                .path_scope()
+                                .matches(&file_entry.path, per_file_ctx.index)
+                        })
+                        .map(|(idx, entry)| (*idx, *entry))
+                        .collect();
+                    if applicable.is_empty() {
+                        return Vec::new();
+                    }
+                    // 2. Read once, skipping a file larger than the
+                    // analysis cap (from the index size, no extra
+                    // stat) so a multi-GB blob can't OOM the run (M3).
+                    // A genuinely-absent file (deleted mid-walk) skips
+                    // silently; a real read error (permission, I/O) or
+                    // an over-cap file is logged at `warn` so it isn't
+                    // silently mistaken for "file absent" (L7). Either
+                    // way the run stays resilient.
+                    let abs = root.join(&file_entry.path);
+                    let Some(bytes) = crate::walker::read_capped_or_skip(&abs, file_entry.size)
+                    else {
+                        return Vec::new();
+                    };
+                    // 3. Dispatch. Every applicable rule sees the
+                    // same byte slice; the file is read exactly once
+                    // even though N rules may produce violations
+                    // against it.
+                    let mut out: Vec<(usize, Violation)> = Vec::new();
+                    for (entry_idx, entry) in applicable {
+                        let pf = entry
                             .rule
                             .as_per_file()
-                            .expect("live entries are per-file rules by construction")
-                            .path_scope()
-                            .matches(&file_entry.path, per_file_ctx.index)
-                    })
-                    .map(|(idx, entry)| (*idx, *entry))
-                    .collect();
-                if applicable.is_empty() {
-                    return Vec::new();
-                }
-                // 2. Read once, skipping a file larger than the
-                // analysis cap (from the index size, no extra
-                // stat) so a multi-GB blob can't OOM the run (M3).
-                // A genuinely-absent file (deleted mid-walk) skips
-                // silently; a real read error (permission, I/O) or
-                // an over-cap file is logged at `warn` so it isn't
-                // silently mistaken for "file absent" (L7). Either
-                // way the run stays resilient.
-                let abs = root.join(&file_entry.path);
-                let Some(bytes) = crate::walker::read_capped_or_skip(&abs, file_entry.size) else {
-                    return Vec::new();
-                };
-                // 3. Dispatch. Every applicable rule sees the
-                // same byte slice; the file is read exactly once
-                // even though N rules may produce violations
-                // against it.
-                let mut out: Vec<(usize, Violation)> = Vec::new();
-                for (entry_idx, entry) in applicable {
-                    let pf = entry
-                        .rule
-                        .as_per_file()
-                        .expect("live entries are per-file rules by construction");
-                    let result = pf.evaluate_file(per_file_ctx, &file_entry.path, &bytes);
-                    match result {
-                        Ok(vs) => {
-                            for v in vs {
-                                out.push((entry_idx, v));
+                            .expect("live entries are per-file rules by construction");
+                        let result = pf.evaluate_file(per_file_ctx, &file_entry.path, &bytes);
+                        match result {
+                            Ok(vs) => {
+                                for v in vs {
+                                    out.push((entry_idx, v));
+                                }
+                            }
+                            Err(e) => {
+                                out.push((entry_idx, Violation::new(format!("rule error: {e}"))));
                             }
                         }
-                        Err(e) => {
-                            out.push((entry_idx, Violation::new(format!("rule error: {e}"))));
-                        }
                     }
-                }
-                out
-            })
-            .collect();
+                    out
+                })
+                .collect()
+        });
 
         // Bucket violations by entry-index, then rebuild
         // `RuleResult` per live entry preserving each rule's
@@ -1413,6 +1472,44 @@ mod tests {
     use crate::scope::Scope;
     use crate::walker::FileEntry;
     use std::path::Path;
+
+    #[test]
+    fn worker_pool_current_thread_fallback_runs_par_iter_ordered() {
+        // `with_worker_pool` returns the job's result unchanged across REPEATED calls
+        // -- the two dispatch sites hit it in one run, so a per-call pool build (the
+        // bug this replaced) would fail at the second site. (Common path: the cached
+        // default pool, exercised by every engine test.) Do these first, before the
+        // local `use_current_thread` pool below claims this thread.
+        assert_eq!(with_worker_pool(|| 40 + 2), 42);
+        assert_eq!(with_worker_pool(|| "ok".to_string()), "ok");
+
+        // The fallback pool mechanism: a single-thread `use_current_thread` pool
+        // spawns ZERO new threads (so it builds under the pressure that defeats the
+        // default pool) and is ORDER-PRESERVING, so a degraded run matches a normal
+        // one. It must also install REPEATEDLY (both sites reuse one cached pool).
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .use_current_thread()
+            .build()
+            .expect("a zero-new-thread pool must always build");
+        let out: Vec<usize> =
+            pool.install(|| (0..1000usize).into_par_iter().map(|x| x * 2).collect());
+        assert_eq!(out, (0..1000usize).map(|x| x * 2).collect::<Vec<_>>());
+        let again: Vec<usize> =
+            pool.install(|| (0..10usize).into_par_iter().map(|x| x + 1).collect());
+        assert_eq!(again, (1..=10usize).collect::<Vec<_>>());
+        // Building a SECOND `use_current_thread` pool on this thread FAILS -- exactly
+        // why `with_worker_pool` must cache one pool (build once, install many) rather
+        // than build per call.
+        assert!(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .use_current_thread()
+                .build()
+                .is_err(),
+            "a second use_current_thread build on one thread must fail (the cache requirement)"
+        );
+    }
 
     /// Stub rule: emits one violation per matched file in scope.
     /// Configurable to advertise `requires_full_index` for

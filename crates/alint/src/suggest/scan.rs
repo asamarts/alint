@@ -128,6 +128,16 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
         let Ok(body) = std::fs::read_to_string(&path) else {
             continue;
         };
+        // Guard a deep-flow YAML bomb before serde_yaml_ng (libyaml) processes it
+        // super-linearly -- the same guard the config loader applies. `suggest`
+        // reads the repo's `.alint.yml` directly, so an untrusted checkout could
+        // otherwise hang it. Degrade gracefully to "no existing extends", as this
+        // function already does for an unparseable config.
+        if !alint_core::yaml_depth::flow_depth_within_limit(&body)
+            || !alint_core::yaml_depth::expansion_within_limit(&body)
+        {
+            return Vec::new();
+        }
         let Ok(doc) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&body) else {
             return Vec::new();
         };
@@ -248,6 +258,18 @@ mod tests {
         assert!(scan.has_extends("alint://bundled/oss-baseline@v1"));
         assert!(scan.has_extends("alint://bundled/rust@v1"));
         assert!(!scan.has_extends("alint://bundled/node@v1"));
+    }
+
+    #[test]
+    fn extends_reader_degrades_on_a_yaml_flow_bomb() {
+        // `suggest` reads the repo's `.alint.yml` directly, so a deep-flow bomb in
+        // an untrusted checkout must NOT hang it: the flow-depth guard rejects it
+        // and we degrade to "no existing extends" (best-effort), exactly as this
+        // reader already does for an unparseable config.
+        let tmp = td();
+        let bomb = format!("extends: {}1{}", "[".repeat(200_000), "]".repeat(200_000));
+        touch(tmp.path(), ".alint.yml", &bomb);
+        assert_eq!(read_existing_extends(tmp.path()), Vec::<String>::new());
     }
 
     #[test]

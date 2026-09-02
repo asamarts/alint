@@ -43,6 +43,15 @@ pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result
             alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
         )));
     }
+    // Reject an alias-expansion bomb (a single anchor referenced many times) the
+    // same way -- `serde_yaml_ng`'s own limits don't catch it.
+    if !alint_core::yaml_depth::expansion_within_limit(contents) {
+        return Err(Error::Other(format!(
+            "{}: YAML alias expansion exceeds the maximum supported node count ({})",
+            source.display(),
+            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
+        )));
+    }
     if contents.contains("{{") {
         let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(contents)?;
         crate::interp::interpolate_value(&mut value, &|n| std::env::var(n).ok())
@@ -191,10 +200,27 @@ fn load_remote(
     // nested extends in a remote body to dodge that ambiguity.
     // When we lift this restriction, the base for relative
     // resolution needs a deliberate decision.
-    let config: RawConfig = serde_yaml_ng::from_str(
-        std::str::from_utf8(&body)
-            .map_err(|e| Error::Other(format!("remote body from {url} is not UTF-8: {e}")))?,
-    )?;
+    let body_str = std::str::from_utf8(&body)
+        .map_err(|e| Error::Other(format!("remote body from {url} is not UTF-8: {e}")))?;
+    // A remote body is untrusted input (SRI pins WHICH bytes, not that they are
+    // benign), so it needs the same flow-depth guard as a local config -- otherwise
+    // `serde_yaml_ng` (libyaml) chews super-linearly on a deep-flow bomb and hangs
+    // the run. The local/interpolated path guards in `parse_config_interpolated`;
+    // this direct `from_str` bypassed it (the guard's docs claim `extends:` bodies
+    // are covered -- true for local, and now for remote).
+    if !alint_core::yaml_depth::flow_depth_within_limit(body_str) {
+        return Err(Error::Other(format!(
+            "remote config at {url}: YAML flow nesting exceeds the maximum supported depth ({})",
+            alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
+        )));
+    }
+    if !alint_core::yaml_depth::expansion_within_limit(body_str) {
+        return Err(Error::Other(format!(
+            "remote config at {url}: YAML alias expansion exceeds the maximum supported node count ({})",
+            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
+        )));
+    }
+    let config: RawConfig = serde_yaml_ng::from_str(body_str)?;
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
             "remote config at {url} contains its own `extends:`; \
@@ -226,6 +252,17 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
         ))
     })?;
 
+    // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
+    // these guards are defense-in-depth, not an attack surface -- but keeping the
+    // checks uniform with the remote/local paths means no `serde_yaml_ng::from_str`
+    // in the loader is ever unguarded. A bundled ruleset tripping one is an alint bug.
+    if !alint_core::yaml_depth::flow_depth_within_limit(body)
+        || !alint_core::yaml_depth::expansion_within_limit(body)
+    {
+        return Err(Error::internal(format!(
+            "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
+        )));
+    }
     let config: RawConfig = serde_yaml_ng::from_str(body).map_err(|e| {
         // A ruleset shipped *inside* the binary failing to parse is an alint
         // bug, not the user's config — Internal → CLI exit 3 (M11).

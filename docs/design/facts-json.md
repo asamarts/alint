@@ -10,8 +10,8 @@ Pages because the consumer and producer disagreed on a hand-counted number.
 ## 1. Problem
 
 alint asserts its own surface area as prose in many places — the README sentence
-("89 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix
-ops, 8 output formats", "11 subcommands"), `docs/site/about/index.md`, and the
+("105 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix
+ops, 8 output formats", "12 subcommands"), `docs/site/about/index.md`, and the
 alint.org marketing site (a separate, private repo). Every one of these is a
 hand-maintained number that drifts the instant a rule kind, fixer, formatter, or
 subcommand lands without someone editing the copy.
@@ -41,18 +41,20 @@ volatile fields, so it is committed and content-diff gated like the schema.
 
 ```json
 {
-  "format_version": 1,
-  "alint_version": "0.13.0",
+  "format_version": 2,
+  "alint_version": "0.15.2",
   "counts": {
-    "rule_kinds": 89,
+    "rule_kinds": 105,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 12,
     "output_formats": 8,
-    "subcommands": 11
+    "subcommands": 12
   },
   "rule_kinds": ["commented_out_code", "cross_file", "..."],
   "families": ["Existence", "Content", "..."],
+  "categories": [{ "slug": "existence", "title": "Existence", "order": 0 }, { "slug": "content", "title": "Content", "order": 1 }],
+  "rule_categories": { "commented_out_code": ["git-hygiene", "content"], "cross_file": ["cross-file"] },
   "bundled_rulesets": ["apache/governance", "go", "rust", "..."],
   "output_formats": ["agent", "github", "gitlab", "human", "json", "junit", "markdown", "sarif"],
   "subcommands": ["check", "explain", "export-agents-md", "..."],

@@ -58,6 +58,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Structured-query rules (`*_path_*`, `json_schema_passes`) no longer false-fire on
+  a BOM-prefixed or empty file.** Any leading UTF-8 BOM(s) (common on Windows-authored
+  `package.json` / `tsconfig.json`) are now stripped for every format before parsing —
+  JSON and HCL previously rejected a BOM as a syntax error — and an empty / whitespace-only
+  file parses as an empty object `{}` for every format, so `*_path_absent` is satisfied,
+  `if_present` stays silent, and `json_schema_passes` validates it against
+  `{"type":"object"}` instead of false-firing "null is not of type object". Flagging a
+  BOM or an empty file remains the `no_bom` / `no_empty_files` rules' job.
+- **Format auto-detection recognizes uppercase extensions and defers `.env.*` to a real
+  extension.** `json_schema_passes` (which auto-detects the target format) no longer
+  reports a false "could not detect format" on a `.JSON` / `.XML` / `.CSPROJ` file
+  (common on Windows and case-insensitive filesystems), and a `.env.json` / `.env.yaml`
+  is now parsed by its real format rather than shadowed by the `.env.*` dotenv rule.
 - The bundled `ci/github-actions@v1` ruleset's `gha-pin-actions-to-sha` rule no
   longer flags **local composite-action references** (`uses: ./...`). Local actions
   live in the same repo (the same trust boundary) and cannot be SHA-pinned; the rule
@@ -73,6 +86,77 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to) write access to the GITHUB_TOKEN -- no permissions declared anywhere,
   `write-all`, or `contents: write` at the workflow level. Rebuilt on the new
   `yaml_path_absent` kind.
+
+### Security
+
+- **Parser hardening: a crafted config file can no longer abort an `alint` run.**
+  `hcl-rs` is a recursive-descent parser with no depth limit of its own, so a
+  deeply-nested or expression-bomb `.tf` (structure, parentheses, unary runs, or long
+  binary / ternary operator chains, including inside `${...}` interpolation) could
+  overflow the stack and abort the whole process (SIGABRT). HCL parsing now runs behind
+  a depth pre-scan plus a 64 KiB size cap on a dedicated large-stack thread, so such a
+  file becomes one per-file parse-error violation instead of a crash. The XML depth
+  guard margin was also widened (`MAX_XML_DEPTH` 256 -> 128) to stay well below
+  `roxmltree`'s overflow point on a constrained worker stack. JSON, YAML, and TOML
+  already enforce their own recursion limits.
+- **XML parsing is no longer quadratic in attribute count.** `roxmltree` 0.20 validates
+  per-element attribute uniqueness in O(n^2), so a single element bearing tens of
+  thousands of attributes (a ~1.5 MB crafted `.xml` / `.csproj`) could stall a worker
+  for minutes -- an algorithmic-complexity DoS that no nesting guard caught. The pre-scan
+  now also caps attributes per element, restoring linear-time parsing; an over-wide
+  element is one per-file parse-error violation.
+- **A remote `extends:` ruleset can no longer hang the run with a YAML flow bomb.** The
+  flow-depth guard that protects a local config was not applied to a remote (or bundled)
+  `extends:` body, so a deeply-nested-flow remote ruleset made `serde_yaml_ng` process it
+  super-linearly. Remote and bundled bodies now go through the same guard.
+- **HCL parsing no longer panics when the parse thread can't be spawned.** Under address-
+  space / thread pressure (hardened CI, containers) the large-stack HCL parse thread could
+  fail to spawn and `.expect`-panic with the crash banner; it now surfaces as one ordinary
+  per-file parse-error violation.
+- **The HCL depth pre-scan can no longer be evaded through a heredoc terminator or a
+  comment inside an interpolation.** The scan skips string / heredoc / comment content
+  while counting expression nesting, but two boundary mismatches with `hcl-rs` let a bomb
+  hide as "content": `hcl-rs` ends a heredoc on a terminator line carrying leading and/or
+  trailing whitespace or a trailing comment (`  EOT`, `EOT `, `EOT # c`), which the scan
+  did not recognize (so it kept skipping the real expression after the terminator); and
+  `hcl-rs` honors `#` / `//` /
+  `/* */` comments inside a `${...}` interpolation, so a `}` in such a comment made the
+  scan close the interpolation early and stop counting. Either could carry a deeply-nested
+  expression on to `hcl-rs` and stack-abort the process. The scan now matches `hcl-rs`'s
+  terminator leniency and skips interpolation comments, both pinned by tests.
+- **A YAML alias-expansion bomb can no longer hang the run.** A single anchor referenced
+  many times (`&a [..]` + thousands of `*a`, or a `<<: *a` merge) expands to tens of
+  millions of nodes from a ~150 KB file -- serde_yaml_ng's own limits catch only NESTED
+  aliases (billion-laughs), not this shape, and the flow-depth guard only bounds nesting.
+  A cheap discard-only pre-count now bounds alias expansion for every YAML surface
+  (`yaml_path_*`, `json_schema_passes`, `extract`, and config / `extends:` loading), so a
+  bomb becomes one per-file parse-error instead of a multi-second, multi-GB hang. Alias-free
+  YAML is unaffected (the check short-circuits) and every legit document parses unchanged.
+- **The alias-expansion short-circuit can no longer be evaded with a plain-scalar quote.**
+  The bomb guard above skips its budget pass when the document uses no alias, and decided
+  that by skipping quoted scalars -- but a plain scalar that merely contains a quote
+  (`desc: it's fine`, `size: 12" wide`; valid, common YAML) made the scan skip past a real
+  `*alias` after it and wrongly conclude "no alias", so a hidden bomb slipped through. The
+  alias detector and the flow-depth scanner (which shared the flaw, letting a flow bomb on a
+  later line hide behind an earlier mid-scalar quote) now treat a quote as a scalar delimiter
+  only when it opens at a node position (line start, after `:`/`-`/`,`/`[`/`{`/`?`, or after an
+  anchor / tag), so the guards can no longer be side-stepped by an innocuous leading line.
+- **Every YAML entry point is now flow-guarded.** The public `alint_dsl::parse()` API, the
+  `{{env.X}}`-interpolated scalar re-parse, and the `alint suggest` config reader each
+  deserialized untrusted YAML without the flow-depth / alias guards the file loader
+  applies; all now share them, closing the last unguarded parse sites.
+- **Structured parsing is bounded against parse-tree memory blow-up.** A parsed value tree
+  costs far more RSS than its input -- up to ~30x for attribute-heavy XML, ~6-10x for JSON --
+  so a near-read-cap (256 MiB) structured file could balloon to multiple GB. Structured input
+  is now capped at 32 MiB (`MAX_STRUCTURED_BYTES`; HCL keeps its tighter 64 KiB cap), bounding
+  a single file's tree to ~1 GB worst case. Config and manifest files are far smaller; an
+  oversize structured file is one parse-error.
+- **Parallel rule dispatch no longer panics when the OS refuses worker threads.** Under
+  `RLIMIT_NPROC` / pids pressure (hardened CI, containers) rayon's lazy global-pool init
+  would `.expect`-panic with the "alint crashed" banner; the engine now runs `par_iter`
+  inside an explicitly-built pool (built once and cached) that degrades through a single
+  spawned worker to a zero-new-thread pool running on the calling thread, with identical,
+  order-preserving results.
 
 ## [0.15.2] - 2026-08-22
 

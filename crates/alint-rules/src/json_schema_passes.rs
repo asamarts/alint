@@ -25,12 +25,14 @@
 //!   same `serde_json::Value` tree the schema validates against,
 //!   and XML maps in via the xmltodict-style `xml_to_value`
 //!   convention — same trick `json_path_*` uses.
-//! - **XML targets are stringly-typed.** Every XML leaf maps to a
-//!   JSON string, so type XML fields as `string` (with a
-//!   `pattern`) — `type: integer` / `boolean` / `number` always
-//!   fail against XML, and `type: array` / `object` depend on
-//!   cardinality (a single vs. repeated element is an object vs.
-//!   an array). See the XML-mapping notes in `docs/rules.md`.
+//! - **XML / dotenv / properties / INI targets are stringly-typed.**
+//!   Every value maps to a JSON string, so type those fields as
+//!   `string` (with a `pattern`) — `type: integer` / `boolean` /
+//!   `number` always fail against them. For XML, `type: array` /
+//!   `object` additionally depend on cardinality (a single vs.
+//!   repeated element is an object vs. an array). JSON / YAML /
+//!   TOML / HCL keep native types. See the mapping notes in
+//!   `docs/rules.md`.
 //! - Each schema-validation error becomes one violation, with
 //!   the message including the failing instance path and the
 //!   schema's error description. A target that fails to parse
@@ -580,6 +582,37 @@ mod tests {
         assert_eq!(
             v[0].path.as_deref(),
             Some(std::path::Path::new("pkg/bad.json"))
+        );
+    }
+
+    #[test]
+    fn empty_file_satisfies_an_object_schema_not_false_fires() {
+        use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+        // Regression (pre-v0.16 audit): an empty / whitespace-only config file must
+        // parse to `{}` and PASS `{"type":"object"}` -- an empty file is a valid
+        // empty document, not a schema violation. An earlier cut returned `null`
+        // for empty input, so this rule false-fired "null is not of type object",
+        // while a comment-only file of the same format parsed to `{}` and passed --
+        // two semantically-identical "no config" files disagreeing. All three must
+        // now be silent.
+        let (tmp, idx) = tempdir_with_files(&[
+            ("schema.json", br#"{"type":"object"}"#),
+            ("empty.toml", b""),
+            ("blank.toml", b"   \n\t\n"),
+            ("comment.toml", b"# just a comment\n"),
+        ]);
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_schema_passes\n\
+             paths: \"**/*.toml\"\n\
+             schema_path: schema.json\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(
+            v.is_empty(),
+            "empty / whitespace / comment-only files must satisfy {{\"type\":\"object\"}}: {v:?}"
         );
     }
 }

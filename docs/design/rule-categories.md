@@ -280,12 +280,12 @@ alias is present to harvest.
 Many-to-many changes only per-category membership, not the headline counts. One
 pre-existing subtlety must be surfaced so the catalog is not mistaken for a drift:
 
-- `counts.rule_kinds` = 89, unchanged. That figure counts distinct `kind:` spellings in
-  `all_kinds.yaml`, which INCLUDE the 11 alias spellings, so the canonical kinds number
-  about 78.
-- The catalog (`alint rules list` and the family Overview pages) lists the ~78 CANONICAL
+- `counts.rule_kinds` = 105, unchanged by categorization. That figure counts distinct
+  `kind:` spellings in `all_kinds.yaml`, which INCLUDE the 11 alias spellings, so the
+  canonical kinds number 94.
+- The catalog (`alint rules list` and the family Overview pages) lists the 94 CANONICAL
   kinds, each annotating its aliases, so its row count is intentionally lower than the
-  89 headline. The gap is exactly the 11 aliases, not missing rules.
+  105 headline. The gap is exactly the 11 aliases, not missing rules.
 - `counts.families` = number of categories = 13, unchanged.
 - The sum of per-category kind counts now exceeds the canonical count (that is the
   point) and is not a headline number.
@@ -355,8 +355,8 @@ Site:
 Following the project's one-commit-per-phase convention with a forward pointer.
 
 - **Phase 0.** This design doc, ADR-0009, and the curated assignment table
-  (`docs/design/rule-categories-assignments.md`): 78 canonical kinds, 32 multi-category,
-  46 single, with the editorial calls settled.
+  (`docs/design/rule-categories-assignments.md`): 94 canonical kinds, 32 multi-category,
+  62 single, with the editorial calls settled.
 - **Phase 1.** `Category` enum (with the order-parity gate); add the shared rules.md
   parse helper and adopt it in the generators; add single-membership `**Categories:**`
   lines (each kind's current family only); `gen-categories` plus the in-crate bridge;
