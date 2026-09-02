@@ -32,6 +32,13 @@ use crate::when::{WhenEnv, WhenExpr};
 /// pool executes; `par_iter().collect()` preserves order regardless, so results are
 /// identical. (The HCL parse thread's spawn failure was hardened the same way; this
 /// is the rayon analogue.)
+///
+/// Caveat: the cached pool is process-global. If the third tier (the current-thread
+/// pool) is what builds, that pool is affine to whichever thread first initialized
+/// it, so a later run from a different thread would `install` onto that thread. This
+/// is unreachable for the CLI (a single main thread) and the per-file LSP path does
+/// not use this helper; it can only arise once both threaded tiers have already
+/// failed, and is the accepted trade for killing the real per-call crash.
 fn with_worker_pool<R: Send>(job: impl FnOnce() -> R + Send) -> R {
     static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
     match POOL
@@ -50,9 +57,14 @@ fn with_worker_pool<R: Send>(job: impl FnOnce() -> R + Send) -> R {
         .as_ref()
     {
         Some(pool) => pool.install(job),
-        // A zero-new-thread pool essentially always builds, so `None` is
-        // near-unreachable; if it happens, run directly (the prior behavior -- no
-        // worse than before this guard).
+        // The zero-new-thread (current-thread) pool essentially always builds, so
+        // `None` -- ALL three tiers failed -- is near-unreachable. If it ever does,
+        // `job()` runs `par_iter` with no pool installed, which re-enters rayon's
+        // LAZY global-pool init: the exact pre-guard behavior, NOT sequential
+        // execution (it parallelizes if the global pool can init, else panics as
+        // before). That is no worse than before this guard and requires rayon to be
+        // wholly unable to build even a current-thread pool (the process is already
+        // doomed at that point).
         None => job(),
     }
 }

@@ -1,0 +1,32 @@
+name: hcl rejects a bomb hidden after a comment-terminated heredoc, not a crash
+tags: [check, hcl_path_absent, structured, hcl, failing]
+
+# SAFETY (adversarial-review regression, round 6): hcl-rs ends a heredoc on the tag
+# followed by trailing whitespace OR a trailing comment (`EOT # ...`), but the round-5
+# depth pre-scan only recognized a bare `EOT` + newline. So a deep expression placed
+# AFTER a whitespace/comment-terminated heredoc was skipped as "heredoc body" and never
+# depth-counted, letting hcl-rs recurse into it and stack-abort (SIGABRT). The scan now
+# ends the heredoc wherever hcl-rs does, so this is one parse-error violation. If the
+# terminator handling regresses, `alint check` CRASHES here (in-process, debug) instead.
+
+given:
+  tree:
+    "bomb.tf": |
+      x = <<EOT
+            a normal heredoc body
+      EOT # trailing comment closes the heredoc for hcl-rs
+      z = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+  config: |
+    version: 1
+    rules:
+      - id: probe
+        kind: hcl_path_absent
+        paths: "bomb.tf"
+        path: "$.nonexistent"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: probe, level: error, path: bomb.tf}

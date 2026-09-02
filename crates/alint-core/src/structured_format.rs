@@ -78,6 +78,16 @@ impl Format {
         // consecutive leading BOMs are all removed. Flagging a BOM is the `no_bom`
         // rule's job.
         let text = text.trim_start_matches('\u{feff}');
+        // Bound the parsed-tree memory FIRST: a structured tree costs up to ~30x the
+        // input in RSS (XML), so a large file balloons to multiple GB. Reject before
+        // building it -- and before the whitespace-emptiness scan below, so an oversize
+        // all-whitespace file is a fast size rejection rather than an O(n) trim.
+        // (HCL's own 64 KiB cap in `hcl_to_value` fires first for HCL.)
+        if text.len() > MAX_STRUCTURED_BYTES {
+            return Err(format!(
+                "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
+            ));
+        }
         // An empty file (nothing but BOMs and whitespace) is "no config", not a
         // broken document: return an empty OBJECT (an empty document) so
         // `*_path_absent` is satisfied, `if_present` stays silent, AND
@@ -100,14 +110,6 @@ impl Format {
             .is_empty()
         {
             return Ok(Value::Object(serde_json::Map::new()));
-        }
-        // Bound the parsed-tree memory: a structured tree costs up to ~30x the input
-        // in RSS (XML), so a large file balloons to multiple GB. Reject before
-        // building it. (HCL's own 64 KiB cap in `hcl_to_value` fires first for HCL.)
-        if text.len() > MAX_STRUCTURED_BYTES {
-            return Err(format!(
-                "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
-            ));
         }
         match self {
             // Try strict JSON first (the common, fast path — plain
@@ -724,8 +726,11 @@ fn hcl_depth_within_limit(text: &str) -> bool {
 /// interpolation carries a real recursing sub-expression, so its `{`/`[`/`(` and
 /// unary runs count toward the depth guard exactly as top-level ones do; a nested
 /// string inside it has its own content skipped but its own deeper `${…}` counted
-/// (via recursion). Self-bounded: every `{`/`${` increments `depth`, so recursion
-/// and the loop both stop at `MAX_HCL_DEPTH` -- this scanner cannot itself overflow.
+/// (via recursion). Comments inside the expression (`#` / `//` line, `/* … */` block,
+/// all honored by `hcl-rs` here) are skipped as content, so a `}` in a comment does
+/// not close the interpolation early and hide a bomb after it. Self-bounded: every
+/// `{`/`${` increments `depth`, so recursion and the loop both stop at
+/// `MAX_HCL_DEPTH` -- this scanner cannot itself overflow.
 fn count_interp(
     b: &[u8],
     i: &mut usize,
@@ -769,6 +774,28 @@ fn count_interp(
                 *depth = depth.saturating_sub(1);
                 *unary_run = 0;
                 *i += 1;
+            }
+            // Comments inside the interpolation's expression (hcl-rs honors `#` / `//`
+            // line comments and `/* … */` blocks here). Their bytes are CONTENT: a `}`
+            // in a comment must NOT close the interpolation, else a bomb after the
+            // comment would go uncounted (`${1 # }` ... deep-bomb `}`).
+            b'#' => {
+                while *i < n && b[*i] != b'\n' {
+                    *i += 1;
+                }
+            }
+            b'/' if b.get(*i + 1) == Some(&b'/') => {
+                while *i < n && b[*i] != b'\n' {
+                    *i += 1;
+                }
+            }
+            b'/' if b.get(*i + 1) == Some(&b'*') => {
+                *i += 2;
+                while *i + 1 < n && !(b[*i] == b'*' && b[*i + 1] == b'/') {
+                    *i += 1;
+                }
+                *i += 2;
+                *unary_run = 0;
             }
             b'-' | b'!' => {
                 *unary_run += 1;
@@ -821,8 +848,9 @@ fn skip_heredoc(
     unary_run: &mut usize,
 ) -> bool {
     *i += 2; // past `<<`
-    let indented = b.get(*i) == Some(&b'-');
-    if indented {
+    // Consume an optional `-` (`<<-TAG`); it affects body-indent stripping in HCL,
+    // not terminator recognition (hcl-rs accepts an indented terminator either way).
+    if b.get(*i) == Some(&b'-') {
         *i += 1;
     }
     let tag_start = *i;
@@ -843,11 +871,21 @@ fn skip_heredoc(
         while ws < n && (b[ws] == b' ' || b[ws] == b'\t') {
             ws += 1;
         }
-        // `<<TAG` terminates at column 0; `<<-TAG` allows leading whitespace.
-        let term_at = if indented { ws } else { line_start };
-        if b[term_at..].starts_with(tag) {
-            let after = term_at + tag.len();
-            if after >= n || b[after] == b'\n' || b[after] == b'\r' {
+        // A terminator is the tag as a WHOLE TOKEN with any leading whitespace: the
+        // byte after the tag must not be a tag-continuation char (`[A-Za-z0-9_]`). That
+        // matches hcl-rs, which ends a heredoc on the tag followed by trailing
+        // whitespace, a trailing `#` / `//` comment, a newline, or EOF -- and also on
+        // an INDENTED terminator, for both `<<` and `<<-`. Matching that leniency is a
+        // SAFETY requirement: a terminator we fail to recognize (a trailing-space `TAG `,
+        // a `TAG # c`, or an indented `  TAG`) would leave us skipping the real
+        // expression AFTER it as "body", hiding a nesting bomb from the depth count.
+        // Whatever follows the tag (whitespace / comment / newline) is then scanned by
+        // the caller's main loop as ordinary expression-context bytes; a longer token
+        // (`TAGx`, `TAG_`) is a different tag, not the terminator (and `TAG foo` is an
+        // hcl-rs parse error either way, so ending the heredoc there stays safe).
+        if b[ws..].starts_with(tag) {
+            let after = ws + tag.len();
+            if after >= n || !(b[after].is_ascii_alphanumeric() || b[after] == b'_') {
                 *i = after;
                 return true;
             }
@@ -1345,6 +1383,94 @@ mod tests {
     }
 
     #[test]
+    fn hcl_comment_inside_interpolation_does_not_hide_a_bomb() {
+        // hcl-rs honors `#` / `//` / `/* */` comments inside a `${…}` interpolation, so
+        // a `}` that sits inside such a comment does NOT close the interpolation. The
+        // depth scanner (`count_interp`) must treat those comment bytes as content too:
+        // otherwise it closes the interpolation at the comment's `}` and never counts a
+        // deep bomb after it, which then reaches hcl-rs and stack-aborts. Heredocs let
+        // an interpolation span lines, so the comment + bomb is reachable.
+        let paren = format!(
+            "{}1{}",
+            "(".repeat(MAX_HCL_DEPTH + 50),
+            ")".repeat(MAX_HCL_DEPTH + 50)
+        );
+        for lead in ["#", "//", "/*"] {
+            let close = if lead == "/*" { "*/" } else { "" };
+            let bomb = format!("x = <<EOT\n${{1 {lead} }} {close}\n+ {paren} }}\nEOT\n");
+            assert!(
+                Format::Hcl.parse(&bomb).is_err(),
+                "a bomb after a `{lead}` comment inside an interpolation must be rejected"
+            );
+        }
+        // Legit comments inside an interpolation still parse (no false reject).
+        for src in [
+            "x = <<EOT\n${1 # c\n+ 1}\nEOT\n",
+            "x = <<EOT\n${1 // c\n+ 1}\nEOT\n",
+            "x = <<EOT\n${1 /* c */ + 1}\nEOT\n",
+        ] {
+            assert!(
+                Format::Hcl.parse(src).is_ok(),
+                "a legit comment inside an interpolation must still parse: {src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hcl_heredoc_terminator_leniency_matches_hcl_rs() {
+        // hcl-rs terminates a heredoc on the tag with leading AND/OR trailing
+        // whitespace, for both `<<` and `<<-`. The depth guard MUST recognize the same
+        // terminators: a terminator it fails to see (a trailing-space `EOT ` or an
+        // indented `  EOT`) leaves it skipping the real expression AFTER the terminator
+        // as "heredoc body", so a deep bomb there is never counted and slips past the
+        // guard into an `hcl-rs` stack-abort. (Regression: the guard previously required
+        // a column-0 tag followed immediately by a newline.)
+        let deep = format!(
+            "{}1{}",
+            "[".repeat(MAX_HCL_DEPTH + 50),
+            "]".repeat(MAX_HCL_DEPTH + 50)
+        );
+        // hcl-rs also ends a heredoc on the tag + a trailing `#` / `//` comment, and on
+        // an indented terminator; the guard must recognize every one of those.
+        for term in [
+            "EOT",
+            "EOT ",
+            "EOT\t",
+            "EOT   ",
+            "  EOT",
+            "  EOT  ",
+            "EOT # c",
+            "EOT#c",
+            "EOT//c",
+            "  EOT\t// c",
+        ] {
+            let bomb = format!("x = <<EOT\nbody\n{term}\nz = {deep}\n");
+            // `Format::Hcl.parse` runs the guard first, so an unrecognized terminator
+            // would let the bomb reach the parse thread; the guard must reject it here.
+            assert!(
+                Format::Hcl.parse(&bomb).is_err(),
+                "a bomb after heredoc terminator {term:?} must be rejected, not skipped"
+            );
+        }
+        // A legit heredoc whose terminator carries leading / trailing whitespace or a
+        // trailing comment still parses (no false reject): exactly what hcl-rs accepts.
+        for term in [
+            "EOT",
+            "EOT ",
+            "  EOT",
+            "  EOT  ",
+            "EOT # done",
+            "EOT // done",
+        ] {
+            let ok = format!("x = <<-EOT\n  hello\n{term}\ny = 1\n");
+            assert!(
+                Format::Hcl.parse(&ok).is_ok(),
+                "a legit heredoc with terminator {term:?} must still parse"
+            );
+        }
+    }
+
+    #[test]
     fn hcl_over_deep_nesting_is_rejected_not_a_stack_abort() {
         // hcl-rs overflows the stack (process ABORT) on deep input; the guard must
         // reject an over-limit file as an error, while a realistically-deep one still
@@ -1750,8 +1876,12 @@ mod tests {
         // A structured tree costs up to ~30x the input (XML), so an input over
         // MAX_STRUCTURED_BYTES is rejected at the size check (no tree, no balloon). The
         // rejection is on `.len()` alone, so no parse runs for the oversize input.
+        // Iterate `Format::ALL` so the invariant is asserted for EVERY format (a
+        // per-arm refactor that skipped the check for one would be caught here); the
+        // "maximum supported size" substring matches both the structured cap message
+        // and HCL's own tighter cap message.
         let over = "x".repeat(MAX_STRUCTURED_BYTES + 1);
-        for f in [Format::Json, Format::Yaml, Format::Xml, Format::Toml] {
+        for &f in Format::ALL {
             let err = f.parse(&over).unwrap_err();
             assert!(
                 err.contains("maximum supported size"),

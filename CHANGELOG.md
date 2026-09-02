@@ -113,6 +113,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   space / thread pressure (hardened CI, containers) the large-stack HCL parse thread could
   fail to spawn and `.expect`-panic with the crash banner; it now surfaces as one ordinary
   per-file parse-error violation.
+- **The HCL depth pre-scan can no longer be evaded through a heredoc terminator or a
+  comment inside an interpolation.** The scan skips string / heredoc / comment content
+  while counting expression nesting, but two boundary mismatches with `hcl-rs` let a bomb
+  hide as "content": `hcl-rs` ends a heredoc on a terminator line carrying leading and/or
+  trailing whitespace or a trailing comment (`  EOT`, `EOT `, `EOT # c`), which the scan
+  did not recognize (so it kept skipping the real expression after the terminator); and
+  `hcl-rs` honors `#` / `//` /
+  `/* */` comments inside a `${...}` interpolation, so a `}` in such a comment made the
+  scan close the interpolation early and stop counting. Either could carry a deeply-nested
+  expression on to `hcl-rs` and stack-abort the process. The scan now matches `hcl-rs`'s
+  terminator leniency and skips interpolation comments, both pinned by tests.
 - **A YAML alias-expansion bomb can no longer hang the run.** A single anchor referenced
   many times (`&a [..]` + thousands of `*a`, or a `<<: *a` merge) expands to tens of
   millions of nodes from a ~150 KB file -- serde_yaml_ng's own limits catch only NESTED
@@ -121,6 +132,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`yaml_path_*`, `json_schema_passes`, `extract`, and config / `extends:` loading), so a
   bomb becomes one per-file parse-error instead of a multi-second, multi-GB hang. Alias-free
   YAML is unaffected (the check short-circuits) and every legit document parses unchanged.
+- **The alias-expansion short-circuit can no longer be evaded with a plain-scalar quote.**
+  The bomb guard above skips its budget pass when the document uses no alias, and decided
+  that by skipping quoted scalars -- but a plain scalar that merely contains a quote
+  (`desc: it's fine`, `size: 12" wide`; valid, common YAML) made the scan skip past a real
+  `*alias` after it and wrongly conclude "no alias", so a hidden bomb slipped through. The
+  alias detector and the flow-depth scanner (which shared the flaw, letting a flow bomb on a
+  later line hide behind an earlier mid-scalar quote) now treat a quote as a scalar delimiter
+  only when it opens at a node position (line start, after `:`/`-`/`,`/`[`/`{`/`?`, or after an
+  anchor / tag), so the guards can no longer be side-stepped by an innocuous leading line.
 - **Every YAML entry point is now flow-guarded.** The public `alint_dsl::parse()` API, the
   `{{env.X}}`-interpolated scalar re-parse, and the `alint suggest` config reader each
   deserialized untrusted YAML without the flow-depth / alias guards the file loader
@@ -134,8 +154,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Parallel rule dispatch no longer panics when the OS refuses worker threads.** Under
   `RLIMIT_NPROC` / pids pressure (hardened CI, containers) rayon's lazy global-pool init
   would `.expect`-panic with the "alint crashed" banner; the engine now runs `par_iter`
-  inside an explicitly-built pool that falls back to single-thread (zero new threads)
-  execution, degrading gracefully with identical results.
+  inside an explicitly-built pool (built once and cached) that degrades through a single
+  spawned worker to a zero-new-thread pool running on the calling thread, with identical,
+  order-preserving results.
 
 ## [0.15.2] - 2026-08-22
 

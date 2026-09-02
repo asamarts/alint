@@ -43,37 +43,25 @@ pub fn flow_depth_within_limit(text: &str) -> bool {
             b' ' | b'\t' | b'\r' => {
                 i += 1;
             }
-            b'"' => {
-                // Double-quoted scalar: `\` escapes the next byte.
-                i += 1;
-                while i < bytes.len() {
-                    match bytes[i] {
-                        b'\\' => i += 2,
-                        b'"' => {
-                            i += 1;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
-                }
-                prev_significant = b'"';
+            b'"' | b'\'' if opens_yaml_node(prev_significant) || depth > 0 => {
+                // A genuine quoted scalar (opens at a node position, or anywhere
+                // inside a flow collection): skip its content so brackets inside it
+                // don't count. A quote in mid-plain-scalar (`size: 12" wide`) is NOT
+                // a node position and falls to the `_` arm as an ordinary byte -- its
+                // brackets already can't count (they'd follow a scalar byte), and
+                // skipping from there could hide a real flow bomb on a later line.
+                // An unterminated quoted scalar is malformed; the real parse errors
+                // on it, so treating the rest as skipped here is safe.
+                let _closed = skip_quoted_scalar(bytes, &mut i, c);
+                prev_significant = c;
             }
-            b'\'' => {
-                // Single-quoted scalar: `''` is an escaped quote.
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        if bytes.get(i + 1) == Some(&b'\'') {
-                            i += 2;
-                        } else {
-                            i += 1;
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-                prev_significant = b'\'';
+            b'&' | b'!' if opens_yaml_node(prev_significant) => {
+                // An anchor/tag decorates the node that FOLLOWS it, so the quoted
+                // scalar or flow open after `&a`/`!!str` is still at a node position
+                // (`b':'` keeps that status) -- otherwise brackets inside an anchored
+                // quoted scalar would be miscounted.
+                skip_anchor_or_tag(bytes, &mut i);
+                prev_significant = b':';
             }
             b'#' if depth == 0 && (prev_significant == 0 || prev_significant == b' ') => {
                 // A `#` is a comment only at line start or after whitespace
@@ -179,46 +167,118 @@ fn expansion_within_limit_with(text: &str, max: usize) -> bool {
     !exceeded.get()
 }
 
-/// Lexical scan for an unquoted YAML alias reference (`*name`), skipping quoted
-/// scalars (so a `"**/*.rs"` glob doesn't count) and line comments. Conservative:
-/// a stray unquoted `*` merely triggers the (still-correct) counting pass; the only
-/// property that matters is never MISSING a real alias, which sits at a node
-/// position and is caught here.
+/// `true` when a `[`/`{`/quote sitting at this preceding-significant-byte context
+/// opens a genuine YAML node (the value of a mapping, a sequence item, or a flow
+/// element) rather than being ordinary plain-scalar content. `0` = line start.
+///
+/// This is the crux of not being fooled by a quote *inside* a plain scalar: in
+/// `desc: it's fine` the `'` follows a scalar byte (`t`), so it is NOT a node
+/// position and must not be treated as a quoted-scalar delimiter; in `desc: 'x'`
+/// the `'` follows `:` (a node position) and genuinely opens a quoted scalar.
+fn opens_yaml_node(prev_significant: u8) -> bool {
+    matches!(
+        prev_significant,
+        0 | b':' | b'-' | b',' | b'?' | b'[' | b'{'
+    )
+}
+
+/// Skip a YAML anchor (`&name`) or tag (`!tag`) token starting at `bytes[*i]`. The
+/// node the token decorates follows it, so callers set the preceding-significant
+/// context back to a node position afterwards. The token ends at whitespace or a
+/// flow indicator / quote / comment; it never crosses a newline, so it cannot
+/// swallow a real `*alias` or flow open on a following line.
+fn skip_anchor_or_tag(bytes: &[u8], i: &mut usize) {
+    *i += 1; // past the `&` or `!`
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b' ' | b'\t' | b'\r' | b'\n' | b'[' | b']' | b'{' | b'}' | b',' | b'"' | b'\''
+            | b'#' => break,
+            _ => *i += 1,
+        }
+    }
+}
+
+/// Skip a quoted YAML scalar starting at `bytes[*i]` (the opening `quote`). On
+/// return `*i` is just past the closing quote (returning `true`) or at
+/// `bytes.len()` if the quote was never closed (returning `false`). Handles `\`
+/// escapes in double quotes and `''` escapes in single quotes -- the same rules
+/// libyaml uses, so the scanner and the real parser agree on where the scalar ends.
+fn skip_quoted_scalar(bytes: &[u8], i: &mut usize, quote: u8) -> bool {
+    *i += 1; // past the opening quote
+    if quote == b'"' {
+        while *i < bytes.len() {
+            match bytes[*i] {
+                b'\\' => *i += 2,
+                b'"' => {
+                    *i += 1;
+                    return true;
+                }
+                _ => *i += 1,
+            }
+        }
+    } else {
+        while *i < bytes.len() {
+            if bytes[*i] == b'\'' {
+                if bytes.get(*i + 1) == Some(&b'\'') {
+                    *i += 2;
+                } else {
+                    *i += 1;
+                    return true;
+                }
+            } else {
+                *i += 1;
+            }
+        }
+    }
+    false
+}
+
+/// Lexical scan for an unquoted YAML alias reference (`*name`), skipping genuine
+/// quoted scalars (so a `"**/*.rs"` glob doesn't count) and line comments.
+///
+/// Safety property: it must NEVER return `false` when a real alias exists (that
+/// would skip the expansion budget pass and re-open the alias-bomb `DoS`). A stray
+/// unquoted `*` is a harmless false positive -- it merely triggers the (still
+/// correct, still bounded) counting pass. The subtlety is that a quote only opens a
+/// scalar-to-skip at a node position: a quote in mid-plain-scalar (`desc: it's fine`,
+/// `size: 12" wide`) is ordinary content, and skipping from there to the next quote
+/// could swallow a real `*alias` on a later line. So quotes are skipped only via
+/// [`opens_yaml_node`], and an unterminated quoted scalar forces the counting pass.
 fn contains_alias(text: &str) -> bool {
     let bytes = text.as_bytes();
     let mut i = 0usize;
+    // Last significant (non-space) byte, `0` at line start: gates both the quote
+    // skip (node position only) and the `#` comment (line start / after space).
+    let mut prev_significant: u8 = 0;
     // `true` at line start or right after whitespace -- where a `#` opens a comment.
     let mut prev_ws = true;
     while i < bytes.len() {
-        match bytes[i] {
-            b'"' => {
+        let c = bytes[i];
+        match c {
+            b'\n' | b'\r' => {
+                prev_significant = 0;
+                prev_ws = true;
                 i += 1;
-                while i < bytes.len() {
-                    match bytes[i] {
-                        b'\\' => i += 2,
-                        b'"' => {
-                            i += 1;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
+            }
+            b' ' | b'\t' => {
+                prev_ws = true;
+                i += 1;
+            }
+            b'"' | b'\'' if opens_yaml_node(prev_significant) => {
+                if !skip_quoted_scalar(bytes, &mut i, c) {
+                    // Unterminated quoted scalar (malformed): don't risk having
+                    // skipped a real alias -- fall through to the counting pass.
+                    return true;
                 }
+                prev_significant = c;
                 prev_ws = false;
             }
-            b'\'' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        if bytes.get(i + 1) == Some(&b'\'') {
-                            i += 2;
-                        } else {
-                            i += 1;
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
+            b'&' | b'!' if opens_yaml_node(prev_significant) => {
+                // Skip the anchor/tag token; the node it decorates follows and is
+                // still a node position (so a genuine quoted scalar after `&a`/`!!str`
+                // is skipped rather than triggering a spurious counting pass).
+                skip_anchor_or_tag(bytes, &mut i);
+                prev_significant = b':';
                 prev_ws = false;
             }
             b'#' if prev_ws => {
@@ -232,11 +292,13 @@ fn contains_alias(text: &str) -> bool {
                 if bytes.get(i + 1).is_some_and(|c| !c.is_ascii_whitespace()) {
                     return true;
                 }
-                i += 1;
+                prev_significant = b'*';
                 prev_ws = false;
+                i += 1;
             }
-            c => {
-                prev_ws = c == b' ' || c == b'\t' || c == b'\n' || c == b'\r';
+            _ => {
+                prev_significant = c;
+                prev_ws = false;
                 i += 1;
             }
         }
@@ -366,6 +428,85 @@ mod tests {
         assert!(!contains_alias("expr: 2 * 3\n"));
         assert!(!contains_alias("# a comment mentioning *stars\n"));
         assert!(!contains_alias("plain: value\nother: 42\n"));
+    }
+
+    #[test]
+    fn alias_hidden_behind_plain_scalar_quote_is_still_detected() {
+        // A plain scalar containing a quote is valid, extremely common YAML. The
+        // alias detector must not treat that quote as a string delimiter and skip
+        // past a real `*alias` after it -- doing so would bypass the budget pass and
+        // re-open the alias-bomb DoS. Both quote flavors, both "unclosed to EOF" and
+        // "a later quote pairs across the alias" shapes.
+        let cases = [
+            "desc: it's fine\nanchor: &a [1, 2, 3]\nuse: *a\n",
+            "size: 12\" wide\nanchor: &a [1, 2, 3]\nuse: *a\n",
+            "a: it's\nb: &x [1]\nc: *x\nd: 'closed'\n",
+            "a: 12\" x\nb: &x [1]\nc: *x\ntail: \"y\"\n",
+        ];
+        for case in cases {
+            // Sanity: each case is genuinely parseable YAML (so the bomb is real).
+            let parsed: Result<serde_yaml_ng::Value, _> = serde_yaml_ng::from_str(case);
+            assert!(parsed.is_ok(), "case must be valid YAML: {case:?}");
+            assert!(
+                contains_alias(case),
+                "alias must not be hidden behind a plain-scalar quote: {case:?}"
+            );
+        }
+        // A GENUINE quoted scalar containing `*` is correctly skipped (no alias).
+        assert!(!contains_alias("pattern: \"*.rs\"\nother: '*.md'\n"));
+        assert!(!contains_alias("- \"a*b\"\n- '*'\n"));
+        // A genuine quoted scalar AFTER an anchor/tag is still recognized (skipped).
+        assert!(!contains_alias("k: &a \"*.rs\"\n"));
+        assert!(!contains_alias("k: !!str '*.md'\n"));
+        // But a real alias that references an anchored node is still detected.
+        assert!(contains_alias("base: &b [1]\nuse: *b\n"));
+        // End-to-end: a real bomb hidden behind an innocuous apostrophe line must be
+        // rejected (previously slipped through the short-circuit).
+        let anchor: String = (0..200).map(|_| "0,".to_string()).collect();
+        let refs: String = (0..500).map(|_| "  - *a\n".to_string()).collect();
+        let hidden = format!("desc: it's fine\nanchor: &a [{anchor}]\nrefs:\n{refs}");
+        assert!(
+            !expansion_within_limit_with(&hidden, 10_000),
+            "alias bomb hidden behind a plain-scalar quote must still be rejected"
+        );
+    }
+
+    #[test]
+    fn flow_bomb_hidden_behind_plain_scalar_quote_is_still_rejected() {
+        // A mid-plain-scalar quote must not let a deep flow collection on a later
+        // line escape the depth count. `lead: it's` opens a bogus quote region in a
+        // naive scanner that would swallow the `deep: [[[[...` bomb below it.
+        let bomb = format!(
+            "lead: it's\ndeep: {}1{}\n",
+            "[".repeat(4000),
+            "]".repeat(4000)
+        );
+        assert!(
+            !flow_depth_within_limit(&bomb),
+            "flow bomb after a mid-scalar quote must still be rejected"
+        );
+        let bomb2 = format!(
+            "lead: 12\" x\ndeep: {}1{}\n",
+            "[".repeat(4000),
+            "]".repeat(4000)
+        );
+        assert!(!flow_depth_within_limit(&bomb2));
+        // A genuine quoted scalar full of brackets must still NOT false-reject.
+        assert!(flow_depth_within_limit(
+            &"re: \"[[[[[[[[[[[[[[[[[[[[\"\n".repeat(3000)
+        ));
+        assert!(flow_depth_within_limit(&"re: '[[[[[[[[[[' \n".repeat(3000)));
+        // Anchored / tagged quoted scalars full of brackets must NOT false-reject
+        // (the quote still opens at a node position after `&a` / `!!str`).
+        assert!(flow_depth_within_limit(
+            &"k: &a \"[[[[[[[[[[\"\n".repeat(2000)
+        ));
+        assert!(flow_depth_within_limit(
+            &"k: !!str \"[[[[[[[[[[\"\n".repeat(2000)
+        ));
+        // But an anchored FLOW bomb is still caught.
+        let anchored = format!("k: &a {}1{}\n", "[".repeat(4000), "]".repeat(4000));
+        assert!(!flow_depth_within_limit(&anchored));
     }
 
     #[test]
