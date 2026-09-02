@@ -147,8 +147,9 @@ const _: () = assert!(
 /// (its node count is ~linear in bytes, already bounded by the read cap). For
 /// alias-bearing text a cheap DISCARD-ONLY pass drives `serde_yaml_ng`'s
 /// deserializer, which replays anchored events through the visitor -- so the
-/// expansion is counted and the pass bails the instant the budget is exceeded
-/// (measured: a 30M-node bomb aborts in well under a second). It builds NO value, so
+/// expansion is counted and the pass bails once the budget is exceeded (measured: a
+/// 30M-node flat bomb aborts in ~0.3s, a tagged variant in ~1.3s, both bounded). It
+/// builds NO value, so
 /// it cannot change the real parse's output; the caller runs the real parse only
 /// after this returns `true`. A non-budget deserialize error (malformed YAML, or an
 /// unusual node the counter doesn't model) is ignored -- only a genuine budget

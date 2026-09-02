@@ -19,34 +19,41 @@ use crate::when::{WhenEnv, WhenExpr};
 /// global thread pool has not been initialized") when thread creation fails under
 /// `RLIMIT_NPROC` / pids.max pressure (common in hardened CI / containers -- the
 /// self-hosted runner has hit pids limits); a linter must degrade, not crash with
-/// the "alint crashed" banner. Building the pool explicitly avoids that lazy init:
-/// the default (`num_cpus`) pool is built ONCE and cached; if even that fails, a
-/// single-thread pool that spawns NO new threads (`use_current_thread`) runs the
-/// work on the calling thread. `install` only changes WHICH pool executes --
-/// `par_iter().collect()` preserves order regardless -- so results are identical.
-/// (The HCL parse thread's spawn failure was hardened the same way earlier; this is
-/// the rayon analogue.)
+/// the "alint crashed" banner. Building an explicit pool avoids that lazy init.
+///
+/// The pool is built ONCE and cached, via a fallback chain: the default (`num_cpus`)
+/// pool, else a single spawned thread, else a `use_current_thread` pool that spawns
+/// ZERO new threads (runs on the caller). Caching is REQUIRED, not just an
+/// optimization: a second `use_current_thread` build on the same thread fails ("the
+/// current thread is already part of another thread pool") and its drop does not
+/// release the thread in time, so a per-call build would panic at the SECOND
+/// dispatch site under pressure -- exactly the crash this guards. One cached pool is
+/// `install`d by both dispatch sites and every run. `install` only changes WHICH
+/// pool executes; `par_iter().collect()` preserves order regardless, so results are
+/// identical. (The HCL parse thread's spawn failure was hardened the same way; this
+/// is the rayon analogue.)
 fn with_worker_pool<R: Send>(job: impl FnOnce() -> R + Send) -> R {
     static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
     match POOL
-        .get_or_init(|| rayon::ThreadPoolBuilder::new().build().ok())
+        .get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .build()
+                .or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build())
+                .or_else(|_| {
+                    rayon::ThreadPoolBuilder::new()
+                        .num_threads(1)
+                        .use_current_thread()
+                        .build()
+                })
+                .ok()
+        })
         .as_ref()
     {
         Some(pool) => pool.install(job),
-        // The default build failed (thread pressure). A single-thread pool built
-        // with `use_current_thread` spawns zero new threads, so it succeeds where
-        // the default couldn't; built + used + dropped here (never cached), so there
-        // is no cross-thread hazard from the current-thread binding.
-        None => match rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .use_current_thread()
-            .build()
-        {
-            Ok(pool) => pool.install(job),
-            // A zero-new-thread build failing is near-impossible; if it does, run
-            // directly (the prior behavior -- no worse than before this guard).
-            Err(_) => job(),
-        },
+        // A zero-new-thread pool essentially always builds, so `None` is
+        // near-unreachable; if it happens, run directly (the prior behavior -- no
+        // worse than before this guard).
+        None => job(),
     }
 }
 
@@ -1456,11 +1463,18 @@ mod tests {
 
     #[test]
     fn worker_pool_current_thread_fallback_runs_par_iter_ordered() {
-        // The rayon panic-fallback builds a single-thread pool with
-        // `use_current_thread` (spawns ZERO new threads, so it succeeds under the
-        // thread pressure that defeats the default pool) and runs `par_iter` inside
-        // it. Verify that mechanism: the pool builds, and par_iter produces correct,
-        // ORDER-PRESERVING results in it (so a degraded run matches a normal run).
+        // `with_worker_pool` returns the job's result unchanged across REPEATED calls
+        // -- the two dispatch sites hit it in one run, so a per-call pool build (the
+        // bug this replaced) would fail at the second site. (Common path: the cached
+        // default pool, exercised by every engine test.) Do these first, before the
+        // local `use_current_thread` pool below claims this thread.
+        assert_eq!(with_worker_pool(|| 40 + 2), 42);
+        assert_eq!(with_worker_pool(|| "ok".to_string()), "ok");
+
+        // The fallback pool mechanism: a single-thread `use_current_thread` pool
+        // spawns ZERO new threads (so it builds under the pressure that defeats the
+        // default pool) and is ORDER-PRESERVING, so a degraded run matches a normal
+        // one. It must also install REPEATEDLY (both sites reuse one cached pool).
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(1)
             .use_current_thread()
@@ -1469,9 +1483,20 @@ mod tests {
         let out: Vec<usize> =
             pool.install(|| (0..1000usize).into_par_iter().map(|x| x * 2).collect());
         assert_eq!(out, (0..1000usize).map(|x| x * 2).collect::<Vec<_>>());
-        // `with_worker_pool` itself returns the job's result unchanged (the common
-        // path uses the cached default pool; every engine test exercises it).
-        assert_eq!(with_worker_pool(|| 40 + 2), 42);
+        let again: Vec<usize> =
+            pool.install(|| (0..10usize).into_par_iter().map(|x| x + 1).collect());
+        assert_eq!(again, (1..=10usize).collect::<Vec<_>>());
+        // Building a SECOND `use_current_thread` pool on this thread FAILS -- exactly
+        // why `with_worker_pool` must cache one pool (build once, install many) rather
+        // than build per call.
+        assert!(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .use_current_thread()
+                .build()
+                .is_err(),
+            "a second use_current_thread build on one thread must fail (the cache requirement)"
+        );
     }
 
     /// Stub rule: emits one violation per matched file in scope.

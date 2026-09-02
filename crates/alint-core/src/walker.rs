@@ -20,14 +20,14 @@ type EscapingSink = Arc<Mutex<Vec<Arc<Path>>>>;
 /// of OOM-ing the run. Shared source of truth: `alint-rules`'s `read_capped`
 /// family re-exports this constant (M3).
 ///
-/// KNOWN LIMITATION (bytes, not tree): this bounds INPUT size, not the parsed
-/// `serde_json::Value` tree a structured format expands into, which measures
-/// ~10-16x the input (XML worst). A near-cap 256 MiB structured file can thus
-/// still peak at multiple GB of RSS, multiplied by the `par_iter` fan-out that
-/// parses several files at once — an OOM risk on a memory-limited runner that a
-/// byte cap alone does not close. A structured-parse-specific cap and/or a
-/// concurrent-parse-memory bound are a tracked follow-up (see
-/// `docs/design/format-coverage.md`, "Known limitations").
+/// NOTE (bytes, not tree): this bounds INPUT size, not the parsed
+/// `serde_json::Value` tree a structured format expands into, which costs up to
+/// ~30x the input in RSS (attribute-heavy XML; ~6-10x for JSON / dotenv). The
+/// per-file structured tree is separately bounded by
+/// `structured_format::MAX_STRUCTURED_BYTES` (32 MiB, ~1 GB tree worst
+/// case). What remains is the AGGREGATE across the `par_iter` fan-out (several files
+/// parsing at once), a concurrent-parse-memory bound tracked as a follow-up (see
+/// `docs/design/format-coverage.md`, "Resource-pressure hardening").
 pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Read a walked file's bytes, first fast-rejecting (loudly) any file whose

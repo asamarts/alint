@@ -19,18 +19,19 @@
 use serde_json::Value;
 
 /// Maximum INPUT size any structured format will parse into a value tree. The read
-/// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed
-/// `serde_json::Value` tree measures ~16-19x the input (XML worst; dotenv ~10x), so
-/// a near-read-cap structured file would peak at multiple GB of RSS -- and the
-/// per-file rule dispatch is parallel, so several parse at once. Capping the
-/// structured-parse INPUT well below the read cap bounds a single file's tree to a
-/// few hundred MB. 64 MiB is far beyond any real config / manifest (they are KB-MB;
-/// even a large `OpenAPI` spec or SBOM is well under) yet 4x tighter than the read
-/// cap. An oversize structured file is one per-file parse-error violation. HCL keeps
-/// its own tighter [`MAX_HCL_BYTES`] (64 KiB); this is the ceiling for the rest.
-/// (Total concurrent parse memory -- this cap times the `par_iter` fan-out -- is a
-/// separate, coarser bound tracked in `docs/design/format-coverage.md`.)
-pub const MAX_STRUCTURED_BYTES: usize = 64 * 1024 * 1024;
+/// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree
+/// costs far more RSS: measured up to ~30x the input for attribute-heavy XML
+/// (roxmltree builds its own arena alongside the `serde_json::Value` tree), ~6-10x
+/// for JSON / dotenv. So a near-read-cap structured file would peak at multiple GB --
+/// and the per-file rule dispatch is parallel, so several parse at once. Capping the
+/// structured-parse INPUT at 32 MiB bounds a single file's tree to ~1 GB worst case
+/// (XML), far above any real config / manifest (they are KB-MB; even a large
+/// `OpenAPI` spec or SBOM is well under 32 MiB) yet 8x tighter than the read cap. An
+/// oversize structured file is one per-file parse-error violation. HCL keeps its own
+/// tighter [`MAX_HCL_BYTES`] (64 KiB); this is the ceiling for the rest. (Aggregate
+/// concurrent parse memory -- this cap times the `par_iter` fan-out -- is a separate,
+/// coarser bound tracked in `docs/design/format-coverage.md`.)
+pub const MAX_STRUCTURED_BYTES: usize = 32 * 1024 * 1024;
 
 /// The structured-parse cap must stay meaningfully below the read cap, or it does
 /// nothing (a file that passes the read cap would also pass this and still balloon).
@@ -100,9 +101,9 @@ impl Format {
         {
             return Ok(Value::Object(serde_json::Map::new()));
         }
-        // Bound the parsed-tree memory: a structured tree is ~16-19x the input, so a
-        // large file balloons to multiple GB. Reject before building it. (HCL's own
-        // 64 KiB cap in `hcl_to_value` is tighter and fires first for HCL.)
+        // Bound the parsed-tree memory: a structured tree costs up to ~30x the input
+        // in RSS (XML), so a large file balloons to multiple GB. Reject before
+        // building it. (HCL's own 64 KiB cap in `hcl_to_value` fires first for HCL.)
         if text.len() > MAX_STRUCTURED_BYTES {
             return Err(format!(
                 "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
@@ -619,42 +620,255 @@ const _: () = assert!(
 /// deep input, and none is caught by a naive `{`/`[` scan:
 /// - `{` / `[` / `(` nesting -- blocks, objects, tuples, index, **and
 ///   parentheses / function-call args** (parens have a big frame: ~5 K levels
-///   abort). Counted EVERYWHERE, including inside strings / comments / heredocs,
-///   because `${…}` interpolation embeds real (parsed, recursing) sub-expressions
-///   there -- skipping those spans was a stack-abort BYPASS.
-/// - A run of prefix unary `-` / `!` (`----1`, `!!!!true`) -- no delimiter to
-///   count; whitespace does not break the run, any other byte does.
+///   abort).
+/// - A run of prefix unary `-` / `!` (`----1`, `!!!!true`, and the SPACED /
+///   multi-line `- - - 1` -- `hcl-rs` recurses on those too) -- no delimiter to
+///   count; whitespace does not break the run.
 ///
-/// Binary-operator / ternary chains (`1 + 1 + …`, `1 ? … : …`) recurse too but
-/// cost >= 2 bytes per level, so they are bounded by [`MAX_HCL_BYTES`] instead of
-/// here. Over-counting (a literal brace / paren in a string or a long `-` run in a
-/// comment) can at worst turn a pathological value into a parse-error violation --
-/// never a crash. Returns false for an over-deep document.
+/// These are counted only in EXPRESSION context. Inside a string literal, a
+/// heredoc, or a comment the bytes are CONTENT (a `-----` banner / separator is not
+/// a unary chain, a `((((` in a `description` is not a paren group), so those spans
+/// are SKIPPED -- counting them false-rejected legit `.tf` files with a misleading
+/// "nesting depth" error. The one exception is a `${…}` / `%{…}` template
+/// interpolation, which carries a real (parsed, recursing) sub-expression and IS
+/// counted ([`count_interp`]); skipping THAT was a stack-abort bypass. Binary /
+/// ternary chains (`1 + 1 + …`) cost >= 2 bytes per level, so [`MAX_HCL_BYTES`]
+/// bounds them instead. Returns false for an over-deep document.
 fn hcl_depth_within_limit(text: &str) -> bool {
+    let b = text.as_bytes();
+    let n = b.len();
+    let mut i = 0usize;
     let mut depth = 0usize;
     let mut unary_run = 0usize;
-    for &c in text.as_bytes() {
-        match c {
+    while i < n {
+        match b[i] {
+            // Comments: `#` / `//` to end of line, `/* … */` block. Content, skipped.
+            b'#' => {
+                while i < n && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < n && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < n && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i += 2;
+                unary_run = 0;
+            }
+            // Double-quoted string: skip content, count `${…}` / `%{…}` interpolations.
+            b'"' => {
+                unary_run = 0;
+                i += 1;
+                while i < n && b[i] != b'"' {
+                    match b[i] {
+                        b'\\' => i += 2,
+                        b'$' | b'%' => match b.get(i + 1) {
+                            Some(&b'{') => {
+                                if !count_interp(b, &mut i, n, &mut depth, &mut unary_run) {
+                                    return false;
+                                }
+                            }
+                            Some(&next) if next == b[i] => i += 2, // literal $${ / %%{
+                            _ => i += 1,
+                        },
+                        _ => i += 1,
+                    }
+                }
+                i += 1;
+            }
+            // Heredoc: `<<TAG` / `<<-TAG` … TAG. Body is content (interps counted).
+            b'<' if b.get(i + 1) == Some(&b'<') => {
+                unary_run = 0;
+                if !skip_heredoc(b, &mut i, n, &mut depth, &mut unary_run) {
+                    return false;
+                }
+            }
             b'{' | b'[' | b'(' => {
                 depth += 1;
                 if depth > MAX_HCL_DEPTH {
                     return false;
                 }
                 unary_run = 0;
+                i += 1;
             }
             b'}' | b']' | b')' => {
                 depth = depth.saturating_sub(1);
                 unary_run = 0;
+                i += 1;
             }
             b'-' | b'!' => {
                 unary_run += 1;
                 if unary_run > MAX_HCL_DEPTH {
                     return false;
                 }
+                i += 1;
             }
-            b' ' | b'\t' | b'\r' | b'\n' => {}
-            _ => unary_run = 0,
+            b' ' | b'\t' | b'\r' | b'\n' => i += 1,
+            _ => {
+                unary_run = 0;
+                i += 1;
+            }
         }
+    }
+    true
+}
+
+/// Count structure / unary inside one `${…}` / `%{…}` template interpolation, whose
+/// opener `b[*i..]` is `${` or `%{`. Advances `*i` past the matching `}`. The
+/// interpolation carries a real recursing sub-expression, so its `{`/`[`/`(` and
+/// unary runs count toward the depth guard exactly as top-level ones do; a nested
+/// string inside it has its own content skipped but its own deeper `${…}` counted
+/// (via recursion). Self-bounded: every `{`/`${` increments `depth`, so recursion
+/// and the loop both stop at `MAX_HCL_DEPTH` -- this scanner cannot itself overflow.
+fn count_interp(
+    b: &[u8],
+    i: &mut usize,
+    n: usize,
+    depth: &mut usize,
+    unary_run: &mut usize,
+) -> bool {
+    *i += 2; // past `${` / `%{`
+    *depth += 1;
+    if *depth > MAX_HCL_DEPTH {
+        return false;
+    }
+    *unary_run = 0;
+    let mut brace = 1usize; // matches the interpolation's own `{`
+    while *i < n && brace > 0 {
+        match b[*i] {
+            b'{' => {
+                brace += 1;
+                *depth += 1;
+                if *depth > MAX_HCL_DEPTH {
+                    return false;
+                }
+                *unary_run = 0;
+                *i += 1;
+            }
+            b'}' => {
+                brace -= 1;
+                *depth = depth.saturating_sub(1);
+                *unary_run = 0;
+                *i += 1;
+            }
+            b'[' | b'(' => {
+                *depth += 1;
+                if *depth > MAX_HCL_DEPTH {
+                    return false;
+                }
+                *unary_run = 0;
+                *i += 1;
+            }
+            b']' | b')' => {
+                *depth = depth.saturating_sub(1);
+                *unary_run = 0;
+                *i += 1;
+            }
+            b'-' | b'!' => {
+                *unary_run += 1;
+                if *unary_run > MAX_HCL_DEPTH {
+                    return false;
+                }
+                *i += 1;
+            }
+            // A nested string inside the interpolation: skip its content (so a
+            // `}` in the string doesn't close the interpolation early), but count
+            // any deeper `${…}` it carries.
+            b'"' => {
+                *unary_run = 0;
+                *i += 1;
+                while *i < n && b[*i] != b'"' {
+                    match b[*i] {
+                        b'\\' => *i += 2,
+                        b'$' | b'%' => match b.get(*i + 1) {
+                            Some(&b'{') => {
+                                if !count_interp(b, i, n, depth, unary_run) {
+                                    return false;
+                                }
+                            }
+                            Some(&next) if next == b[*i] => *i += 2,
+                            _ => *i += 1,
+                        },
+                        _ => *i += 1,
+                    }
+                }
+                *i += 1;
+            }
+            b' ' | b'\t' | b'\r' | b'\n' => *i += 1,
+            _ => {
+                *unary_run = 0;
+                *i += 1;
+            }
+        }
+    }
+    true
+}
+
+/// Skip an HCL heredoc (`b[*i..]` is `<<`), advancing `*i` past its terminator line.
+/// The body is literal CONTENT (dashes there are not a unary chain), so it is
+/// skipped -- except `${…}` / `%{…}` interpolations in it, which are counted.
+fn skip_heredoc(
+    b: &[u8],
+    i: &mut usize,
+    n: usize,
+    depth: &mut usize,
+    unary_run: &mut usize,
+) -> bool {
+    *i += 2; // past `<<`
+    let indented = b.get(*i) == Some(&b'-');
+    if indented {
+        *i += 1;
+    }
+    let tag_start = *i;
+    while *i < n && (b[*i].is_ascii_alphanumeric() || b[*i] == b'_') {
+        *i += 1;
+    }
+    let tag = &b[tag_start..*i];
+    if tag.is_empty() {
+        return true; // `<<` not opening a heredoc; let hcl-rs surface the error
+    }
+    while *i < n && b[*i] != b'\n' {
+        *i += 1; // skip the rest of the opening line
+    }
+    while *i < n {
+        *i += 1; // past the `\n`, to the start of the next line
+        let line_start = *i;
+        let mut ws = line_start;
+        while ws < n && (b[ws] == b' ' || b[ws] == b'\t') {
+            ws += 1;
+        }
+        // `<<TAG` terminates at column 0; `<<-TAG` allows leading whitespace.
+        let term_at = if indented { ws } else { line_start };
+        if b[term_at..].starts_with(tag) {
+            let after = term_at + tag.len();
+            if after >= n || b[after] == b'\n' || b[after] == b'\r' {
+                *i = after;
+                return true;
+            }
+        }
+        // Body line: skip content, count interpolations.
+        let mut j = line_start;
+        while j < n && b[j] != b'\n' {
+            match b[j] {
+                b'$' | b'%' => match b.get(j + 1) {
+                    Some(&b'{') => {
+                        if !count_interp(b, &mut j, n, depth, unary_run) {
+                            return false;
+                        }
+                    }
+                    Some(&next) if next == b[j] => j += 2,
+                    _ => j += 1,
+                },
+                _ => j += 1,
+            }
+        }
+        *i = j;
     }
     true
 }
@@ -1150,33 +1364,72 @@ mod tests {
     }
 
     #[test]
-    fn hcl_depth_guard_counts_delimiters_everywhere_and_unary_runs() {
-        // The guard counts `{`/`[`/`(` WHEREVER they appear -- including inside a
-        // string / heredoc, since `${...}` interpolation embeds real recursing
-        // sub-expressions there (skipping those spans was a stack-abort bypass) --
-        // and bounds a prefix `-`/`!` run.
+    fn hcl_depth_guard_counts_expressions_not_string_content() {
         let over = MAX_HCL_DEPTH + 1;
+        // EXPRESSION-position structure / unary IS counted (real recursion in hcl-rs):
         assert!(!hcl_depth_within_limit(&"(".repeat(over)), "parens count");
         assert!(
-            !hcl_depth_within_limit(&format!("x = \"{}\"\n", "[".repeat(over))),
-            "delimiters inside a string count"
-        );
-        assert!(
-            !hcl_depth_within_limit(&format!("x = <<EOT\n{}\nEOT\n", "{".repeat(over))),
-            "delimiters inside a heredoc count"
-        );
-        assert!(
             !hcl_depth_within_limit(&"-".repeat(over)),
-            "a `-` run is bounded"
+            "a contiguous `-` run is bounded"
         );
         assert!(
-            !hcl_depth_within_limit(&"! ".repeat(over)),
-            "whitespace does not reset a `!` run"
+            !hcl_depth_within_limit(&format!("x = {}1\n", "- ".repeat(over))),
+            "a SPACED unary chain (hcl-rs recurses on it too) is bounded"
+        );
+        assert!(
+            !hcl_depth_within_limit(&format!("x = {}true\n", "!".repeat(over))),
+            "a `!` run is bounded"
+        );
+        // Plain string / heredoc / comment CONTENT is NOT counted -- a `-----` banner
+        // or a `((((` separator is literal text, not a nesting chain. These
+        // false-rejected legit `.tf` (with a misleading "nesting depth" error) before
+        // the fix; they must now PASS.
+        assert!(
+            hcl_depth_within_limit(&format!("banner = \"{}\"\n", "-".repeat(over))),
+            "dashes in a double-quoted string are content"
+        );
+        assert!(
+            hcl_depth_within_limit(&format!("x = \"{}\"\n", "[".repeat(over))),
+            "delimiters in a string are content"
+        );
+        assert!(
+            hcl_depth_within_limit(&format!(
+                "d = <<EOT\n{}\nEOT\n",
+                vec!["-".repeat(40); over / 20 + 2].join("\n")
+            )),
+            "multi-line dashes in a heredoc are content"
+        );
+        assert!(
+            hcl_depth_within_limit(&format!("# {}\n", "-".repeat(over))),
+            "dashes in a comment are content"
+        );
+        // A `${...}` / `%{...}` interpolation carries a real sub-expression, so its
+        // structure / unary IS counted (skipping it was a stack-abort bypass):
+        assert!(
+            !hcl_depth_within_limit(&format!("x = \"${{{}1}}\"\n", "-".repeat(over))),
+            "unary inside an interpolation counts"
+        );
+        assert!(
+            !hcl_depth_within_limit(&format!(
+                "x = \"${{{}1{}}}\"\n",
+                "(".repeat(over),
+                ")".repeat(over)
+            )),
+            "parens inside an interpolation count"
+        );
+        assert!(
+            !hcl_depth_within_limit(&format!("d = <<EOT\n${{{}1}}\nEOT\n", "-".repeat(over))),
+            "unary inside a heredoc interpolation counts"
+        );
+        // An escaped `$${` is a LITERAL `${`, not an interpolation -> not counted.
+        assert!(
+            hcl_depth_within_limit(&format!("x = \"$${{{}1}}\"\n", "-".repeat(over))),
+            "an escaped literal interpolation is not counted"
         );
         // A realistically shallow file passes (balanced parens, a unary `-`, a
-        // normal heredoc with a small JSON body).
+        // normal heredoc with a small JSON body, an interpolation).
         assert!(hcl_depth_within_limit(
-            "x = max(1, -2)\npolicy = <<EOT\n{ \"a\": [1, 2] }\nEOT\n"
+            "x = max(1, -2)\ny = \"${var.z}\"\npolicy = <<EOT\n{ \"a\": [1, 2] }\nEOT\n"
         ));
     }
 
@@ -1494,8 +1747,8 @@ mod tests {
 
     #[test]
     fn oversize_structured_input_is_rejected_before_building_a_tree() {
-        // A structured tree is ~16-19x the input, so an input over MAX_STRUCTURED_BYTES
-        // is rejected at the size check (no tree built, no multi-GB balloon). The
+        // A structured tree costs up to ~30x the input (XML), so an input over
+        // MAX_STRUCTURED_BYTES is rejected at the size check (no tree, no balloon). The
         // rejection is on `.len()` alone, so no parse runs for the oversize input.
         let over = "x".repeat(MAX_STRUCTURED_BYTES + 1);
         for f in [Format::Json, Format::Yaml, Format::Xml, Format::Toml] {
