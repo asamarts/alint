@@ -314,6 +314,59 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             "rule_xml_path_absent",
             structured_path::absent_options_schema(),
         ),
+        // The dotenv / properties / ini / hcl path kinds share the SAME option
+        // structs as their json/yaml/toml/xml siblings, so derive their schema
+        // branches here too rather than hand-maintaining them in the base -- this
+        // keeps all 24 structured kinds' option field descriptions identical and
+        // prevents silent drift when a shared option field is added.
+        (
+            "rule_dotenv_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_dotenv_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_dotenv_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
+            "rule_properties_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_properties_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_properties_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
+            "rule_ini_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_ini_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_ini_path_absent",
+            structured_path::absent_options_schema(),
+        ),
+        (
+            "rule_hcl_path_equals",
+            structured_path::equals_options_schema(),
+        ),
+        (
+            "rule_hcl_path_matches",
+            structured_path::matches_options_schema(),
+        ),
+        (
+            "rule_hcl_path_absent",
+            structured_path::absent_options_schema(),
+        ),
         (
             "rule_json_schema_passes",
             json_schema_passes::options_schema(),

@@ -10,8 +10,8 @@ Pages because the consumer and producer disagreed on a hand-counted number.
 ## 1. Problem
 
 alint asserts its own surface area as prose in many places — the README sentence
-("89 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix
-ops, 8 output formats", "11 subcommands"), `docs/site/about/index.md`, and the
+("105 rule kinds across 13 families, 22 bundled ecosystem rulesets, 12 auto-fix
+ops, 8 output formats", "12 subcommands"), `docs/site/about/index.md`, and the
 alint.org marketing site (a separate, private repo). Every one of these is a
 hand-maintained number that drifts the instant a rule kind, fixer, formatter, or
 subcommand lands without someone editing the copy.

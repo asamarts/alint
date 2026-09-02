@@ -51,6 +51,20 @@ impl Format {
     ];
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
+        // Strip a leading UTF-8 BOM uniformly. Some libraries (serde_json, hcl-rs)
+        // reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
+        // `package.json` / `config.hcl` (common from Windows editors) would
+        // false-fire the structured rules; the hand-rolled dotenv/ini/properties
+        // parsers already strip it. Flagging a BOM is the `no_bom` rule's job.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+        // An empty / whitespace-only file is "no config", not a broken document:
+        // return an empty document so `*_path_absent` is satisfied and `if_present`
+        // stays silent, uniformly. Otherwise the JSON / XML / YAML libraries reject
+        // an empty input as a syntax error -- a false positive for the absent family.
+        // Flagging an empty file is the `no_empty_files` rule's job.
+        if text.trim().is_empty() {
+            return Ok(Value::Null);
+        }
         match self {
             // Try strict JSON first (the common, fast path — plain
             // JSON is byte-for-byte unchanged). Only on failure retry
@@ -228,15 +242,20 @@ fn strip_jsonc(src: &str) -> String {
 
 /// Maximum XML element-nesting depth `xml_to_value` will
 /// descend. Real config/manifest XML (`.csproj`, `pom.xml`, …)
-/// is a handful of levels deep; 256 is far beyond any real
+/// is a handful of levels deep; 128 is far beyond any real
 /// manifest yet far below the recursion depth that would
 /// overflow the stack. A document nested deeper is rejected as a
 /// parse error (one per-file violation via the existing
 /// parse-error path) rather than recursed into — a crafted or
-/// accidental deeply-nested file must never abort the run. The
+/// accidental deeply-nested file must never abort the run. Unlike
+/// HCL, XML parses on the CALLING thread (a rayon worker, ~1-2 MB
+/// stack), and roxmltree overflows a 1 MB stack around depth
+/// ~256-350; 128 keeps a ~2x margin on the smallest stacks
+/// (macOS / musl / a constrained `RUST_MIN_STACK`), matching the
+/// JSON recursion limit and the `when`-parser's calibration. The
 /// other formats' parsers carry their own internal recursion
 /// limits; this is the XML arm's equivalent.
-pub const MAX_XML_DEPTH: usize = 256;
+pub const MAX_XML_DEPTH: usize = 128;
 
 /// Conservatively bound the raw XML's element-nesting depth BEFORE
 /// `roxmltree::Document::parse` sees it. `Document::parse` descends recursively
@@ -425,17 +444,19 @@ fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
 pub const MAX_HCL_DEPTH: usize = 256;
 
 /// Maximum HCL input size `hcl_to_value` will parse. The [`MAX_HCL_DEPTH`] guard
-/// bounds `{` / `[` nesting, but `hcl-rs` ALSO recurses on EXPRESSION nesting that
-/// carries no delimiter to count -- long operator chains (`1 + 1 + …`,
-/// `a == a == …`), nested ternaries, and deeply-nested parentheses / function
-/// calls (in code AND inside `${…}` string / heredoc interpolation). A lexical
-/// scan cannot bound those, and they too overflow the stack (SIGABRT). They need
-/// tens of thousands of levels, though, and every level costs input bytes, so a
-/// size cap bounds them: a file this small cannot hold enough expression tokens to
-/// exceed the parse-thread stack. Real HCL is far smaller (Terraform best practice
+/// bounds `{` / `[` / `(` and unary nesting, but `hcl-rs` ALSO recurses on
+/// EXPRESSION-OPERATOR nesting that carries no such delimiter -- long binary /
+/// ternary chains (`1 + 1 + …`, `a == a == …`, `1 ? … : …`), including inside
+/// `${…}` string / heredoc interpolation. A lexical scan cannot cleanly bound
+/// those (operators interleave with operands and span lines), and they too
+/// overflow the stack (SIGABRT). The DENSEST such chain is ~2 bytes per recursion
+/// level (`+1`), so the byte cap bounds them: on the 512 MB parse thread an
+/// operator chain overflows around ~75 000 levels (~150 KB), so 64 KiB admits at
+/// most ~32 000 levels -- a >2x stack margin that tolerates per-level frame drift
+/// across `hcl-rs` versions. Real HCL is far smaller (Terraform best practice
 /// splits into modules); an oversize file is one per-file parse-error violation.
-/// Kept in step with the parse-thread `stack_size` in `hcl_to_value`.
-pub const MAX_HCL_BYTES: usize = 256 * 1024;
+/// MUST be kept below (parse-thread `stack_size` / operator frame / 2 bytes).
+pub const MAX_HCL_BYTES: usize = 64 * 1024;
 
 /// Conservatively bound the HCL constructs `hcl-rs` recurses on, BEFORE
 /// `hcl::from_str` overflows the stack. Every one of these aborts the process on
@@ -882,6 +903,7 @@ mod tests {
         // failing, the guard / size cap / parse-thread stack regressed.
         let d = 60_000; // past every measured crash threshold
         let bombs = [
+            // Delimiter / unary nesting -- caught by the depth guard (small inputs).
             format!("x = {}1{}", "(".repeat(d), ")".repeat(d)), // parens
             format!("x = {}1{}", "f(".repeat(d), ")".repeat(d)), // function calls
             format!("x = {}1", "-".repeat(d)),                  // unary minus
@@ -889,6 +911,14 @@ mod tests {
             format!("x = \"${{{}1{}}}\"", "(".repeat(d), ")".repeat(d)), // interp parens
             format!("x = \"${{{}1{}}}\"", "[".repeat(d), "]".repeat(d)), // interp tuple
             format!("x = <<EOT\n${{{}1{}}}\nEOT\n", "[".repeat(d), "]".repeat(d)), // heredoc interp
+            // Delimiter-less OPERATOR chains -- these carry no `{`/`[`/`(` and no
+            // unary run, so ONLY the byte cap stops them. Each is in the ~150 KB+
+            // overflow band that a naive cap (256 KB) let crash (audit finding);
+            // 64 KB rejects them. Regression guards against re-widening the cap.
+            format!("x = 1{}", "+1".repeat(80_000)), // binary chain (~160 KB)
+            format!("x = {}1", "1?1:".repeat(65_000)), // ternary chain
+            format!("x = \"${{1{}}}\"", "+1".repeat(131_000)), // binary inside interpolation
+            format!("x = <<EOT\n${{1{}}}\nEOT\n", "+1".repeat(131_000)), // binary inside heredoc interp
         ];
         for b in &bombs {
             assert!(
@@ -896,19 +926,13 @@ mod tests {
                 "an expression bomb must be a parse error, not a crash"
             );
         }
-        // A bounded operator chain still parses (the size cap does not over-reject a
-        // normal file); an oversize input is size-rejected before it can recurse.
+        // A bounded operator chain UNDER the cap still parses (no over-reject of a
+        // normal file), at a depth well inside the parse-thread stack ceiling.
         assert!(
             Format::Hcl
-                .parse(&format!("x = {}1", "1 + ".repeat(5_000)))
+                .parse(&format!("x = 1{}", "+1".repeat(10_000)))
                 .is_ok(),
             "a bounded binary chain parses"
-        );
-        assert!(
-            Format::Hcl
-                .parse(&format!("x = {}1", "1 + ".repeat(MAX_HCL_BYTES)))
-                .is_err(),
-            "an oversize input is rejected by the byte cap"
         );
     }
 

@@ -198,7 +198,7 @@ Nothing carries more than three; the `gen-categories` gate can assert this bound
 | Plugin (tier 1) | 1 | 1 / +0 |
 
 The biggest discoverability gains are the Security lens (3 -> 13), Encoding (1 -> 5), and
-Structure (3 -> 9). 32 of the 78 canonical kinds are multi-category; 46 stay single, so
+Structure (3 -> 9). 32 of the 94 canonical kinds are multi-category; 62 stay single, so
 the taxonomy is enriched without becoming a everything-tagged-everything soup.
 
 ## Mis-filed-primary flags (future cleanup, not this feature)

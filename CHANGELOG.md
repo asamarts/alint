@@ -58,6 +58,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Structured-query rules (`*_path_*`, `json_schema_passes`) no longer false-fire on
+  a BOM-prefixed or empty file.** A leading UTF-8 BOM (common on Windows-authored
+  `package.json` / `tsconfig.json`) is now stripped for every format before parsing —
+  JSON and HCL previously rejected it as a syntax error — and an empty / whitespace-only
+  file parses as an empty document (so `*_path_absent` is satisfied and `if_present`
+  stays silent) rather than a parse error. Flagging a BOM or an empty file remains the
+  `no_bom` / `no_empty_files` rules' job.
 - The bundled `ci/github-actions@v1` ruleset's `gha-pin-actions-to-sha` rule no
   longer flags **local composite-action references** (`uses: ./...`). Local actions
   live in the same repo (the same trust boundary) and cannot be SHA-pinned; the rule

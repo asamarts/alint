@@ -355,8 +355,8 @@ Site:
 Following the project's one-commit-per-phase convention with a forward pointer.
 
 - **Phase 0.** This design doc, ADR-0009, and the curated assignment table
-  (`docs/design/rule-categories-assignments.md`): 78 canonical kinds, 32 multi-category,
-  46 single, with the editorial calls settled.
+  (`docs/design/rule-categories-assignments.md`): 94 canonical kinds, 32 multi-category,
+  62 single, with the editorial calls settled.
 - **Phase 1.** `Category` enum (with the order-parity gate); add the shared rules.md
   parse helper and adopt it in the generators; add single-membership `**Categories:**`
   lines (each kind's current family only); `gen-categories` plus the in-crate bridge;
