@@ -59,9 +59,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **Structured-query rules (`*_path_*`, `json_schema_passes`) no longer false-fire on
-  a BOM-prefixed or empty file.** A leading UTF-8 BOM (common on Windows-authored
-  `package.json` / `tsconfig.json`) is now stripped for every format before parsing —
-  JSON and HCL previously rejected it as a syntax error — and an empty / whitespace-only
+  a BOM-prefixed or empty file.** Any leading UTF-8 BOM(s) (common on Windows-authored
+  `package.json` / `tsconfig.json`) are now stripped for every format before parsing —
+  JSON and HCL previously rejected a BOM as a syntax error — and an empty / whitespace-only
   file parses as an empty object `{}` for every format, so `*_path_absent` is satisfied,
   `if_present` stays silent, and `json_schema_passes` validates it against
   `{"type":"object"}` instead of false-firing "null is not of type object". Flagging a
@@ -105,6 +105,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for minutes -- an algorithmic-complexity DoS that no nesting guard caught. The pre-scan
   now also caps attributes per element, restoring linear-time parsing; an over-wide
   element is one per-file parse-error violation.
+- **A remote `extends:` ruleset can no longer hang the run with a YAML flow bomb.** The
+  flow-depth guard that protects a local config was not applied to a remote (or bundled)
+  `extends:` body, so a deeply-nested-flow remote ruleset made `serde_yaml_ng` process it
+  super-linearly. Remote and bundled bodies now go through the same guard.
+- **HCL parsing no longer panics when the parse thread can't be spawned.** Under address-
+  space / thread pressure (hardened CI, containers) the large-stack HCL parse thread could
+  fail to spawn and `.expect`-panic with the crash banner; it now surfaces as one ordinary
+  per-file parse-error violation.
 
 ## [0.15.2] - 2026-08-22
 

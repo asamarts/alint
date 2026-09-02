@@ -55,25 +55,31 @@ impl Format {
         // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
         // `package.json` / `config.hcl` (common from Windows editors) would
         // false-fire the structured rules; the hand-rolled dotenv/ini/properties
-        // parsers already strip it. `trim_start_matches` (not `strip_prefix`) so a
-        // rare double BOM can't leave a residual `\u{feff}` that survives the
-        // emptiness check below and mis-parses (YAML would otherwise read the
-        // residual as a scalar string). Flagging a BOM is the `no_bom` rule's job.
+        // parsers already strip it. `trim_start_matches` (not `strip_prefix`) so
+        // consecutive leading BOMs are all removed. Flagging a BOM is the `no_bom`
+        // rule's job.
         let text = text.trim_start_matches('\u{feff}');
-        // An empty / whitespace-only file is "no config", not a broken document:
-        // return an empty OBJECT (an empty document) so `*_path_absent` is
-        // satisfied, `if_present` stays silent, AND `json_schema_passes` validates
-        // it as `{}` -- which satisfies `{"type":"object"}`, since an empty config
-        // file IS a valid empty table. (Returning `Value::Null` here made
-        // `json_schema_passes` false-fire "null is not of type object" on an empty
-        // `.toml`/`.ini`/`.env`/`.properties`/`.hcl`, while a comment-only file of
-        // the same format parsed to `{}` and passed -- two "no config" files
-        // disagreeing.) Otherwise the JSON / XML libraries reject empty input as a
-        // syntax error -- a false positive for the absent family. Flagging an empty
-        // file is the `no_empty_files` rule's job. (TOML / dotenv / INI / properties
-        // already parse empty to `{}`; YAML's native empty is `null`, but one
-        // uniform empty document is less surprising than per-format null-vs-object.)
-        if text.trim().is_empty() {
+        // An empty file (nothing but BOMs and whitespace) is "no config", not a
+        // broken document: return an empty OBJECT (an empty document) so
+        // `*_path_absent` is satisfied, `if_present` stays silent, AND
+        // `json_schema_passes` validates it as `{}` -- which satisfies
+        // `{"type":"object"}`, since an empty config file IS a valid empty table.
+        // (Returning `Value::Null` here made `json_schema_passes` false-fire "null
+        // is not of type object" on an empty `.toml`/`.ini`/`.env`/`.properties`/
+        // `.hcl`, while a comment-only file of the same format parsed to `{}` and
+        // passed -- two "no config" files disagreeing.) Otherwise the JSON / XML
+        // libraries reject empty input as a syntax error -- a false positive for the
+        // absent family. The emptiness test also strips a stray BOM interleaved with
+        // whitespace (e.g. `\u{feff} \u{feff}`), which `trim_start_matches` alone
+        // leaves and which YAML/properties/INI would otherwise mis-read as a
+        // one-character scalar. Flagging an empty file is the `no_empty_files` rule's
+        // job. (TOML / dotenv / INI / properties already parse empty to `{}`; YAML's
+        // native empty is `null`, but one uniform empty document is less surprising
+        // than per-format null-vs-object.)
+        if text
+            .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+            .is_empty()
+        {
             return Ok(Value::Object(serde_json::Map::new()));
         }
         match self {
@@ -147,13 +153,24 @@ impl Format {
                 _ => {}
             }
         }
-        // dotenv is filename-based, not extension-based: a bare `.env` has no
-        // extension, and `.env.local` / `.env.production` carry the environment
-        // where an extension would be. Match the `.env` family by name, but only
-        // for a suffix that ISN'T itself a known format extension (handled above),
-        // so `.env.json` is JSON, not dotenv. Case-folded to match `.ENV` too.
+        // Well-known config files identified by NAME, not extension: extension-less
+        // (`.editorconfig`, `Pipfile`) or a `.config` that is specifically .NET XML
+        // (a bare `.config` extension is not universally XML, so match exact names).
+        // Only UNAMBIGUOUS names are mapped -- `.eslintrc`/`.prettierrc` are skipped
+        // because they may be JSON OR YAML, so they still need an explicit `format:`.
+        // dotenv is likewise filename-based: a bare `.env` has no extension, and
+        // `.env.local` / `.env.production` carry the environment where an extension
+        // would be. The `.env` family matches by name but only for a suffix that
+        // ISN'T a known format extension (handled above), so `.env.json` is JSON.
+        // All case-folded (`.ENV`, `WEB.CONFIG`, ...).
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             let lname = name.to_ascii_lowercase();
+            match lname.as_str() {
+                ".editorconfig" => return Some(Self::Ini),
+                "pipfile" => return Some(Self::Toml),
+                "web.config" | "app.config" => return Some(Self::Xml),
+                _ => {}
+            }
             if lname == ".env" || lname.starts_with(".env.") {
                 return Some(Self::Dotenv);
             }
@@ -286,11 +303,15 @@ pub const MAX_XML_DEPTH: usize = 128;
 /// The analytically-safe ceiling for [`MAX_XML_DEPTH`], enforced at compile time
 /// below. roxmltree recurses ~1 frame per element; the smallest stack alint
 /// realistically parses XML on is a ~2 MiB rayon worker, which overflows (debug)
-/// around ~350 elements deep, so ~half of that keeps a >=2x margin. Raising
-/// `MAX_XML_DEPTH` past this risks a stack-overflow process-abort on a constrained
-/// worker stack -- and the depth tests only exercise the REJECTION path (they run
-/// on a >=2 MiB harness stack where even 300-deep survives), so a careless
-/// re-widening would pass every runtime test. This static bound is the real guard.
+/// around ~350 elements deep, so ~half of that keeps a >=2x margin. This ceiling is
+/// SCOPED to that 2 MiB production worker; the shipping `MAX_XML_DEPTH = 128` also
+/// survives a constrained 1 MiB stack (~1.4x), but a raise all the way to this
+/// ceiling would erode that non-production 1 MiB margin to ~1.1x (fine on 2 MiB) --
+/// so treat a bump toward 160 as 2-MiB-only. Raising `MAX_XML_DEPTH` PAST this risks
+/// a stack-overflow process-abort even on the 2 MiB worker -- and the depth tests
+/// only exercise the REJECTION path (they run on a >=2 MiB harness stack where even
+/// 300-deep survives), so a careless re-widening would pass every runtime test. This
+/// static bound is the real guard.
 const SAFE_MAX_XML_DEPTH: usize = 160;
 const _: () = assert!(
     MAX_XML_DEPTH <= SAFE_MAX_XML_DEPTH,
@@ -305,15 +326,21 @@ const _: () = assert!(
 /// file into MINUTES of parse time (`<r a0=".." a1=".." …/>`: ~64 K attrs ≈ 96 s,
 /// clean quadratic), an algorithmic-complexity `DoS` that NO nesting guard catches
 /// (all the depth guards bound height, not width). Bounding attributes per element
-/// makes total parse cost linear in the (already size-capped) input again: the
-/// worst case becomes `cap * total_attrs` = O(bytes). 1024 is 10-20x beyond any
-/// real element -- XML expresses repetition with child ELEMENTS, not thousands of
-/// attributes on one tag (a heavily-attributed `MSBuild` item or SVG node has
-/// dozens) -- yet bounds one element's validation to ~1024^2 ≈ 1 M compares (tens
-/// of ms). roxmltree can't be bumped to fix this (0.21 stack-overflows on nesting;
-/// pinned at 0.20), so the pre-scan below caps it. An over-cap element is rejected
-/// as one ordinary per-file parse-error violation.
-const MAX_XML_ATTRS_PER_ELEMENT: usize = 1024;
+/// makes total parse cost linear in the input: the aggregate work is
+/// `sum(k_i^2) <= cap * sum(k_i) = cap * total_attrs`, and `total_attrs` is bounded
+/// by the `MAX_ANALYZE_BYTES` (256 MiB) read cap, so the whole document is O(bytes).
+/// The cap ALSO sets the constant: at 256 a crafted attribute-dense file parses at
+/// roughly benign-XML speed (measured ~1.5x a same-size ordinary file, vs ~5x at
+/// 1024), so it no longer costs meaningfully more than any other file of its size --
+/// unlike HCL, XML has no format-specific byte cap (real XML data files can be large
+/// and must not false-error), so the per-element cap is the sole width bound and is
+/// kept tight. 256 is still ~5x beyond even an attribute-heavy real element (an
+/// `MSBuild` `<Csc>`/`<Vbc>` task, the widest common case, exposes ~40; SVG/`.csproj`
+/// nodes have far fewer) -- XML expresses repetition with child ELEMENTS, not
+/// hundreds of attributes on one tag. roxmltree can't be bumped to fix this (0.21
+/// stack-overflows on nesting; pinned at 0.20). An over-cap element is rejected as
+/// one ordinary per-file parse-error violation.
+const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 
 /// Conservatively bound the raw XML's element-nesting DEPTH and per-element
 /// attribute WIDTH BEFORE `roxmltree::Document::parse` sees it, in one linear scan.
@@ -625,14 +652,22 @@ fn hcl_to_value(text: &str) -> std::result::Result<Value, String> {
         ));
     }
     std::thread::scope(|scope| {
-        std::thread::Builder::new()
+        match std::thread::Builder::new()
             .stack_size(512 * 1024 * 1024)
             .spawn_scoped(scope, || {
                 hcl::from_str::<Value>(text).map_err(|e| e.to_string())
-            })
-            .expect("spawn HCL parse thread")
-            .join()
-            .unwrap_or_else(|_| Err("HCL parser panicked".to_string()))
+            }) {
+            Ok(handle) => handle
+                .join()
+                .unwrap_or_else(|_| Err("HCL parser panicked".to_string())),
+            // A linter must never abort the run -- not on untrusted input, and not
+            // on resource pressure. If the OS refuses the large-stack parse thread
+            // (an `RLIMIT_AS` / `RLIMIT_NPROC` / `vm.max_map_count` ceiling, common
+            // in hardened CI / containers, against which the 512 MB reservation
+            // counts), surface it as one ordinary per-file parse-error violation
+            // rather than `.expect`-panicking with the "alint crashed" banner.
+            Err(e) => Err(format!("could not allocate HCL parse thread: {e}")),
+        }
     })
 }
 
@@ -721,6 +756,23 @@ mod tests {
         // a single attribute whose value is packed with `=` stays one attribute.
         let equals_in_value = format!("<r a=\"{}\"/>", "=".repeat(5000));
         assert!(xml_within_parse_limits(&equals_in_value).is_ok());
+        // Exact boundary: `MAX_XML_ATTRS_PER_ELEMENT` is accepted, one more is not.
+        let at_cap: String = format!(
+            "<r{}/>",
+            (0..MAX_XML_ATTRS_PER_ELEMENT).fold(String::new(), |mut s, i| {
+                write!(s, " a{i}=\"v\"").unwrap();
+                s
+            })
+        );
+        assert!(
+            xml_within_parse_limits(&at_cap).is_ok(),
+            "exactly the cap is accepted"
+        );
+        let over_cap = at_cap.replace("/>", " extra=\"v\"/>");
+        assert!(
+            xml_within_parse_limits(&over_cap).is_err(),
+            "one over the cap is rejected"
+        );
     }
 
     #[test]
@@ -846,6 +898,31 @@ mod tests {
             Some(Format::Dotenv),
             ".ENV should detect as dotenv"
         );
+    }
+
+    #[test]
+    fn well_known_config_files_detect_by_name() {
+        use std::path::Path;
+        // Extension-less / name-identified config files auto-detect by filename.
+        for (p, want) in [
+            (".editorconfig", Format::Ini),
+            ("Pipfile", Format::Toml),
+            ("web.config", Format::Xml),
+            ("app.config", Format::Xml),
+            ("WEB.CONFIG", Format::Xml), // case-folded
+        ] {
+            assert_eq!(
+                Format::detect_from_path(Path::new(p)),
+                Some(want),
+                "{p} should detect by name"
+            );
+        }
+        // `Pipfile.lock` is JSON, NOT TOML -- the exact-name match must not catch it
+        // (and we don't auto-detect it, so it stays None rather than mis-detecting).
+        assert_eq!(Format::detect_from_path(Path::new("Pipfile.lock")), None);
+        // Ambiguous dotfiles (JSON or YAML) are deliberately NOT auto-detected.
+        assert_eq!(Format::detect_from_path(Path::new(".eslintrc")), None);
+        assert_eq!(Format::detect_from_path(Path::new(".prettierrc")), None);
     }
 
     #[test]
@@ -1138,10 +1215,13 @@ mod tests {
         // The depth REJECTION path is tested elsewhere; this gates the other half
         // -- that a document AT `MAX_XML_DEPTH` actually PARSES without overflowing
         // on the stack alint really parses XML on (a ~2 MiB rayon worker), not just
-        // on the test harness's larger stack. roxmltree recurses ~1 frame/element;
-        // if `MAX_XML_DEPTH` were raised past what a 2 MiB stack holds, this ABORTS
-        // loudly. (The compile-time `SAFE_MAX_XML_DEPTH` assert is the primary
-        // guard against re-widening; this is the empirical at-limit backstop.)
+        // on the test harness's larger stack. roxmltree recurses ~1 frame/element.
+        // NOTE this proves at-limit safety for the CURRENT value; it does NOT by
+        // itself catch a re-widening: a 2 MiB debug stack survives to ~350 deep, so
+        // a regression to e.g. 256 would still PASS here. The compile-time
+        // `SAFE_MAX_XML_DEPTH = 160` assert is what blocks such a raise (`256 > 160`
+        // = build error); this runtime test is the empirical at-limit backstop that
+        // the ceiling isn't fantasy.
         let deep = format!(
             "{}x{}",
             "<a>".repeat(MAX_XML_DEPTH),
@@ -1181,6 +1261,15 @@ mod tests {
                 f.parse("   \n\t  "),
                 Ok(empty_doc.clone()),
                 "{} whitespace-only input must be an empty object",
+                f.label()
+            );
+            // A BOM interleaved with whitespace (a stray BOM that `trim_start_matches`
+            // alone leaves behind) on otherwise-empty input must ALSO be an empty
+            // object, not a one-char scalar (which YAML/properties/INI would produce).
+            assert_eq!(
+                f.parse("\u{feff} \u{feff}\t"),
+                Ok(empty_doc.clone()),
+                "{} BOM-and-whitespace-only input must be an empty object",
                 f.label()
             );
         }
@@ -1232,6 +1321,120 @@ mod tests {
             Format::Hcl.parse("a = 1\na = 2\n").is_err(),
             "HCL rejects a duplicate attribute"
         );
+    }
+
+    #[test]
+    fn duplicate_keys_diverge_by_format_as_documented() {
+        // GATE for the "Duplicate keys differ" caveat in docs/rules.md: a key
+        // repeated within one scope resolves three incompatible ways, and a rule
+        // author needs to know which. Pinning it here keeps the doc honest and
+        // catches a parser swap that changes the behavior (e.g. a serde_yaml that
+        // starts rejecting dup keys would move YAML from keep-last to reject).
+        //
+        // Keep-LAST (earlier value invisible):
+        assert_eq!(
+            Format::Json.parse("{\"a\":1,\"a\":2}").unwrap()["a"],
+            serde_json::json!(2),
+            "JSON keeps the last duplicate key"
+        );
+        assert_eq!(
+            Format::Yaml.parse("a: 1\na: 2\n").unwrap()["a"],
+            serde_json::json!(2),
+            "YAML (serde_yaml_ng) keeps the last duplicate key"
+        );
+        assert_eq!(
+            Format::Dotenv.parse("a=1\na=2\n").unwrap()["a"],
+            serde_json::json!("2"),
+            "dotenv keeps the last duplicate key"
+        );
+        assert_eq!(
+            Format::Properties.parse("a=1\na=2\n").unwrap()["a"],
+            serde_json::json!("2"),
+            "properties keeps the last duplicate key"
+        );
+        // REJECT (parse error):
+        assert!(
+            Format::Toml.parse("a = 1\na = 2\n").is_err(),
+            "TOML rejects a duplicate key"
+        );
+        assert!(
+            Format::Hcl.parse("a = 1\na = 2\n").is_err(),
+            "HCL rejects a duplicate attribute"
+        );
+        // Document-order ARRAY (both values queryable):
+        assert_eq!(
+            Format::Xml.parse("<r><a>1</a><a>2</a></r>").unwrap()["r"]["a"],
+            serde_json::json!(["1", "2"]),
+            "XML collects repeated elements into a document-order array"
+        );
+        assert_eq!(
+            Format::Ini.parse("[s]\na=1\na=2\n").unwrap()["s"]["a"],
+            serde_json::json!(["1", "2"]),
+            "INI collects a repeated key into a document-order array"
+        );
+    }
+
+    #[test]
+    fn value_mapping_caveats_are_accurate() {
+        // GATE for the "Value-mapping caveats" block in docs/rules.md. That block
+        // has drifted from the real parser twice (a linter that documents a footgun
+        // must document the RIGHT footgun), so pin every claim here: a doc/parser
+        // mismatch now fails CI. (Duplicate-key divergence has its own test above.)
+        use serde_json::json;
+
+        // Stringly-typed formats store even a numeric literal as a STRING -- the root
+        // cause of "numeric/boolean filter comparators no-op on XML/dotenv/properties/
+        // INI"; a typed format keeps the number.
+        assert_eq!(
+            Format::Dotenv.parse("PORT=8080").unwrap()["PORT"],
+            json!("8080")
+        );
+        assert_eq!(
+            Format::Json.parse("{\"PORT\":8080}").unwrap()["PORT"],
+            json!(8080)
+        );
+
+        // inf/nan: TOML/YAML -> null; HCL -> opaque expression string (NOT an error);
+        // JSON has no such literal.
+        assert_eq!(Format::Toml.parse("a = inf").unwrap()["a"], json!(null));
+        assert_eq!(Format::Yaml.parse("a: .inf").unwrap()["a"], json!(null));
+        assert_eq!(Format::Hcl.parse("a = inf").unwrap()["a"], json!("${inf}"));
+        assert_eq!(Format::Hcl.parse("a = nan").unwrap()["a"], json!("${nan}"));
+
+        // Empty value: null in XML/YAML, "" in json/toml/dotenv/ini/properties.
+        assert_eq!(
+            Format::Xml.parse("<r><a/></r>").unwrap()["r"]["a"],
+            json!(null)
+        );
+        assert_eq!(Format::Yaml.parse("a:").unwrap()["a"], json!(null));
+        assert_eq!(Format::Json.parse("{\"a\":\"\"}").unwrap()["a"], json!(""));
+        assert_eq!(Format::Toml.parse("a = \"\"").unwrap()["a"], json!(""));
+        assert_eq!(Format::Dotenv.parse("a=").unwrap()["a"], json!(""));
+        assert_eq!(Format::Ini.parse("[s]\nk=").unwrap()["s"]["k"], json!(""));
+        assert_eq!(Format::Properties.parse("k=").unwrap()["k"], json!(""));
+
+        // A TOML date/time is a magic-key OBJECT, not a string; YAML's is a string.
+        assert_eq!(
+            Format::Toml.parse("a = 1979-05-27").unwrap()["a"],
+            json!({ "$__toml_private_datetime": "1979-05-27" })
+        );
+        assert_eq!(
+            Format::Yaml.parse("a: 2002-12-14").unwrap()["a"],
+            json!("2002-12-14")
+        );
+
+        // Based / underscored numbers: TOML parses all; YAML parses base prefixes but
+        // keeps an underscored decimal as a string; HCL REJECTS non-decimal literals.
+        assert_eq!(Format::Toml.parse("a = 0x1F").unwrap()["a"], json!(31));
+        assert_eq!(Format::Toml.parse("a = 1_000").unwrap()["a"], json!(1000));
+        assert_eq!(Format::Yaml.parse("a: 0x1F").unwrap()["a"], json!(31));
+        assert_eq!(Format::Yaml.parse("a: 1_000").unwrap()["a"], json!("1_000"));
+        assert!(Format::Hcl.parse("a = 0x1F").is_err());
+
+        // Big integer beyond i64: lossy float in JSON, parse error in YAML/TOML.
+        assert!(Format::Json.parse("{\"a\":100000000000000000000}").unwrap()["a"].is_f64());
+        assert!(Format::Yaml.parse("a: 100000000000000000000").is_err());
+        assert!(Format::Toml.parse("a = 100000000000000000000").is_err());
     }
 
     #[test]

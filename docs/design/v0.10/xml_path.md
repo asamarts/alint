@@ -168,7 +168,7 @@ musl stacks — still orders of magnitude beyond any real
 `.csproj` / `pom.xml`, far below the overflow depth). Past the
 bound it returns an `Err` that flows through the **existing**
 parse-error path: one ordinary "not a valid XML document: XML
-nesting exceeds the maximum supported depth (256)" violation
+nesting exceeds the maximum supported depth (128)" violation
 for that file, per-file contained, no abort. This brings the
 XML arm to the same hardening posture the other formats already
 have.

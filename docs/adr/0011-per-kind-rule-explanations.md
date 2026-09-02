@@ -143,6 +143,6 @@ Harder, and accepted:
   (the cleaning/cap model), the `gen-categories` parse pass (`categories.rs`), the
   `ALIAS_TO_CANONICAL` map + `categories_for_kind` (alias resolution + the family
   derivation), and `categories_gen.rs` (the generated-bridge + `--check` pattern).
-- All 78 canonical kinds have prose in `docs/rules.md` (enforced by
+- Every canonical kind has prose in `docs/rules.md` (enforced by
   `gen-categories`'s registry validation and docs-export's undocumented-kind gate),
   so the bridge is never missing a summary.
