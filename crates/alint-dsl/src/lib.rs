@@ -477,6 +477,12 @@ pub fn parse(yaml: &str) -> Result<Config> {
             alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
         )));
     }
+    if !alint_core::yaml_depth::expansion_within_limit(yaml) {
+        return Err(Error::Other(format!(
+            "YAML alias expansion exceeds the maximum supported node count ({})",
+            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
+        )));
+    }
     let config: Config = serde_yaml_ng::from_str(yaml)?;
     if !config.extends.is_empty() {
         return Err(Error::Other(

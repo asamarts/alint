@@ -113,6 +113,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   space / thread pressure (hardened CI, containers) the large-stack HCL parse thread could
   fail to spawn and `.expect`-panic with the crash banner; it now surfaces as one ordinary
   per-file parse-error violation.
+- **A YAML alias-expansion bomb can no longer hang the run.** A single anchor referenced
+  many times (`&a [..]` + thousands of `*a`, or a `<<: *a` merge) expands to tens of
+  millions of nodes from a ~150 KB file -- serde_yaml_ng's own limits catch only NESTED
+  aliases (billion-laughs), not this shape, and the flow-depth guard only bounds nesting.
+  A cheap discard-only pre-count now bounds alias expansion for every YAML surface
+  (`yaml_path_*`, `json_schema_passes`, `extract`, and config / `extends:` loading), so a
+  bomb becomes one per-file parse-error instead of a multi-second, multi-GB hang. Alias-free
+  YAML is unaffected (the check short-circuits) and every legit document parses unchanged.
+- **Every YAML entry point is now flow-guarded.** The public `alint_dsl::parse()` API, the
+  `{{env.X}}`-interpolated scalar re-parse, and the `alint suggest` config reader each
+  deserialized untrusted YAML without the flow-depth / alias guards the file loader
+  applies; all now share them, closing the last unguarded parse sites.
 
 ## [0.15.2] - 2026-08-22
 

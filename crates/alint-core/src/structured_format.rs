@@ -104,6 +104,16 @@ impl Format {
                         crate::yaml_depth::MAX_YAML_FLOW_DEPTH
                     ));
                 }
+                // Bound ALIAS expansion: `serde_yaml_ng`'s own limits miss a single
+                // anchor referenced many times (`*a` x N -> N x anchor-size nodes),
+                // which balloons a small file into millions of nodes. Cheap
+                // discard-only pre-count; alias-free text short-circuits for free.
+                if !crate::yaml_depth::expansion_within_limit(text) {
+                    return Err(format!(
+                        "YAML alias expansion exceeds the maximum supported node count ({})",
+                        crate::yaml_depth::MAX_YAML_EXPANSION_NODES
+                    ));
+                }
                 serde_yaml_ng::from_str(text).map_err(|e| e.to_string())
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
@@ -1394,10 +1404,14 @@ mod tests {
             json!(8080)
         );
 
-        // inf/nan: TOML/YAML -> null; HCL -> opaque expression string (NOT an error);
-        // JSON has no such literal.
+        // inf/nan: TOML (`inf`/`nan`) and YAML (`.inf`/`.nan`) -> null; HCL -> opaque
+        // expression string (NOT an error); JSON has no such literal. NB YAML's bare
+        // `nan` (no dot) is a plain string -- only the dotted form is a float.
         assert_eq!(Format::Toml.parse("a = inf").unwrap()["a"], json!(null));
+        assert_eq!(Format::Toml.parse("a = nan").unwrap()["a"], json!(null));
         assert_eq!(Format::Yaml.parse("a: .inf").unwrap()["a"], json!(null));
+        assert_eq!(Format::Yaml.parse("a: .nan").unwrap()["a"], json!(null));
+        assert_eq!(Format::Yaml.parse("a: nan").unwrap()["a"], json!("nan"));
         assert_eq!(Format::Hcl.parse("a = inf").unwrap()["a"], json!("${inf}"));
         assert_eq!(Format::Hcl.parse("a = nan").unwrap()["a"], json!("${nan}"));
 
@@ -1423,18 +1437,33 @@ mod tests {
             json!("2002-12-14")
         );
 
-        // Based / underscored numbers: TOML parses all; YAML parses base prefixes but
-        // keeps an underscored decimal as a string; HCL REJECTS non-decimal literals.
+        // Based / underscored numbers: TOML parses hex/octal/binary + underscores;
+        // YAML parses the base prefixes but keeps an underscored decimal as a string;
+        // HCL REJECTS non-decimal literals; the stringly formats keep them as strings.
         assert_eq!(Format::Toml.parse("a = 0x1F").unwrap()["a"], json!(31));
+        assert_eq!(Format::Toml.parse("a = 0o17").unwrap()["a"], json!(15));
+        assert_eq!(Format::Toml.parse("a = 0b101").unwrap()["a"], json!(5));
         assert_eq!(Format::Toml.parse("a = 1_000").unwrap()["a"], json!(1000));
         assert_eq!(Format::Yaml.parse("a: 0x1F").unwrap()["a"], json!(31));
+        assert_eq!(Format::Yaml.parse("a: 0o17").unwrap()["a"], json!(15));
+        assert_eq!(Format::Yaml.parse("a: 0b101").unwrap()["a"], json!(5));
         assert_eq!(Format::Yaml.parse("a: 1_000").unwrap()["a"], json!("1_000"));
         assert!(Format::Hcl.parse("a = 0x1F").is_err());
+        assert!(Format::Hcl.parse("a = 1_000").is_err());
+        assert_eq!(
+            Format::Ini.parse("[s]\nport=8080").unwrap()["s"]["port"],
+            json!("8080")
+        );
+        assert_eq!(
+            Format::Xml.parse("<r><n>42</n></r>").unwrap()["r"]["n"],
+            json!("42")
+        );
 
-        // Big integer beyond i64: lossy float in JSON, parse error in YAML/TOML.
+        // Big integer beyond i64: lossy float in JSON, parse error in YAML/TOML/HCL.
         assert!(Format::Json.parse("{\"a\":100000000000000000000}").unwrap()["a"].is_f64());
         assert!(Format::Yaml.parse("a: 100000000000000000000").is_err());
         assert!(Format::Toml.parse("a = 100000000000000000000").is_err());
+        assert!(Format::Hcl.parse("a = 100000000000000000000").is_err());
     }
 
     #[test]
