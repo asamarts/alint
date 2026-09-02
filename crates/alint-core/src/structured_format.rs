@@ -18,6 +18,24 @@
 
 use serde_json::Value;
 
+/// Maximum INPUT size any structured format will parse into a value tree. The read
+/// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed
+/// `serde_json::Value` tree measures ~16-19x the input (XML worst; dotenv ~10x), so
+/// a near-read-cap structured file would peak at multiple GB of RSS -- and the
+/// per-file rule dispatch is parallel, so several parse at once. Capping the
+/// structured-parse INPUT well below the read cap bounds a single file's tree to a
+/// few hundred MB. 64 MiB is far beyond any real config / manifest (they are KB-MB;
+/// even a large `OpenAPI` spec or SBOM is well under) yet 4x tighter than the read
+/// cap. An oversize structured file is one per-file parse-error violation. HCL keeps
+/// its own tighter [`MAX_HCL_BYTES`] (64 KiB); this is the ceiling for the rest.
+/// (Total concurrent parse memory -- this cap times the `par_iter` fan-out -- is a
+/// separate, coarser bound tracked in `docs/design/format-coverage.md`.)
+pub const MAX_STRUCTURED_BYTES: usize = 64 * 1024 * 1024;
+
+/// The structured-parse cap must stay meaningfully below the read cap, or it does
+/// nothing (a file that passes the read cap would also pass this and still balloon).
+const _: () = assert!((MAX_STRUCTURED_BYTES as u64) < crate::walker::MAX_ANALYZE_BYTES / 2);
+
 /// Which config format the target file is parsed as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -81,6 +99,14 @@ impl Format {
             .is_empty()
         {
             return Ok(Value::Object(serde_json::Map::new()));
+        }
+        // Bound the parsed-tree memory: a structured tree is ~16-19x the input, so a
+        // large file balloons to multiple GB. Reject before building it. (HCL's own
+        // 64 KiB cap in `hcl_to_value` is tighter and fires first for HCL.)
+        if text.len() > MAX_STRUCTURED_BYTES {
+            return Err(format!(
+                "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
+            ));
         }
         match self {
             // Try strict JSON first (the common, fast path — plain
@@ -1464,6 +1490,22 @@ mod tests {
         assert!(Format::Yaml.parse("a: 100000000000000000000").is_err());
         assert!(Format::Toml.parse("a = 100000000000000000000").is_err());
         assert!(Format::Hcl.parse("a = 100000000000000000000").is_err());
+    }
+
+    #[test]
+    fn oversize_structured_input_is_rejected_before_building_a_tree() {
+        // A structured tree is ~16-19x the input, so an input over MAX_STRUCTURED_BYTES
+        // is rejected at the size check (no tree built, no multi-GB balloon). The
+        // rejection is on `.len()` alone, so no parse runs for the oversize input.
+        let over = "x".repeat(MAX_STRUCTURED_BYTES + 1);
+        for f in [Format::Json, Format::Yaml, Format::Xml, Format::Toml] {
+            let err = f.parse(&over).unwrap_err();
+            assert!(
+                err.contains("maximum supported size"),
+                "{} oversize input rejected: {err}",
+                f.label()
+            );
+        }
     }
 
     #[test]

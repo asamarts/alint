@@ -125,6 +125,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{{env.X}}`-interpolated scalar re-parse, and the `alint suggest` config reader each
   deserialized untrusted YAML without the flow-depth / alias guards the file loader
   applies; all now share them, closing the last unguarded parse sites.
+- **Structured parsing is bounded against parse-tree memory blow-up.** A parsed value tree
+  is ~16-19x its input, so a near-read-cap (256 MiB) structured file could balloon to
+  multiple GB of RSS. Structured input is now capped at 64 MiB (`MAX_STRUCTURED_BYTES`; HCL
+  keeps its tighter 64 KiB cap), bounding a single file's tree to a few hundred MB. Config
+  and manifest files are far smaller; an oversize structured file is one parse-error.
+- **Parallel rule dispatch no longer panics when the OS refuses worker threads.** Under
+  `RLIMIT_NPROC` / pids pressure (hardened CI, containers) rayon's lazy global-pool init
+  would `.expect`-panic with the "alint crashed" banner; the engine now runs `par_iter`
+  inside an explicitly-built pool that falls back to single-thread (zero new threads)
+  execution, degrading gracefully with identical results.
 
 ## [0.15.2] - 2026-08-22
 
