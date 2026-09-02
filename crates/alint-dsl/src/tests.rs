@@ -1550,3 +1550,16 @@ fn extends_diamond_inheritance_resolves_without_duplicate_rules() {
         "diamond inheritance should yield one `from-d` rule, got {from_d_count}",
     );
 }
+
+#[test]
+fn parse_rejects_a_yaml_flow_bomb_without_hanging() {
+    // `parse()` is a public entry point, so untrusted YAML must be flow-guarded here
+    // exactly like the file loader and the remote/bundled `extends:` bodies -- a
+    // deep-flow bomb is a fast error, not a super-linear hang.
+    let bomb = format!("x: {}1{}", "[".repeat(200_000), "]".repeat(200_000));
+    let err = parse(&bomb).unwrap_err();
+    assert!(
+        err.to_string().contains("flow nesting"),
+        "expected a flow-depth error, got: {err}"
+    );
+}

@@ -298,6 +298,14 @@ fn strip_quotes(s: &str) -> Option<&str> {
 /// deserialization surfaces a clear type error. This matches the design
 /// doc's accepted trade-off.
 fn retype_scalar(text: String) -> Value {
+    // A bare number / bool literal is short; anything long is a string regardless.
+    // Skip the YAML re-parse for a long value so a huge INTERPOLATED value (e.g. an
+    // attacker-controlled `{{env.X}}` holding a `[[[…` flow bomb, substituted AFTER
+    // the config's own flow-depth guard already ran) can't be handed to libyaml to
+    // chew on super-linearly.
+    if text.len() > 1024 {
+        return Value::String(text);
+    }
     match serde_yaml_ng::from_str::<Value>(&text) {
         Ok(v @ (Value::Number(_) | Value::Bool(_))) => v,
         _ => Value::String(text),
@@ -357,6 +365,21 @@ mod tests {
     fn simple_env_substitution() {
         let env = fake_env(&[("ALINT_BASE_SHA", "deadbeef")]);
         assert_eq!(interp("{{env.ALINT_BASE_SHA}}", &env).unwrap(), "deadbeef");
+    }
+
+    #[test]
+    fn retype_scalar_skips_long_values_without_reparse() {
+        // A short bare number / bool re-types; a long value stays a String WITHOUT a
+        // super-linear YAML re-parse -- so a `[[[…` flow bomb substituted from an
+        // attacker-controlled `{{env.X}}` (after the config's own flow guard) can
+        // never reach libyaml here.
+        assert!(matches!(retype_scalar("72".to_string()), Value::Number(_)));
+        assert!(matches!(
+            retype_scalar("true".to_string()),
+            Value::Bool(true)
+        ));
+        let bomb = "[".repeat(200_000);
+        assert!(matches!(retype_scalar(bomb), Value::String(_)));
     }
 
     #[test]

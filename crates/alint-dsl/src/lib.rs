@@ -467,6 +467,16 @@ impl LoadOptions {
 }
 
 pub fn parse(yaml: &str) -> Result<Config> {
+    // Guard the deep-flow bomb before `serde_yaml_ng` (libyaml) processes it
+    // super-linearly, same as `load()` / the remote+bundled `extends:` bodies. This
+    // is a public entry point, so an external caller's untrusted YAML must be as
+    // safe here as through the file loader.
+    if !alint_core::yaml_depth::flow_depth_within_limit(yaml) {
+        return Err(Error::Other(format!(
+            "YAML flow nesting exceeds the maximum supported depth ({})",
+            alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
+        )));
+    }
     let config: Config = serde_yaml_ng::from_str(yaml)?;
     if !config.extends.is_empty() {
         return Err(Error::Other(
