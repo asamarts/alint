@@ -22,7 +22,11 @@
 //!   `min_ms` delta vs baseline must not exceed +15 %. `min_ms`
 //!   is the robust cross-version statistic (corpus
 //!   reproducibility ~2.7 % at ≥10k vs ~8.8 % for `mean_ms`).
-//!   Improvements never gate.
+//!   Improvements never gate. The small `changed`-mode cells
+//!   (1k/10k) are *advisory* here too, not just for CV: they are
+//!   dominated by the multi-core wakeup cost of a tiny parallel
+//!   burst and drift with the host's C-state / power state
+//!   independent of code (see the 2026-09 v0.16 investigation).
 //!
 //! Exit is non-zero iff a *gating* check fails; advisory notices
 //! never affect it.
@@ -45,6 +49,18 @@ const ADVISORY_SIZES: &[&str] = &["1k", "10k"];
 /// Sizes the cross-version regression check applies to (`min_ms`
 /// is reproducible here; 1k is not, at any statistic).
 const REGRESSION_SIZES: &[&str] = &["10k", "100k", "1m"];
+/// `changed`-mode cells at these sizes are advisory for the REGRESSION check,
+/// not just CV. They are dominated by the multi-core wakeup cost of a tiny
+/// parallel burst (git-diff runs single-threaded, then the rule `par_iter` runs
+/// over a tiny changed subset), which drifts with the host's C-state / frequency
+/// behavior independent of any code change. See
+/// docs/benchmarks/investigations/2026-09-v0.16-changed-mode-bench-artifact/.
+const CHANGED_REGRESSION_ADVISORY_SIZES: &[&str] = &["1k", "10k"];
+
+/// A `changed`-mode small cell reports its regression delta but does not gate.
+fn regression_advisory_only(r: &Row) -> bool {
+    r.mode == "changed" && CHANGED_REGRESSION_ADVISORY_SIZES.contains(&r.size_label.as_str())
+}
 
 fn cv(r: &Row) -> f64 {
     if r.mean_ms == 0.0 {
@@ -133,10 +149,10 @@ pub fn evaluate(rows: &[Row], baseline: Option<&[Row]>) -> Outcome {
         Some(base) => {
             let bmap: HashMap<_, _> = base.iter().map(|r| (key(r), r)).collect();
             o.lines.push(format!(
-                "[regression] min_ms vs baseline (gate: ≥10k, +{:.0}%)",
+                "[regression] min_ms vs baseline (gate: ≥10k, +{:.0}%; small changed cells advisory)",
                 REGRESSION_MAX * 100.0
             ));
-            let mut deltas: Vec<(f64, String)> = Vec::new();
+            let mut deltas: Vec<(f64, String, bool)> = Vec::new();
             let mut r_fail = 0usize;
             for r in rows {
                 if !REGRESSION_SIZES.contains(&r.size_label.as_str()) {
@@ -149,21 +165,30 @@ pub fn evaluate(rows: &[Row], baseline: Option<&[Row]>) -> Outcome {
                     continue;
                 }
                 let d = (r.min_ms - b.min_ms) / b.min_ms;
+                let advisory = regression_advisory_only(r);
                 if d > REGRESSION_MAX {
-                    r_fail += 1;
-                    o.gating_failures += 1;
+                    if advisory {
+                        o.advisories += 1;
+                    } else {
+                        r_fail += 1;
+                        o.gating_failures += 1;
+                    }
                 }
-                deltas.push((d, cell(r)));
+                deltas.push((d, cell(r), advisory));
             }
             deltas.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-            for (d, c) in deltas.iter().take(6) {
-                let tag = if *d > REGRESSION_MAX { "FAIL" } else { "ok  " };
+            for (d, c, advisory) in deltas.iter().take(8) {
+                let tag = if *d > REGRESSION_MAX {
+                    if *advisory { "ADV " } else { "FAIL" }
+                } else {
+                    "ok  "
+                };
                 o.lines
                     .push(format!("  {tag} {:34} min_ms {:+.1}%", c, d * 100.0));
             }
             if r_fail == 0 {
                 o.lines.push(format!(
-                    "  regression: PASS (max min_ms delta ≤ +{:.0}%)",
+                    "  regression: PASS (max gating min_ms delta ≤ +{:.0}%)",
                     REGRESSION_MAX * 100.0
                 ));
             }
@@ -284,5 +309,37 @@ mod tests {
         let after = vec![row("S9", "1k", "changed", 15.0, 1.0, 14.0)]; // -32%, 1k
         let o = evaluate(&after, Some(&base));
         assert_eq!(o.gating_failures, 0);
+    }
+
+    #[test]
+    fn changed_small_cell_regression_is_advisory_not_gating() {
+        // The v0.16.0 finding: small `changed` cells are floor-level and
+        // environment-sensitive (multi-core wakeup on a tiny burst), so a large
+        // min_ms delta there is advisory, not a gate failure. 1k is excluded from
+        // the regression check entirely; the 10k changed cell reports as advisory.
+        let base = vec![
+            row("S1", "10k", "changed", 43.0, 1.0, 43.0),
+            row("S1", "1k", "changed", 10.0, 1.0, 10.0),
+        ];
+        let after = vec![
+            row("S1", "10k", "changed", 117.0, 2.0, 117.0), // +172% min
+            row("S1", "1k", "changed", 17.0, 1.0, 17.0),    // +70% min
+        ];
+        let o = evaluate(&after, Some(&base));
+        assert_eq!(
+            o.gating_failures, 0,
+            "small changed cells must not gate: {:#?}",
+            o.lines
+        );
+        assert_eq!(o.advisories, 1, "the 10k changed cell is an advisory");
+    }
+
+    #[test]
+    fn full_10k_regression_still_gates() {
+        // The advisory carve-out is scoped to `changed` mode: `full`/10k still gates.
+        let base = vec![row("S1", "10k", "full", 24.0, 0.5, 24.0)];
+        let after = vec![row("S1", "10k", "full", 30.0, 0.5, 30.0)]; // +25% min
+        let o = evaluate(&after, Some(&base));
+        assert_eq!(o.gating_failures, 1, "full/10k regression must still gate");
     }
 }

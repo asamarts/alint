@@ -114,8 +114,10 @@ yet the same v0.15.0 binary re-measured on the same host moved 43 -> 117 ms on
 `changed`/10k (with `full` flat, and `RAYON_NUM_THREADS=1` pinned at the old 43 ms for
 both versions), so it was a version-independent environment artifact
 ([`investigations/2026-09-v0.16-changed-mode-bench-artifact/`](investigations/2026-09-v0.16-changed-mode-bench-artifact/)).
-Treat small `changed` cells as regression-advisory (as they already are for CV); the
-deterministic gate stays the authoritative regression signal.
+`xtask bench-gate` now treats small `changed` cells (1k/10k) as regression-advisory as
+well as CV-advisory (`gate.rs` `CHANGED_REGRESSION_ADVISORY_SIZES`): they report their
+`min_ms` delta as `ADV` but do not fail the gate, while `full`/10k and all 100k/1m cells
+still gate. The deterministic gate stays the authoritative regression signal.
 
 ### Why hyperfine and not a custom Rust harness
 

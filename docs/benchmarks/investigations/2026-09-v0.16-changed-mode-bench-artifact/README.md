@@ -1,6 +1,7 @@
 # 2026-09 - v0.16.0 changed-mode small-cell "regression": a bench artifact, not code
 
-Status: **Resolved (no code change).** v0.16.0's `bench-record` failed the regression
+Status: **Resolved (no engine change; `xtask bench-gate` now marks small `changed`
+cells regression-advisory).** v0.16.0's `bench-record` failed the regression
 gate with the small `changed`-mode cells inflated **+40 to +92%** vs the committed
 v0.15.0 baseline (`S1..S12 1k/10k changed`), while every `full` cell and the large
 `changed`/100k + `changed`/1m cells were flat. A tight, same-host, same-conditions A/B
@@ -111,10 +112,13 @@ verify either way with a same-host, same-conditions, tight-N A/B before concludi
 
 ## Resolution
 
-No alint code change. The `changed`-mode `1k`/`10k` cells are environment-sensitive
-floor cells and should not gate cross-version comparisons - they are already advisory
-for the CV quality gate and should be advisory for the `min_ms` regression gate too
-(tracked against [`../../../design/deterministic-perf-gating.md`](../../../design/deterministic-perf-gating.md);
-the load-immune deterministic gate remains the authoritative regression signal). The
-v0.16.0 bench numbers reflect current-kbench environment on those cells, not a
-regression; the `full` and large-`changed` numbers are sound and comparable.
+No alint engine change. The `changed`-mode `1k`/`10k` cells are environment-sensitive
+floor cells that should not gate cross-version comparisons - they were already advisory
+for the CV quality gate, and `xtask bench-gate` now makes them advisory for the `min_ms`
+regression gate too (`gate.rs` `CHANGED_REGRESSION_ADVISORY_SIZES`; they report their
+delta as `ADV` but no longer fail the gate, with `full`/10k and all 100k/1m cells still
+gating). The load-immune deterministic gate
+([`../../../design/deterministic-perf-gating.md`](../../../design/deterministic-perf-gating.md))
+remains the authoritative regression signal. With this change the v0.16.0 numbers pass
+the gate: those cells reflect current-kbench environment, not a regression, and the
+`full` and large-`changed` numbers are sound and comparable.
