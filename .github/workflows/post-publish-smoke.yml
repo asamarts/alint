@@ -68,6 +68,7 @@ jobs:
           - { channel: install.sh, os: ubuntu-latest }
           - { channel: docker, os: ubuntu-latest }
           - { channel: npm, os: ubuntu-latest }
+          - { channel: pypi, os: ubuntu-latest }
           - { channel: cargo-binstall, os: ubuntu-latest }
           - { channel: cargo, os: ubuntu-latest }
           - { channel: homebrew, os: macos-latest }
@@ -79,6 +80,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "20"
+
+      - name: set up Python (pypi channel)
+        if: matrix.channel == 'pypi'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
 
       - name: set up Rust (cargo + cargo-binstall channels)
         if: matrix.channel == 'cargo' || matrix.channel == 'cargo-binstall'

@@ -791,7 +791,7 @@ jobs:
     # Not gated by editor channels (vscode/jetbrains), which the smoke doesn't
     # cover. workflow_dispatch is the documented anti-recursion exception (same
     # pattern as the docs-bundle dispatch), so the token-triggered run fires.
-    needs: [release, docker, publish-crates, publish-npm, homebrew]
+    needs: [release, docker, publish-crates, publish-npm, publish-pypi, homebrew]
     # Fire even if a publisher failed (partial publish) -- the smoke then reds on
     # exactly the un-published channel instead of the monitor going dark. Only a
     # cancelled run skips it.

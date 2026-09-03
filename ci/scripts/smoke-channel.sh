@@ -7,13 +7,13 @@ set -euo pipefail
 # Each channel retries to ride out registry / CDN propagation lag.
 #
 # Usage: ci/scripts/smoke-channel.sh <channel> <tag>
-#   channel: install.sh | cargo | cargo-binstall | npm | docker | homebrew
+#   channel: install.sh | cargo | cargo-binstall | npm | docker | homebrew | pypi
 #   tag:     the release tag, e.g. v0.16.0
 #
 # Env overrides: DOCKER (default: docker; set to podman locally),
 #                RETRY_MAX (default 6), RETRY_SLEEP seconds (default 30).
 
-CHANNEL="${1:?channel required (install.sh|cargo|cargo-binstall|npm|docker|homebrew)}"
+CHANNEL="${1:?channel required (install.sh|cargo|cargo-binstall|npm|docker|homebrew|pypi)}"
 TAG="${2:?tag required (e.g. v0.16.0)}"
 VER="${TAG#v}"                        # 0.16.0
 IMAGE="ghcr.io/asamarts/alint"
@@ -139,6 +139,24 @@ case "$CHANNEL" in
       hb_n=$((hb_n + 1))
     done
     assert_version alint --version
+    ;;
+  pypi)
+    # The Python-ecosystem entry points, exercised against the pinned version.
+    # uvx is the headline path (the real user flow: install uv, then run the
+    # wheel); a pip-install into a throwaway venv is the lowest common
+    # denominator. Both pull the prebuilt py3-none wheel from PyPI with no
+    # toolchain. See docs/design/distribution-pypi.md.
+    export PATH="${HOME}/.local/bin:${PATH}"
+    if ! command -v uvx >/dev/null 2>&1; then
+      retry bash -c 'curl -fsSL https://astral.sh/uv/install.sh | sh'
+    fi
+    retry uvx "alint@${VER}" --version
+    assert_version uvx "alint@${VER}" --version
+    python3 -m venv /tmp/alint-pypi-smoke
+    retry /tmp/alint-pypi-smoke/bin/pip install --quiet "alint==${VER}"
+    assert_version /tmp/alint-pypi-smoke/bin/alint --version
+    # Unversioned resolve must serve VER when smoking the latest (no-op otherwise).
+    check_floating "$(uvx alint --version 2>&1 | awk '/^alint [0-9]/ { print $2; exit }')"
     ;;
   *)
     echo "  [smoke] unknown channel: ${CHANNEL}" >&2
