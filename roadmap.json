@@ -92,6 +92,12 @@
       "blurb": "alint explain surfaces a rule's full detail with a docs link and a one-line summary, rules show and list --search browse the catalog offline, and scope_filter gains manifest-derived path scoping so a rule tracks the manifest that declares its members instead of a drifting hand-maintained glob."
     },
     {
+      "version": "0.16",
+      "title": "Config-format coverage + parser hardening",
+      "kind": "release",
+      "blurb": "XML becomes a first-class target across every format-aware rule, and dotenv, Java .properties, INI, and HCL join as new config formats with their own path-query rule families, alongside a new *_path_absent kind family and a multi-round audit that bounds every config parser against crafted-file denial-of-service."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",

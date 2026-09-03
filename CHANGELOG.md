@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-02
+
+This release completes the config-format coverage arc and hardens every config
+parser against crafted-file denial-of-service. XML becomes a first-class target
+across every format-aware rule, and dotenv (`.env`), Java `.properties`, INI /
+`.cfg`, and HCL (Terraform / Nomad / Packer) join as new config formats, each with
+a `*_path_{equals,matches,absent}` rule family, `json_schema_passes` support, and
+`extract:` in the cross-file rules; a new `*_path_absent` kind family (JSON / YAML /
+TOML / XML) asserts a query matches nothing. Alongside the surface work, a
+multi-round adversarial audit bounded every parser against crafted-file DoS
+(recursion / nesting / size caps, YAML flow-depth and alias-expansion limits robust
+to quote-based evasion, an HCL depth pre-scan matching hcl-rs at every content
+boundary, an XML attribute-count cap, a 32 MiB structured-input cap, and graceful
+worker-pool fallback), so an untrusted config or repo file can no longer hang or
+abort a run.
+
 ### Added
 
 - New rule kinds `json_path_absent` / `yaml_path_absent` / `toml_path_absent` /
@@ -6739,7 +6755,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.15.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/asamarts/alint/compare/v0.15.2...v0.16.0
 [0.15.2]: https://github.com/asamarts/alint/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/asamarts/alint/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/asamarts/alint/compare/v0.14.2...v0.15.0
