@@ -27,10 +27,10 @@ Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarba
 Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
 
 ```bash
-ALINT_VERSION=v0.15.2 curl -sSL https://alint.org/install.sh | bash
+ALINT_VERSION=v0.16.0 curl -sSL https://alint.org/install.sh | bash
 ```
 
-Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.15.2/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
+Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.16.0/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
 
 ## npm
 
@@ -69,7 +69,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.15.2 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.16.0 check
 ```
 
 The image is OCI-standard, so **Podman runs it unchanged** — just use the fully-qualified name (Podman does not assume a default registry):
@@ -84,7 +84,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: the bare semver (`:0.15.2`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.15.2`).
+Also published: the bare semver (`:0.16.0`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.16.0`).
 
 ## Windows
 
@@ -92,7 +92,7 @@ The `install.sh` one-liner is shell-based and does not cover Windows. On Windows
 
 - **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
 - **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
-- **manual:** download `alint-v0.15.2-x86_64-pc-windows-msvc.tar.gz` from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
+- **manual:** download `alint-v0.16.0-x86_64-pc-windows-msvc.tar.gz` from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
 
 Note on manually-downloaded binaries: a tarball downloaded through a **browser** carries a "mark of the web", so the first run can trip Windows SmartScreen ("More info → Run anyway") or, on macOS, Gatekeeper quarantine — clear it with `xattr -d com.apple.quarantine ./alint`. Binaries fetched by `curl`/npm/cargo/Homebrew/Docker carry no such mark and run without prompts.
 

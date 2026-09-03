@@ -12,7 +12,18 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.15.2** (2026-08-22): a release-infrastructure patch, binaries
+**Latest release: v0.16.0** (2026-09-02): the config-format coverage arc plus a
+parser-hardening cycle. XML becomes a first-class target across every format-aware
+rule, and dotenv (`.env`), Java `.properties`, INI / `.cfg`, and HCL (Terraform /
+Nomad / Packer) join as new config formats, each with a
+`*_path_{equals,matches,absent}` family, `json_schema_passes` support, and
+`extract:` in the cross-file rules; a new `*_path_absent` kind family (JSON / YAML /
+TOML / XML) asserts a query matches nothing. A multi-round adversarial audit then
+bounded every parser against crafted-file denial-of-service (recursion, nesting,
+size, alias-expansion, and attribute-count caps, robust to quote- and
+terminator-based evasion, with an HCL depth pre-scan that matches hcl-rs at every
+content boundary), so an untrusted config or repo file can no longer hang or abort a
+run. The prior v0.15.2 (2026-08-22) was a release-infrastructure patch, binaries
 unchanged from v0.15.1. npm now publishes via keyless OIDC Trusted Publishing
 (tokenless, with a provenance attestation), retiring the `NPM_TOKEN` PAT. The
 prior v0.15.1 (2026-08-21) was a supply-chain-hardening release: every release is
@@ -1291,6 +1302,28 @@ via `derive_target:`. See
   ADR-0010.
 - `scope_filter` correctness: resolves under `--changed`, applies on rule-major
   kinds, and diagnostics stay off stdout.
+
+## v0.16: Config-format coverage + parser hardening
+
+The cut that finishes config-format coverage and hardens the parsers behind it.
+XML is now a first-class target across `json_schema_passes` and the cross-file
+rules (`extract:`), and dotenv (`.env`), Java `.properties`, INI / `.cfg`, and HCL
+(Terraform / Nomad / Packer) join as config formats, each with a
+`*_path_{equals,matches,absent}` rule family. A new `*_path_absent` kind family
+(JSON / YAML / TOML / XML) asserts a query matches nothing. A multi-round
+adversarial audit then bounded every config parser against crafted-file
+denial-of-service. See
+[`format-coverage.md`](format-coverage.md) and CHANGELOG `[0.16.0]`.
+
+- XML across every format-aware rule; dotenv, `.properties`, INI, and HCL as new
+  config formats, each with a `*_path_{equals,matches,absent}` family,
+  `json_schema_passes`, and `extract:` support.
+- A `*_path_absent` kind family (JSON / YAML / TOML / XML): assert a query matches
+  nothing.
+- Parser DoS hardening across every format: bounded recursion / nesting / size,
+  YAML flow-depth and alias-expansion caps (robust to quote-based evasion), an HCL
+  depth pre-scan matching hcl-rs at each content boundary, an XML attribute-count
+  cap, a 32 MiB structured-input cap, and graceful worker-pool fallback.
 
 ## v1.0: Stability
 
