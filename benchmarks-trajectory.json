@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.16.0",
+      "date": "2026-09-02",
+      "headline": "This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18119.733386626667,
+          "stddev_ms": 163.53384922186748,
+          "display": "18.12 s ± 0.16"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17330.04284410667,
+          "stddev_ms": 17.281609996486406,
+          "display": "17.33 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16177.696593800001,
+          "stddev_ms": 46.21470615123037,
+          "display": "16.18 s ± 0.05"
+        },
+        "s9_1m_full": {
+          "mean_ms": 12007.831071060002,
+          "stddev_ms": 163.72118350994424,
+          "display": "12.01 s ± 0.16"
+        }
+      }
+    },
+    {
       "version": "v0.15.0",
       "date": "2026-08-16",
       "headline": "v0.15 makes rules legible and monorepos first-class.",
