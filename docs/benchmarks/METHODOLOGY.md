@@ -103,6 +103,20 @@ statistic, publish the full distribution. Cross-machine and
 cross-hyperfine-version comparisons still require a like-for-like
 fingerprint.
 
+**Caveat on the small `changed`-mode cells (added 2026-09).** The `changed`/1k and
+`changed`/10k cells are unreliable for the `min_ms` REGRESSION gate too, not just for
+CV. `changed` mode spawns `git` single-threaded to find the changed subset, then
+dispatches the rule `par_iter` over a *tiny* subset, so these cells are dominated by
+the cost of waking the other cores for that brief parallel burst - which is highly
+sensitive to the host's C-state / frequency behavior and drifts across baseline
+captures independent of any code change. v0.16.0's bench-record flagged them +40-92%,
+yet the same v0.15.0 binary re-measured on the same host moved 43 -> 117 ms on
+`changed`/10k (with `full` flat, and `RAYON_NUM_THREADS=1` pinned at the old 43 ms for
+both versions), so it was a version-independent environment artifact
+([`investigations/2026-09-v0.16-changed-mode-bench-artifact/`](investigations/2026-09-v0.16-changed-mode-bench-artifact/)).
+Treat small `changed` cells as regression-advisory (as they already are for CV); the
+deterministic gate stays the authoritative regression signal.
+
 ### Why hyperfine and not a custom Rust harness
 
 hyperfine measures wall-time of an external command from

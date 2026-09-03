@@ -37,6 +37,15 @@ Each investigation directory ships:
 
 ## Existing investigations
 
+### [`2026-05-bench-runner-instability/`](2026-05-bench-runner-instability/)
+
+The v0.9.23 CV-gate failures that turned out to be **gate miscalibration, not a
+degraded host**. A full cross-version corpus analysis showed the fingerprint
+(kernel / rustc / RAM / fs / hyperfine / CPU) byte-identical across releases and the
+`RELEASING.md` CV>10% rule never met by any shipped release; it produced the
+programmatic `xtask bench-gate` (quality CV on 100k+ only; regression `min_ms` vs the
+previous release). Dir name kept so the PR #32 backlink stays valid.
+
 ### [`2026-05-cross-file-rules/`](2026-05-cross-file-rules/)
 
 The v0.9.4 1M S3 cliff investigation that produced the cross-file
@@ -55,6 +64,31 @@ for the *same* binary and look for rules whose `elapsed_us` grows
 super-linearly in file count. Functions whose share grows
 monotonically are super-linear suspects, even when the wall-time
 absolute number doesn't yet flag them as a regression.
+
+### [`2026-05-scope-filter-baseline-drift/`](2026-05-scope-filter-baseline-drift/)
+
+v0.9.6 `scope_filter` Phase 2: a `bench-compare` flagged three >10% regressions
+(`single_file_file_hash`, a junit formatter cell) that were **baseline drift, not an
+engine regression** - the published floor was recorded under different conditions. An
+apples-to-apples same-box re-measure cleared it. An early instance of the recurring
+"stale baseline reads as a regression" trap.
+
+### [`2026-05-v0.10-s13-100k-margin/`](2026-05-v0.10-s13-100k-margin/)
+
+v0.10.0 bench-record: `S13 100k full` marginal CV failures across three runs on the
+(then 3900X `kbox`) host - **host-side contention** from sister runners / dev stacks,
+not code. The two busy runs failed on *different* cells each; a quiescent run passed
+with one residual borderline cell accepted with a note. Motivates measuring only on a
+quiescent host.
+
+### [`2026-06-v0.12-perf-validation/`](2026-06-v0.12-perf-validation/)
+
+v0.12's apparent wall-clock regression proven to be **co-tenant contamination, not
+code**, via the deterministic Valgrind `Ir` gate (flat -> compute path unchanged).
+This is the investigation that established the load-immune deterministic gate as the
+authoritative regression signal - with the later caveat (added 2026-07) that `Ir` is
+**I/O-blind**: it rules out compute/cache regressions but not syscall / read-path ones
+(see the v0.14-S2 sibling).
 
 ### [`2026-07-1m-writeback-contention/`](2026-07-1m-writeback-contention/)
 
@@ -111,6 +145,19 @@ control before concluding "no regression." A real CI bug fell out on the way:
 `det-perf-gate.sh` pins `gungraun-runner` older than the `gungraun` library, so the
 deterministic gate mis-reports a tooling failure as an Ir regression on any
 post-bump PR.
+
+### [`2026-09-v0.16-changed-mode-bench-artifact/`](2026-09-v0.16-changed-mode-bench-artifact/)
+
+v0.16.0's `bench-record` flagged the small `changed`-mode cells +40-92%; a tight,
+same-host, same-conditions 30-run A/B proved **v0.16.0 == v0.15.0 (no code
+regression)**. The flag is a version-independent environment artifact: the same
+v0.15.0 binary measures `changed/10k` at 43 ms (committed baseline) vs 117 ms (fresh
+kbench) while `full` is flat, and `RAYON_NUM_THREADS=1` returns 43 ms for both
+versions - the floor-level `changed` cells are dominated by the multi-core wakeup cost
+of a tiny parallel burst, which grew on current kbench (idle cores at 800 MHz, deep
+C-states, turbo off). Two wrong hypotheses (runner contamination; a `with_worker_pool`
+rayon regression) were refuted along the way. Recommends the small `changed` cells be
+regression-advisory, as they already are for the CV gate.
 
 ## Tooling
 
