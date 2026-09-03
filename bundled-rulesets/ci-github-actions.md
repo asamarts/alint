@@ -36,11 +36,11 @@ extends:
 
 ### `gha-workflow-contents-read`
 
-- **kind**: [`yaml_path_equals`](/docs/rules/structured-query/yaml_path_equals/)
+- **kind**: [`yaml_path_absent`](/docs/rules/structured-query/yaml_path_absent/)
 - **level**: `warning`
 - **policy**: <https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token>
 
-> GitHub workflows should declare `permissions.contents: read` at the workflow level. Workflows that truly need write can override this rule or set per-job permissions.
+> Workflow grants (or defaults to) write access to the GITHUB_TOKEN. Restrict it: declare `permissions: contents: read` (or `read-all`, or `{}`) at the workflow level, or set per-job `permissions:`, so a compromised step can't push to the repo.
 
 ### `gha-pin-actions-to-sha`
 
@@ -48,7 +48,7 @@ extends:
 - **level**: `warning`
 - **policy**: <https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions>
 
-> Third-party action is not pinned to a commit SHA. Pin with `@<40-char-sha>  # v4.1.1` so a compromised tag can't silently change what runs.
+> Third-party action is not pinned to a commit SHA. Pin with `@<40-char-sha>  # v4.1.1` (or `docker://img@sha256:...` for a Docker action) so a compromised tag can't silently change what runs. Local `./` action references are allowed.
 
 ### `gha-workflow-has-name`
 
@@ -90,18 +90,36 @@ version: 1
 
 rules:
   - id: gha-workflow-contents-read
-    # OpenSSF Scorecard Token-Permissions check. Workflows that
-    # need write permissions should override this rule per-file
-    # or set `level: off` in the root config.
-    kind: yaml_path_equals
+    # OpenSSF Scorecard Token-Permissions check: a workflow should
+    # restrict the GITHUB_TOKEN so a compromised step can't push to
+    # the repo. Fires only when a workflow grants (or defaults to)
+    # write -- it declares NO permissions anywhere (no workflow-level
+    # block AND no per-job block, so it inherits the broad default),
+    # OR declares `write-all`, OR `contents: write` at the workflow
+    # level. PASSES `contents: read`/`none`, `read-all`, `{}` (empty),
+    # and per-job-only permissions.
+    #
+    # Scope note: the write checks are workflow-level. A job-level
+    # `write-all`/`contents: write`, or a workflow where only SOME jobs
+    # declare permissions, is treated as declared and passes -- per-job
+    # scoping is the deliberate escape hatch.
+    #
+    # The `$[?...]` filter selects the bad state; `yaml_path_absent`
+    # emits ONE file-level violation when it matches (a value-op kind
+    # would fan out to one warning per top-level key). Telling "no
+    # permissions at all" apart from "per-job permissions" needs this
+    # two-path disjunction, which the value-comparison kinds can't
+    # express.
+    kind: yaml_path_absent
     paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
-    path: "$.permissions.contents"
-    equals: "read"
+    path: "$[?((!$.permissions && count($.jobs[*].permissions)==0) || $.permissions=='write-all' || $.permissions.contents=='write')]"
     level: warning
     message: >-
-      GitHub workflows should declare `permissions.contents: read`
-      at the workflow level. Workflows that truly need write can
-      override this rule or set per-job permissions.
+      Workflow grants (or defaults to) write access to the
+      GITHUB_TOKEN. Restrict it: declare `permissions: contents:
+      read` (or `read-all`, or `{}`) at the workflow level, or set
+      per-job `permissions:`, so a compromised step can't push to
+      the repo.
     policy_url: "https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token"
 
   - id: gha-pin-actions-to-sha
@@ -115,16 +133,22 @@ rules:
     # `@v4`, `@main`, or `@v4.1.1`. Teams that trust specific
     # publishers (e.g. `actions/*`) typically tighten or relax
     # via a follow-up rule.
+    #
+    # Local `./` composite-action references are exempt: they live in
+    # the same repo (same trust boundary) and cannot be SHA-pinned.
+    # Digest-pinned Docker actions (`docker://img@sha256:<64-hex>`) are
+    # accepted; a tag-pinned `docker://img:tag` still fires.
     kind: yaml_path_matches
     paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
     path: "$.jobs.*.steps[*].uses"
-    matches: '^[a-zA-Z0-9._/-]+@[a-f0-9]{40}$'
+    matches: '^(\./.*|docker://[^@]+@sha256:[a-f0-9]{64}|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
     if_present: true
     level: warning
     message: >-
       Third-party action is not pinned to a commit SHA. Pin with
-      `@<40-char-sha>  # v4.1.1` so a compromised tag can't
-      silently change what runs.
+      `@<40-char-sha>  # v4.1.1` (or `docker://img@sha256:...` for a
+      Docker action) so a compromised tag can't silently change what
+      runs. Local `./` action references are allowed.
     policy_url: "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions"
 
   - id: gha-workflow-has-name
