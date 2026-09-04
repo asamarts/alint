@@ -81,7 +81,7 @@ verbatim docs sync.
   order, at a consistent depth, with a worked example on every page.
 - Give every concept one elegant animated diagram in a shared visual language.
 - Reclassify: `Concepts` holds only mental-model concepts; feature and command
-  pages move to `Configuration`, `Reference`, or `Guides`.
+  pages move to `Configuration`, `Reference`, or the `Cookbook`.
 - Fix every stale error found in the audit.
 
 **Non-goals.**
@@ -144,8 +144,8 @@ not just page frontmatter; see 5.4 for the mechanism.
 - `how-alint-works.md` -- the execution pipeline; determinism; read-coalescing.
 - `the-config-model.md` -- one `.alint.yml`; the rule record; `version: 1`.
 - `kinds-families-categories.md` -- the three axes; the 94+11 / 13 / 13 counts.
-- `severity-and-exit-codes.md` -- `level:` to exit code; `off`; `--fail-on-warning`.
-  (Short; could merge into the config model -- see Open questions.)
+- `severity-and-exit-codes.md` -- `level:` to exit code; `off`; `--fail-on-warning`
+  (a short standalone page, kept as a stable link target for CI-gating docs).
 
 **How rules target files**
 - `the-walker-and-git.md` -- discovery, `.gitignore`, walked-tree vs git-index,
@@ -184,13 +184,13 @@ not just page frontmatter; see 5.4 for the mechanism.
 | `templates.md` | `Configuration` (reuse/composition) | a config construct |
 | `drop-ins.md` | folded into `config-layering.md` (Concepts) | a layering mechanic |
 | `variable-interpolation.md` | timing folded into `config-layering.md`; full reference to `Configuration` | a config feature with one conceptual hook (timing) |
-| `suggest.md` | `Guides` (or CLI reference) | a command workflow |
+| `suggest.md` | `Cookbook` (or CLI reference) | a command workflow |
 
 ### 5.3 Before / after at a glance
 
 - Before: 9 flat pages, ~3 concepts + 6 misfiled, 3 diagrams, 3 hard errors,
   duplicate/gap sidebar orders.
-- After: ~14 grouped concept pages (each with a worked example and one animated
+- After: ~15 grouped concept pages (each with a worked example and one animated
   diagram), feature/command pages relocated, all errors fixed, one visual
   language.
 
@@ -260,7 +260,7 @@ untouched.
   LikeC4 loader). A GitHub-faithful static SVG fallback is optional per diagram
   (GitHub strips animated SVG, exactly as it strips `<likec4-view>` today).
 
-**The diagram set.** One animated diagram per major concept page (thirteen below),
+**The diagram set.** One animated diagram per major concept page (fourteen below),
 ranked by teaching value (the concept map's "hardest concepts" ranking). Short or
 derivative pages (`severity-and-exit-codes` if kept standalone, and the relocated
 feature pages) carry no diagram of their own or reuse a neighbor's:
@@ -297,6 +297,9 @@ feature pages) carry no diagram of their own or reuse a neighbor's:
 13. **Agent single source of truth** (`the-agent-surface`): active rules flow into
     `export-agents-md` -> `AGENTS.md` -> the agent reads it at session start; plus
     the `agent` output format's per-violation `fix_command`.
+14. **The bundled-ruleset on-ramp** (`bundled-rulesets`): `alint init` detects the
+    ecosystem (facts) and writes the `extends:` lines; each bundled ruleset stays a
+    silent no-op until its fact gate matches.
 
 **Relationship to `animated-diagrams.md` and amorph.** The existing
 `docs/design/animated-diagrams.md` breadcrumb states that alint's public docs
@@ -374,12 +377,14 @@ whole section under the new grouping.
 5. **Multi-file + adoption pages.** Add `cross-file-rules`, `structured-queries`;
    rewrite `fixing` (absorbing `content-from`) and `baseline`; add
    `the-agent-surface`.
-6. **Relocations + redirects.** Move `templates` to Configuration, `suggest` to
-   Guides; retire `content-from`/`drop-ins`/`variable-interpolation` as standalone
-   concepts (content folded), leaving redirects (section 9). Renumber the sidebar.
-7. **Source-doc corrections.** Apply the ARCHITECTURE.md / ADR errata (section 7).
+6. **Relocations + redirects.** Move `templates` to Configuration, `suggest` to the
+   Cookbook; retire `content-from`/`drop-ins`/`variable-interpolation` as standalone
+   concepts (content folded), leaving redirects (section 9). Build the grouped
+   Concepts sidebar (5.4).
+7. **Source-doc corrections.** Apply the ARCHITECTURE.md / model errata (section 7).
 
-Each phase is a reviewable PR; content lives in `alint/docs/site/`, so it syncs to
+**Phases 1 and 7 already shipped** in the errata hot-fix (#228, merged); phases 2-6
+remain. Each phase is a reviewable PR; content lives in `alint/docs/site/`, so it syncs to
 alint.org through the normal `docs-export` + `docs-bundle` pipeline (ADR-0007). No
 release is required for doc-only pages (the docs-bundle rebuilds from a main
 worktree).
@@ -396,8 +401,9 @@ existing link/head-parity checks before deploy.
 
 ## 10. Effort and sequencing
 
-Rough order of magnitude: ~14 concept pages (about 6 net-new, ~5 rewrites, ~3
-relocations) plus ~13 animated diagrams, and one small alint.org change (the
+Rough order of magnitude: ~15 concept pages (roughly half net-new, the rest
+rewrites or absorptions, ~2 relocations) plus ~14 animated diagrams, and one small
+alint.org change (the
 sidebar grouping in 5.4 plus the redirects in 9). The errata hot-fix (phase 1) is an
 afternoon. The diagram kit + hero (phase 2) de-risks the technique. Phases 3-5
 are the bulk and can be parallelized per group. Phases 6-7 are mechanical.
@@ -407,7 +413,7 @@ Recommend landing phase 1 immediately, then phases 2-7 as a small series of PRs.
 
 All nine open questions were resolved with the maintainer, one by one. Net: ~15
 concept pages (added `bundled-rulesets`; `severity-and-exit-codes` and
-`changed-mode` both kept standalone) and ~13 animated diagrams.
+`changed-mode` both kept standalone) and ~14 animated diagrams.
 
 1. **ADR? No.** The animated-diagram convention is an additive, reversible docs
    technique under ADR-0005's diagram program; recorded in `animated-diagrams.md`,
