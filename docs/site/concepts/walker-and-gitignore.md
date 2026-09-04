@@ -117,7 +117,7 @@ Behaviour summary:
 
 When `alint` runs outside a git repo (no `.git/`), or when `git` isn't on `PATH`, the tracked-set is empty and absence-style rules with `git_tracked_only: true` become silent no-ops. That's the right default for "don't let X be committed": if there's no repo, there's nothing to commit. Existence rules with the flag set fail in that case (no file qualifies), which is also the correct conservative behaviour.
 
-The other roadmap'd git primitives (`git_no_denied_paths`, `git_commit_message`) are still pending.
+The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the rule reference for the full set.
 
 ## Restricting the walk: `--changed`
 

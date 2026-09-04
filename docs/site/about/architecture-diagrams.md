@@ -105,7 +105,7 @@ filtering, and the deterministic, sorted `FileIndex`.
 
 ## Template expansion
 
-How `${...}` template variables in rule options are expanded before evaluation.
+How `{{vars.X}}` template variables in rule options are expanded before evaluation.
 
 <likec4-view view-id="templateFlow"></likec4-view>
 

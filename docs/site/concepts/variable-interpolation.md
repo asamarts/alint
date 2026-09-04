@@ -82,11 +82,11 @@ rules:
 
 ## Migrating from the v0.9.21 `${VAR}` syntax
 
-v0.9.21 shipped POSIX-style `${VAR}` / `${VAR:-default}` interpolation on `git_commit_message.since:` only. That syntax still works in v0.11 but emits a deprecation warning at config load, with the canonical rewrite shown inline:
+v0.9.21 shipped POSIX-style `${VAR}` / `${VAR:-default}` interpolation on `git_commit_message.since:` only. That syntax still works but emits a deprecation warning at config load, with the canonical rewrite shown inline:
 
 ```text
 alint: warning: rule "pr-conventional-commits": `since: ${ALINT_BASE_SHA}` uses the
-  deprecated v0.9.21 `${VAR}` interpolation syntax. The canonical v0.11+ form is
+  deprecated v0.9.21 `${VAR}` interpolation syntax. The canonical form is
   `{{env.ALINT_BASE_SHA}}`; the `${VAR}` form will be removed in v1.0.
 ```
 
