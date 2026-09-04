@@ -116,6 +116,14 @@ built from. CORE = everyone; FEATURE = opt-in.
 | 16 | Templates (reusable rule shapes) | FEATURE | `templates` (a config feature) |
 | 17 | `suggest` (propose rules) | FEATURE | `suggest` (a command) |
 
+**Deliberately not concept pages** (they are real, but they are field/command
+references, not mental models; the rewrite cross-links to them rather than
+absorbing them): `allow_out_of_root:` and `fix_size_limit:` (top-level config
+fields, to Configuration); the `# yaml-language-server: $schema=` editor pragma and
+the report JSON schemas (to Integrations / Reference); and the config-independent
+`rules` catalog vs the config-scoped `list` (ADR-0009, a CLI concern, to CLI
+reference).
+
 ## 5. Proposed information architecture
 
 Redo the whole section (the maintainer's preferred option). `Concepts` becomes a
@@ -126,8 +134,9 @@ resulting report line, and a "going deeper" link.
 
 ### 5.1 New `Concepts` section
 
-Grouped via Starlight sidebar groups (progressive: mental model, then targeting,
-then composition, then multi-file, then adoption).
+Grouped into sub-sections (progressive: mental model, then targeting, then
+composition, then multi-file, then adoption). The grouping is a cross-repo change,
+not just page frontmatter; see 5.4 for the mechanism.
 
 **Start here (the mental model)**
 - `index.md` -- Concepts hub. Lean: the one-screen mental model + the hero
@@ -182,6 +191,33 @@ then composition, then multi-file, then adoption).
   diagram), feature/command pages relocated, all errors fixed, one visual
   language.
 
+### 5.4 Sidebar and cross-repo mechanism
+
+The current `Concepts` sidebar is one line in the alint.org `astro.config.mjs`:
+`autogenerate: { directory: 'docs/concepts' }` (a flat list ordered by each page's
+frontmatter `sidebar.order`). Starlight autogenerate cannot order or label
+sub-groups; the config already notes this and hand-builds the Rules group for that
+reason. So the proposed grouping is not achievable from the synced Markdown alone.
+Two options:
+
+- **(recommended) subdirectories + an explicit sidebar entry.** Author the pages
+  under `docs/site/concepts/<group>/...` (so the URL carries the group) and replace
+  the single `autogenerate` line with an explicit `Concepts` group whose items are
+  the five sub-groups, mirroring how the Rules group is hand-built. Ordering and
+  proper-case labels then work. Cost: the subdir choice sets the page URLs, so it
+  must ship with the redirects in section 9.
+- **(alternative) flat with `sidebar.order` bands.** Keep one directory and imply
+  grouping with ordered bands and a label convention. No config change, but no real
+  sub-group headers.
+
+This makes the redesign a **cross-repo change**. Page content and diagrams are
+authored in `alint/docs/site/concepts/` (synced verbatim to alint.org), but three
+pieces are edits in the **alint.org** repo: the sidebar grouping
+(`astro.config.mjs`), any shared `@keyframes` (section 6), and the redirects
+(section 9, `public/_redirects`). The "no build / CSP / dependency change" claim in
+section 6 is specifically about the *diagrams*; the *grouping* is a small
+`astro.config.mjs` edit.
+
 ## 6. The animated-diagram system
 
 **Technique (recommended).** Hand-authored inline SVG animated with CSS
@@ -192,9 +228,18 @@ change, and no dependency; it themes automatically via Starlight tokens
 (`var(--sl-color-*)` with literal fallbacks); reduced-motion is a one-line
 declarative guard; and it degrades to a static final frame. SMIL was rejected (it
 ignores `prefers-reduced-motion` in CSS); JS-island and small-lib options were
-rejected (they force `.mdx` or a site-side head loader). The same page prose can
-later swap the `<svg>` for `amorph`'s planned `<amorph-anim>` element with a
-site-side loader, so this is a forward-compatible first step, not a dead end.
+rejected (they force `.mdx` or a site-side head loader). This diverges from the
+existing `animated-diagrams.md` plan (vendored static SVG from amorph); that
+divergence is reconciled at the end of this section. The reference template and the
+shared token kit are in Appendix 14.
+
+**Relationship to the existing LikeC4 views.** The three concept pages that carry a
+LikeC4 view today (`checkFlow`, `walkerFlow`, `templateFlow`) keep it. The animated
+inline SVG becomes the *primary* teaching diagram at the top of each page (it
+animates one idea the reader just read); the interactive `<likec4-view>` stays as a
+"Going deeper" link (the explorable full model). The two are complementary, not
+competing, and the full LikeC4 gallery in `about/architecture-diagrams.md` is
+untouched.
 
 **Shared visual language.** One small kit so the diagrams read as a system:
 - Structure in neutral grays (`var(--sl-color-gray-*)`); the active/flowing
@@ -210,8 +255,10 @@ site-side loader, so this is a forward-compatible first step, not a dead end.
   LikeC4 loader). A GitHub-faithful static SVG fallback is optional per diagram
   (GitHub strips animated SVG, exactly as it strips `<likec4-view>` today).
 
-**The diagram set (one per concept).** Ranked by teaching value (the concept map's
-"hardest concepts" ranking):
+**The diagram set.** One animated diagram per major concept page (thirteen below),
+ranked by teaching value (the concept map's "hardest concepts" ranking). Short or
+derivative pages (`severity-and-exit-codes` if kept standalone, and the relocated
+feature pages) carry no diagram of their own or reuse a neighbor's:
 
 1. **Execution pipeline** (hero, on `how-alint-works` + the hub): a token flows
    config -> walk -> dispatch -> report; parallel fan-out then a
@@ -242,6 +289,26 @@ site-side loader, so this is a forward-compatible first step, not a dead end.
     fields lighting up as they are matched and evaluated.
 12. **Fix pass** (`fixing`): parallel evaluate, then the serial single-threaded
     fix mutation.
+13. **Agent single source of truth** (`the-agent-surface`): active rules flow into
+    `export-agents-md` -> `AGENTS.md` -> the agent reads it at session start; plus
+    the `agent` output format's per-violation `fix_command`.
+
+**Relationship to `animated-diagrams.md` and amorph.** The existing
+`docs/design/animated-diagrams.md` breadcrumb states that alint's public docs
+consume amorph's output as *vendored static SVG* (no runtime dependency), because
+the amorph engine is private. Two facts change the calculus for the concepts pages:
+amorph is at Phase 0 (unbuilt), so there is nothing to vendor yet; and the explicit
+ask is *animated* diagrams, which a static vendored SVG does not deliver. Inline
+SVG + CSS satisfies both -- it is animated (the ask) and takes no runtime
+dependency (amorph's "no engine in public alint" principle; CSS animates
+natively). This proposal therefore **revises** the "static only" stance of
+`animated-diagrams.md` for the concepts pages. Forward path when amorph ships: the
+page prose is unchanged and only the `<svg>` block is regenerated by amorph (as
+animated SVG, or swapped for its `<amorph-anim>` element behind an alint.org
+head-loader). The bridge's cost is re-generating the hand-authored SVGs later; the
+alternative (wait for amorph) is rejected because amorph is far off and the docs
+need the diagrams now (decision recorded in section 11). `animated-diagrams.md`
+should get a one-line pointer to this doc.
 
 ## 7. Corrections (fold into the rewrite)
 
@@ -311,15 +378,17 @@ worktree).
 
 Moving/retiring pages changes URLs (`/docs/concepts/templates/`,
 `/content-from/`, `/drop-ins/`, `/variable-interpolation/`, `/suggest/`). Add
-redirects on the alint.org side (the site already ships a redirects mechanism) to
-the new homes so external links and search results do not 404. Update in-repo
+redirects on the alint.org side (the site already ships `public/_redirects`, served
+by its Cloudflare Worker) to the new homes so external links and search results do
+not 404. Update in-repo
 cross-links (notably `configuration/index.md:316`). Verify with the site's
 existing link/head-parity checks before deploy.
 
 ## 10. Effort and sequencing
 
 Rough order of magnitude: ~14 concept pages (about 6 net-new, ~5 rewrites, ~3
-relocations) plus ~12 animated diagrams. The errata hot-fix (phase 1) is an
+relocations) plus ~13 animated diagrams, and one small alint.org change (the
+sidebar grouping in 5.4 plus the redirects in 9). The errata hot-fix (phase 1) is an
 afternoon. The diagram kit + hero (phase 2) de-risks the technique. Phases 3-5
 are the bulk and can be parallelized per group. Phases 6-7 are mechanical.
 Recommend landing phase 1 immediately, then phases 2-7 as a small series of PRs.
@@ -348,6 +417,19 @@ Recommend landing phase 1 immediately, then phases 2-7 as a small series of PRs.
    source) vs inlined per diagram (self-contained, survives to GitHub). Recommend
    a hybrid: inline per diagram for portability, with the option to hoist if
    duplication grows.
+7. **Bridge now vs wait for amorph (recommend: bridge).** Hand-author inline SVG +
+   CSS now and regenerate via amorph when it ships, vs wait for amorph to produce
+   the diagrams. Recommend bridging: amorph is Phase 0, the docs need diagrams now,
+   and the prose does not change on migration. Confirm, and add a pointer from
+   `animated-diagrams.md` to this doc.
+8. **Does "Bundled rulesets" deserve its own page?** It is the primary on-ramp
+   (`alint init` writes the `extends:` lines) and the Repolinter-migration target,
+   yet 5.1 folds it into `composition-and-trust`. Recommend a short dedicated
+   `bundled-rulesets.md` concept page (the catalog, how `init` uses it, and
+   fact-gating), which would make ~15 pages. Confirm.
+9. **Grouping mechanism (5.4).** Subdirectories + an explicit alint.org sidebar
+   entry (recommended) vs flat `sidebar.order` bands. Confirm before authoring: the
+   subdir choice sets the page URLs, and therefore the redirects.
 
 ## 12. Appendix: audit provenance
 
@@ -355,4 +437,102 @@ Three read-only audits (2026-09-04) against workspace v0.16.1 produced the
 current-state critique (section 1, 7), the code-verified concept map (section 4),
 and the diagram-technology assessment (section 6). Counts verified against
 `facts.json`. This doc is the synthesis; the per-page content and each diagram's
-SVG are produced during implementation (phases 3-5).
+SVG are produced during implementation (phases 3-5). All claims in this doc were
+re-verified against source in an adversarial review pass (counts, the three hard
+errata line-citations, the three source-doc inaccuracies, the `.md`-not-`.mdx`
+fact, the absence of a CSP, and the sidebar-grouping mechanism).
+
+## 13. Appendix: the concept-page template
+
+Every concepts page follows one shape (progressive disclosure; the diagram
+reinforces the thesis; a worked example grounds it). Authors copy this skeleton:
+
+    ---
+    title: <Concept>
+    description: <one sentence; straight quotes; no em-dash>
+    sidebar:
+      order: <n>
+    ---
+
+    <One-sentence thesis: the mental model in a line.>
+
+    <Animated SVG diagram (Appendix 14), illustrating exactly that sentence.>
+
+    <Narrative: two to four short paragraphs, each idea building on the last.>
+
+    ## In practice
+
+    <A worked `.alint.yml` snippet AND the resulting `alint check` report line.>
+
+    ## Going deeper
+
+    <Links to the reference/config pages and the interactive LikeC4 view.>
+
+Worked mini-example (the pipeline page, abbreviated):
+
+    alint reads one declarative .alint.yml, makes a single parallel pass over your
+    repository, and emits one report in your pipeline's format.
+
+    [pipeline animation -- Appendix 14]
+
+    The walk runs once; each file's bytes are read at most once; evaluation is
+    parallel, then results are re-sorted so output is byte-identical run to run.
+
+    ## In practice
+    version: 1
+    rules:
+      - { id: readme-exists, kind: file_exists, paths: [README.md], level: error }
+
+    error  readme-exists  README.md is required at the repo root
+
+## 14. Appendix: the animated-SVG reference template
+
+The reference implementation (the pipeline hero). Pure inline SVG + inline
+`<style>`: no `.mdx`, no script, no dependency; themed via Starlight tokens with
+literal fallbacks; `prefers-reduced-motion` rests it at the final frame. Every
+concept diagram is a variation on this skeleton reusing the token kit below.
+
+    <svg class="alint-diagram" viewBox="0 0 640 120" role="img"
+         aria-labelledby="pipe-title pipe-desc" xmlns="http://www.w3.org/2000/svg">
+      <title id="pipe-title">alint execution pipeline</title>
+      <desc id="pipe-desc">One token flows left to right through four stages:
+        config, walk, dispatch, report.</desc>
+      <style>
+        .alint-diagram { max-width: 100%; height: auto;
+          font: 600 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+        .wire  { fill: none; stroke: var(--sl-color-gray-4, #9aa0b4); stroke-width: 2;
+                 stroke-dasharray: 6 6; animation: pipe-flow 1.2s linear infinite; }
+        .stage { fill: var(--sl-color-gray-6, #eef2ff);
+                 stroke: var(--sl-color-accent, #4338ca); stroke-width: 1.5; }
+        .label { fill: var(--sl-color-text, #1e1b4b); }
+        .token { fill: var(--sl-color-accent, #4338ca);
+                 animation: pipe-travel 3.6s cubic-bezier(.5,0,.5,1) infinite; }
+        @keyframes pipe-flow   { to { stroke-dashoffset: -12; } }
+        @keyframes pipe-travel { 0% { transform: translateX(0); opacity: 0; }
+          8% { opacity: 1; } 92% { opacity: 1; }
+          100% { transform: translateX(480px); opacity: 0; } }
+        @media (prefers-reduced-motion: reduce) {
+          .wire  { animation: none; stroke-dasharray: none; }
+          .token { animation: none; transform: translateX(480px); opacity: 1; } }
+      </style>
+      <path class="wire" d="M 80 60 H 560" />
+      <g class="label" text-anchor="middle">
+        <rect class="stage" x="20"  y="40" width="120" height="40" rx="6"/><text x="80"  y="65">config</text>
+        <rect class="stage" x="180" y="40" width="120" height="40" rx="6"/><text x="240" y="65">walk</text>
+        <rect class="stage" x="340" y="40" width="120" height="40" rx="6"/><text x="400" y="65">dispatch</text>
+        <rect class="stage" x="500" y="40" width="120" height="40" rx="6"/><text x="560" y="65">report</text>
+      </g>
+      <circle class="token" cx="80" cy="60" r="6"/>
+    </svg>
+
+Visual-language token kit (shared across every diagram):
+
+- Structure: `var(--sl-color-gray-4..6)`. Active/flowing element:
+  `var(--sl-color-accent)` (`#4338ca`). Violation: a danger token (red).
+- Motion vocabulary: a traveling token means "one pass"; a dashed wire with
+  animated offset means "flow"; fade or scale means "matched" or "suppressed."
+- Accessibility on every diagram: `role="img"` + `<title>` + `<desc>`, and a
+  `prefers-reduced-motion` block that rests at the final frame.
+- Performance: one concept per page means one or two diagrams render per page, so
+  the continuous CSS animations carry no meaningful cost; no off-screen pausing
+  (which would need JS) is required.
