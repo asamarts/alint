@@ -312,6 +312,10 @@ should get a one-line pointer to this doc.
 
 ## 7. Corrections (fold into the rewrite)
 
+**Status: these errata are corrected in a standalone hot-fix (#228)**, so the
+rewrite in phases 3-5 builds on already-fixed docs. They are listed here for the
+audit record and so the new concept pages do not reintroduce them.
+
 **Hard errors (shipped features documented as unbuilt).**
 - `docs/site/about/monorepos.md:65` -- `--changed` called "on the v0.5 roadmap."
   It ships (documented in `walker-and-gitignore.md:122`, `README.md:249`).
@@ -338,7 +342,8 @@ must reflect the code, not these:
 - `.alintignore` does not exist. The walker honors `.gitignore` / `.ignore` /
   git-exclude + the config `ignore:` list only. (Wrong in `ARCHITECTURE.md:279`.)
 - Facts are evaluated sequentially (a `for` loop), not in parallel; "cached"
-  refers to LSP reuse. (Overstated in `ARCHITECTURE.md` and ADR-0010.)
+  refers to LSP reuse. (Overstated in `ARCHITECTURE.md`; ADR-0010 is accurate, saying
+facts are evaluated once per run.)
 - The `when:` language has no `ctx.` namespace (namespaces are
   `facts.`/`vars.`/`iter.`/`env.`); `{{ctx.*}}` is valid only in message
   templates. (Wrong in `ARCHITECTURE.md` DSL listing.)
