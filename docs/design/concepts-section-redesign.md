@@ -257,8 +257,9 @@ untouched.
   `max-width:100%`.
 - A copy-paste template in the doc + optional shared `@keyframes` hoisted into
   alint.org `src/styles/custom.css` (the same split the site already uses for the
-  LikeC4 loader). A GitHub-faithful static SVG fallback is optional per diagram
-  (GitHub strips animated SVG, exactly as it strips `<likec4-view>` today).
+  LikeC4 loader). A per-diagram GitHub fallback is optional and usually
+  unnecessary: github.com strips inline `<svg>` from Markdown entirely (animated
+  or not), exactly as it strips `<likec4-view>` today (see Appendix 14).
 
 **The diagram set.** One animated diagram per major concept page (fourteen below),
 ranked by teaching value (the concept map's "hardest concepts" ranking). Short or
@@ -424,9 +425,12 @@ concept pages (added `bundled-rulesets`; `severity-and-exit-codes` and
    the cross-file-correctness rule); keeps `the-walker-and-git` focused.
 4. **`baseline` + `the-agent-surface`: stay in Concepts.** Both teach a real
    mental model; task recipes in the Cookbook link to them.
-5. **Static-SVG fallback: hero only.** Concept pages show no diagram on GitHub (an
-   alint.org surface, as with `<likec4-view>` today); a static twin ships only for
-   the hero pipeline diagram.
+5. **GitHub static fallback: inline, no twin files.** github.com strips inline
+   `<svg>` from Markdown entirely, so concept pages show no diagram on GitHub (an
+   alint.org surface, as with `<likec4-view>` today); the numbered steps carry the
+   information. No separate static-twin files ship: the hero instead carries inline
+   presentation-attribute fallbacks (`fill`/`stroke`) that keep it a valid styled
+   diagram in any renderer that drops `<style>` but keeps `<svg>` (Appendix 14).
 6. **`@keyframes`: inline per diagram.** Self-contained and portable; hoist shared
    keyframes into alint.org `custom.css` only if real duplication emerges.
 7. **amorph: bridge now.** Ship inline SVG + CSS now; regenerate each `<svg>` via
@@ -541,3 +545,22 @@ Visual-language token kit (shared across every diagram):
 - Performance: one concept per page means one or two diagrams render per page, so
   the continuous CSS animations carry no meaningful cost; no off-screen pausing
   (which would need JS) is required.
+- Graceful degradation: put light presentation-attribute fallbacks (`fill`,
+  `stroke`) directly on the shapes. On alint.org the CSS classes win over them
+  (CSS beats presentation attributes) and animate with tokens; in any renderer
+  that keeps `<svg>` but drops the `<style>` (a common sanitizer posture) the
+  presentation attributes still render a static, styled diagram, so the file needs
+  no separate static-twin. Note that github.com's Markdown renderer strips inline
+  `<svg>` entirely, so the hero does not appear when this page is viewed on GitHub;
+  that is acceptable, because the canonical surface is the rendered alint.org page
+  and the numbered steps carry the pipeline without the diagram.
+- Uniqueness per page: the `<title>`/`<desc>` ids referenced by `aria-labelledby`,
+  and the `@keyframes` names, must not collide with another diagram on the same
+  page. Namespace them per diagram (the hero uses `pipe-*` ids and `alint-*`
+  keyframes). The token's travel distance is geometry-specific, so retune it when
+  the stage layout changes.
+
+The shipped reference implementation is the pipeline hero in
+`docs/site/concepts/how-it-works.md` (Phase 2): copy its structure for the rest.
+It is deliberately minimal (four stages, one traveling token); richer per-concept
+diagrams build on this base as each page is written.
