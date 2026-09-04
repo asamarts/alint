@@ -131,6 +131,20 @@ alint check
 
 The [@asamarts/alint](https://www.npmjs.com/package/@asamarts/alint) package is a thin shim that downloads the matching pre-built binary at install time, verifies its SHA-256 against the same `.sha256` companion `install.sh` and Homebrew use, and stages it under the package's `bin-platform/`. The package itself ships zero JS runtime behaviour. Set `ALINT_SKIP_INSTALL=1` to suppress the postinstall network hop in CI environments that snapshot `node_modules`.
 
+### From PyPI (uvx / pipx / pip)
+
+```bash
+# Run without installing (the Python equivalent of npx):
+uvx alint check
+pipx run alint check
+
+# Install as a tool, or into the current environment:
+uv tool install alint
+pip install alint
+```
+
+The [`alint`](https://pypi.org/project/alint/) PyPI package ships the native binary **inside** a per-platform wheel (`py3-none-<platform>`): no source build, no PyO3, no Python in the hot path. Because the wheel embeds the binary rather than downloading it in a postinstall step, it installs cleanly where the npm shim cannot (`--ignore-scripts`, `bunx`, offline mirrors), on Linux (glibc and musl), macOS, and Windows.
+
 ### From source
 
 ```bash
@@ -319,17 +333,17 @@ Upload findings to GitHub Code Scanning:
 
 ### pre-commit
 
-Add to your `.pre-commit-config.yaml`:
+Add to your `.pre-commit-config.yaml`. The [`alint-pre-commit`](https://github.com/asamarts/alint-pre-commit) mirror installs the prebuilt wheel, so the hook is fast and needs no toolchain:
 
 ```yaml
 repos:
-  - repo: https://github.com/asamarts/alint
+  - repo: https://github.com/asamarts/alint-pre-commit
     rev: v0.16.1
     hooks:
       - id: alint
 ```
 
-The hook runs `alint check` against the repo's `.alint.yml`. For auto-fix, add `id: alint-fix`. It's registered under `stages: [manual]` so it only runs when invoked explicitly (`pre-commit run alint-fix`), since fixers mutate the tree.
+The hook runs `alint check` against the repo's `.alint.yml`. For auto-fix, add `id: alint-fix`; it's registered under `stages: [manual]` so it only runs when invoked explicitly (`pre-commit run alint-fix`), since fixers mutate the tree. If you would rather not depend on PyPI, point `repo:` at `https://github.com/asamarts/alint` instead, whose `language: rust` hook compiles alint from source.
 
 ## Docs
 
