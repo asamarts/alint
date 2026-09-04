@@ -112,11 +112,11 @@ and `SHA256SUMS` (verified against the live v0.15.0 release).
 
 **Support floor.** The musl-static Linux binary has effectively *no glibc floor* — it
 runs on old RHEL/CentOS and minimal containers, a genuine enterprise advantage worth
-stating explicitly. The **macOS floor is unpinned** (`MP-L7`): with no
-`MACOSX_DEPLOYMENT_TARGET` set in CI, the floor is rustc's per-target default
-(currently 10.12 on x86_64, 11.0 on aarch64) — a function of the Rust toolchain
-version, not the runner image, and it has drifted before (x86_64 went 10.7→10.12 in
-Rust 1.74), so we should pin it explicitly (honored by both rustc and the `cc` crate).
+stating explicitly. The **macOS floor is now pinned** (`MP-L7`, resolved with the PyPI
+channel): `release.yml` sets `MACOSX_DEPLOYMENT_TARGET` (10.12 on x86_64, 11.0 on
+aarch64), so the floor no longer tracks rustc's per-target default. It had drifted before
+(x86_64 went 10.7→10.12 in Rust 1.74), which would silently move the PyPI wheel's
+`macosx_*` platform tag — the pin (honored by both rustc and the `cc` crate) prevents that.
 (`x86_64-apple-darwin` is also slated for a Rust support-tier demotion to Tier 2.) The
 **source-build** channels
 (`cargo install`, the binstall source fallback, `cargo install --git`, and the
@@ -200,9 +200,9 @@ live citations.
 | **MP-L2** | LOW | `action-selftest` pins `v0.12.0` though its comment says track the previous minor (should be v0.14.0). | `action-selftest.yml:94` | bump each release / P0 |
 | **MP-L3** | LOW | `cross` installed unpinned at release time (fresh unversioned build dep in the aarch64 hot path). | `release-binary.sh:34-40` | pin `--version` / P0 (effect next tag) |
 | **MP-L4** | LOW | Four editor channels (Zed/Neovim/Emacs/Sublime) are source-only, manual, post-release; only VS Code + JetBrains are tag-gated. | `RELEASING.md:208-218` | automate what can be / P2 |
-| **MP-L5** | LOW | The pre-commit hook compiles from source (`language: rust`) — the slowest install path, needs a full Rust toolchain (rustc ≥ 1.85). | `.pre-commit-hooks.yaml` | ship a prebuilt-binary hook, or a PyPI-wheel `language: python` hook once PyPI lands / P2-P3 |
+| **MP-L5** | LOW | The pre-commit hook compiles from source (`language: rust`) — the slowest install path, needs a full Rust toolchain (rustc ≥ 1.85). | `.pre-commit-hooks.yaml` | **being built:** the PyPI channel (`distribution-pypi.md`) ships a `language: python` `asamarts/alint-pre-commit` mirror hook that installs the prebuilt wheel; lands with the channel |
 | **MP-L6** | LOW | The OCI image sets source/version/license labels but not `org.opencontainers.image.revision` (git SHA) or `.created`; labels sit on the image config, not the manifest-index annotations. | `release.yml:313-317` | add `.revision`/`.created`; use build-push `annotations:` / P2 |
-| **MP-L7** | LOW | The macOS deployment-target floor is unpinned, so it sits at rustc's per-target default (10.12 x86_64 / 11.0 aarch64) and drifts on a *toolchain* bump (e.g. x86_64 10.7→10.12 in Rust 1.74), not the runner image. | no `MACOSX_DEPLOYMENT_TARGET` in `release.yml` | pin `MACOSX_DEPLOYMENT_TARGET` / P2 |
+| **MP-L7** | LOW | The macOS deployment-target floor is unpinned, so it sits at rustc's per-target default (10.12 x86_64 / 11.0 aarch64) and drifts on a *toolchain* bump (e.g. x86_64 10.7→10.12 in Rust 1.74), not the runner image. | ~~no `MACOSX_DEPLOYMENT_TARGET` in `release.yml`~~ | **RESOLVED:** `release.yml` pins `MACOSX_DEPLOYMENT_TARGET` (10.12 x86_64 / 11.0 arm64), landed with the PyPI channel |
 | **MP-L8** | LOW | `SHA256SUMS` covers only the tarballs (`cat *.tar.gz.sha256`), not the `install.sh` also attached to the Release — so the headline installer script has no checksum-manifest entry, and the release-pinned immutable `install.sh` URL is undocumented. | `release.yml:175`, `:190` | add `install.sh` to the sha loop (then §6.2 cosign covers it); document the pinned URL + download-then-inspect / P1 |
 | **MP-N1** | NOTE | install.sh exists in three independently-updatable copies (release-pinned; `main` served via raw + the alint.org 302; the Action fetches at the consumer's ref). The headline `curl` pulls from mutable `main`. | `install.sh` header, `release.yml:190`, `action.yml:116`, alint.org `_redirects:9` | pair with signing (§6) |
 | **MP-N2** | NOTE | The `v0` major tag is force-moved each release, so `@v0` consumers auto-receive whatever it is repointed to — the same mutable-ref surface as `MP-N1`, one level up (a compromised account can repoint it; `@v0` also crosses 0.x breaking minors). | `release.yml:228-229` (`git tag -f`/`git push -f`) | recommend SHA-pinning for security-sensitive consumers; note the auto-update tradeoff / §6 |
@@ -292,7 +292,7 @@ run` short-name discoverability is optional, low-priority.
 | **nixpkgs** | M | Wide reach, mostly bot-maintained after entry — but do the in-repo flake first, and either use `importCargoLock`/`cargoLock` (no FOD hash) or wire a `passthru.updateScript` (`nix-update-script`), because r-ryantm cannot auto-bump Rust's `cargoHash`. |
 | **conda-forge** | M | Cheap to keep once in (regro autotick bot bumps; we merge), but the audience skews data-science — worth the one-time staged-recipes PR on demand. |
 | **Self-owned COPR** | M | Native `dnf install` UX for Fedora/RHEL via webhook auto-rebuild, no official-Fedora gatekeeper (precedent: bottom and ripgrep both have community COPRs). |
-| **PyPI (maturin `bindings="bin"` wheels)** | M | Fully automatable and clean (how ruff and typos ship: per-platform wheels landing the binary as a PATH script via `maturin-action` + OIDC). **Only worth it for the Python-ecosystem wins** — `uvx alint`, `uv tool install`, `pipx run alint`, and pinnable **pre-commit** hooks (which would also remedy `MP-L5`). Biome deliberately skips PyPI; dprint, by contrast, *does* ship an official `dprint-py` for exactly this pre-commit/Python niche — mild evidence for the demand-gated play. Adopt if we want that reach. |
+| **PyPI (`py3-none` wheels, Path B)** | M | **Promoted to a build (2026-09-03) — see `distribution-pypi.md`.** Ships the Python-ecosystem reach — `uvx alint`, `uv tool install`, `pipx run alint`, `pip install alint` — and a fast `language: python` pre-commit hook that retires `MP-L5`. Built via **Path B** (repackage the attested release binaries into per-platform wheels + OIDC Trusted Publishing + PEP 740), **not** maturin recompile (Path A, how ruff/typos ship), so the wheel payload is byte-identical to the release and the release attestation transitively covers it. dprint ships `dprint-py` for exactly this pre-commit/Python niche. |
 | **cargo-dist / `dist`** | M–L | A *consolidation* play: it would regenerate install.sh/npm/Homebrew/the release workflow and hand us binstall metadata + shell/PowerShell installers for free. Actively maintained (axodotdev, releases into 2026); the caveat is single-vendor bus-factor (the vendor sunset its hosted product once). Evaluate when hand-rolled upkeep starts to hurt. |
 | **Snap** | M+ | A path-reading linter needs **classic** confinement → a one-time manual Canonical review. Modest incremental reach; low priority. |
 

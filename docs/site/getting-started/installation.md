@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install alint via Homebrew, install.sh, npm, cargo (or cargo-binstall), Docker/Podman, or from source.
+description: Install alint via Homebrew, install.sh, npm, PyPI (uvx/pipx), cargo (or cargo-binstall), Docker/Podman, or from source.
 sidebar:
   order: 1
 ---
@@ -45,6 +45,25 @@ npx @asamarts/alint check
 ```
 
 Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts`, Bun's `bunx`, or **pnpm 10+** (which blocks dependency build scripts by default — run `pnpm approve-builds @asamarts/alint` to allow it). A future release moves to per-platform packages to lift those limits.
+
+## PyPI (uvx / pipx / pip / uv)
+
+```bash
+# Run without installing (the Python equivalent of npx):
+uvx alint check
+pipx run alint check
+
+# Install as a standalone tool:
+uv tool install alint
+pipx install alint
+
+# Or into the current environment:
+pip install alint
+```
+
+The [`alint`](https://pypi.org/project/alint/) PyPI package ships the native binary **inside** a per-platform wheel (`py3-none-<platform>`): no source build, no PyO3, no Python in the hot path. It is the same executable the other channels ship, delivered through the Python packaging ecosystem. Because the wheel embeds the binary rather than downloading it in a postinstall step, it installs cleanly where the npm wrapper cannot: locked-down `--ignore-scripts`-style installs, offline/mirror setups, and `bunx`. Convenient for Python-tooling repos, pre-commit, and any environment that already has `uv` or `pipx`.
+
+Supports Linux (x86_64/aarch64, glibc **and** musl), macOS (x86_64/arm64), and Windows (x64). Python 3.7+ is enough to select a wheel; the binary itself is interpreter-independent.
 
 ## cargo
 

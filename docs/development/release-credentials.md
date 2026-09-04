@@ -65,6 +65,15 @@ bit us again at v0.15.1, the trigger for the migration).
   `publish-npm` job needs `permissions: id-token: write`, npm CLI
   `>= 11.5.1`, and Node `>= 22.14`; `npm publish` then authenticates via
   OIDC (no `NODE_AUTH_TOKEN`) and gets build provenance for free.
+- **PyPI:** configure a Trusted Publisher on the project (pypi.org →
+  project `alint` → Publishing → add a **pending** GitHub Actions
+  publisher: owner `asamarts`, repo `alint`, workflow `release.yml`, no
+  environment). A *pending* publisher both creates the project and
+  OIDC-secures it on the first publish. The `publish-pypi` job needs only
+  `permissions: id-token: write` (that one scope also covers PEP 740
+  attestation signing via Sigstore, so it does **not** need GitHub's
+  `attestations: write`); `pypa/gh-action-pypi-publish` then publishes
+  tokenlessly with attestations on by default.
 
 crates.io and npm are both migrated. `NPM_TOKEN` was **deleted 2026-08-22**
 after v0.15.2 proved OIDC live end to end; `CARGO_REGISTRY_TOKEN` can be
@@ -83,23 +92,31 @@ two that go keyless if you take the OIDC path).
    npmjs.com → `@asamarts/alint` → Settings → Trusted Publisher → GitHub
    Actions: repo `asamarts/alint`, workflow `release.yml`, no environment
    (see the keyless section above).
-4. **Homebrew tap** — `ssh-keygen -t ed25519 -f tap_key -N ""`; add
+4. **PyPI** — keyless via Trusted Publishing (OIDC), no secret. One-time:
+   pypi.org → project `alint` → Publishing → add a **pending** GitHub
+   Actions publisher (owner `asamarts`, repo `alint`, workflow
+   `release.yml`, no environment). It must exist before the first release
+   that runs `publish-pypi`; a missing publisher fails only that job, so
+   add it then `gh run rerun --failed` (never re-tag). A pending publisher
+   does not reserve the name, so land the first publish promptly after
+   adding it.
+5. **Homebrew tap** — `ssh-keygen -t ed25519 -f tap_key -N ""`; add
    `tap_key.pub` as a **write** deploy key on `asamarts/homebrew-alint`;
    `gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo asamarts/alint < tap_key`;
    delete the local key files.
-5. **VS Code Marketplace** — create the **`asamarts` publisher** at
+6. **VS Code Marketplace** — create the **`asamarts` publisher** at
    marketplace.visualstudio.com/manage; create an **Azure DevOps** org,
    then a PAT (all accessible orgs, Marketplace → Manage, max expiry);
    `gh secret set VSCE_PAT`.
-6. **Open VSX** — sign in at open-vsx.org, claim the `asamarts`
+7. **Open VSX** — sign in at open-vsx.org, claim the `asamarts`
    namespace, create an access token; `gh secret set OVSX_PAT`.
-7. **JetBrains Marketplace** — create a vendor at
+8. **JetBrains Marketplace** — create a vendor at
    plugins.jetbrains.com, generate a permanent token (My Tokens);
    `gh secret set JETBRAINS_MARKETPLACE_TOKEN`. Then generate a signing
    chain (per JetBrains' "Plugin Signing" docs, openssl) and set
    `JETBRAINS_CERTIFICATE_CHAIN`, `JETBRAINS_PRIVATE_KEY`,
    `JETBRAINS_PRIVATE_KEY_PASSWORD`.
-8. **Codecov / alint.org** — already configured; no action.
+9. **Codecov / alint.org** — already configured; no action.
 
 ## Residual manual actions (and how we minimize them)
 
