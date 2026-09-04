@@ -155,8 +155,11 @@ not just page frontmatter; see 5.4 for the mechanism.
 - `changed-mode.md` -- the `--changed` fast path and cross-file correctness.
 
 **Composition and trust**
-- `composition-and-trust.md` -- `extends:` field-merge, bundled rulesets, the
-  trust boundary (spawn gate, SRI, path confinement).
+- `composition-and-trust.md` -- `extends:` field-merge and the trust boundary
+  (spawn gate, SRI, path confinement).
+- `bundled-rulesets.md` -- the 22 bundled rulesets: the on-ramp (`alint init`
+  scaffolds them), fact-gating, and local override; links to the Bundled Rulesets
+  reference for per-ruleset detail. (Decision: own page.)
 - `config-layering.md` -- how one effective config is assembled from drop-ins
   (`.alint.d/`), nested configs, and the three interpolation timing layers.
 
@@ -198,17 +201,19 @@ The current `Concepts` sidebar is one line in the alint.org `astro.config.mjs`:
 frontmatter `sidebar.order`). Starlight autogenerate cannot order or label
 sub-groups; the config already notes this and hand-builds the Rules group for that
 reason. So the proposed grouping is not achievable from the synced Markdown alone.
-Two options:
 
-- **(recommended) subdirectories + an explicit sidebar entry.** Author the pages
-  under `docs/site/concepts/<group>/...` (so the URL carries the group) and replace
-  the single `autogenerate` line with an explicit `Concepts` group whose items are
-  the five sub-groups, mirroring how the Rules group is hand-built. Ordering and
-  proper-case labels then work. Cost: the subdir choice sets the page URLs, so it
-  must ship with the redirects in section 9.
-- **(alternative) flat with `sidebar.order` bands.** Keep one directory and imply
-  grouping with ordered bands and a label convention. No config change, but no real
-  sub-group headers.
+**Decided (2026-09-04): the hybrid.** Author the pages under
+`docs/site/concepts/<group>/...`, and in the alint.org `astro.config.mjs` build the
+`Concepts` group from manual, proper-case group labels, each wrapping a per-group
+`autogenerate: { directory: 'docs/concepts/<group>' }` -- exactly the pattern the
+Reference group already uses. Best long-term choice: adding a page is zero-config
+(drop a file with a `sidebar.order` and Starlight autogenerate lists it), the
+sidebar cannot drift from the files, group order and labels are fully controlled,
+and URLs are semantic (`/docs/concepts/targeting/scoping/`). The one cost -- moving
+today's flat pages into subdirs changes their URLs -- folds into the redirect set
+the re-org needs anyway (section 9). Rejected: a pure-manual sidebar (hand-listing
+every page drifts as the section grows, as the old Rules arrays did) and a flat
+`sidebar.order` list (no real grouping).
 
 This makes the redesign a **cross-repo change**. Page content and diagrams are
 authored in `alint/docs/site/concepts/` (synced verbatim to alint.org), but three
@@ -398,43 +403,32 @@ afternoon. The diagram kit + hero (phase 2) de-risks the technique. Phases 3-5
 are the bulk and can be parallelized per group. Phases 6-7 are mechanical.
 Recommend landing phase 1 immediately, then phases 2-7 as a small series of PRs.
 
-## 11. Open questions
+## 11. Decisions (resolved 2026-09-04)
 
-1. **Does the animated-diagram convention warrant an ADR?** It is an additive,
-   reversible docs technique (not an architectural decision), and ADR-0005 already
-   covers the diagram program. Recommend: no ADR; note the technique in
-   `architecture-diagrams.md` / `animated-diagrams.md` instead. Confirm.
-2. **`severity-and-exit-codes`: standalone or folded into `the-config-model`?**
-   It is short. Recommend folding, with exit codes as a callout, unless we want a
-   linkable page for CI docs to point at.
-3. **`changed-mode`: its own page or a section of `the-walker-and-git`?** It is a
-   distinct idea (git diff + cross-file correctness) but small. Recommend its own
-   short page for linkability; open to folding.
-4. **`baseline` and `the-agent-surface`: Concepts or Guides?** Both carry a real
-   mental model but are also workflows. Recommend keeping them in Concepts (they
-   are differentiators) and adding a task-oriented Guide that links to them.
-5. **Static-SVG fallbacks for GitHub.** Author every animated diagram with a
-   committed static SVG twin (as the two landing heroes do), or accept that
-   `docs/site/*.md` viewed on GitHub shows no diagram (consistent with
-   `<likec4-view>` today)? Recommend: accept it for most; add a static twin only
-   for the hero.
-6. **Shared `@keyframes` location.** In alint.org `custom.css` (site-owned, one
-   source) vs inlined per diagram (self-contained, survives to GitHub). Recommend
-   a hybrid: inline per diagram for portability, with the option to hoist if
-   duplication grows.
-7. **Bridge now vs wait for amorph (recommend: bridge).** Hand-author inline SVG +
-   CSS now and regenerate via amorph when it ships, vs wait for amorph to produce
-   the diagrams. Recommend bridging: amorph is Phase 0, the docs need diagrams now,
-   and the prose does not change on migration. Confirm, and add a pointer from
-   `animated-diagrams.md` to this doc.
-8. **Does "Bundled rulesets" deserve its own page?** It is the primary on-ramp
-   (`alint init` writes the `extends:` lines) and the Repolinter-migration target,
-   yet 5.1 folds it into `composition-and-trust`. Recommend a short dedicated
-   `bundled-rulesets.md` concept page (the catalog, how `init` uses it, and
-   fact-gating), which would make ~15 pages. Confirm.
-9. **Grouping mechanism (5.4).** Subdirectories + an explicit alint.org sidebar
-   entry (recommended) vs flat `sidebar.order` bands. Confirm before authoring: the
-   subdir choice sets the page URLs, and therefore the redirects.
+All nine open questions were resolved with the maintainer, one by one. Net: ~15
+concept pages (added `bundled-rulesets`; `severity-and-exit-codes` and
+`changed-mode` both kept standalone) and ~13 animated diagrams.
+
+1. **ADR? No.** The animated-diagram convention is an additive, reversible docs
+   technique under ADR-0005's diagram program; recorded in `animated-diagrams.md`,
+   not a new ADR.
+2. **`severity-and-exit-codes`: own page.** Kept standalone as a stable link
+   target for CI-gating docs.
+3. **`changed-mode`: own page.** A short standalone page (the git-diff fast path +
+   the cross-file-correctness rule); keeps `the-walker-and-git` focused.
+4. **`baseline` + `the-agent-surface`: stay in Concepts.** Both teach a real
+   mental model; task recipes in the Cookbook link to them.
+5. **Static-SVG fallback: hero only.** Concept pages show no diagram on GitHub (an
+   alint.org surface, as with `<likec4-view>` today); a static twin ships only for
+   the hero pipeline diagram.
+6. **`@keyframes`: inline per diagram.** Self-contained and portable; hoist shared
+   keyframes into alint.org `custom.css` only if real duplication emerges.
+7. **amorph: bridge now.** Ship inline SVG + CSS now; regenerate each `<svg>` via
+   amorph when it lands (prose unchanged). `animated-diagrams.md` now points here.
+8. **"Bundled rulesets": own page.** A dedicated concept page (the on-ramp +
+   fact-gating), linking to the Bundled Rulesets reference (5.1).
+9. **Grouping: the hybrid** -- manual group labels each wrapping a per-group
+   `autogenerate` (the Reference-group pattern; see 5.4).
 
 ## 12. Appendix: audit provenance
 
