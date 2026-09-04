@@ -12,8 +12,11 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.16.0** (2026-09-02): the config-format coverage arc plus a
-parser-hardening cycle. XML becomes a first-class target across every format-aware
+**Latest release: v0.16.1** (2026-09-04): the PyPI distribution channel. alint is
+now installable via `uvx` / `pipx` / `uv tool` / `pip`, with a fast `language: python`
+pre-commit hook, each wheel embedding the prebuilt attested binary. It builds on the
+v0.16.0 config-format coverage arc plus a parser-hardening cycle: XML becomes a
+first-class target across every format-aware
 rule, and dotenv (`.env`), Java `.properties`, INI / `.cfg`, and HCL (Terraform /
 Nomad / Packer) join as new config formats, each with a
 `*_path_{equals,matches,absent}` family, `json_schema_passes` support, and
