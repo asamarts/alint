@@ -8,6 +8,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-04
+
+This release ships the PyPI distribution channel: alint is now installable via
+`uvx` / `pipx` / `uv tool` / `pip`, with a fast `language: python` pre-commit hook.
+Each wheel embeds the prebuilt, attested native binary and is published tokenlessly
+through PyPI Trusted Publishing with PEP 740 attestations.
+
+### Added
+
+- **PyPI distribution channel.** alint is now installable from PyPI: `uvx alint`,
+  `pipx run alint`, `uv tool install alint`, and `pip install alint`, plus a fast
+  `language: python` pre-commit hook via the `asamarts/alint-pre-commit` mirror. Each
+  per-platform wheel embeds the prebuilt, attested native binary (no source build, no
+  PyO3, no Python in the hot path), so it installs cleanly where the npm postinstall
+  wrapper cannot (`--ignore-scripts`, `bunx`, offline mirrors). Published tokenlessly via
+  PyPI Trusted Publishing with PEP 740 attestations; the wheel payload is byte-identical
+  to the release binary, so the release's build provenance transitively covers it. See
+  ADR-0016 and the installation guide.
+
+### Changed
+
+- macOS release binaries pin their deployment-target floor (10.12 on x86_64, 11.0 on
+  arm64) so it no longer drifts with the Rust toolchain, keeping the PyPI wheel platform
+  tags stable.
+
 ## [0.16.0] - 2026-09-02
 
 This release completes the config-format coverage arc and hardens every config
@@ -6757,7 +6782,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/asamarts/alint/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/asamarts/alint/compare/v0.15.2...v0.16.0
 [0.15.2]: https://github.com/asamarts/alint/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/asamarts/alint/compare/v0.15.0...v0.15.1
