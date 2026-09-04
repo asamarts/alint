@@ -1,6 +1,6 @@
 id = "alint"
 name = "alint"
-version = "0.16.0"
+version = "0.16.1"
 schema_version = 1
 authors = ["alint contributors"]
 description = "Repository-structure linting (alint) in Zed via the alint language server."

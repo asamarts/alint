@@ -1,6 +1,6 @@
 {
   "format_version": 2,
-  "alint_version": "0.16.0",
+  "alint_version": "0.16.1",
   "counts": {
     "rule_kinds": 105,
     "families": 13,
