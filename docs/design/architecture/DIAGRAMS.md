@@ -169,8 +169,8 @@ graph LR
 (cache, cycle-detect, SRI)`" .-> AlintCliDsl
   AlintCliDsl -. "`reject spawning kinds in extends 
 (ADR-0004)`" .-> AlintCliDsl
-  AlintCliAlintBin -. "`evaluate facts (parallel, cached) + 
-filter rules by when`" .-> AlintCliCore
+  AlintCliAlintBin -. "`evaluate facts (once, cached) + filter 
+rules by when`" .-> AlintCliCore
   AlintCliAlintBin -. "`parallel walk -> FileIndex (sorted, 
 deterministic)`" .-> AlintCliCore
   AlintCliCore -. "`per-file dispatch: read each file once 
@@ -291,9 +291,8 @@ graph LR
   AlintCliAlintBin["alint"]
   AlintCliCore["alint-core"]
   AlintCliRules["alint-rules"]
-  AlintCliAlintBin -. "`evaluate facts in parallel 
-(any_file_exists, count_files, custom, 
-...)`" .-> AlintCliCore
+  AlintCliAlintBin -. "`evaluate facts once (any_file_exists, 
+count_files, custom, ...)`" .-> AlintCliCore
   AlintCliCore -. "`cache fact values keyed on input hashes`" .-> AlintCliCore
   AlintCliCore -. "`evaluate each rule when: clause over 
 facts / vars / ctx`" .-> AlintCliCore
@@ -329,8 +328,7 @@ graph LR
   AlintCliRules["alint-rules"]
   AlintCliAlintBin -. "`parallel walk (ignore crate 
 WalkBuilder.build_parallel)`" .-> AlintCliCore
-  AlintCliCore -. "`honor .gitignore + .alintignore + 
-ignore: globs`" .-> AlintCliCore
+  AlintCliCore -. "`honor .gitignore/.ignore + ignore: globs`" .-> AlintCliCore
   AlintCliCore -. "`merge thread-local FileEntry vecs + 
 deterministic sort`" .-> AlintCliCore
   AlintCliCore -. "`build lazy indices: path set, 

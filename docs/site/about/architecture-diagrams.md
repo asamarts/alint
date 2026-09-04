@@ -84,7 +84,7 @@ The engine's core types: how a `Rule` (or `PerFileRule`), a `Fixer`, and the
 
 ## Facts and conditional rules
 
-Facts are evaluated once (in parallel, cached), then used to filter which rules
+Facts are evaluated once (sequentially, cached), then used to filter which rules
 run via their `when:` conditions.
 
 <likec4-view view-id="factsFlow"></likec4-view>
