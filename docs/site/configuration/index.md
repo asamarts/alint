@@ -313,4 +313,4 @@ A `--baseline <path>` flag overrides this key. There is **no silent auto-detect*
 
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.
 - [Rules](/docs/rules/): every rule kind, organised by family, with per-rule options.
-- [Concepts](/docs/concepts/): the rule model and `when:` expression language explained in depth.
+- [Concepts](/docs/concepts/): the rule model, the walker, and how alint runs, explained.
