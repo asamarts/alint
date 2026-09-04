@@ -10,7 +10,7 @@ alint reads one declarative `.alint.yml`, makes a single parallel pass over your
 <likec4-view view-id="checkFlow"></likec4-view>
 
 1. **Config load.** alint reads the `.alint.yml` at the repository root and resolves any `extends:` (local files, HTTPS sources pinned by a subresource-integrity hash, or bundled rulesets), then validates the merged config against its JSON schema.
-2. **Facts.** Any `facts:` you declared are evaluated once, in parallel, and cached. Facts answer questions about the repo (does a file exist, how many match a glob, what does a command print) that rules can gate on.
+2. **Facts.** Any `facts:` you declared are evaluated once, sequentially, and cached. Facts answer questions about the repo (does a file exist, how many match a glob, what does a command print) that rules can gate on.
 3. **Rule filter.** Each rule's `when:` condition is evaluated against the facts; rules whose condition is false are dropped before a single file is read.
 4. **Walk.** alint walks the repository once, in parallel, honoring `.gitignore` and your `ignore:` globs, and builds a deterministic, sorted index of the files.
 5. **Dispatch.** Rules split into two classes: cross-file rules scan the whole index, and per-file rules run against each matched file. Either way, every matched file's bytes are read at most once.

@@ -278,7 +278,7 @@ paths: ["src/**/*.rs", "!src/**/testdata/**"]              # array with negation
 paths: {include: ["src/**"], exclude: ["**/*.test.*"]}     # explicit pair
 ```
 
-`.gitignore` is honored by default. `.alintignore` provides alint-specific exclusions. `ignore:` in config adds to the exclusion set.
+`.gitignore` (plus `.ignore` and git exclude files) is honored by default. `ignore:` in config adds to the exclusion set.
 
 ### Facts and conditional rules
 
@@ -289,7 +289,7 @@ Fact kinds are `any_file_exists`, `all_files_exist`, `count_files`, `file_conten
 The `when` expression language is deliberately bounded:
 
 - Operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`, `in`, `matches`
-- Identifiers: `facts.<name>`, `vars.<name>`, `ctx.<name>`
+- Identifiers: `facts.<name>`, `vars.<name>`, `iter.<name>`, `env.<name>` (`ctx.<name>` is available in messages, not in `when:`)
 - Literals: strings, numbers, booleans, null, lists
 
 No user-defined functions, no recursion, no I/O. Examples:
@@ -342,7 +342,7 @@ The pipeline from `alint check` to output:
 <likec4-view view-id="checkFlow"></likec4-view>
 
 1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
-2. **Facts.** Evaluate facts in parallel. Cache keyed on input hashes.
+2. **Facts.** Evaluate facts sequentially, once per run. Cache keyed on input hashes (reused on the LSP per-file path).
 3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
 4. **Walk.** One *parallel* pass over the filesystem via the `ignore` crate's `WalkBuilder::build_parallel` (v0.9.1). Each worker thread accumulates `FileEntry`s in a thread-local `Vec`; the engine merges them and runs a deterministic `sort_unstable_by` post-sort so downstream output is byte-identical to the pre-v0.9.1 sequential walker. The resulting `FileIndex` exposes lazy `OnceLock` indexes (`contains_file`, `children_of`, `descendants_of`, `file_basenames_of`) that turn common cross-file queries from linear scans into O(1) hash lookups (v0.9.5 + v0.9.8).
 5. **Dispatch partition.** Rules with `requires_full_index() = true` (cross-file) stay rule-major; the rest implement `PerFileRule` and join the file-major dispatch (v0.9.3, see [Rule model](#dispatch-flip--perfilerule-v093)).
@@ -352,9 +352,9 @@ The pipeline from `alint check` to output:
 9. **Fix (optional).** Apply fixers serially; re-run checks.
 10. **Emit.** Format via selected output.
 
-Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; fact and rule evaluation are both parallelized; fixers run serially (they mutate the tree).
+Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially (they mutate the tree).
 
-Step 2 in detail: facts are evaluated once (in parallel, cached), then gate which rules run via their `when:` conditions.
+Step 2 in detail: facts are evaluated once (sequentially, cached), then gate which rules run via their `when:` conditions.
 
 <likec4-view view-id="factsFlow"></likec4-view>
 

@@ -84,7 +84,7 @@ The engine's core types: how a `Rule` (or `PerFileRule`), a `Fixer`, and the
 
 ## Facts and conditional rules
 
-Facts are evaluated once (in parallel, cached), then used to filter which rules
+Facts are evaluated once (sequentially, cached), then used to filter which rules
 run via their `when:` conditions.
 
 <likec4-view view-id="factsFlow"></likec4-view>
@@ -105,7 +105,7 @@ filtering, and the deterministic, sorted `FileIndex`.
 
 ## Template expansion
 
-How `${...}` template variables in rule options are expanded before evaluation.
+How `{{vars.X}}` template variables in rule options are expanded before evaluation.
 
 <likec4-view view-id="templateFlow"></likec4-view>
 
