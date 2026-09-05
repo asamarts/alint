@@ -19,30 +19,31 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
   .alint-kinds .tx { fill:var(--tx); } .alint-kinds .mut { fill:var(--mut); } .alint-kinds .ac { fill:var(--ac); }
   .alint-kinds .card { fill:var(--card); stroke:var(--bd); stroke-width:1.3; }
   .alint-kinds .chip { fill:none; stroke:var(--bd); stroke-width:1.1; }
-  .alint-kinds .extra { animation:kpulse 2.6s ease-in-out infinite; }
-  @keyframes kpulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
-  @media (prefers-reduced-motion:reduce){ .alint-kinds .extra { animation:none; opacity:1; } }
+  .alint-kinds .tag { font:600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill:var(--mut); }
+  .alint-kinds .extra { animation:kpulse 2.8s ease-in-out infinite; }
+  @keyframes kpulse { 0%,100% { stroke:var(--bd); } 50% { stroke:var(--ac); } }
+  @media (prefers-reduced-motion:reduce){ .alint-kinds .extra { animation:none; } }
 </style>
 <text class="ui ac" x="18" y="15">one family, many categories</text>
 <text class="ui mut" x="18" y="33">105 kinds &#183; 13 families &#183; 13 categories</text>
 <rect class="card" x="20" y="46" width="420" height="58" rx="8"/><rect x="20" y="46" width="6" height="58" rx="2" fill="#3b82f6"/>
 <text class="mono tx" x="38" y="72" font-size="14">file_exists</text>
 <rect x="330" y="56" width="92" height="22" rx="11" fill="#3b82f6"/><text class="ui" x="376" y="71" text-anchor="middle" fill="#fff">Existence</text>
-<rect class="chip" x="38" y="82" width="76" height="18" rx="9"/><text class="mono mut" x="48" y="95" font-size="10">existence</text>
+<rect class="chip" x="38" y="82" width="82" height="18" rx="9"/><text class="tag" x="49" y="95">existence</text>
 <rect class="card" x="20" y="116" width="420" height="58" rx="8"/><rect x="20" y="116" width="6" height="58" rx="2" fill="#ef4444"/>
 <text class="mono tx" x="38" y="142" font-size="14">no_bidi_controls</text>
 <rect x="336" y="126" width="86" height="22" rx="11" fill="#ef4444"/><text class="ui" x="379" y="141" text-anchor="middle" fill="#fff">Security</text>
-<rect class="chip" x="38" y="152" width="70" height="18" rx="9"/><text class="mono mut" x="48" y="165" font-size="10">security</text>
-<g class="extra"><rect class="chip" x="114" y="152" width="72" height="18" rx="9"/><text class="mono mut" x="124" y="165" font-size="10">encoding</text></g>
+<rect class="chip" x="38" y="152" width="76" height="18" rx="9"/><text class="tag" x="49" y="165">security</text>
+<rect class="chip extra" x="122" y="152" width="76" height="18" rx="9"/><text class="tag" x="133" y="165">encoding</text>
 <rect class="card" x="20" y="186" width="420" height="58" rx="8"/><rect x="20" y="186" width="6" height="58" rx="2" fill="#7c3aed"/>
 <text class="mono tx" x="38" y="212" font-size="14">dir_contains</text>
 <rect x="330" y="196" width="92" height="22" rx="11" fill="#7c3aed"/><text class="ui" x="376" y="211" text-anchor="middle" fill="#fff">Cross-file</text>
-<rect class="chip" x="38" y="222" width="78" height="18" rx="9"/><text class="mono mut" x="48" y="235" font-size="10">cross-file</text>
-<g class="extra"><rect class="chip" x="126" y="222" width="74" height="18" rx="9"/><text class="mono mut" x="136" y="235" font-size="10">structure</text></g>
+<rect class="chip" x="38" y="222" width="90" height="18" rx="9"/><text class="tag" x="49" y="235">cross-file</text>
+<rect class="chip extra" x="136" y="222" width="82" height="18" rx="9"/><text class="tag" x="147" y="235">structure</text>
 <rect class="card" x="20" y="256" width="420" height="58" rx="8"/><rect x="20" y="256" width="6" height="58" rx="2" fill="#06b6d4"/>
 <text class="mono tx" x="38" y="282" font-size="14">filename_case</text>
 <rect x="346" y="266" width="76" height="22" rx="11" fill="#06b6d4"/><text class="ui" x="384" y="281" text-anchor="middle" fill="#fff">Naming</text>
-<rect class="chip" x="38" y="292" width="64" height="18" rx="9"/><text class="mono mut" x="48" y="305" font-size="10">naming</text>
+<rect class="chip" x="38" y="292" width="62" height="18" rx="9"/><text class="tag" x="49" y="305">naming</text>
 <line x1="20" y1="336" x2="440" y2="336" stroke="var(--bd)" stroke-width="1" opacity=".5"/>
 <rect x="20" y="352" width="14" height="14" rx="3" fill="#7c3aed"/><text class="ui tx" x="42" y="363">colored band = the one family a kind belongs to</text>
 <rect class="chip" x="20" y="380" width="14" height="14" rx="7"/><text class="ui tx" x="42" y="391">chips = its categories; 32 kinds carry more than one,</text>
