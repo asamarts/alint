@@ -22,9 +22,9 @@ alint reads one declarative config, makes a single parallel pass over your repos
   .alint-check .accent-card { fill:var(--card); stroke:var(--ac); stroke-width:1.6; }
   .alint-check .flow { fill:none; stroke:var(--ac); stroke-width:2; stroke-dasharray:6 6; opacity:.75; animation:chkf 1s linear infinite; }
   .alint-check .scan { animation:chks 6s ease-in-out infinite; }
-  .alint-check .glow { fill:var(--ac); opacity:.10; }
-  .alint-check .beam { fill:var(--ac); opacity:.16; }
-  .alint-check .head { fill:var(--ac); }
+  .alint-check .glow { fill:var(--ac); opacity:.16; }
+  .alint-check .small { font:600 11px system-ui, -apple-system, sans-serif; }
+  .alint-check .exit { font:700 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .alint-check .off { opacity:.45; }
   @keyframes chkf { to { stroke-dashoffset:-12; } }
   @keyframes chks { 0%{transform:translateY(0);opacity:0} 5%{opacity:1} 92%{transform:translateY(220px);opacity:1} 100%{transform:translateY(220px);opacity:0} }
@@ -37,21 +37,18 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <text class="mono ac" x="34" y="88">.alint.yml</text>
 <text class="mono mut" x="34" y="107" font-size="12">extends: rust@v1</text>
 <rect x="30" y="114" width="182" height="20" rx="10" fill="#ef4444" opacity=".14"/>
-<text class="ui" x="40" y="128" fill="#ef4444" font-size="11">spawn-gate blocks command &#10007;</text>
+<text class="small" x="40" y="128" fill="#ef4444">spawn-gate blocks command &#10007;</text>
 <text class="ui mut" x="34" y="151">facts once &#183; when filters rules</text>
 <text class="ui ac" x="20" y="180">active rules</text>
 <rect class="card" x="20" y="188" width="84" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="204" font-size="12">no_bidi</text>
 <rect class="card" x="112" y="188" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="124" y="204" font-size="12">filename_case</text>
 <rect class="card" x="20" y="220" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="31" y="236" font-size="12" fill="#7c3aed">pair</text>
 <rect class="card off" x="92" y="220" width="150" height="24" rx="12"/><text class="mono mut off" x="103" y="236" font-size="11">win (when: false)</text>
-<path class="flow" d="M 230 250 V 268"/><text class="ui mut" x="242" y="263">walk</text>
-<rect class="repo" x="20" y="268" width="130" height="14" rx="4"/>
+<path class="flow" d="M 230 250 V 278"/><text class="ui mut" x="242" y="263">walk</text>
 <rect class="repo" x="20" y="280" width="420" height="344" rx="14"/>
 <text class="ui ac" x="34" y="303">repository</text><text class="ui mut" x="116" y="303">walked once, sorted</text>
 <g class="scan">
-  <rect class="glow" x="28" y="306" width="384" height="52" rx="10"/>
-  <rect class="beam" x="32" y="312" width="376" height="40" rx="8"/>
-  <path class="head" d="M 32 322 l 12 10 l -12 10 z"/>
+  <rect class="glow" x="28" y="308" width="384" height="48" rx="10"/>
 </g>
 <rect class="card" x="34" y="312" width="372" height="40" rx="7"/><rect x="34" y="312" width="6" height="40" rx="2" fill="#3b82f6"/><text class="mono tx" x="56" y="337">README.md</text><circle cx="388" cy="332" r="10" fill="#22c55e"/><path d="M383 332 l3.5 3.5 l6 -7" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 <rect class="card" x="34" y="356" width="372" height="40" rx="7"/><rect x="34" y="356" width="6" height="40" rx="2" fill="#f59e0b"/><text class="mono tx" x="56" y="381">Cargo.toml</text><circle cx="388" cy="376" r="10" fill="#22c55e"/><path d="M383 376 l3.5 3.5 l6 -7" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -74,7 +71,7 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <text class="mono tx" x="60" y="764" font-size="12">filename_case</text>
 <text class="mono mut" x="60" y="781" font-size="11">src/Utils.rs</text>
 <line x1="34" y1="788" x2="426" y2="788" stroke="var(--bd)" stroke-width="1"/>
-<text class="mono" x="34" y="822" fill="#ef4444" font-size="18" font-weight="700">exit 1</text>
+<text class="exit" x="34" y="822" fill="#ef4444">exit 1</text>
 <rect class="card" x="120" y="808" width="60" height="20" rx="10"/><text class="ui mut" x="130" y="822">human</text>
 <rect class="card" x="186" y="808" width="46" height="20" rx="10"/><text class="ui mut" x="194" y="822">json</text>
 <text class="ui mut" x="34" y="848">SARIF, GitHub, and 5 more formats</text>
