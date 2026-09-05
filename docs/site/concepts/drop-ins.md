@@ -1,11 +1,11 @@
 ---
 title: 'Drop-in configs (.alint.d/*.yml)'
-description: Auto-discovered alongside the top-level `.alint.yml`, merged alphabetically. The `/etc/*.d/` shape applied to alint configs — stage `00-base.yml` for ops defaults, `99-local.yml` for developer overrides.
+description: Auto-discovered alongside the top-level `.alint.yml`, merged alphabetically. The `/etc/*.d/` shape applied to alint configs. Stage `00-base.yml` for ops defaults, `99-local.yml` for developer overrides.
 sidebar:
   order: 7
 ---
 
-When `.alint.yml` lives alongside a `.alint.d/` directory at the same path, alint discovers every `*.yml` (or `*.yaml`) file inside that directory and merges them into the effective config. Merge order is alphabetical by filename — the **last drop-in wins** on field-level conflict, mirroring the `/etc/*.d/` convention. Non-yaml files (`.gitkeep`, `README.md`) are silently skipped.
+When `.alint.yml` lives alongside a `.alint.d/` directory at the same path, alint discovers every `*.yml` (or `*.yaml`) file inside that directory and merges them into the effective config. Merge order is alphabetical by filename: the **last drop-in wins** on field-level conflict, mirroring the `/etc/*.d/` convention. Non-yaml files (`.gitkeep`, `README.md`) are silently skipped.
 
 ## Layout
 
@@ -21,7 +21,7 @@ Each drop-in is a complete alint config (with its own `version: 1`) that contrib
 
 ## Trust posture
 
-Drop-ins are **trust-equivalent to the main `.alint.yml`** — they live in the same workspace under the user's control, so they CAN declare `custom:` facts and `kind: command` rules without the trust gate that protects HTTPS-fetched and `alint://bundled/` extends. The mental model: anything you'd put in your own `.alint.yml`, you can put in a drop-in.
+Drop-ins are **trust-equivalent to the main `.alint.yml`**: they live in the same workspace under the user's control, so they CAN declare `custom:` facts and `kind: command` rules without the trust gate that protects HTTPS-fetched and `alint://bundled/` extends. The mental model: anything you'd put in your own `.alint.yml`, you can put in a drop-in.
 
 ## Use cases
 
@@ -59,6 +59,6 @@ After merge: `my-custom-rule` has `level: error` (drop-in won the field override
 
 ## Limits
 
-- **Top-level only.** Only the root config gets `.alint.d/` discovery. Sub-extended configs (anything reached via `extends:`) don't get their own drop-ins — that would compound merge complexity beyond reason.
+- **Top-level only.** Only the root config gets `.alint.d/` discovery. Sub-extended configs (anything reached via `extends:`) don't get their own drop-ins. That would compound merge complexity beyond reason.
 - **Alphabetical order is the only knob.** No explicit priority field, no "before this file" hooks. Use the `00-`, `50-`, `99-` convention to reserve ranges; that's how `/etc/*.d/` does it and it's enough.
-- **Merge isn't recursive into nested fields.** Override semantics match `extends:` exactly — top-level keys on a rule mapping merge by id, but nested structures (`fix:` blocks, `paths:` `include`/`exclude` pairs) replace wholesale. Surprising in theory; the right call in practice (overriding `fix.file_create.content` partially is rarely what you actually want).
+- **Merge isn't recursive into nested fields.** Override semantics match `extends:` exactly: top-level keys on a rule mapping merge by id, but nested structures (`fix:` blocks, `paths:` `include`/`exclude` pairs) replace wholesale. Surprising in theory; the right call in practice (overriding `fix.file_create.content` partially is rarely what you actually want).

@@ -1,6 +1,6 @@
 ---
 title: Baseline mode
-description: Grandfather a repo's existing violations so `alint check` gates only on new findings — the fingerprint-based baseline file, the two-command workflow, and which formats are baseline-aware.
+description: Grandfather a repo's existing violations so `alint check` gates only on new findings. Covers the fingerprint-based baseline file, the two-command workflow, and which formats are baseline-aware.
 sidebar:
   order: 9
 ---
@@ -11,7 +11,7 @@ This is the standard "ratchet": stop the bleeding now, pay the backlog down on y
 
 ## The two-command workflow
 
-**1. Record the baseline** — run once when you adopt alint (and again when you deliberately pay down or accept debt):
+**1. Record the baseline.** Run once when you adopt alint (and again when you deliberately pay down or accept debt):
 
 ```sh
 alint baseline
@@ -19,7 +19,7 @@ alint baseline
 
 This runs the same whole-tree evaluation as `check`, then writes every current violation to `.alint-baseline.json`. Commit that file.
 
-**2. Enforce the delta** — in CI and locally:
+**2. Enforce the delta.** In CI and locally:
 
 ```sh
 alint check --baseline .alint-baseline.json
@@ -33,11 +33,11 @@ Persist the path in `.alint.yml` so CI need not repeat the flag:
 baseline: .alint-baseline.json
 ```
 
-`--baseline` on the command line overrides the config key. There is **no silent auto-detect** — a baseline suppresses findings only when you opt in explicitly (the config key or the flag), never because the file merely exists. Suppression is always a reviewable, committed decision.
+`--baseline` on the command line overrides the config key. There is **no silent auto-detect**: a baseline suppresses findings only when you opt in explicitly (the config key or the flag), never because the file merely exists. Suppression is always a reviewable, committed decision.
 
 ## The baseline file
 
-`.alint-baseline.json` is **JSON Lines** — a header line, then one sorted entry per grandfathered finding:
+`.alint-baseline.json` is **JSON Lines**, one header line then one sorted entry per grandfathered finding:
 
 ```
 {"schema_version":1,"alint_version":"0.14.0"}
@@ -47,14 +47,14 @@ baseline: .alint-baseline.json
 
 One entry per line (not a single JSON array) is a deliberate choice: it is **merge-friendly**. Two PRs that each grandfather a different finding don't collide on shared array brackets. Entries are sorted, so an unchanged tree regenerates byte-for-byte identically.
 
-The `message` and `path` fields are **advisory** — they exist so a reviewer reading the baseline diff in a PR can see *what* is being grandfathered. Only the `fingerprint` is matched.
+The `message` and `path` fields are **advisory**: they exist so a reviewer reading the baseline diff in a PR can see *what* is being grandfathered. Only the `fingerprint` is matched.
 
 ## Fingerprints, not line numbers
 
-The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator** — for a line-anchored finding, the offending line's *text*, not its line *number*. So:
+The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator**: for a line-anchored finding, the offending line's *text*, not its line *number*. So:
 
 - Inserting or deleting unrelated lines elsewhere in the file **does not** churn the baseline (line numbers shift; fingerprints don't).
-- **Editing the offending line itself re-triggers** the rule — the fingerprint changes, so the finding is treated as new and the gate catches it. You can't silently mutate grandfathered-but-broken code into something else that's broken.
+- **Editing the offending line itself re-triggers** the rule: the fingerprint changes, so the finding is treated as new and the gate catches it. You can't silently mutate grandfathered-but-broken code into something else that's broken.
 
 This is why the baseline survives ordinary refactoring without a flood of stale-entry noise, yet never masks a genuinely new problem.
 
@@ -74,19 +74,19 @@ Stale entries (present in the baseline but no longer firing) warn by default; `-
 
 Suppression **marks** violations rather than deleting them, so each formatter does the right thing for its consumer:
 
-- **sarif** — suppressed results are emitted with `suppressions: [{ "kind": "external" }]` and `baselineState: "unchanged"`; new findings get `baselineState: "new"`. This keeps GitHub Code Scanning alerts *open-but-dismissed* instead of flapping fixed-then-reopened as findings resurface.
-- **json** — suppressed findings are omitted from `results` (the gate sees only new), but the envelope carries a `summary.baselined_suppressed` count.
-- **human** — suppressed findings are omitted; the count prints on stderr.
+- **sarif**: suppressed results are emitted with `suppressions: [{ "kind": "external" }]` and `baselineState: "unchanged"`; new findings get `baselineState: "new"`. This keeps GitHub Code Scanning alerts *open-but-dismissed* instead of flapping fixed-then-reopened as findings resurface.
+- **json**: suppressed findings are omitted from `results` (the gate sees only new), but the envelope carries a `summary.baselined_suppressed` count.
+- **human**: suppressed findings are omitted; the count prints on stderr.
 
 Only **sarif** and **json** are baseline-aware; the other formats receive the already-filtered live report. The global `--show-baselined` flag lists the suppressed findings in full, in any format. The exit code is gated on the live (new) findings only, always.
 
 ## What baseline mode does *not* do
 
 - **`fix` does not take `--baseline`.** Auto-fixing is orthogonal to grandfathering; run `fix` normally, then refresh the baseline.
-- **It is not `--changed`.** A baseline must be whole-tree, so `alint baseline` rejects `--changed`/`--base` — a changed-scope snapshot would capture only the diff and silently omit the rest of the legacy tree. Baseline mode and changed-file mode compose at `check` time, not at record time.
+- **It is not `--changed`.** A baseline must be whole-tree, so `alint baseline` rejects `--changed`/`--base`: a changed-scope snapshot would capture only the diff and silently omit the rest of the legacy tree. Baseline mode and changed-file mode compose at `check` time, not at record time.
 
 ## See also
 
 - [`baseline:` configuration key](/docs/configuration/#baseline)
-- [Output formats](/docs/reference/output-formats/) — the full per-format behaviour
-- [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) — what the whole-tree evaluation sees
+- [Output formats](/docs/reference/output-formats/): the full per-format behaviour
+- [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/): what the whole-tree evaluation sees

@@ -35,7 +35,7 @@ rules:
     vars: { dir: apps }
 ```
 
-That config produces three independent rules — `packages-have-readme`, `services-have-readme`, `apps-have-readme` — each scoped to the right directory, each with its own substituted message.
+That config produces three independent rules (`packages-have-readme`, `services-have-readme`, `apps-have-readme`), each scoped to the right directory, each with its own substituted message.
 
 ## Substitution
 
@@ -55,7 +55,7 @@ templates:
         content_from: "templates/{{vars.lang}}.Cargo.toml"
 ```
 
-Unknown placeholders are preserved literally — a typo in `{{vars.languge}}` shows up in the rule's output rather than silently blanking out a field.
+Unknown placeholders are preserved literally: a typo in `{{vars.languge}}` shows up in the rule's output rather than silently blanking out a field.
 
 ## Field-level overrides on instances
 
@@ -69,7 +69,7 @@ rules:
     vars: { dir: services }
 ```
 
-The instance's `id:` is required (templates don't carry an id into the instance — each instance owns its own); `vars:` and `extends_template:` are template-control fields that get stripped during expansion.
+The instance's `id:` is required (templates don't carry an id into the instance, so each instance owns its own); `vars:` and `extends_template:` are template-control fields that get stripped during expansion.
 
 ## Composition with extends
 
@@ -77,7 +77,7 @@ Templates merge through the `extends:` chain by id, the same way rules and facts
 
 ## Leaf-only
 
-A template can't itself reference `extends_template:` — the schema rejects it at config-load time with a clear "templates are leaf-only" error. This mirrors the bundled-rulesets restriction (which can't `extends:` themselves either): chained templates would invite cycles and silent depth explosions, both of which are awful to debug. If you need template hierarchies, build a thin pass-through rule that calls the inner template instead.
+A template can't itself reference `extends_template:`. The schema rejects it at config-load time with a clear "templates are leaf-only" error. This mirrors the bundled-rulesets restriction (which can't `extends:` themselves either): chained templates would invite cycles and silent depth explosions, both of which are awful to debug. If you need template hierarchies, build a thin pass-through rule that calls the inner template instead.
 
 ## When to reach for templates
 
@@ -87,4 +87,4 @@ Use templates when you'd otherwise write the same rule N times with one field va
 - Per-language hygiene overlays driven by language facts
 - Per-customer / per-environment config that swaps a name or URL
 
-Don't reach for templates when only a single instance exists today — instantiating once is just indirection. And templates are no substitute for `extends:` for whole-config composition; they're for intra-config repetition.
+Don't reach for templates when only a single instance exists today; instantiating once is just indirection. And templates are no substitute for `extends:` for whole-config composition; they're for intra-config repetition.

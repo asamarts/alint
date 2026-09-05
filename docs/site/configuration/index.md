@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`.alint.yml` is the only file alint reads. It declares the rules, the rule sources, the facts they're gated on, and a handful of run-time knobs.
+`.alint.yml` is alint's entry point. It declares the rules, the rule sources, the facts they're gated on, and a handful of run-time knobs. alint also reads the configs it `extends:`, any `.alint.d/` drop-ins, per-directory nested configs, and every repository file each rule checks.
 
 The entities of a config and how they relate:
 
@@ -32,7 +32,7 @@ Schema version. Always `1` for the current schema. Required.
 version: 1
 ```
 
-A future schema bump (`version: 2`, …) would be an explicit migration; v1 is stable.
+A future schema bump (to `version: 2`) would be an explicit migration; v1 is stable.
 
 ### `extends`
 
@@ -46,7 +46,7 @@ extends:
   - ./shared/team-defaults.yml
 
   # HTTPS URL with required SHA-256 SRI:
-  - https://example.com/rules.yml#sha256-abc123…
+  - https://example.com/rules.yml#sha256-abc123...
 
   # Bundled ruleset, resolved offline from the binary:
   - alint://bundled/oss-baseline@v1
@@ -91,18 +91,18 @@ The full implications (including how absence-style rules interpret "tracked" vs 
 
 ### `vars`
 
-Free-form string variables referenced from rule messages as `{{vars.<name>}}` and from `when:` clauses as `vars.<name>`.
+Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/concepts/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
 
 ```yaml
 vars:
-  copyright_year: "2026"
-  org_name: "Acme"
+  enforce_headers: "true"
 
 rules:
-  - id: copyright-header
+  - id: spdx-header
     kind: file_header
     paths: "src/**/*.rs"
-    pattern: '^// Copyright \\(c\\) {{vars.copyright_year}} {{vars.org_name}}'
+    pattern: '^// SPDX-License-Identifier:'
+    when: vars.enforce_headers == "true"   # top-level vars feed when: as bare vars.X
     level: error
 ```
 
@@ -161,7 +161,7 @@ Common per-rule fields:
 - **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
 - **`when`**: bounded expression gating the rule on facts / vars.
-- **`scope_filter`**: extra per-file scoping — by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
+- **`scope_filter`**: extra per-file scoping by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
 - **`policy_url`**: link surfaced when the rule fires.
@@ -183,7 +183,7 @@ rules:
 
 `has_ancestor:` accepts a literal filename or a list of filenames; path separators and glob metacharacters are rejected at build time. The bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) use this to scope per-file content rules to their ecosystem's package subtrees in polyglot monorepos.
 
-`changed_since: <git-ref>` (v0.11+) narrows a per-file rule to files in the `<ref>...HEAD` diff — the same merge-base diff as `alint check --changed`. Use it to grandfather pre-existing files in a PR (e.g. require an SPDX header only on files the PR touched):
+`changed_since: <git-ref>` (v0.11+) narrows a per-file rule to files in the `<ref>...HEAD` diff, the same merge-base diff as `alint check --changed`. Use it to grandfather pre-existing files in a PR (e.g. require an SPDX header only on files the PR touched):
 
 ```yaml
 rules:
@@ -200,7 +200,7 @@ It accepts the `{{env.X}}` interpolation, resolves the diff once per run, matche
 
 `include_manifest_paths:` / `exclude_manifest_paths:` (v0.15+) scope a per-file rule by membership in a path set a **manifest** declares, so the manifest that owns the truth and the rule that depends on it stay in one place instead of a hand-maintained `paths.exclude` that drifts. `exclude_manifest_paths:` drops files in the set; `include_manifest_paths:` keeps only files in it.
 
-Exempt the `package.json` `bin` entrypoints from a `no-console` rule — even though `bin` names the *build output* (`dist/cli.js`), `derive_target:` maps it back to source:
+Exempt the `package.json` `bin` entrypoints from a `no-console` rule. Even though `bin` names the *build output* (`dist/cli.js`), `derive_target:` maps it back to source:
 
 ```yaml
 rules:
@@ -232,11 +232,11 @@ rules:
     level: warning
 ```
 
-Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty — an empty include set would otherwise silently no-op the whole rule. This guards the *declared* set: a member that resolves but matches no file on disk (a glob with no matching directory, or a literal pointing at an absent path) still scopes nothing silently, so use `alint explain` to confirm a rule's resolved scope.
+Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty, since an empty include set would otherwise silently no-op the whole rule. This guards the *declared* set: a member that resolves but matches no file on disk (a glob with no matching directory, or a literal pointing at an absent path) still scopes nothing silently, so use `alint explain` to confirm a rule's resolved scope.
 
-Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded — a `members = ["crates/*"]` entry (the form a real `Cargo.toml` / `package.json` declares) scopes every file under each matching `crates/<x>` directory. The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing — the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
+Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded: a `members = ["crates/*"]` entry (the form a real `Cargo.toml` / `package.json` declares) scopes every file under each matching `crates/<x>` directory. The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing: the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
 
-Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major kinds — `filename_case`, `filename_regex`, `file_max_size`, `file_min_size`, `executable_bit`, `no_empty_files`, `json_schema_passes`, and their siblings — honor `scope_filter:` too as of v0.15. (Before v0.15 they applied their own `paths:` glob but silently ignored a `changed_since:` predicate, so a scope that depended on it matched nothing on them.)
+Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major kinds (`filename_case`, `filename_regex`, `file_max_size`, `file_min_size`, `executable_bit`, `no_empty_files`, `json_schema_passes`, and their siblings) honor `scope_filter:` too as of v0.15. (Before v0.15 they applied their own `paths:` glob but silently ignored a `changed_since:` predicate, so a scope that depended on it matched nothing on them.)
 
 ### `fix_size_limit`
 
@@ -281,13 +281,13 @@ Only the user's top-level config may set `nested_configs: true`. Nested configs 
 
 ### `allow_out_of_root`
 
-By default alint confines every config-declared path to the repository root: a rule can never read or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for *reads* — when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
+By default alint confines every config-declared path to the repository root: a rule can never read or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for *reads*, when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
 
 ```yaml
 allow_out_of_root: true            # every rule may read out-of-root paths
 ```
 
-Or scope it to specific rule kinds and/or ids — a rule is permitted if its `kind` is in `kinds` **or** its `id` is in `rules`:
+Or scope it to specific rule kinds and/or ids: a rule is permitted if its `kind` is in `kinds` **or** its `id` is in `rules`:
 
 ```yaml
 allow_out_of_root:
@@ -297,7 +297,7 @@ allow_out_of_root:
 
 Absent or `false` keeps the secure default (full confinement).
 
-**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config — any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
+**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
 
 ### `baseline`
 

@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-The three content-providing fix ops — `file_create`, `file_prepend`, `file_append` — accept a `content_from: <path>` field as an alternative to inline `content:`. The path resolves relative to the lint root and is read when `alint fix` actually runs, so the source file's bytes flow into the target without round-tripping through YAML.
+The three content-providing fix ops (`file_create`, `file_prepend`, `file_append`) accept a `content_from: <path>` field as an alternative to inline `content:`. The path resolves relative to the lint root and is read when `alint fix` actually runs, so the source file's bytes flow into the target without round-tripping through YAML.
 
 ## When to reach for it
 
@@ -30,12 +30,12 @@ Exactly one of `content:` / `content_from:` must be set on a fix op. Both is a c
 
 ## Resolution semantics
 
-The path is **relative to the lint root** — the path you pass to `alint check` (or `alint fix`), or the current directory if you don't. Same root the rest of alint uses. Absolute paths work but reduce portability across checkouts.
+The path is **relative to the lint root**: the path you pass to `alint check` (or `alint fix`), or the current directory if you don't. Same root the rest of alint uses. Absolute paths work but reduce portability across checkouts.
 
 The source file is read at **fix-apply time**, not at config-load time. Two consequences:
 
-1. The template file doesn't need to exist when `alint check` runs — only when `alint fix` runs against a violating tree. A check-only CI workflow won't fail because the template is missing.
-2. Editing the template between `alint check` and `alint fix` is fine — the latest bytes go into the target.
+1. The template file doesn't need to exist when `alint check` runs, only when `alint fix` runs against a violating tree. A check-only CI workflow won't fail because the template is missing.
+2. Editing the template between `alint check` and `alint fix` is fine; the latest bytes go into the target.
 
 ## Missing source = `Skipped`, not `Error`
 
@@ -46,17 +46,17 @@ If the `content_from:` path doesn't exist or can't be read at fix-apply time, al
 The same `content_from:` shape works on all three:
 
 ```yaml
-# file_create — typical for missing top-level documents
+# file_create: typical for missing top-level documents
 fix:
   file_create:
     content_from: ".alint/templates/LICENSE.txt"
 
-# file_prepend — typical for SPDX / copyright headers
+# file_prepend: typical for SPDX / copyright headers
 fix:
   file_prepend:
     content_from: ".alint/templates/spdx-header.rs"
 
-# file_append — typical for trailing trailers / signoffs
+# file_append: typical for trailing trailers / signoffs
 fix:
   file_append:
     content_from: ".alint/templates/footer.md"
@@ -64,4 +64,4 @@ fix:
 
 ## Working with templates in a monorepo
 
-`content_from:` paths are resolved against the root the user invoked `alint check` from. With `nested_configs: true`, a sub-config in `packages/foo/.alint.yml` still resolves `content_from:` against the workspace root — so a single `.alint/templates/` directory at the root supplies content to every sub-package without duplication. Pair this with rule templates for "every package gets the same generated NOTICE file" patterns.
+`content_from:` paths are resolved against the root the user invoked `alint check` from. With `nested_configs: true`, a sub-config in `packages/foo/.alint.yml` still resolves `content_from:` against the workspace root, so a single `.alint/templates/` directory at the root supplies content to every sub-package without duplication. Pair this with rule templates for "every package gets the same generated NOTICE file" patterns.

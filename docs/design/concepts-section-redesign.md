@@ -384,7 +384,11 @@ whole section under the new grouping.
    Concepts sidebar (5.4).
 7. **Source-doc corrections.** Apply the ARCHITECTURE.md / model errata (section 7).
 
-**Phases 1 and 7 already shipped** in the errata hot-fix (#228, merged); phases 2-6
+**Phases 1 and 7 shipped** in the errata hot-fix (#228); **Phase 2** (diagram kit +
+hero) in #230; **Phase 3** (this PR) rewrites `how-alint-works` and adds
+`the-config-model`, `kinds-families-categories`, and `severity-and-exit-codes` (each
+with a diagram), upgrades the config-model diagram to the richer visual language
+(Appendix 14), and folds in the `vars` / `iter` documentation errata. Phases 4-6
 remain. Each phase is a reviewable PR; content lives in `alint/docs/site/`, so it syncs to
 alint.org through the normal `docs-export` + `docs-bundle` pipeline (ADR-0007). No
 release is required for doc-only pages (the docs-bundle rebuilds from a main
@@ -496,7 +500,32 @@ Worked mini-example (the pipeline page, abbreviated):
 
 ## 14. Appendix: the animated-SVG reference template
 
-The reference implementation (the pipeline hero). Pure inline SVG + inline
+**Current reference: the v3 visual language (shipped in Phases 2-3).** The diagrams on
+`how-alint-works`, `the-config-model`, `kinds-families-categories`, and
+`severity-and-exit-codes` are the living reference; copy the one closest to your
+concept. What the language settled on:
+
+- **Palette (custom vars, theme-swapped).** Each diagram's `<style>` declares
+  `--tx / --mut / --card / --bd / --ac` on its own class, with a
+  `:root[data-theme="dark"]` block and a `@media (prefers-color-scheme: dark)` block
+  so it tracks the docs theme in both directions. Semantic colors are literal and
+  read on both grounds: pass `#22c55e`, fail `#ef4444`, and the family/type hues
+  (blue `#3b82f6`, amber `#f59e0b`, cyan `#06b6d4`, violet `#7c3aed`).
+- **Vocabulary.** Rounded `card`s for entities; a colored left band or a filled badge
+  for a family/tier; small outlined `chip`s for tags; document glyphs with
+  green-check / red-cross status badges for files; a glowing `beam` that sweeps to
+  mean "scanning"; a dashed animated `flow` line between stages.
+- **Narrow and mobile-first.** Lay diagrams out vertically and cap them with
+  `width:100%; max-width:480px` so they fit a phone column and never overflow; verify
+  at 320-414px.
+- **Motion + a11y.** Reduced-motion-guarded animation; `role="img"` plus unique
+  `<title>`/`<desc>` ids and `@keyframes` names per diagram.
+- **QA by screenshot.** Render the built page and inspect the image before shipping
+  (Playwright + chromium are on the box). Test over HTTP, not `file://`: a `file://`
+  load cannot fetch the root-absolute `/_astro/*.css` stylesheets, so the page CSS is
+  absent and the result misleads (self-contained inline-SVG styling still renders).
+
+The original minimal skeleton (kept for reference) follows. The reference implementation (the pipeline hero). Pure inline SVG + inline
 `<style>`: no `.mdx`, no script, no dependency; themed via Starlight tokens with
 literal fallbacks; `prefers-reduced-motion` rests it at the final frame. Every
 concept diagram is a variation on this skeleton reusing the token kit below.
