@@ -36,7 +36,7 @@ Every string-typed **value** field is interpolated at load:
 | `pattern:` regex | yes | environment-driven matcher |
 | `since:`, `changed_since:` | yes | the motivating case |
 | `policy_url:` | yes | per-team policy URLs |
-| `message:` | yes | adds `{{env.X}}` alongside `{{vars.X}}` / `{{ctx.X}}` |
+| `message:` | yes | `{{env.X}}` at load; `{{ctx.X}}` fills per violation (`{{vars.X}}` substitutes only inside `templates:`) |
 | `content:`, `content_from:` | yes | templated fix bodies |
 | `vars:` values | yes | lets `vars` themselves be env-driven |
 | `id:`, `kind:`, `level:` | **no** | identity / type / severity must be stable across environments — env-driven values break audit trails and reproducibility |
@@ -55,7 +55,7 @@ A consequence: a string-typed field whose env value is bare-numeric (`"72"`) or 
 
 ## `env.X` in `when:` expressions
 
-The `when:` expression language gains `env` as a third namespace alongside `facts` and `vars`:
+The `when:` expression reads four namespaces: `facts`, `vars`, `env`, and `iter` (the last only inside iteration contexts, such as a `for_each_*` rule's `when_iter:`). `env` exposes environment variables:
 
 ```yaml
 - id: ci-only-rule

@@ -52,7 +52,7 @@ Rules reference facts in `when:` to gate themselves conditionally:
   level: error
 ```
 
-The `when:` grammar supports boolean logic (`and` / `or` / `not`), comparison (`==` `!=` `<` `<=` `>` `>=`), `in` (list / substring), `matches` (regex), literal types, and `facts.X` / `vars.X` identifiers. It's deliberately bounded — no arbitrary code, no dynamic evaluation.
+The `when:` grammar supports boolean logic (`and` / `or` / `not`), comparison (`==` `!=` `<` `<=` `>` `>=`), `in` (list / substring), `matches` (regex), literal types, and `facts.X` / `vars.X` / `iter.X` / `env.X` identifiers. It's deliberately bounded — no arbitrary code, no dynamic evaluation.
 
 ## Auto-fix
 

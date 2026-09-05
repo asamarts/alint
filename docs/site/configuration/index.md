@@ -91,18 +91,18 @@ The full implications (including how absence-style rules interpret "tracked" vs 
 
 ### `vars`
 
-Free-form string variables referenced from rule messages as `{{vars.<name>}}` and from `when:` clauses as `vars.<name>`.
+Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/concepts/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
 
 ```yaml
 vars:
-  copyright_year: "2026"
-  org_name: "Acme"
+  enforce_headers: "true"
 
 rules:
-  - id: copyright-header
+  - id: spdx-header
     kind: file_header
     paths: "src/**/*.rs"
-    pattern: '^// Copyright \\(c\\) {{vars.copyright_year}} {{vars.org_name}}'
+    pattern: '^// SPDX-License-Identifier:'
+    when: vars.enforce_headers == "true"   # top-level vars feed when: as bare vars.X
     level: error
 ```
 
