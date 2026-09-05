@@ -25,7 +25,6 @@ alint reads one declarative config, makes a single parallel pass over your repos
   .alint-check .glow { fill:var(--ac); opacity:.16; }
   .alint-check .small { font:600 11px system-ui, -apple-system, sans-serif; }
   .alint-check .exit { font:700 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .alint-check .off { opacity:.45; }
   @keyframes chkf { to { stroke-dashoffset:-12; } }
   @keyframes chks { 0%{transform:translateY(0);opacity:0} 5%{opacity:1} 92%{transform:translateY(220px);opacity:1} 100%{transform:translateY(220px);opacity:0} }
   @media (prefers-reduced-motion:reduce){ .alint-check .flow{animation:none;stroke-dasharray:none} .alint-check .scan{animation:none;transform:translateY(88px)} }
@@ -43,7 +42,7 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <rect class="card" x="20" y="188" width="84" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="204" font-size="12">no_bidi</text>
 <rect class="card" x="112" y="188" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="124" y="204" font-size="12">filename_case</text>
 <rect class="card" x="20" y="220" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="31" y="236" font-size="12" fill="#7c3aed">pair</text>
-<rect class="card off" x="92" y="220" width="150" height="24" rx="12"/><text class="mono mut off" x="103" y="236" font-size="11">win (when: false)</text>
+<rect class="card" x="92" y="220" width="150" height="24" rx="12" stroke-dasharray="4 3"/><text class="mono mut" x="103" y="236" font-size="11">win (when: false)</text>
 <path class="flow" d="M 230 250 V 278"/><text class="ui mut" x="242" y="263">walk</text>
 <rect class="repo" x="20" y="280" width="420" height="344" rx="14"/>
 <text class="ui ac" x="34" y="303">repository</text><text class="ui mut" x="116" y="303">walked once, sorted</text>
