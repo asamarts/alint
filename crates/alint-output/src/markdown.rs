@@ -635,7 +635,7 @@ mod tests {
                             is_note: false,
                             baseline_key: None,
                         },
-                        status: FixStatus::Applied("removed 3 trailing spaces".into()),
+                        status: FixStatus::Applied("trimmed trailing whitespace in a.rs".into()),
                     },
                     FixItem {
                         violation: Violation {
@@ -656,5 +656,23 @@ mod tests {
         assert!(out.contains("**applied**"));
         assert!(out.contains("**unfixable**"));
         assert!(out.contains("**1 applied**, **0 skipped**, **1 unfixable**."));
+        // Applied: the summary already carries the path, so it is not re-prefixed.
+        assert!(
+            out.contains("**applied** - trimmed trailing whitespace in a"),
+            "applied line should carry the summary verbatim: {out}"
+        );
+        assert!(
+            !out.contains("`a.rs` - **applied**"),
+            "applied line must not duplicate the path as a prefix: {out}"
+        );
+        // Unfixable is message-based, so it keeps the path prefix.
+        assert!(
+            out.contains("`b.rs` - **unfixable**"),
+            "unfixable line should keep the path prefix: {out}"
+        );
+        assert!(
+            !out.contains('\u{2014}'),
+            "markdown fix report must not contain an em-dash: {out}"
+        );
     }
 }

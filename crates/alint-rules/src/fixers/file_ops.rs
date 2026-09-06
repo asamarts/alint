@@ -117,7 +117,7 @@ impl Fixer for FileRenameFixer {
         }
         if ctx.dry_run {
             return Ok(FixOutcome::Applied(format!(
-                "would rename {} → {}",
+                "would rename {} -> {}",
                 path.display(),
                 new_path.display()
             )));
@@ -127,7 +127,7 @@ impl Fixer for FileRenameFixer {
             source,
         })?;
         Ok(FixOutcome::Applied(format!(
-            "renamed {} → {}",
+            "renamed {} -> {}",
             path.display(),
             new_path.display()
         )))
@@ -213,7 +213,10 @@ mod tests {
             )
             .unwrap();
         match outcome {
-            FixOutcome::Applied(s) => assert!(s.starts_with("would remove")),
+            FixOutcome::Applied(s) => {
+                assert!(s.starts_with("would remove"));
+                assert!(s.contains("victim.bak"), "summary must name the file: {s}");
+            }
             FixOutcome::Skipped(_) => panic!("expected Applied"),
         }
         assert!(target.exists());

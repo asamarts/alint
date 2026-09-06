@@ -303,6 +303,14 @@ mod tests {
             "got: {inst}"
         );
         assert!(
+            inst.contains("(or run `alint fix --only readme-exists` to apply the auto-fix)"),
+            "fixable instruction should carry the parenthetical fix hint: {inst}"
+        );
+        assert!(
+            !inst.contains('\u{2014}'),
+            "agent_instruction must not contain an em-dash: {inst}"
+        );
+        assert!(
             inst.contains("https://example.com/policy"),
             "policy URL should be cited: {inst}"
         );
