@@ -160,7 +160,7 @@ Common per-rule fields:
 - **`kind`** *(required)*: which built-in implementation to invoke. Required somewhere in the `extends:` chain.
 - **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
-- **`when`**: bounded expression gating the rule on facts / vars.
+- **`when`**: bounded expression gating the rule on facts / vars. See [Scoping](/docs/concepts/scoping/) for the gate order.
 - **`scope_filter`**: extra per-file scoping by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
@@ -314,3 +314,4 @@ A `--baseline <path>` flag overrides this key. There is **no silent auto-detect*
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.
 - [Rules](/docs/rules/): every rule kind, organised by family, with per-rule options.
 - [Concepts](/docs/concepts/): the rule model, the walker, and how alint runs, explained.
+- [Scoping](/docs/concepts/scoping/): the `when:`, `paths:`, and `scope_filter:` gates a rule narrows its files through.

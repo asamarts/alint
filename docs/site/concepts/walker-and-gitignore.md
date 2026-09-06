@@ -1,97 +1,86 @@
 ---
-title: The walker and .gitignore
-description: How alint discovers files, what `.gitignore` filters out by default, and how rules like `file_absent` / `dir_absent` interpret git state.
+title: The walker and git
+description: "How alint discovers files by walking the tree through git's own ignore rules, why the walked tree can diverge from git's index, and how git_tracked_only switches a rule to the index."
 sidebar:
   order: 5
 ---
 
-Every alint run starts the same way: walk the repo, build an in-memory index of files, then evaluate rules against that index. The walker is a thin wrapper around the [`ignore`](https://docs.rs/ignore/) crate (the same crate that powers `ripgrep`), and its filtering behaviour is the most common source of confusion when a rule "doesn't fire when I expected it to."
+Every run begins by walking your repository once into a sorted in-memory index, and every rule reads that index, never the raw filesystem and never `git` directly. What lands in the index is the working tree minus everything `.gitignore` excludes, so a rule's idea of "what is here" is the un-ignored working tree. That is almost always what you want; the two places it diverges from git's own index are the source of nearly every "why didn't my rule fire" question.
 
-<likec4-view view-id="walkerFlow"></likec4-view>
+<svg class="alint-walk" viewBox="0 0 460 424" role="img" aria-labelledby="walk-t walk-d" xmlns="http://www.w3.org/2000/svg">
+<title id="walk-t">The walker builds an index from the un-ignored tree; git_tracked_only reads git's index instead</title>
+<desc id="walk-d">Files on disk split two ways. The default walked tree includes README.md and an un-ignored untracked file but drops a gitignored-but-committed file. The git index, which git_tracked_only consults, includes README.md and the committed file but not the untracked one. The two divergent files are the ones a mis-set gitignore hides.</desc>
+<style>
+  .alint-walk { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  :root[data-theme="dark"] .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
+  .alint-walk .ui { font:600 12px system-ui, -apple-system, sans-serif; }
+  .alint-walk .tag { font:600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-walk .tx { fill:var(--tx); } .alint-walk .mut { fill:var(--mut); } .alint-walk .ac { fill:var(--ac); }
+  .alint-walk .card { fill:var(--card); stroke:var(--bd); stroke-width:1.3; }
+  .alint-walk .chip { fill:var(--card); stroke:var(--bd); stroke-width:1.2; }
+  .alint-walk .off  { opacity:.42; }
+  .alint-walk .flow { fill:none; stroke:var(--ac); stroke-width:2; stroke-dasharray:6 6; opacity:.7; animation:walkflow 1s linear infinite; }
+  .alint-walk .pulse { animation:walkpulse 2.4s ease-in-out infinite; }
+  @keyframes walkflow { to { stroke-dashoffset:-12; } }
+  @keyframes walkpulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  @media (prefers-reduced-motion:reduce){ .alint-walk .flow{animation:none;stroke-dasharray:none} .alint-walk .pulse{animation:none} }
+</style>
+<text class="ui ac" x="18" y="16">one walk, one index</text>
+<text class="ui mut" x="442" y="16" text-anchor="end">git_tracked_only reads git instead</text>
+<rect class="card" x="20" y="28" width="420" height="118" rx="10"/>
+<text class="ui mut" x="34" y="46">on disk</text>
+<rect class="chip" x="34" y="54" width="400" height="24" rx="6"/><rect x="34" y="54" width="5" height="24" rx="2" fill="#22c55e"/><text class="tag tx" x="48" y="70">README.md</text><text class="tag mut" x="428" y="70" text-anchor="end">committed</text>
+<rect class="chip" x="34" y="82" width="400" height="24" rx="6"/><rect x="34" y="82" width="5" height="24" rx="2" fill="#7c3aed"/><text class="tag tx" x="48" y="98">config.local.yml</text><text class="tag mut" x="428" y="98" text-anchor="end">gitignored, committed</text>
+<rect class="chip" x="34" y="110" width="400" height="24" rx="6"/><rect x="34" y="110" width="5" height="24" rx="2" fill="#f59e0b"/><text class="tag tx" x="48" y="126">scratch.tmp</text><text class="tag mut" x="428" y="126" text-anchor="end">untracked</text>
+<path class="flow" d="M 180 146 C 180 176, 120 176, 120 200"/>
+<path class="flow" d="M 280 146 C 280 176, 340 176, 340 200"/>
+<text class="tag mut" x="34" y="166">walk + .gitignore</text>
+<text class="tag mut" x="426" y="166" text-anchor="end">git ls-files</text>
+<rect class="card" x="20" y="204" width="200" height="182" rx="10"/>
+<text class="ui ac" x="34" y="226">walked tree</text>
+<text class="tag mut" x="34" y="242">default rule view</text>
+<rect class="chip" x="34" y="252" width="172" height="24" rx="6"/><rect x="34" y="252" width="5" height="24" rx="2" fill="#22c55e"/><text class="tag tx" x="48" y="268">README.md</text>
+<rect class="chip pulse" x="34" y="282" width="172" height="24" rx="6"/><rect x="34" y="282" width="5" height="24" rx="2" fill="#f59e0b"/><text class="tag tx" x="48" y="298">scratch.tmp</text>
+<rect class="chip off" x="34" y="312" width="172" height="24" rx="6" stroke-dasharray="4 3"/><text class="tag mut" x="48" y="328">config.local.yml</text>
+<text class="tag mut" x="34" y="356">the un-ignored tree,</text>
+<text class="tag mut" x="34" y="372">committed file filtered out</text>
+<rect class="card" x="240" y="204" width="200" height="182" rx="10"/>
+<text class="ui ac" x="254" y="226">git index</text>
+<text class="tag mut" x="254" y="242">git_tracked_only: true</text>
+<rect class="chip" x="254" y="252" width="172" height="24" rx="6"/><rect x="254" y="252" width="5" height="24" rx="2" fill="#22c55e"/><text class="tag tx" x="268" y="268">README.md</text>
+<rect class="chip pulse" x="254" y="282" width="172" height="24" rx="6"/><rect x="254" y="282" width="5" height="24" rx="2" fill="#7c3aed"/><text class="tag tx" x="268" y="298">config.local.yml</text>
+<rect class="chip off" x="254" y="312" width="172" height="24" rx="6" stroke-dasharray="4 3"/><text class="tag mut" x="268" y="328">scratch.tmp</text>
+<text class="tag mut" x="254" y="356">what git tracks,</text>
+<text class="tag mut" x="254" y="372">catches the drift</text>
+<text class="tag mut" x="230" y="410" text-anchor="middle">the two files that differ are the ones a mis-set .gitignore hides</text>
+</svg>
 
-## What the walker sees by default
+## What the walker sees
 
-Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** for paths matched by any of the following:
+Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root and per-directory), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
 
-- The repo's `.gitignore` files (root and per-directory)
-- `.git/info/exclude`
-- Your global gitignore (`~/.config/git/ignore`, or whatever `core.excludesFile` points at)
-- `.ignore` files (the `ignore` crate's own convention; same syntax as `.gitignore`)
-- The `.git/` directory itself
-- Anything added under the config's `ignore:` field (see below)
+Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required; on a plain directory the walk just has nothing to filter, so every file is visible.
 
-Hidden files (those starting with `.`) **are** included; alint walks `.github/`, `.editorconfig`, `.cargo/`, etc. by default. Symlinks are followed.
-
-The walker does *not* require a git repo to function. Rules run identically on a plain directory, a tarball extraction, or a fresh git clone. The only difference is that without `.gitignore` files, no paths get filtered out.
-
-## The `respect_gitignore` config field
-
-The default is the equivalent of:
-
-```yaml
-version: 1
-respect_gitignore: true   # the default
-```
-
-Set it to `false` to disable every gitignore source above (per-directory, root, info/exclude, global, `.ignore`):
-
-```yaml
-version: 1
-respect_gitignore: false
-```
-
-The CLI's `--no-gitignore` flag overrides whatever's in config to `false` for one invocation. Useful when you want to lint files that *would* be committed if `.gitignore` weren't there, e.g. for a one-off audit of a build directory.
-
-## The `ignore:` config field
-
-`ignore:` adds patterns *on top of* whatever `.gitignore` already excludes. Same gitignore-style syntax. Use it for repo-specific exclusions you don't want to put in `.gitignore` itself (because they're an alint thing, not a git thing):
+Two config fields shape the filtering. `respect_gitignore` (default `true`) toggles every gitignore source at once; the CLI's `--no-gitignore` forces it off for one run. `ignore:` adds gitignore-style patterns on top, and applies regardless of `respect_gitignore`, for exclusions that are an alint concern rather than a git one:
 
 ```yaml
 version: 1
 ignore:
   - "vendor/**"
   - "**/*.snapshot.json"
-  - "fixtures/golden/**"
 ```
 
-These patterns are excluded *regardless* of `respect_gitignore`. Setting `respect_gitignore: false` disables `.gitignore`-sourced filters but leaves `ignore:` filters in place.
+Setting `respect_gitignore: false` is rarely useful during development: absence-style rules (`dir_absent`, `file_absent`) begin firing on every locally-built `target/`, `node_modules/`, and `__pycache__/`. It fits one-off audits of a build tree, or linting a directory that is not a git repo.
 
-## How this affects rules
+## Walked tree versus git's index
 
-Every rule sees a **pre-filtered file index**. If a path was excluded by the walker, no rule can act on it; they don't get a chance.
+Because the walker filters by `.gitignore`, "the walked tree" is a close but imperfect stand-in for "what git would commit." alint never reads `.git/index` or shells out to `git ls-files` for the walk, so the approximation drifts in two directions:
 
-For most rules (`file_exists`, `file_content_matches`, `filename_case`, `for_each_dir`) this is exactly what you want. You don't care about gitignored caches, you care about the files git would actually track.
+- **A gitignored-but-tracked file** (added to git first and gitignored later, or forced in with `git add -f`) stays in git's index on every commit, yet the walker filters it out. Absence rules never see it and content rules never inspect it.
+- **An un-ignored untracked file** (a scratch file no `.gitignore` pattern covers) is in the walked tree but not git's index, so a rule fires on a file git is not tracking.
 
-For **absence-style rules** (`file_absent`, `dir_absent`, `no_*` rules), the implication is sharper:
-
-> A `dir_absent` rule with `paths: "**/target"` fires whenever `target/` exists in the walked tree. If `target/` is in `.gitignore`, the walker filters it out, and the rule never sees it. No violation, even if `target/` is sitting on disk full of build artefacts.
-
-That's the intent. When your `.gitignore` is correct, build artefacts are invisible to alint, and the rule effectively means "this directory wouldn't be committed." When `.gitignore` is missing or wrong, the directory becomes visible, the rule fires, and you've caught a hygiene gap.
-
-The rule's name often reads as "no committed `target/`". That's a useful mental model, but the actual implementation is **"no un-ignored `target/`"**. The two coincide in well-configured repos. They diverge in the edge cases below.
-
-## What this is *not*: a check against git's index
-
-alint doesn't read `.git/index` and doesn't shell out to `git ls-files`. The walker observes the filesystem; `.gitignore` is a coarse approximation of "what would be committed." Two cases where this approximation drifts:
-
-- **Tracked-then-gitignored files.** `.gitignore` only affects *untracked* files. If a file was added to git first and then later listed in `.gitignore`, git still tracks it on every commit, but alint's walker filters it out, so absence-style rules don't fire and content rules don't inspect it. `git ls-files <path>` would still report the file.
-- **`git add -f`'d files.** Adding a file with `--force` overrides `.gitignore`. The file is in git's index, but alint's walker still filters it out by the matching gitignore entry.
-
-In a healthy repo neither case is common. If you suspect either, `git ls-files <path>` is the authoritative answer.
-
-## When to use `respect_gitignore: false`
-
-Rare, but legitimate cases:
-
-- **Auditing a CI runner's working tree** where build outputs accumulated and you want to enforce content rules on everything, including gitignored caches.
-- **Linting a directory that isn't a git repo** but happens to contain a stray `.gitignore` you don't want to honour.
-- **Running absence-style rules deliberately on the full disk state**, e.g. as a pre-package check that "no `.env` is sitting in this directory regardless of `.gitignore`."
-
-Don't reach for `--no-gitignore` casually. With it on, every `dir_absent` / `file_absent` rule fires on any developer who has built locally: `target/`, `node_modules/`, `__pycache__/`, `.next/` all become violations. That's almost never what you want during normal development.
-
-## Tightening the rule with `git_tracked_only`
-
-The walker's gitignore-based approximation works for most repos, but if you want a rule that fires *only* when a path is actually in git's index (independent of `.gitignore` state) set `git_tracked_only: true` on the rule:
+In a healthy repo neither case is common, and `git ls-files <path>` is the authoritative answer when you suspect one. When a rule must key off git's index rather than the walked tree, set `git_tracked_only: true` on it. The rule then fires only for paths git actually tracks, independent of `.gitignore` state:
 
 ```yaml
 - id: target-not-tracked
@@ -101,46 +90,43 @@ The walker's gitignore-based approximation works for most repos, but if you want
   level: error
 ```
 
-This is the canonical "don't let `target/` be committed" rule. With the flag set, the rule only fires when `target/` contains at least one file in `git ls-files`. A locally-built `target/` that's properly gitignored stays silent (no tracked content). A `target/` whose contents have been added with `git add -f` or before `.gitignore` was set up (the cases the [walker approximation misses](#what-this-is-not-a-check-against-gits-index)) does fire, because `git ls-files` reports them.
-
-Behaviour summary:
-
-| `target/` state | Without `git_tracked_only` | With `git_tracked_only` |
+| `target/` state | default | `git_tracked_only` |
 |---|---|---|
 | Gitignored, never built | silent | silent |
 | Gitignored, built locally | silent | silent |
-| Not gitignored, exists on disk | **fires** | silent (not in index) |
-| Tracked in git's index | **fires** | **fires** |
-| Repo isn't a git repo | **fires** | silent (no index) |
+| Not gitignored, on disk | **fires** | silent (not in index) |
+| Committed (not gitignored) | **fires** | **fires** |
+| Gitignored but force-added | silent (walker prunes it) | **fires** |
+| Not a git repo | **fires** | silent (no index) |
 
-`git_tracked_only` currently applies to four rule kinds: `file_exists`, `file_absent`, `dir_exists`, `dir_absent`. The other rule kinds ignore the field; we'll extend coverage as use cases come up.
+`git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; any other kind rejects it at load rather than ignoring it. Outside a git repo (or with `git` off `PATH`) the tracked set is empty, so absence rules with the flag become silent no-ops (there is nothing to commit) and existence rules with it fail conservatively (no file qualifies). The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
 
-When `alint` runs outside a git repo (no `.git/`), or when `git` isn't on `PATH`, the tracked-set is empty and absence-style rules with `git_tracked_only: true` become silent no-ops. That's the right default for "don't let X be committed": if there's no repo, there's nothing to commit. Existence rules with the flag set fail in that case (no file qualifies), which is also the correct conservative behaviour.
+## In practice
 
-The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the rule reference for the full set.
+The canonical "do not let `target/` be committed" rule keys off the index, not the walked tree, so a locally-built `target/` stays quiet while a force-added one is caught:
 
-## Restricting the walk: `--changed`
+```yaml
+version: 1
+rules:
+  - id: target-not-tracked
+    kind: dir_absent
+    paths: "**/target"
+    git_tracked_only: true
+    level: error
+    message: "target/ must not be committed"
+```
 
-The walker is the engine's source of truth about what's on disk. `alint check --changed` adds a second filter layer on top: only files that appear in the *diff* are visible to per-file rules. The walked index still spans the whole tree (so cross-file rules and existence rules can answer their full-tree questions), but per-file rules see a filtered view.
+On a repo where someone ran `git add -f target/debug/build.log`:
 
-Two diff modes:
+```
+error  target-not-tracked  target/ must not be committed
+```
 
-| Invocation | Diff source | Right shape for |
-|---|---|---|
-| `alint check --changed` | `git ls-files --modified --others --exclude-standard` | Pre-commit / local dev |
-| `alint check --changed --base=main` | `git diff --name-only --relative main...HEAD` | PR checks (three-dot, merge-base) |
+The same rule is silent for every developer who merely built locally, because that `target/` is gitignored and untracked.
 
-The `<base>...HEAD` form (three-dot) diffs against the merge-base of `<base>` and `HEAD`, which is what GitHub PR checks consider "your changes." The two-dot form `<base>..HEAD` is rarely what you want here, because it includes commits in `HEAD` since you branched, plus any commits *removed* from `<base>` since the branch point.
+## Going deeper
 
-**Which rules opt out of the changed-set filter:**
-
-- **Cross-file rules** (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) always evaluate against the full tree. A `pair` rule still fires when a `.h` partner is missing, even if the matching `.c` wasn't in your diff.
-- **Existence rules** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`) evaluate against the full tree, but the engine *skips them entirely* when their `paths:` scope doesn't intersect the diff. So an unchanged-but-missing `LICENSE` doesn't fire on every PR; it only fires on PRs that touched a `LICENSE*` path.
-
-**Edge cases:**
-
-- **Empty diff** (no working-tree changes, no untracked files): the engine short-circuits to an empty report. The "ran on a no-op commit" pre-commit case completes in milliseconds.
-- **Outside a git repo** (or `git` missing from `PATH`): `--changed` exits non-zero with an explicit error rather than silently fall back to a full check. Falling back would violate the intent the user expressed by passing the flag.
-- **Deleted files** are reported by both diff modes. A `LICENSE` deleted in your branch shows up in the diff; the walker doesn't see it on disk (it's gone), so an existence rule for `LICENSE*` evaluates against the full tree (which lacks it) and fires.
-
-`--changed` pairs naturally with `git_tracked_only: true`: the changed-set is a working-tree concept, the tracked-set is an index concept, and an absence-style rule with both is "fire only on tracked entries that are part of this diff." The same flags work for `alint fix --changed`.
+- [Configuration](/docs/configuration/) is the field reference for `ignore:`, `respect_gitignore`, and every rule field.
+- [Scoping](/docs/concepts/scoping/) is how a rule narrows within the index, with `paths:`, `when:`, and `scope_filter:`.
+- [Changed mode](/docs/concepts/changed-mode/) restricts a run to the files in a diff, layered on top of the walk.
+- The interactive <a href="/docs/about/architecture-diagrams/">architecture diagrams</a> include the walker view (`walkerFlow`) as an explorable model.
