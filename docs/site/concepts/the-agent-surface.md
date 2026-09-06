@@ -97,7 +97,7 @@ One fixable finding comes back as a flat object with a ready-to-run `fix_command
       "line": 12,
       "column": 80,
       "human_message": "trailing whitespace",
-      "agent_instruction": "warning: trailing whitespace. To resolve: edit src/app.rs:12:80 — or run `alint fix --only no-trailing-whitespace` to apply the auto-fix.",
+      "agent_instruction": "warning: trailing whitespace. To resolve: edit src/app.rs:12:80 (or run `alint fix --only no-trailing-whitespace` to apply the auto-fix).",
       "fix_available": true,
       "fix_command": ["fix", "--only", "no-trailing-whitespace"]
     }

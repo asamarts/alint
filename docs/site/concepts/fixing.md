@@ -97,12 +97,12 @@ rules:
 error [license-present]:
   ✓ created LICENSE
 info [md-trim]:
-  ✓ docs/guide.md — trimmed trailing whitespace in docs/guide.md
+  ✓ trimmed trailing whitespace in docs/guide.md
 
 2 applied, 0 skipped, 0 unfixable.
 ```
 
-Each applied line is prefixed with the file it touched. A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
+Each applied line names the file in its summary; skipped and unfixable lines carry it as a prefix. A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
 
 ## Going deeper
 

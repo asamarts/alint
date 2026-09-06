@@ -89,17 +89,22 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
         writeln!(w, "## `{}` ({})", md_inline_code(&r.rule_id), r.items.len())?;
         writeln!(w)?;
         for item in &r.items {
-            let status_label = match &item.status {
-                FixStatus::Applied(msg) => format!("**applied** — {}", md_escape(msg)),
-                FixStatus::Skipped(msg) => format!("**skipped** — {}", md_escape(msg)),
-                FixStatus::Unfixable => "**unfixable**".to_string(),
+            // The applied summary already names its file, so show the path
+            // prefix only on the message-based skipped / unfixable lines.
+            let (status_label, show_path) = match &item.status {
+                FixStatus::Applied(msg) => (format!("**applied** - {}", md_escape(msg)), false),
+                FixStatus::Skipped(msg) => (format!("**skipped** - {}", md_escape(msg)), true),
+                FixStatus::Unfixable => ("**unfixable**".to_string(), true),
             };
-            let path_part = item
-                .violation
-                .path
-                .as_ref()
-                .map(|p| format!("`{}` — ", md_inline_code(&p.display().to_string())))
-                .unwrap_or_default();
+            let path_part = if show_path {
+                item.violation
+                    .path
+                    .as_ref()
+                    .map(|p| format!("`{}` - ", md_inline_code(&p.display().to_string())))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             writeln!(
                 w,
                 "- {path_part}{status_label}: {}",
