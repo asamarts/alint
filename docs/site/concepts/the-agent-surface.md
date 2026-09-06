@@ -7,7 +7,7 @@ sidebar:
 
 alint treats a coding agent as a first-class consumer. Your one rule set drives two feeds: `export-agents-md` renders the rules into an `AGENTS.md` section the agent reads at the start of a session, and `alint check --format agent` emits each violation as machine-actionable JSON with an exact `fix_command`. The rules become both the agent's standing instructions and its fix loop.
 
-<svg class="alint-agent" viewBox="0 0 460 320" role="img" aria-labelledby="ag-t ag-d" xmlns="http://www.w3.org/2000/svg">
+<svg class="alint-agent" viewBox="0 0 460 344" role="img" aria-labelledby="ag-t ag-d" xmlns="http://www.w3.org/2000/svg">
 <title id="ag-t">One rule set feeds an agent as an AGENTS.md section and as per-violation fix commands</title>
 <desc id="ag-d">Active rules feed two paths. export-agents-md writes an AGENTS.md section the agent reads at session start; alint check --format agent emits per-violation JSON with agent_instruction and fix_command. Both reach the coding agent.</desc>
 <style>
@@ -23,19 +23,21 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
   @keyframes agflow { to { stroke-dashoffset:-12; } }
   @media (prefers-reduced-motion:reduce){ .alint-agent .flow{animation:none;stroke-dasharray:none} }
 </style>
-<rect class="key" x="160" y="20" width="140" height="28" rx="8"/><text class="tag ac" x="230" y="38" text-anchor="middle">active rules</text>
-<path class="flow" d="M 200 48 C 160 62, 120 62, 120 76"/>
-<path class="flow" d="M 260 48 C 300 62, 340 62, 340 76"/>
-<rect class="card" x="20" y="78" width="200" height="30" rx="7"/><text class="tag tx" x="120" y="97" text-anchor="middle">export-agents-md</text>
-<rect class="card" x="240" y="78" width="200" height="30" rx="7"/><text class="tag tx" x="340" y="97" text-anchor="middle">check --format agent</text>
-<path class="flow" d="M 120 108 V 130"/>
-<path class="flow" d="M 340 108 V 130"/>
-<rect class="card" x="34" y="132" width="172" height="46" rx="7"/><text class="tag tx" x="120" y="151" text-anchor="middle">AGENTS.md</text><text class="tag mut" x="120" y="168" text-anchor="middle">read at session start</text>
-<rect class="card" x="254" y="132" width="172" height="46" rx="7"/><text class="tag tx" x="340" y="151" text-anchor="middle">agent_instruction</text><text class="tag ac" x="340" y="168" text-anchor="middle">+ fix_command</text>
-<path class="flow" d="M 120 178 C 120 210, 210 210, 230 220"/>
-<path class="flow" d="M 340 178 C 340 210, 250 210, 230 220"/>
-<rect class="key" x="120" y="222" width="220" height="46" rx="10"/><text class="ui ac" x="230" y="242" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="259" text-anchor="middle">reads the rules, runs each fix_command</text>
-<text class="tag mut" x="230" y="298" text-anchor="middle">the rules are the agent's instructions and its fixes</text>
+<text class="ui ac" x="18" y="16">one rule set</text>
+<text class="ui mut" x="442" y="16" text-anchor="end">two agent feeds</text>
+<rect class="key" x="160" y="44" width="140" height="28" rx="8"/><text class="tag ac" x="230" y="62" text-anchor="middle">active rules</text>
+<path class="flow" d="M 200 72 C 160 86, 120 86, 120 100"/>
+<path class="flow" d="M 260 72 C 300 86, 340 86, 340 100"/>
+<rect class="card" x="20" y="102" width="200" height="30" rx="7"/><text class="tag tx" x="120" y="121" text-anchor="middle">export-agents-md</text>
+<rect class="card" x="240" y="102" width="200" height="30" rx="7"/><text class="tag tx" x="340" y="121" text-anchor="middle">check --format agent</text>
+<path class="flow" d="M 120 132 V 154"/>
+<path class="flow" d="M 340 132 V 154"/>
+<rect class="card" x="34" y="156" width="172" height="46" rx="7"/><text class="tag tx" x="120" y="175" text-anchor="middle">AGENTS.md</text><text class="tag mut" x="120" y="192" text-anchor="middle">read at session start</text>
+<rect class="card" x="254" y="156" width="172" height="46" rx="7"/><text class="tag tx" x="340" y="175" text-anchor="middle">agent_instruction</text><text class="tag ac" x="340" y="192" text-anchor="middle">+ fix_command</text>
+<path class="flow" d="M 120 202 C 120 234, 210 234, 230 244"/>
+<path class="flow" d="M 340 202 C 340 234, 250 234, 230 244"/>
+<rect class="key" x="120" y="246" width="220" height="46" rx="10"/><text class="ui ac" x="230" y="266" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="283" text-anchor="middle">reads the rules, runs each fix_command</text>
+<text class="tag mut" x="230" y="322" text-anchor="middle">the rules are the agent's instructions and its fixes</text>
 </svg>
 
 ## The `agent` output format
@@ -46,11 +48,11 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 - **`summary`**: `total_violations`, `by_severity` (`error` / `warning` / `info`), `fixable_violations`, `passing_rules`, `failing_rules`.
 - **`violations`**: a single flat array (unlike `--format json`, which nests by rule).
 
-Each violation object carries `rule_id`, `severity`, the location (`file`, `line`, `column`, present only when the finding has one), `human_message` (the rule's message verbatim), an `agent_instruction` (a templated remediation sentence: `"<severity>: <message>. To resolve: edit <path>:<line>:<col>"`, or a repository-level phrasing for a path-less finding), `fix_available`, and, when fixable, a **`fix_command`**. That command is the argv **after** the `alint` program name, `["fix", "--only", "<rule-id>"]`, so an agent runs the fix without parsing English, and a CLI-parse test guarantees it only ever names flags the binary accepts.
+Each violation object carries `rule_id`, `severity`, the location (`file`, `line`, `column`, present only when the finding has one), `human_message` (the rule's message verbatim), an `agent_instruction`, `fix_available`, a **`fix_command`** when the finding is fixable, and a `policy_url` when the rule declares one. The `agent_instruction` starts from a templated remediation sentence, `"<severity>: <message>. To resolve: edit <path>:<line>:<col>"` (or a repository-level phrasing for a path-less finding); a fix hint is appended when the finding is fixable and a policy hint when a `policy_url` is set, and the whole always closes with a period. The `fix_command` is the argv **after** the `alint` program name, `["fix", "--only", "<rule-id>"]`, so an agent runs the fix without parsing English, and a CLI-parse test guarantees it only ever names flags the binary accepts.
 
 ## `export-agents-md`
 
-`alint export-agents-md` renders the **active** rule set into a directive block, grouped by severity, shaped for an agent-instruction file. By default it prints to **stdout**; `--output <path>` writes a file; and `--inline` (the canonical workflow) splices the block between `<!-- alint:start -->` and `<!-- alint:end -->` markers in an existing file, creating them if absent, so re-running keeps just that section in sync and leaves the rest of the file untouched. `--section-title` sets the heading, `--include-info` adds info-level rules (excluded by default), and `--format json` emits the machine shape instead of the default markdown. Because agents read these files at the start of a session, the same config that gates CI becomes the agent's standing instructions.
+`alint export-agents-md` renders the **active** rule set into a directive block, grouped by severity, shaped for an agent-instruction file. By default it prints to **stdout**; `--output <path>` writes a file; and `--inline` (the canonical workflow, which requires `--output`) splices the block into that file between `<!-- alint:start -->` and `<!-- alint:end -->` markers, creating them if absent, so re-running keeps just that section in sync and leaves the rest of the file untouched. `--section-title` sets the heading, `--include-info` adds info-level rules (excluded by default), and `--format json` emits the machine shape instead of the default markdown. Because agents read these files at the start of a session, the same config that gates CI becomes the agent's standing instructions.
 
 ## Bundled agentic rulesets
 
@@ -95,7 +97,7 @@ One fixable finding comes back as a flat object with a ready-to-run `fix_command
       "line": 12,
       "column": 80,
       "human_message": "trailing whitespace",
-      "agent_instruction": "warning: trailing whitespace. To resolve: edit src/app.rs:12:80 — or run `alint fix --only no-trailing-whitespace` to apply the auto-fix",
+      "agent_instruction": "warning: trailing whitespace. To resolve: edit src/app.rs:12:80 — or run `alint fix --only no-trailing-whitespace` to apply the auto-fix.",
       "fix_available": true,
       "fix_command": ["fix", "--only", "no-trailing-whitespace"]
     }

@@ -50,7 +50,7 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 
 ## Fixable versus report-only
 
-A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, and `alint fix --changed` restricts the pass to the diff (cross-file and existence rules still see the whole tree). A violation with no fixer still fails the gate; fixing is an accelerant, not an escape hatch.
+A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, `alint fix --only <rule-id>` applies just one rule's fixers (the command the [agent surface](/docs/concepts/the-agent-surface/) emits), and `alint fix --changed` restricts the pass to the diff ([cross-file](/docs/concepts/cross-file-rules/) and existence rules still see the whole tree). A violation with no fixer still fails the gate; fixing is an accelerant, not an escape hatch.
 
 The fix pass runs **rule by rule in sequence** (evaluate the rule, then apply its fixers) rather than in parallel like `check`, because a fixer mutates files on disk and a later rule must see the result, not race it.
 
@@ -66,7 +66,7 @@ These ops are careful about repeat runs: `file_prepend` and `file_append` are id
 
 ## fix_size_limit
 
-Any op that reads a file honors `fix_size_limit` (default 1 MiB): a file over the cap is reported `Skipped` in the fix report rather than rewritten. That covers the seven content edits **and** `file_prepend` / `file_append`, which read the file to splice content. Only the path-only ops, `file_create`, `file_remove`, and `file_rename`, ignore the cap, because they never read content.
+`fix_size_limit` (default 1 MiB) bounds the file a fixer **rewrites in place**: if that target is over the cap it is reported `Skipped` rather than rewritten. It covers the seven content edits **and** `file_prepend` / `file_append`, all of which read the target to splice content. The path ops fall outside it: `file_remove` and `file_rename` read no content at all, and while `file_create` does read its `content_from:` template, that read is not itself bounded by `fix_size_limit`.
 
 ## In practice
 
@@ -97,15 +97,16 @@ rules:
 error [license-present]:
   ✓ created LICENSE
 info [md-trim]:
-  ✓ trimmed trailing whitespace in docs/guide.md
+  ✓ docs/guide.md — trimmed trailing whitespace in docs/guide.md
 
-2 applied, 0 skipped, 0 unfixable
+2 applied, 0 skipped, 0 unfixable.
 ```
 
-A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
+Each applied line is prefixed with the file it touched. A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
 
 ## Going deeper
 
 - [Configuration](/docs/configuration/#fix_size_limit) documents `fix_size_limit` and the per-rule `fix:` field.
+- [content_from](/docs/concepts/content-from/) is the file-backed alternative to an inline `content:` string, in depth.
 - [Rules](/docs/rules/) lists which kinds ship a fixer and the options each op takes.
 - [Changed mode](/docs/concepts/changed-mode/) covers `alint fix --changed`.

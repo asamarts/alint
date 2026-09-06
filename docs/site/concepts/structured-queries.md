@@ -56,18 +56,18 @@ alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML,
 <rect class="fmt" x="18" y="290" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="304" text-anchor="middle">dotenv</text>
 <text class="tag mut" x="80" y="304">SERVER_HOST=<tspan fill="#22c55e">db1</tspan></text>
 <text class="tag ac pp d4" x="442" y="304" text-anchor="end">$.SERVER_HOST</text>
-<text class="tag" x="230" y="328" text-anchor="middle" fill="#f59e0b">dotenv and .properties are flat: the key is the path</text>
+<text class="tag" x="230" y="328" text-anchor="middle" fill="#f59e0b">dotenv and properties are flat: the key is the path</text>
 <text class="ui ac" x="18" y="356">eight parsers, one Value tree</text>
 <rect class="fmt" x="22" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="71" y="382" text-anchor="middle">json</text>
 <rect class="fmt" x="128" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="177" y="382" text-anchor="middle">yaml</text>
 <rect class="fmt" x="234" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="283" y="382" text-anchor="middle">toml</text>
 <rect class="fmt" x="340" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="389" y="382" text-anchor="middle">xml</text>
-<rect class="fmt" x="22" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="71" y="412" text-anchor="middle">ini</text>
-<rect class="fmt" x="128" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="177" y="412" text-anchor="middle">dotenv</text>
-<rect class="fmt" x="234" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="283" y="412" text-anchor="middle">properties</text>
+<rect class="fmt" x="22" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="71" y="412" text-anchor="middle">dotenv</text>
+<rect class="fmt" x="128" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="177" y="412" text-anchor="middle">properties</text>
+<rect class="fmt" x="234" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="283" y="412" text-anchor="middle">ini</text>
 <rect class="fmt" x="340" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="389" y="412" text-anchor="middle">hcl</text>
 <text class="tag mut" x="230" y="436" text-anchor="middle">JSON, YAML, TOML, HCL keep number and boolean types</text>
-<text class="tag mut" x="230" y="454" text-anchor="middle">XML, INI, dotenv, .properties give string-typed leaves</text>
+<text class="tag mut" x="230" y="454" text-anchor="middle">XML, INI, dotenv, properties give string-typed leaves</text>
 <text class="ui ac" x="18" y="484">then assert</text>
 <rect class="chip" x="18" y="494" width="134" height="26" rx="6"/><text class="tag tx" x="85" y="511" text-anchor="middle">equals "db1"</text>
 <rect class="chip" x="163" y="494" width="134" height="26" rx="6"/><text class="tag tx" x="230" y="511" text-anchor="middle">matches /db\d/</text>
@@ -106,7 +106,7 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 
 ## In practice
 
-Require that `package.json` pins the Node engine to a major line, and that `.nvmrc` is not left at a floating tag:
+Pin two versions the same way across two formats: the Node engine in `package.json` (JSON) and the Python floor in `pyproject.toml` (TOML), reaching a dashed key with bracket notation.
 
 ```yaml
 version: 1
@@ -118,12 +118,20 @@ rules:
     matches: '^>=?\d+'
     level: error
     message: "package.json must pin engines.node"
+  - id: python-requires-pinned
+    kind: toml_path_matches
+    paths: ["pyproject.toml"]
+    path: "$.project['requires-python']"
+    matches: '>='
+    level: error
+    message: "pyproject.toml must pin requires-python"
 ```
 
-On a `package.json` whose `engines.node` is missing or unpinned:
+One JSONPath dialect, two file formats. On a repo where both are unpinned:
 
 ```
-error  node-engine-pinned  package.json must pin engines.node
+error  node-engine-pinned      package.json must pin engines.node
+error  python-requires-pinned  pyproject.toml must pin requires-python
 ```
 
 ## Going deeper
