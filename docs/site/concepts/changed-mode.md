@@ -69,8 +69,8 @@ The three-dot `<base>...HEAD` form diffs against the merge-base of `<base>` and 
 
 The filter narrows the file set for **per-file rules** only. Two families opt out, on purpose:
 
-- **Cross-file rules** (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`) always evaluate against the whole tree. A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
-- **Existence rules** (`file_exists`, `file_absent`, `dir_exists`, `dir_absent`) also evaluate whole-tree, but the engine **skips a rule entirely when its `paths:` scope does not intersect the diff**. So a missing `LICENSE` does not fail every PR; it fails only the PRs that touch a `LICENSE`-shaped path. This keeps whole-tree correctness without re-reporting the same unchanged-tree finding on every unrelated PR.
+- **Whole-tree rules** always evaluate against the whole tree, because their verdict depends on files outside your diff: the relational rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`), the manifest and graph rules (`cross_file`, `file_graph`, `registry_paths_resolve`, `pair_hash`), and the single-shot rules (`generated_file_fresh`, `command_idempotent`). A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
+- **Existence rules** also consult the whole tree, but the two file-existence rules (`file_exists`, `file_absent`) are **skipped when their `paths:` scope does not intersect the diff**, so a missing `LICENSE` fails only the PRs that touch a `LICENSE`-shaped path. The two directory-existence rules (`dir_exists`, `dir_absent`) always evaluate, since a directory scope never intersects a file-path diff.
 
 ## Edge cases
 
@@ -91,7 +91,7 @@ alint check --changed --base=origin/main
 If the branch added a trailing-whitespace line to `src/parser.rs` and deleted `api.c` (leaving `api.h` orphaned), one report carries both a per-file finding and a whole-tree one:
 
 ```
-warning  no-trailing-whitespace  src/parser.rs:42 trailing whitespace
+warning  no-trailing-whitespace  trailing whitespace
 error    header-source-pair      api.h has no matching api.c
 ```
 

@@ -9,7 +9,7 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 
 <svg class="alint-layer" viewBox="0 0 460 392" role="img" aria-labelledby="layer-t layer-d" xmlns="http://www.w3.org/2000/svg">
 <title id="layer-t">The three interpolation timings resolve at three different moments</title>
-<desc id="layer-d">A timeline with three stages. At config load, {{env.PKG_ROOT}} resolves to packages. At template expansion, {{vars.dir}} resolves to packages. Per violation, {{ctx.path}} resolves to packages/README.md. Each resolves at its own moment.</desc>
+<desc id="layer-d">A timeline with three stages. At config load, {{env.SRC_ROOT | default('src')}} resolves to src. At template expansion, {{vars.dir}} resolves to src. Per violation, {{ctx.primary}} resolves to src/app.c. Each resolves at its own moment.</desc>
 <style>
   .alint-layer { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-layer { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -34,15 +34,15 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 <circle class="token" cx="54" cy="74" r="4.5"/>
 <rect class="card" x="82" y="52" width="338" height="76" rx="10"/>
 <text class="ui ac" x="98" y="74">config load</text>
-<text class="tag tx" x="98" y="98">{{env.PKG_ROOT}} -&gt; packages</text>
+<text class="tag tx" x="98" y="98">{{env.SRC_ROOT|default('src')}} -&gt; src</text>
 <text class="tag mut" x="98" y="118">from the process environment; local configs only</text>
 <rect class="card" x="82" y="152" width="338" height="76" rx="10"/>
 <text class="ui ac" x="98" y="174">template expansion</text>
-<text class="tag tx" x="98" y="198">{{vars.dir}} -&gt; packages</text>
+<text class="tag tx" x="98" y="198">{{vars.dir}} -&gt; src</text>
 <text class="tag mut" x="98" y="218">only inside a templates: body</text>
 <rect class="card" x="82" y="252" width="338" height="76" rx="10"/>
 <text class="ui ac" x="98" y="274">per violation</text>
-<text class="tag tx" x="98" y="298">{{ctx.path}} -&gt; packages/README.md</text>
+<text class="tag tx" x="98" y="298">{{ctx.primary}} -&gt; src/app.c</text>
 <text class="tag mut" x="98" y="318">in a rule's message, once per finding</text>
 <text class="tag mut" x="230" y="362" text-anchor="middle">each resolves at its own moment; no layer sees another's values</text>
 </svg>
@@ -57,7 +57,7 @@ Drop-ins are **trust-equivalent to your root config**: they live in the same wor
 
 Opt in with `nested_configs: true` in the root config, and alint walks the tree (respecting `.gitignore` and `ignore:`) and picks up a `.alint.yml` in any subdirectory. A nested config's rules are **added, not overridden**, and each rule's path-like scope is **auto-prefixed with that subtree**, so a rule in `packages/web/.alint.yml` only ever looks at `packages/web/`.
 
-The guardrails keep nesting predictable: a nested config may declare only `version:` and `rules:`; every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on, one level deep.
+The guardrails keep nesting predictable: a nested config may declare only `version:` and `rules:`; every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on; a nested config cannot enable its own nested discovery.
 
 ## Three interpolation timings
 
@@ -65,32 +65,33 @@ The same `{{...}}` syntax resolves at three distinct times, and each layer only 
 
 - **`{{env.X}}`** resolves at **config load**, from the process environment, in local config files only. A `{{env.X | default('...')}}` filter supplies a fallback.
 - **`{{vars.X}}`** resolves when a **`templates:` body expands** into its instances. A plain, non-template rule does not expand `{{vars.X}}` in its fields; a bare `when: vars.X` reads a top-level var directly.
-- **`{{ctx.X}}`** resolves **per violation**, inside a rule's `message`, so each finding can name its own file or match.
+- **`{{ctx.X}}`** resolves **per violation**, inside the `message` of a rule that populates it. A `pair` rule fills `{{ctx.primary}}` and `{{ctx.partner}}`, for example; not every rule interpolates its message, and one like `file_exists` emits its `message` verbatim.
 
-Because they resolve at different moments, they never cross: `{{ctx.path}}` is meaningless at load, and `{{env.X}}` is long since resolved by the time a violation is formatted.
+Because they resolve at different moments, they never cross: `{{ctx.primary}}` is meaningless at load, and `{{env.X}}` is long since resolved by the time a violation is formatted.
 
 ## In practice
 
-One config threads all three timings in order, an env value feeding a template var, the var scoping a path, and the violation naming it:
+One config threads all three timings in order: an env value feeds a template var, the var scopes which files the rule pairs, and each violation names the file and its missing partner:
 
 ```yaml
 version: 1
 templates:
-  - id: dir-readme
-    kind: file_exists
-    paths: ["{{vars.dir}}/README.md"]        # {{vars}} fills at template expansion
+  - id: sources-need-headers
+    kind: pair
+    primary: "{{vars.dir}}/**/*.c"                     # {{vars}} fills at template expansion
+    partner: "{dir}/{stem}.h"
+    message: "{{ctx.primary}} has no header at {{ctx.partner}}"   # {{ctx}} fills per violation
     level: error
-    message: "{{ctx.path}} is required"        # {{ctx}} fills per violation
 rules:
-  - extends_template: dir-readme
-    id: pkg-readme
-    vars: { dir: "{{env.PKG_ROOT | default('packages')}}" }   # {{env}} fills at load
+  - extends_template: sources-need-headers
+    id: lib-headers
+    vars: { dir: "{{env.SRC_ROOT | default('src')}}" }     # {{env}} fills at load
 ```
 
-With `PKG_ROOT` unset and no `packages/README.md`, the default resolves at load, the template expands to `packages/README.md`, and the violation fills the message:
+With `SRC_ROOT` unset and `src/app.c` missing its header, the default resolves at load, the template expands to pair `src/**/*.c` files, and the `pair` rule fills the message per violation:
 
 ```
-error  pkg-readme  packages/README.md is required
+error  lib-headers  src/app.c has no header at src/app.h
 ```
 
 ## Going deeper

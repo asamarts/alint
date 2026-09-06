@@ -60,7 +60,7 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 
 Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root and per-directory), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
 
-Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. Symlinks are followed. No git repo is required; on a plain directory the walk just has nothing to filter, so every file is visible.
+Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required; on a plain directory the walk just has nothing to filter, so every file is visible.
 
 Two config fields shape the filtering. `respect_gitignore` (default `true`) toggles every gitignore source at once; the CLI's `--no-gitignore` forces it off for one run. `ignore:` adds gitignore-style patterns on top, and applies regardless of `respect_gitignore`, for exclusions that are an alint concern rather than a git one:
 
@@ -95,10 +95,11 @@ In a healthy repo neither case is common, and `git ls-files <path>` is the autho
 | Gitignored, never built | silent | silent |
 | Gitignored, built locally | silent | silent |
 | Not gitignored, on disk | **fires** | silent (not in index) |
-| Tracked in git's index | **fires** | **fires** |
+| Committed (not gitignored) | **fires** | **fires** |
+| Gitignored but force-added | silent (walker prunes it) | **fires** |
 | Not a git repo | **fires** | silent (no index) |
 
-`git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; other kinds ignore it. Outside a git repo (or with `git` off `PATH`) the tracked set is empty, so absence rules with the flag become silent no-ops (there is nothing to commit) and existence rules with it fail conservatively (no file qualifies). The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
+`git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; any other kind rejects it at load rather than ignoring it. Outside a git repo (or with `git` off `PATH`) the tracked set is empty, so absence rules with the flag become silent no-ops (there is nothing to commit) and existence rules with it fail conservatively (no file qualifies). The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
 
 ## In practice
 
