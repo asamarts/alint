@@ -5,11 +5,11 @@ sidebar:
   order: 11
 ---
 
-alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML, XML, dotenv, properties, INI, and HCL into one common Value tree, then runs a single RFC 9535 JSONPath query over that tree. The payoff: the same query mental model covers all eight formats. A top-level `version` of `"1.2"` in a `.json`, a `.toml`, or a `.yaml` file is all read by `$.version`, even though the three files share not one character of syntax.
+alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML, XML, dotenv, properties, INI, and HCL into one common Value tree, then runs a single RFC 9535 JSONPath query over that tree. The payoff: the same query mental model covers all eight formats. A `host` nested under a `server` table is read by `$.server.host` whether the file is JSON, YAML, TOML, or XML, even though those files share not one character of syntax.
 
-<svg class="alint-sq" viewBox="0 0 460 404" role="img" aria-labelledby="sq-t sq-d" xmlns="http://www.w3.org/2000/svg">
-<title id="sq-t">Three file syntaxes parse into one Value tree that a single JSONPath query walks</title>
-<desc id="sq-d">The same value written three ways (JSON, TOML, YAML) parses into one common Value tree with a node version equal to 1.2, which the query $.version reads. An op (equals, matches, or absent) then checks it.</desc>
+<svg class="alint-sq" viewBox="0 0 460 532" role="img" aria-labelledby="sq-t sq-d" xmlns="http://www.w3.org/2000/svg">
+<title id="sq-t">A JSONPath dissected, the same query resolving across five formats, and all eight supported formats</title>
+<desc id="sq-d">A path like $.server.host breaks into a root token, a member token, and a leaf token, with extra selectors for index, wildcard, recursive descent, and bracketed keys. The one query $.server.host resolves the value db1 from json, yaml, toml, and xml, while a flat format like dotenv uses the whole key SERVER_HOST as the path. alint parses all eight formats -- json, yaml, toml, xml, ini, dotenv, properties, hcl -- into one Value tree, then asserts with equals, matches, or absent.</desc>
 <style>
   .alint-sq { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-sq { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -17,35 +17,61 @@ alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML,
   .alint-sq .ui { font:600 12px system-ui, -apple-system, sans-serif; }
   .alint-sq .tag { font:600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .alint-sq .tx { fill:var(--tx); } .alint-sq .mut { fill:var(--mut); } .alint-sq .ac { fill:var(--ac); }
+  .alint-sq .card { fill:var(--card); stroke:var(--bd); stroke-width:1.2; }
+  .alint-sq .tok, .alint-sq .fmt { fill:var(--card); stroke:var(--ac); stroke-width:1.3; }
   .alint-sq .chip { fill:var(--card); stroke:var(--bd); stroke-width:1.2; }
-  .alint-sq .fmt { fill:var(--card); stroke:var(--ac); stroke-width:1.3; }
-  .alint-sq .hit { fill:var(--card); stroke:var(--ac); stroke-width:1.8; }
-  .alint-sq .flow { fill:none; stroke:var(--ac); stroke-width:2; stroke-dasharray:6 6; opacity:.7; animation:sqflow 1s linear infinite; }
-  .alint-sq .pulse { animation:sqpulse 2.4s ease-in-out infinite; }
-  @keyframes sqflow { to { stroke-dashoffset:-12; } }
-  @keyframes sqpulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  @media (prefers-reduced-motion:reduce){ .alint-sq .flow{animation:none;stroke-dasharray:none} .alint-sq .pulse{animation:none} }
+  .alint-sq .scan { animation:sqscan 3.2s ease-in-out infinite; }
+  .alint-sq .pp { animation:sqpulse 2.8s ease-in-out infinite; }
+  .alint-sq .d1 { animation-delay:.3s; } .alint-sq .d2 { animation-delay:.6s; } .alint-sq .d3 { animation-delay:.9s; } .alint-sq .d4 { animation-delay:1.2s; }
+  @keyframes sqscan { 0%{transform:translateX(0);opacity:0} 12%{opacity:1} 88%{opacity:1} 100%{transform:translateX(158px);opacity:0} }
+  @keyframes sqpulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @media (prefers-reduced-motion:reduce){ .alint-sq .scan{animation:none;opacity:0} .alint-sq .pp{animation:none} }
 </style>
-<text class="ui ac" x="18" y="16">same value, three syntaxes</text>
-<text class="ui mut" x="442" y="16" text-anchor="end">one query</text>
-<rect class="fmt" x="18" y="26" width="58" height="24" rx="6"/><text class="tag ac" x="47" y="42" text-anchor="middle">json</text>
-<rect class="chip" x="84" y="26" width="358" height="24" rx="6"/><text class="tag tx" x="98" y="42">{ "version": "1.2" }</text>
-<rect class="fmt" x="18" y="56" width="58" height="24" rx="6"/><text class="tag ac" x="47" y="72" text-anchor="middle">toml</text>
-<rect class="chip" x="84" y="56" width="358" height="24" rx="6"/><text class="tag tx" x="98" y="72">version = "1.2"</text>
-<rect class="fmt" x="18" y="86" width="58" height="24" rx="6"/><text class="tag ac" x="47" y="102" text-anchor="middle">yaml</text>
-<rect class="chip" x="84" y="86" width="358" height="24" rx="6"/><text class="tag tx" x="98" y="102">version: "1.2"</text>
-<path class="flow" d="M 200 50 C 200 122, 230 108, 230 140"/>
-<path class="flow" d="M 230 80 V 140"/>
-<path class="flow" d="M 260 110 C 260 122, 230 122, 230 140"/>
-<text class="tag mut" x="245" y="132">parse + coerce</text>
-<rect class="hit" x="120" y="146" width="220" height="52" rx="10"/><text class="ui ac" x="134" y="167">one Value tree</text><text class="tag tx" x="134" y="187">version = "1.2"</text>
-<path class="flow" d="M 230 198 V 224"/>
-<text class="ui ac" x="120" y="242">$.version</text><text class="tag mut" x="210" y="242">reads "1.2" from all three</text>
-<rect class="chip" x="18" y="256" width="134" height="26" rx="6"/><text class="tag tx" x="85" y="273" text-anchor="middle">equals "1.2"</text>
-<rect class="chip" x="163" y="256" width="134" height="26" rx="6"/><text class="tag tx" x="230" y="273" text-anchor="middle">matches /1\./</text>
-<rect class="chip" x="308" y="256" width="134" height="26" rx="6"/><text class="tag tx" x="375" y="273" text-anchor="middle">absent</text>
-<text class="tag mut" x="230" y="316" text-anchor="middle">XML nests under its root element: $.pkg.version</text>
-<text class="tag mut" x="230" y="338" text-anchor="middle">XML, dotenv, properties, and INI give string-typed leaves</text>
+<text class="ui ac" x="18" y="16">one query, any format</text>
+<text class="ui mut" x="442" y="16" text-anchor="end">RFC 9535 JSONPath</text>
+<rect class="card" x="18" y="26" width="424" height="118" rx="12"/>
+<text class="ui ac" x="32" y="46">anatomy of a path</text>
+<rect class="tok" x="151" y="56" width="26" height="24" rx="6"/><text class="tag tx" x="164" y="73" text-anchor="middle">$</text>
+<rect class="tok" x="185" y="56" width="64" height="24" rx="6"/><text class="tag tx" x="217" y="73" text-anchor="middle">.server</text>
+<rect class="tok" x="257" y="56" width="52" height="24" rx="6"/><text class="tag tx" x="283" y="73" text-anchor="middle">.host</text>
+<circle class="scan" cx="151" cy="86" r="3" fill="var(--ac)"/>
+<text class="tag mut" x="164" y="100" text-anchor="middle">root</text>
+<text class="tag mut" x="217" y="100" text-anchor="middle">member</text>
+<text class="tag mut" x="283" y="100" text-anchor="middle">leaf</text>
+<line x1="32" y1="112" x2="428" y2="112" stroke="var(--bd)" stroke-width="1"/>
+<text class="tag mut" x="32" y="131">also: [0] nth, [*] all, .. any depth, ['a-b'] odd keys</text>
+<text class="ui ac" x="18" y="168">the same query, any file shape</text>
+<rect class="fmt" x="18" y="178" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="192" text-anchor="middle">json</text>
+<text class="tag mut" x="80" y="192">{"server":{"host":<tspan fill="#22c55e">"db1"</tspan>}}</text>
+<text class="tag ac pp" x="442" y="192" text-anchor="end">$.server.host</text>
+<rect class="fmt" x="18" y="206" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="220" text-anchor="middle">yaml</text>
+<text class="tag mut" x="80" y="220">server: {host: <tspan fill="#22c55e">db1</tspan>}</text>
+<text class="tag ac pp d1" x="442" y="220" text-anchor="end">$.server.host</text>
+<rect class="fmt" x="18" y="234" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="248" text-anchor="middle">toml</text>
+<text class="tag mut" x="80" y="248">server.host = <tspan fill="#22c55e">"db1"</tspan></text>
+<text class="tag ac pp d2" x="442" y="248" text-anchor="end">$.server.host</text>
+<rect class="fmt" x="18" y="262" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="276" text-anchor="middle">xml</text>
+<text class="tag mut" x="80" y="276">&lt;server&gt;&lt;host&gt;<tspan fill="#22c55e">db1</tspan>&lt;/host&gt;</text>
+<text class="tag ac pp d3" x="442" y="276" text-anchor="end">$.server.host</text>
+<rect class="fmt" x="18" y="290" width="52" height="20" rx="6"/><text class="tag ac" x="44" y="304" text-anchor="middle">dotenv</text>
+<text class="tag mut" x="80" y="304">SERVER_HOST=<tspan fill="#22c55e">db1</tspan></text>
+<text class="tag ac pp d4" x="442" y="304" text-anchor="end">$.SERVER_HOST</text>
+<text class="tag" x="230" y="328" text-anchor="middle" fill="#f59e0b">dotenv and .properties are flat: the key is the path</text>
+<text class="ui ac" x="18" y="356">eight parsers, one Value tree</text>
+<rect class="fmt" x="22" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="71" y="382" text-anchor="middle">json</text>
+<rect class="fmt" x="128" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="177" y="382" text-anchor="middle">yaml</text>
+<rect class="fmt" x="234" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="283" y="382" text-anchor="middle">toml</text>
+<rect class="fmt" x="340" y="366" width="98" height="24" rx="7"/><text class="tag ac" x="389" y="382" text-anchor="middle">xml</text>
+<rect class="fmt" x="22" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="71" y="412" text-anchor="middle">ini</text>
+<rect class="fmt" x="128" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="177" y="412" text-anchor="middle">dotenv</text>
+<rect class="fmt" x="234" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="283" y="412" text-anchor="middle">properties</text>
+<rect class="fmt" x="340" y="396" width="98" height="24" rx="7"/><text class="tag ac" x="389" y="412" text-anchor="middle">hcl</text>
+<text class="tag mut" x="230" y="436" text-anchor="middle">JSON, YAML, TOML, HCL keep number and boolean types</text>
+<text class="tag mut" x="230" y="454" text-anchor="middle">XML, INI, dotenv, .properties give string-typed leaves</text>
+<text class="ui ac" x="18" y="484">then assert</text>
+<rect class="chip" x="18" y="494" width="134" height="26" rx="6"/><text class="tag tx" x="85" y="511" text-anchor="middle">equals "db1"</text>
+<rect class="chip" x="163" y="494" width="134" height="26" rx="6"/><text class="tag tx" x="230" y="511" text-anchor="middle">matches /db\d/</text>
+<rect class="chip" x="308" y="494" width="134" height="26" rx="6"/><text class="tag tx" x="375" y="511" text-anchor="middle">absent</text>
 </svg>
 
 ## Eight formats, one tree
