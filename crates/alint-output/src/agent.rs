@@ -167,8 +167,8 @@ fn severity_str(level: Level) -> &'static str {
 /// Concrete shapes:
 ///
 /// - Path-bound, fixable: `"warning: README is missing. To
-///   resolve: edit README — or run `alint fix --only
-///   readme-exists` to apply the auto-fix."`
+///   resolve: edit README (or run `alint fix --only
+///   readme-exists` to apply the auto-fix)."`
 /// - Path-bound, non-fixable: `"warning: console.log left in
 ///   non-test source. To resolve: edit src/api.ts:2:1."`
 /// - Cross-file (no path): `"error: Multiple lockfiles present.
@@ -208,9 +208,9 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
     }
 
     if rule.is_fixable {
-        out.push_str(" — or run `alint fix --only ");
+        out.push_str(" (or run `alint fix --only ");
         out.push_str(&rule.rule_id);
-        out.push_str("` to apply the auto-fix");
+        out.push_str("` to apply the auto-fix)");
     }
 
     if let Some(url) = rule.policy_url.as_deref() {
@@ -301,6 +301,14 @@ mod tests {
         assert!(
             inst.contains("alint fix --only readme-exists"),
             "got: {inst}"
+        );
+        assert!(
+            inst.contains("(or run `alint fix --only readme-exists` to apply the auto-fix)"),
+            "fixable instruction should carry the parenthetical fix hint: {inst}"
+        );
+        assert!(
+            !inst.contains('\u{2014}'),
+            "agent_instruction must not contain an em-dash: {inst}"
         );
         assert!(
             inst.contains("https://example.com/policy"),

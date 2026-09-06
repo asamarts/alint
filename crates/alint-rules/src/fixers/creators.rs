@@ -494,7 +494,10 @@ mod tests {
             .apply(&Violation::new("x"), &make_ctx(&tmp, true))
             .unwrap();
         match outcome {
-            FixOutcome::Applied(s) => assert!(s.starts_with("would create")),
+            FixOutcome::Applied(s) => {
+                assert!(s.starts_with("would create"));
+                assert!(s.contains("x.txt"), "summary must name the file: {s}");
+            }
             FixOutcome::Skipped(_) => panic!("expected Applied"),
         }
         assert!(!tmp.path().join("x.txt").exists());

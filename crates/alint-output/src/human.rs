@@ -470,11 +470,14 @@ pub fn write_fix_human(
             "{level_style}{level_name}{level_style:#} {rule_style}[{safe_rule_id}]{rule_style:#}:",
         )?;
         for item in &rule.items {
+            // The applied summary already names the file it touched, so the
+            // path prefix is added only to the message-based skipped / no-fixer
+            // lines below, where the file would otherwise go unnamed.
             let path_prefix = item
                 .violation
                 .path
                 .as_ref()
-                .map(|p| format!("{} — ", p.display()))
+                .map(|p| format!("{} - ", p.display()))
                 .unwrap_or_default();
             let (glyph, line_style_open, line_style_close, content) = match &item.status {
                 FixStatus::Applied(summary) => {
@@ -483,7 +486,7 @@ pub fn write_fix_human(
                         opts.glyphs.success,
                         format!("{s}"),
                         format!("{s:#}"),
-                        format!("{path_prefix}{summary}"),
+                        summary.clone(),
                     )
                 }
                 FixStatus::Skipped(reason) => (

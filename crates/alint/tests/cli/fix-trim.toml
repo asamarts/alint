@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["fix", "."]
+fs.sandbox = true

@@ -1,0 +1,4 @@
+warning [trim]:
+  ✓ trimmed trailing whitespace in doc.md
+
+1 applied, 0 skipped, 0 unfixable.

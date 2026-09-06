@@ -1,0 +1,8 @@
+version: 1
+rules:
+  - id: trim
+    kind: no_trailing_whitespace
+    paths: "**/*.md"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
