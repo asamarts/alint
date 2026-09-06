@@ -1,15 +1,15 @@
 ---
 title: Fixing
-description: "How alint repairs violations: rules with a fix: block are auto-fixable, the twelve fix ops, content_from:, fix_size_limit, and why evaluation is parallel but fixes apply one at a time."
+description: "How alint repairs violations: rules with a fix: block are auto-fixable, the twelve fix ops, content_from:, fix_size_limit, and why evaluation is parallel but fixes apply one rule at a time."
 sidebar:
   order: 12
 ---
 
-A rule that can mechanically repair its violation declares a `fix:` block. `alint check` only reports; `alint fix` applies the repairs. Evaluation runs in parallel across files, but the fixes themselves apply one file at a time, because each one mutates the tree the next rule might read.
+A rule that can mechanically repair its violation declares a `fix:` block. `alint check` only reports; `alint fix` applies the repairs. Evaluation runs in parallel across files, but the fix pass is a single sequential loop, one rule at a time, because each fixer writes to the tree that the next rule will read.
 
 <svg class="alint-fix" viewBox="0 0 460 344" role="img" aria-labelledby="fx-t fx-d" xmlns="http://www.w3.org/2000/svg">
-<title id="fx-t">alint evaluates files in parallel, then applies fixes sequentially</title>
-<desc id="fx-d">Three files are evaluated in parallel and produce fixable violations. Those violations feed a single sequential lane where fixes are applied one file at a time.</desc>
+<title id="fx-t">alint evaluates files in parallel, then applies fixes one rule at a time</title>
+<desc id="fx-d">Three files are evaluated in parallel and produce fixable violations. Those violations feed a single sequential lane where fixes are applied one rule at a time.</desc>
 <style>
   .alint-fix { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-fix { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -37,32 +37,36 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 <path class="flow" d="M 370 58 C 370 92, 230 92, 230 116"/>
 <rect class="lane" x="40" y="122" width="380" height="56" rx="10"/>
 <text class="ui ac" x="56" y="144">apply</text>
-<text class="tag mut" x="110" y="144">sequential, one file at a time</text>
+<text class="tag mut" x="110" y="144">sequential, one rule at a time</text>
 <line x1="60" y1="162" x2="400" y2="162" stroke="var(--bd)" stroke-width="2"/>
 <circle cx="100" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="100" y="176" text-anchor="middle">fix 1</text>
 <circle cx="230" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="230" y="176" text-anchor="middle">fix 2</text>
 <circle cx="360" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="360" y="176" text-anchor="middle">fix 3</text>
 <circle class="tok" cx="100" cy="162" r="6"/>
 <text class="ui ac" x="18" y="214">two families of op</text>
-<rect class="chip" x="18" y="224" width="412" height="44" rx="8"/><text class="tag tx" x="32" y="242">content edits (7)</text><text class="tag mut" x="32" y="258">trim, final newline, line endings, BOM, bidi, zero-width, blanks</text>
-<rect class="chip" x="18" y="278" width="412" height="44" rx="8"/><text class="tag tx" x="32" y="296">path + content (5)</text><text class="tag mut" x="32" y="312">create, remove, rename, prepend, append</text>
+<rect class="chip" x="18" y="224" width="424" height="44" rx="8"/><text class="tag tx" x="32" y="242">content edits (7)</text><text class="tag mut" x="32" y="258">trim, newline, line endings, BOM, bidi, zero-width, blanks</text>
+<rect class="chip" x="18" y="278" width="424" height="44" rx="8"/><text class="tag tx" x="32" y="296">path + content (5)</text><text class="tag mut" x="32" y="312">create, remove, rename, prepend, append</text>
 </svg>
 
 ## Fixable versus report-only
 
-A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, and `alint fix --changed` restricts the pass to the diff (cross-file and existence rules still see the whole tree). Violations with no fixer still fail the gate; fixing is an accelerant, not an escape hatch.
+A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, and `alint fix --changed` restricts the pass to the diff (cross-file and existence rules still see the whole tree). A violation with no fixer still fails the gate; fixing is an accelerant, not an escape hatch.
+
+The fix pass runs **rule by rule in sequence** (evaluate the rule, then apply its fixers) rather than in parallel like `check`, because a fixer mutates files on disk and a later rule must see the result, not race it.
 
 ## The twelve ops
 
-Seven ops edit content in place: `file_trim_trailing_whitespace`, `file_final_newline`, `file_normalize_line_endings`, `file_strip_bom`, `file_strip_bidi`, `file_strip_zero_width`, and `file_collapse_blank_lines`. Five more work at the path or prepend/append level: `file_create`, `file_remove`, `file_rename`, `file_prepend`, and `file_append`.
+Seven ops edit content in place: `file_trim_trailing_whitespace`, `file_append_final_newline`, `file_normalize_line_endings`, `file_strip_bom`, `file_strip_bidi`, `file_strip_zero_width`, and `file_collapse_blank_lines`. Five more work at the path or prepend/append level: `file_create`, `file_remove`, `file_rename`, `file_prepend`, and `file_append`.
 
 ## content_from
 
 The three content-providing ops, `file_create`, `file_prepend`, and `file_append`, take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file. Exactly one of the two must be set. The path resolves against the lint root and is read at fix-apply time, so a LICENSE or SPDX header can live in `.alint/templates/` under version control instead of being escaped into YAML. A missing `content_from:` source is reported as `Skipped`, never a half-written file.
 
+These ops are careful about repeat runs: `file_prepend` and `file_append` are idempotent (a no-op when the content is already present) and `file_prepend` preserves a leading byte-order mark, while `file_create` skips a target that already exists.
+
 ## fix_size_limit
 
-Content-editing ops read and rewrite whole files, so they honor `fix_size_limit` (default 1 MiB): a file over the cap is reported `Skipped` with a one-line stderr note rather than rewritten. The path-only ops (`file_create`, `file_remove`, `file_rename`) ignore the cap, because they do not read content.
+Any op that reads a file honors `fix_size_limit` (default 1 MiB): a file over the cap is reported `Skipped` in the fix report rather than rewritten. That covers the seven content edits **and** `file_prepend` / `file_append`, which read the file to splice content. Only the path-only ops, `file_create`, `file_remove`, and `file_rename`, ignore the cap, because they never read content.
 
 ## In practice
 
@@ -87,12 +91,18 @@ rules:
         content_from: ".alint/templates/LICENSE-MIT.txt"
 ```
 
-`alint fix` rewrites the Markdown and writes `LICENSE`, then reports what it changed:
+`alint fix` prints a block per rule and a final count:
 
 ```
-applied  md-trim          trimmed trailing whitespace
-applied  license-present   created LICENSE
+error [license-present]:
+  ✓ created LICENSE
+info [md-trim]:
+  ✓ trimmed trailing whitespace in docs/guide.md
+
+2 applied, 0 skipped, 0 unfixable
 ```
+
+A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
 
 ## Going deeper
 
