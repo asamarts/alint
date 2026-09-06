@@ -150,7 +150,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "git_no_denied_paths has no fix op — `git rm --cached` is too destructive to automate",
+            "git_no_denied_paths has no fix op - `git rm --cached` is too destructive to automate",
         ));
     }
 
@@ -250,7 +250,7 @@ mod tests {
         assert!(
             lit.matches(std::path::Path::new("secrets/id_rsa"))
                 .is_empty(),
-            "a bare literal is root-anchored — the real M5 gap"
+            "a bare literal is root-anchored - the real M5 gap"
         );
     }
 

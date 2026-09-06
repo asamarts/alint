@@ -452,7 +452,7 @@ fn evaluate_one_per_file_rule(
             return vec![
                 Violation::new(format!(
                     "{parent_id}: nested rule #{nested_i} cannot analyze {} \
-                     — file is too large ({})",
+                     - file is too large ({})",
                     literal.display(),
                     crate::io::over_cap(n),
                 ))

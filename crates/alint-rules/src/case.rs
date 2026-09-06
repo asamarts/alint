@@ -346,7 +346,7 @@ mod tests {
             let out = conv.convert(input);
             assert!(
                 conv.check(&out),
-                "{conv:?}.convert({input:?}) = {out:?} does not satisfy check() — non-convergent"
+                "{conv:?}.convert({input:?}) = {out:?} does not satisfy check() - non-convergent"
             );
             // And idempotent: a second pass changes nothing.
             assert_eq!(conv.convert(&out), out, "second convert must be a no-op");

@@ -121,7 +121,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if opts.prefixes.is_empty() {
         return Err(Error::rule_config(
             &spec.id,
-            "markdown_paths_resolve requires a non-empty `prefixes` list — \
+            "markdown_paths_resolve requires a non-empty `prefixes` list - \
              declare which path shapes (e.g. [\"src/\", \"crates/\", \"docs/\"]) \
              count as path candidates in your codebase",
         ));

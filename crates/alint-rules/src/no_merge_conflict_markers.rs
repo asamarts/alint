@@ -131,7 +131,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "no_merge_conflict_markers has no fix op — conflict resolution requires human judgment",
+            "no_merge_conflict_markers has no fix op - conflict resolution requires human judgment",
         ));
     }
     Ok(Box::new(NoMergeConflictMarkersRule {

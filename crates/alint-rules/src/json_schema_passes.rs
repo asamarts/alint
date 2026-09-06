@@ -299,7 +299,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "json_schema_passes has no fix op — alint can't synthesize correct content",
+            "json_schema_passes has no fix op - alint can't synthesize correct content",
         ));
     }
 

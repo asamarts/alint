@@ -105,7 +105,7 @@ fn init_panic_hook() {
             url_encode(&title),
             url_encode(&body),
         );
-        eprintln!("\nalint crashed unexpectedly. This is a bug — please file a report:");
+        eprintln!("\nalint crashed unexpectedly. This is a bug - please file a report:");
         eprintln!("  {url}\n");
         eprintln!("Panic: {payload}");
         eprintln!("Location: {location}");
@@ -262,7 +262,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
 fn reject_non_human_format(cli: &Cli, cmd: &str) -> anyhow::Result<()> {
     if cli.format != "human" {
         anyhow::bail!(
-            "`{cmd}` does not support `--format {}` — it produces no formatted report; drop `--format`",
+            "`{cmd}` does not support `--format {}` - it produces no formatted report; drop `--format`",
             cli.format
         );
     }
@@ -372,7 +372,7 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
     let summary = init::render_summary(&detection);
     if summary.is_empty() {
         println!(
-            "Wrote {} — extends `oss-baseline@v1` only.",
+            "Wrote {} - extends `oss-baseline@v1` only.",
             target.display()
         );
         println!(
@@ -380,7 +380,7 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
              (`alint://bundled/rust@v1`, `node@v1`, …) when ready."
         );
     } else {
-        println!("Wrote {} — detected: {}.", target.display(), summary);
+        println!("Wrote {} - detected: {}.", target.display(), summary);
         println!("  Run `alint check` to lint against the generated config.");
     }
     Ok(ExitCode::SUCCESS)
@@ -811,7 +811,7 @@ fn cmd_baseline(
     // contract `--only` follows on subcommands that don't honor it).
     if cli.format != "human" {
         anyhow::bail!(
-            "`baseline` does not support `--format {}` — it writes the baseline file and a \
+            "`baseline` does not support `--format {}` - it writes the baseline file and a \
              human summary; drop `--format` (use `--quiet` to silence the summary)",
             cli.format
         );
@@ -965,7 +965,7 @@ fn cmd_fix(
         bail!(
             "`alint fix` supports only `--format human`, `--format json`, or \
              `--format markdown` (got {fmt:?}); the SARIF/GitHub/JUnit/GitLab/agent \
-             formats describe findings, not fixes — run `alint check --format {fmt}` \
+             formats describe findings, not fixes - run `alint check --format {fmt}` \
              for those",
             fmt = cli.format,
         );

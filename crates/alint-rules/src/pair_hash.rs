@@ -314,7 +314,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "pair_hash has no fix op — regenerating a checksum manifest is the \
+            "pair_hash has no fix op - regenerating a checksum manifest is the \
              manifest generator's job, not alint's",
         ));
     }

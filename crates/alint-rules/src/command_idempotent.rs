@@ -157,7 +157,7 @@ impl Rule for CommandIdempotentRule {
                 return Ok(vec![self.violation(
                     &self.workdir,
                     &format!(
-                        "`{}` exited with {code} — the tree is not formatter-clean{}",
+                        "`{}` exited with {code} - the tree is not formatter-clean{}",
                         self.command.join(" "),
                         snippet(&stdout, &stderr),
                     ),

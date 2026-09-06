@@ -272,7 +272,7 @@ impl RawConfig {
                 let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
                 return Err(Error::Other(format!(
                     "template {id:?}: `kind: {kind}` spawns a process and is not allowed \
-                     in a `templates:` block — a template is expanded after the spawn \
+                     in a `templates:` block - a template is expanded after the spawn \
                      gate, so this would let a ruleset run arbitrary code. Declare the \
                      command rule directly in your top-level `rules:`."
                 )));
@@ -354,7 +354,7 @@ fn expand_template(
         return Err(Error::rule_config(
             &id_hint,
             format!(
-                "template `{template_id}` itself references `extends_template:` — \
+                "template `{template_id}` itself references `extends_template:` - \
                  templates are leaf-only (mirrors the bundled-rulesets restriction)"
             ),
         ));
@@ -549,8 +549,8 @@ fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
             .unwrap_or("(unknown)");
         return Err(Error::Other(format!(
             "rule {id:?}: `kind: {kind}` spawns a process and is only allowed in the \
-             user's top-level config; declaring one in an extended config ({source}) — \
-             including inside a `require:` block — is refused because it would let a \
+             user's top-level config; declaring one in an extended config ({source}) - \
+             including inside a `require:` block - is refused because it would let a \
              ruleset run arbitrary code"
         )));
     }

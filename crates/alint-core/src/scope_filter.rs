@@ -665,7 +665,7 @@ pub fn reject_scope_filter_on_cross_file(
             format!(
                 "scope_filter is supported on per-file rules only; {cross_file_kind_label} is a \
                  cross-file rule. Express ancestor scoping via `for_each_dir + when_iter:` \
-                 instead — see docs/design/v0.9/scope-filter.md for the pattern."
+                 instead - see docs/design/v0.9/scope-filter.md for the pattern."
             ),
         ));
     }
@@ -728,7 +728,7 @@ fn validate_manifest_name(rule_id: &str, name: &str) -> Result<()> {
         return Err(Error::rule_config(
             rule_id,
             format!(
-                "scope_filter.has_ancestor name {name:?} must be a basename — no path separators.\n  \
+                "scope_filter.has_ancestor name {name:?} must be a basename - no path separators.\n  \
                  hint: to match files inside a specific subtree, use `paths:` on the rule's main \
                  scope (e.g. `paths: \"airflow-core/**/*.py\"`); to match files in any subtree \
                  that has this manifest, use the basename only (e.g. `has_ancestor: {basename:?}`)."
@@ -742,7 +742,7 @@ fn validate_manifest_name(rule_id: &str, name: &str) -> Result<()> {
         return Err(Error::rule_config(
             rule_id,
             format!(
-                "scope_filter.has_ancestor name {name:?} must be a literal — no glob \
+                "scope_filter.has_ancestor name {name:?} must be a literal - no glob \
                  metacharacters allowed (use `Cargo.toml`, not `*.toml`)"
             ),
         ));

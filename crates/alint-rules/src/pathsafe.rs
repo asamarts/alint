@@ -57,7 +57,7 @@ pub(crate) fn confine(path: &Path, allow_escape: bool) -> Confined {
 /// The informational-note message for a permitted out-of-root read.
 pub(crate) fn out_of_root_note(path: &Path) -> String {
     format!(
-        "reading out-of-root path {} — permitted by `allow_out_of_root`",
+        "reading out-of-root path {} - permitted by `allow_out_of_root`",
         path.display()
     )
 }

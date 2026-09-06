@@ -176,7 +176,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "file_is_ascii has no fix op — replacement for non-ASCII bytes is ambiguous",
+            "file_is_ascii has no fix op - replacement for non-ASCII bytes is ambiguous",
         ));
     }
     let opts: Options = spec

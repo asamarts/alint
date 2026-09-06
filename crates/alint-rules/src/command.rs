@@ -285,7 +285,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "command rules do not support `fix:` blocks in v0.5.x — \
+            "command rules do not support `fix:` blocks in v0.5.x - \
              wire a paired fix-on-save tool via a separate `command` \
              rule (or another rule kind) for now",
         ));

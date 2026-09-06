@@ -120,7 +120,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "file_starts_with has no fix op — pair with an explicit `file_prepend` rule if you \
+            "file_starts_with has no fix op - pair with an explicit `file_prepend` rule if you \
              want auto-prepend (avoids silently duplicating near-matching prefixes).",
         ));
     }

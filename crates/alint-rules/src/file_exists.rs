@@ -250,7 +250,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 .ok_or_else(|| {
                     Error::rule_config(
                         &spec.id,
-                        "fix.file_create needs a `path` — none of the rule's `paths:` \
+                        "fix.file_create needs a `path` - none of the rule's `paths:` \
                          entries is a literal filename",
                     )
                 })?;

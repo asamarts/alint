@@ -85,7 +85,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "shebang_has_executable has no fix op — chmod auto-apply is deferred (see ROADMAP)",
+            "shebang_has_executable has no fix op - chmod auto-apply is deferred (see ROADMAP)",
         ));
     }
     Ok(Box::new(ShebangHasExecutableRule {
