@@ -442,7 +442,7 @@ fn strip_block_comment_markers(line: &str, open: &str, close: &str) -> String {
 /// Characters strongly biased toward code over English prose.
 /// Brackets and assignment / comparison operators show up
 /// constantly in code and almost never in normal writing.
-/// Backticks and quotes are NOT included — backticks delimit
+/// Backticks and quotes are NOT included - backticks delimit
 /// code references in rustdoc / `TSDoc` prose
 /// (`` `foo` matches `bar` ``), double quotes appear in normal
 /// English. Either would inflate the score on legitimate prose
@@ -459,7 +459,7 @@ const STRONG_CODE_CHARS: &[char] = &[
 const SATURATION_POINT: f64 = 0.20;
 
 /// Punctuation-density score in [0.0, 1.0]. See module-level
-/// rustdoc for the design rationale — the short version is
+/// rustdoc for the design rationale - the short version is
 /// "count brackets / semicolons / assignment operators, ignore
 /// identifier tokens (prose has identifier-shaped words too)."
 ///
@@ -485,7 +485,7 @@ fn score_density(content: &str) -> f64 {
 
 /// Strip runs of 5+ identical characters. Used to defang
 /// ASCII-art separators / banners (`==========`, `----`,
-/// `####`) before density scoring — those are layout, not
+/// `####`) before density scoring - those are layout, not
 /// code structure, and inflate the strong-char count.
 fn drop_long_runs(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

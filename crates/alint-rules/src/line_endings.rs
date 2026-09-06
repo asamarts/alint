@@ -100,7 +100,7 @@ impl PerFileRule for LineEndingsRule {
 /// Walk the byte stream and return the 1-based line number of
 /// the first line ending that doesn't match `target`. The last
 /// "line" (after the final newline, or the whole file if no
-/// newline at all) is ignored — `final_newline` is that rule.
+/// newline at all) is ignored - `final_newline` is that rule.
 fn first_mismatched_line(bytes: &[u8], target: LineEndingTarget) -> Option<usize> {
     let mut line_no = 1usize;
     let mut i = 0;

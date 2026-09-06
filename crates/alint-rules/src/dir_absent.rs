@@ -29,7 +29,7 @@ pub struct DirAbsentRule {
     root_only: bool,
     /// When `true`, only fire on directories that contain at
     /// least one git-tracked file. The canonical use case is
-    /// "don't let `target/` be committed" — with this flag set,
+    /// "don't let `target/` be committed" - with this flag set,
     /// a developer's locally-built `target/` (gitignored, no
     /// tracked content) doesn't trigger; a `target/` whose
     /// contents made it into git's index does.

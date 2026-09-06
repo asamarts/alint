@@ -126,7 +126,7 @@ impl Rule for GitNoDeniedPathsRule {
 /// `**/` matches zero or more segments, so the anchored form still catches
 /// the root-level file. This is the secure default for a denylist: a bare
 /// *literal* like `id_rsa` should ban that file anywhere in the tree, not only
-/// at the root — globset root-anchors a bare literal. (A bare *wildcard* like
+/// at the root - globset root-anchors a bare literal. (A bare *wildcard* like
 /// `*.pem` already spans depths in globset, so anchoring it is a no-op.)
 fn anchor_denied_pattern(pattern: &str) -> std::borrow::Cow<'_, str> {
     if pattern.contains('/') {

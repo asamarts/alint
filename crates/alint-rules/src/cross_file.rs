@@ -75,8 +75,8 @@ struct TargetEntrySpec {
 }
 
 /// `targets:` is either a `{ files: <glob>, extract: … }` map
-/// (form a — one query applied per glob match) or a sequence of
-/// `{ file, extract }` (form b — heterogeneous pins). A YAML map
+/// (form a - one query applied per glob match) or a sequence of
+/// `{ file, extract }` (form b - heterogeneous pins). A YAML map
 /// vs a sequence are structurally distinct, so an untagged enum
 /// decodes them unambiguously. `extract` is absent for `identical`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -114,12 +114,12 @@ enum Relation {
     /// must equal `v` (after normalize).
     #[default]
     Equals,
-    /// `S ⊆ T` — every source value appears in the target
+    /// `S ⊆ T` - every source value appears in the target
     /// (singleton `S` = membership).
     Subset,
-    /// `S ⊇ T` — every target value appears in the source.
+    /// `S ⊇ T` - every target value appears in the source.
     Superset,
-    /// `S == T` — the sets match exactly.
+    /// `S == T` - the sets match exactly.
     SetEquals,
     /// Whole-file byte identity (optional `skip_header_lines`).
     Identical,
@@ -147,7 +147,7 @@ enum Normalize {
     /// Compare only the leading `MAJOR` token (the dotnet/runtime
     /// SDK-band shape: same feature band, not exact patch).
     SemverMajor,
-    /// Compare only the leading `MAJOR.MINOR` band — drops patch and
+    /// Compare only the leading `MAJOR.MINOR` band - drops patch and
     /// pre-release and takes the leading digits of each token, so
     /// `4.36-dev`, `4.36.0`, `pnpm@11.3.0` (→ `11.3`) and `>=22.13`
     /// all reconcile to one band (the protobuf / pnpm version-format
@@ -225,7 +225,7 @@ impl Default for NormalizeSpec {
 
 impl NormalizeSpec {
     /// The ordered transform list, with `None` (a no-op marker)
-    /// dropped — so an empty list means "no normalization".
+    /// dropped - so an empty list means "no normalization".
     fn into_list(self) -> Vec<Normalize> {
         let raw = match self {
             Self::One(n) => vec![n],
@@ -352,7 +352,7 @@ impl Rule for CrossFileRule {
 
 impl CrossFileRule {
     /// Read + extract the source file's literal values (raw, not
-    /// normalised — callers normalise as the relation needs).
+    /// normalised - callers normalise as the relation needs).
     /// `None` (with a violation pushed) when the source can't be
     /// read or parsed. Only the value relations + `resolves` call
     /// this; `build` guarantees `source_extract` is `Some` for them.
@@ -389,7 +389,7 @@ impl CrossFileRule {
         Self::source_values_from(ctx, Path::new(&self.source_file), extract, out)
     }
 
-    /// Read one source file + extract its literal values — the
+    /// Read one source file + extract its literal values - the
     /// per-file body shared by the single-`file` and `files:`
     /// glob-union forms.
     fn source_values_from(
@@ -441,7 +441,7 @@ impl CrossFileRule {
         Some(literal)
     }
 
-    /// `relation: equals` — the released `cross_file_value_equals`
+    /// `relation: equals` - the released `cross_file_value_equals`
     /// behaviour: the source must resolve to exactly one value, and
     /// every target value must equal it after normalize.
     fn check_equals(&self, ctx: &Context<'_>, source_values: &[String], out: &mut Vec<Violation>) {
@@ -482,7 +482,7 @@ impl CrossFileRule {
         });
     }
 
-    /// The set relations — compare the source set `S` to each
+    /// The set relations - compare the source set `S` to each
     /// target's extracted (normalised) set `T`.
     fn check_set(
         &self,
@@ -535,7 +535,7 @@ impl CrossFileRule {
         Some(Violation::new(msg).with_path(target.to_path_buf()))
     }
 
-    /// `relation: identical` — every target file's bytes (after
+    /// `relation: identical` - every target file's bytes (after
     /// dropping `skip_header_lines` leading lines) must equal the
     /// source file's. Binary-accurate; `normalize` does not apply.
     fn check_identical(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
@@ -618,7 +618,7 @@ impl CrossFileRule {
         }
     }
 
-    /// `relation: resolves` — each path the source extracts must
+    /// `relation: resolves` - each path the source extracts must
     /// exist on disk (file or dir), resolved relative to the source
     /// file's directory. The 1-level forward half of
     /// `registry_paths_resolve`.
@@ -762,7 +762,7 @@ impl CrossFileRule {
         Violation::new(format!("{}: {reason}", crate::slash(path))).with_path(path.to_path_buf())
     }
 
-    /// An informational note (non-violation finding) — e.g. a
+    /// An informational note (non-violation finding) - e.g. a
     /// non-literal value the rule skipped rather than compared.
     fn note(path: &Path, reason: &str) -> Violation {
         Self::violation(path, reason).as_note()
@@ -835,7 +835,7 @@ fn read_cap_reason(what: &str, e: &crate::io::ReadCapError) -> String {
 }
 
 /// Lexically confine `rel`, then verify it doesn't escape the root through
-/// an in-repo symlink once joined — `normalize_confined` is symlink-blind,
+/// an in-repo symlink once joined - `normalize_confined` is symlink-blind,
 /// so `link/secret` (with `link -> /etc`) would otherwise read out of the
 /// tree. `None` on either escape; the caller reports "escapes the repo
 /// root". Used by every cross-file *read* path.
@@ -1134,7 +1134,7 @@ mod tests {
         /// Every `normalize` transform is idempotent: normalising an
         /// already-normalised value is a no-op. A non-idempotent
         /// transform would make `equals` comparisons depend on how many
-        /// times normalisation ran — a latent correctness bug. (This is
+        /// times normalisation ran - a latent correctness bug. (This is
         /// the behaviour spec; proptest is the partial proof.)
         #[test]
         fn normalize_transforms_are_idempotent(s in r"\PC{0,48}") {
@@ -1151,7 +1151,7 @@ mod tests {
         }
 
         /// `apply_normalize` with a single transform equals that
-        /// transform applied directly — the fold has no off-by-one.
+        /// transform applied directly - the fold has no off-by-one.
         #[test]
         fn apply_normalize_single_equals_transform(s in r"\PC{0,48}") {
             let t = Normalize::SemverMinor;

@@ -413,7 +413,7 @@ fn exit_desc(status: std::process::ExitStatus, stderr: &[u8]) -> String {
 
 /// Restores the working tree on Drop: writes every snapshot file back
 /// and deletes every generator-created file. Best-effort (Drop can't
-/// surface errors) and panic-safe — `alint check` must not leave a
+/// surface errors) and panic-safe - `alint check` must not leave a
 /// mutating generator's output behind.
 struct OutputRestorer<'a> {
     root: &'a Path,

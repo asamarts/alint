@@ -65,7 +65,7 @@ impl PerFileRule for NoMergeConflictMarkersRule {
     }
 }
 
-/// True when the file carries an unambiguous conflict *anchor* — a
+/// True when the file carries an unambiguous conflict *anchor* - a
 /// line starting with `<<<<<<< `, `>>>>>>> `, or `||||||| ` (each
 /// followed by a ref, so it never collides with prose). A bare
 /// `=======` is only treated as a separator when such an anchor is

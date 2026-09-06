@@ -107,7 +107,7 @@ pub struct JsonSchemaPassesRule {
     message: Option<String>,
     scope: Scope,
     schema_path: PathBuf,
-    /// Permit reading a `schema_path:` that escapes the repo root —
+    /// Permit reading a `schema_path:` that escapes the repo root -
     /// set post-build from the top-level `allow_out_of_root:` policy.
     allow_out_of_root: bool,
     /// Explicit format, if the user passed `format:`. When

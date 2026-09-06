@@ -123,13 +123,13 @@ pub(crate) fn run_capturing(
 
 /// Per-stream cap on captured child output (L12). The spawning kinds are
 /// trust-gated, so this is defense-in-depth: a runaway or compromised
-/// generator cannot OOM the run. Generous — every legitimate formatter diff /
-/// generated file is orders of magnitude smaller — yet bounded.
+/// generator cannot OOM the run. Generous - every legitimate formatter diff /
+/// generated file is orders of magnitude smaller - yet bounded.
 const CAPTURE_CAP_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Read up to [`CAPTURE_CAP_BYTES`] from `pipe`, then drain (discard) any
 /// excess so the child can finish writing and exit instead of blocking on a
-/// full pipe — preserving the concurrent-drain robustness while bounding
+/// full pipe - preserving the concurrent-drain robustness while bounding
 /// memory. Truncation past the cap is silent but bounded (surfacing it to the
 /// caller would need `SpawnOutcome` plumbing; tracked as a follow-up). A `None`
 /// pipe yields an empty buffer.

@@ -46,7 +46,7 @@ pub struct FileAbsentRule {
     /// When `true`, only fire on entries that are also tracked
     /// in git's index. Outside a git repo or with no rules
     /// opting in, the tracked-set is `None` and every entry
-    /// reads as "untracked," so the rule becomes a no-op —
+    /// reads as "untracked," so the rule becomes a no-op -
     /// which is the right default for "don't let X be
     /// committed" semantics.
     git_tracked_only: bool,
@@ -327,7 +327,7 @@ mod tests {
     /// ADR-0008: `respect_gitignore` is honoured ONLY by `file_exists` (pitfall
     /// #18), so it lives solely in `file_exists`'s `Options`. A sibling
     /// existence kind like `file_absent` must reject it at load rather than
-    /// accept-and-ignore — the subtle case where a user assumes every existence
+    /// accept-and-ignore - the subtle case where a user assumes every existence
     /// kind shares the option.
     #[test]
     fn build_rejects_respect_gitignore_sibling_existence_kind() {

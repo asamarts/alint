@@ -177,7 +177,7 @@ mod tests {
 
     /// ADR-0008: `respect_gitignore` is a `file_exists`-only option (the
     /// pitfall-#18 escape hatch), NOT a `rule_common` field. A non-existence
-    /// kind that receives it must reject it at load — the fail-loud it lacked
+    /// kind that receives it must reject it at load - the fail-loud it lacked
     /// while the field lived on `rule_common` (where `no_bom: respect_gitignore`
     /// validated, loaded, and was silently ignored).
     #[test]

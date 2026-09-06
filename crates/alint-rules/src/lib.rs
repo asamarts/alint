@@ -42,7 +42,7 @@ pub(crate) fn slash(path: impl AsRef<std::path::Path>) -> String {
     path.as_ref().display().to_string().replace('\\', "/")
 }
 
-/// True when `path` names something NESTED — more than one path component,
+/// True when `path` names something NESTED - more than one path component,
 /// i.e. not directly at the repository root. The existence family
 /// (`file_exists`/`file_absent`/`dir_exists`/`dir_absent`) uses this to honour
 /// their `root_only:` option: when set, only root-level paths are considered.
@@ -379,7 +379,7 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
 /// Naming convention: rules that have a `dir_*` sibling keep
 /// their `file_*` prefix (`file_exists` vs `dir_exists`); rules
 /// with no such parallel also register a short alias without the
-/// prefix — `content_matches`, `content_forbidden`, `header`,
+/// prefix - `content_matches`, `content_forbidden`, `header`,
 /// `is_text`, `max_size`. Both forms resolve to the same
 /// builder; new rules land under short names only.
 // A flat one-line-per-kind registration table that grows with every
@@ -829,7 +829,7 @@ mod registry_tests {
     /// `--changed` filtering (`requires_full_index() == true`)
     /// and declare no `path_scope` (so the engine never
     /// skip-by-intersects them). A refactor breaking this would
-    /// silently make them miss violations in PR mode — there was
+    /// silently make them miss violations in PR mode - there was
     /// no test guarding it before the v0.10 post-audit pass.
     #[test]
     fn v010_cross_file_kinds_require_full_index_and_no_path_scope() {

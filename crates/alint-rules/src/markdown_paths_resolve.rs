@@ -22,7 +22,7 @@ use serde::Deserialize;
 struct Options {
     /// Whitelist of path-shape prefixes to validate. A backticked
     /// token must start with one of these to be considered a path
-    /// candidate. No defaults — every project's layout differs and
+    /// candidate. No defaults - every project's layout differs and
     /// the user must declare which prefixes mark a path.
     #[schemars(length(min = 1))]
     prefixes: Vec<String>,
@@ -247,7 +247,7 @@ fn detect_fence(s: &str) -> Option<(char, usize)> {
 
 /// True if `s` consists only of `ch`-characters (allowing
 /// trailing whitespace). Used to decide if an opening-fence
-/// marker line could close a fence — `CommonMark` says the
+/// marker line could close a fence - `CommonMark` says the
 /// closing fence cannot have an info string after the markers.
 fn only_fence(s: &str, ch: char) -> bool {
     s.trim_end().chars().all(|c| c == ch)
