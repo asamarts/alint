@@ -130,7 +130,15 @@ jobs:
           # redirects. Delete first so main's subdir layout REPLACES the tag's.
           rm -rf docs/site/concepts
           git checkout origin/main -- docs/site/concepts
-          echo "Overlaid reference + design + full concepts/ from origin/main ($(git rev-parse --short origin/main))."
+          # Phase 6 relocated three pages OUT of concepts/: templates.md and
+          # variable-interpolation.md to configuration/, and suggest.md to
+          # cookbook/. The redesign (and a rule page) link to their new homes, so
+          # overlay those from main too -- otherwise they exist only at the tag's
+          # old concepts/ paths and the new links 404. Drift-safe: same released
+          # prose, just moved.
+          git checkout origin/main -- docs/site/configuration/templates.md \
+            docs/site/configuration/variable-interpolation.md docs/site/cookbook/suggest.md
+          echo "Overlaid reference + design + full concepts/ + relocated pages from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Release-gate the overlaid docs (strip unreleased since-blocks)
         # The overlay above brings main's reference + design prose into the
@@ -160,6 +168,9 @@ jobs:
             docs/site/reference \
             docs/site/about/architecture-diagrams.md \
             docs/site/concepts \
+            docs/site/configuration/templates.md \
+            docs/site/configuration/variable-interpolation.md \
+            docs/site/cookbook/suggest.md \
             docs/site/getting-started/installation.md \
             docs/design/ARCHITECTURE.md \
             docs/design/ROADMAP.md
