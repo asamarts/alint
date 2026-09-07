@@ -11,9 +11,9 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <title id="chk-t">alint check: the execution pipeline</title>
 <desc id="chk-d">A vertical pipeline. The command runs alint check. The config assembles from .alint.yml and its extends, with a spawn-gate blocking process-spawning rules from extended configs. The repository is walked once into a sorted index; facts are then evaluated once against it and rules filtered by when, leaving three active rules. Each file is scanned once: a glowing scanner reads each file once, marking four passes with green checks and two failures with red crosses, while a cross-file rule scans the whole index. The report shows four passed, two failed, and exit code 1 in any of eight formats.</desc>
 <style>
-  .alint-check { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --repo:#eaeefb; --bd:#c7cfe0; --ac:#4f46e5; --term:#1e1b3a; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  :root[data-theme="dark"] .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#0f1120; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#0f1120; } }
+  .alint-check { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --repo:#eaeefb; --bd:#c7cfe0; --ac:#4f46e5; --term:#f6f8fa; --term-fg:#24292e; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  :root[data-theme="dark"] .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#011627; --term-fg:#d6deeb; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#011627; --term-fg:#d6deeb; } }
   .alint-check .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .alint-check .ui   { font:600 12px system-ui, -apple-system, sans-serif; }
   .alint-check .tx { fill:var(--tx); } .alint-check .mut { fill:var(--mut); } .alint-check .ac { fill:var(--ac); }
@@ -29,8 +29,8 @@ alint reads one declarative config, makes a single parallel pass over your repos
   @keyframes chks { 0%{transform:translateY(0);opacity:0} 5%{opacity:1} 92%{transform:translateY(220px);opacity:1} 100%{transform:translateY(220px);opacity:0} }
   @media (prefers-reduced-motion:reduce){ .alint-check .flow{animation:none;stroke-dasharray:none} .alint-check .scan{animation:none;transform:translateY(88px)} }
 </style>
-<rect class="card" x="20" y="18" width="420" height="34" rx="6" style="fill:var(--term);stroke:var(--term)"/>
-<text class="mono" x="34" y="40" fill="#22c55e">$</text><text class="mono" x="48" y="40" fill="#e6e8ef">alint check .</text>
+<rect class="card" x="20" y="18" width="420" height="34" rx="6" style="fill:var(--term)"/>
+<text class="mono" x="34" y="40" fill="#22c55e">$</text><text class="mono" x="48" y="40" fill="var(--term-fg)">alint check .</text>
 <path class="flow" d="M 230 52 V 66"/>
 <rect class="accent-card" x="20" y="66" width="420" height="80" rx="9"/>
 <text class="mono ac" x="34" y="88">.alint.yml</text>
