@@ -89,14 +89,16 @@ jobs:
           # already-released behaviour (e.g. the output formats). Overlaying it
           # from main lets reference-doc additions and fixes ship without
           # waiting for the next release. Keep reference pages to released
-          # behaviour so this can't surface anything unreleased. A few concept /
-          # getting-started pages (concepts/index, concepts/content-from,
-          # getting-started/installation) are overlaid too, so presentation-only
-          # fixes -- e.g. dropping a low-value <likec4-view> -- reach the site
-          # without a release; like reference docs they are release-gated below
-          # and must stay within released behaviour (no count/version drift).
-          # All other docs/site prose stays pinned to the tag, so count- or
-          # version-sensitive pages can't drift ahead of the release.
+          # behaviour so this can't surface anything unreleased. The whole
+          # docs/site/concepts/ tree is overlaid from main (the Phase 6 redesign
+          # restructured concepts into grouped subdirs and renamed/folded the old
+          # flat pages), so the concepts ship without a release; getting-started/
+          # installation is overlaid for the same presentation-fix reason. Like
+          # reference docs these are release-gated below (strip-since) and stay
+          # within released behaviour: the concepts are drift-safe because main's
+          # facts.json counts are identical to the release. All other docs/site
+          # prose stays pinned to the tag, so count/version-sensitive pages can't
+          # drift ahead of the release.
           #
           # docs/design/ARCHITECTURE.md and ROADMAP.md are overlaid too: they
           # are living design documents for contributors (the
@@ -120,9 +122,15 @@ jobs:
           # they stay overlaid for released-doc fixes.
           git fetch --quiet origin main
           git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json \
-            docs/site/about/architecture-diagrams.md docs/site/concepts/how-it-works.md \
-            docs/site/concepts/index.md docs/site/concepts/content-from.md docs/site/getting-started/installation.md
-          echo "Overlaid reference + design docs from origin/main ($(git rev-parse --short origin/main))."
+            docs/site/about/architecture-diagrams.md docs/site/getting-started/installation.md
+          # Concepts: overlay the whole tree from main. `git checkout` adds and
+          # overwrites but never DELETES, so remove the tag's obsolete flat
+          # concept pages first (Phase 6 renamed/folded/relocated all of them);
+          # otherwise stale pages would survive from the tag and shadow the
+          # redirects. Delete first so main's subdir layout REPLACES the tag's.
+          rm -rf docs/site/concepts
+          git checkout origin/main -- docs/site/concepts
+          echo "Overlaid reference + design + full concepts/ from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Release-gate the overlaid docs (strip unreleased since-blocks)
         # The overlay above brings main's reference + design prose into the
@@ -151,9 +159,7 @@ jobs:
           node ci/scripts/strip-since.mjs --released-version "${BUNDLE_SOURCE#v}" \
             docs/site/reference \
             docs/site/about/architecture-diagrams.md \
-            docs/site/concepts/how-it-works.md \
-            docs/site/concepts/index.md \
-            docs/site/concepts/content-from.md \
+            docs/site/concepts \
             docs/site/getting-started/installation.md \
             docs/design/ARCHITECTURE.md \
             docs/design/ROADMAP.md
