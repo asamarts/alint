@@ -11,7 +11,7 @@ alint ships **22 bundled rulesets** compiled straight into the binary, with no n
 <title id="br-t">A bundled ruleset's rules are fact-gated, so extending it is a no-op where the fact does not hold</title>
 <desc id="br-d">One extends line pulls in three bundled rulesets. oss-baseline always applies. rust@v1 is gated on facts.has_rust and fires because the repo has Rust. go@v1 is gated on facts.has_go and stays dormant because the repo has no Go. Every inherited rule can be overridden in your own config.</desc>
 <style>
-  .alint-br { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-br { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-br { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-br { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-br .ui { font:600 12px system-ui, -apple-system, sans-serif; }

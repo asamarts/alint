@@ -11,7 +11,7 @@ Every rule carries a `level`, and every `alint check` returns an exit code. The 
 <title id="sev-t">Severity levels mapped to exit codes</title>
 <desc id="sev-d">A rule's level maps to an exit code. error exits 1 and fails the run. warning exits 0 by default, or 1 with the --fail-on-warning flag. info exits 0 and is reported only. off means the rule is skipped. A bad config or usage exits 2; an internal error exits 3.</desc>
 <style>
-  .alint-sev { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-sev { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-sev { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-sev { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-sev .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

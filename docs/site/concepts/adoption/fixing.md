@@ -11,7 +11,7 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 <title id="fx-t">alint evaluates files in parallel, then applies fixes one rule at a time</title>
 <desc id="fx-d">Three files are evaluated in parallel and produce fixable violations. Those violations feed a single sequential lane where fixes are applied one rule at a time.</desc>
 <style>
-  .alint-fix { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-fix { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-fix { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-fix { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-fix .ui { font:600 12px system-ui, -apple-system, sans-serif; }

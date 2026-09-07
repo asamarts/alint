@@ -11,7 +11,7 @@ sidebar:
 <title id="chg-t">--changed filters per-file rules to the diff while cross-file and existence rules stay whole-tree</title>
 <desc id="chg-d">A repository of four files has two changed. Per-file rules receive only the two changed files. Cross-file and existence rules receive all four files, so a whole-tree invariant is still checked.</desc>
 <style>
-  .alint-chg { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-chg { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-chg { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-chg { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-chg .ui { font:600 12px system-ui, -apple-system, sans-serif; }

@@ -11,7 +11,7 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 <title id="ag-t">One rule set feeds an agent as an AGENTS.md section and as per-violation fix commands</title>
 <desc id="ag-d">Active rules feed two paths. export-agents-md writes an AGENTS.md section the agent reads at session start; alint check --format agent emits per-violation JSON with agent_instruction and fix_command. Both reach the coding agent.</desc>
 <style>
-  .alint-agent { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-agent { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-agent { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-agent { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-agent .ui { font:600 12px system-ui, -apple-system, sans-serif; }

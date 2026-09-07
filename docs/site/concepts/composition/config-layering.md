@@ -11,7 +11,7 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 <title id="layer-t">The three interpolation timings resolve at three different moments</title>
 <desc id="layer-d">A timeline with three stages. At config load, {{env.SRC_ROOT | default('src')}} resolves to src. At template expansion, {{vars.dir}} resolves to src. Per violation, {{ctx.primary}} resolves to src/app.c. Each resolves at its own moment.</desc>
 <style>
-  .alint-layer { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-layer { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-layer { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-layer { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-layer .ui { font:600 12px system-ui, -apple-system, sans-serif; }

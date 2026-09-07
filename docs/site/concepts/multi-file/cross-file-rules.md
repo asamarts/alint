@@ -11,7 +11,7 @@ Most rules judge one file at a time. **Cross-file rules** judge a relationship b
 <title id="xf-t">file_graph builds a reference graph, then checks it with a require: mode</title>
 <desc id="xf-d">A reference graph of four proto files. Three form an import cycle (order, item, user), which the acyclic mode catches; a fourth (util) is unreferenced, which the no_orphans mode catches. The five require: modes are acyclic, forbidden_edges, no_dangling, no_orphans, and fresh.</desc>
 <style>
-  .alint-xfile { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-xfile { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-xfile { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-xfile { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-xfile .ui { font:600 12px system-ui, -apple-system, sans-serif; }

@@ -13,7 +13,7 @@ Everything here is one idea seen from six angles. You **declare** rules (fact-ga
 <title id="map-t">The alint mental model: a rule record, and the pipeline it drives</title>
 <desc id="map-d">A rule record (id, kind, level, paths, when, fix, message) takes facts and extends as inputs, then drives a five-stage pipeline: target, evaluate, report with an exit code, adopt via fix and baseline, and an agent surface. Each stage maps to a Concepts group.</desc>
 <style>
-  .alint-map { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-map { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-map { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-map { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-map .ui { font:600 12px system-ui, -apple-system, sans-serif; }

@@ -11,7 +11,7 @@ A config rarely stands alone. `extends:` pulls in other configs and merges their
 <title id="trust-t">extends merges rules by id, but the trust boundary blocks spawning rules and other privileged fields</title>
 <desc id="trust-d">Your top-level config is trusted and may spawn commands, add custom facts, read out of root, and set a baseline. An extended ruleset sits below a trust boundary: its ordinary rules merge up by id, but a kind: command rule and an allow_out_of_root field are rejected at load.</desc>
 <style>
-  .alint-trust { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-trust { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-trust { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-trust { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-trust .ui { font:600 12px system-ui, -apple-system, sans-serif; }

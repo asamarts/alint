@@ -11,7 +11,7 @@ A rule never judges the whole repository. It narrows from the walked index to a 
 <title id="scope-t">A rule narrows the file index through gates in a fixed order</title>
 <desc id="scope-d">A when: gate decides whether the rule runs. Then the walked index of 40 files narrows through the paths: glob to 12 and through scope_filter: to 8, leaving 8 files evaluated. Each gate is a narrower bar than the one above it. The scope_filter gate offers several predicates (has_ancestor, changed_since, manifest paths) that AND-compose.</desc>
 <style>
-  .alint-scope { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-scope { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-scope { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-scope { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-scope .ui { font:600 12px system-ui, -apple-system, sans-serif; }

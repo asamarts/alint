@@ -11,7 +11,7 @@ alint is driven by a small declarative language. You describe the checks you wan
 <title id="cfg-t">alint assembles one effective config from many sources</title>
 <desc id="cfg-d">Four config sources (bundled, extends, root, drop-in) merge by rule id from low to high precedence into one effective config. The bundled ruleset sets readme-exists to warning; the drop-in overrides it to error, which wins. Nested configs add subtree-scoped rules.</desc>
 <style>
-  .alint-config { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-config { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-config { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-config { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-config .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -35,7 +35,7 @@ alint is driven by a small declarative language. You describe the checks you wan
 <text class="ui ac" x="36" y="172">root</text><text class="mono tx" x="36" y="190">.alint.yml</text><text class="tag mut" x="424" y="181" text-anchor="end">+ your rules</text>
 <rect class="card" x="20" y="210" width="420" height="48" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
 <text class="ui" x="36" y="228" fill="#7c3aed">drop-in</text><text class="mono tx" x="36" y="246">99-local.yml</text><text class="tag" x="424" y="237" text-anchor="end" fill="#7c3aed">readme-exists: error</text>
-<path class="flow" d="M 230 258 V 272"/><text class="ui mut" x="242" y="267">merge by id</text>
+<path class="flow" d="M 230 270 V 291"/><path fill="var(--ac)" d="M 225 291 L 230 298 L 235 291 Z"/><text class="ui mut" x="244" y="286">merge by id</text>
 <text class="ui ac" x="20" y="290">effective config</text>
 <rect class="eff" x="20" y="298" width="420" height="156" rx="12"/>
 <text class="mono ac" x="36" y="326" font-weight="700">readme-exists</text>

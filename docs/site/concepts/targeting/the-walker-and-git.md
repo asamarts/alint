@@ -11,7 +11,7 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 <title id="walk-t">The walker builds an index from the un-ignored tree; git_tracked_only reads git's index instead</title>
 <desc id="walk-d">Files on disk split two ways. The default walked tree includes README.md and an un-ignored untracked file but drops a gitignored-but-committed file. The git index, which git_tracked_only consults, includes README.md and the committed file but not the untracked one. The two divergent files are the ones a mis-set gitignore hides.</desc>
 <style>
-  .alint-walk { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-walk { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-walk .ui { font:600 12px system-ui, -apple-system, sans-serif; }

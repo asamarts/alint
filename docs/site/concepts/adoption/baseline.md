@@ -11,7 +11,7 @@ Turning a linter on for an established repo has a chicken-and-egg problem: the r
 <title id="bl-t">A baseline suppresses recorded findings, lets new ones fail, and prunes stale ones</title>
 <desc id="bl-d">This run's findings are checked against the recorded baseline by fingerprint. A recorded finding is suppressed even after its line moved; a finding not in the baseline is new and fails the gate; a recorded finding gone from this run is stale and pruned.</desc>
 <style>
-  .alint-base { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-base { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-base { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-base { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-base .ui { font:600 12px system-ui, -apple-system, sans-serif; }

@@ -11,7 +11,7 @@ alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML,
 <title id="sq-t">A JSONPath dissected, the same query resolving across five formats, and all eight supported formats</title>
 <desc id="sq-d">A path like $.server.host breaks into a root token, a member token, and a leaf token, with extra selectors for index, wildcard, recursive descent, and bracketed keys. The one query $.server.host resolves the value db1 from json, yaml, toml, and xml, while a flat format like dotenv uses the whole key SERVER_HOST as the path. alint parses all eight formats -- json, yaml, toml, xml, ini, dotenv, properties, hcl -- into one Value tree, then asserts with equals, matches, or absent.</desc>
 <style>
-  .alint-sq { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-sq { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-sq { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-sq { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-sq .ui { font:600 12px system-ui, -apple-system, sans-serif; }

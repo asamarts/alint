@@ -11,7 +11,7 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
 <title id="kfc-t">Kinds, families, and categories</title>
 <desc id="kfc-d">Each rule kind belongs to exactly one family (its colored home group) but can be tagged into several categories. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category. 105 kinds, 13 families, 13 categories.</desc>
 <style>
-  .alint-kinds { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-kinds { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-kinds { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-kinds { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-kinds .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
