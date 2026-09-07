@@ -7,9 +7,9 @@ sidebar:
 
 A rule never judges the whole repository. It narrows from the walked index to a specific set of files through three gates applied in a fixed order: `when:` decides whether the rule runs at all, `paths:` selects files by glob, and `scope_filter:` refines that selection per file. Only what survives all three is evaluated.
 
-<svg class="alint-scope" viewBox="0 0 460 296" role="img" aria-labelledby="scope-t scope-d" xmlns="http://www.w3.org/2000/svg">
+<svg class="alint-scope" viewBox="0 0 460 352" role="img" aria-labelledby="scope-t scope-d" xmlns="http://www.w3.org/2000/svg">
 <title id="scope-t">A rule narrows the file index through gates in a fixed order</title>
-<desc id="scope-d">A when: gate decides whether the rule runs. Then the walked index of 40 files narrows through the paths: glob to 12 and through scope_filter: to 8, leaving 8 files evaluated. Each gate is a narrower bar than the one above it.</desc>
+<desc id="scope-d">A when: gate decides whether the rule runs. Then the walked index of 40 files narrows through the paths: glob to 12 and through scope_filter: to 8, leaving 8 files evaluated. Each gate is a narrower bar than the one above it. The scope_filter gate offers several predicates (has_ancestor, changed_since, manifest paths) that AND-compose.</desc>
 <style>
   .alint-scope { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-scope { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -21,10 +21,9 @@ A rule never judges the whole repository. It narrows from the walked index to a 
   .alint-scope .gate { fill:var(--card); stroke:var(--ac); stroke-width:1.6; }
   .alint-scope .final { fill:var(--card); stroke:var(--ac); stroke-width:1.8; }
   .alint-scope .flow { fill:none; stroke:var(--ac); stroke-width:2; stroke-dasharray:6 6; opacity:.6; animation:scopeflow 1s linear infinite; }
-  .alint-scope .token { fill:var(--ac); animation:scopetok 3.4s cubic-bezier(.5,0,.5,1) infinite; }
+  .alint-scope .chip { fill:var(--card); stroke:var(--bd); stroke-width:1.2; }
   @keyframes scopeflow { to { stroke-dashoffset:-12; } }
-  @keyframes scopetok { 0%{transform:translateY(0);opacity:0} 8%{opacity:1} 90%{opacity:1} 100%{transform:translateY(146px);opacity:0} }
-  @media (prefers-reduced-motion:reduce){ .alint-scope .flow{animation:none;stroke-dasharray:none} .alint-scope .token{animation:none;opacity:1;transform:translateY(146px)} }
+  @media (prefers-reduced-motion:reduce){ .alint-scope .flow{animation:none;stroke-dasharray:none} }
 </style>
 <rect class="gate" x="126" y="22" width="208" height="28" rx="14"/>
 <text class="tag ac" x="230" y="40" text-anchor="middle">when: facts.has_rust</text>
@@ -34,8 +33,12 @@ A rule never judges the whole repository. It narrows from the walked index to a 
 <rect class="bar" x="64" y="124" width="332" height="30" rx="6"/><text class="tag tx" x="76" y="143">paths: src/**/*.rs</text><text class="tag mut" x="384" y="143" text-anchor="end">12</text>
 <rect class="bar" x="98" y="168" width="264" height="30" rx="6"/><text class="tag tx" x="110" y="187">scope_filter: has_ancestor</text><text class="tag mut" x="350" y="187" text-anchor="end">8</text>
 <rect class="final" x="130" y="212" width="200" height="30" rx="6"/><text class="tag ac" x="142" y="231">evaluate</text><text class="tag ac" x="318" y="231" text-anchor="end">8</text>
-<circle class="token" cx="230" cy="86" r="5"/>
-<text class="tag mut" x="230" y="272" text-anchor="middle">each gate ANDs onto the last; the set only ever shrinks</text>
+<text class="tag mut" x="230" y="264" text-anchor="middle">each gate ANDs onto the last; the set only ever shrinks</text>
+<line x1="30" y1="282" x2="430" y2="282" stroke="var(--bd)" stroke-width="1" opacity=".5"/>
+<text class="tag ac" x="30" y="302">scope_filter predicates, AND-composed:</text>
+<rect class="chip" x="30" y="312" width="118" height="26" rx="7"/><text class="tag tx" x="89" y="329" text-anchor="middle">has_ancestor</text>
+<rect class="chip" x="156" y="312" width="126" height="26" rx="7"/><text class="tag tx" x="219" y="329" text-anchor="middle">changed_since</text>
+<rect class="chip" x="290" y="312" width="140" height="26" rx="7"/><text class="tag tx" x="360" y="329" text-anchor="middle">manifest_paths</text>
 </svg>
 
 ## The three gates

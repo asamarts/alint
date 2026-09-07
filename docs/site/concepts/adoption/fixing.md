@@ -21,11 +21,11 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
   .alint-fix .lane { fill:var(--card); stroke:var(--ac); stroke-width:1.6; }
   .alint-fix .flow { fill:none; stroke:var(--ac); stroke-width:2; stroke-dasharray:6 6; opacity:.7; animation:fxflow 1s linear infinite; }
   .alint-fix .pulse { animation:fxpulse 2s ease-in-out infinite; }
-  .alint-fix .tok { fill:var(--ac); animation:fxtok 3.6s cubic-bezier(.5,0,.5,1) infinite; }
+  .alint-fix .prog { fill:none; stroke:var(--ac); stroke-width:2.5; stroke-linecap:round; stroke-dasharray:260; stroke-dashoffset:260; animation:fxdraw 3s ease-in-out infinite; }
   @keyframes fxflow { to { stroke-dashoffset:-12; } }
   @keyframes fxpulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  @keyframes fxtok { 0%{transform:translateX(0);opacity:0} 8%{opacity:1} 90%{opacity:1} 100%{transform:translateX(300px);opacity:0} }
-  @media (prefers-reduced-motion:reduce){ .alint-fix .flow{animation:none;stroke-dasharray:none} .alint-fix .pulse{animation:none} .alint-fix .tok{animation:none;opacity:1;transform:translateX(300px)} }
+  @keyframes fxdraw { 0%,12%{stroke-dashoffset:260} 80%,100%{stroke-dashoffset:0} }
+  @media (prefers-reduced-motion:reduce){ .alint-fix .flow{animation:none;stroke-dasharray:none} .alint-fix .pulse{animation:none} .alint-fix .prog{animation:none;stroke-dashoffset:0} }
 </style>
 <text class="ui ac" x="18" y="16">evaluate</text>
 <text class="ui mut" x="146" y="16">parallel, all files at once</text>
@@ -38,11 +38,11 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 <rect class="lane" x="40" y="122" width="380" height="56" rx="10"/>
 <text class="ui ac" x="56" y="144">apply</text>
 <text class="tag mut" x="110" y="144">sequential, one rule at a time</text>
-<line x1="60" y1="162" x2="400" y2="162" stroke="var(--bd)" stroke-width="2"/>
-<circle cx="100" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="100" y="176" text-anchor="middle">fix 1</text>
-<circle cx="230" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="230" y="176" text-anchor="middle">fix 2</text>
-<circle cx="360" cy="162" r="4" fill="var(--ac)"/><text class="tag mut" x="360" y="176" text-anchor="middle">fix 3</text>
-<circle class="tok" cx="100" cy="162" r="6"/>
+<line x1="80" y1="162" x2="380" y2="162" stroke="var(--bd)" stroke-width="2"/>
+<line class="prog" x1="100" y1="162" x2="360" y2="162"/>
+<circle cx="100" cy="162" r="4.5" fill="var(--ac)"/><text class="tag mut" x="100" y="176" text-anchor="middle">fix 1</text>
+<circle cx="230" cy="162" r="4.5" fill="var(--ac)"/><text class="tag mut" x="230" y="176" text-anchor="middle">fix 2</text>
+<circle cx="360" cy="162" r="4.5" fill="var(--ac)"/><text class="tag mut" x="360" y="176" text-anchor="middle">fix 3</text>
 <text class="ui ac" x="18" y="214">two families of op</text>
 <rect class="chip" x="18" y="224" width="424" height="44" rx="8"/><text class="tag tx" x="32" y="242">content edits (7)</text><text class="tag mut" x="32" y="258">trim, newline, line endings, BOM, bidi, zero-width, blanks</text>
 <rect class="chip" x="18" y="278" width="424" height="44" rx="8"/><text class="tag tx" x="32" y="296">path + content (5)</text><text class="tag mut" x="32" y="312">create, remove, rename, prepend, append</text>
@@ -60,7 +60,7 @@ Seven ops edit content in place: `file_trim_trailing_whitespace`, `file_append_f
 
 ## content_from
 
-The three content-providing ops, `file_create`, `file_prepend`, and `file_append`, take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file (exactly one of the two must be set). This is how boilerplate that is awkward to inline stays under version control: a real Apache-2 `LICENSE` is ~10 KB, and pasting it into YAML is fragile (escape rules, indentation drift, stray code-search hits), so stash the canonical bytes under `.alint/templates/` and point `content_from:` at them. The path resolves against the lint root and is read at fix-apply time, so the template need not exist when `alint check` runs, only when `alint fix` writes the target; a missing source is reported as `Skipped`, never a half-written file. In a monorepo with `nested_configs: true`, a sub-config's `content_from:` still resolves against the workspace root, so one root `.alint/templates/` supplies every package.
+The three content-providing ops, `file_create`, `file_prepend`, and `file_append`, take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file (exactly one of the two must be set). This is how boilerplate that is awkward to inline stays under version control: a real Apache-2 `LICENSE` is ~10 KB, and pasting it into YAML is fragile (escape rules, indentation drift, stray code-search hits), so stash the canonical bytes under `.alint/templates/` and point `content_from:` at them. The path resolves against the lint root (and, like every fix op that writes a path, stays confined to that root unless `allow_out_of_root` is set) and is read at fix-apply time, so the template need not exist when `alint check` runs, only when `alint fix` writes the target; a missing source is reported as `Skipped`, never a half-written file. In a monorepo with `nested_configs: true`, a sub-config's `content_from:` still resolves against the workspace root, so one root `.alint/templates/` supplies every package.
 
 These ops are careful about repeat runs: `file_prepend` and `file_append` are idempotent (a no-op when the content is already present) and `file_prepend` preserves a leading byte-order mark, while `file_create` skips a target that already exists.
 

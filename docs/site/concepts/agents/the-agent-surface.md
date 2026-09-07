@@ -58,7 +58,7 @@ Each violation object carries `rule_id`, `severity`, the location (`file`, `line
 
 Two bundled rulesets target the agentic era, adopted through `extends:` like any other:
 
-- **`alint://bundled/agent-context@v1`** lints the agent-instruction files themselves (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, `copilot-instructions.md`) for existence, stubs, bloat, and stale-path drift.
+- **`alint://bundled/agent-context@v1`** lints the agent-instruction files themselves. It guards against stubs and bloat across all five it knows (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, `.github/copilot-instructions.md`), recommends a repo ship one of the first three, and flags stale backticked paths in `AGENTS.md` and `CLAUDE.md`.
 - **`alint://bundled/agent-hygiene@v1`** catches residue that is distinctly AI-shaped: versioned duplicate filenames, scratch-doc sprawl, AI-affirmation prose, debug residue, and model-attributed TODOs.
 
 ```yaml

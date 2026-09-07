@@ -9,7 +9,7 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
 
 <svg class="alint-kinds" viewBox="0 0 460 440" role="img" aria-labelledby="kfc-t kfc-d" xmlns="http://www.w3.org/2000/svg">
 <title id="kfc-t">Kinds, families, and categories</title>
-<desc id="kfc-d">Each rule kind belongs to exactly one family (its colored home group) but can be tagged into several categories. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security family, tagged security and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category. 105 kinds, 13 families, 13 categories.</desc>
+<desc id="kfc-d">Each rule kind belongs to exactly one family (its colored home group) but can be tagged into several categories. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category. 105 kinds, 13 families, 13 categories.</desc>
 <style>
   .alint-kinds { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-kinds { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -33,8 +33,8 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
 <rect class="card" x="20" y="116" width="420" height="58" rx="8"/><rect x="20" y="116" width="6" height="58" rx="2" fill="#ef4444"/>
 <text class="mono tx" x="38" y="142" font-size="14">no_bidi_controls</text>
 <rect x="336" y="126" width="86" height="22" rx="11" fill="#ef4444"/><text class="ui" x="379" y="141" text-anchor="middle" fill="#fff">Security</text>
-<rect class="chip" x="38" y="152" width="76" height="18" rx="9"/><text class="tag" x="49" y="165">security</text>
-<rect class="chip extra" x="122" y="152" width="76" height="18" rx="9"/><text class="tag" x="133" y="165">encoding</text>
+<rect class="chip" x="38" y="152" width="168" height="18" rx="9"/><text class="tag" x="48" y="165">security-unicode-sanity</text>
+<rect class="chip extra" x="214" y="152" width="76" height="18" rx="9"/><text class="tag" x="225" y="165">encoding</text>
 <rect class="card" x="20" y="186" width="420" height="58" rx="8"/><rect x="20" y="186" width="6" height="58" rx="2" fill="#7c3aed"/>
 <text class="mono tx" x="38" y="212" font-size="14">dir_contains</text>
 <rect x="330" y="196" width="92" height="22" rx="11" fill="#7c3aed"/><text class="ui" x="376" y="211" text-anchor="middle" fill="#fff">Cross-file</text>
@@ -56,7 +56,7 @@ A `kind` is the built-in implementation a rule invokes: `file_exists`, `no_bidi_
 
 ## Families are the home group
 
-The 94 kinds are partitioned into **13 families** by mechanism: Existence, Content, Naming, Structure, Cross-file, Security / Unicode sanity, Text hygiene, Encoding, Portable metadata, Unix metadata, Git hygiene, Structured query, and Plugin. Every kind belongs to **exactly one** family, so the families are a clean table of contents for the catalog. `alint rules list` prints the kinds grouped this way.
+The 94 kinds are partitioned into **13 families** by mechanism: Existence, Content, Naming, Structure, Cross-file, Security / Unicode sanity, Text hygiene, Encoding, Portable metadata, Unix metadata, Git hygiene, Structured query, and Plugin (tier 1). Every kind belongs to **exactly one** family, so the families are a clean table of contents for the catalog. `alint rules list` prints the kinds grouped this way.
 
 ## Categories are cross-cutting tags
 
@@ -67,9 +67,9 @@ The **13 categories** carry the same thirteen names, but the relationship is man
 Browse the catalog by family, or filter it by category:
 
 ```
-alint rules list                       # every kind alint ships, grouped by family
-alint rules list --category security   # only the kinds tagged "security"
-alint list --category security         # only YOUR configured rules that are "security"
+alint rules list                                      # every kind alint ships, grouped by family
+alint rules list --category security-unicode-sanity   # only kinds in that category
+alint list --category security-unicode-sanity         # only YOUR configured rules in it
 ```
 
 An unknown category slug fails fast with the list of the thirteen valid ones, so a typo never silently returns nothing.

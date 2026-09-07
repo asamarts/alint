@@ -40,8 +40,8 @@ A config rarely stands alone. `extends:` pulls in other configs and merges their
 <text class="ui mut" x="44" y="144">extends (fetched or bundled)</text>
 <text class="tag mut" x="44" y="162">alint://bundled/oss-baseline@v1, https pinned by #sha256</text>
 <rect class="chip" x="44" y="172" width="210" height="26" rx="6"/><rect x="44" y="172" width="5" height="26" rx="2" fill="#22c55e"/><text class="tag tx" x="62" y="189">readme-exists: error</text><text class="tag" x="272" y="189" fill="#22c55e">merges by id</text>
-<rect class="chip" x="44" y="208" width="210" height="26" rx="6"/><rect x="44" y="208" width="5" height="26" rx="2" fill="#7c3aed"/><text class="tag tx" x="62" y="225">kind: command</text><text class="tag pulse" x="272" y="225" fill="#ef4444">rejected at load</text>
-<rect class="chip" x="44" y="244" width="210" height="26" rx="6"/><rect x="44" y="244" width="5" height="26" rx="2" fill="#7c3aed"/><text class="tag tx" x="62" y="261">allow_out_of_root</text><text class="tag pulse" x="272" y="261" fill="#ef4444">rejected at load</text>
+<rect class="chip" x="44" y="208" width="210" height="26" rx="6"/><rect x="44" y="208" width="5" height="26" rx="2" fill="#ef4444"/><text class="tag tx" x="62" y="225">kind: command</text><text class="tag pulse" x="272" y="225" fill="#ef4444">rejected at load</text>
+<rect class="chip" x="44" y="244" width="210" height="26" rx="6"/><rect x="44" y="244" width="5" height="26" rx="2" fill="#ef4444"/><text class="tag tx" x="62" y="261">allow_out_of_root</text><text class="tag pulse" x="272" y="261" fill="#ef4444">rejected at load</text>
 <text class="tag mut" x="44" y="302">bundled resolves offline; fetched bodies match their hash</text>
 <text class="tag mut" x="230" y="362" text-anchor="middle">an extended ruleset can tighten your checks, never run your commands</text>
 </svg>
@@ -60,7 +60,7 @@ Sources are not equally trusted, and the boundary is drawn at `extends:`. Your o
 - **read outside the repo** (`allow_out_of_root:` is a top-level-only grant), or
 - **choose which findings are suppressed** (`baseline:` is a top-level-only input).
 
-For `https://` entries, a **SHA-256 subresource-integrity hash** (`#sha256-...`) pins exactly which bytes are trusted; a body that does not match its hash is refused. Bundled rulesets ship inside the binary and are resolved offline, so there is nothing to fetch or pin. The hash pins *which* bytes load, and the trust boundary governs *what those bytes may do*.
+For `https://` entries, a **SHA-256 subresource-integrity hash** (`#sha256-...`) pins exactly which bytes are trusted; an `https://` entry that omits the pin is refused outright, a plain `http://` URL is rejected, and a fetched body that does not match its hash is refused. Bundled rulesets ship inside the binary and are resolved offline, so there is nothing to fetch or pin. The hash pins *which* bytes load, and the trust boundary governs *what those bytes may do*.
 
 ## In practice
 
@@ -89,7 +89,7 @@ alint refuses to load, naming the rule and the offending config rather than runn
 ```
 rule "deploy-check": `kind: command` spawns a process and is only allowed in
 the user's top-level config; declaring one in an extended config
-(./ci-rules.yml), including inside a `require:` block, is refused because it
+(./ci-rules.yml) - including inside a `require:` block - is refused because it
 would let a ruleset run arbitrary code
 ```
 

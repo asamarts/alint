@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-`alint check --changed` layers a diff filter on top of the walk so a per-file rule sees only the files you touched, which is what a pre-commit hook or a PR check wants. Cross-file and existence rules deliberately opt out and keep evaluating the whole tree, because an invariant they enforce can be broken by a file you changed even when its partner did not.
+`alint check --changed` layers a diff filter on top of the walk so a per-file rule sees only the files you touched, which is what a pre-commit hook or a PR check wants. Most cross-file rules, and the existence rules, deliberately opt out and keep evaluating the whole tree, because an invariant they enforce can be broken by a file you changed even when its partner did not.
 
 <svg class="alint-chg" viewBox="0 0 460 424" role="img" aria-labelledby="chg-t chg-d" xmlns="http://www.w3.org/2000/svg">
 <title id="chg-t">--changed filters per-file rules to the diff while cross-file and existence rules stay whole-tree</title>
@@ -69,8 +69,9 @@ The three-dot `<base>...HEAD` form diffs against the merge-base of `<base>` and 
 
 The filter narrows the file set for **per-file rules** only. Two families opt out, on purpose:
 
-- **Whole-tree rules** always evaluate against the whole tree, because their verdict depends on files outside your diff: the relational rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`), the manifest and graph rules (`cross_file`, `file_graph`, `registry_paths_resolve`, `pair_hash`), and the single-shot rules (`generated_file_fresh`, `command_idempotent`). A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
+- **Whole-tree rules** always evaluate against the whole tree, because their verdict depends on files outside your diff: the relational rules (`pair`, `for_each_dir`, `for_each_file`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`), the manifest and graph rules (`cross_file`, `file_graph`, `registry_paths_resolve`, `pair_hash`), and the single-shot rules (`generated_file_fresh`, `command_idempotent`). A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
 - **Existence rules** also consult the whole tree, but the two file-existence rules (`file_exists`, `file_absent`) are **skipped when their `paths:` scope does not intersect the diff**, so a missing `LICENSE` fails only the PRs that touch a `LICENSE`-shaped path. The two directory-existence rules (`dir_exists`, `dir_absent`) always evaluate, since a directory scope never intersects a file-path diff.
+- **Diff-oriented rules** are the mirror image: a few cross-file rules exist *because* of the diff. `pair_changed_together` asks whether a file's partner changed alongside it, and `changeset_requires_path` gates on what a commit range touched, so they read the changed set by design; `markdown_paths_resolve` is likewise a per-file rule and follows the diff filter like any other.
 
 ## Edge cases
 

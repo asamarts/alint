@@ -59,7 +59,7 @@ The atom of the language is the rule record. Three fields are always required: `
   message: "README.md is required at the repo root"
 ```
 
-alint reads those fields in a fixed order, and that order is the pipeline in miniature. `when` is checked first, against facts computed once per run, so a gated-out rule is dropped before a single file is read. `paths` then selects the files, `kind` runs its check, and `level` and `message` shape what lands in the report. The `when:` expression is a deliberately bounded little language, with boolean logic, comparisons, `in`, and `matches` over four namespaces (`facts.`, `vars.`, `iter.`, `env.`) and no arbitrary code; a missing fact reads as `null` (falsy), so a rule gated on an absent fact simply never runs.
+alint reads those fields in a fixed order, and that order is the pipeline in miniature. `when` is checked first, against facts computed once per run, so a gated-out rule is dropped before its files are scanned. `paths` then selects the files, `kind` runs its check, and `level` and `message` shape what lands in the report. The `when:` expression is a deliberately bounded little language, with boolean logic, comparisons, `in`, and `matches` over four namespaces (`facts.`, `vars.`, `iter.`, `env.`) and no arbitrary code; a missing fact reads as `null` (falsy), so a rule gated on an absent fact simply never runs.
 
 Around the rules sit the rest of the top-level fields: `extends:` inherits other configs, `vars:` and `facts:` supply values the rules gate and interpolate on, `ignore:` and `respect_gitignore:` shape the walk, `templates:` factor out repeated rule shapes, and a few knobs (`fix_size_limit`, `nested_configs`, `allow_out_of_root`, `baseline`) tune a run. Only `version: 1` is strictly required.
 
@@ -77,7 +77,7 @@ Sources are not equally trusted. Your own `.alint.yml` and its drop-ins are trus
 
 ## From config to verdicts
 
-Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it computes your `facts:` once, in order; drops every rule whose `when:` is false; walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/start-here/how-alint-works/) for that evaluation pipeline in full.
+Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; computes your `facts:` once, in order, against that index; drops every rule whose `when:` is false; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/start-here/how-alint-works/) for that evaluation pipeline in full.
 
 Three interpolation layers thread through both halves, each resolving at a different time: `{{env.X}}` at config load (from the process environment, in local configs only), `{{vars.X}}` when a `templates:` body expands, and `{{ctx.X}}` per violation, inside a rule's `message`.
 

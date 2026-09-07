@@ -57,7 +57,7 @@ Drop-ins are **trust-equivalent to your root config**: they live in the same wor
 
 Opt in with `nested_configs: true` in the root config, and alint walks the tree (respecting `.gitignore` and `ignore:`) and picks up a `.alint.yml` in any subdirectory. A nested config's rules are **added, not overridden**, and each rule's path-like scope is **auto-prefixed with that subtree**, so a rule in `packages/web/.alint.yml` only ever looks at `packages/web/`.
 
-The guardrails keep nesting predictable: a nested config may declare only `version:` and `rules:`; every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on; a nested config cannot enable its own nested discovery.
+The guardrails keep nesting predictable: of a nested config's fields, only `version:` and `rules:` carry weight; the dangerous ones (`extends:`, `facts:`, `baseline:`, `allow_out_of_root:`, `nested_configs:`, and spawning rules) are rejected at load, while other top-level knobs such as `respect_gitignore:` are silently ignored rather than honored. Every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on; a nested config cannot enable its own nested discovery.
 
 ## Three interpolation timings
 

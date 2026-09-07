@@ -47,7 +47,7 @@ Every rule carries a `level`, and every `alint check` returns an exit code. The 
 `alint check` returns one of four codes, so a pipeline can tell "clean" from "found problems" from "misconfigured":
 
 - **`0`** clean: no errors, and no warnings under `--fail-on-warning`.
-- **`1`** findings: at least one error, or a warning while `--fail-on-warning` is set.
+- **`1`** findings: at least one error, a warning while `--fail-on-warning` is set, or a stale [baseline](/docs/concepts/adoption/baseline/) entry while `--strict-baseline` is set.
 - **`2`** a bad config or bad usage (an unknown field, a malformed `.alint.yml`, an invalid flag).
 - **`3`** an internal error (a bug). Distinct from `2` so CI can tell "your config is wrong" apart from "alint fell over."
 

@@ -51,7 +51,7 @@ Every violation whose fingerprint is in the baseline is suppressed (up to its re
 
 ## Fingerprints, not line numbers
 
-The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator**, chosen in priority order: a rule may supply its own key (a structured-query rule keys on its JSONPath like `$.license`, a whole-file rule on the path alone), otherwise the **offending line's text** is used, and a path-bearing finding with no line keys on `(rule, path)` with the message deliberately left out of the hash. The line *number* is never part of it.
+The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator**, chosen in priority order: a rule may supply its own key (a structured-query rule keys on its query *plus the operator and the value it matched*, so two different bad values at one path like `$.license` stay distinct findings; a whole-file rule keys on the path alone), otherwise the **offending line's text** is used, and a path-bearing finding with no line keys on `(rule, path)` with the message deliberately left out of the hash. The line *number* is never part of it.
 
 So inserting or deleting unrelated lines never churns the baseline. **Editing the offending line** re-keys a line-anchored finding, so it counts as new and the gate catches it, but a structured-query or whole-file finding keeps its identity across unrelated edits. The baseline survives ordinary refactoring without stale-entry noise, and never masks a genuinely new problem.
 
