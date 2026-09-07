@@ -29,7 +29,7 @@ Options:
       --show-notes
           List informational notes in full on stderr.
           
-          Notes are non-violation findings — e.g. entries a rule skipped rather than failed on. By
+          Notes are non-violation findings - e.g. entries a rule skipped rather than failed on. By
           default only a one-line count is shown.
 
       --color <WHEN>
@@ -70,7 +70,7 @@ Options:
           When to render progress on stderr for slow operations.
           
           Currently just `alint suggest`. `auto` (the default) renders when stderr is a TTY;
-          `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON
+          `always` forces; `never` silences. Progress always lives on stderr - `--format` JSON
           output on stdout stays byte-clean.
           
           [default: auto]
@@ -110,7 +110,7 @@ Options:
           matches no loaded rule is an error, so typos fail loudly rather than silently linting
           nothing. Applies to `check` and `fix` (the `agent` format emits `fix --only <rule-id>`);
           rejected on any other subcommand. Global, so the bare `alint --only <id>` lints the
-          current directory like `alint check --only <id>` — to lint a different path, use the
+          current directory like `alint check --only <id>` - to lint a different path, use the
           explicit form `alint check --only <id> <path>`.
 
   -h, --help

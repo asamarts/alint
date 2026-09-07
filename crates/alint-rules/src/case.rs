@@ -61,7 +61,7 @@ impl CaseConvention {
 
     /// Convert `input` to this convention. Used by `file_rename` to
     /// derive a filename's corrected form. `Lower`/`Upper` case-fold with
-    /// Unicode `to_lowercase`/`to_uppercase` — NOT ASCII-only — so the fixer
+    /// Unicode `to_lowercase`/`to_uppercase` - NOT ASCII-only - so the fixer
     /// matches the Unicode-aware `is_lowercase`/`is_uppercase` check and can
     /// actually converge on a non-ASCII name like `RÉSUMÉ.md` (an ASCII-only
     /// flip left `É` and re-fired every run). The other conventions tokenize on
@@ -97,7 +97,7 @@ impl CaseConvention {
 
 /// Split a case-mixed string into word tokens. Separators (`_`, `-`,
 /// space, `.`) split; case transitions split (`fooBar` → `foo`,`Bar`;
-/// `XMLParser` → `XML`,`Parser`). Tokens retain their original casing —
+/// `XMLParser` → `XML`,`Parser`). Tokens retain their original casing -
 /// conversion functions lowercase/titlecase as needed.
 fn tokenize(s: &str) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
@@ -346,7 +346,7 @@ mod tests {
             let out = conv.convert(input);
             assert!(
                 conv.check(&out),
-                "{conv:?}.convert({input:?}) = {out:?} does not satisfy check() — non-convergent"
+                "{conv:?}.convert({input:?}) = {out:?} does not satisfy check() - non-convergent"
             );
             // And idempotent: a second pass changes nothing.
             assert_eq!(conv.convert(&out), out, "second convert must be a no-op");

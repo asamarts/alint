@@ -39,13 +39,13 @@ enum Language {
     Java,
     Dart,
     Nix,
-    /// No preset — an explicit `import_pattern` is required.
+    /// No preset - an explicit `import_pattern` is required.
     Generic,
 }
 
 impl Language {
     /// Default import-line regex; **capture group 1 is the
-    /// imported target**. Line-based (not a grammar — see the
+    /// imported target**. Line-based (not a grammar - see the
     /// design doc's false-positive section); users override with
     /// `import_pattern` for edge cases.
     fn default_pattern(self) -> Option<&'static str> {
@@ -114,8 +114,8 @@ pub struct ImportGateRule {
     allow: Option<Scope>,
     /// Blank `//` and `/* … */` comments before matching. Set only
     /// for the `language: js` preset, whose pattern is unanchored and
-    /// so matches `import("…")` inside a `JSDoc` `@typedef {import(…)}`
-    /// — a type-only annotation, not a real import (eslint / svelte).
+    /// so matches `import("…")` inside a `JSDoc` `@typedef {import(…)}`,
+    /// a type-only annotation, not a real import (eslint / svelte).
     /// The anchored presets (`^\s*import …`) can't match a comment
     /// line, so they don't need it.
     strip_comments: bool,
@@ -198,7 +198,7 @@ impl PerFileRule for ImportGateRule {
 /// Replace `//` line comments and `/* … */` block comments (incl.
 /// `JSDoc` `/** … */`) with spaces, preserving newlines so line
 /// numbers and the per-line scanner are unaffected. String literals
-/// (`'…'`, `"…"`, `` `…` ``) are passed through verbatim — the import
+/// (`'…'`, `"…"`, `` `…` ``) are passed through verbatim - the import
 /// *target* is itself a quoted string, so blanking strings would
 /// erase what we extract. Not a full JS lexer: regex literals are
 /// treated as code, so a regex containing `//` or `/*` could be

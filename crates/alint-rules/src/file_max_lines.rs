@@ -79,7 +79,7 @@ impl PerFileRule for FileMaxLinesRule {
 /// `file_min_lines::count_lines`. Kept as a private function
 /// here (rather than reused from `file_min_lines`) because
 /// inlining it makes the unit tests explicit about what this
-/// rule's threshold is being compared against — and the
+/// rule's threshold is being compared against - and the
 /// implementation is one line, not worth a cross-module dep.
 fn count_lines(bytes: &[u8]) -> u64 {
     if bytes.is_empty() {

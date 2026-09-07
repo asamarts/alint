@@ -33,7 +33,7 @@ struct Options {
     #[serde(default = "default_key")]
     key: String,
     /// Fold the key to lowercase before grouping, so keys that
-    /// collide only under case-folding count as duplicates — the
+    /// collide only under case-folding count as duplicates - the
     /// case-insensitive-filesystem hazard (Windows / macOS).
     #[serde(default)]
     case_insensitive: bool,

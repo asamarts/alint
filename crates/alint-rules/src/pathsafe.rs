@@ -30,13 +30,13 @@ pub(crate) use alint_core::normalize_confined;
 /// rule's `allow_out_of_root` permission (see
 /// `docs/design/v0.12/allow_out_of_root.md`).
 pub(crate) enum Confined {
-    /// In-tree (lexically normalised) — read as today.
+    /// In-tree (lexically normalised) - read as today.
     In(PathBuf),
     /// Escapes the root, but the rule is permitted to read it. The
     /// caller reads `root.join(path)` (absolute → itself; `../../x` →
     /// up) and emits an informational note via [`out_of_root_note`].
     AllowedEscape(PathBuf),
-    /// Escapes the root and the rule is not permitted — the caller
+    /// Escapes the root and the rule is not permitted - the caller
     /// emits an "escapes the repo root" violation and does not read.
     Denied,
 }
@@ -57,7 +57,7 @@ pub(crate) fn confine(path: &Path, allow_escape: bool) -> Confined {
 /// The informational-note message for a permitted out-of-root read.
 pub(crate) fn out_of_root_note(path: &Path) -> String {
     format!(
-        "reading out-of-root path {} — permitted by `allow_out_of_root`",
+        "reading out-of-root path {} - permitted by `allow_out_of_root`",
         path.display()
     )
 }
@@ -66,7 +66,7 @@ pub(crate) fn out_of_root_note(path: &Path) -> String {
 /// resolves *inside* `root` once symlinks are followed. [`normalize_confined`]
 /// is purely lexical and therefore symlink-blind, so an in-repo symlink
 /// (`link -> /etc`) makes a lexically-in path (`link/secret`) escape the
-/// tree at read time — defeating confinement and the `allow_out_of_root`
+/// tree at read time - defeating confinement and the `allow_out_of_root`
 /// gate. We canonicalize the deepest *existing* ancestor (the final
 /// component may legitimately not exist, e.g. an existence check, and a
 /// non-existent component can't be a symlink), re-attach the non-existent

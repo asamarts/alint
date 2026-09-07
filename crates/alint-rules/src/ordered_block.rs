@@ -32,7 +32,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 enum Comparator {
-    /// Rust `str` `Ord` — byte-wise over the UTF-8.
+    /// Rust `str` `Ord` - byte-wise over the UTF-8.
     #[default]
     Lexical,
     /// ASCII-case-insensitive lexical.
@@ -183,7 +183,7 @@ impl PerFileRule for OrderedBlockRule {
                         path,
                         b.start_line,
                         b.start_line,
-                        &format!("unclosed ordered_block — no {end:?} line after the start"),
+                        &format!("unclosed ordered_block - no {end:?} line after the start"),
                     ));
                 }
                 block = Some(Block {
@@ -248,7 +248,7 @@ impl PerFileRule for OrderedBlockRule {
                 path,
                 b.start_line,
                 b.start_line,
-                &format!("unclosed ordered_block — no {end:?} line after the start"),
+                &format!("unclosed ordered_block - no {end:?} line after the start"),
             ));
         }
         Ok(violations)

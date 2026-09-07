@@ -79,7 +79,7 @@ pub(crate) fn resolve_select(spec: SelectSpec, rule_id: &str) -> Result<Scope> {
 #[serde(deny_unknown_fields)]
 struct Options {
     select: SelectSpec,
-    /// Optional per-iteration filter — evaluated against each
+    /// Optional per-iteration filter - evaluated against each
     /// iterated entry's `iter` context. Common shape:
     /// `iter.has_file("Cargo.toml")` to scope the iteration to
     /// directories that look like a workspace member.
@@ -154,7 +154,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 /// Pre-compile each `NestedRuleSpec` in `require:` so its
 /// `when:` source is parsed exactly once at rule-build time.
 /// Shared by `for_each_dir`, `for_each_file`, and
-/// `every_matching_has` — all three accept nested rules with
+/// `every_matching_has` - all three accept nested rules with
 /// optional `when:` clauses, and all three pre-v0.9.12 re-
 /// parsed the source per iteration. This helper is the single
 /// place new cross-file iteration rules thread their require
@@ -172,13 +172,13 @@ pub(crate) fn compile_nested_require(
 
 /// Dry-build each nested `require:` spec against the registry so a
 /// nested rule with an unknown kind, an unknown option, or a missing
-/// required field fails at config-load time — not lazily on the first
+/// required field fails at config-load time - not lazily on the first
 /// matching iteration, and not silently when the selector matches
 /// nothing. Shared by `for_each_dir`, `for_each_file`, and
 /// `every_matching_has` via their `Rule::validate_nested` impls.
 ///
 /// A placeholder path token set is used: only structural errors
-/// (kind / option / required-field) surface here — the per-iteration
+/// (kind / option / required-field) surface here - the per-iteration
 /// path *values* are irrelevant to whether a nested spec builds.
 pub(crate) fn validate_nested_require(
     parent_id: &str,
@@ -215,7 +215,7 @@ pub(crate) fn parse_when_iter(spec: &RuleSpec, src: Option<&str>) -> Result<Opti
 pub(crate) enum IterateMode {
     Dirs,
     Files,
-    /// Both files and dirs (dirs first) — used by `every_matching_has`.
+    /// Both files and dirs (dirs first) - used by `every_matching_has`.
     Both,
 }
 
@@ -225,7 +225,7 @@ pub(crate) enum IterateMode {
 /// when present and false for an entry, that entry is skipped
 /// before any nested rule is built or evaluated.
 ///
-/// 108 lines after the v0.9.8 literal-path bypass landed —
+/// 108 lines after the v0.9.8 literal-path bypass landed -
 /// extracting the bypass into a separate helper would require
 /// threading the `parent_id` / level / current entry / nested
 /// spec through 5 args, and the bypass and the fallback path
@@ -398,7 +398,7 @@ pub(crate) fn evaluate_for_each(
 /// O(N) full-index scan.
 ///
 /// Conservative: returns `None` for any pattern containing a
-/// glob metacharacter, even when the metacharacter is escaped —
+/// glob metacharacter, even when the metacharacter is escaped -
 /// the bench cliff this exists to fix is the canonical
 /// `paths: "{path}/<basename>"` shape, which always resolves to
 /// a literal post-template-expansion. False positives here
@@ -452,7 +452,7 @@ fn evaluate_one_per_file_rule(
             return vec![
                 Violation::new(format!(
                     "{parent_id}: nested rule #{nested_i} cannot analyze {} \
-                     — file is too large ({})",
+                     - file is too large ({})",
                     literal.display(),
                     crate::io::over_cap(n),
                 ))

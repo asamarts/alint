@@ -115,7 +115,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "line_max_width has no fix op — truncation is unsafe",
+            "line_max_width has no fix op - truncation is unsafe",
         ));
     }
     Ok(Box::new(LineMaxWidthRule {

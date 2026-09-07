@@ -24,7 +24,7 @@ struct Options {
     /// Per-rule override for the workspace `respect_gitignore` setting. When
     /// `false`, this rule's literal-path checks also stat the filesystem
     /// directly, so it sees files that are tracked AND `.gitignore`-masked
-    /// (the bazel-style `.bazelversion` pattern — pitfall #18 in
+    /// (the bazel-style `.bazelversion` pattern - pitfall #18 in
     /// `docs/development/CONFIG-AUTHORING.md`). Honoured only by `file_exists`
     /// literal paths; glob patterns fall through to the workspace setting.
     /// Default: inherit the workspace `respect_gitignore`.
@@ -56,11 +56,11 @@ pub struct FileExistsRule {
     root_only: bool,
     /// When `true`, only consider walked entries that are also
     /// in git's index. Outside a git repo this becomes a silent
-    /// no-op — no entries qualify, so the rule reports the
+    /// no-op - no entries qualify, so the rule reports the
     /// "missing" violation as if no file existed.
     git_tracked_only: bool,
     /// When `Some(false)`, the literal-path fast path also
-    /// checks the filesystem directly via `ctx.root.join(p)` —
+    /// checks the filesystem directly via `ctx.root.join(p)` -
     /// finds files that are present-on-disk but
     /// `.gitignore`-masked from the walker (closes the
     /// `bazel-style "tracked AND gitignored"` pattern from
@@ -70,7 +70,7 @@ pub struct FileExistsRule {
     fixer: Option<FileCreateFixer>,
 }
 
-/// True when `pattern` is a plain literal path string — no glob
+/// True when `pattern` is a plain literal path string - no glob
 /// metacharacters, no `!` exclude prefix. Such patterns can be
 /// answered by an O(1) hash-set lookup against
 /// [`alint_core::FileIndex::contains_file`] instead of a O(N)
@@ -83,7 +83,7 @@ fn is_literal_path(pattern: &str) -> bool {
 }
 
 /// True iff `paths` is a flat list (single string or `Many`)
-/// with no excludes — `IncludeExclude` form is excluded since
+/// with no excludes - `IncludeExclude` form is excluded since
 /// the fast path can't honour excludes by hash lookup alone.
 fn paths_spec_has_no_excludes(spec: &PathsSpec) -> bool {
     match spec {
@@ -250,7 +250,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 .ok_or_else(|| {
                     Error::rule_config(
                         &spec.id,
-                        "fix.file_create needs a `path` — none of the rule's `paths:` \
+                        "fix.file_create needs a `path` - none of the rule's `paths:` \
                          entries is a literal filename",
                     )
                 })?;
@@ -295,7 +295,7 @@ fn literal_is_nested(p: &Path) -> bool {
 
 /// Best-effort: return the first entry in `patterns` that has no glob
 /// metacharacters (so it's a usable file path). Returns `None` if every
-/// pattern is a glob — in that case the caller must require an
+/// pattern is a glob - in that case the caller must require an
 /// explicit `fix.file_create.path`.
 fn first_literal_path(patterns: &[String]) -> Option<PathBuf> {
     patterns

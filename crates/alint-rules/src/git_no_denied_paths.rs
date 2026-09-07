@@ -126,7 +126,7 @@ impl Rule for GitNoDeniedPathsRule {
 /// `**/` matches zero or more segments, so the anchored form still catches
 /// the root-level file. This is the secure default for a denylist: a bare
 /// *literal* like `id_rsa` should ban that file anywhere in the tree, not only
-/// at the root — globset root-anchors a bare literal. (A bare *wildcard* like
+/// at the root - globset root-anchors a bare literal. (A bare *wildcard* like
 /// `*.pem` already spans depths in globset, so anchoring it is a no-op.)
 fn anchor_denied_pattern(pattern: &str) -> std::borrow::Cow<'_, str> {
     if pattern.contains('/') {
@@ -150,7 +150,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "git_no_denied_paths has no fix op — `git rm --cached` is too destructive to automate",
+            "git_no_denied_paths has no fix op - `git rm --cached` is too destructive to automate",
         ));
     }
 
@@ -250,7 +250,7 @@ mod tests {
         assert!(
             lit.matches(std::path::Path::new("secrets/id_rsa"))
                 .is_empty(),
-            "a bare literal is root-anchored — the real M5 gap"
+            "a bare literal is root-anchored - the real M5 gap"
         );
     }
 

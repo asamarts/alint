@@ -31,7 +31,7 @@ pub fn render(directives: &[Directive], section_title: &str) -> String {
     out.push('\n');
     out.push_str(
         "Generated from `.alint.yml` by `alint export-agents-md`. \
-         Re-run after editing the lint config — these directives \
+         Re-run after editing the lint config - these directives \
          must stay in sync with what alint blocks at commit time. \
          Manual edits inside this section are overwritten.\n",
     );

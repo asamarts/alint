@@ -65,7 +65,7 @@ impl PerFileRule for NoMergeConflictMarkersRule {
     }
 }
 
-/// True when the file carries an unambiguous conflict *anchor* — a
+/// True when the file carries an unambiguous conflict *anchor* - a
 /// line starting with `<<<<<<< `, `>>>>>>> `, or `||||||| ` (each
 /// followed by a ref, so it never collides with prose). A bare
 /// `=======` is only treated as a separator when such an anchor is
@@ -131,7 +131,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "no_merge_conflict_markers has no fix op — conflict resolution requires human judgment",
+            "no_merge_conflict_markers has no fix op - conflict resolution requires human judgment",
         ));
     }
     Ok(Box::new(NoMergeConflictMarkersRule {

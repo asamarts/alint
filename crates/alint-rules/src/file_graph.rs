@@ -84,7 +84,7 @@ struct FromContentSpec {
     resolve: Resolve,
 }
 
-/// The `edges:` block — exactly one extractor (validated in
+/// The `edges:` block - exactly one extractor (validated in
 /// `build`): `from_content` (the reference-graph modes) or
 /// `derive_target` (a name template → `fresh` codegen-freshness or
 /// `no_dangling` derived-sibling existence).
@@ -98,7 +98,7 @@ struct EdgesSpec {
 }
 
 /// Name-template edges: derive the generated target's path from the
-/// source node's path — `from` is a regex matched against the node
+/// source node's path - `from` is a regex matched against the node
 /// path, `to` is a replacement template using its captures (e.g.
 /// `from: '(.*)\.proto'`, `to: '$1.pb.go'`; a constant `to` maps
 /// many sources to one target). The `fresh` mode's edge.
@@ -120,7 +120,7 @@ struct ForbiddenEdgeSpec {
 /// (`{ forbidden_edges: [...] }`). A scalar and a map are
 /// structurally distinct, so an untagged enum decodes them
 /// unambiguously (the proven `cross_file_value_equals` `targets:`
-/// pattern — not the externally-tagged-enum-from-map trap
+/// pattern - not the externally-tagged-enum-from-map trap
 /// `crate::extract` documents).
 #[derive(Debug, Deserialize)]
 #[serde(
@@ -138,7 +138,7 @@ enum NamedRequire {
     Acyclic,
     /// Every path-shaped reference must resolve to a path on disk.
     NoDangling,
-    /// No node is unreferenced (bare form — no entry-point roots).
+    /// No node is unreferenced (bare form - no entry-point roots).
     NoOrphans,
 }
 
@@ -172,7 +172,7 @@ struct NoOrphansSpec {
 /// Options for the `fresh` map form: the `derive_target` output must
 /// embed the source's current `hash` digest, captured by `marker`
 /// (a regex whose group 1 is the hex digest). Content-hash, never
-/// mtime — portable on a fresh clone.
+/// mtime - portable on a fresh clone.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FreshSpec {
@@ -219,7 +219,7 @@ enum Require {
     },
 }
 
-/// How edges are formed — paired with `require` in `build`:
+/// How edges are formed - paired with `require` in `build`:
 /// `FromContent` ⇒ the reference-graph modes; `DeriveTarget` ⇒
 /// `fresh`.
 #[derive(Debug)]
@@ -338,7 +338,7 @@ impl FileGraphRule {
     /// One violation per path-shaped edge whose resolved target
     /// exists nowhere in the index (as a file or a directory).
     /// References that aren't path-shaped (bare module names, URLs)
-    /// are dropped, not flagged — `no_dangling` is a
+    /// are dropped, not flagged - `no_dangling` is a
     /// reference-integrity check, not a module resolver.
     fn check_no_dangling(&self, ctx: &Context<'_>, nodes: &[PathBuf]) -> Vec<Violation> {
         let mut out = Vec::new();
@@ -679,12 +679,12 @@ fn resolve_ref(reference: &str, from_file: &Path, mode: Resolve) -> Option<PathB
 /// A representative set of directed cycles in `adj` (node indices
 /// `0..n`), each canonicalised (rotated to start at its smallest
 /// index, so the same cycle always reports identically) and the
-/// whole set sorted. Iterative DFS — no recursion-depth limit on
+/// whole set sorted. Iterative DFS - no recursion-depth limit on
 /// deep graphs.
 ///
 /// This is *not* an enumeration of every distinct simple cycle
 /// (that is exponential and needs Johnson's algorithm); it records
-/// one cycle per DFS back-edge — enough to surface every file that
+/// one cycle per DFS back-edge - enough to surface every file that
 /// participates in a cycle. A node already fully explored (BLACK)
 /// is not revisited, so a cycle reachable only through it from a
 /// later DFS root may go unlisted even though its members are
@@ -752,7 +752,7 @@ fn canonical_cycle(cycle: &[usize]) -> Vec<usize> {
     out
 }
 
-/// Resolve the map form of `require:` — exactly one of
+/// Resolve the map form of `require:` - exactly one of
 /// `forbidden_edges` / `no_orphans` (the bare-string modes are
 /// resolved in `build`).
 fn resolve_map_require(map: RequireMap, cfg: &impl Fn(String) -> Error) -> Result<Require> {

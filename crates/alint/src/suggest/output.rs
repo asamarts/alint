@@ -41,7 +41,7 @@ fn render_human(proposals: &[Proposal], opts: &RunOptions, out: &mut dyn Write) 
         let success = style::SUCCESS;
         writeln!(
             out,
-            "{success}No proposals{success:#} — your existing config already covers what we'd suggest."
+            "{success}No proposals{success:#} - your existing config already covers what we'd suggest."
         )?;
         return Ok(());
     }

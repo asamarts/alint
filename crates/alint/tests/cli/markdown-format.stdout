@@ -4,5 +4,5 @@
 
 ## Cross-file (1)
 
-- **error** `must-have-license` — expected a file matching /[LICENSE/]
+- **error** `must-have-license` - expected a file matching /[LICENSE/]
 

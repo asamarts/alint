@@ -249,7 +249,7 @@ impl GeneratedFileFreshRule {
             return vec![self.violation(
                 file,
                 &format!(
-                    "is stale — its committed contents differ from `{}` output{}",
+                    "is stale - its committed contents differ from `{}` output{}",
                     self.command.join(" "),
                     first_diff_hint(&stdout, &committed),
                 ),
@@ -317,7 +317,7 @@ impl GeneratedFileFreshRule {
             match crate::io::read_capped(&ctx.root.join(path)) {
                 Ok(after) if self.normalize.differs(before, &after) => stale.push((
                     path.clone(),
-                    format!("is out of date — re-run `{cmd}` and commit the result"),
+                    format!("is out of date - re-run `{cmd}` and commit the result"),
                 )),
                 Ok(_) => {}
                 Err(crate::io::ReadCapError::Io(e))
@@ -325,13 +325,13 @@ impl GeneratedFileFreshRule {
                 {
                     stale.push((
                         path.clone(),
-                        format!("was removed by `{cmd}` — re-run it and commit the result"),
+                        format!("was removed by `{cmd}` - re-run it and commit the result"),
                     ));
                 }
                 Err(_) => stale.push((
                     path.clone(),
                     format!(
-                        "could not be read to verify freshness (too large or unreadable) — re-run `{cmd}`"
+                        "could not be read to verify freshness (too large or unreadable) - re-run `{cmd}`"
                     ),
                 )),
             }
@@ -348,7 +348,7 @@ impl GeneratedFileFreshRule {
                     restorer.register_new(entry.path.clone());
                     stale.push((
                         entry.path.clone(),
-                        format!("is an uncommitted generated file — `{cmd}` created it; commit it"),
+                        format!("is an uncommitted generated file - `{cmd}` created it; commit it"),
                     ));
                 }
             }
@@ -413,7 +413,7 @@ fn exit_desc(status: std::process::ExitStatus, stderr: &[u8]) -> String {
 
 /// Restores the working tree on Drop: writes every snapshot file back
 /// and deletes every generator-created file. Best-effort (Drop can't
-/// surface errors) and panic-safe — `alint check` must not leave a
+/// surface errors) and panic-safe - `alint check` must not leave a
 /// mutating generator's output behind.
 struct OutputRestorer<'a> {
     root: &'a Path,
