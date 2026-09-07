@@ -2,16 +2,16 @@
 title: Changed mode
 description: "How alint check --changed restricts a run to the files in a diff for per-file rules, while cross-file and existence rules keep evaluating the whole tree so they stay correct."
 sidebar:
-  order: 7
+  order: 3
 ---
 
-`alint check --changed` layers a diff filter on top of the walk so a per-file rule sees only the files you touched, which is what a pre-commit hook or a PR check wants. Cross-file and existence rules deliberately opt out and keep evaluating the whole tree, because an invariant they enforce can be broken by a file you changed even when its partner did not.
+`alint check --changed` layers a diff filter on top of the walk so a per-file rule sees only the files you touched, which is what a pre-commit hook or a PR check wants. Most cross-file rules, and the existence rules, deliberately opt out and keep evaluating the whole tree, because an invariant they enforce can be broken by a file you changed even when its partner did not.
 
 <svg class="alint-chg" viewBox="0 0 460 424" role="img" aria-labelledby="chg-t chg-d" xmlns="http://www.w3.org/2000/svg">
 <title id="chg-t">--changed filters per-file rules to the diff while cross-file and existence rules stay whole-tree</title>
 <desc id="chg-d">A repository of four files has two changed. Per-file rules receive only the two changed files. Cross-file and existence rules receive all four files, so a whole-tree invariant is still checked.</desc>
 <style>
-  .alint-chg { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-chg { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-chg { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-chg { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-chg .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -26,15 +26,15 @@ sidebar:
   @keyframes chgpulse { 0%,100%{opacity:1} 50%{opacity:.55} }
   @media (prefers-reduced-motion:reduce){ .alint-chg .flow{animation:none;stroke-dasharray:none} .alint-chg .pulse{animation:none} }
 </style>
-<rect class="card" x="30" y="28" width="400" height="128" rx="10"/>
+<rect class="card" x="30" y="28" width="400" height="140" rx="10"/>
 <text class="ui mut" x="44" y="48">repository</text>
 <text class="tag mut" x="416" y="48" text-anchor="end">2 of 4 files changed</text>
 <rect class="chip pulse" x="44" y="56" width="372" height="22" rx="6"/><rect x="44" y="56" width="5" height="22" rx="2" fill="#4f46e5"/><text class="tag tx" x="58" y="71">src/parser.rs</text><text class="tag ac" x="404" y="71" text-anchor="end">changed</text>
 <rect class="chip pulse" x="44" y="82" width="372" height="22" rx="6"/><rect x="44" y="82" width="5" height="22" rx="2" fill="#4f46e5"/><text class="tag tx" x="58" y="97">docs/guide.md</text><text class="tag ac" x="404" y="97" text-anchor="end">changed</text>
 <rect class="chip off" x="44" y="108" width="372" height="22" rx="6"/><text class="tag mut" x="58" y="123">src/lib.rs</text><text class="tag mut" x="404" y="123" text-anchor="end">unchanged</text>
 <rect class="chip off" x="44" y="134" width="372" height="22" rx="6"/><text class="tag mut" x="58" y="149">api.h</text><text class="tag mut" x="404" y="149" text-anchor="end">unchanged</text>
-<path class="flow" d="M 180 156 C 180 186, 120 186, 120 210"/>
-<path class="flow" d="M 280 156 C 280 186, 340 186, 340 210"/>
+<path class="flow" d="M 180 168 C 180 190, 120 190, 120 210"/>
+<path class="flow" d="M 280 168 C 280 190, 340 190, 340 210"/>
 <rect class="card" x="20" y="214" width="200" height="176" rx="10"/>
 <text class="ui ac" x="34" y="236">per-file rules</text>
 <text class="tag mut" x="34" y="252">see the changed set</text>
@@ -69,8 +69,9 @@ The three-dot `<base>...HEAD` form diffs against the merge-base of `<base>` and 
 
 The filter narrows the file set for **per-file rules** only. Two families opt out, on purpose:
 
-- **Whole-tree rules** always evaluate against the whole tree, because their verdict depends on files outside your diff: the relational rules (`pair`, `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`), the manifest and graph rules (`cross_file`, `file_graph`, `registry_paths_resolve`, `pair_hash`), and the single-shot rules (`generated_file_fresh`, `command_idempotent`). A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
+- **Whole-tree rules** always evaluate against the whole tree, because their verdict depends on files outside your diff: the relational rules (`pair`, `for_each_dir`, `for_each_file`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`), the manifest and graph rules (`cross_file`, `file_graph`, `registry_paths_resolve`, `pair_hash`), and the single-shot rules (`generated_file_fresh`, `command_idempotent`). A `pair` rule that requires every `api.h` to have an `api.c` must still fire when you delete `api.c`, even though the surviving `api.h` is not itself in your diff.
 - **Existence rules** also consult the whole tree, but the two file-existence rules (`file_exists`, `file_absent`) are **skipped when their `paths:` scope does not intersect the diff**, so a missing `LICENSE` fails only the PRs that touch a `LICENSE`-shaped path. The two directory-existence rules (`dir_exists`, `dir_absent`) always evaluate, since a directory scope never intersects a file-path diff.
+- **Diff-oriented rules** are the mirror image: a few cross-file rules exist *because* of the diff. `pair_changed_together` asks whether a file's partner changed alongside it, and `changeset_requires_path` gates on what a commit range touched, so they read the changed set by design; `markdown_paths_resolve` is likewise a per-file rule and follows the diff filter like any other.
 
 ## Edge cases
 
@@ -78,7 +79,7 @@ The filter narrows the file set for **per-file rules** only. Two families opt ou
 - **Outside a git repo** (or `git` missing from `PATH`): `--changed` hard-errors rather than silently falling back to a full check, because a silent full run would betray the intent the flag expressed.
 - **Deleted files** appear in the diff. A `LICENSE` you deleted is in the changed set, the walker no longer sees it on disk, and an existence rule for `LICENSE` evaluates the whole tree (which now lacks it) and fires.
 
-`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/walker-and-gitignore/): the changed set is a working-tree concept and the tracked set is an index concept, so a rule with both fires only on tracked entries that are part of this diff.
+`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/targeting/the-walker-and-git/): the changed set is a working-tree concept and the tracked set is an index concept, so a rule with both fires only on tracked entries that are part of this diff.
 
 ## In practice
 
@@ -99,6 +100,6 @@ The `no-trailing-whitespace` finding came through the diff filter; the `pair` fi
 
 ## Going deeper
 
-- [The walker and git](/docs/concepts/walker-and-gitignore/) is the whole-tree index this filter sits on top of.
-- [Scoping](/docs/concepts/scoping/) covers `changed_since:`, the per-rule scope_filter counterpart to the run-wide `--changed`.
+- [The walker and git](/docs/concepts/targeting/the-walker-and-git/) is the whole-tree index this filter sits on top of.
+- [Scoping](/docs/concepts/targeting/scoping/) covers `changed_since:`, the per-rule scope_filter counterpart to the run-wide `--changed`.
 - [Configuration](/docs/configuration/) documents the rule kinds and their cross-file versus per-file classification.

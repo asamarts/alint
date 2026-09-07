@@ -31,11 +31,11 @@ A machine format is the *only* thing written to **stdout** — so `alint check -
 
 ## Stable fingerprints
 
-`sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to **every** run — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitHub Code Scanning uses the SARIF fingerprint to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
+`sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to **every** run — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitHub Code Scanning uses the SARIF fingerprint to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
 
 ## Baseline suppression
 
-When a run is filtered through a [baseline](/docs/concepts/baseline/), suppression *marks* findings rather than deleting them, and only two formats surface those marks:
+When a run is filtered through a [baseline](/docs/concepts/adoption/baseline/), suppression *marks* findings rather than deleting them, and only two formats surface those marks:
 
 - **`sarif`** carries `suppressions: [{ "kind": "external" }]` and `baselineState` (`unchanged` for suppressed, `new` for live) on each result — so GitHub Code Scanning keeps grandfathered alerts open-but-dismissed instead of flapping fixed-then-reopened. (The stable `partialFingerprints` identity is emitted on every run, baseline or not — see above.)
 - **`json`** omits suppressed findings from `results` and records a `summary.baselined_suppressed` count in the envelope.

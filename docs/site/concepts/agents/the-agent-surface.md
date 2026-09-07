@@ -2,7 +2,7 @@
 title: The agent surface
 description: "How alint feeds a coding agent: the agent output format with per-violation fix_command, export-agents-md writing an AGENTS.md section, and the two bundled agentic rulesets."
 sidebar:
-  order: 14
+  order: 1
 ---
 
 alint treats a coding agent as a first-class consumer. Your one rule set drives two feeds: `export-agents-md` renders the rules into an `AGENTS.md` section the agent reads at the start of a session, and `alint check --format agent` emits each violation as machine-actionable JSON with an exact `fix_command`. The rules become both the agent's standing instructions and its fix loop.
@@ -11,7 +11,7 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 <title id="ag-t">One rule set feeds an agent as an AGENTS.md section and as per-violation fix commands</title>
 <desc id="ag-d">Active rules feed two paths. export-agents-md writes an AGENTS.md section the agent reads at session start; alint check --format agent emits per-violation JSON with agent_instruction and fix_command. Both reach the coding agent.</desc>
 <style>
-  .alint-agent { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-agent { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-agent { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-agent { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-agent .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -36,7 +36,7 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 <rect class="card" x="254" y="156" width="172" height="46" rx="7"/><text class="tag tx" x="340" y="175" text-anchor="middle">agent_instruction</text><text class="tag ac" x="340" y="192" text-anchor="middle">+ fix_command</text>
 <path class="flow" d="M 120 202 C 120 234, 210 234, 230 244"/>
 <path class="flow" d="M 340 202 C 340 234, 250 234, 230 244"/>
-<rect class="key" x="120" y="246" width="220" height="46" rx="10"/><text class="ui ac" x="230" y="266" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="283" text-anchor="middle">reads the rules, runs each fix_command</text>
+<rect class="key" x="94" y="246" width="272" height="46" rx="10"/><text class="ui ac" x="230" y="266" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="283" text-anchor="middle">reads the rules, runs each fix_command</text>
 <text class="tag mut" x="230" y="322" text-anchor="middle">the rules are the agent's instructions and its fixes</text>
 </svg>
 
@@ -58,7 +58,7 @@ Each violation object carries `rule_id`, `severity`, the location (`file`, `line
 
 Two bundled rulesets target the agentic era, adopted through `extends:` like any other:
 
-- **`alint://bundled/agent-context@v1`** lints the agent-instruction files themselves (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, `copilot-instructions.md`) for existence, stubs, bloat, and stale-path drift.
+- **`alint://bundled/agent-context@v1`** lints the agent-instruction files themselves. It guards against stubs and bloat across all five it knows (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, `.github/copilot-instructions.md`), recommends a repo ship one of the first three, and flags stale backticked paths in `AGENTS.md` and `CLAUDE.md`.
 - **`alint://bundled/agent-hygiene@v1`** catches residue that is distinctly AI-shaped: versioned duplicate filenames, scratch-doc sprawl, AI-affirmation prose, debug residue, and model-attributed TODOs.
 
 ```yaml
@@ -113,6 +113,6 @@ alint export-agents-md --inline --output AGENTS.md
 
 ## Going deeper
 
-- [Fixing](/docs/concepts/fixing/) is what a `fix_command` invokes under the hood.
+- [Fixing](/docs/concepts/adoption/fixing/) is what a `fix_command` invokes under the hood.
 - [Configuration](/docs/configuration/) covers the output-format flag and `extends:` for the bundled rulesets.
 - [Rules](/docs/rules/) lists the `agent-context` and `agent-hygiene` rulesets and their kinds.

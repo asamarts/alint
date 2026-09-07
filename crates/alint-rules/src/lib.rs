@@ -872,6 +872,16 @@ mod registry_tests {
                 "id: t\nkind: file_graph\nnodes: \"src/**/*.ts\"\nedges:\n  \
                  from_content:\n    extract:\n      lines: {}\nrequire: acyclic\nlevel: error\n",
             ),
+            (
+                "for_each_dir",
+                "id: t\nkind: for_each_dir\nselect: \"src/*\"\nrequire:\n  \
+                 - kind: file_exists\n    paths: \"{dir}/mod.rs\"\nlevel: error\n",
+            ),
+            (
+                "for_each_file",
+                "id: t\nkind: for_each_file\nselect: \"**/*.c\"\nrequire:\n  \
+                 - kind: file_exists\n    paths: \"{dir}/{stem}.h\"\nlevel: error\n",
+            ),
         ];
 
         for (kind, yaml) in cases {
@@ -883,6 +893,8 @@ mod registry_tests {
                 "command_idempotent" => crate::command_idempotent::build(&spec),
                 "pair_hash" => crate::pair_hash::build(&spec),
                 "file_graph" => crate::file_graph::build(&spec),
+                "for_each_dir" => crate::for_each_dir::build(&spec),
+                "for_each_file" => crate::for_each_file::build(&spec),
                 _ => unreachable!(),
             };
             let rule = built.unwrap_or_else(|e| panic!("{kind} build failed: {e}"));

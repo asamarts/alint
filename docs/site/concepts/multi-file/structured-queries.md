@@ -2,7 +2,7 @@
 title: Structured queries
 description: "One JSONPath query language reads a value out of any of eight config formats, because alint parses each into one common Value tree first, with equals, matches, and absent ops."
 sidebar:
-  order: 11
+  order: 2
 ---
 
 alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML, XML, dotenv, properties, INI, and HCL into one common Value tree, then runs a single RFC 9535 JSONPath query over that tree. The payoff: the same query mental model covers all eight formats. A `host` nested under a `server` table is read by `$.server.host` whether the file is JSON, YAML, TOML, or XML, even though those files share not one character of syntax.
@@ -11,7 +11,7 @@ alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML,
 <title id="sq-t">A JSONPath dissected, the same query resolving across five formats, and all eight supported formats</title>
 <desc id="sq-d">A path like $.server.host breaks into a root token, a member token, and a leaf token, with extra selectors for index, wildcard, recursive descent, and bracketed keys. The one query $.server.host resolves the value db1 from json, yaml, toml, and xml, while a flat format like dotenv uses the whole key SERVER_HOST as the path. alint parses all eight formats -- json, yaml, toml, xml, ini, dotenv, properties, hcl -- into one Value tree, then asserts with equals, matches, or absent.</desc>
 <style>
-  .alint-sq { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-sq { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-sq { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-sq { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-sq .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -86,7 +86,7 @@ Every structured-query rule is named `<format>_path_<op>`: `json_path_equals`, `
 | dotenv | `VERSION=1.2` | `$.VERSION` |
 | properties | `version=1.2` | `$.version` |
 
-Four things do not transfer unchanged: **XML wraps everything in its root element**, so the root name is the first path segment; **INI sections are a level** (keys before any section hoist to the top); **dotenv keys keep their casing** (usually upper); and, as below, the flat formats and XML give you **string-typed** leaves.
+Four things do not transfer unchanged: **XML wraps everything in its root element** (with an element's attributes read as `@name` keys and its text as `#text`), so the root name is the first path segment; **INI sections are a level** (keys before any section hoist to the top); **dotenv keys keep their casing** (usually upper); and, as below, the flat formats and XML give you **string-typed** leaves.
 
 ## The three ops
 
@@ -98,7 +98,7 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 
 **String-typed leaves.** In JSON, YAML, TOML, and HCL a value keeps its type, so `equals: 8080` matches the number `8080`. But XML, dotenv, properties, and INI have no type system: every leaf is a **string**, so there `equals: 8080` (a number) silently never matches and you must write `equals: "8080"`. This is the one place the "one mental model" leaks, and it bites quietly.
 
-**Cardinality.** A JSONPath can select zero, one, or many nodes. For `equals` and `matches`, **every** selected node must satisfy the op, and selecting **zero** is itself a "path not found" violation, unless you set `if_present: true` (which passes silently on zero matches and checks only the nodes that exist). In XML a single child is a scalar, not a one-element list, so `$.items.item[*]` reads nothing when there is exactly one `<item>`; reach it with recursive descent (`$..item`) instead.
+**Cardinality.** A JSONPath can select zero, one, or many nodes. For `equals` and `matches`, **every** selected node must satisfy the op, and selecting **zero** is itself a "path not found" violation, unless you set `if_present: true` (which passes silently on zero matches and checks only the nodes that exist). In XML a single child is a scalar, not a one-element list, so `$.items.item[*]` reads nothing when there is exactly one `<item>`; reach it with recursive descent (`$..item`) instead. HCL and INI share this shape-shift: a repeated block or key becomes a list, but a lone one stays a scalar or object, so an index or `[*]` that works on many entries reads nothing when there is exactly one.
 
 **Keys with dashes or dots.** Dot notation stops at a dashed or dotted key, so `$.scripts.pre-commit` and `$.db.host` (a single dotted properties key) do not resolve. Use bracket notation: `$.scripts['pre-commit']`, `$['db.host']`.
 
@@ -136,6 +136,6 @@ error  python-requires-pinned  pyproject.toml must pin requires-python
 
 ## Going deeper
 
-- [Cross-file rules](/docs/concepts/cross-file-rules/) reuse this query engine through the shared `extract:` extractor.
+- [Cross-file rules](/docs/concepts/multi-file/cross-file-rules/) reuse this query engine through the shared `extract:` extractor.
 - [Rules](/docs/rules/) lists every `<format>_path_<op>` kind, its options, and the per-format sharp edges.
 - [Configuration](/docs/configuration/) covers `paths:` and the common rule fields.

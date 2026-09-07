@@ -2,18 +2,18 @@
 title: How alint works
 description: "A deep look at alint's execution pipeline: assemble one config, evaluate facts once, filter rules, walk the repository in parallel, dispatch per-file and cross-file rules over a single read of each file, and emit one report."
 sidebar:
-  order: 2
+  order: 1
 ---
 
-alint reads one declarative config, makes a single parallel pass over your repository, and emits one report in the format your pipeline wants. The diagram below traces the whole run top to bottom: the command, the config it assembles, the facts and `when:` filter that decide which rules survive, the walk that indexes the repository, the scanner that reads each file once, and the report that comes back with an exit code.
+alint reads one declarative config, makes a single parallel pass over your repository, and emits one report in the format your pipeline wants. The diagram below traces the whole run top to bottom: the command, the config it assembles, the walk that indexes the repository, the facts and `when:` filter that decide which rules survive, the scanner that reads each file once, and the report that comes back with an exit code.
 
 <svg class="alint-check" viewBox="0 0 460 876" role="img" aria-labelledby="chk-t chk-d" xmlns="http://www.w3.org/2000/svg">
 <title id="chk-t">alint check: the execution pipeline</title>
-<desc id="chk-d">A vertical pipeline. The command runs alint check. The config assembles from .alint.yml and its extends, with a spawn-gate blocking process-spawning rules from extended configs, facts evaluated once, and rules filtered by when. Four active rules survive. The repository is walked once into a sorted index, then scanned file by file: a glowing scanner reads each file once, marking four passes with green checks and two failures with red crosses, while a cross-file rule scans the whole index. The report shows four passed, two failed, and exit code 1 in any of eight formats.</desc>
+<desc id="chk-d">A vertical pipeline. The command runs alint check. The config assembles from .alint.yml and its extends, with a spawn-gate blocking process-spawning rules from extended configs. The repository is walked once into a sorted index; facts are then evaluated once against it and rules filtered by when, leaving three active rules. Each file is scanned once: a glowing scanner reads each file once, marking four passes with green checks and two failures with red crosses, while a cross-file rule scans the whole index. The report shows four passed, two failed, and exit code 1 in any of eight formats.</desc>
 <style>
-  .alint-check { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --repo:#eaeefb; --bd:#c7cfe0; --ac:#4f46e5; --term:#1e1b3a; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  :root[data-theme="dark"] .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#0f1120; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#0f1120; } }
+  .alint-check { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --repo:#eaeefb; --bd:#c7cfe0; --ac:#4f46e5; --term:#f6f8fa; --term-fg:#24292e; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  :root[data-theme="dark"] .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#011627; --term-fg:#d6deeb; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-check { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --repo:#1c2130; --bd:#3b4254; --ac:#8b93f8; --term:#011627; --term-fg:#d6deeb; } }
   .alint-check .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .alint-check .ui   { font:600 12px system-ui, -apple-system, sans-serif; }
   .alint-check .tx { fill:var(--tx); } .alint-check .mut { fill:var(--mut); } .alint-check .ac { fill:var(--ac); }
@@ -29,23 +29,25 @@ alint reads one declarative config, makes a single parallel pass over your repos
   @keyframes chks { 0%{transform:translateY(0);opacity:0} 5%{opacity:1} 92%{transform:translateY(220px);opacity:1} 100%{transform:translateY(220px);opacity:0} }
   @media (prefers-reduced-motion:reduce){ .alint-check .flow{animation:none;stroke-dasharray:none} .alint-check .scan{animation:none;transform:translateY(88px)} }
 </style>
-<rect class="card" x="20" y="18" width="420" height="34" rx="6" style="fill:var(--term);stroke:var(--term)"/>
-<text class="mono" x="34" y="40" fill="#22c55e">$</text><text class="mono" x="48" y="40" fill="#e6e8ef">alint check .</text>
+<rect class="card" x="20" y="18" width="420" height="34" rx="6" style="fill:var(--term)"/>
+<text class="mono" x="34" y="40" fill="#22c55e">$</text><text class="mono" x="48" y="40" fill="var(--term-fg)">alint check .</text>
 <path class="flow" d="M 230 52 V 66"/>
-<rect class="accent-card" x="20" y="66" width="420" height="94" rx="9"/>
+<rect class="accent-card" x="20" y="66" width="420" height="80" rx="9"/>
 <text class="mono ac" x="34" y="88">.alint.yml</text>
 <text class="mono mut" x="34" y="107" font-size="12">extends: rust@v1</text>
 <rect x="30" y="114" width="182" height="20" rx="10" fill="#ef4444" opacity=".14"/>
 <text class="small" x="40" y="128" fill="#ef4444">spawn-gate blocks command &#10007;</text>
-<text class="ui mut" x="34" y="151">facts once &#183; when filters rules</text>
-<text class="ui ac" x="20" y="180">active rules</text>
-<rect class="card" x="20" y="188" width="84" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="204" font-size="12">no_bidi</text>
-<rect class="card" x="112" y="188" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="124" y="204" font-size="12">filename_case</text>
-<rect class="card" x="20" y="220" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="31" y="236" font-size="12" fill="#7c3aed">pair</text>
-<rect class="card" x="92" y="220" width="150" height="24" rx="12" stroke-dasharray="4 3"/><text class="mono mut" x="103" y="236" font-size="11">win (when: false)</text>
-<path class="flow" d="M 230 250 V 278"/><text class="ui mut" x="242" y="263">walk</text>
+<path class="flow" d="M 230 146 V 164"/><text class="ui mut" x="242" y="159">walk</text>
+<rect class="card" x="20" y="166" width="420" height="32" rx="8"/>
+<text class="ui ac" x="34" y="186">repository index</text><text class="ui mut" x="426" y="186" text-anchor="end">walked once, sorted &#183; 6 files</text>
+<path class="flow" d="M 230 198 V 214"/>
+<text class="ui mut" x="20" y="228">facts once &#183; when filters &#8594; 3 of 4 rules active</text>
+<rect class="card" x="20" y="236" width="84" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="252" font-size="12">no_bidi</text>
+<rect class="card" x="112" y="236" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="124" y="252" font-size="12">filename_case</text>
+<rect class="card" x="246" y="236" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="257" y="252" font-size="12" fill="#7c3aed">pair</text>
+<path class="flow" d="M 230 264 V 278"/>
 <rect class="repo" x="20" y="280" width="420" height="344" rx="14"/>
-<text class="ui ac" x="34" y="303">repository</text><text class="ui mut" x="116" y="303">walked once, sorted</text>
+<text class="ui ac" x="34" y="303">scan</text><text class="ui mut" x="70" y="303">read each file once</text>
 <g class="scan">
   <rect class="glow" x="28" y="308" width="384" height="48" rx="10"/>
 </g>
@@ -73,26 +75,26 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <text class="exit" x="34" y="822" fill="#ef4444">exit 1</text>
 <rect class="card" x="120" y="808" width="60" height="20" rx="10"/><text class="ui mut" x="130" y="822">human</text>
 <rect class="card" x="186" y="808" width="46" height="20" rx="10"/><text class="ui mut" x="194" y="822">json</text>
-<text class="ui mut" x="34" y="848">SARIF, GitHub, and 5 more formats</text>
+<text class="ui mut" x="34" y="848">SARIF, GitHub, and 4 more formats</text>
 </svg>
 
 The design goal is one config, one pass, one report: predictable, fast, and easy to wire into CI. The stages below trace the run in order.
 
 ## 1. Assemble the config
 
-alint discovers the `.alint.yml` at the repository root and builds the **effective config**: it resolves every `extends:` source (a local file, an `https://` URL pinned by a SHA-256 hash, or a bundled ruleset resolved offline), caches and cycle-checks them, and field-merges each layer by rule `id`. This is also the trust boundary: a process-spawning rule (`kind: command` and its siblings) or a `custom:` fact that arrives through `extends:` is rejected at load, so adopting someone else's ruleset can never make your machine run their commands. The [config model](/docs/concepts/the-config-model/) covers assembly and precedence in full.
+alint discovers the `.alint.yml` at the repository root and builds the **effective config**: it resolves every `extends:` source (a local file, an `https://` URL pinned by a SHA-256 hash, or a bundled ruleset resolved offline), caches and cycle-checks them, and field-merges each layer by rule `id`. This is also the trust boundary: a process-spawning rule (`kind: command` and its siblings) or a `custom:` fact that arrives through `extends:` is rejected at load, so adopting someone else's ruleset can never make your machine run their commands. The [config model](/docs/concepts/start-here/the-config-model/) covers assembly and precedence in full.
 
-## 2. Evaluate facts, once
+## 2. Walk the repository
 
-Any `facts:` you declared are evaluated a single time, in order, before any rule runs, and the results are reused for the rest of the run. Facts answer questions about the repository (does a file exist, how many match a glob, what does a command print) that rules gate on.
+alint walks the tree once, in parallel, honoring `.gitignore` (and `.ignore`, git excludes, and your `ignore:` globs), and builds one deterministic, sorted `FileIndex`. Sorting the index up front is what makes a run reproducible: the same repository produces byte-identical output every time. Everything downstream reads this one index, facts included, so the walk comes first.
 
-## 3. Filter rules by `when:`
+## 3. Evaluate facts, once
 
-Each rule's `when:` expression is evaluated against the facts. A rule whose condition is false is dropped **before a single file is read**, so a config that layers in the Rust, Node, Python, and Go rulesets costs almost nothing in a repository that is only one of them.
+Any `facts:` you declared are evaluated a single time, in order, **against the walked index**, and the results are reused for the rest of the run. Facts answer questions about the repository (does a file exist, how many match a glob, what does a command print) that rules gate on.
 
-## 4. Walk the repository
+## 4. Filter rules by `when:`
 
-alint walks the tree once, in parallel, honoring `.gitignore` (and `.ignore`, git excludes, and your `ignore:` globs), and builds one deterministic, sorted `FileIndex`. Sorting the index up front is what makes a run reproducible: the same repository produces byte-identical output every time.
+Each rule's `when:` expression is evaluated against the facts. A rule whose condition is false is dropped **before its files are scanned**, so a config that layers in the Rust, Node, Python, and Go rulesets costs almost nothing in a repository that is only one of them.
 
 ## 5. Dispatch: scan each file once
 
@@ -105,11 +107,11 @@ Both classes run in parallel across cores; their violations are merged and re-so
 
 ## 6. Aggregate and emit
 
-The violations collect into one `Report`. alint renders it in your chosen format (human, JSON, SARIF, and five more) and returns an exit code your pipeline can gate on. With `alint fix`, auto-fixable violations are applied to the working tree, serially, and the check re-runs.
+The violations collect into one `Report`. alint renders it in your chosen format (human, JSON, SARIF, and five more) and returns an exit code your pipeline can gate on. With `alint fix`, alint evaluates each rule and applies its fixers to the working tree one rule at a time, so a later rule sees the edits an earlier one made.
 
 ## Going deeper
 
-- [The config model](/docs/concepts/the-config-model/) is the language this pipeline evaluates.
+- [The config model](/docs/concepts/start-here/the-config-model/) is the language this pipeline evaluates.
 - The interactive model below lets you explore every component and edge of the run:
 
 <likec4-view view-id="checkFlow"></likec4-view>

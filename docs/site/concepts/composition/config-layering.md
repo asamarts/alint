@@ -2,7 +2,7 @@
 title: Config layering
 description: "How one effective config is assembled from drop-ins and nested configs, and how the three interpolation timings resolve values at load, at template expansion, and per violation."
 sidebar:
-  order: 9
+  order: 3
 ---
 
 Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-directory nested configs add subtree-scoped rules, and three interpolation timings fill in values at three different moments. Knowing which layer resolves when is the difference between a config that behaves and one that surprises you.
@@ -11,7 +11,7 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 <title id="layer-t">The three interpolation timings resolve at three different moments</title>
 <desc id="layer-d">A timeline with three stages. At config load, {{env.SRC_ROOT | default('src')}} resolves to src. At template expansion, {{vars.dir}} resolves to src. Per violation, {{ctx.primary}} resolves to src/app.c. Each resolves at its own moment.</desc>
 <style>
-  .alint-layer { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-layer { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-layer { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-layer { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-layer .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -51,13 +51,13 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 
 When a `.alint.d/` directory sits next to your root `.alint.yml`, alint discovers every `*.yml` (or `*.yaml`) inside it and merges them in **alphabetical order, last wins** on a field-level conflict. It is the `/etc/*.d/` pattern applied to config: ops layer `50-policy.yml` through provisioning, a developer gitignores `99-local.yml`. Each drop-in is a complete config (its own `version: 1`) and can add rules, override existing ones by id, add `extends:`, or layer more `facts:` and `vars:`.
 
-Drop-ins are **trust-equivalent to your root config**: they live in the same workspace under your control, so they may declare spawning rules and `custom:` facts, unlike anything reached through `extends:`. Only the root config gets `.alint.d/` discovery; a config reached via `extends:` does not carry its own drop-ins.
+Drop-ins are **trust-equivalent to your root config**: they live in the same workspace under your control, so they may declare spawning rules and `custom:` facts, unlike anything reached through `extends:`. Only the root config gets `.alint.d/` discovery; a config reached via `extends:` does not carry its own drop-ins. Reserve numeric prefixes (`00-base.yml`, `50-team.yml`, `99-local.yml`) to control the order, the one merge knob. A drop-in overrides an existing rule field-by-field by id, but nested structures (a `fix:` block, a `paths:` include/exclude pair) replace wholesale rather than merging into the base.
 
 ## Nested configs
 
 Opt in with `nested_configs: true` in the root config, and alint walks the tree (respecting `.gitignore` and `ignore:`) and picks up a `.alint.yml` in any subdirectory. A nested config's rules are **added, not overridden**, and each rule's path-like scope is **auto-prefixed with that subtree**, so a rule in `packages/web/.alint.yml` only ever looks at `packages/web/`.
 
-The guardrails keep nesting predictable: a nested config may declare only `version:` and `rules:`; every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on; a nested config cannot enable its own nested discovery.
+The guardrails keep nesting predictable: of a nested config's fields, only `version:` and `rules:` carry weight; the dangerous ones (`extends:`, `facts:`, `baseline:`, `allow_out_of_root:`, `nested_configs:`, and spawning rules) are rejected at load, while other top-level knobs such as `respect_gitignore:` are silently ignored rather than honored. Every nested rule needs at least one scope field; absolute and `..`-escaping paths are rejected; and a duplicate rule `id` anywhere is a load error, never a silent override. Nesting is untrusted in the same way an `extends:`'d ruleset is (no spawning rules), and only the top-level config may turn it on; a nested config cannot enable its own nested discovery.
 
 ## Three interpolation timings
 
@@ -96,6 +96,6 @@ error  lib-headers  src/app.c has no header at src/app.h
 
 ## Going deeper
 
-- [The config model](/docs/concepts/the-config-model/) is the whole assembly picture these layers feed into.
-- [Composition and trust](/docs/concepts/composition-and-trust/) covers `extends:`, the other way configs combine.
-- [Variable interpolation](/docs/concepts/variable-interpolation/) and [Rule templates](/docs/concepts/templates/) are the field-level references for the timings above.
+- [The config model](/docs/concepts/start-here/the-config-model/) is the whole assembly picture these layers feed into.
+- [Composition and trust](/docs/concepts/composition/composition-and-trust/) covers `extends:`, the other way configs combine.
+- [Variable interpolation](/docs/configuration/variable-interpolation/) and [Rule templates](/docs/configuration/templates/) are the field-level references for the timings above.

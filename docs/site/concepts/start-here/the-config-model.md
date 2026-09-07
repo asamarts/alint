@@ -2,7 +2,7 @@
 title: The config model
 description: "How alint turns one .alint.yml, plus the configs it extends, drops in, and nests, into a single effective config, and then into a report."
 sidebar:
-  order: 3
+  order: 2
 ---
 
 alint is driven by a small declarative language. You describe the checks you want as **rules**; alint merges them with every other config source in play into one **effective config**, and then reads your repository to turn that config into a report. The root `.alint.yml` is the entry point, not the whole story: alint also reads the configs it `extends:`, any `.alint.d/` drop-ins, per-directory nested configs, and of course every repository file each rule checks.
@@ -11,7 +11,7 @@ alint is driven by a small declarative language. You describe the checks you wan
 <title id="cfg-t">alint assembles one effective config from many sources</title>
 <desc id="cfg-d">Four config sources (bundled, extends, root, drop-in) merge by rule id from low to high precedence into one effective config. The bundled ruleset sets readme-exists to warning; the drop-in overrides it to error, which wins. Nested configs add subtree-scoped rules.</desc>
 <style>
-  .alint-config { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-config { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-config { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-config { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-config .mono { font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -27,15 +27,15 @@ alint is driven by a small declarative language. You describe the checks you wan
 </style>
 <text class="ui ac" x="18" y="15">one effective config, from many sources</text>
 <text class="ui mut" x="18" y="32">low to high precedence &#8595;</text>
-<rect class="card" x="20" y="42"  width="420" height="44" rx="8"/><rect x="20" y="42"  width="6" height="44" rx="2" fill="#3b82f6"/>
+<rect class="card" x="20" y="42"  width="420" height="48" rx="8"/><rect x="20" y="42"  width="6" height="44" rx="2" fill="#3b82f6"/>
 <text class="ui" x="36" y="60" fill="#3b82f6">bundled</text><text class="mono tx" x="36" y="78">oss-baseline@v1</text><text class="tag mut" x="424" y="69" text-anchor="end">readme-exists: warning</text>
-<rect class="card" x="20" y="98"  width="420" height="44" rx="8"/><rect x="20" y="98"  width="6" height="44" rx="2" fill="#f59e0b"/>
+<rect class="card" x="20" y="98"  width="420" height="48" rx="8"/><rect x="20" y="98"  width="6" height="44" rx="2" fill="#f59e0b"/>
 <text class="ui" x="36" y="116" fill="#f59e0b">extends</text><text class="mono tx" x="36" y="134">./team.yml</text><text class="tag mut" x="424" y="125" text-anchor="end">+ team rules</text>
-<rect class="card" x="20" y="154" width="420" height="44" rx="8"/><rect x="20" y="154" width="6" height="44" rx="2" fill="#4f46e5"/>
+<rect class="card" x="20" y="154" width="420" height="48" rx="8"/><rect x="20" y="154" width="6" height="44" rx="2" fill="#4f46e5"/>
 <text class="ui ac" x="36" y="172">root</text><text class="mono tx" x="36" y="190">.alint.yml</text><text class="tag mut" x="424" y="181" text-anchor="end">+ your rules</text>
-<rect class="card" x="20" y="210" width="420" height="44" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
+<rect class="card" x="20" y="210" width="420" height="48" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
 <text class="ui" x="36" y="228" fill="#7c3aed">drop-in</text><text class="mono tx" x="36" y="246">99-local.yml</text><text class="tag" x="424" y="237" text-anchor="end" fill="#7c3aed">readme-exists: error</text>
-<path class="flow" d="M 230 254 V 272"/><text class="ui mut" x="242" y="267">merge by id</text>
+<path class="flow" d="M 230 270 V 291"/><path fill="var(--ac)" d="M 225 291 L 230 298 L 235 291 Z"/><text class="ui mut" x="244" y="286">merge by id</text>
 <text class="ui ac" x="20" y="290">effective config</text>
 <rect class="eff" x="20" y="298" width="420" height="156" rx="12"/>
 <text class="mono ac" x="36" y="326" font-weight="700">readme-exists</text>
@@ -59,7 +59,7 @@ The atom of the language is the rule record. Three fields are always required: `
   message: "README.md is required at the repo root"
 ```
 
-alint reads those fields in a fixed order, and that order is the pipeline in miniature. `when` is checked first, against facts computed once per run, so a gated-out rule is dropped before a single file is read. `paths` then selects the files, `kind` runs its check, and `level` and `message` shape what lands in the report. The `when:` expression is a deliberately bounded little language, with boolean logic, comparisons, `in`, and `matches` over four namespaces (`facts.`, `vars.`, `iter.`, `env.`) and no arbitrary code; a missing fact reads as `null` (falsy), so a rule gated on an absent fact simply never runs.
+alint reads those fields in a fixed order, and that order is the pipeline in miniature. `when` is checked first, against facts computed once per run, so a gated-out rule is dropped before its files are scanned. `paths` then selects the files, `kind` runs its check, and `level` and `message` shape what lands in the report. The `when:` expression is a deliberately bounded little language, with boolean logic, comparisons, `in`, and `matches` over four namespaces (`facts.`, `vars.`, `iter.`, `env.`) and no arbitrary code; a missing fact reads as `null` (falsy), so a rule gated on an absent fact simply never runs.
 
 Around the rules sit the rest of the top-level fields: `extends:` inherits other configs, `vars:` and `facts:` supply values the rules gate and interpolate on, `ignore:` and `respect_gitignore:` shape the walk, `templates:` factor out repeated rule shapes, and a few knobs (`fix_size_limit`, `nested_configs`, `allow_out_of_root`, `baseline`) tune a run. Only `version: 1` is strictly required.
 
@@ -77,7 +77,7 @@ Sources are not equally trusted. Your own `.alint.yml` and its drop-ins are trus
 
 ## From config to verdicts
 
-Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it computes your `facts:` once, in order; drops every rule whose `when:` is false; walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/how-it-works/) for that evaluation pipeline in full.
+Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; computes your `facts:` once, in order, against that index; drops every rule whose `when:` is false; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/start-here/how-alint-works/) for that evaluation pipeline in full.
 
 Three interpolation layers thread through both halves, each resolving at a different time: `{{env.X}}` at config load (from the process environment, in local configs only), `{{vars.X}}` when a `templates:` body expands, and `{{ctx.X}}` per violation, inside a rule's `message`.
 
@@ -115,6 +115,6 @@ The drop-in supplied only `level`; `kind`, `paths`, and `message` came from the 
 ## Going deeper
 
 - [Configuration](/docs/configuration/) is the field-by-field reference for all twelve top-level fields, every rule field, and the JSON Schema.
-- [Drop-in configs](/docs/concepts/drop-ins/) covers `.alint.d/` layering and its trust posture in depth.
-- [Variable interpolation](/docs/concepts/variable-interpolation/) details the three interpolation timings and `{{env.X | default(...)}}`.
-- [How alint works](/docs/concepts/how-it-works/) traces the assembly-then-evaluation pipeline end to end.
+- [Drop-in configs](/docs/concepts/composition/config-layering/) covers `.alint.d/` layering and its trust posture in depth.
+- [Variable interpolation](/docs/configuration/variable-interpolation/) details the three interpolation timings and `{{env.X | default(...)}}`.
+- [How alint works](/docs/concepts/start-here/how-alint-works/) traces the assembly-then-evaluation pipeline end to end.

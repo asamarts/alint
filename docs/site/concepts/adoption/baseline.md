@@ -2,7 +2,7 @@
 title: Baseline mode
 description: "Grandfather a repo's existing violations so alint check gates only on new findings, using a fingerprint that keys on content rather than line number."
 sidebar:
-  order: 13
+  order: 2
 ---
 
 Turning a linter on for an established repo has a chicken-and-egg problem: the rules go red on thousands of pre-existing violations the current change never introduced. **Baseline mode** breaks it. You record today's violations into a committed baseline file, and from then on `alint check` reports and gates on only the findings that are *new* relative to that snapshot. It is the ratchet: stop the bleeding now, pay the backlog down on your own schedule.
@@ -11,7 +11,7 @@ Turning a linter on for an established repo has a chicken-and-egg problem: the r
 <title id="bl-t">A baseline suppresses recorded findings, lets new ones fail, and prunes stale ones</title>
 <desc id="bl-d">This run's findings are checked against the recorded baseline by fingerprint. A recorded finding is suppressed even after its line moved; a finding not in the baseline is new and fails the gate; a recorded finding gone from this run is stale and pruned.</desc>
 <style>
-  .alint-base { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-base { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-base { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-base { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-base .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -24,9 +24,9 @@ Turning a linter on for an established repo has a chicken-and-egg problem: the r
 </style>
 <text class="ui ac" x="18" y="16">this run, checked against the baseline</text>
 <text class="ui mut" x="442" y="16" text-anchor="end">by fingerprint</text>
-<rect class="row" x="20" y="26" width="420" height="40" rx="8"/><rect x="20" y="26" width="6" height="40" rx="2" fill="#22c55e"/><text class="tag tx" x="40" y="44">no-todo-comments</text><text class="tag mut" x="40" y="59">api.ts (line moved)</text><text class="tag" x="424" y="50" text-anchor="end" fill="#22c55e">suppressed</text>
-<rect class="row" x="20" y="74" width="420" height="40" rx="8"/><rect x="20" y="74" width="6" height="40" rx="2" fill="#ef4444"/><text class="tag tx" x="40" y="92">no-todo-comments</text><text class="tag mut" x="40" y="107">new.ts</text><text class="tag pulse" x="424" y="99" text-anchor="end" fill="#ef4444">new: fails the gate</text>
-<rect class="row" x="20" y="122" width="420" height="40" rx="8" stroke-dasharray="4 3"/><rect x="20" y="122" width="6" height="40" rx="2" fill="#94a3b8"/><text class="tag mut" x="40" y="140">lockfiles-only-one</text><text class="tag mut" x="40" y="155">fixed since</text><text class="tag mut" x="424" y="147" text-anchor="end">stale: pruned</text>
+<rect class="row" x="20" y="26" width="420" height="43" rx="8"/><rect x="20" y="26" width="6" height="43" rx="2" fill="#22c55e"/><text class="tag tx" x="40" y="44">no-todo-comments</text><text class="tag mut" x="40" y="59">api.ts (line moved)</text><text class="tag" x="424" y="50" text-anchor="end" fill="#22c55e">suppressed</text>
+<rect class="row" x="20" y="74" width="420" height="43" rx="8"/><rect x="20" y="74" width="6" height="43" rx="2" fill="#ef4444"/><text class="tag tx" x="40" y="92">no-todo-comments</text><text class="tag mut" x="40" y="107">new.ts</text><text class="tag pulse" x="424" y="99" text-anchor="end" fill="#ef4444">new: fails the gate</text>
+<rect class="row" x="20" y="122" width="420" height="43" rx="8" stroke-dasharray="4 3"/><rect x="20" y="122" width="6" height="43" rx="2" fill="#94a3b8"/><text class="tag mut" x="40" y="140">lockfiles-only-one</text><text class="tag mut" x="40" y="155">fixed since</text><text class="tag mut" x="424" y="147" text-anchor="end">stale: pruned</text>
 <text class="tag mut" x="230" y="196" text-anchor="middle">the fingerprint keys on content, not the line number</text>
 <text class="tag mut" x="230" y="220" text-anchor="middle">a finding that only moved lines stays suppressed</text>
 </svg>
@@ -51,7 +51,7 @@ Every violation whose fingerprint is in the baseline is suppressed (up to its re
 
 ## Fingerprints, not line numbers
 
-The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator**, chosen in priority order: a rule may supply its own key (a structured-query rule keys on its JSONPath like `$.license`, a whole-file rule on the path alone), otherwise the **offending line's text** is used, and a path-bearing finding with no line keys on `(rule, path)` with the message deliberately left out of the hash. The line *number* is never part of it.
+The crux of a usable baseline is a stable identity for each violation. alint fingerprints a violation as a SHA-256 over its rule, its path, and a **content discriminator**, chosen in priority order: a rule may supply its own key (a structured-query rule keys on its query *plus the operator and the value it matched*, so two different bad values at one path like `$.license` stay distinct findings; a whole-file rule keys on the path alone), otherwise the **offending line's text** is used, and a path-bearing finding with no line keys on `(rule, path)` with the message deliberately left out of the hash. The line *number* is never part of it.
 
 So inserting or deleting unrelated lines never churns the baseline. **Editing the offending line** re-keys a line-anchored finding, so it counts as new and the gate catches it, but a structured-query or whole-file finding keeps its identity across unrelated edits. The baseline survives ordinary refactoring without stale-entry noise, and never masks a genuinely new problem.
 
@@ -100,7 +100,7 @@ error  no-todo-comments  TODO without an owner
 ## Going deeper
 
 - [`baseline:` configuration key](/docs/configuration/#baseline) persists the path.
-- [The walker and git](/docs/concepts/walker-and-gitignore/) is the whole-tree evaluation a baseline records.
-- [Changed mode](/docs/concepts/changed-mode/) is the `--changed` subset that baseline recording refuses.
-- [Severity and exit codes](/docs/concepts/severity-and-exit-codes/) is the gate the live (non-suppressed) findings drive.
-- [Suggesting rules](/docs/concepts/suggest/) pairs with baseline mode when adopting on an established repo.
+- [The walker and git](/docs/concepts/targeting/the-walker-and-git/) is the whole-tree evaluation a baseline records.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) is the `--changed` subset that baseline recording refuses.
+- [Severity and exit codes](/docs/concepts/start-here/severity-and-exit-codes/) is the gate the live (non-suppressed) findings drive.
+- [Suggesting rules](/docs/cookbook/suggest/) pairs with baseline mode when adopting on an established repo.

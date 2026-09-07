@@ -2,7 +2,7 @@
 title: The walker and git
 description: "How alint discovers files by walking the tree through git's own ignore rules, why the walked tree can diverge from git's index, and how git_tracked_only switches a rule to the index."
 sidebar:
-  order: 5
+  order: 1
 ---
 
 Every run begins by walking your repository once into a sorted in-memory index, and every rule reads that index, never the raw filesystem and never `git` directly. What lands in the index is the working tree minus everything `.gitignore` excludes, so a rule's idea of "what is here" is the un-ignored working tree. That is almost always what you want; the two places it diverges from git's own index are the source of nearly every "why didn't my rule fire" question.
@@ -11,7 +11,7 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 <title id="walk-t">The walker builds an index from the un-ignored tree; git_tracked_only reads git's index instead</title>
 <desc id="walk-d">Files on disk split two ways. The default walked tree includes README.md and an un-ignored untracked file but drops a gitignored-but-committed file. The git index, which git_tracked_only consults, includes README.md and the committed file but not the untracked one. The two divergent files are the ones a mis-set gitignore hides.</desc>
 <style>
-  .alint-walk { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .alint-walk { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alint-walk { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; } }
   .alint-walk .ui { font:600 12px system-ui, -apple-system, sans-serif; }
@@ -58,9 +58,9 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 
 ## What the walker sees
 
-Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root and per-directory), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
+Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root, per-directory, and any in directories above the walk root), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
 
-Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required; on a plain directory the walk just has nothing to filter, so every file is visible.
+Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required, and the ignore rules do not need one either: a directory that is not a git repo still honors any `.gitignore` and `.ignore` files it contains, so filtering happens with or without a `.git/`. Only a directory with no ignore files at all shows literally every file.
 
 Two config fields shape the filtering. `respect_gitignore` (default `true`) toggles every gitignore source at once; the CLI's `--no-gitignore` forces it off for one run. `ignore:` adds gitignore-style patterns on top, and applies regardless of `respect_gitignore`, for exclusions that are an alint concern rather than a git one:
 
@@ -127,6 +127,6 @@ The same rule is silent for every developer who merely built locally, because th
 ## Going deeper
 
 - [Configuration](/docs/configuration/) is the field reference for `ignore:`, `respect_gitignore`, and every rule field.
-- [Scoping](/docs/concepts/scoping/) is how a rule narrows within the index, with `paths:`, `when:`, and `scope_filter:`.
-- [Changed mode](/docs/concepts/changed-mode/) restricts a run to the files in a diff, layered on top of the walk.
+- [Scoping](/docs/concepts/targeting/scoping/) is how a rule narrows within the index, with `paths:`, `when:`, and `scope_filter:`.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) restricts a run to the files in a diff, layered on top of the walk.
 - The interactive <a href="/docs/about/architecture-diagrams/">architecture diagrams</a> include the walker view (`walkerFlow`) as an explorable model.

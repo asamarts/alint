@@ -47,7 +47,7 @@ Every glob match in `paths` must correspond to a real file. Use an array to acce
 
 Fix: `file_create` — write a declared `content`. With an array of `paths`, the fix creates the first entry.
 
-**Optional `git_tracked_only: true`** further requires that the matching file be in git's index — useful for rules like "every release must commit a CHANGELOG entry" where local-only files shouldn't satisfy the requirement. Outside a git repo, the rule fails (no file qualifies). See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
+**Optional `git_tracked_only: true`** further requires that the matching file be in git's index — useful for rules like "every release must commit a CHANGELOG entry" where local-only files shouldn't satisfy the requirement. Outside a git repo, the rule fails (no file qualifies). See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
 ### `file_absent`
 
@@ -62,7 +62,7 @@ Fix: `file_remove` — delete every violating file.
 
 **Optional `content_prefix_hex`** narrows a name match with a content check: a matching file fires only if its bytes begin with one of the listed hex signatures. This separates real binary junk from unrelated files that share a name pattern — macOS AppleDouble sidecars (`._*`) start with `00 05 16 07` and `.DS_Store` with `00 00 00 01` `"Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0`. A file that cannot be read, or is shorter than every signature, does not match; an empty list (the default) keeps the name-only behaviour.
 
-**What "exists" means**: alint walks the filesystem and honours `.gitignore` by default, so a `file_absent` rule fires whenever a matching file is **present in the walked tree**, not when it's tracked in git. Files filtered by `.gitignore` are invisible to the rule. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics, the `--no-gitignore` flag, and the gap between this and git's actual index.
+**What "exists" means**: alint walks the filesystem and honours `.gitignore` by default, so a `file_absent` rule fires whenever a matching file is **present in the walked tree**, not when it's tracked in git. Files filtered by `.gitignore` are invisible to the rule. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics, the `--no-gitignore` flag, and the gap between this and git's actual index.
 
 ### `dir_exists`
 
@@ -72,7 +72,7 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 
 **Optional `root_only: true`** (like `file_exists`) requires the match to be a
 directory directly at the repository root, not nested.
-**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
+**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
 ### `dir_absent`
 
@@ -83,7 +83,7 @@ Directory counterpart of `file_absent`. The match-and-fire semantics are the sam
 **Optional `root_only: true`** (like `dir_exists`) restricts the check to the repository root: a directory forbidden at the root does not fire on nested directories of the same name.
 **Optional `git_tracked_only: true`** restricts the check to directories that contain at least one git-tracked file. With it set, a developer's locally-built `target/` (gitignored, no tracked content) doesn't trigger; a `target/` whose contents made it into git's index does. This is the canonical "don't let `target/` be committed" semantic.
 
-See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for the full semantics.
+See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
 ---
 
@@ -522,7 +522,7 @@ jobs:
 
 Assert every commit in scope carries a DCO (Developer Certificate of Origin) `Signed-off-by:` trailer — required by every CNCF / Linux Foundation / kernel-style project. A commit lacking the trailer fires one violation, with the short SHA + subject snippet so you know which to amend (`git commit --amend -s` or `git rebase --signoff`).
 
-The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override `pattern:` to enforce a stricter form (e.g. a corporate-domain email). Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes (silent outside a git repo; a bad `since:` ref hard-fails with a shallow-clone hint). See [variable interpolation](/docs/concepts/variable-interpolation/) for the `{{env.X}}` form.
+The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override `pattern:` to enforce a stricter form (e.g. a corporate-domain email). Shares the commit-validation family's `since:` / `include_merges:` semantics and failure modes (silent outside a git repo; a bad `since:` ref hard-fails with a shallow-clone hint). See [variable interpolation](/docs/configuration/variable-interpolation/) for the `{{env.X}}` form.
 
 ### `git_commit_no_fixup`
 

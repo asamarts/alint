@@ -54,6 +54,15 @@ pub struct ForEachFileRule {
 impl Rule for ForEachFileRule {
     alint_core::rule_common_impl!();
 
+    fn requires_full_index(&self) -> bool {
+        // Cross-file: a `for_each_file` over `**/*.c` requiring a
+        // matching `{dir}/{stem}.h` must see every source file, not
+        // just the changed ones, or under `--changed` it would miss
+        // a source whose partner was deleted in an earlier commit.
+        // Mirrors `for_each_dir`; opts out of `--changed` filtering.
+        true
+    }
+
     fn validate_nested(&self, registry: &alint_core::RuleRegistry) -> Result<()> {
         validate_nested_require(&self.id, self.level, &self.require, registry)
     }
