@@ -2,7 +2,7 @@
 title: Changed mode
 description: "How alint check --changed restricts a run to the files in a diff for per-file rules, while cross-file and existence rules keep evaluating the whole tree so they stay correct."
 sidebar:
-  order: 7
+  order: 3
 ---
 
 `alint check --changed` layers a diff filter on top of the walk so a per-file rule sees only the files you touched, which is what a pre-commit hook or a PR check wants. Cross-file and existence rules deliberately opt out and keep evaluating the whole tree, because an invariant they enforce can be broken by a file you changed even when its partner did not.
@@ -78,7 +78,7 @@ The filter narrows the file set for **per-file rules** only. Two families opt ou
 - **Outside a git repo** (or `git` missing from `PATH`): `--changed` hard-errors rather than silently falling back to a full check, because a silent full run would betray the intent the flag expressed.
 - **Deleted files** appear in the diff. A `LICENSE` you deleted is in the changed set, the walker no longer sees it on disk, and an existence rule for `LICENSE` evaluates the whole tree (which now lacks it) and fires.
 
-`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/walker-and-gitignore/): the changed set is a working-tree concept and the tracked set is an index concept, so a rule with both fires only on tracked entries that are part of this diff.
+`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/targeting/the-walker-and-git/): the changed set is a working-tree concept and the tracked set is an index concept, so a rule with both fires only on tracked entries that are part of this diff.
 
 ## In practice
 
@@ -99,6 +99,6 @@ The `no-trailing-whitespace` finding came through the diff filter; the `pair` fi
 
 ## Going deeper
 
-- [The walker and git](/docs/concepts/walker-and-gitignore/) is the whole-tree index this filter sits on top of.
-- [Scoping](/docs/concepts/scoping/) covers `changed_since:`, the per-rule scope_filter counterpart to the run-wide `--changed`.
+- [The walker and git](/docs/concepts/targeting/the-walker-and-git/) is the whole-tree index this filter sits on top of.
+- [Scoping](/docs/concepts/targeting/scoping/) covers `changed_since:`, the per-rule scope_filter counterpart to the run-wide `--changed`.
 - [Configuration](/docs/configuration/) documents the rule kinds and their cross-file versus per-file classification.

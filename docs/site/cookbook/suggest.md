@@ -58,10 +58,10 @@ Progress on a large tree renders on stderr (`--progress` / `--quiet` control it)
 
 ## What it does *not* do
 
-`suggest` **never writes to your config**: every output is review-only, so a scan can't surprise you with a rule you didn't vet. It also doesn't *run* the proposed rules against your tree; it proposes what would help, and you decide. Once you've adopted rules on an established repo, pair it with [baseline mode](/docs/concepts/baseline/) to grandfather the existing violations and gate only on new ones.
+`suggest` **never writes to your config**: every output is review-only, so a scan can't surprise you with a rule you didn't vet. It also doesn't *run* the proposed rules against your tree; it proposes what would help, and you decide. Once you've adopted rules on an established repo, pair it with [baseline mode](/docs/concepts/adoption/baseline/) to grandfather the existing violations and gate only on new ones.
 
 ## See also
 
 - [`alint suggest` CLI reference](/docs/cli/suggest/): every flag, captured from the binary
-- [Baseline mode](/docs/concepts/baseline/): adopting on a repo with existing debt
+- [Baseline mode](/docs/concepts/adoption/baseline/): adopting on a repo with existing debt
 - [Rules](/docs/rules/): the bundled rulesets and rule kinds `suggest` proposes

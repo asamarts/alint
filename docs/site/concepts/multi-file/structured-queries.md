@@ -2,7 +2,7 @@
 title: Structured queries
 description: "One JSONPath query language reads a value out of any of eight config formats, because alint parses each into one common Value tree first, with equals, matches, and absent ops."
 sidebar:
-  order: 11
+  order: 2
 ---
 
 alint reads *inside* config files, not just at them. It parses JSON, YAML, TOML, XML, dotenv, properties, INI, and HCL into one common Value tree, then runs a single RFC 9535 JSONPath query over that tree. The payoff: the same query mental model covers all eight formats. A `host` nested under a `server` table is read by `$.server.host` whether the file is JSON, YAML, TOML, or XML, even though those files share not one character of syntax.
@@ -136,6 +136,6 @@ error  python-requires-pinned  pyproject.toml must pin requires-python
 
 ## Going deeper
 
-- [Cross-file rules](/docs/concepts/cross-file-rules/) reuse this query engine through the shared `extract:` extractor.
+- [Cross-file rules](/docs/concepts/multi-file/cross-file-rules/) reuse this query engine through the shared `extract:` extractor.
 - [Rules](/docs/rules/) lists every `<format>_path_<op>` kind, its options, and the per-format sharp edges.
 - [Configuration](/docs/configuration/) covers `paths:` and the common rule fields.

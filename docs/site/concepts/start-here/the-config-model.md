@@ -2,7 +2,7 @@
 title: The config model
 description: "How alint turns one .alint.yml, plus the configs it extends, drops in, and nests, into a single effective config, and then into a report."
 sidebar:
-  order: 3
+  order: 2
 ---
 
 alint is driven by a small declarative language. You describe the checks you want as **rules**; alint merges them with every other config source in play into one **effective config**, and then reads your repository to turn that config into a report. The root `.alint.yml` is the entry point, not the whole story: alint also reads the configs it `extends:`, any `.alint.d/` drop-ins, per-directory nested configs, and of course every repository file each rule checks.
@@ -77,7 +77,7 @@ Sources are not equally trusted. Your own `.alint.yml` and its drop-ins are trus
 
 ## From config to verdicts
 
-Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it computes your `facts:` once, in order; drops every rule whose `when:` is false; walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/how-it-works/) for that evaluation pipeline in full.
+Assembling the config is only the first half. Once the effective config exists, alint validates it against the schema, then evaluates it: it computes your `facts:` once, in order; drops every rule whose `when:` is false; walks the repository a single time (honoring `.gitignore` and your `ignore:` globs) into one deterministic, sorted index; and dispatches each rule. Cross-file rules scan the whole index; per-file rules run against each matched file, and every file's bytes are read at most once no matter how many rules match it. The violations aggregate into one report. See [How alint works](/docs/concepts/start-here/how-alint-works/) for that evaluation pipeline in full.
 
 Three interpolation layers thread through both halves, each resolving at a different time: `{{env.X}}` at config load (from the process environment, in local configs only), `{{vars.X}}` when a `templates:` body expands, and `{{ctx.X}}` per violation, inside a rule's `message`.
 
@@ -115,6 +115,6 @@ The drop-in supplied only `level`; `kind`, `paths`, and `message` came from the 
 ## Going deeper
 
 - [Configuration](/docs/configuration/) is the field-by-field reference for all twelve top-level fields, every rule field, and the JSON Schema.
-- [Drop-in configs](/docs/concepts/drop-ins/) covers `.alint.d/` layering and its trust posture in depth.
-- [Variable interpolation](/docs/concepts/variable-interpolation/) details the three interpolation timings and `{{env.X | default(...)}}`.
-- [How alint works](/docs/concepts/how-it-works/) traces the assembly-then-evaluation pipeline end to end.
+- [Drop-in configs](/docs/concepts/composition/config-layering/) covers `.alint.d/` layering and its trust posture in depth.
+- [Variable interpolation](/docs/configuration/variable-interpolation/) details the three interpolation timings and `{{env.X | default(...)}}`.
+- [How alint works](/docs/concepts/start-here/how-alint-works/) traces the assembly-then-evaluation pipeline end to end.

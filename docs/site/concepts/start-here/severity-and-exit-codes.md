@@ -2,7 +2,7 @@
 title: Severity and exit codes
 description: "How a rule's level (error, warning, info, off) maps to alint's process exit code, and how --fail-on-warning tightens the gate for CI."
 sidebar:
-  order: 5
+  order: 4
 ---
 
 Every rule carries a `level`, and every `alint check` returns an exit code. The level decides how loud a finding is; the exit code is what your CI gates on. The mapping is small and fixed.
@@ -69,5 +69,5 @@ rules:
 
 ## Going deeper
 
-- [The config model](/docs/concepts/the-config-model/) covers where `level` sits in the rule record and how a child config overrides it.
-- [How alint works](/docs/concepts/how-it-works/) shows where the report and its exit code are produced.
+- [The config model](/docs/concepts/start-here/the-config-model/) covers where `level` sits in the rule record and how a child config overrides it.
+- [How alint works](/docs/concepts/start-here/how-alint-works/) shows where the report and its exit code are produced.

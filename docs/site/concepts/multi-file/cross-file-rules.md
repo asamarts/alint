@@ -2,7 +2,7 @@
 title: Cross-file rules
 description: "Rules whose verdict for one file depends on other files: the relational rules, file_graph and its require: modes, cross_file value relations, and the shared extract: extractor."
 sidebar:
-  order: 10
+  order: 1
 ---
 
 Most rules judge one file at a time. **Cross-file rules** judge a relationship between files, so the verdict for one file depends on what else is in the tree. That is why they always read the whole tree and never run on a `--changed` subset: deleting one file can break an invariant about another the diff never touched.
@@ -61,7 +61,7 @@ Edges resolve **as paths**, which is the point: a `from_content` regex captures 
 
 ## The `extract:` extractor
 
-`file_graph` and `cross_file` (plus `registry_paths_resolve` and `scope_filter`'s manifest predicates) share one extractor, which reads a value out of a file in exactly one of four ways: a **structured query** (an RFC 9535 JSONPath, keyed by format: `json`, `yaml`, `toml`, `xml`, `dotenv`, `properties`, `ini`, or `hcl`), a **`lines`** list, a **`regex`** capture, or **`whole_file`** (the entire content as one value, for byte comparisons). The structured form is the same machinery [structured queries](/docs/concepts/structured-queries/) use standalone.
+`file_graph` and `cross_file` (plus `registry_paths_resolve` and `scope_filter`'s manifest predicates) share one extractor, which reads a value out of a file in exactly one of four ways: a **structured query** (an RFC 9535 JSONPath, keyed by format: `json`, `yaml`, `toml`, `xml`, `dotenv`, `properties`, `ini`, or `hcl`), a **`lines`** list, a **`regex`** capture, or **`whole_file`** (the entire content as one value, for byte comparisons). The structured form is the same machinery [structured queries](/docs/concepts/multi-file/structured-queries/) use standalone.
 
 ## In practice
 
@@ -90,6 +90,6 @@ error  no-proto-import-cycles  import cycle: order.proto -> item.proto -> user.p
 
 ## Going deeper
 
-- [Structured queries](/docs/concepts/structured-queries/) is the `extract:` JSONPath machinery in depth.
-- [Changed mode](/docs/concepts/changed-mode/) explains why these rules stay whole-tree under `--changed`.
+- [Structured queries](/docs/concepts/multi-file/structured-queries/) is the `extract:` JSONPath machinery in depth.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) explains why these rules stay whole-tree under `--changed`.
 - [Rules](/docs/rules/) is the per-kind reference for `file_graph`, `cross_file`, `pair`, and the rest.

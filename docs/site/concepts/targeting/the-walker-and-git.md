@@ -2,7 +2,7 @@
 title: The walker and git
 description: "How alint discovers files by walking the tree through git's own ignore rules, why the walked tree can diverge from git's index, and how git_tracked_only switches a rule to the index."
 sidebar:
-  order: 5
+  order: 1
 ---
 
 Every run begins by walking your repository once into a sorted in-memory index, and every rule reads that index, never the raw filesystem and never `git` directly. What lands in the index is the working tree minus everything `.gitignore` excludes, so a rule's idea of "what is here" is the un-ignored working tree. That is almost always what you want; the two places it diverges from git's own index are the source of nearly every "why didn't my rule fire" question.
@@ -127,6 +127,6 @@ The same rule is silent for every developer who merely built locally, because th
 ## Going deeper
 
 - [Configuration](/docs/configuration/) is the field reference for `ignore:`, `respect_gitignore`, and every rule field.
-- [Scoping](/docs/concepts/scoping/) is how a rule narrows within the index, with `paths:`, `when:`, and `scope_filter:`.
-- [Changed mode](/docs/concepts/changed-mode/) restricts a run to the files in a diff, layered on top of the walk.
+- [Scoping](/docs/concepts/targeting/scoping/) is how a rule narrows within the index, with `paths:`, `when:`, and `scope_filter:`.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) restricts a run to the files in a diff, layered on top of the walk.
 - The interactive <a href="/docs/about/architecture-diagrams/">architecture diagrams</a> include the walker view (`walkerFlow`) as an explorable model.

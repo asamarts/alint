@@ -2,7 +2,7 @@
 title: Config layering
 description: "How one effective config is assembled from drop-ins and nested configs, and how the three interpolation timings resolve values at load, at template expansion, and per violation."
 sidebar:
-  order: 9
+  order: 3
 ---
 
 Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-directory nested configs add subtree-scoped rules, and three interpolation timings fill in values at three different moments. Knowing which layer resolves when is the difference between a config that behaves and one that surprises you.
@@ -51,7 +51,7 @@ Your root `.alint.yml` is rarely the whole config. Drop-ins layer over it, per-d
 
 When a `.alint.d/` directory sits next to your root `.alint.yml`, alint discovers every `*.yml` (or `*.yaml`) inside it and merges them in **alphabetical order, last wins** on a field-level conflict. It is the `/etc/*.d/` pattern applied to config: ops layer `50-policy.yml` through provisioning, a developer gitignores `99-local.yml`. Each drop-in is a complete config (its own `version: 1`) and can add rules, override existing ones by id, add `extends:`, or layer more `facts:` and `vars:`.
 
-Drop-ins are **trust-equivalent to your root config**: they live in the same workspace under your control, so they may declare spawning rules and `custom:` facts, unlike anything reached through `extends:`. Only the root config gets `.alint.d/` discovery; a config reached via `extends:` does not carry its own drop-ins.
+Drop-ins are **trust-equivalent to your root config**: they live in the same workspace under your control, so they may declare spawning rules and `custom:` facts, unlike anything reached through `extends:`. Only the root config gets `.alint.d/` discovery; a config reached via `extends:` does not carry its own drop-ins. Reserve numeric prefixes (`00-base.yml`, `50-team.yml`, `99-local.yml`) to control the order, the one merge knob. A drop-in overrides an existing rule field-by-field by id, but nested structures (a `fix:` block, a `paths:` include/exclude pair) replace wholesale rather than merging into the base.
 
 ## Nested configs
 
@@ -96,6 +96,6 @@ error  lib-headers  src/app.c has no header at src/app.h
 
 ## Going deeper
 
-- [The config model](/docs/concepts/the-config-model/) is the whole assembly picture these layers feed into.
-- [Composition and trust](/docs/concepts/composition-and-trust/) covers `extends:`, the other way configs combine.
-- [Variable interpolation](/docs/concepts/variable-interpolation/) and [Rule templates](/docs/concepts/templates/) are the field-level references for the timings above.
+- [The config model](/docs/concepts/start-here/the-config-model/) is the whole assembly picture these layers feed into.
+- [Composition and trust](/docs/concepts/composition/composition-and-trust/) covers `extends:`, the other way configs combine.
+- [Variable interpolation](/docs/configuration/variable-interpolation/) and [Rule templates](/docs/configuration/templates/) are the field-level references for the timings above.

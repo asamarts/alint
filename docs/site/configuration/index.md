@@ -74,7 +74,7 @@ ignore:
   - "fixtures/golden/**"
 ```
 
-`ignore:` patterns apply regardless of `respect_gitignore`. See [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/) for what gets filtered by default and how absence-style rules interpret git state.
+`ignore:` patterns apply regardless of `respect_gitignore`. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for what gets filtered by default and how absence-style rules interpret git state.
 
 ### `respect_gitignore`
 
@@ -87,11 +87,11 @@ respect_gitignore: true   # default; honor .gitignore
 
 Setting it to `false` is rarely useful during normal development because absence-style rules (`dir_absent`, `file_absent`) start firing on every locally-built artefact (`target/`, `node_modules/`, `__pycache__/`, and so on). It's appropriate for one-off audits or for directories that aren't git repos at all. The CLI's `--no-gitignore` flag overrides this for one invocation.
 
-The full implications (including how absence-style rules interpret "tracked" vs "ignored" and where this approximation diverges from git's actual index) live in [The walker and `.gitignore`](/docs/concepts/walker-and-gitignore/).
+The full implications (including how absence-style rules interpret "tracked" vs "ignored" and where this approximation diverges from git's actual index) live in [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/).
 
 ### `vars`
 
-Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/concepts/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
+Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/configuration/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
 
 ```yaml
 vars:
@@ -160,7 +160,7 @@ Common per-rule fields:
 - **`kind`** *(required)*: which built-in implementation to invoke. Required somewhere in the `extends:` chain.
 - **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
-- **`when`**: bounded expression gating the rule on facts / vars. See [Scoping](/docs/concepts/scoping/) for the gate order.
+- **`when`**: bounded expression gating the rule on facts / vars. See [Scoping](/docs/concepts/targeting/scoping/) for the gate order.
 - **`scope_filter`**: extra per-file scoping by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
@@ -307,11 +307,11 @@ Path to a committed baseline file that grandfathers pre-existing violations, so 
 baseline: .alint-baseline.json
 ```
 
-A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
+A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/adoption/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
 
 ## See also
 
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.
 - [Rules](/docs/rules/): every rule kind, organised by family, with per-rule options.
 - [Concepts](/docs/concepts/): the rule model, the walker, and how alint runs, explained.
-- [Scoping](/docs/concepts/scoping/): the `when:`, `paths:`, and `scope_filter:` gates a rule narrows its files through.
+- [Scoping](/docs/concepts/targeting/scoping/): the `when:`, `paths:`, and `scope_filter:` gates a rule narrows its files through.

@@ -2,7 +2,7 @@
 title: The agent surface
 description: "How alint feeds a coding agent: the agent output format with per-violation fix_command, export-agents-md writing an AGENTS.md section, and the two bundled agentic rulesets."
 sidebar:
-  order: 14
+  order: 1
 ---
 
 alint treats a coding agent as a first-class consumer. Your one rule set drives two feeds: `export-agents-md` renders the rules into an `AGENTS.md` section the agent reads at the start of a session, and `alint check --format agent` emits each violation as machine-actionable JSON with an exact `fix_command`. The rules become both the agent's standing instructions and its fix loop.
@@ -113,6 +113,6 @@ alint export-agents-md --inline --output AGENTS.md
 
 ## Going deeper
 
-- [Fixing](/docs/concepts/fixing/) is what a `fix_command` invokes under the hood.
+- [Fixing](/docs/concepts/adoption/fixing/) is what a `fix_command` invokes under the hood.
 - [Configuration](/docs/configuration/) covers the output-format flag and `extends:` for the bundled rulesets.
 - [Rules](/docs/rules/) lists the `agent-context` and `agent-hygiene` rulesets and their kinds.

@@ -2,7 +2,7 @@
 title: Kinds, families, and categories
 description: "alint ships 94 rule kinds (105 with aliases), grouped one way by family (one home each) and another way by category (cross-cutting tags you can filter on)."
 sidebar:
-  order: 4
+  order: 3
 ---
 
 Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct kinds** (105 counting aliases), and it organizes them two ways at once. Each kind has one home **family**, and each kind is tagged into one or more **categories**. Same thirteen names, two different relationships.
@@ -77,4 +77,4 @@ An unknown category slug fails fast with the list of the thirteen valid ones, so
 ## Going deeper
 
 - [Rules](/docs/rules/) is the full reference for every kind, grouped by family, with each kind's fields and examples.
-- [The config model](/docs/concepts/the-config-model/) shows how a `kind` sits inside the rule record.
+- [The config model](/docs/concepts/start-here/the-config-model/) shows how a `kind` sits inside the rule record.

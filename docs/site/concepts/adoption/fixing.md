@@ -2,7 +2,7 @@
 title: Fixing
 description: "How alint repairs violations: rules with a fix: block are auto-fixable, the twelve fix ops, content_from:, fix_size_limit, and why evaluation is parallel but fixes apply one rule at a time."
 sidebar:
-  order: 12
+  order: 1
 ---
 
 A rule that can mechanically repair its violation declares a `fix:` block. `alint check` only reports; `alint fix` applies the repairs. Evaluation runs in parallel across files, but the fix pass is a single sequential loop, one rule at a time, because each fixer writes to the tree that the next rule will read.
@@ -50,7 +50,7 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 
 ## Fixable versus report-only
 
-A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, `alint fix --only <rule-id>` applies just one rule's fixers (the command the [agent surface](/docs/concepts/the-agent-surface/) emits), and `alint fix --changed` restricts the pass to the diff ([cross-file](/docs/concepts/cross-file-rules/) and existence rules still see the whole tree). A violation with no fixer still fails the gate; fixing is an accelerant, not an escape hatch.
+A rule is auto-fixable only if it declares a `fix:` block; otherwise its violation is report-only and you repair it by hand. `alint check --format human` marks the fixable ones, and the summary counts them. `alint fix` applies them, `alint fix --dry-run` prints what it would change without writing, `alint fix --only <rule-id>` applies just one rule's fixers (the command the [agent surface](/docs/concepts/agents/the-agent-surface/) emits), and `alint fix --changed` restricts the pass to the diff ([cross-file](/docs/concepts/multi-file/cross-file-rules/) and existence rules still see the whole tree). A violation with no fixer still fails the gate; fixing is an accelerant, not an escape hatch.
 
 The fix pass runs **rule by rule in sequence** (evaluate the rule, then apply its fixers) rather than in parallel like `check`, because a fixer mutates files on disk and a later rule must see the result, not race it.
 
@@ -60,7 +60,7 @@ Seven ops edit content in place: `file_trim_trailing_whitespace`, `file_append_f
 
 ## content_from
 
-The three content-providing ops, `file_create`, `file_prepend`, and `file_append`, take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file. Exactly one of the two must be set. The path resolves against the lint root and is read at fix-apply time, so a LICENSE or SPDX header can live in `.alint/templates/` under version control instead of being escaped into YAML. A missing `content_from:` source is reported as `Skipped`, never a half-written file.
+The three content-providing ops, `file_create`, `file_prepend`, and `file_append`, take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file (exactly one of the two must be set). This is how boilerplate that is awkward to inline stays under version control: a real Apache-2 `LICENSE` is ~10 KB, and pasting it into YAML is fragile (escape rules, indentation drift, stray code-search hits), so stash the canonical bytes under `.alint/templates/` and point `content_from:` at them. The path resolves against the lint root and is read at fix-apply time, so the template need not exist when `alint check` runs, only when `alint fix` writes the target; a missing source is reported as `Skipped`, never a half-written file. In a monorepo with `nested_configs: true`, a sub-config's `content_from:` still resolves against the workspace root, so one root `.alint/templates/` supplies every package.
 
 These ops are careful about repeat runs: `file_prepend` and `file_append` are idempotent (a no-op when the content is already present) and `file_prepend` preserves a leading byte-order mark, while `file_create` skips a target that already exists.
 
@@ -107,6 +107,5 @@ Each applied line names the file in its summary; skipped and unfixable lines car
 ## Going deeper
 
 - [Configuration](/docs/configuration/#fix_size_limit) documents `fix_size_limit` and the per-rule `fix:` field.
-- [content_from](/docs/concepts/content-from/) is the file-backed alternative to an inline `content:` string, in depth.
 - [Rules](/docs/rules/) lists which kinds ship a fixer and the options each op takes.
-- [Changed mode](/docs/concepts/changed-mode/) covers `alint fix --changed`.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) covers `alint fix --changed`.

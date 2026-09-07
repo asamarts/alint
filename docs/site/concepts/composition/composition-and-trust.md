@@ -2,7 +2,7 @@
 title: Composition and trust
 description: "How extends: merges other configs into yours field-by-field by id, and the trust boundary that lets a fetched or bundled ruleset tighten your checks but never run your machine's code."
 sidebar:
-  order: 8
+  order: 1
 ---
 
 A config rarely stands alone. `extends:` pulls in other configs and merges their rules into yours, field by field, keyed on rule `id`. But the further a config sits from you, the less it is trusted: your own `.alint.yml` may run commands and reach outside the repo, while anything reached through `extends:` cannot. Adopting someone else's ruleset can only ever tighten your checks; it can never make your machine run their code.
@@ -98,5 +98,5 @@ Move `deploy-check` into your own top-level `.alint.yml` and it runs, because no
 ## Going deeper
 
 - [Configuration](/docs/configuration/#extends) is the field reference for `extends:`, `allow_out_of_root:`, and the rule filters.
-- [Config layering](/docs/concepts/config-layering/) covers drop-ins and nested configs, the other sources that merge into one effective config.
-- [Variable interpolation](/docs/concepts/variable-interpolation/) details the `#sha256-...` pin and how `{{env.X}}` interacts with an `extends:` URL.
+- [Config layering](/docs/concepts/composition/config-layering/) covers drop-ins and nested configs, the other sources that merge into one effective config.
+- [Variable interpolation](/docs/configuration/variable-interpolation/) details the `#sha256-...` pin and how `{{env.X}}` interacts with an `extends:` URL.

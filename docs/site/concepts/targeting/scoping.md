@@ -2,7 +2,7 @@
 title: Scoping
 description: "How a rule narrows from the whole index to the files it judges: the when: fact gate, the paths: glob, and scope_filter: predicates, applied in a fixed order."
 sidebar:
-  order: 6
+  order: 2
 ---
 
 A rule never judges the whole repository. It narrows from the walked index to a specific set of files through three gates applied in a fixed order: `when:` decides whether the rule runs at all, `paths:` selects files by glob, and `scope_filter:` refines that selection per file. Only what survives all three is evaluated.
@@ -49,7 +49,7 @@ A rule never judges the whole repository. It narrows from the walked index to a 
 ## scope_filter predicates
 
 - **`has_ancestor:`** keeps a file only when a named manifest sits somewhere in its ancestor directory chain. The engine walks `Path::parent()` upward (the file's own directory counts) and stops at the first match, so a content rule scopes to just its ecosystem's subtree in a polyglot monorepo. The bundled ecosystem rulesets use it to confine per-file rules to their package subtrees.
-- **`changed_since: <git-ref>`** keeps only files in the `<ref>...HEAD` merge-base diff, the form [`--changed --base=<ref>`](/docs/concepts/changed-mode/) uses (bare `--changed` uses a working-tree diff instead). It accepts `{{env.X}}` interpolation and resolves the diff once per run.
+- **`changed_since: <git-ref>`** keeps only files in the `<ref>...HEAD` merge-base diff, the form [`--changed --base=<ref>`](/docs/concepts/targeting/changed-mode/) uses (bare `--changed` uses a working-tree diff instead). It accepts `{{env.X}}` interpolation and resolves the diff once per run.
 - **`include_manifest_paths:` / `exclude_manifest_paths:`** scope by membership in a path set a manifest declares (a `Cargo.toml` `workspace.members`, a `package.json` `bin`), so the manifest that owns the truth and the rule that depends on it stay in one place. An optional **`derive_target: { from, to }`** regex maps a declared build output back to its source (`dist/cli.js` back to `src/cli.ts`); `expect_nonempty:` (default `true`) warns when an include set resolves to nothing rather than silently matching no files.
 
 A manifest **value** only gates which files a rule sees, never what it decides about them: extraction is pure parsing (no spawn, so it is safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
@@ -87,5 +87,5 @@ Unchanged Rust files, and every file outside a `Cargo.toml` subtree, are never c
 ## Going deeper
 
 - [Configuration](/docs/configuration/#scope_filter-per-file-rules-v096) is the field reference for every `scope_filter:` predicate and its options.
-- [The walker and git](/docs/concepts/walker-and-gitignore/) is the index these gates narrow, and where `git_tracked_only:` is defined.
-- [Changed mode](/docs/concepts/changed-mode/) is the run-wide `--changed` counterpart to the per-rule `changed_since:` predicate.
+- [The walker and git](/docs/concepts/targeting/the-walker-and-git/) is the index these gates narrow, and where `git_tracked_only:` is defined.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) is the run-wide `--changed` counterpart to the per-rule `changed_since:` predicate.

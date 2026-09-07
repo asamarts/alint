@@ -2,7 +2,7 @@
 title: Baseline mode
 description: "Grandfather a repo's existing violations so alint check gates only on new findings, using a fingerprint that keys on content rather than line number."
 sidebar:
-  order: 13
+  order: 2
 ---
 
 Turning a linter on for an established repo has a chicken-and-egg problem: the rules go red on thousands of pre-existing violations the current change never introduced. **Baseline mode** breaks it. You record today's violations into a committed baseline file, and from then on `alint check` reports and gates on only the findings that are *new* relative to that snapshot. It is the ratchet: stop the bleeding now, pay the backlog down on your own schedule.
@@ -100,7 +100,7 @@ error  no-todo-comments  TODO without an owner
 ## Going deeper
 
 - [`baseline:` configuration key](/docs/configuration/#baseline) persists the path.
-- [The walker and git](/docs/concepts/walker-and-gitignore/) is the whole-tree evaluation a baseline records.
-- [Changed mode](/docs/concepts/changed-mode/) is the `--changed` subset that baseline recording refuses.
-- [Severity and exit codes](/docs/concepts/severity-and-exit-codes/) is the gate the live (non-suppressed) findings drive.
-- [Suggesting rules](/docs/concepts/suggest/) pairs with baseline mode when adopting on an established repo.
+- [The walker and git](/docs/concepts/targeting/the-walker-and-git/) is the whole-tree evaluation a baseline records.
+- [Changed mode](/docs/concepts/targeting/changed-mode/) is the `--changed` subset that baseline recording refuses.
+- [Severity and exit codes](/docs/concepts/start-here/severity-and-exit-codes/) is the gate the live (non-suppressed) findings drive.
+- [Suggesting rules](/docs/cookbook/suggest/) pairs with baseline mode when adopting on an established repo.

@@ -2,7 +2,7 @@
 title: How alint works
 description: "A deep look at alint's execution pipeline: assemble one config, evaluate facts once, filter rules, walk the repository in parallel, dispatch per-file and cross-file rules over a single read of each file, and emit one report."
 sidebar:
-  order: 2
+  order: 1
 ---
 
 alint reads one declarative config, makes a single parallel pass over your repository, and emits one report in the format your pipeline wants. The diagram below traces the whole run top to bottom: the command, the config it assembles, the facts and `when:` filter that decide which rules survive, the walk that indexes the repository, the scanner that reads each file once, and the report that comes back with an exit code.
@@ -80,7 +80,7 @@ The design goal is one config, one pass, one report: predictable, fast, and easy
 
 ## 1. Assemble the config
 
-alint discovers the `.alint.yml` at the repository root and builds the **effective config**: it resolves every `extends:` source (a local file, an `https://` URL pinned by a SHA-256 hash, or a bundled ruleset resolved offline), caches and cycle-checks them, and field-merges each layer by rule `id`. This is also the trust boundary: a process-spawning rule (`kind: command` and its siblings) or a `custom:` fact that arrives through `extends:` is rejected at load, so adopting someone else's ruleset can never make your machine run their commands. The [config model](/docs/concepts/the-config-model/) covers assembly and precedence in full.
+alint discovers the `.alint.yml` at the repository root and builds the **effective config**: it resolves every `extends:` source (a local file, an `https://` URL pinned by a SHA-256 hash, or a bundled ruleset resolved offline), caches and cycle-checks them, and field-merges each layer by rule `id`. This is also the trust boundary: a process-spawning rule (`kind: command` and its siblings) or a `custom:` fact that arrives through `extends:` is rejected at load, so adopting someone else's ruleset can never make your machine run their commands. The [config model](/docs/concepts/start-here/the-config-model/) covers assembly and precedence in full.
 
 ## 2. Evaluate facts, once
 
@@ -109,7 +109,7 @@ The violations collect into one `Report`. alint renders it in your chosen format
 
 ## Going deeper
 
-- [The config model](/docs/concepts/the-config-model/) is the language this pipeline evaluates.
+- [The config model](/docs/concepts/start-here/the-config-model/) is the language this pipeline evaluates.
 - The interactive model below lets you explore every component and edge of the run:
 
 <likec4-view view-id="checkFlow"></likec4-view>
