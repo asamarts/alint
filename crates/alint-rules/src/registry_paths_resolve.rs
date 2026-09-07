@@ -142,7 +142,7 @@ pub struct RegistryPathsResolveRule {
     exclude_query: Option<String>,
     orphans: Option<OrphansSpec>,
     /// Permit reading a `source:` registry file that escapes the repo
-    /// root — set post-build from the top-level `allow_out_of_root:`
+    /// root - set post-build from the top-level `allow_out_of_root:`
     /// policy. (The declared *entries* stay confined regardless.)
     allow_out_of_root: bool,
 }

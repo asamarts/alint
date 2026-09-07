@@ -260,7 +260,7 @@ mod tests {
                 ("src", true),
                 ("src/foo", true),
                 ("src/foo/a.rs", false),
-                ("src/foo/inner", true), // subdirectory — skipped
+                ("src/foo/inner", true), // subdirectory - skipped
             ],
         );
         assert!(v.is_empty());

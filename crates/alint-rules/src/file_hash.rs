@@ -127,7 +127,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "file_hash has no fix op — alint can't synthesize the correct content",
+            "file_hash has no fix op - alint can't synthesize the correct content",
         ));
     }
     Ok(Box::new(FileHashRule {

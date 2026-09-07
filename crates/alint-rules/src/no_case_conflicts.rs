@@ -88,7 +88,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "no_case_conflicts has no fix op — renaming which path to keep is a human decision",
+            "no_case_conflicts has no fix op - renaming which path to keep is a human decision",
         ));
     }
     Ok(Box::new(NoCaseConflictsRule {

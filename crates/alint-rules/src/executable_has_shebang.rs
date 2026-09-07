@@ -85,7 +85,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "executable_has_shebang has no fix op — add a shebang or clear +x is a human call",
+            "executable_has_shebang has no fix op - add a shebang or clear +x is a human call",
         ));
     }
     Ok(Box::new(ExecutableHasShebangRule {

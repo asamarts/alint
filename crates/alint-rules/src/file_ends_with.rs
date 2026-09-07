@@ -109,7 +109,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "file_ends_with has no fix op — pair with an explicit `file_append` rule if you \
+            "file_ends_with has no fix op - pair with an explicit `file_append` rule if you \
              want auto-append (avoids silently duplicating near-matching suffixes).",
         ));
     }

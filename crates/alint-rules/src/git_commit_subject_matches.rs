@@ -141,7 +141,7 @@ mod tests {
     }
 
     /// Construct the concrete rule directly so tests can drive
-    /// `check_one` — the real per-commit path — without a git repo.
+    /// `check_one` - the real per-commit path - without a git repo.
     fn match_rule(re: &str) -> GitCommitSubjectMatchesRule {
         GitCommitSubjectMatchesRule {
             id: "subject-grammar".into(),

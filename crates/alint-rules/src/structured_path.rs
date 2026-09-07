@@ -65,7 +65,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_json_path::JsonPath;
 
-/// True when `pattern` is a plain relative-path literal — no
+/// True when `pattern` is a plain relative-path literal - no
 /// glob metacharacters, no `!` exclude prefix. Mirrors
 /// `file_exists::is_literal_path`; kept local to dodge a
 /// crate-wide pub-helper module just for two rules.
@@ -78,7 +78,7 @@ fn is_literal_path(pattern: &str) -> bool {
 
 /// Collect every literal pattern from `spec` IFF every entry is
 /// a literal AND the spec carries no excludes. Returns `None`
-/// when any pattern is a glob or there are excludes — the slow
+/// when any pattern is a glob or there are excludes - the slow
 /// path is still correct in those cases.
 fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
     let patterns: Vec<&str> = match spec {
@@ -96,7 +96,7 @@ fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
     }
 }
 
-/// Comparison op — keeps the rule builders thin.
+/// Comparison op - keeps the rule builders thin.
 #[derive(Debug)]
 pub enum Op {
     /// Value at `path` must serialize-compare equal to this
@@ -197,7 +197,7 @@ pub struct StructuredPathRule {
     /// literal (no glob metacharacters, no `!` excludes). The
     /// fast path uses these to short-circuit through the
     /// index's hash-set and skip the O(N) `scope.matches`
-    /// scan — same shape as `file_exists`'s fast path. Driven
+    /// scan - same shape as `file_exists`'s fast path. Driven
     /// by the bundled `monorepo/cargo-workspace@v1`'s
     /// `cargo-workspace-member-declares-name` rule, which
     /// `for_each_dir` instantiates with `paths:
@@ -211,10 +211,10 @@ pub struct StructuredPathRule {
     op: Op,
     /// When `true`, a `JSONPath` query that produces zero matches
     /// is silently OK. When `false` (default), a zero-match query
-    /// is reported as a single violation — the "value being
+    /// is reported as a single violation - the "value being
     /// enforced doesn't exist" case. Use `true` for predicates
     /// that are conditional on the field being present (e.g.
-    /// "every `uses:` in a workflow must be SHA-pinned" — a
+    /// "every `uses:` in a workflow must be SHA-pinned" - a
     /// workflow with no `uses:` at all shouldn't be flagged).
     if_present: bool,
 }
@@ -372,7 +372,7 @@ impl PerFileRule for StructuredPathRule {
 ///
 /// The value is rendered in **full** (not `short_render`, which truncates at
 /// 80 chars for human messages): a truncated value would collapse two distinct
-/// long values sharing an 80-char prefix into one fingerprint — a masking bug.
+/// long values sharing an 80-char prefix into one fingerprint - a masking bug.
 /// `Value`'s `Display` is compact JSON with control characters escaped, so a
 /// value can never contain a literal `\0` and forge the NUL separators.
 fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {

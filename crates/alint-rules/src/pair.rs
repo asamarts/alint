@@ -80,7 +80,7 @@ impl Rule for PairRule {
             if resolves_to_self(&partner_path, &entry.path) {
                 violations.push(
                     Violation::new(format!(
-                        "partner template {:?} resolves to the primary file itself ({}) — \
+                        "partner template {:?} resolves to the primary file itself ({}) - \
                          check that the template differs from the primary",
                         self.partner_template,
                         entry.path.display(),
@@ -211,7 +211,7 @@ mod tests {
             &r,
             &[
                 "src/mod/foo.c",
-                "src/mod/foo.h", // has partner — OK
+                "src/mod/foo.h", // has partner - OK
                 "src/mod/bar.c", // no bar.h
                 "src/mod/baz.c", // no baz.h
             ],

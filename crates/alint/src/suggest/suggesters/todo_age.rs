@@ -136,7 +136,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
   pattern: '\b(TODO|FIXME|XXX|HACK)\b'
   max_age_days: {STALE_THRESHOLD_DAYS}
   level: warning
-  message: "`{{{{ctx.match}}}}` is over {STALE_THRESHOLD_DAYS} days old — resolve, convert to a tracked issue, or remove."
+  message: "`{{{{ctx.match}}}}` is over {STALE_THRESHOLD_DAYS} days old - resolve, convert to a tracked issue, or remove."
 "#
     );
 
@@ -148,7 +148,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
         },
         confidence: Confidence::Medium,
         summary: format!(
-            "{stale_total} stale TODO/FIXME marker{} — `git_blame_age` would flag them.",
+            "{stale_total} stale TODO/FIXME marker{} - `git_blame_age` would flag them.",
             if stale_total == 1 { "" } else { "s" },
         ),
         evidence,

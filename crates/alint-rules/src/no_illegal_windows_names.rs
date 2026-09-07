@@ -130,7 +130,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "no_illegal_windows_names has no fix op — renames aren't deterministic",
+            "no_illegal_windows_names has no fix op - renames aren't deterministic",
         ));
     }
     Ok(Box::new(NoIllegalWindowsNamesRule {

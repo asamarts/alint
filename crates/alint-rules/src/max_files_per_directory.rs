@@ -93,7 +93,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "max_files_per_directory has no fix op — file relocation is a human decision",
+            "max_files_per_directory has no fix op - file relocation is a human decision",
         ));
     }
     Ok(Box::new(MaxFilesPerDirectoryRule {

@@ -30,7 +30,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
         },
         confidence: Confidence::High,
         evidence: vec![Evidence {
-            message: "Applies to every repository — README, LICENSE, hygiene basics.".into(),
+            message: "Applies to every repository - README, LICENSE, hygiene basics.".into(),
         }],
         summary: "Universal OSS hygiene baseline.".into(),
     });
@@ -66,7 +66,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
             evidence: vec![Evidence {
                 message: format!("Detected via {marker}."),
             }],
-            summary: format!("{label} detected — extend the language ruleset."),
+            summary: format!("{label} detected - extend the language ruleset."),
         });
     }
 
@@ -94,7 +94,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
             evidence: vec![Evidence {
                 message: format!("Workspace detected via {label}."),
             }],
-            summary: "Workspace-tier monorepo — extend the generic monorepo ruleset.".into(),
+            summary: "Workspace-tier monorepo - extend the generic monorepo ruleset.".into(),
         });
         out.push(Proposal {
             id: uri.into(),

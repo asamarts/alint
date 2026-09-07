@@ -33,7 +33,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 /// Cap on the tool output captured into a fallback violation
-/// message — a noisy formatter can emit a lot; keep reports
+/// message - a noisy formatter can emit a lot; keep reports
 /// legible (mirrors the `command` rule's output cap intent).
 const OUTPUT_SNIPPET_CAP: usize = 400;
 
@@ -157,7 +157,7 @@ impl Rule for CommandIdempotentRule {
                 return Ok(vec![self.violation(
                     &self.workdir,
                     &format!(
-                        "`{}` exited with {code} — the tree is not formatter-clean{}",
+                        "`{}` exited with {code} - the tree is not formatter-clean{}",
                         self.command.join(" "),
                         snippet(&stdout, &stderr),
                     ),

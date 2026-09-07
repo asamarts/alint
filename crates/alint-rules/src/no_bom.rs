@@ -40,7 +40,7 @@ impl BomKind {
 
     /// Byte count of this BOM sequence. Named `byte_len` rather
     /// than `len` to dodge clippy's "has `len` but no `is_empty`"
-    /// lint — BOMs are never empty.
+    /// lint - BOMs are never empty.
     pub fn byte_len(self) -> usize {
         match self {
             Self::Utf8 => 3,

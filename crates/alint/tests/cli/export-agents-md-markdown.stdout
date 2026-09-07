@@ -2,7 +2,7 @@
 
 ## Lint rules enforced by alint
 
-Generated from `.alint.yml` by `alint export-agents-md`. Re-run after editing the lint config — these directives must stay in sync with what alint blocks at commit time. Manual edits inside this section are overwritten.
+Generated from `.alint.yml` by `alint export-agents-md`. Re-run after editing the lint config - these directives must stay in sync with what alint blocks at commit time. Manual edits inside this section are overwritten.
 
 ### Errors (commit will fail)
 

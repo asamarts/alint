@@ -81,7 +81,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "max_directory_depth has no fix op — moving files is a human decision",
+            "max_directory_depth has no fix op - moving files is a human decision",
         ));
     }
     Ok(Box::new(MaxDirectoryDepthRule {

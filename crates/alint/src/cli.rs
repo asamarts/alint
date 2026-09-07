@@ -25,7 +25,7 @@ use crate::ALINT_LONG_VERSION;
     max_term_width = 100,
 )]
 // Several independent boolean flags are the natural shape of the
-// CLI surface — `--ascii`, `--compact`, `--fail-on-warning`,
+// CLI surface - `--ascii`, `--compact`, `--fail-on-warning`,
 // `--no-gitignore`. Collapsing them into a state-machine enum
 // would obscure, not clarify.
 #[allow(clippy::struct_excessive_bools)]
@@ -48,7 +48,7 @@ pub(crate) struct Cli {
 
     /// List informational notes in full on stderr.
     ///
-    /// Notes are non-violation findings — e.g. entries a rule skipped
+    /// Notes are non-violation findings - e.g. entries a rule skipped
     /// rather than failed on. By default only a one-line count is shown.
     #[arg(long, global = true)]
     pub(crate) show_notes: bool,
@@ -102,7 +102,7 @@ pub(crate) struct Cli {
     ///
     /// Currently just `alint suggest`. `auto` (the default) renders
     /// when stderr is a TTY; `always` forces; `never` silences.
-    /// Progress always lives on stderr — `--format` JSON output on
+    /// Progress always lives on stderr - `--format` JSON output on
     /// stdout stays byte-clean.
     #[arg(
         long,
@@ -156,7 +156,7 @@ pub(crate) struct Cli {
     /// Applies to `check` and `fix` (the `agent` format emits `fix
     /// --only <rule-id>`); rejected on any other subcommand. Global, so
     /// the bare `alint --only <id>` lints the current directory like
-    /// `alint check --only <id>` — to lint a different path, use the
+    /// `alint check --only <id>` - to lint a different path, use the
     /// explicit form `alint check --only <id> <path>`.
     #[arg(long, global = true, value_name = "RULE_ID")]
     pub(crate) only: Vec<String>,
@@ -258,7 +258,7 @@ pub(crate) enum Command {
     /// Scaffold a starter `.alint.yml` for the detected ecosystem.
     ///
     /// Detects the ecosystem (and optionally workspace shape) from the
-    /// repo. Refuses to overwrite an existing config — delete the
+    /// repo. Refuses to overwrite an existing config - delete the
     /// existing one first if you really mean it.
     Init {
         /// Root of the repository to write the config into.
@@ -297,7 +297,7 @@ pub(crate) enum Command {
         /// "Lint rules enforced by alint".
         #[arg(long, value_name = "TEXT")]
         section_title: Option<String>,
-        /// Include `level: info` rules. Default omits them —
+        /// Include `level: info` rules. Default omits them -
         /// info-level rules are nudges, not directives.
         #[arg(long)]
         include_info: bool,
@@ -315,7 +315,7 @@ pub(crate) enum Command {
     },
     /// Scan for antipatterns and propose rules that would catch them.
     ///
-    /// Prints proposals to stdout for review — never edits the user's
+    /// Prints proposals to stdout for review - never edits the user's
     /// config. Pairs naturally with `alint init` for a smarter
     /// cold-start adoption flow.
     Suggest {

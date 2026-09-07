@@ -93,7 +93,7 @@ impl PerFileRule for MaxConsecutiveBlankLinesRule {
 
 /// Return the 1-based line number of the first blank line that
 /// pushes the consecutive-blank counter above `max`. Only counts
-/// blank lines that lie between file content — the trailing slot
+/// blank lines that lie between file content - the trailing slot
 /// after the final newline is ignored so a regular `foo\n` file
 /// doesn't trip max=0.
 fn first_over_limit(text: &str, max: u32) -> Option<usize> {

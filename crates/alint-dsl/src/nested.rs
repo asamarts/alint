@@ -104,7 +104,7 @@ pub(crate) fn discover_nested(
                     return Err(Error::rule_config(
                         id,
                         format!(
-                            "nested config {} redefines rule id {id:?} — \
+                            "nested config {} redefines rule id {id:?} - \
                              per-subtree overrides aren't supported yet; \
                              pick a unique id or disable the root's rule \
                              and define it per-subtree",
@@ -149,44 +149,44 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     let source = abs_path.display().to_string();
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `extends:` — nested configs \
+            "nested config {source} declares `extends:` - nested configs \
              are flat in this release; extend only from the root config"
         )));
     }
     if !config.facts.is_empty() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `facts:` — facts are a \
+            "nested config {source} declares `facts:` - facts are a \
              root-only concept; move the fact to the root config"
         )));
     }
     if !config.vars.is_empty() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `vars:` — vars are a \
+            "nested config {source} declares `vars:` - vars are a \
              root-only concept; move them to the root config"
         )));
     }
     if !config.ignore.is_empty() || config.nested_configs {
         return Err(Error::Other(format!(
-            "nested config {source} declares `ignore:` or `nested_configs:` — \
+            "nested config {source} declares `ignore:` or `nested_configs:` - \
              both are root-only in this release"
         )));
     }
     if config.baseline.is_some() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `baseline:` — the baseline is a \
+            "nested config {source} declares `baseline:` - the baseline is a \
              trusted, root-only input; declare it in the top-level config"
         )));
     }
     if !config.allow_out_of_root.is_confined() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `allow_out_of_root:` — the out-of-root \
+            "nested config {source} declares `allow_out_of_root:` - the out-of-root \
              escape hatch is a trusted, root-only grant; declare it in the top-level \
              config. (It is ignored here, never silently honored.)"
         )));
     }
     if !config.templates.is_empty() {
         return Err(Error::Other(format!(
-            "nested config {source} declares `templates:` — templates are a root-only \
+            "nested config {source} declares `templates:` - templates are a root-only \
              concept (a nested template would be silently dropped, and could otherwise \
              smuggle a spawning rule into the subtree); declare them in the top-level \
              config"
@@ -283,7 +283,7 @@ fn scope_rule(rule: &mut Mapping, prefix: &str, source: &str) -> Result<()> {
             &id_hint,
             format!(
                 "rule in nested config {source} has no path-like scope \
-                 field ({}) — nested configs can only contribute rules \
+                 field ({}) - nested configs can only contribute rules \
                  whose scope can be confined to the nested directory",
                 NESTED_SCOPE_FIELDS.join(", "),
             ),
@@ -348,7 +348,7 @@ pub(crate) fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
     };
     if rest.starts_with('/') {
         return Err(Error::Other(format!(
-            "absolute path {glob:?} can't be used in a nested config — \
+            "absolute path {glob:?} can't be used in a nested config - \
              it would escape the subtree"
         )));
     }

@@ -45,7 +45,7 @@ struct Options {
     require: Vec<NestedRuleSpec>,
 }
 
-/// Schema for `require:` — a non-empty array of the shared `nested_rule` def
+/// Schema for `require:` - a non-empty array of the shared `nested_rule` def
 /// (kept hand-written; see the field comment). Reproduces the previous
 /// hand-written branch exactly.
 fn require_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {

@@ -22,7 +22,7 @@ fn not_regular_file(path: &Path) -> std::io::Error {
 /// skips these at index time (`result_to_entry`); the direct-read helpers that
 /// bypass the walker must apply the same guard. The `metadata` stat follows
 /// symlinks, so a symlink-to-FIFO is rejected too. (A vanishingly small TOCTOU
-/// window remains between the stat and the open — the real threat is a
+/// window remains between the stat and the open - the real threat is a
 /// committed / planted special file, which the stat catches.)
 fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
     if !std::fs::metadata(path)?.is_file() {
@@ -38,7 +38,7 @@ pub fn read_prefix(path: &Path) -> std::io::Result<Vec<u8>> {
 }
 
 /// Read up to `n` bytes from the start of `path`. Used by rules that
-/// only need to inspect a leading window — `executable_has_shebang`
+/// only need to inspect a leading window - `executable_has_shebang`
 /// (2 bytes for `#!`), `file_starts_with` (`pattern.len()` bytes).
 /// Reads less than `n` if the file is shorter; returns the actual byte
 /// count in the returned `Vec`'s length.
@@ -51,7 +51,7 @@ pub fn read_prefix_n(path: &Path, n: usize) -> std::io::Result<Vec<u8>> {
 }
 
 /// Read up to `n` bytes from the END of `path`. Used by rules that
-/// only need to inspect the tail — `file_ends_with` (`pattern.len()`
+/// only need to inspect the tail - `file_ends_with` (`pattern.len()`
 /// bytes). Returns the actual byte count in the returned `Vec`'s
 /// length; fewer than `n` bytes if the file is shorter. Files smaller
 /// than `n` are read whole.
@@ -69,7 +69,7 @@ pub fn read_suffix_n(path: &Path, n: usize) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Classification of a file's contents. Computed lazily — callers check the
+/// Classification of a file's contents. Computed lazily - callers check the
 /// subset they care about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
@@ -86,7 +86,7 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
 
 /// Whether `bytes` look like binary content (per `content_inspector`,
 /// sampling the same leading window as `file_is_text`). The byte-level
-/// fixers consult this and refuse to rewrite a binary file — a line-ending,
+/// fixers consult this and refuse to rewrite a binary file - a line-ending,
 /// BOM, final-newline, or prepend/append edit on a binary corrupts it.
 pub fn looks_binary(bytes: &[u8]) -> bool {
     let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
@@ -94,13 +94,13 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
 }
 
 /// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
-/// file, copy the original's permissions onto it (so an existing mode —
-/// notably the executable bit — survives), `fsync`, then rename it over
+/// file, copy the original's permissions onto it (so an existing mode -
+/// notably the executable bit - survives), `fsync`, then rename it over
 /// `path`. Unlike `std::fs::write` (open-truncate-then-write), a crash or
 /// I/O error mid-write leaves the original intact rather than truncated or
 /// destroyed. The temp is a sibling so the rename is atomic on the same
 /// filesystem, and it is cleaned up on failure. (Manual temp, no `tempfile`
-/// runtime dependency — matching the extends cache.)
+/// runtime dependency - matching the extends cache.)
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -142,13 +142,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Hard cap on a single whole-file read across the rule/engine read paths.
-/// Generous — every realistic manifest / source / generated file is orders of
-/// magnitude smaller — yet bounded so a hostile or accidental multi-GB file in
+/// Generous - every realistic manifest / source / generated file is orders of
+/// magnitude smaller - yet bounded so a hostile or accidental multi-GB file in
 /// a linted repo can't OOM the run. The over-cap *outcome* varies by read
 /// site: the cross-file kinds (`registry_paths_resolve`, `pair_hash`, …) and
 /// the `for_each` single-literal path yield a clear over-cap violation
 /// (fail-closed); the per-file engine/rule loops and the per-file content
-/// rules skip the file (fail-open, resilient — a file too big to analyze is
+/// rules skip the file (fail-open, resilient - a file too big to analyze is
 /// left un-analyzed rather than failing the build), logging at `warn` where a
 /// `tracing` sink is available (the `alint-core` loops).
 ///

@@ -97,7 +97,7 @@ pub struct PairHashRule {
     target: String,
     algorithm: Algorithm,
     format: Format,
-    /// Permit reading a `target:` that escapes the repo root — set
+    /// Permit reading a `target:` that escapes the repo root - set
     /// post-build from the top-level `allow_out_of_root:` policy.
     allow_out_of_root: bool,
 }
@@ -314,7 +314,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "pair_hash has no fix op — regenerating a checksum manifest is the \
+            "pair_hash has no fix op - regenerating a checksum manifest is the \
              manifest generator's job, not alint's",
         ));
     }
@@ -570,7 +570,7 @@ mod tests {
     /// `pair_hash` (and the other v0.10 cross-file / structured
     /// rules) consume. We can't materialise a >256 MiB fixture
     /// at test time, so we go in via `read_capped_with` directly
-    /// — proves the cap helper preserves the file's real size
+    /// to prove the cap helper preserves the file's real size
     /// (so the rule's `{n} bytes` interpolation reports honestly)
     /// and that the canonical "too large to analyze" wording
     /// constructed from that `n` matches what the rule's evaluate

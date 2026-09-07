@@ -170,7 +170,7 @@ impl Default for LinesOpts {
 /// Genuine markers only: shell/Nix `${var}` and `$(cmd)`,
 /// mustache/jinja `{{ … }}`, string concatenation `"a" + b`.
 /// A bare `$`, backtick, or `(.` is legal in a real filename, so
-/// it is **not** treated as non-literal — over-matching those
+/// it is **not** treated as non-literal - over-matching those
 /// silently dropped real literal paths (a false negative; v0.10
 /// post-audit P2). The skip never fails the rule and is
 /// intentionally silent; visibly surfacing skipped entries is a

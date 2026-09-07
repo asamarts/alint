@@ -237,7 +237,7 @@ fn format_msg(commit: &CommitRecord, subject: &str, what: &str) -> String {
 /// first line; the body is everything after the first blank line
 /// that follows it. Messages with no blank-line separator have an
 /// empty body. Trailing whitespace on the subject is preserved
-/// as-is — the length check counts it.
+/// as-is - the length check counts it.
 fn split_subject_body(message: &str) -> (&str, &str) {
     let (subject, rest) = message.split_once('\n').unwrap_or((message, ""));
     // Skip exactly one trailing blank-line separator if present
@@ -251,13 +251,13 @@ fn split_subject_body(message: &str) -> (&str, &str) {
 /// Expand POSIX-style env-var references in a `since:` value. The
 /// syntax is intentionally narrow:
 ///
-/// - `${VAR}` — substitute the value of `VAR`. If unset, returns
+/// - `${VAR}` - substitute the value of `VAR`. If unset, returns
 ///   `Err(missing-var-name)` so the rule can hard-fail with a
 ///   CI-friendly hint.
-/// - `${VAR:-default}` — substitute `VAR`, or `default` when
+/// - `${VAR:-default}` - substitute `VAR`, or `default` when
 ///   `VAR` is unset or empty. `default` may not itself contain
-///   `${`, `}` or `:-` — keep the surface small.
-/// - Bare text — left as-is. So `since: origin/main` works
+///   `${`, `}` or `:-` - keep the surface small.
+/// - Bare text - left as-is. So `since: origin/main` works
 ///   unchanged.
 ///
 /// Multiple `${...}` references in one value are supported. The

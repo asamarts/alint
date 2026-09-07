@@ -31,7 +31,7 @@ use crate::fixers::FileStripZeroWidthFixer;
 
 /// Returns true if `c` is a zero-width character that this rule
 /// flags. `is_leading_feff == true` means U+FEFF at byte 0 of
-/// the file (the BOM case) — that's deliberately NOT flagged.
+/// the file (the BOM case) - that's deliberately NOT flagged.
 pub fn is_flagged_zero_width(c: char, is_leading_feff: bool) -> bool {
     match c {
         '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{180E}' => true,

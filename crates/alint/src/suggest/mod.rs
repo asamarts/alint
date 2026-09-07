@@ -123,7 +123,7 @@ fn summarise(proposals: &[Proposal], elapsed: std::time::Duration) -> String {
     let total = proposals.len();
     if total == 0 {
         return format!(
-            "alint: 0 proposals — your config already looks tidy. ({:.1}s)",
+            "alint: 0 proposals - your config already looks tidy. ({:.1}s)",
             elapsed.as_secs_f64()
         );
     }
@@ -150,7 +150,7 @@ fn summarise(proposals: &[Proposal], elapsed: std::time::Duration) -> String {
         parts.push(format!("{low} low"));
     }
     format!(
-        "alint: {total} proposal{} ({}) — {:.1}s",
+        "alint: {total} proposal{} ({}) - {:.1}s",
         if total == 1 { "" } else { "s" },
         parts.join(", "),
         elapsed.as_secs_f64(),

@@ -91,7 +91,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
             uri: AGENT_HYGIENE_URI.into(),
         },
         confidence: Confidence::Medium,
-        summary: "Agent-hygiene leftovers detected — bundled ruleset would catch them.".into(),
+        summary: "Agent-hygiene leftovers detected - bundled ruleset would catch them.".into(),
         evidence,
     }]
 }

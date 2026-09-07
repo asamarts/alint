@@ -234,7 +234,7 @@ impl Phase {
         if let Some(bar) = self.bar {
             bar.finish_with_message(summary.to_string());
         } else if let Some(label) = self.fallback_label {
-            eprintln!("· {label} — {summary}");
+            eprintln!("· {label} - {summary}");
         }
     }
 }

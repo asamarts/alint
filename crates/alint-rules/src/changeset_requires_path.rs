@@ -124,7 +124,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if opts.since.trim().is_empty() {
         return Err(Error::rule_config(
             &spec.id,
-            "`since` must not be empty — `changeset_requires_path` is diff-scoped and needs a \
+            "`since` must not be empty - `changeset_requires_path` is diff-scoped and needs a \
              base ref (typically `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`)",
         ));
     }

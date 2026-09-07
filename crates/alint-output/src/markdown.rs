@@ -180,7 +180,7 @@ fn write_violation_bullet(
 
     writeln!(
         w,
-        "- **{level}** {rule_part}{loc} — {}",
+        "- **{level}** {rule_part}{loc} - {}",
         md_escape(&violation.message)
     )?;
     Ok(())
@@ -419,7 +419,7 @@ mod tests {
         let out = render(&report);
         assert!(out.contains("**1 violation across 1 file** (1 error)."));
         assert!(out.contains("## `src/lib.rs` (1)"));
-        assert!(out.contains("- **error** `no-todo` (line 12, col 4) — TODO marker found"));
+        assert!(out.contains("- **error** `no-todo` (line 12, col 4) - TODO marker found"));
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
         };
         let out = render(&report);
         assert!(out.contains("## Cross-file (1)"));
-        assert!(out.contains("- **error** `unique-pkg` — duplicate package name"));
+        assert!(out.contains("- **error** `unique-pkg` - duplicate package name"));
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod tests {
             )],
         };
         let out = render(&report);
-        assert!(out.contains("(line 7) — x"));
+        assert!(out.contains("(line 7) - x"));
         assert!(!out.contains("col"));
     }
 

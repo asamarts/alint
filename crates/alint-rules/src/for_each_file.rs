@@ -32,7 +32,7 @@ use crate::for_each_dir::{
 #[serde(deny_unknown_fields)]
 struct Options {
     select: SelectSpec,
-    /// Optional per-iteration filter — typical shapes:
+    /// Optional per-iteration filter - typical shapes:
     /// `iter.basename matches "^[a-z]"` to skip uppercase-named
     /// files, or `not iter.has_file(...)` (always false for
     /// file iteration) to no-op the rule.

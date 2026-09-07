@@ -172,7 +172,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "indent_style has no fix op — tab-width-aware reindentation is deferred",
+            "indent_style has no fix op - tab-width-aware reindentation is deferred",
         ));
     }
     Ok(Box::new(IndentStyleRule {

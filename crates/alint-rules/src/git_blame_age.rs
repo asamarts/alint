@@ -138,7 +138,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,
-            "git_blame_age has no fix op — auto-removing matched lines is destructive",
+            "git_blame_age has no fix op - auto-removing matched lines is destructive",
         ));
     }
     let pattern = Regex::new(&opts.pattern)
