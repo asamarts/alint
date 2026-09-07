@@ -29,8 +29,8 @@ The `iter` namespace exposes:
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `require` | list of nested rule | yes |  | Nested rules evaluated against each matched directory. |
-| `select` | string or list of string | yes |  | Glob(s) selecting the directories to iterate — a single glob, or a list with `!`-prefixed excludes (e.g. ["src/*", "!src/internal"]). |
-| `when_iter` | string |  |  | Per-iteration `when:` filter — evaluated against `iter.*` in the iterated entry's context. Iterations whose verdict is false are skipped before any nested rule is built. Examples: `iter.has_file("Cargo.toml")`, `iter.basename matches "^pkg-"`. |
+| `select` | string or list of string | yes |  | Glob(s) selecting the directories to iterate - a single glob, or a list with `!`-prefixed excludes (e.g. ["src/*", "!src/internal"]). |
+| `when_iter` | string |  |  | Per-iteration `when:` filter - evaluated against `iter.*` in the iterated entry's context. Iterations whose verdict is false are skipped before any nested rule is built. Examples: `iter.has_file("Cargo.toml")`, `iter.basename matches "^pkg-"`. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 

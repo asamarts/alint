@@ -59,7 +59,7 @@ rules:
 ```ansi
 [2m--- .gitmodules ----------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mno-submods[0m
-              `.gitmodules` present — git submodules are forbidden
+              `.gitmodules` present - git submodules are forbidden
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

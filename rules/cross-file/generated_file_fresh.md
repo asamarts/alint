@@ -60,9 +60,8 @@ rules:
 ```ansi
 [2m--- gen/list.txt ---------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mlist-fresh[0m
-              gen/list.txt: is stale — its committed contents differ from `sh
-              -c printf 'alpha\nbravo\ncharlie\n'` output (first differs at line
-              2)
+              gen/list.txt: is stale - its committed contents differ from `sh -c
+              printf 'alpha\nbravo\ncharlie\n'` output (first differs at line 2)
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

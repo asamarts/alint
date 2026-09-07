@@ -12,7 +12,7 @@ No two files matching `select` may share the value of `key` (a path template; to
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `case_insensitive` | boolean |  | `false` | Fold the key to lowercase before grouping, so keys that collide only under case-folding count as duplicates — the case-insensitive-filesystem hazard (Windows / macOS). |
+| `case_insensitive` | boolean |  | `false` | Fold the key to lowercase before grouping, so keys that collide only under case-folding count as duplicates - the case-insensitive-filesystem hazard (Windows / macOS). |
 | `key` | string |  | `{basename}` | Path-template producing a key per matched file. Default: {basename}. |
 | `select` | string | yes |  | Glob selecting the files to deduplicate. |
 
