@@ -27,15 +27,15 @@ alint is driven by a small declarative language. You describe the checks you wan
 </style>
 <text class="ui ac" x="18" y="15">one effective config, from many sources</text>
 <text class="ui mut" x="18" y="32">low to high precedence &#8595;</text>
-<rect class="card" x="20" y="42"  width="420" height="44" rx="8"/><rect x="20" y="42"  width="6" height="44" rx="2" fill="#3b82f6"/>
+<rect class="card" x="20" y="42"  width="420" height="48" rx="8"/><rect x="20" y="42"  width="6" height="44" rx="2" fill="#3b82f6"/>
 <text class="ui" x="36" y="60" fill="#3b82f6">bundled</text><text class="mono tx" x="36" y="78">oss-baseline@v1</text><text class="tag mut" x="424" y="69" text-anchor="end">readme-exists: warning</text>
-<rect class="card" x="20" y="98"  width="420" height="44" rx="8"/><rect x="20" y="98"  width="6" height="44" rx="2" fill="#f59e0b"/>
+<rect class="card" x="20" y="98"  width="420" height="48" rx="8"/><rect x="20" y="98"  width="6" height="44" rx="2" fill="#f59e0b"/>
 <text class="ui" x="36" y="116" fill="#f59e0b">extends</text><text class="mono tx" x="36" y="134">./team.yml</text><text class="tag mut" x="424" y="125" text-anchor="end">+ team rules</text>
-<rect class="card" x="20" y="154" width="420" height="44" rx="8"/><rect x="20" y="154" width="6" height="44" rx="2" fill="#4f46e5"/>
+<rect class="card" x="20" y="154" width="420" height="48" rx="8"/><rect x="20" y="154" width="6" height="44" rx="2" fill="#4f46e5"/>
 <text class="ui ac" x="36" y="172">root</text><text class="mono tx" x="36" y="190">.alint.yml</text><text class="tag mut" x="424" y="181" text-anchor="end">+ your rules</text>
-<rect class="card" x="20" y="210" width="420" height="44" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
+<rect class="card" x="20" y="210" width="420" height="48" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
 <text class="ui" x="36" y="228" fill="#7c3aed">drop-in</text><text class="mono tx" x="36" y="246">99-local.yml</text><text class="tag" x="424" y="237" text-anchor="end" fill="#7c3aed">readme-exists: error</text>
-<path class="flow" d="M 230 254 V 272"/><text class="ui mut" x="242" y="267">merge by id</text>
+<path class="flow" d="M 230 258 V 272"/><text class="ui mut" x="242" y="267">merge by id</text>
 <text class="ui ac" x="20" y="290">effective config</text>
 <rect class="eff" x="20" y="298" width="420" height="156" rx="12"/>
 <text class="mono ac" x="36" y="326" font-weight="700">readme-exists</text>

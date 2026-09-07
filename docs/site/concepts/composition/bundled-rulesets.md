@@ -29,14 +29,14 @@ alint ships **22 bundled rulesets** compiled straight into the binary, with no n
 </style>
 <text class="ui ac" x="18" y="16">one extends line</text>
 <text class="ui mut" x="442" y="16" text-anchor="end">22 bundled rulesets</text>
-<rect class="key" x="70" y="26" width="320" height="42" rx="9"/><text class="tag ac" x="230" y="45" text-anchor="middle">your .alint.yml</text><text class="tag mut" x="230" y="60" text-anchor="middle">extends: oss-baseline, rust@v1, go@v1</text>
+<rect class="key" x="70" y="26" width="320" height="46" rx="9"/><text class="tag ac" x="230" y="45" text-anchor="middle">your .alint.yml</text><text class="tag mut" x="230" y="61" text-anchor="middle">extends: oss-baseline, rust@v1, go@v1</text>
 <text class="tag mut" x="230" y="86" text-anchor="middle">repo facts: has_rust = true, has_go = false</text>
-<path class="flow" d="M 150 68 C 150 96, 92 96, 92 112"/>
+<path class="flow" d="M 150 72 C 150 96, 92 96, 92 112"/>
 <path class="flow" d="M 230 96 V 112"/>
-<path class="flow" d="M 310 68 C 310 96, 368 96, 368 112"/>
-<rect class="card on" x="18" y="114" width="424" height="44" rx="9"/><text class="tag tx" x="32" y="133">oss-baseline@v1</text><text class="tag mut" x="32" y="150">always applies</text><text class="tag" x="424" y="142" text-anchor="end" fill="#22c55e">applies</text>
-<rect class="card on pulse" x="18" y="166" width="424" height="44" rx="9"/><text class="tag tx" x="32" y="185">rust@v1</text><text class="tag mut" x="32" y="202">when facts.has_rust</text><text class="tag" x="424" y="194" text-anchor="end" fill="#22c55e">fires</text>
-<rect class="card off" x="18" y="218" width="424" height="44" rx="9"/><text class="tag tx" x="32" y="237">go@v1</text><text class="tag mut" x="32" y="254">when facts.has_go</text><text class="tag mut" x="424" y="246" text-anchor="end">dormant</text>
+<path class="flow" d="M 310 72 C 310 96, 368 96, 368 112"/>
+<rect class="card on" x="18" y="114" width="424" height="47" rx="9"/><text class="tag tx" x="32" y="133">oss-baseline@v1</text><text class="tag mut" x="32" y="150">always applies</text><text class="tag" x="424" y="142" text-anchor="end" fill="#22c55e">applies</text>
+<rect class="card on pulse" x="18" y="166" width="424" height="47" rx="9"/><text class="tag tx" x="32" y="185">rust@v1</text><text class="tag mut" x="32" y="202">when facts.has_rust</text><text class="tag" x="424" y="194" text-anchor="end" fill="#22c55e">fires</text>
+<rect class="card off" x="18" y="218" width="424" height="47" rx="9"/><text class="tag tx" x="32" y="237">go@v1</text><text class="tag mut" x="32" y="254">when facts.has_go</text><text class="tag mut" x="424" y="246" text-anchor="end">dormant</text>
 <text class="tag mut" x="230" y="288" text-anchor="middle">a ruleset applies itself only where its facts hold</text>
 <text class="tag mut" x="230" y="310" text-anchor="middle">override any inherited rule's level in your own config</text>
 </svg>

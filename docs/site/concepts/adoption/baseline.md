@@ -24,9 +24,9 @@ Turning a linter on for an established repo has a chicken-and-egg problem: the r
 </style>
 <text class="ui ac" x="18" y="16">this run, checked against the baseline</text>
 <text class="ui mut" x="442" y="16" text-anchor="end">by fingerprint</text>
-<rect class="row" x="20" y="26" width="420" height="40" rx="8"/><rect x="20" y="26" width="6" height="40" rx="2" fill="#22c55e"/><text class="tag tx" x="40" y="44">no-todo-comments</text><text class="tag mut" x="40" y="59">api.ts (line moved)</text><text class="tag" x="424" y="50" text-anchor="end" fill="#22c55e">suppressed</text>
-<rect class="row" x="20" y="74" width="420" height="40" rx="8"/><rect x="20" y="74" width="6" height="40" rx="2" fill="#ef4444"/><text class="tag tx" x="40" y="92">no-todo-comments</text><text class="tag mut" x="40" y="107">new.ts</text><text class="tag pulse" x="424" y="99" text-anchor="end" fill="#ef4444">new: fails the gate</text>
-<rect class="row" x="20" y="122" width="420" height="40" rx="8" stroke-dasharray="4 3"/><rect x="20" y="122" width="6" height="40" rx="2" fill="#94a3b8"/><text class="tag mut" x="40" y="140">lockfiles-only-one</text><text class="tag mut" x="40" y="155">fixed since</text><text class="tag mut" x="424" y="147" text-anchor="end">stale: pruned</text>
+<rect class="row" x="20" y="26" width="420" height="43" rx="8"/><rect x="20" y="26" width="6" height="43" rx="2" fill="#22c55e"/><text class="tag tx" x="40" y="44">no-todo-comments</text><text class="tag mut" x="40" y="59">api.ts (line moved)</text><text class="tag" x="424" y="50" text-anchor="end" fill="#22c55e">suppressed</text>
+<rect class="row" x="20" y="74" width="420" height="43" rx="8"/><rect x="20" y="74" width="6" height="43" rx="2" fill="#ef4444"/><text class="tag tx" x="40" y="92">no-todo-comments</text><text class="tag mut" x="40" y="107">new.ts</text><text class="tag pulse" x="424" y="99" text-anchor="end" fill="#ef4444">new: fails the gate</text>
+<rect class="row" x="20" y="122" width="420" height="43" rx="8" stroke-dasharray="4 3"/><rect x="20" y="122" width="6" height="43" rx="2" fill="#94a3b8"/><text class="tag mut" x="40" y="140">lockfiles-only-one</text><text class="tag mut" x="40" y="155">fixed since</text><text class="tag mut" x="424" y="147" text-anchor="end">stale: pruned</text>
 <text class="tag mut" x="230" y="196" text-anchor="middle">the fingerprint keys on content, not the line number</text>
 <text class="tag mut" x="230" y="220" text-anchor="middle">a finding that only moved lines stays suppressed</text>
 </svg>

@@ -26,15 +26,15 @@ sidebar:
   @keyframes chgpulse { 0%,100%{opacity:1} 50%{opacity:.55} }
   @media (prefers-reduced-motion:reduce){ .alint-chg .flow{animation:none;stroke-dasharray:none} .alint-chg .pulse{animation:none} }
 </style>
-<rect class="card" x="30" y="28" width="400" height="128" rx="10"/>
+<rect class="card" x="30" y="28" width="400" height="140" rx="10"/>
 <text class="ui mut" x="44" y="48">repository</text>
 <text class="tag mut" x="416" y="48" text-anchor="end">2 of 4 files changed</text>
 <rect class="chip pulse" x="44" y="56" width="372" height="22" rx="6"/><rect x="44" y="56" width="5" height="22" rx="2" fill="#4f46e5"/><text class="tag tx" x="58" y="71">src/parser.rs</text><text class="tag ac" x="404" y="71" text-anchor="end">changed</text>
 <rect class="chip pulse" x="44" y="82" width="372" height="22" rx="6"/><rect x="44" y="82" width="5" height="22" rx="2" fill="#4f46e5"/><text class="tag tx" x="58" y="97">docs/guide.md</text><text class="tag ac" x="404" y="97" text-anchor="end">changed</text>
 <rect class="chip off" x="44" y="108" width="372" height="22" rx="6"/><text class="tag mut" x="58" y="123">src/lib.rs</text><text class="tag mut" x="404" y="123" text-anchor="end">unchanged</text>
 <rect class="chip off" x="44" y="134" width="372" height="22" rx="6"/><text class="tag mut" x="58" y="149">api.h</text><text class="tag mut" x="404" y="149" text-anchor="end">unchanged</text>
-<path class="flow" d="M 180 156 C 180 186, 120 186, 120 210"/>
-<path class="flow" d="M 280 156 C 280 186, 340 186, 340 210"/>
+<path class="flow" d="M 180 168 C 180 190, 120 190, 120 210"/>
+<path class="flow" d="M 280 168 C 280 190, 340 190, 340 210"/>
 <rect class="card" x="20" y="214" width="200" height="176" rx="10"/>
 <text class="ui ac" x="34" y="236">per-file rules</text>
 <text class="tag mut" x="34" y="252">see the changed set</text>

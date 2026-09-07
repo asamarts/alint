@@ -37,7 +37,7 @@ Everything here is one idea seen from six angles. You **declare** rules (fact-ga
 <rect class="chip" x="220" y="30" width="180" height="26" rx="13"/><text class="tag tx" x="310" y="47" text-anchor="middle">extends: rust@v1</text>
 <path class="feed" d="M122 56 V 72"/><path fill="var(--ac)" d="M118 72 L122 78 L126 72 Z"/>
 <path class="feed" d="M310 56 V 72"/><path fill="var(--ac)" d="M306 72 L310 78 L314 72 Z"/>
-<rect class="atom" x="40" y="80" width="380" height="214" rx="10"/>
+<rect class="atom" x="40" y="80" width="380" height="220" rx="10"/>
 <text class="ui ac" x="56" y="102">rule</text>
 <text class="tag mut" x="404" y="102" text-anchor="end">the rule model &middot; START HERE</text>
 <line x1="56" y1="112" x2="404" y2="112" stroke="var(--bd)" stroke-width="1" opacity=".5"/>

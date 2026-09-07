@@ -35,7 +35,7 @@ A rule that can mechanically repair its violation declares a `fix:` block. `alin
 <path class="flow" d="M 90 58 C 90 92, 230 92, 230 116"/>
 <path class="flow" d="M 230 58 V 116"/>
 <path class="flow" d="M 370 58 C 370 92, 230 92, 230 116"/>
-<rect class="lane" x="40" y="122" width="380" height="56" rx="10"/>
+<rect class="lane" x="40" y="122" width="380" height="68" rx="10"/>
 <text class="ui ac" x="56" y="144">apply</text>
 <text class="tag mut" x="110" y="144">sequential, one rule at a time</text>
 <line x1="80" y1="162" x2="380" y2="162" stroke="var(--bd)" stroke-width="2"/>

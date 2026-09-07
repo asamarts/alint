@@ -36,7 +36,7 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 <rect class="card" x="254" y="156" width="172" height="46" rx="7"/><text class="tag tx" x="340" y="175" text-anchor="middle">agent_instruction</text><text class="tag ac" x="340" y="192" text-anchor="middle">+ fix_command</text>
 <path class="flow" d="M 120 202 C 120 234, 210 234, 230 244"/>
 <path class="flow" d="M 340 202 C 340 234, 250 234, 230 244"/>
-<rect class="key" x="120" y="246" width="220" height="46" rx="10"/><text class="ui ac" x="230" y="266" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="283" text-anchor="middle">reads the rules, runs each fix_command</text>
+<rect class="key" x="94" y="246" width="272" height="46" rx="10"/><text class="ui ac" x="230" y="266" text-anchor="middle">the coding agent</text><text class="tag mut" x="230" y="283" text-anchor="middle">reads the rules, runs each fix_command</text>
 <text class="tag mut" x="230" y="322" text-anchor="middle">the rules are the agent's instructions and its fixes</text>
 </svg>
 

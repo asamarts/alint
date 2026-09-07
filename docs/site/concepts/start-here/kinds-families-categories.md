@@ -26,21 +26,21 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
 </style>
 <text class="ui ac" x="18" y="15">one family, many categories</text>
 <text class="ui mut" x="18" y="33">105 kinds &#183; 13 families &#183; 13 categories</text>
-<rect class="card" x="20" y="46" width="420" height="58" rx="8"/><rect x="20" y="46" width="6" height="58" rx="2" fill="#3b82f6"/>
+<rect class="card" x="20" y="46" width="420" height="62" rx="8"/><rect x="20" y="46" width="6" height="58" rx="2" fill="#3b82f6"/>
 <text class="mono tx" x="38" y="72" font-size="14">file_exists</text>
 <rect x="330" y="56" width="92" height="22" rx="11" fill="#3b82f6"/><text class="ui" x="376" y="71" text-anchor="middle" fill="#fff">Existence</text>
 <rect class="chip" x="38" y="82" width="82" height="18" rx="9"/><text class="tag" x="49" y="95">existence</text>
-<rect class="card" x="20" y="116" width="420" height="58" rx="8"/><rect x="20" y="116" width="6" height="58" rx="2" fill="#ef4444"/>
+<rect class="card" x="20" y="116" width="420" height="62" rx="8"/><rect x="20" y="116" width="6" height="58" rx="2" fill="#ef4444"/>
 <text class="mono tx" x="38" y="142" font-size="14">no_bidi_controls</text>
 <rect x="336" y="126" width="86" height="22" rx="11" fill="#ef4444"/><text class="ui" x="379" y="141" text-anchor="middle" fill="#fff">Security</text>
 <rect class="chip" x="38" y="152" width="168" height="18" rx="9"/><text class="tag" x="48" y="165">security-unicode-sanity</text>
 <rect class="chip extra" x="214" y="152" width="76" height="18" rx="9"/><text class="tag" x="225" y="165">encoding</text>
-<rect class="card" x="20" y="186" width="420" height="58" rx="8"/><rect x="20" y="186" width="6" height="58" rx="2" fill="#7c3aed"/>
+<rect class="card" x="20" y="186" width="420" height="62" rx="8"/><rect x="20" y="186" width="6" height="58" rx="2" fill="#7c3aed"/>
 <text class="mono tx" x="38" y="212" font-size="14">dir_contains</text>
 <rect x="330" y="196" width="92" height="22" rx="11" fill="#7c3aed"/><text class="ui" x="376" y="211" text-anchor="middle" fill="#fff">Cross-file</text>
 <rect class="chip" x="38" y="222" width="90" height="18" rx="9"/><text class="tag" x="49" y="235">cross-file</text>
 <rect class="chip extra" x="136" y="222" width="82" height="18" rx="9"/><text class="tag" x="147" y="235">structure</text>
-<rect class="card" x="20" y="256" width="420" height="58" rx="8"/><rect x="20" y="256" width="6" height="58" rx="2" fill="#06b6d4"/>
+<rect class="card" x="20" y="256" width="420" height="62" rx="8"/><rect x="20" y="256" width="6" height="58" rx="2" fill="#06b6d4"/>
 <text class="mono tx" x="38" y="282" font-size="14">filename_case</text>
 <rect x="346" y="266" width="76" height="22" rx="11" fill="#06b6d4"/><text class="ui" x="384" y="281" text-anchor="middle" fill="#fff">Naming</text>
 <rect class="chip" x="38" y="292" width="62" height="18" rx="9"/><text class="tag" x="49" y="305">naming</text>
