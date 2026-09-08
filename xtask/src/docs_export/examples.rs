@@ -346,12 +346,17 @@ fn push_file_contents(md: &mut String, tree: &TreeSpec) {
             continue;
         }
         let _ = writeln!(md);
-        let _ = writeln!(md, "`{path}`:");
-        let _ = writeln!(md);
+        // Render each file as an expressiveCode editor window titled with its path
+        // (a filename tab), rather than a prose `` `path`: `` label + a bare fence.
+        // A titled fence whose title is a filename makes EC frame the block as a
+        // code editor instead of a terminal, so a shell file WITHOUT a shebang
+        // (e.g. a `file_shebang` counter-example like `echo no shebang`) no longer
+        // renders with a misleading `$` command prompt - it reads as the file it is.
         if looks_binary(content) {
-            push_fenced(
+            push_fenced_titled(
                 md,
                 "text",
+                &path,
                 &format!("(binary content, {} bytes)", content.len()),
             );
         } else {
@@ -361,7 +366,12 @@ fn push_file_contents(md: &mut String, tree: &TreeSpec) {
             // into a published page ships a live Trojan-Source override / invisible
             // byte. The escaped form still SHOWS the reader where the offending
             // char is. (`\0` files are already noted as binary above.)
-            push_fenced(md, lang_for(&path), &escape_docs_control_chars(content));
+            push_fenced_titled(
+                md,
+                lang_for(&path),
+                &path,
+                &escape_docs_control_chars(content),
+            );
         }
     }
 }
@@ -525,6 +535,19 @@ fn render_git_history(git: &GivenGit) -> Option<String> {
 fn push_fenced(md: &mut String, lang: &str, content: &str) {
     let fence = fence_for(content);
     let _ = writeln!(md, "{fence}{lang}");
+    md.push_str(content.trim_end_matches('\n'));
+    let _ = writeln!(md);
+    let _ = writeln!(md, "{fence}");
+}
+
+/// Like [`push_fenced`], but adds an expressiveCode `title="..."` to the opening
+/// fence so the block renders as a titled editor window (a filename tab). When
+/// the title looks like a filename, EC also frames a terminal-language block
+/// (bash/sh) as a code editor rather than a terminal, dropping the spurious `$`
+/// prompt a file-content example would otherwise get (see `push_file_contents`).
+fn push_fenced_titled(md: &mut String, lang: &str, title: &str, content: &str) {
+    let fence = fence_for(content);
+    let _ = writeln!(md, "{fence}{lang} title=\"{title}\"");
     md.push_str(content.trim_end_matches('\n'));
     let _ = writeln!(md);
     let _ = writeln!(md, "{fence}");
@@ -764,10 +787,11 @@ expect:
         assert!(md.contains("### T"));
         assert!(md.contains("With this `.alint.yml`:"));
         assert!(!md.contains("alint check` reports"));
-        // The file's content is shown (not just its name in the tree).
+        // The file's content is shown (not just its name in the tree), in a fence
+        // titled with the file's path (a filename tab).
         assert!(
-            md.contains("`README.md`:"),
-            "file content label missing:\n{md}"
+            md.contains("title=\"README.md\""),
+            "file content title tab missing:\n{md}"
         );
     }
 
@@ -781,8 +805,8 @@ expect:
         let mut md = String::new();
         push_file_contents(&mut md, &t);
         assert!(
-            md.contains("`src/main.rs`:") && md.contains("```rust"),
-            "rust block missing:\n{md}"
+            md.contains("```rust title=\"src/main.rs\""),
+            "titled rust block missing:\n{md}"
         );
         assert!(md.contains("fn main() {}"));
         assert!(
@@ -790,7 +814,7 @@ expect:
             "binary note missing:\n{md}"
         );
         assert!(!md.contains('\0'), "a NUL byte leaked into the page");
-        assert!(!md.contains("`empty.txt`:"), "empty file should be skipped");
+        assert!(!md.contains("empty.txt"), "empty file should be skipped");
     }
 
     #[test]
