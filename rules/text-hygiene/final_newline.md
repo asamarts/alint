@@ -26,15 +26,11 @@ docs/clean.md
 docs/missing.md
 ```
 
-`docs/clean.md`:
-
-```markdown
+```markdown title="docs/clean.md"
 # Hi
 ```
 
-`docs/missing.md`:
-
-```markdown
+```markdown title="docs/missing.md"
 # No newline
 ```
 
@@ -72,15 +68,11 @@ docs/b.md
 docs/empty.md
 ```
 
-`docs/a.md`:
-
-```markdown
+```markdown title="docs/a.md"
 # Hi
 ```
 
-`docs/b.md`:
-
-```markdown
+```markdown title="docs/b.md"
 Hello
 world
 ```

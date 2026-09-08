@@ -30,15 +30,11 @@ docs/
 docs/generate.sh  (executable)
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`docs/generate.sh`:
-
-```bash
+```bash title="docs/generate.sh"
 echo generated
 ```
 
@@ -76,15 +72,11 @@ docs/
 docs/intro.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`docs/intro.md`:
-
-```markdown
+```markdown title="docs/intro.md"
 hello
 ```
 

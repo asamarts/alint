@@ -32,9 +32,7 @@ The rule fires on this repository:
 Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
@@ -72,16 +70,12 @@ Cargo.toml
 README.md
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 

@@ -28,9 +28,7 @@ The rule fires on this repository:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 spring.datasource.url=jdbc:mysql://localhost/app
 ```
 
@@ -68,9 +66,7 @@ This repository is compliant:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 spring.datasource.url=jdbc:postgresql://localhost/app
 ```
 

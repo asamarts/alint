@@ -27,15 +27,11 @@ big.txt
 tiny.txt
 ```
 
-`big.txt`:
-
-```text
+```text title="big.txt"
 this content is easily over ten bytes long
 ```
 
-`tiny.txt`:
-
-```text
+```text title="tiny.txt"
 short
 ```
 
@@ -72,15 +68,11 @@ also_tiny.txt
 tiny.txt
 ```
 
-`also_tiny.txt`:
-
-```text
+```text title="also_tiny.txt"
 hi
 ```
 
-`tiny.txt`:
-
-```text
+```text title="tiny.txt"
 x
 ```
 

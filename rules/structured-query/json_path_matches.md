@@ -32,15 +32,11 @@ packages/ok/
 packages/ok/package.json
 ```
 
-`packages/bad/package.json`:
-
-```json
+```json title="packages/bad/package.json"
 {"name": "@demo/bad", "version": "not-a-semver"}
 ```
 
-`packages/ok/package.json`:
-
-```json
+```json title="packages/ok/package.json"
 {"name": "@demo/ok", "version": "1.2.3"}
 ```
 
@@ -81,15 +77,11 @@ packages/b/
 packages/b/package.json
 ```
 
-`packages/a/package.json`:
-
-```json
+```json title="packages/a/package.json"
 {"name": "@demo/a", "version": "1.2.3"}
 ```
 
-`packages/b/package.json`:
-
-```json
+```json title="packages/b/package.json"
 {"name": "@demo/b", "version": "0.10.0"}
 ```
 

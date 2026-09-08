@@ -27,18 +27,14 @@ fine.md
 stub.md
 ```
 
-`fine.md`:
-
-```markdown
+```markdown title="fine.md"
 # Project
 
 A description.
 Usage: run me.
 ```
 
-`stub.md`:
-
-```markdown
+```markdown title="stub.md"
 # Project
 TODO
 ```
@@ -75,9 +71,7 @@ This repository is compliant:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # Demo
 
 A description.

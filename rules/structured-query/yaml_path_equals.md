@@ -44,9 +44,7 @@ The rule fires on this repository:
 .github/workflows/ci.yml
 ```
 
-`.github/workflows/bad.yml`:
-
-```yaml
+```yaml title=".github/workflows/bad.yml"
 name: Bad
 on: push
 permissions:
@@ -58,9 +56,7 @@ jobs:
       - run: echo hi
 ```
 
-`.github/workflows/ci.yml`:
-
-```yaml
+```yaml title=".github/workflows/ci.yml"
 name: CI
 on: push
 permissions:
@@ -109,9 +105,7 @@ This repository is compliant:
 .github/workflows/release.yml
 ```
 
-`.github/workflows/ci.yml`:
-
-```yaml
+```yaml title=".github/workflows/ci.yml"
 name: CI
 on: push
 permissions:
@@ -123,9 +117,7 @@ jobs:
       - run: echo hi
 ```
 
-`.github/workflows/release.yml`:
-
-```yaml
+```yaml title=".github/workflows/release.yml"
 name: Release
 on: push
 permissions:

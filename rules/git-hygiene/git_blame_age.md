@@ -39,9 +39,7 @@ src/
 src/main.rs
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {
     // TODO: refactor this
 }
@@ -88,9 +86,7 @@ src/
 src/main.rs
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {
     // TODO: refactor this
 }

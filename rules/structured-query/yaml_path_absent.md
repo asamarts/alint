@@ -33,9 +33,7 @@ The rule fires on this repository:
 .github/workflows/ci.yml
 ```
 
-`.github/workflows/ci.yml`:
-
-```yaml
+```yaml title=".github/workflows/ci.yml"
 name: CI
 on: push
 permissions: write-all
@@ -84,9 +82,7 @@ This repository is compliant:
 .github/workflows/ci.yml
 ```
 
-`.github/workflows/ci.yml`:
-
-```yaml
+```yaml title=".github/workflows/ci.yml"
 name: CI
 on: push
 permissions:

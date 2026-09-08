@@ -34,9 +34,7 @@ The rule fires on this repository:
 gen/list.txt
 ```
 
-`gen/list.txt`:
-
-```text
+```text title="gen/list.txt"
 alpha
 STALE
 charlie
@@ -76,9 +74,7 @@ This repository is compliant:
 gen/list.txt
 ```
 
-`gen/list.txt`:
-
-```text
+```text title="gen/list.txt"
 alpha
 bravo
 charlie

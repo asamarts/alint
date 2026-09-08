@@ -26,15 +26,11 @@ other.txt
 readme.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # upper
 ```
 
-`readme.md`:
-
-```markdown
+```markdown title="readme.md"
 # lower
 ```
 
@@ -77,15 +73,11 @@ src/lib.rs
 src/util.rs
 ```
 
-`CONTRIBUTING.md`:
-
-```markdown
+```markdown title="CONTRIBUTING.md"
 # guide
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # hi
 ```
 

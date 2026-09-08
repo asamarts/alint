@@ -36,21 +36,15 @@ packages/gamma/
 packages/gamma/package.json
 ```
 
-`packages/alpha/package.json`:
-
-```json
+```json title="packages/alpha/package.json"
 {}
 ```
 
-`packages/beta/README.md`:
-
-```markdown
+```markdown title="packages/beta/README.md"
 # beta
 ```
 
-`packages/gamma/package.json`:
-
-```json
+```json title="packages/gamma/package.json"
 {}
 ```
 
@@ -92,15 +86,11 @@ packages/beta/
 packages/beta/package.json
 ```
 
-`packages/alpha/package.json`:
-
-```json
+```json title="packages/alpha/package.json"
 {}
 ```
 
-`packages/beta/package.json`:
-
-```json
+```json title="packages/beta/package.json"
 {}
 ```
 

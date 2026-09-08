@@ -29,9 +29,7 @@ The rule fires on this repository:
 staging/src/k8s.io/api/types.go
 ```
 
-`staging/src/k8s.io/api/types.go`:
-
-```go
+```go title="staging/src/k8s.io/api/types.go"
 package api
 
 import (
@@ -74,9 +72,7 @@ This repository is compliant:
 staging/src/k8s.io/api/types.go
 ```
 
-`staging/src/k8s.io/api/types.go`:
-
-```go
+```go title="staging/src/k8s.io/api/types.go"
 package api
 
 import (

@@ -41,9 +41,7 @@ The rule fires on this repository:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 resource "aws_instance" "web" {
   ami   = "ami-123"
   count = 2
@@ -83,9 +81,7 @@ This repository is compliant:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 resource "aws_instance" "web" {
   ami   = "ami-123"
   count = 1

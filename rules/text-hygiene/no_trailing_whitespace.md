@@ -27,21 +27,15 @@ src/good.rs
 src/tabbed.md
 ```
 
-`src/bad.rs`:
-
-```rust
+```rust title="src/bad.rs"
 fn bad() {}   
 ```
 
-`src/good.rs`:
-
-```rust
+```rust title="src/good.rs"
 fn good() {}
 ```
 
-`src/tabbed.md`:
-
-```markdown
+```markdown title="src/tabbed.md"
 # Heading	
 ```
 
@@ -82,15 +76,11 @@ src/one.rs
 src/two.rs
 ```
 
-`src/one.rs`:
-
-```rust
+```rust title="src/one.rs"
 fn one() {}
 ```
 
-`src/two.rs`:
-
-```rust
+```rust title="src/two.rs"
 fn two() {}
 ```
 

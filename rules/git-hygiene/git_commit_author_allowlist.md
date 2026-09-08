@@ -31,9 +31,7 @@ The rule fires on this repository:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
@@ -76,9 +74,7 @@ This repository is compliant:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 

@@ -52,16 +52,12 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 // TODO: drop the debug hook before release
 fn a() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 fn b() {}
 ```
 
@@ -100,15 +96,11 @@ src/lib.rs
 src/main.rs
 ```
 
-`src/lib.rs`:
-
-```rust
+```rust title="src/lib.rs"
 pub fn ok() {}
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

@@ -28,9 +28,7 @@ The rule fires on this repository:
 pom.xml
 ```
 
-`pom.xml`:
-
-```text
+```text title="pom.xml"
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
   <dependencies>
@@ -73,9 +71,7 @@ This repository is compliant:
 pom.xml
 ```
 
-`pom.xml`:
-
-```text
+```text title="pom.xml"
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
   <dependencies>

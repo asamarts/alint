@@ -26,15 +26,11 @@ src/clean.rs
 src/half_merged.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok() {}
 ```
 
-`src/half_merged.rs`:
-
-```rust
+```rust title="src/half_merged.rs"
 <<<<<<< HEAD
 ours
 =======
@@ -75,15 +71,11 @@ src/a.rs
 src/docs.md
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 pub fn a() {}
 ```
 
-`src/docs.md`:
-
-```markdown
+```markdown title="src/docs.md"
 Conflict discussion: we use <<<<<< for ... (inline, no col-1 marker)
 ```
 

@@ -29,9 +29,7 @@ The rule fires on this repository:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 

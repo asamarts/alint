@@ -30,17 +30,13 @@ vendor/lib/
 vendor/lib/.keep
 ```
 
-`.gitmodules`:
-
-```text
+```text title=".gitmodules"
 [submodule "vendor/lib"]
   path = vendor/lib
   url = https://example.com/lib.git
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
@@ -77,21 +73,15 @@ src/
 src/main.rs
 ```
 
-`.gitignore`:
-
-```text
+```text title=".gitignore"
 /target
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

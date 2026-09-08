@@ -31,9 +31,7 @@ The rule fires on this repository:
 Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 version = "0.1.0"
@@ -79,9 +77,7 @@ This repository is compliant:
 Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 version = "0.1.0"

@@ -31,9 +31,7 @@ The rule fires on this repository:
 App.csproj
 ```
 
-`App.csproj`:
-
-```text
+```text title="App.csproj"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -78,9 +76,7 @@ This repository is compliant:
 App.csproj
 ```
 
-`App.csproj`:
-
-```text
+```text title="App.csproj"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>

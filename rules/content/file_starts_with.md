@@ -31,22 +31,16 @@ src/ok.rs
 src/wrong_spdx.rs
 ```
 
-`src/no_header.rs`:
-
-```rust
+```rust title="src/no_header.rs"
 fn x() {}
 ```
 
-`src/ok.rs`:
-
-```rust
+```rust title="src/ok.rs"
 // SPDX-License-Identifier: MIT
 fn main() {}
 ```
 
-`src/wrong_spdx.rs`:
-
-```rust
+```rust title="src/wrong_spdx.rs"
 // SPDX-License-Identifier: GPL-3.0
 fn y() {}
 ```
@@ -89,16 +83,12 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 // SPDX-License-Identifier: MIT
 fn main() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 // SPDX-License-Identifier: MIT
 fn x() {}
 ```

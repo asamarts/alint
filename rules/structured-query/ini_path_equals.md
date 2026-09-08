@@ -41,9 +41,7 @@ The rule fires on this repository:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [server]
 port = 9090
 ```
@@ -81,9 +79,7 @@ This repository is compliant:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [server]
 port = 8080
 ```

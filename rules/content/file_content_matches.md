@@ -28,9 +28,7 @@ The rule fires on this repository:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # Project
 
 A short description.
@@ -68,9 +66,7 @@ This repository is compliant:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # Project
 
 SPDX-License-Identifier: Apache-2.0

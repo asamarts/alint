@@ -45,15 +45,11 @@ packages/ok/
 packages/ok/package.json
 ```
 
-`packages/bad/package.json`:
-
-```json
+```json title="packages/bad/package.json"
 {"name": "@demo/bad", "license": "UNLICENSED"}
 ```
 
-`packages/ok/package.json`:
-
-```json
+```json title="packages/ok/package.json"
 {"name": "@demo/ok", "license": "MIT"}
 ```
 
@@ -95,15 +91,11 @@ packages/b/
 packages/b/package.json
 ```
 
-`packages/a/package.json`:
-
-```json
+```json title="packages/a/package.json"
 {"name": "@demo/a", "license": "MIT"}
 ```
 
-`packages/b/package.json`:
-
-```json
+```json title="packages/b/package.json"
 {"name": "@demo/b", "license": "MIT"}
 ```
 

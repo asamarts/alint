@@ -31,9 +31,7 @@ The rule fires on this repository:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 provider "aws" {
   region     = "us-east-1"
   access_key = "AKIAIOSFODNN7EXAMPLE"
@@ -75,9 +73,7 @@ This repository is compliant:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 provider "aws" {
   region = "us-east-1"
 }

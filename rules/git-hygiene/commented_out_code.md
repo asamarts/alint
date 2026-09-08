@@ -36,9 +36,7 @@ src/
 src/api.ts
 ```
 
-`src/api.ts`:
-
-```ts
+```ts title="src/api.ts"
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Acme Corp
 //
@@ -88,9 +86,7 @@ src/
 src/api.ts
 ```
 
-`src/api.ts`:
-
-```ts
+```ts title="src/api.ts"
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Acme Corp
 //

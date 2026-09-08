@@ -41,9 +41,7 @@ The rule fires on this repository:
 .env.production
 ```
 
-`.env.production`:
-
-```text
+```text title=".env.production"
 NODE_ENV=development
 PORT=8080
 ```
@@ -82,9 +80,7 @@ This repository is compliant:
 .env.production
 ```
 
-`.env.production`:
-
-```text
+```text title=".env.production"
 NODE_ENV=production
 PORT=8080
 ```

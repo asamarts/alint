@@ -26,9 +26,7 @@ The rule fires on this repository:
 reference.txt
 ```
 
-`reference.txt`:
-
-```text
+```text title="reference.txt"
 hello world
 ```
 
@@ -70,9 +68,7 @@ This repository is compliant:
 reference.txt
 ```
 
-`reference.txt`:
-
-```text
+```text title="reference.txt"
 hello world
 ```
 

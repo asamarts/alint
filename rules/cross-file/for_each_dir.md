@@ -50,21 +50,15 @@ src/gamma/
 src/gamma/mod.rs
 ```
 
-`src/alpha/mod.rs`:
-
-```rust
+```rust title="src/alpha/mod.rs"
 pub fn a() {}
 ```
 
-`src/beta/lib.rs`:
-
-```rust
+```rust title="src/beta/lib.rs"
 pub fn b() {}
 ```
 
-`src/gamma/mod.rs`:
-
-```rust
+```rust title="src/gamma/mod.rs"
 pub fn c() {}
 ```
 
@@ -106,15 +100,11 @@ src/beta/
 src/beta/mod.rs
 ```
 
-`src/alpha/mod.rs`:
-
-```rust
+```rust title="src/alpha/mod.rs"
 pub fn a() {}
 ```
 
-`src/beta/mod.rs`:
-
-```rust
+```rust title="src/beta/mod.rs"
 pub fn b() {}
 ```
 

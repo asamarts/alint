@@ -43,15 +43,11 @@ allowed.json
 used.json
 ```
 
-`allowed.json`:
-
-```json
+```json title="allowed.json"
 {"allowed": ["a", "b"]}
 ```
 
-`used.json`:
-
-```json
+```json title="used.json"
 {"used": ["a", "x"]}
 ```
 
@@ -93,15 +89,11 @@ allowed.json
 used.json
 ```
 
-`allowed.json`:
-
-```json
+```json title="allowed.json"
 {"allowed": ["a", "b", "c"]}
 ```
 
-`used.json`:
-
-```json
+```json title="used.json"
 {"used": ["a", "c"]}
 ```
 

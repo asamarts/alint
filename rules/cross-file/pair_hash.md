@@ -30,15 +30,11 @@ SHA256SUMS
 hello.txt
 ```
 
-`SHA256SUMS`:
-
-```text
+```text title="SHA256SUMS"
 0000000000000000000000000000000000000000000000000000000000000000  other.txt
 ```
 
-`hello.txt`:
-
-```text
+```text title="hello.txt"
 hello
 ```
 
@@ -77,15 +73,11 @@ SHA256SUMS
 hello.txt
 ```
 
-`SHA256SUMS`:
-
-```text
+```text title="SHA256SUMS"
 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  hello.txt
 ```
 
-`hello.txt`:
-
-```text
+```text title="hello.txt"
 hello
 ```
 

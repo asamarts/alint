@@ -31,9 +31,7 @@ The rule fires on this repository:
 .env
 ```
 
-`.env`:
-
-```text
+```text title=".env"
 NODE_ENV=production
 AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIexampleKEY
 ```
@@ -74,9 +72,7 @@ This repository is compliant:
 .env
 ```
 
-`.env`:
-
-```text
+```text title=".env"
 NODE_ENV=production
 PORT=8080
 ```

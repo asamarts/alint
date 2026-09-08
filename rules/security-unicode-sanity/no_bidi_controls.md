@@ -26,15 +26,11 @@ src/clean.rs
 src/sneaky.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok() {}
 ```
 
-`src/sneaky.rs`:
-
-```rust
+```rust title="src/sneaky.rs"
 let comment = "<U+202E>gnitcepsnI ydobon emah sih";
 ```
 
@@ -72,15 +68,11 @@ src/ascii.rs
 src/unicode.rs
 ```
 
-`src/ascii.rs`:
-
-```rust
+```rust title="src/ascii.rs"
 pub fn ok() {}
 ```
 
-`src/unicode.rs`:
-
-```rust
+```rust title="src/unicode.rs"
 // A ☃ comment with emoji 🦀
 pub fn fine() {}
 ```

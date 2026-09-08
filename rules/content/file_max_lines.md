@@ -28,9 +28,7 @@ src/bloated.rs
 src/tiny.rs
 ```
 
-`src/bloated.rs`:
-
-```rust
+```rust title="src/bloated.rs"
 fn a() {}
 fn b() {}
 fn c() {}
@@ -40,9 +38,7 @@ fn f() {}
 fn g() {}
 ```
 
-`src/tiny.rs`:
-
-```rust
+```rust title="src/tiny.rs"
 fn a() {}
 ```
 
@@ -80,9 +76,7 @@ src/medium.rs
 src/tiny.rs
 ```
 
-`src/medium.rs`:
-
-```rust
+```rust title="src/medium.rs"
 fn a() {}
 fn b() {}
 fn c() {}
@@ -90,9 +84,7 @@ fn d() {}
 fn e() {}
 ```
 
-`src/tiny.rs`:
-
-```rust
+```rust title="src/tiny.rs"
 fn a() {}
 ```
 

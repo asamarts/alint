@@ -33,21 +33,15 @@ c/
 c/other.rs
 ```
 
-`a/util.rs`:
-
-```rust
+```rust title="a/util.rs"
 pub fn a() {}
 ```
 
-`b/util.rs`:
-
-```rust
+```rust title="b/util.rs"
 pub fn b() {}
 ```
 
-`c/other.rs`:
-
-```rust
+```rust title="c/other.rs"
 pub fn c() {}
 ```
 

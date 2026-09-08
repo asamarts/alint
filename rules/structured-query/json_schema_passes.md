@@ -35,18 +35,14 @@ schemas/
 schemas/package.schema.json
 ```
 
-`package.json`:
-
-```json
+```json title="package.json"
 {
   "name": "demo",
   "version": "v1.x"
 }
 ```
 
-`schemas/package.schema.json`:
-
-```json
+```json title="schemas/package.schema.json"
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -93,9 +89,7 @@ schemas/
 schemas/project.schema.json
 ```
 
-`App.csproj`:
-
-```text
+```text title="App.csproj"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>banana</TargetFramework>
@@ -103,9 +97,7 @@ schemas/project.schema.json
 </Project>
 ```
 
-`schemas/project.schema.json`:
-
-```json
+```json title="schemas/project.schema.json"
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -164,18 +156,14 @@ schemas/
 schemas/package.schema.json
 ```
 
-`package.json`:
-
-```json
+```json title="package.json"
 {
   "name": "demo",
   "version": "1.2.3"
 }
 ```
 
-`schemas/package.schema.json`:
-
-```json
+```json title="schemas/package.schema.json"
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -215,9 +203,7 @@ schemas/
 schemas/project.schema.json
 ```
 
-`app.config`:
-
-```text
+```text title="app.config"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -225,9 +211,7 @@ schemas/project.schema.json
 </Project>
 ```
 
-`schemas/project.schema.json`:
-
-```json
+```json title="schemas/project.schema.json"
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

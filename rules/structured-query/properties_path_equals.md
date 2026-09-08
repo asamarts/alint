@@ -41,9 +41,7 @@ The rule fires on this repository:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 server.port=9090
 ```
 
@@ -80,9 +78,7 @@ This repository is compliant:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 server.port=8080
 ```
 

@@ -32,17 +32,13 @@ crates/b/
 crates/b/Cargo.toml
 ```
 
-`crates/a/Cargo.toml`:
-
-```toml
+```toml title="crates/a/Cargo.toml"
 [package]
 name = "a"
 version = "1.2.3"
 ```
 
-`crates/b/Cargo.toml`:
-
-```toml
+```toml title="crates/b/Cargo.toml"
 [package]
 name = "b"
 version = "0.4"
@@ -85,17 +81,13 @@ crates/b/
 crates/b/Cargo.toml
 ```
 
-`crates/a/Cargo.toml`:
-
-```toml
+```toml title="crates/a/Cargo.toml"
 [package]
 name = "a"
 version = "1.2.3"
 ```
 
-`crates/b/Cargo.toml`:
-
-```toml
+```toml title="crates/b/Cargo.toml"
 [package]
 name = "b"
 version = "0.4.5"

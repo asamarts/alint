@@ -36,16 +36,12 @@ crates/core/
 crates/core/Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [workspace]
 members = ["crates/core", "crates/cli"]
 ```
 
-`crates/core/Cargo.toml`:
-
-```toml
+```toml title="crates/core/Cargo.toml"
 [package]
 name = "core"
 ```
@@ -90,23 +86,17 @@ crates/core/
 crates/core/Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [workspace]
 members = ["crates/core", "crates/cli"]
 ```
 
-`crates/cli/Cargo.toml`:
-
-```toml
+```toml title="crates/cli/Cargo.toml"
 [package]
 name = "cli"
 ```
 
-`crates/core/Cargo.toml`:
-
-```toml
+```toml title="crates/core/Cargo.toml"
 [package]
 name = "core"
 ```

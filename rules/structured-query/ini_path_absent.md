@@ -31,9 +31,7 @@ The rule fires on this repository:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [server]
 port = 8080
 debug = true
@@ -73,9 +71,7 @@ This repository is compliant:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [server]
 port = 8080
 ```

@@ -34,9 +34,7 @@ con.txt
 trailing_dot.
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # fine
 ```
 

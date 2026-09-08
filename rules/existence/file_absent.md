@@ -40,15 +40,11 @@ src/
 src/main.rs.bak
 ```
 
-`Cargo.lock.bak`:
-
-```text
+```text title="Cargo.lock.bak"
 # generated
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
@@ -90,16 +86,12 @@ src/
 src/main.rs
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

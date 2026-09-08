@@ -28,9 +28,7 @@ placeholder.rs
 stray.log
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # hi
 ```
 
@@ -71,15 +69,11 @@ src/
 src/a.rs
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # hi
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 fn a() {}
 ```
 

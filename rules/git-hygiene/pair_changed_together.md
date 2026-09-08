@@ -31,9 +31,7 @@ src/
 src/format.rs
 ```
 
-`src/format.rs`:
-
-```rust
+```rust title="src/format.rs"
 pub struct Format;
 ```
 
@@ -81,15 +79,11 @@ src/
 src/format.rs
 ```
 
-`FORMAT_VERSION`:
-
-```text
+```text title="FORMAT_VERSION"
 2
 ```
 
-`src/format.rs`:
-
-```rust
+```rust title="src/format.rs"
 pub struct Format;
 ```
 

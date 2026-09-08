@@ -27,9 +27,7 @@ The rule fires on this repository:
 CHANGELOG.md
 ```
 
-`CHANGELOG.md`:
-
-```markdown
+```markdown title="CHANGELOG.md"
 - Add a feature ([#12](https://github.com/x/pull/12)).
 - Typo fix ([#5](https://github.com/x/pull/9)).
 ```
@@ -70,9 +68,7 @@ This repository is compliant:
 CHANGELOG.md
 ```
 
-`CHANGELOG.md`:
-
-```markdown
+```markdown title="CHANGELOG.md"
 - Add a feature ([#12](https://github.com/x/pull/12)).
 - Fix a bug ([#34](https://github.com/x/pull/34)).
 ```

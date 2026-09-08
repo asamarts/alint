@@ -31,9 +31,7 @@ The rule fires on this repository:
 package.json
 ```
 
-`package.json`:
-
-```json
+```json title="package.json"
 {
   "name": "demo",
   "version": "1.0.0",
@@ -80,9 +78,7 @@ This repository is compliant:
 package.json
 ```
 
-`package.json`:
-
-```json
+```json title="package.json"
 {
   "name": "demo",
   "version": "1.0.0",

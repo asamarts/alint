@@ -30,9 +30,7 @@ The rule fires on this repository:
 .gitignore
 ```
 
-`.gitignore`:
-
-```text
+```text title=".gitignore"
 /target
 # keep-sorted start
 *.log
@@ -76,9 +74,7 @@ This repository is compliant:
 .gitignore
 ```
 
-`.gitignore`:
-
-```text
+```text title=".gitignore"
 /target
 # keep-sorted start
 *.log

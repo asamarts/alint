@@ -30,29 +30,21 @@ scripts/hello.sh
 scripts/plain.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`scripts/build.py`:
-
-```python
+```python title="scripts/build.py"
 #!/usr/bin/env python3
 print('x')
 ```
 
-`scripts/hello.sh`:
-
-```bash
+```bash title="scripts/hello.sh"
 #!/bin/sh
 echo hi
 ```
 
-`scripts/plain.md`:
-
-```markdown
+```markdown title="scripts/plain.md"
 no shebang
 ```
 
@@ -93,15 +85,11 @@ scripts/
 scripts/hello.sh  (executable)
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`scripts/hello.sh`:
-
-```bash
+```bash title="scripts/hello.sh"
 #!/bin/sh
 echo hi
 ```

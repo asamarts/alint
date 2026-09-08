@@ -30,15 +30,11 @@ src/clean.rs
 src/obfuscated.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn normal() {}
 ```
 
-`src/obfuscated.rs`:
-
-```rust
+```rust title="src/obfuscated.rs"
 pub fn sec<U+200B>ret() {}
 ```
 
@@ -75,15 +71,11 @@ src/clean.rs
 src/with_bom.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok2() {}
 ```
 
-`src/with_bom.rs`:
-
-```rust
+```rust title="src/with_bom.rs"
 <U+FEFF>pub fn ok() {}
 ```
 

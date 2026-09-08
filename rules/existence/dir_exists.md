@@ -31,9 +31,7 @@ The rule fires on this repository:
 Cargo.toml
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
@@ -71,16 +69,12 @@ src/
 src/main.rs
 ```
 
-`Cargo.toml`:
-
-```toml
+```toml title="Cargo.toml"
 [package]
 name = "demo"
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

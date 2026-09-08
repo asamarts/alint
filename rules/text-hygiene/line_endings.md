@@ -28,16 +28,12 @@ src/has_crlf.rs
 src/pure_lf.rs
 ```
 
-`src/has_crlf.rs`:
-
-```rust
+```rust title="src/has_crlf.rs"
 fn c() {}<U+000D>
 fn d() {}
 ```
 
-`src/pure_lf.rs`:
-
-```rust
+```rust title="src/pure_lf.rs"
 fn a() {}
 fn b() {}
 ```
@@ -76,16 +72,12 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 fn a() {}
 fn b() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 fn c() {}
 ```
 

@@ -27,18 +27,14 @@ healthy.md
 tiny.txt
 ```
 
-`healthy.md`:
-
-```markdown
+```markdown title="healthy.md"
 # Healthy doc
 
 This document has more than fifty bytes of content, well
 above the minimum. A short README reads like a stub.
 ```
 
-`tiny.txt`:
-
-```text
+```text title="tiny.txt"
 too short
 ```
 
@@ -74,9 +70,7 @@ This repository is compliant:
 README.md
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 
 A short but non-stub README.

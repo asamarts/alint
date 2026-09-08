@@ -28,9 +28,7 @@ The rule fires on this repository:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 terraform {
   required_version = "1.0.0"
 }
@@ -69,9 +67,7 @@ This repository is compliant:
 main.tf
 ```
 
-`main.tf`:
-
-```text
+```text title="main.tf"
 terraform {
   required_version = "~> 1.0"
 }

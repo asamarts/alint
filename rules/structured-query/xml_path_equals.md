@@ -45,15 +45,11 @@ src/Ok/
 src/Ok/Ok.csproj
 ```
 
-`src/Bad/Bad.csproj`:
-
-```text
+```text title="src/Bad/Bad.csproj"
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net6.0</TargetFramework></PropertyGroup></Project>
 ```
 
-`src/Ok/Ok.csproj`:
-
-```text
+```text title="src/Ok/Ok.csproj"
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>
 ```
 
@@ -93,9 +89,7 @@ src/App/
 src/App/App.csproj
 ```
 
-`src/App/App.csproj`:
-
-```text
+```text title="src/App/App.csproj"
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable></PropertyGroup></Project>
 ```
 

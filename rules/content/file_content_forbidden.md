@@ -28,15 +28,11 @@ src/clean.rs
 src/main.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok() {}
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {
     dbg!(42);
 }
@@ -76,15 +72,11 @@ src/clean.rs
 src/main.rs
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok() {}
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {
     println!("hi");
 }

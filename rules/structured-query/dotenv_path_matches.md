@@ -28,9 +28,7 @@ The rule fires on this repository:
 .env
 ```
 
-`.env`:
-
-```text
+```text title=".env"
 DATABASE_URL=mysql://localhost/app
 ```
 
@@ -68,9 +66,7 @@ This repository is compliant:
 .env
 ```
 
-`.env`:
-
-```text
+```text title=".env"
 DATABASE_URL=postgres://localhost/app
 ```
 

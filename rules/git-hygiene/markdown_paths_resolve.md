@@ -39,9 +39,7 @@ src/
 src/exists.ts
 ```
 
-`AGENTS.md`:
-
-````markdown
+````markdown title="AGENTS.md"
 # Agents file
 
 See `src/exists.ts` for the implementation.
@@ -56,15 +54,11 @@ Path with line: `src/exists.ts:42`.
 Template var: `src/{{user_id}}.ts`.
 ````
 
-`docs/extant.md`:
-
-```markdown
+```markdown title="docs/extant.md"
 # real doc
 ```
 
-`src/exists.ts`:
-
-```ts
+```ts title="src/exists.ts"
 export const x = 1;
 ```
 
@@ -109,9 +103,7 @@ src/api.ts
 src/utils.ts
 ```
 
-`AGENTS.md`:
-
-````markdown
+````markdown title="AGENTS.md"
 # Agents file
 
 Production code lives under `src/api.ts` and `src/utils.ts`.
@@ -123,21 +115,15 @@ example: `src/anything-goes.ts`
 ```
 ````
 
-`docs/guide.md`:
-
-```markdown
+```markdown title="docs/guide.md"
 # guide
 ```
 
-`src/api.ts`:
-
-```ts
+```ts title="src/api.ts"
 export function api() {}
 ```
 
-`src/utils.ts`:
-
-```ts
+```ts title="src/utils.ts"
 export const u = 1;
 ```
 

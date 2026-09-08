@@ -31,9 +31,7 @@ src/
 src/lib.rs
 ```
 
-`src/lib.rs`:
-
-```rust
+```rust title="src/lib.rs"
 pub fn feature() {}
 ```
 
@@ -80,15 +78,11 @@ src/
 src/lib.rs
 ```
 
-`.changeset/add-feature.md`:
-
-```markdown
+```markdown title=".changeset/add-feature.md"
 Added the feature.
 ```
 
-`src/lib.rs`:
-
-```rust
+```rust title="src/lib.rs"
 pub fn feature() {}
 ```
 

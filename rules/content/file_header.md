@@ -31,15 +31,11 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 fn a() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 // Copyright 2026
 // SPDX-License-Identifier: Apache-2.0
 fn b() {}
@@ -80,16 +76,12 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 // Copyright 2026
 fn a() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 // Copyright 2026
 // SPDX-License-Identifier: Apache-2.0
 fn b() {}

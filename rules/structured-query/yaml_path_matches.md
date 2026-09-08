@@ -31,9 +31,7 @@ The rule fires on this repository:
 .github/workflows/ok.yml
 ```
 
-`.github/workflows/bad.yml`:
-
-```yaml
+```yaml title=".github/workflows/bad.yml"
 name: Bad
 on: push
 jobs:
@@ -44,9 +42,7 @@ jobs:
       - run: echo hi
 ```
 
-`.github/workflows/ok.yml`:
-
-```yaml
+```yaml title=".github/workflows/ok.yml"
 name: OK
 on: push
 jobs:
@@ -93,9 +89,7 @@ This repository is compliant:
 .github/workflows/ci.yml
 ```
 
-`.github/workflows/ci.yml`:
-
-```yaml
+```yaml title=".github/workflows/ci.yml"
 name: CI
 on: push
 jobs:

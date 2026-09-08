@@ -26,15 +26,11 @@ scripts/
 scripts/run  (executable)
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`scripts/run`:
-
-```text
+```text title="scripts/run"
 echo hi
 ```
 
@@ -71,15 +67,11 @@ scripts/
 scripts/hello.sh  (executable)
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`scripts/hello.sh`:
-
-```bash
+```bash title="scripts/hello.sh"
 #!/bin/sh
 echo hi
 ```

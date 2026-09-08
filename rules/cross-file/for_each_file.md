@@ -49,21 +49,15 @@ tests/unit/lexer.rs
 tests/unit/parser.rs
 ```
 
-`tests/snapshots/parser.snap`:
-
-```text
+```text title="tests/snapshots/parser.snap"
 output
 ```
 
-`tests/unit/lexer.rs`:
-
-```rust
+```rust title="tests/unit/lexer.rs"
 fn t2() {}
 ```
 
-`tests/unit/parser.rs`:
-
-```rust
+```rust title="tests/unit/parser.rs"
 fn t1() {}
 ```
 

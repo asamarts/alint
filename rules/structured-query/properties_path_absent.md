@@ -31,9 +31,7 @@ The rule fires on this repository:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 server.port=8080
 debug.enabled=true
 ```
@@ -72,9 +70,7 @@ This repository is compliant:
 application.properties
 ```
 
-`application.properties`:
-
-```text
+```text title="application.properties"
 server.port=8080
 ```
 

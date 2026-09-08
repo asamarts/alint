@@ -34,27 +34,19 @@ packages/gamma/
 packages/gamma/LICENSE
 ```
 
-`packages/alpha/LICENSE`:
-
-```text
+```text title="packages/alpha/LICENSE"
 MIT
 ```
 
-`packages/alpha/README.md`:
-
-```markdown
+```markdown title="packages/alpha/README.md"
 # alpha
 ```
 
-`packages/beta/README.md`:
-
-```markdown
+```markdown title="packages/beta/README.md"
 # beta
 ```
 
-`packages/gamma/LICENSE`:
-
-```text
+```text title="packages/gamma/LICENSE"
 MIT
 ```
 
@@ -100,27 +92,19 @@ packages/beta/LICENSE-APACHE
 packages/beta/README.md
 ```
 
-`packages/alpha/LICENSE`:
-
-```text
+```text title="packages/alpha/LICENSE"
 MIT
 ```
 
-`packages/alpha/README.md`:
-
-```markdown
+```markdown title="packages/alpha/README.md"
 # alpha
 ```
 
-`packages/beta/LICENSE-APACHE`:
-
-```text
+```text title="packages/beta/LICENSE-APACHE"
 Apache-2.0 text
 ```
 
-`packages/beta/README.md`:
-
-```markdown
+```markdown title="packages/beta/README.md"
 # beta
 ```
 

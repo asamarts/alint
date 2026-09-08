@@ -30,21 +30,15 @@ src/alpha.h
 src/beta.c
 ```
 
-`src/alpha.c`:
-
-```c
+```c title="src/alpha.c"
 int a;
 ```
 
-`src/alpha.h`:
-
-```c
+```c title="src/alpha.h"
 int a;
 ```
 
-`src/beta.c`:
-
-```c
+```c title="src/beta.c"
 int b;
 ```
 
@@ -85,27 +79,19 @@ src/beta.c
 src/beta.h
 ```
 
-`src/alpha.c`:
-
-```c
+```c title="src/alpha.c"
 int a;
 ```
 
-`src/alpha.h`:
-
-```c
+```c title="src/alpha.h"
 int a;
 ```
 
-`src/beta.c`:
-
-```c
+```c title="src/beta.c"
 int b;
 ```
 
-`src/beta.h`:
-
-```c
+```c title="src/beta.h"
 int b;
 ```
 

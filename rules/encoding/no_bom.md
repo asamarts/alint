@@ -28,15 +28,11 @@ docs/clean.md
 docs/with_bom.md
 ```
 
-`docs/clean.md`:
-
-```markdown
+```markdown title="docs/clean.md"
 # hi
 ```
 
-`docs/with_bom.md`:
-
-```markdown
+```markdown title="docs/with_bom.md"
 <U+FEFF># hi
 ```
 
@@ -73,15 +69,11 @@ docs/a.md
 docs/b.md
 ```
 
-`docs/a.md`:
-
-```markdown
+```markdown title="docs/a.md"
 # hi
 ```
 
-`docs/b.md`:
-
-```markdown
+```markdown title="docs/b.md"
 content
 ```
 

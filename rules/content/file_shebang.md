@@ -31,22 +31,16 @@ scripts/missing.sh
 scripts/ok.sh
 ```
 
-`scripts/hardcoded.sh`:
-
-```bash
+```bash title="scripts/hardcoded.sh"
 #!/bin/bash
 echo legacy
 ```
 
-`scripts/missing.sh`:
-
-```bash
+```bash title="scripts/missing.sh"
 echo no shebang
 ```
 
-`scripts/ok.sh`:
-
-```bash
+```bash title="scripts/ok.sh"
 #!/usr/bin/env bash
 echo ok
 ```
@@ -91,17 +85,13 @@ scripts/build.sh
 scripts/ci.sh
 ```
 
-`scripts/build.sh`:
-
-```bash
+```bash title="scripts/build.sh"
 #!/usr/bin/env bash
 set -euo pipefail
 echo ok
 ```
 
-`scripts/ci.sh`:
-
-```bash
+```bash title="scripts/ci.sh"
 #!/usr/bin/env bash
 echo ok
 ```

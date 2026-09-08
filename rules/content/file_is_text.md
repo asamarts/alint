@@ -26,15 +26,11 @@ src/accidental_blob.rs
 src/clean.rs
 ```
 
-`src/accidental_blob.rs`:
-
-```text
+```text title="src/accidental_blob.rs"
 (binary content, 11 bytes)
 ```
 
-`src/clean.rs`:
-
-```rust
+```rust title="src/clean.rs"
 pub fn ok() {}
 ```
 
@@ -71,15 +67,11 @@ src/lib.rs
 src/main.rs
 ```
 
-`src/lib.rs`:
-
-```rust
+```rust title="src/lib.rs"
 pub fn ok() {}
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

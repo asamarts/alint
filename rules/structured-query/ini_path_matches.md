@@ -28,9 +28,7 @@ The rule fires on this repository:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [database]
 url = jdbc:mysql://localhost/app
 ```
@@ -69,9 +67,7 @@ This repository is compliant:
 tox.ini
 ```
 
-`tox.ini`:
-
-```text
+```text title="tox.ini"
 [testenv]
 deps =
     pytest
@@ -106,9 +102,7 @@ This repository is compliant:
 config.ini
 ```
 
-`config.ini`:
-
-```text
+```text title="config.ini"
 [database]
 url = jdbc:postgresql://localhost/app
 ```

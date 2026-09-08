@@ -28,16 +28,12 @@ src/ok.rs
 src/wide.rs
 ```
 
-`src/ok.rs`:
-
-```rust
+```rust title="src/ok.rs"
 fn a() {}
 fn b() {}
 ```
 
-`src/wide.rs`:
-
-```rust
+```rust title="src/wide.rs"
 fn x() {}
 this line is intentionally way too long to be acceptable under the limit
 fn y() {}
@@ -77,16 +73,12 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 fn a() {}
 fn b() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 pub fn c() {}
 ```
 

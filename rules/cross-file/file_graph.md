@@ -31,21 +31,15 @@ proto/b.proto
 proto/c.proto
 ```
 
-`proto/a.proto`:
-
-```text
+```text title="proto/a.proto"
 import "proto/b.proto";
 ```
 
-`proto/b.proto`:
-
-```text
+```text title="proto/b.proto"
 import "proto/c.proto";
 ```
 
-`proto/c.proto`:
-
-```text
+```text title="proto/c.proto"
 import "proto/a.proto";
 ```
 
@@ -89,21 +83,15 @@ proto/b.proto
 proto/c.proto
 ```
 
-`proto/a.proto`:
-
-```text
+```text title="proto/a.proto"
 import "proto/b.proto";
 ```
 
-`proto/b.proto`:
-
-```text
+```text title="proto/b.proto"
 import "proto/c.proto";
 ```
 
-`proto/c.proto`:
-
-```text
+```text title="proto/c.proto"
 // leaf node, imports nothing
 ```
 

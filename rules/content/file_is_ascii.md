@@ -30,15 +30,11 @@ src/ascii.rs
 src/unicode.rs
 ```
 
-`src/ascii.rs`:
-
-```rust
+```rust title="src/ascii.rs"
 pub fn ok() {}
 ```
 
-`src/unicode.rs`:
-
-```rust
+```rust title="src/unicode.rs"
 // The ☃ is here
 pub fn cold() {}
 ```
@@ -76,15 +72,11 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 pub fn a() {}
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 pub fn b() { let _ = 42; }
 ```
 

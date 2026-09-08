@@ -31,16 +31,12 @@ src/missing.rs
 src/ok.rs
 ```
 
-`src/missing.rs`:
-
-```rust
+```rust title="src/missing.rs"
 fn b() {}
 // no footer here
 ```
 
-`src/ok.rs`:
-
-```rust
+```rust title="src/ok.rs"
 fn a() {}
 // Licensed under the Apache License, Version 2.0
 ```
@@ -81,17 +77,13 @@ src/a.rs
 src/b.rs
 ```
 
-`src/a.rs`:
-
-```rust
+```rust title="src/a.rs"
 fn a() {}
 
 // Licensed under the Apache License, Version 2.0
 ```
 
-`src/b.rs`:
-
-```rust
+```rust title="src/b.rs"
 fn b() {}
 // Licensed under the Apache License, Version 2.0
 ```

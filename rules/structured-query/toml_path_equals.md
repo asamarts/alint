@@ -45,17 +45,13 @@ crates/ok/
 crates/ok/Cargo.toml
 ```
 
-`crates/bad/Cargo.toml`:
-
-```toml
+```toml title="crates/bad/Cargo.toml"
 [package]
 name = "bad"
 edition = "2021"
 ```
 
-`crates/ok/Cargo.toml`:
-
-```toml
+```toml title="crates/ok/Cargo.toml"
 [package]
 name = "ok"
 edition = "2024"
@@ -98,17 +94,13 @@ crates/b/
 crates/b/Cargo.toml
 ```
 
-`crates/a/Cargo.toml`:
-
-```toml
+```toml title="crates/a/Cargo.toml"
 [package]
 name = "a"
 edition = "2024"
 ```
 
-`crates/b/Cargo.toml`:
-
-```toml
+```toml title="crates/b/Cargo.toml"
 [package]
 name = "b"
 edition = "2024"

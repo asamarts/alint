@@ -31,9 +31,7 @@ src/bad.go
 src/ok.go
 ```
 
-`src/bad.go`:
-
-```go
+```go title="src/bad.go"
 package main
 
 func y() {
@@ -41,9 +39,7 @@ func y() {
 }
 ```
 
-`src/ok.go`:
-
-```go
+```go title="src/ok.go"
 package main
 
 func x() {
@@ -85,9 +81,7 @@ src/a.go
 src/b.go
 ```
 
-`src/a.go`:
-
-```go
+```go title="src/a.go"
 package main
 
 func x() {
@@ -95,9 +89,7 @@ func x() {
 }
 ```
 
-`src/b.go`:
-
-```go
+```go title="src/b.go"
 package main
 
 func y() {

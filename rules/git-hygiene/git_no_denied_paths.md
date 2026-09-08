@@ -32,15 +32,11 @@ The rule fires on this repository:
 README.md
 ```
 
-`.env`:
-
-```text
+```text title=".env"
 SECRET=swordfish
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
@@ -80,15 +76,11 @@ src/
 src/main.rs
 ```
 
-`README.md`:
-
-```markdown
+```markdown title="README.md"
 # demo
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

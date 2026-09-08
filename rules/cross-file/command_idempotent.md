@@ -44,9 +44,7 @@ The rule fires on this repository:
 src/main.rs
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 
@@ -82,9 +80,7 @@ This repository is compliant:
 src/main.rs
 ```
 
-`src/main.rs`:
-
-```rust
+```rust title="src/main.rs"
 fn main() {}
 ```
 

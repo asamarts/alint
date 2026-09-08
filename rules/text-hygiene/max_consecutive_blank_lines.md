@@ -30,17 +30,13 @@ docs/clean.md
 docs/gappy.md
 ```
 
-`docs/clean.md`:
-
-```markdown
+```markdown title="docs/clean.md"
 a
 
 b
 ```
 
-`docs/gappy.md`:
-
-```markdown
+```markdown title="docs/gappy.md"
 a
 
 
@@ -82,9 +78,7 @@ docs/a.md
 docs/b.md
 ```
 
-`docs/a.md`:
-
-```markdown
+```markdown title="docs/a.md"
 # title
 
 first paragraph
@@ -92,9 +86,7 @@ first paragraph
 second paragraph
 ```
 
-`docs/b.md`:
-
-```markdown
+```markdown title="docs/b.md"
 x
 
 y
