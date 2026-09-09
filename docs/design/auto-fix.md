@@ -1,6 +1,6 @@
 # Auto-fix: a systematic framework for mechanical remediation
 
-Status: Accepted (ratified 2026-09-09; revised five times after independent adversarial audits, see the changelog note at the end). Execution plan to follow as a companion design doc.
+Status: Accepted (ratified 2026-09-09; revised five times after independent adversarial audits, see the changelog note at the end). Execution is tracked in the companion [`auto-fix-implementation-plan.md`](auto-fix-implementation-plan.md).
 Decisions: [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) (accepted) records the load-bearing decisions (the batched range-edit apply engine, the applicability model, and the fixer trust boundary).
 Demand evidence: the structured-query family (25 kinds, the largest family) is 100% unfixable today; see the `format-coverage.md` arc and the 30-repo `examples/` corpus.
 
