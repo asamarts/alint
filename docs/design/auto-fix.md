@@ -1,6 +1,6 @@
 # Auto-fix: a systematic framework for mechanical remediation
 
-Status: Draft (revised after an adversarial audit; see the changelog note at the end).
+Status: Draft (revised five times after independent adversarial audits; see the changelog note at the end).
 Decisions: [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) (proposed) records the load-bearing decisions (the batched range-edit apply engine, the applicability model, and the fixer trust boundary).
 Demand evidence: the structured-query family (25 kinds, the largest family) is 100% unfixable today; see the `format-coverage.md` arc and the 30-repo `examples/` corpus.
 
@@ -25,7 +25,7 @@ Demand evidence: the structured-query family (25 kinds, the largest family) is 1
   - [6. The phased plan](#6-the-phased-plan)
   - [7. False-positive and safety surface](#7-false-positive-and-safety-surface)
   - [8. Invariants and the decision record](#8-invariants-and-the-decision-record)
-  - [9. Open questions](#9-open-questions)
+  - [9. Resolved decisions and open questions](#9-resolved-decisions-and-open-questions)
 - [References and prior art](#references-and-prior-art)
 
 ## Thesis
@@ -59,9 +59,11 @@ on purpose:
   Unsafe (opt-in via `--unsafe-fixes`), Suggestion (surfaced, never auto-applied), Never
   (advisory or a tripwire; no fix proposed).
 
-One batched apply engine runs over the primitives; every class is an adapter that emits
-primitives with a declared tier. The engine, not the individual fixer, owns conflict
-resolution, determinism, postcondition verification, and (from Phase 1) fixpoint iteration.
+One apply engine runs over the primitives; every class is an adapter that emits primitives
+with a declared tier. The engine has **two composition regimes** (5.2): whole-file transforms
+compose in config order, and located edits go through a batched, verifying pass. The engine,
+not the individual fixer, owns conflict resolution, determinism, postcondition verification,
+and (from Phase 1) fixpoint iteration.
 
 ---
 
@@ -216,8 +218,9 @@ universe indexed by intent (which is how the DSL will expose it):
 - **Structured value** (a value at a path must equal / be absent): class 3. Entirely
   unfixable today; the largest opportunity.
 - **Ordering / canonicalization** (a marked block must stay sorted; entries deduplicated):
-  `ordered_block` sort is the clean win; `unique_by` dedup and `.gitattributes` /
-  `.gitignore` line insertion are adjacent, currently unbuilt.
+  `ordered_block` sort and line dedup are the clean wins; `.gitattributes` / `.gitignore` line
+  insertion is adjacent, currently unbuilt; a `unique_by` collision has no unique automatic fix
+  (which duplicate survives is ambiguous) and stays a Suggestion.
 - **Metadata / permission** (exec bit, symlink, submodule, portable name): `SetMode` plus
   delete/rename. alint deletes symlinks and submodules; chmod and portable-name repair are
   gaps.
@@ -296,7 +299,7 @@ edit, where changing the value is the entire point; for alint, the Safe test for
 edit is "sets exactly the declared value, output re-parses, recoverable via VCS," not
 "preserves meaning."
 
-This maps one-to-one onto the maintainer's existing five buckets and gives alint three
+This maps cleanly onto the maintainer's existing five buckets (5-to-4, per 1.4) and gives alint three
 properties it lacks: a machine-readable safety declaration on every fixer, a default that
 only applies fixes that cannot surprise, and a first-class home for "proposed but not
 automatic." The data model for Suggestions and their interaction with the existing agent
@@ -313,8 +316,8 @@ behavior and are classified Safe on introduction. The one intentional change is 
 `hygiene/no-tracked-artifacts` ruleset): it is **reclassified Unsafe by default**, because deleting
 a whole file irreversibly is a poor default for a bare `alint fix`. A one-release deprecation
 warning ships first, and a user can **promote it back to Safe on a specific rule** via
-`fix: { applicability: safe }` in their own top-level config (per-rule promotion is
-top-level-only, 5.5).
+`fix: { file_remove: { applicability: safe } }` in their own top-level config (per-rule promotion
+is top-level-only, 5.5).
 
 ## 4. Prevalence and usefulness
 
@@ -343,8 +346,9 @@ invests in that class.
 6. **VCS untrack + gitignore: high for the hygiene story.** A tracked `target/`,
    `node_modules/`, or `.DS_Store` is one of the most common real findings (it is literally
    the README demo). Spawn-gated (5.5).
-7. **Ordering / canonicalization: medium.** `ordered_block` sort and `unique_by` dedup are
-   clean, deterministic wins.
+7. **Ordering / canonicalization: medium.** `ordered_block` sort and line dedup are clean,
+   deterministic wins; a `unique_by` collision has no Safe fix (which duplicate file survives is
+   ambiguous) and stays a Suggestion.
 8. **Metadata permission (chmod): medium.** `shebang_has_executable` (add +x) is unambiguous
    and Safe; the others are narrower.
 9. **Reference/version pinning (class 7): high visibility, special-cased.** SHA-pinning a
@@ -397,11 +401,15 @@ computed span and can genuinely overlap another, so it is the range/overlap mach
 whole-file `SetContent` is therefore **not** modeled as a `0..len` range for overlap purposes.
 The two shapes do not co-apply to one file in a single pass: a file a whole-file transform touches
 in a pass takes no located edits that pass, and located edits re-collect against the new bytes on
-the next fixpoint pass (5.2.3), so every located byte offset stays valid. And because a single
-`*_path_absent` violation expands to N node deletions (5.2.1), the multi-node structured
-fan-out **requires** true `ReplaceRange`s, since N whole-file `SetContent`s would each claim
-`0..len` and mutually conflict; `ReplaceRange` is load-bearing for class 3, not optional
-(open question 3).
+the next fixpoint pass (5.2.3), so every located byte offset stays valid. A single `*_path_absent`
+violation expands to N node deletions (5.2.1). `ReplaceRange` is the **chosen** representation for
+that fan-out rather than a strict necessity: a rule-level `collect_edits` (5.2.1) could instead
+splice all N nodes internally and return one whole-file `SetContent`, which would conflict with
+nothing, so the flagship does not *require* the ranged primitive. The engine adopts `ReplaceRange`
+anyway because it gives the whole located-edit family - including the Phase 1 regex `replace`, where
+two rules genuinely overlap one span - a single substrate with engine-level overlap detection and
+minimal LSP diffs, instead of pushing that bookkeeping into each fixer. The leaner
+single-`SetContent` alternative is recorded and rejected in ADR-0017 (resolved; 5.2.1).
 
 ### 5.2 The batched apply engine
 
@@ -633,10 +641,43 @@ security-load-bearing work to build, not a mechanism to inherit.
 
 ### 5.6 DSL, CLI, and downstream surface
 
-- **New `fix:` ops.** `replace` (class 2/4, capture substitution); `set_value` and
-  `remove_value` (class 3); `sort` and `dedup` (for `ordered_block` / `unique_by`); `chmod`;
-  `git_untrack` (spawning, top-level-only); `sync_from` (whole-file copy from a canonical
-  source, 2.2); `insert_header` (comment-style-aware). Each declares a default applicability.
+- **New `fix:` ops and their config surface.** Each new op declares a default applicability and
+  binds to a specific set of host rule kinds; the existing "`fix.<op> is not compatible with
+  <kind>`" load-time gate (enforced by each fixable builder, e.g. `no_empty_files.rs`,
+  `file_header.rs`) is extended to the new pairings. Most ops read their parameters from the **host
+  rule** so a fix restates no data the rule already carries; the table gives, per op, the host
+  kind(s), what it reads from the rule, and the few genuinely new fields of the op object:
+
+  | Op | Class | Host kind(s) | Reads from the rule | New op field(s) | Default tier |
+  |---|---|---|---|---|---|
+  | `replace` | 2/4 | `file_content_forbidden`, `file_content_matches`, `*_path_matches` | the search regex (`pattern:`; `matches:` on `*_path_matches`) | `replacement` (template, capture substitution) | Unsafe |
+  | `set_value` | 3 | `*_path_equals` only | target `path:` and value (`equals:`) | none | Safe (scalar into an existing scalar), else Suggestion |
+  | `remove_value` | 3 | `*_path_absent` | target `path:` (the node to delete) | none | Unsafe |
+  | `sort` | 6 | `ordered_block` | `comparator` / `start` / `end` / `select` / `unique` | none | Safe |
+  | `dedup` | 6 | `ordered_block` only | the marked-block bounds | none | Safe |
+  | `chmod` | metadata | `executable_bit`, `shebang_has_executable`, `executable_has_shebang` | the desired bit (`require:`) | none (mode derived from `require:`) | Unsafe (Safe for shebang add-+x) |
+  | `git_untrack` | VCS | `file_absent` (and `no_committed_binaries` once built) | the violating path | `gitignore` (also append a `.gitignore` line; default true) | Unsafe, spawning (top-level-only, 5.5) |
+  | `sync_from` | 2.2 | `cross_file` (`identical` / `equals`) | the canonical `source:` file | none | Unsafe |
+  | `insert_header` | 6 | `file_header` | (nothing: `pattern:` is a regex, unusable as literal bytes) | `text` (literal header) + `comment_style` (`line` / `block` / `auto`) | Safe (presence-guarded) |
+  | `dir_create` | presence | `dir_exists` | the missing directory path | none | Safe |
+
+  Three bindings need an explicit design call, because the obvious reading collides with an existing
+  mechanism:
+  - **`dedup` is `ordered_block`-only.** Deduping a marked line-block is a clean Safe transform. The
+    superficially similar `unique_by` violation is cross-*file* (N files share a key), where "dedup"
+    would mean *deleting* all but one source file with no principled rule for which survives; that is
+    a destructive, ambiguous-target fix and routes to **Suggestion** (a human picks the survivor),
+    never a Safe `dedup`. One op name must not span both.
+  - **`insert_header` does not replace the existing `file_header` fix.** `file_header` is already
+    fixable today via `file_prepend` (`file_header.rs:136-149` builds a `FilePrependFixer` from
+    `content` / `content_from`), which inserts verbatim bytes. `insert_header` is a *distinct*,
+    comment-style-aware op that renders the header in the file's comment syntax by extension; a rule
+    carries one or the other (one op per `fix:` block), and plain `file_prepend` stays valid for an
+    already-formatted literal block.
+  - **`sync_from` takes its source from the host rule, not a new field.** It reads the canonical file
+    from `cross_file`'s existing `source:`, so it introduces no `content_from:`-style field (which
+    would duplicate the `file_create` / `file_append` content source). `cross_file` parses no `fix:`
+    block today, so this is new fix-block plumbing on that kind.
 - **Per-rule reclassification.** The schema encodes exactly one op per `fix:` block (the op is
   the key; each branch is `additionalProperties: false`), so applicability is a field *of the
   op's object*, not a sibling key: `fix: { file_remove: { applicability: safe } }`. The
@@ -868,9 +909,9 @@ located-edit coverage. Risk: low.
 
 A `replace` fix op: a Rust regex plus a replacement template with capture substitution, emitting
 `ReplaceRange` per match, wired to `file_content_forbidden` and `file_content_matches`. Unsafe by
-default; Safe only when the replacement is provably a normalization. This phase also introduces
-the **fixpoint loop and index invalidation** (5.2.3), since two `replace` rules can unblock each
-other. Tests: firing, silent, idempotence, overlap between two `replace` rules on one file,
+default; Safe only when the replacement is provably a normalization. This phase also **first
+exercises the fixpoint loop and index invalidation** (5.2.3, both built in Phase 0), since two
+`replace` rules can unblock each other. Tests: firing, silent, idempotence, overlap between two `replace` rules on one file,
 cross-fixer non-convergence hits the cap, multiline.
 
 ### Phase 2: structured value edits (the flagship, class 3)
@@ -898,7 +939,9 @@ per format: firing + silent + idempotence + a comment/order-preservation golden 
 
 ### Phase 4: ordering, canonicalization, and the license-header inserter
 
-- **`ordered_block` sort** and **`unique_by` dedup** (Safe, deterministic).
+- **`ordered_block` sort** and **`ordered_block` dedup** (Safe, deterministic). A `unique_by`
+  collision has no Safe fix - deleting all but one of N files that share a key is destructive and
+  the survivor is ambiguous - so it surfaces as a Suggestion (5.6).
 - **`indent_style`** leading-indent tab/space conversion (Safe for pure leading indentation only;
   Unsafe otherwise).
 - **`.gitattributes` / `.gitignore` line insertion** (Safe, presence-guarded).
@@ -932,7 +975,8 @@ This section is mandatory (TEMPLATE section 4) and applies across the phases.
 - **Overlapping edits and non-convergence.** Mitigation: the total-order sort plus skip-overlap
   and isolation groups; the fixpoint cap with a loud error; the per-fixer idempotence test (which
   catches self-oscillation only, not cross-fixer cycles, 5.2.3).
-- **Cross-file half-application.** Mitigation: the all-or-nothing multi-file transaction (5.2.4).
+- **Cross-file half-application.** Mitigation: the multi-file transaction (5.2.4), all-or-nothing
+  through verify and best-effort (no cross-file journal) through the per-file writes.
 - **Ambiguous targets.** Mitigation: those stay Suggestion; alint proposes, a human or agent
   disposes.
 - **Destructiveness and recoverability.** The practical undo is VCS. Keep the pre-commit "fix and
@@ -951,7 +995,8 @@ plus ADR (invariants 12 and 13).
 
 **ADR-0017** (proposed) records: (1) the ranged edit primitive plus the batched,
 conflict-resolving, postcondition-verifying apply engine (whole-file ops composed in config
-order in Phase 0; the located-edit batch and the fixpoint arrive in Phase 1); (2) the four-state
+order in Phase 0; the located-edit batch and the fixpoint built in Phase 0 but first exercised in
+Phase 1); (2) the four-state
 applicability model with safe-by-default and `--unsafe-fixes` opt-in, including the
 Dershowitz-Manna termination contract for Safe fixers and the well-behaved-lens acceptance test
 for structured fixes (5.8); and (3) the fixer trust boundary (spawning fix ops refused from
@@ -982,8 +1027,11 @@ Resolved after review (folded into the sections above):
   any source (so bundled hygiene keeps auto-applying), remote-URL content-injecting fixers are
   **demoted to Suggestion** with a `trusted_extends:` opt-in, and spawning fixers are refused from
   any non-top-level source (5.5).
-- **`ReplaceRange` vs `SetContent`:** **ranged**, since the multi-node structured fan-out requires
-  it (5.1, 5.2.1).
+- **`ReplaceRange` vs `SetContent`:** **ranged**. The multi-node structured fan-out does not
+  strictly require it (a rule-level `collect_edits` could emit one whole-file `SetContent`), but a
+  ranged primitive gives the whole located-edit family one substrate with engine-level overlap
+  detection and minimal LSP diffs; the leaner single-`SetContent` alternative is recorded and
+  rejected in ADR-0017 (5.1, 5.2.1).
 - **Baseline and `fix`:** **baseline-aware**; skip suppressed violations, surface them as
   Suggestions, fix only new ones (5.7).
 - **Network-gated fixes:** the core stays network-free; SHA-pinning is a separate, top-level-only,
@@ -1048,7 +1096,7 @@ hierarchy, relational dependency theory) lives in the companion
 
 ---
 
-*Revision note: revised four times after independent adversarial audits. Round 1 (technical +
+*Revision note: revised five times after independent adversarial audits. Round 1 (technical +
 design) added the rule-level `collect_edits` binding (5.2.1), a total edit order (5.2.2),
 multi-file transactions (5.2.4), the locate/serialize split (5.3, 5.4), the fixer trust boundary
 (5.5), the interaction surfaces (5.7), the recount to seven normalizers, and dropped the undefined
@@ -1072,4 +1120,17 @@ failure model honest (all-or-nothing through verify, best-effort through the per
 5.2.4), and added SARIF `fixes[]` for all tiers on `check --format sarif`, a
 performance-and-perf-gate section (5.9), a preview-mode table, and Windows / `nested_configs`
 handling. The maintainer resolved: the v0.17 warned-migration slot, all-tier SARIF fixes, and
-computing check-side edits only when a fix-carrying format is selected.*
+computing check-side edits only when a fix-carrying format is selected. Round 5 (a holistic
+coherence and drift audit, a coverage-doc re-audit with DSL worked-examples, and an
+over-engineering critique) specified 5.6's per-op config surface (host kinds, inputs-read-from-rule
+versus new op fields) for every new op and resolved three collisions the worked-examples exposed
+(`dedup` is `ordered_block`-only, since deduping `unique_by` would delete source files;
+`insert_header` is distinct from the existing `file_prepend`-on-`file_header` fix; `sync_from` reads
+`cross_file`'s `source:` rather than a new content field), defined the referenced-but-undefined
+`dir_create` op, fixed a schema-shape contradiction (the section 3 `file_remove` promotion example
+used the invalid sibling-key form) and a run of cross-reference drift (the section 9 TOC anchor, a
+dangling "open question 3", the round count, the Thesis two-regime framing, and the multi-file
+"all-or-nothing" qualifier), and made the `ReplaceRange` justification honest (a chosen substrate,
+not a strict necessity, since a single `collect_edits` could emit one `SetContent`). The maintainer
+resolved to keep the full-engine-first plan of section 6 as written, with the leaner "defer the
+located-edit engine" alternative recorded and rejected in ADR-0017.*

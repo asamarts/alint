@@ -147,10 +147,13 @@ The **coverage gaps are the same dependency classes over *dynamically-extracted*
 two-way IND on SPDX ids. This motivates a single, theory-grounded **`constraint` kind**: an
 `extract` spec (pull tuples from a glob via JSONPath / `lines` / `regex`, tagged by source)
 composed with a dependency to assert (`key`, `references`, `set_equals`, `equal`, `disjoint`,
-optionally a `count` / `distinct` operator for the counting fragment). It would subsume `unique_by`,
-`cross_file`, and `registry_paths_resolve` and unlock `key_parity`,
-`dependency_version_consistency`, and the toolchain-pin family as *configurations* rather than
-bespoke kinds. Guardrail: **check only, never infer**, because FD+IND implication is undecidable
+optionally a `count` / `distinct` operator for the counting fragment). It would subsume `cross_file`
+and `registry_paths_resolve` (both already extract-then-assert-a-dependency kinds built on the
+shared `crate::extract` module) and unlock `key_parity`, `dependency_version_consistency`, and the
+toolchain-pin family as *configurations* rather than bespoke kinds. It would **not** subsume
+`unique_by`, which keys on a path-*template* (`key: "{stem}"`) over file paths rather than on any
+content extraction, a form the `Extract` enum (`Structured` / `Lines` / `Regex` / `WholeFile`) does
+not have; folding it in would need a new path-template extractor. Guardrail: **check only, never infer**, because FD+IND implication is undecidable
 (Chandra-Vardi 1985); alint evaluates a declared constraint against an instance (polynomial), and
 must never entail or minimize a constraint set.
 
@@ -170,7 +173,7 @@ schema whereas alint's relations are discovered per run.
 | Missing class | Gaps | Kind of work |
 |---|---|---|
 | Recognition upgrade (build a structure the parser drops or never builds) | B1 duplicate keys, B2 well-formed, E1/E3/E6 markdown grammar, G1 tabular, H2 Dockerfile, F2 SPDX-expression | a parser or scanner |
-| Dependency over a *dynamically-extracted* relation | C3 version consistency, D1 key parity, D2 placeholder parity, F3 REUSE completeness | new constraint logic (the `constraint` kind of 2.4) |
+| Dependency over a *dynamically-extracted* relation | C3 version consistency, D1 key parity, D2 placeholder parity, F3 REUSE completeness | new constraint logic (the `constraint` kind of 2.4); the dependency shape is partly present already (`registry_paths_resolve` and `cross_file set_equals` are dynamic INDs), so the genuinely new pieces are key-*set* enumeration (D1, which JSONPath cannot express) and the extract-and-assert packaging |
 | General FO+COUNT (equality-of-counts / threshold over an extracted relation) | C3 count-distinct, key-count parity, B4 mutually-exclusive (= 1), dead-pattern (= 0) | a `count` operator on the `constraint` kind |
 | A small offline decision procedure | C4 semver-range algebra | a self-contained solver |
 | Out of band (the computability boundary of 2.2) | Scorecard-via-API, dependency-graph resolution, code semantics, SAST, secrets, crypto | deliberately excluded |
@@ -254,7 +257,7 @@ itself, which a path query structurally cannot see.
 | `no_duplicate_keys` | the same key twice in one mapping, for JSON / YAML / dotenv / properties (silent data loss) | IN | K | Suggestion |
 | `well_formed` (`parses_as`) | a file parses as valid X with no schema and no query; JSON strictness extras | IN | P+K | Never |
 | `structured_key_sort` | keys within a parsed object are in a canonical order (distinct from `ordered_block`, which sorts lines) | IN | K | Safe |
-| `*_path_casing` / `*_path_mutually_exclusive` | a queried value obeys a naming case; exactly one of two paths is present | IN | K (small) | Unsafe / Never |
+| `*_path_casing` / `*_path_mutually_exclusive` | a queried value obeys a naming case; exactly one of two paths is present | IN | P+K (casing: `*_path_matches` with a case regex works today) / K (the XOR) | Unsafe / Never |
 
 **`no_duplicate_keys` is a gap alint's own reference documents.** `docs/rules.md` states that
 a "detect duplicate key" rule is only expressible for XML and INI (which array-collect the
@@ -276,7 +279,7 @@ so this whole vein is unmined.
 | Gap | Detects | Scope | Expr | Fix |
 |---|---|---|---|---|
 | version-SSOT ruleset | one version identical across package.json / Cargo.toml / pyproject / VERSION / `__version__` / Chart appVersion / OpenAPI info.version / the top CHANGELOG entry, plus the git tag | IN (files) / BORDERLINE (tag) | P + K | Safe/Unsafe |
-| toolchain-pins ruleset | one language/tool version across `.nvmrc` / `engines` / Dockerfile `FROM` / CI setup / `.tool-versions` (Node, Rust, Python, Ruby, JVM, .NET) | IN | P | Unsafe |
+| toolchain-pins ruleset | one language/tool version across `.nvmrc` / `engines` / Dockerfile `FROM` / CI setup / `.tool-versions` (Node, Rust, Python, Ruby, JVM, .NET) | IN | P (exact pins); range pins fall to C4 | Unsafe |
 | `dependency_version_consistency` | every instance of a dynamically-discovered dependency agrees across a glob of manifests | IN (assert) / BORDERLINE (pick highest) | K | Unsafe |
 | `semver_range` awareness | range intersection, satisfaction, and `^`/`~`/exact policy consistency | BORDERLINE | K | Unsafe / Never |
 | `dependabot_ecosystem_drift` | a manifest exists but no `updates[]` entry covers its ecosystem | IN | P+K | Suggestion |
@@ -446,7 +449,7 @@ highest-value new fixes ride substrates that document already plans:
 |---|---|---|
 | `editorconfig_conforms` | Safe | reuses the existing hygiene fixers, driven by the file's declared policy |
 | `gitattributes_valid` (eol-pin) | Safe | a presence-guarded `ReplaceRange` insert |
-| `structured_key_sort` | Safe | format-preserving reorder (auto-fix Phase 4 sort) |
+| `structured_key_sort` | Safe | format-preserving key reorder via the structured bridge (auto-fix Phase 2) |
 | version SSOT | Safe/Unsafe | structured `set_value` to the SSOT (auto-fix Phase 2 flagship) |
 | toolchain / dependency drift | Unsafe | set the drifted pin to canonical |
 | `no_duplicate_keys` | Suggestion | which duplicate to keep is ambiguous |
@@ -466,7 +469,8 @@ gap all ride the same path-to-span bridge.
    territory, no general linter does it. (K)
 4. version-SSOT ruleset + config-ingest (C1): huge proven demand; mostly expressible, needs
    packaging plus a tag kind. (P+K)
-5. toolchain-pins ruleset (C2): under-served, because Dependabot ignores pin files. (P)
+5. toolchain-pins ruleset (C2): under-served, because Dependabot ignores pin files. (P for exact
+   pins; range pins are C4 `semver_range`)
 6. `semver_range` awareness (C4): the one class alint structurally cannot do. (K)
 7. `markdown_links_resolve` (E1): `markdown_paths_resolve` does only backticks. (K)
 8. `dependency_version_consistency` (C3): the syncpack/manypkg headline. (K)
@@ -511,7 +515,8 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
 - **A markdown link / heading / front-matter scanner** (one light line-scanner with a
   fenced-code toggle) unlocks all of Family E.
 - **A single `constraint` kind** (extract relations from a glob, then assert a dependency;
-  section 2.4) generalizes `unique_by` / `cross_file` / `registry_paths_resolve` and unlocks the
+  section 2.4) generalizes `cross_file` and `registry_paths_resolve` (not `unique_by`, whose
+  path-template keying needs a new extractor; 2.4) and unlocks the
   whole cross-file consistency vein (`dependency_version_consistency`, `key_parity`,
   `placeholder_parity`) as configurations rather than bespoke kinds, subject to the
   check-only-never-infer guardrail.

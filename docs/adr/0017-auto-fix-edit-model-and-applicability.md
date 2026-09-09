@@ -11,7 +11,7 @@ decision-makers: asamarts
 Proposed. Companion design doc:
 [`docs/design/auto-fix.md`](../design/auto-fix.md), which carries the research survey (the
 seven-class fix taxonomy), the per-format structured-write feasibility verdicts, the
-architecture, and the phased build plan. This ADR records the two load-bearing decisions
+architecture, and the phased build plan. This ADR records the three load-bearing decisions
 that everything in that plan depends on.
 
 ## Context
@@ -67,12 +67,12 @@ demote to Suggestion, memoized per edit, any edit that would produce an unparsea
 write atomically. Whole-file transforms (the existing ops) are **not** modeled as `0..len`
 ranges; they compose functionally in config order, so **Phase 0, which ships only whole-file
 ops, reproduces today's behavior exactly**, and the located-edit batch, overlap-skip, and
-fixpoint arrive in Phase 1. The engine is a **non-confluent rewriting system** driven by a
+fixpoint are built in Phase 0 but first exercised in Phase 1. The engine is a **non-confluent rewriting system** driven by a
 total-order strategy, which buys reproducibility, not canonicity, and whose soundness rests on
 the fact that disjoint edits commute. The fixpoint carries an index-invalidation rule (a
 path-mutating edit forces a deterministic re-walk) and a loud non-convergence cap. A fix that
-spans files is an all-or-nothing multi-file transaction whose postconditions are checked over
-the staged set. Format-preserving structured edits are span-splices against a per-format CST or
+spans files is a multi-file transaction, all-or-nothing through the verify phase (postconditions
+checked over the staged set) but best-effort through the per-file writes (no cross-file journal). Format-preserving structured edits are span-splices against a per-format CST or
 spanned parser, never a parse-then-dump, with a per-format value serializer for quoting, type
 fidelity, and separator surgery.
 
@@ -162,6 +162,19 @@ splice or overlap invariant, and debug_assert runtime contracts.
 - **Reuse the kind-level `SPAWNING_RULE_KINDS` gate for spawning fixers.** Rejected: it gates
   the rule kind, so a spawning fixer attached to a non-spawning kind (a `git_untrack` fix on
   `file_absent`) would pass untouched; a distinct fix-level gate is required.
+- **A leaner v1 that defers the located-edit engine (the `ReplaceRange` primitive, the batch,
+  overlap-skip, and the fixpoint) until the regex `replace` family needs cross-rule same-file
+  conflict resolution, shipping the structured-value flagship as one whole-file `SetContent` per
+  file from a rule-level `collect_edits` plus the span bridge.** The technical premise is sound: a
+  single `collect_edits` can splice all N nodes internally and emit one `SetContent`, which the
+  current engine applies with nothing to conflict against, so the flagship does not strictly require
+  the ranged primitive. Rejected as the plan of record anyway, because it trades one fix-path
+  migration for two (a `SetContent`-only bridge now, then the located-edit engine later when
+  `replace` lands, which is already on the roadmap) and leaves the re-parse postcondition, the tier
+  filter, and the determinism / total-order contract without a single engine-level home in the
+  interim. The located-edit machinery is dormant in Phase 0 (whole-file ops reproduce today exactly,
+  Decision 1), so building it up front is implementation cost but no behavior risk. Design doc
+  section 5.1 records the same trade-off at the primitive level.
 
 ## More Information
 
