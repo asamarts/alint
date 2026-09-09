@@ -117,6 +117,50 @@ fn links(text: &str) -> Vec<String> {
     urls
 }
 
+/// Remove fenced code blocks and inline code spans before link
+/// extraction. A `[text](./path)` shown as an EXAMPLE inside backticks
+/// renders as literal text on GitHub, not a live link, so the gate must
+/// not treat it as one (rule-coverage-gaps.md documents markdown-link
+/// syntax this way). Only the bytes *between* backticks are dropped, so
+/// a real link whose visible text is code-formatted keeps its
+/// `](target)` and is still checked.
+fn strip_code(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fence = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            out.push('\n');
+            continue;
+        }
+        if in_fence {
+            out.push('\n');
+            continue;
+        }
+        let mut in_code = false;
+        for ch in line.chars() {
+            if ch == '`' {
+                in_code = !in_code;
+            } else if !in_code {
+                out.push(ch);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[test]
+fn strip_code_drops_example_links_but_keeps_real_ones() {
+    // A whole link inside one code span is an example -> dropped.
+    assert!(!strip_code("see `[text](./path)` here").contains("]("));
+    // A real link whose visible text is code-formatted -> kept + checked.
+    assert!(strip_code("see [`auto-fix.md`](auto-fix.md)").contains("](auto-fix.md)"));
+    // Fenced code blocks are dropped wholesale.
+    assert!(!strip_code("```\n[x](./nope)\n```").contains("]("));
+}
+
 #[test]
 fn repo_doc_links_are_not_dead_on_github() {
     let root = repo_root();
@@ -143,7 +187,7 @@ fn repo_doc_links_are_not_dead_on_github() {
             }
         }
 
-        for url in links(&text) {
+        for url in links(&strip_code(&text)) {
             // Anchors, externals, mail/other schemes: not our concern.
             if url.starts_with('#') || url.starts_with("mailto:") {
                 continue;
