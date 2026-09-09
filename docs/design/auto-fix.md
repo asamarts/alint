@@ -307,10 +307,14 @@ the rule arrives through `extends:`. Promotion toward Safe/Unsafe, and every con
 or spawning op, is confined to the user's own top-level config (5.5). An inherited fixer may
 be demoted but never promoted.
 
-**Back-compatibility:** the 12 existing ops keep their current behavior and are classified
-Safe on introduction, so `alint fix` is unchanged for existing configs. Whether `file_remove`
-(deleting a whole file by default, with no `--unsafe-fixes`) should be reclassified Unsafe is
-a safety-default question, not merely a semver one; see the open questions.
+**Back-compatibility and `file_remove`:** the content and path-normalizing ops keep their current
+behavior and are classified Safe on introduction. The one intentional change is `file_remove`
+(used by `file_absent`, `no_empty_files`, `no_submodules`, `no_symlinks`, and the bundled
+`hygiene/no-tracked-artifacts` ruleset): it is **reclassified Unsafe by default**, because deleting
+a whole file irreversibly is a poor default for a bare `alint fix`. A one-release deprecation
+warning ships first, and a user can **promote it back to Safe on a specific rule** via
+`fix: { applicability: safe }` in their own top-level config (per-rule promotion is
+top-level-only, 5.5).
 
 ## 4. Prevalence and usefulness
 
@@ -384,15 +388,16 @@ from a whole-file `SetContent` to minimal `ReplaceRange`s with an O(ND) Myers di
 1986), which tightens both the LSP diff and the overlap footprint.
 
 Two edit shapes must not be conflated, and conflating them was a round-1 error this revision
-corrects. A **whole-file transform** (the seven normalizers, or a create/remove/rename path
-op) is a function of the file's bytes, not an edit at a span. Whole-file transforms compose by
-**function composition in config order** (exactly today's behavior), and the seven pure
-normalizers additionally form a confluent, terminating sub-system (5.8), so their composite
-normal form is order-independent. A **located edit** (`ReplaceRange` from `replace` /
-`set_value` / `remove_value`) targets a computed span and can genuinely overlap another, so it
-is the range/overlap machinery's job. A whole-file `SetContent` is therefore **not** modeled as
-a `0..len` range for overlap purposes; a file that receives both a whole-file transform and
-located edits has them sequenced across fixpoint passes (5.2.3). And because a single
+corrects. A **whole-file transform** (the seven normalizers, or a create / remove / rename path op) is not
+an edit at a span; the engine applies each in **config order** (exactly today's per-op behavior),
+and Phase 0 replays that same order. It does *not* rely on these transforms commuting (they do
+not: 5.8 gives a counterexample); reproducing today's config order is all the Phase 0 no-op
+needs. A **located edit** (`ReplaceRange` from `replace` / `set_value` / `remove_value`) targets a
+computed span and can genuinely overlap another, so it is the range/overlap machinery's job. A
+whole-file `SetContent` is therefore **not** modeled as a `0..len` range for overlap purposes.
+The two shapes do not co-apply to one file in a single pass: a file a whole-file transform touches
+in a pass takes no located edits that pass, and located edits re-collect against the new bytes on
+the next fixpoint pass (5.2.3), so every located byte offset stays valid. And because a single
 `*_path_absent` violation expands to N node deletions (5.2.1), the multi-node structured
 fan-out **requires** true `ReplaceRange`s, since N whole-file `SetContent`s would each claim
 `0..len` and mutually conflict; `ReplaceRange` is load-bearing for class 3, not optional
@@ -570,28 +575,34 @@ well-behaved fix here" signal that routes creation to Suggestion.
 ### 5.5 Trust boundary for fixers
 
 A fixer is a new trust surface, and the existing `SPAWNING_RULE_KINDS` allowlist does not cover
-it: that gate checks the rule **kind** at load (`crates/alint-dsl/src/lib.rs:513`), so a
-spawning or content-writing **fixer** attached to a non-spawning kind (for example a
-`git_untrack` fix on `file_absent`, or a `replace` fix on `file_content_forbidden`) passes it
-untouched. Without a new gate, an `extends:`-ed ruleset could ship a fix that silently rewrites
-the user's files or shells out on a default `alint fix`, which is the file-writing and RCE
-analogue of the spawning-kind hazard the repo already takes seriously. The rules:
+it: that gate checks the rule **kind** (its `.contains(&kind)` sites are at
+`crates/alint-dsl/src/lib.rs:271` / `545` / `579`), so a spawning or content-injecting **fixer**
+attached to a non-spawning kind (a `git_untrack` fix on `file_absent`, or a `replace` fix on
+`file_content_forbidden`) passes it untouched. Without a new gate, a remote `extends:`-ed ruleset
+could ship a fix that silently injects bytes into the user's files or shells out on a default
+`alint fix`, the file-writing and RCE analogue of the spawning-kind hazard. The gate keys on
+**what the fixer can do** and **where it came from** (the loader already tracks
+top-level-versus-`extends:` provenance and threads a per-rule permission to the fixer, the same
+mechanism that forces `allow_out_of_root` off for inherited rules):
 
-- **Spawning fix ops** (`git_untrack`, a `command`-backed fix, regenerate-from-command) are
-  **refused at load** from an `extends:`-ed ruleset, mirroring how the kind-level
-  `SPAWNING_RULE_KINDS` hard-rejects a spawning kind. This needs a new **fix-level** allowlist,
-  because the kind-level gate does not see a spawning fixer attached to a non-spawning kind.
-- **Content-mutating fix ops** (`replace`, `set_value`, `remove_value`, `sync_from`,
-  `insert_header`, and any future op that rewrites existing bytes) are, when inherited from an
-  `extends:`-ed ruleset, **demoted to Suggestion** rather than refused, so an untrusted ruleset
-  can propose an edit but never auto-write on a default `alint fix`. Whether inherited content
-  fixers should be honored at all (versus dropped) is open question 2.
-- **Applicability promotion is top-level-only.** An inherited fixer may be demoted but never
-  promoted toward Safe/Unsafe. The gate is implementable on existing plumbing: the loader
-  already tracks top-level-versus-`extends:` provenance and threads a per-rule permission to the
-  fixer (the same mechanism that forces `allow_out_of_root` off for inherited rules), so the fix
-  op and its origin are both known at rule-build time.
-- `allow_out_of_root` remains top-level-only, unchanged.
+- **Fixed-behavior fixers** (the seven hygiene normalizers, rename-to-case, `file_remove`, `chmod`,
+  `dir_create`) carry no ruleset-supplied bytes and do not spawn, so there is no injection surface;
+  they are honored at their own tier from any source. This is what keeps the bundled rulesets'
+  trailing-whitespace / final-newline fixes auto-applying (they arrive via
+  `extends: alint://bundled/...`); a destructive one like `file_remove` is already gated by its
+  Unsafe tier, independent of source.
+- **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`, and
+  `file_create` / `file_prepend` / `file_append` with inline content) are honored at their tier
+  from the user's own top-level config, local-path `extends:`, and first-party **bundled**
+  rulesets. From a **remote-URL `extends:`** they are **demoted to Suggestion** by default (they
+  can propose an edit, never auto-write), because the content is authored by a third party. A
+  top-level `trusted_extends:` allowlist opts specific remote URLs (a company's internal ruleset
+  host) into honoring their content fixers at tier.
+- **Spawning fixers** (`git_untrack`, a `command`-backed fix, regenerate-from-command) are
+  **refused at load** from any non-top-level source (bundled included), matching the
+  top-level-only posture of `SPAWNING_RULE_KINDS`.
+- **Applicability promotion** toward Safe/Unsafe is top-level-only: an inherited fixer may be
+  demoted but never promoted. `allow_out_of_root` remains top-level-only, unchanged.
 
 ### 5.6 DSL and CLI surface
 
@@ -600,7 +611,11 @@ analogue of the spawning-kind hazard the repo already takes seriously. The rules
   `git_untrack` (spawning, top-level-only); `sync_from` (whole-file copy from a canonical
   source, 2.2); `insert_header` (comment-style-aware). Each declares a default applicability.
 - **Per-rule reclassification.** `fix: { op: ..., applicability: safe | unsafe | suggestion }`
-  (Ruff's `extend-safe-fixes` model), subject to the promotion rule of 5.5.
+  (Ruff's `extend-safe-fixes` model), subject to the promotion rule of 5.5. This is also how a
+  user promotes `file_remove` back to Safe on a chosen rule.
+- **Trust config.** A top-level `trusted_extends:` list (URL prefixes) opts specific remote
+  `extends:` sources into having their content-injecting fixers honored at tier rather than
+  demoted to Suggestion (5.5), for teams that trust their own internal ruleset host.
 - **`command` rule fixability.** The `command` plugin rule may carry a user-supplied fix
   command; it is a spawning fixer, so top-level-only and gated as in 5.5. Its name is distinct
   from the agent output's existing `fix_command` field (5.7).
@@ -612,9 +627,9 @@ analogue of the spawning-kind hazard the repo already takes seriously. The rules
 
 - **Baseline.** `alint fix` rejects `--baseline` today, so it acts on the unsuppressed set;
   after Phase 2 that would auto-rewrite a structured value a team deliberately grandfathered.
-  The proposal makes `fix` **baseline-aware**: with a baseline, suppressed violations are
-  skipped by the apply set and surfaced only as Suggestions. This is a behavior addition, called
-  out as an open question.
+  `fix` becomes **baseline-aware**: with a baseline, suppressed (grandfathered) violations are
+  skipped by the apply set and surfaced only as Suggestions, mirroring `check --baseline`; only
+  new violations are fixed. (Resolved; was an open question.)
 - **`--changed`.** `Engine::fix` already honors `--changed`. The fixpoint can require writes to
   files outside the changed set (cross-file consistency, or a file a prior pass created); the
   proposal confines writes to the changed set plus files a fix in scope created, and treats a
@@ -629,16 +644,17 @@ analogue of the spawning-kind hazard the repo already takes seriously. The rules
   drift; this is the one place true concurrency appears, and version-pinning, not operational
   transformation, is the right tool (5.8).
 - **Agent output and the Suggestion data model.** The report types carry no tier today
-  (`FixStatus` is `Applied | Skipped | Unfixable`) and the agent format emits `fix_available:
-  bool` plus `fix_command: ["fix","--only",<id>]`. The proposal adds a `Suggested(edit)`
-  outcome (or a tier field on `FixItem`), an `applicability` field on the agent violation, a
-  `proposed_edit: {path, range, content}[]` payload for Suggestions, and gates `fix_command` to
-  Safe/Unsafe (appending `--unsafe-fixes` for Unsafe). Crucially, a Suggestion is **never
-  applied**, so an error-level violation whose only fix is a Suggestion **still stands** after
-  `alint fix` and must **still drive a nonzero exit** (`has_unresolved` continues to count it,
-  preserving the "fix and fail nonzero" posture of section 7). The reframing is confined to the
-  agent output: such a violation is surfaced as a `proposed_edit` rather than a bare
-  `unfixable`, not exempted from the exit-code predicate.
+  (`FixStatus` is `Applied | Skipped | Unfixable`, and `has_unresolved` at
+  `crates/alint-core/src/report.rs:106-110` counts only `Skipped | Unfixable`, which drives the
+  nonzero `fix` exit). The proposal adds a **`FixStatus::Suggested(edit)`** variant, an
+  `applicability` field on the agent violation, a `proposed_edit: {path, range, content}[]`
+  payload, and gates `fix_command` to Safe/Unsafe (appending `--unsafe-fixes` for Unsafe). Because
+  a Suggestion is **never applied**, an error-level violation whose only fix is a Suggestion still
+  stands after `alint fix`, so **`has_unresolved` is extended to count `Suggested` as unresolved**
+  for exit-code purposes: the report distinguishes a proposed edit from a bare `unfixable`, while
+  the "fix and fail nonzero" posture of section 7 is preserved (an error-level Suggestion still
+  fails the run). This resolves the earlier ambiguity between "a new status variant" and "reframe
+  the serialization": it is a new variant *and* the `has_unresolved` extension, together.
 
 ### 5.8 Formal model: the guarantees the engine can and cannot make
 
@@ -652,30 +668,39 @@ content edit can reintroduce another rule's violation, so different orders can r
 results and the relation is not terminating in general. The total order of 5.2.2 therefore makes
 the engine a **deterministic strategy over a non-confluent system**, which buys
 **reproducibility** (a fixed order gives one result every run), **not canonicity** (that result
-is not an order-independent normal form). The one positive law that holds is **orthogonality**:
-edits with disjoint byte ranges commute (Rosen 1973), which is exactly why applying a
-pairwise-disjoint subset and skipping overlaps is sound. The seven whole-file normalizers are a
-good special case: among themselves they are confluent and terminating (trailing-whitespace
-stripping and final-newline insertion reach the same normal form in either order), which is why
-Phase 0's functional composition is order-independent up to that normal form. (Newman 1942;
-Baader and Nipkow 1998; Rosen 1973.)
+is not an order-independent normal form). The one positive law that holds is the analogue of
+**orthogonality**: edits with disjoint byte ranges commute, so applying a pairwise-disjoint set is
+order-independent (the property proved for non-overlapping / left-linear systems by Rosen 1973,
+and later termed orthogonality), which is exactly why applying a pairwise-disjoint subset and
+skipping overlaps is sound. The whole-file normalizers do **not** have this property among
+themselves: they compose single-pass and do not all commute (for example `final_newline` appends a
+bare `\n`, so on interior-CRLF input it does not commute with `line_endings: crlf`; a trailing
+zero-width character shields preceding spaces from the trailing-whitespace trim). Phase 0 does not
+rely on their commuting; it reproduces today's single-pass config-order composition exactly, which
+is a no-op whether or not that order is canonical. (Newman 1942; Baader and Nipkow 1998; Rosen
+1973.)
 
 **Termination of the Safe tier.** Uniform termination of a rewriting system is undecidable (Huet
 and Lankford 1978), which is why the fixpoint carries a hard cap and bails loudly. But the Safe
-tier can terminate by construction: require every Safe fixer to **strictly decrease the multiset
-of outstanding violations** (remove at least one, introduce none of any rule), under the
-Dershowitz-Manna multiset extension of a well-founded order (Dershowitz and Manna 1979). Then a
-Safe-only fixpoint reaches a fixed point in at most `|V|` passes with no reliance on the cap; the
-cap guards only Unsafe and user-promoted fixers, which carry no such guarantee (an arbitrary
-regex `replace` can loop). This makes "a Safe fixer" a checkable contract.
+tier can terminate by construction: require every Safe fixer to **strictly shrink the set of
+outstanding violations** (resolve at least one, introduce none of any rule). The count then falls
+by at least one each non-final pass, so a Safe-only fixpoint reaches a fixed point in at most `|V|`
+passes with no reliance on the cap. (The full Dershowitz-Manna multiset ordering, 1979, is only
+needed if the contract is relaxed to "replace a violation with strictly-lower-ranked ones"; under
+the strict "introduce none" contract a plain cardinality argument suffices.) The cap guards only
+Unsafe and user-promoted fixers, which carry no such guarantee (an arbitrary regex `replace` can
+loop). This makes "a Safe fixer" a checkable contract.
 
 **Not a least fixed point (a caveat, not a theorem).** It is tempting to call the loop a
 least-fixed-point computation (Kleene / Knaster-Tarski). In general it is not: the apply operator
 is non-monotone (an Unsafe fix can add violations) and the state space is not a complete lattice.
-The fixed-point reading holds **only** under the Safe remove-only contract above, on the finite
-lattice of violation sets ordered by inclusion, where Kleene iteration converges in at most `|V|`
-steps. The failure of monotonicity for the general operator is precisely *why* the cap exists;
-the cap is not an implementation detail of an otherwise-guaranteed convergence.
+Even under the Safe remove-only contract the reading is only partial: the loop is a
+strictly-**descending** iteration from the top (all of `V`) on the finite violation-inclusion
+lattice, so it reaches **a** fixed point in at most `|V|` steps (the lattice height), but this is a
+greatest-fixed-point-flavored descent, not the ascending-from-bottom Kleene least fixed point, and
+without confluence that fixed point need not be unique. The failure of monotonicity for the general
+operator is precisely *why* the cap exists; the cap is not an implementation detail of an
+otherwise-guaranteed convergence.
 
 **The structured write-back is a lens.** A structured read (`*_path_equals`, the query) and its
 write-back (`set_value`, the splice) form an asymmetric **lens** (Foster et al. 2007; the
@@ -684,8 +709,9 @@ database view-update problem, Bancilhon and Spyratos 1981): `get(source) = value
 oracle**, and they line up with the acceptance checks:
 
 - **GetPut** (`put(get(s), s) = s`): writing back the value already present is a no-op. This is
-  format-preservation stated precisely, strictly stronger than "apply twice is a no-op" because
-  it forbids touching any byte the edit did not mean to change.
+  format-preservation stated precisely: byte-exact stability that forbids touching any byte the
+  edit did not mean to change (idempotence alone permits gratuitous byte changes on a first
+  application). GetPut and PutGet together in fact imply the fixer is idempotent.
 - **PutGet** (`get(put(v, s)) = v`): after the fix, the query returns the intended value. This is
   the localized-equivalence half of the acceptance test (5.2 step 4).
 - **PutPut** (the "very-well-behaved" law) does **not** hold in general for format-preserving
@@ -699,8 +725,10 @@ constrains the write, which is the formal statement of "there is no well-behaved
 
 **Why re-serialization is lossy, and what re-parse guarantees.** `Format::parse` is a
 **non-injective** function (many byte strings, differing in whitespace, comments, and key order,
-map to one `serde_json::Value`), so it has no right inverse: there is no serializer `Q` with
-`Q . parse = id`. That is the formal reason the value tree cannot preserve format and a lossless
+map to one `serde_json::Value`), so it has no **left inverse**: no serializer `Q` recovers the
+original bytes (`Q . parse = id`). (It does have right inverses: an ordinary serializer `Q'`
+satisfies `parse . Q' = id` on the value; what is impossible is recovering the discarded bytes.)
+That is the formal reason the value tree cannot preserve format and a lossless
 CST or a spanned splice is required (Roslyn red-green trees; rust-analyzer's Rowan; the `cstree`
 crate). The re-parse in the acceptance test is a **decidable membership check** in the format
 language, a real guarantee that no file outside the language is ever written, but it is
@@ -717,8 +745,9 @@ validation on unverified fixers**, backed by property tests, not a proof that ev
 semantics-preserving.
 
 **What the engine does not guarantee** (the honest ledger): the fix result is not independent of
-rule order (only reproducible for a fixed order); the loop is not a least fixed point of the
-general operator (only under the Safe remove-only contract); the write-back is well-behaved but
+rule order (only reproducible for a fixed order); the loop is not a Kleene least fixed point (even
+under the Safe contract it is a strictly-descending iteration to a fixed point, not an ascending
+least one); the write-back is well-behaved but
 not very-well-behaved (no PutPut); "re-parses" is syntactic, not semantic; the Safe tier is
 validated per run, not proven; and no operational transformation or CRDT is needed, because a
 single-writer total order is stronger than eventual convergence (OT is a future LSP-only concern,
@@ -767,7 +796,7 @@ per format: firing + silent + idempotence + a comment/order-preservation golden 
 "produces invalid document -> demoted to Suggestion" case + a value-serialization matrix
 (quoting, type fidelity, entity-encoding).
 
-### Phase 3: metadata, VCS, and cross-file (classes 2.2 + metadata)
+### Phase 3: metadata, VCS, and the repo-scale cross-file classes (2.2)
 
 - **chmod (`SetMode`):** `shebang_has_executable` -> add +x (Safe); `executable_bit` -> set/clear
   (Unsafe); `executable_has_shebang` -> Suggestion.
@@ -854,23 +883,28 @@ committed nothing).
 `gen-roadmap --check` gate). Proposed placement is a dedicated post-v0.16 cut, "Auto-fix
 expansion"; wiring it in is a follow-up.
 
-## 9. Open questions
+## 9. Resolved decisions and open questions
 
-1. **Reclassifying `file_remove`.** Deleting a whole file by default with no `--unsafe-fixes` is a
-   poor safety default regardless of semver. Lean toward Unsafe with a one-release migration note;
-   confirm before Phase 0 ships the tiers.
-2. **Inherited fixers by default.** Should an `extends:`-ed ruleset's content-mutating fixer apply
-   at all by default (as a Suggestion), or require the user to opt in per rule? 5.5 defaults it to
-   Suggestion; the stricter option is "not honored unless re-declared top-level."
-3. **`ReplaceRange` versus `SetContent` for class 3.** True ranged edits (best LSP diffs, real
-   conflict detection) or `SetContent`-of-spliced-bytes? Leaning ranged, since Phases 1 and 3 need
-   `ReplaceRange` regardless.
-4. **YAML depth.** Is scalar-only YAML write-back (Unsafe, re-parse-guarded) enough for the real
-   configs users care about, or is a heavier round-trip approach warranted later?
-5. **Baseline-and-fix semantics.** Skip suppressed violations from the apply set (the proposal),
-   refuse to run `fix` when a baseline exists, or surface suppressed findings as Suggestions only?
-6. **Network-gated fixes.** Is a top-level-config-only, explicitly-opted-in network fix (SHA
-   pinning) acceptable within the telemetry-free posture, or must it wait for the WASM sandbox?
+Resolved after review (folded into the sections above):
+
+- **`file_remove` default:** reclassified **Unsafe** with a one-release migration and a per-rule
+  Safe override (3, 5.6).
+- **Inherited fixers:** gated by capability and provenance: fixed-behavior fixers are honored from
+  any source (so bundled hygiene keeps auto-applying), remote-URL content-injecting fixers are
+  **demoted to Suggestion** with a `trusted_extends:` opt-in, and spawning fixers are refused from
+  any non-top-level source (5.5).
+- **`ReplaceRange` vs `SetContent`:** **ranged**, since the multi-node structured fan-out requires
+  it (5.1, 5.2.1).
+- **Baseline and `fix`:** **baseline-aware**; skip suppressed violations, surface them as
+  Suggestions, fix only new ones (5.7).
+- **Network-gated fixes:** the core stays network-free; SHA-pinning is a separate, top-level-only,
+  explicitly-opted-in fix or a future WASM plugin, never a bare `alint fix` (6, Deferred).
+
+Still open:
+
+1. **YAML edit depth.** Is scalar-only YAML write-back (Unsafe, re-parse-guarded) enough for the
+   real configs users care about, or is a heavier round-trip approach warranted later? Decide with
+   corpus evidence before scheduling sub-phase 2e.
 
 ## References and prior art
 
@@ -919,14 +953,18 @@ hierarchy, relational dependency theory) lives in the companion
 
 ---
 
-*Revision note: revised twice after independent adversarial audits. Round 1 (technical + design)
-added the rule-level `collect_edits` binding (5.2.1), a total edit order (5.2.2), multi-file
-transactions (5.2.4), the locate/serialize split (5.3, 5.4), the fixer trust boundary (5.5), the
-interaction surfaces (5.7), the recount to seven normalizers, and dropped the undefined
+*Revision note: revised three times after independent adversarial audits. Round 1 (technical +
+design) added the rule-level `collect_edits` binding (5.2.1), a total edit order (5.2.2),
+multi-file transactions (5.2.4), the locate/serialize split (5.3, 5.4), the fixer trust boundary
+(5.5), the interaction surfaces (5.7), the recount to seven normalizers, and dropped the undefined
 `MoveFile`. Round 2 (a second audit plus a mathematical-foundations pass) corrected the Phase 0
-"zero behavior change" claim (whole-file transforms compose functionally in config order; located
-edits and the fixpoint are Phase 1, per 5.1 and 5.2), fixed the `Suggested`-outcome exit-code
-semantics (5.7), and added the formal model (5.8): the engine as a non-confluent rewriting system
-driven by a deterministic strategy, the Dershowitz-Manna termination contract for Safe fixers,
-the lens laws as the write-back correctness spec, and the translation-validation verification plan
-(section 8).*
+"zero behavior change" claim (whole-file transforms compose in config order; located edits and the
+fixpoint are Phase 1) and the `Suggested`-outcome exit code, and added the formal model (5.8).
+Round 3 (a third audit, a theory-correctness referee pass, and a resolved-decisions pass with the
+maintainer) corrected a false "the normalizers are confluent" claim (they are not; Phase 0 relies
+only on replaying today's config order, 5.1 and 5.8) and a swapped inverse term (left, not right,
+inverse, 5.8), sharpened the fixed-point and counting framings, specified whole-file-vs-located
+sequencing (5.1, 5.2.3) and the `Suggested` exit-code plumbing (5.7), refined the trust boundary to
+gate content-injecting fixers by provenance with a `trusted_extends:` opt-in while leaving
+fixed-behavior fixers untouched (5.5), and recorded the maintainer's decisions: `file_remove`
+Unsafe-by-default with a per-rule override, baseline-aware `fix`, and a network-free core (3, 9).*

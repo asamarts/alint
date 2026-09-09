@@ -87,22 +87,27 @@ contract that makes a Safe-only fixpoint terminate without the cap); a Safe **st
 a **well-behaved lens** (the GetPut and PutGet laws hold at apply time). Safe `set_value` is
 restricted to a scalar replacing an existing scalar; object/array values, key insertion, and
 nested creation are Suggestions. `alint fix` applies only Safe fixes by default. The report gains
-a `Suggested(edit)` outcome and the agent format gains an `applicability` field and a
-`proposed_edit` payload; a Suggestion is never applied, so an error-level violation whose only fix
-is a Suggestion **still stands and still drives a nonzero `fix` exit** (the reframing is confined
-to the agent output, not the exit-code predicate). The 12 existing ops are classified Safe on
-introduction so current behavior is unchanged.
+a `FixStatus::Suggested(edit)` variant and the agent format gains an `applicability` field and a
+`proposed_edit` payload; because a Suggestion is never applied, `has_unresolved` is **extended to
+count `Suggested` as unresolved**, so an error-level Suggestion still stands and still drives a
+nonzero `fix` exit. Existing ops are classified Safe on introduction, **except `file_remove`,
+reclassified Unsafe by default** (deleting a whole file irreversibly is a poor default), with a
+one-release migration and a per-rule Safe override from top-level config.
 
 **3. A fixer trust boundary distinct from the kind-level spawn gate.** A fixer is a new trust
 surface, and the existing `SPAWNING_RULE_KINDS` allowlist gates the rule **kind**, not a
-**fixer** attached to a non-spawning kind. We will add a fix-level gate. **Spawning** fix ops
-(`git_untrack`, a `command`-backed fix, regenerate-from-command) are **refused at load** from an
-`extends:`-ed ruleset, mirroring the kind-level `SPAWNING_RULE_KINDS` hard-reject.
-**Content-mutating** fix ops (`replace`, `set_value`, `remove_value`, `sync_from`,
-`insert_header`) are, when inherited, **demoted to Suggestion** rather than refused. Applicability
-promotion is top-level-only (an inherited fixer may be demoted but never promoted). The gate
-reuses the loader's existing top-level-versus-`extends:` provenance plumbing (the same mechanism
-that forces `allow_out_of_root` off for inherited rules).
+**fixer** attached to a non-spawning kind. We will add a fix-level gate keyed on
+capability and provenance. **Fixed-behavior fixers** (the seven normalizers, rename-to-case,
+`file_remove`, `chmod`, `dir_create`) inject no bytes and do not spawn, so they are honored at
+their tier from any source (this keeps bundled rulesets' trailing-whitespace / final-newline fixes
+auto-applying). **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`,
+create/prepend/append-with-content) are honored from top-level config, local-path `extends:`, and
+first-party bundled rulesets, but **demoted to Suggestion** from a remote-URL `extends:`, with a
+top-level `trusted_extends:` allowlist to opt specific remote sources back in. **Spawning fixers**
+(`git_untrack`, a `command`-backed fix, regenerate-from-command) are **refused at load** from any
+non-top-level source. Applicability promotion is top-level-only (an inherited fixer may be demoted
+but never promoted). The gate reuses the loader's existing top-level-versus-`extends:` provenance
+plumbing (the same mechanism that forces `allow_out_of_root` off for inherited rules).
 
 ## Consequences
 

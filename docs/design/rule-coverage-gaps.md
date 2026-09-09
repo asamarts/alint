@@ -109,17 +109,20 @@ Classifying the current kinds by finite-model-theory level:
   Reachability, connectivity, and acyclicity are provably **not** first-order-definable
   (Ehrenfeucht-Fraisse games; Gaifman locality 1982; Aho-Ullman 1979), so acyclicity cannot be
   desugared into the FO cross-file kinds. This is the theorem that earns `file_graph` its keep.
-  Honest correction: only `acyclic` is non-FO; `no_dangling` / `no_orphans` / `forbidden_edges` are
-  FO over the materialized edge relation, bundled with it for ergonomics, not expressiveness.
+  Honest correction: only `acyclic` is non-FO; `no_dangling` / `forbidden_edges` are FO over the
+  materialized edge relation, and `no_orphans` is FO under its in-degree-zero reading ("a file
+  nothing references"); a reachability reading ("unreachable from any root") would be non-FO like
+  `acyclic`. These are bundled with `acyclic` for ergonomics, not expressiveness.
 - **Path-query expressiveness:** the navigational core of XPath is characterized as FO2 over trees
   (Marx and de Rijke 2005); JSONPath (RFC 9535) has no such published theorem, so FO2 is a grounded
   analogy, not a proof, for alint's `*_path_*` family. The family asserts a
   universal-over-a-selected-set predicate, which structurally cannot compare cardinalities across
   nodes, assert key-set equality, or see duplicate keys.
-- **Counting:** the engine does *fixed* aggregations (`max_files_per_directory`, and the size,
-  depth, line, and path-length caps), FO-with-counting in practice, but exposes no *general*
+- **Counting:** comparing a count to a *fixed constant* (`max_files_per_directory`, and the size,
+  depth, line, and path-length caps) is already plain **FO** (a threshold to a constant needs no
+  counting quantifier). What the engine lacks is **general FO+COUNT**: comparing two counts, or an
   equality-of-counts over an extracted relation. (Parity is the classic witness that FO alone
-  cannot count.) That general fragment underlies several gaps below.
+  cannot count.) That general fragment, not the fixed caps, underlies several gaps below.
 
 ### 2.4 The unifying lens: a repository is a database with integrity constraints
 
@@ -205,8 +208,8 @@ single-source candidates): `json_key_sort_order`, `column_alignment`, `not_execu
 `directory_hash`, `case_collision_safe`, `dir_name_matches_field`, `balanced_delimiters`, and
 the backlogged `duplicate_blocks` (copy-paste) and WASM plugins. The `detect: linguist` /
 `detect: askalono` facts were planned for an early cut and **never shipped** (verified: no
-`licensee` or `askalono` reference exists in `crates/`; the only mentions are in ROADMAP and
-this analysis).
+`licensee` or `askalono` crate reference exists in `crates/` source; the remaining mentions are a
+ROADMAP entry and a `detect: linguist` test comment).
 
 ## 4. The gap families
 
@@ -500,8 +503,9 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
 
 - **The format-preserving structured-value write-back engine** (auto-fix Phase 2) turns the
   version-SSOT, structured-key-sort, and the whole `*_path_equals`-backed set of gaps fixable.
-- **A bundled SPDX id table plus a small expression parser** turns the entire BORDERLINE
-  license tier (F2, F3, F4) green with no network.
+- **A bundled SPDX id table plus a small expression parser** turns the BORDERLINE license-validity
+  checks (F2, and F4's validity half) green with no network, and underpins F3's REUSE completeness
+  (an IN cross-file check).
 - **A duplicate-aware / spanned structured parser** (shared with the auto-fix bridge) unlocks
   `no_duplicate_keys` (B1).
 - **A markdown link / heading / front-matter scanner** (one light line-scanner with a
