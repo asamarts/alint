@@ -405,8 +405,11 @@ fan-out **requires** true `ReplaceRange`s, since N whole-file `SetContent`s woul
 
 ### 5.2 The batched apply engine
 
-Replace the single-pass loop with a batched model, keeping the "serial filesystem mutation"
-guarantee. The engine has two composition regimes (5.1): **whole-file transforms** compose
+Replace the single-pass loop with a batched model, keeping the serial-mutation guarantee. (Today
+`Engine::fix` is already fully serial, evaluation included: a plain `for entry in &self.entries`
+loop, not the rayon `PerFileRule` path `check` uses; so "parallel eval, serial fix" describes
+`check`, and `fix` gains parallel edit *collection* only if later profiling warrants it.) The
+engine has two composition regimes (5.1): **whole-file transforms** compose
 functionally in config order, and **located edits** go through the collect / sort /
 skip-overlap batch below. **Phase 0 ships only whole-file ops** (the existing 12), so it
 composes them in config order in memory (one write per file), reproducing today's
@@ -478,9 +481,11 @@ on located edits. Sorting "by start then end" is not total when two edits share 
 (two rules rewriting one span), so the engine sorts by the total key
 `(start, end, rule_index, violation_index)` with a stable sort, where `rule_index` is config
 order and `violation_index` is the rule's deterministic emission order (JSONPath match order).
-Ties resolve by config order, the determinism anchor elsewhere in the engine. The applied
-subset is always pairwise byte-disjoint, and disjoint edits commute (5.8), which is what makes
-skip-overlap sound.
+Ties resolve by config order, the determinism anchor elsewhere in the engine. Across
+`nested_configs`, `rule_index` orders the root config's rules first, then each nested `.alint.yml`
+in the engine's deterministic nested-discovery order, so the total order stays well-defined once
+nested rules are lifted into the flat list. The applied subset is always pairwise byte-disjoint,
+and disjoint edits commute (5.8), which is what makes skip-overlap sound.
 
 #### 5.2.3 The fixpoint and index invalidation (Phase 1)
 
@@ -492,8 +497,13 @@ a cap is hit (match Ruff; bail loudly on non-convergence). Two subtleties the si
 - **Index invalidation.** `CreateFile` / `DeleteFile` / `RenameFile` change the tree, but the
   `FileIndex` is built once. A pass that applied a path-mutating edit forces a **full
   deterministic re-walk** before the next pass (so cross-file and `requires_full_index()` rules
-  see the new tree); a pass with only content edits re-checks just the touched files. A created
-  file is not a "changed file," so path-mutating fixes and `--changed` interact (5.7).
+  see the new tree); a pass with only content edits re-checks just the touched files. This
+  **amends ARCHITECTURE's "the walk runs exactly once per invocation" invariant for the `fix`
+  path only** (`check` is unchanged), so ARCHITECTURE.md must be updated when the fixpoint lands
+  (5.6). It also needs the walk configuration the current `Engine::fix` lacks (it takes a
+  pre-built index and stores no `WalkOptions`): either thread `WalkOptions` into the fix engine,
+  or hoist the fixpoint loop up to the `cmd_fix` layer that already holds them. A created file is
+  not a "changed file," so path-mutating fixes and `--changed` interact (5.7).
 - **Termination.** The per-fixer idempotence test catches **self**-oscillation only.
   **Cross-fixer** oscillation (fixer A reintroduces what fixer B removed) is caught solely by
   the iteration cap, which is why the cap exists and why non-convergence is a loud error, not a
@@ -504,13 +514,19 @@ a cap is hit (match Ruff; bail loudly on non-convergence). Two subtleties the si
 #### 5.2.4 Multi-file transactions
 
 A single logical fix can span files (create-and-register, sync-from-canonical to N targets,
-version propagation). "Write once per file" gives no cross-file atomicity, so a fix that emits
-edits to multiple files is applied **all-or-nothing**: stage every file's new bytes in memory,
-verify every postcondition **against the staged set** (a cross-file postcondition, such as "the
-created crate now resolves in `workspace.members`", is checked over the staged buffers, not a
-single file's), and only then write them (each file still atomically). A failure on any file
-aborts the whole group and writes nothing, so a half-applied create-without-register cannot
-occur.
+version propagation). The apply is **staged**: compute every file's new bytes in memory, verify
+every postcondition **against the staged set** (a cross-file postcondition, such as "the created
+crate now resolves in `workspace.members`", is checked over the staged buffers, not a single
+file's), and only then write. This is genuinely all-or-nothing *through the verify phase*: any
+collect or verify failure discards the whole group and writes nothing. The write phase is honest
+about its limit: `write_atomic` is per-file with no cross-file journal, so a failure *during* the
+writes (ENOSPC on file 3 of 5, after files 1-2's atomic renames already committed) leaves a
+partially-applied group. The proposal shrinks that window (write all temp files first, then
+rename them, since a rename failure is far rarer than a write failure) and reports a partial
+apply loudly with the list of files that changed, rather than claiming a transactionality the
+filesystem does not provide. A single fixer that errors during collect or apply skips *that
+edit* and continues, matching today's per-violation `FixStatus::Skipped("fix error: ...")`
+(`engine.rs:1006-1065`); it never aborts the run.
 
 ### 5.3 The structured bridge: locating the span
 
@@ -531,7 +547,7 @@ caution. In build order by cost:
 | dotenv | free | the parser is alint-owned and line-oriented; add per-value byte-offset tracking, splice |
 | INI | free | same as dotenv (alint owns `ini.rs`) |
 | properties | cheap | `java-properties` gives no spans; hand-roll a line/value-span locator (separators, backslash continuations, `\uXXXX`) |
-| TOML | one dep | `toml_edit::DocumentMut` (present today only as a dev dependency via `trycmd`; promote to a real dep of `alint-rules`) |
+| TOML | zero or one dep | the `toml` 1.1 crate alint already depends on ships `serde_spanned` (span-capable), so a spanned splice may need no new dep; or promote `toml_edit` (a full round-trip CST, present today only as a `trycmd` dev-dep) |
 | JSON | new dep | no in-tree JSON parser preserves formatting; add `jsonc-parser` (dprint), which records comment/value ranges, then splice |
 | YAML | hard | no mature Rust library round-trips YAML comments; use a span-capable parser (`saphyr-parser`) to splice a single scalar (Unsafe until the re-parse postcondition passes); structural edits stay Suggestion |
 
@@ -581,9 +597,7 @@ attached to a non-spawning kind (a `git_untrack` fix on `file_absent`, or a `rep
 `file_content_forbidden`) passes it untouched. Without a new gate, a remote `extends:`-ed ruleset
 could ship a fix that silently injects bytes into the user's files or shells out on a default
 `alint fix`, the file-writing and RCE analogue of the spawning-kind hazard. The gate keys on
-**what the fixer can do** and **where it came from** (the loader already tracks
-top-level-versus-`extends:` provenance and threads a per-rule permission to the fixer, the same
-mechanism that forces `allow_out_of_root` off for inherited rules):
+**what the fixer can do** and **where it came from**:
 
 - **Fixed-behavior fixers** (the seven hygiene normalizers, rename-to-case, `file_remove`, `chmod`,
   `dir_create`) carry no ruleset-supplied bytes and do not spawn, so there is no injection surface;
@@ -593,35 +607,70 @@ mechanism that forces `allow_out_of_root` off for inherited rules):
   Unsafe tier, independent of source.
 - **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`, and
   `file_create` / `file_prepend` / `file_append` with inline content) are honored at their tier
-  from the user's own top-level config, local-path `extends:`, and first-party **bundled**
-  rulesets. From a **remote-URL `extends:`** they are **demoted to Suggestion** by default (they
-  can propose an edit, never auto-write), because the content is authored by a third party. A
-  top-level `trusted_extends:` allowlist opts specific remote URLs (a company's internal ruleset
-  host) into honoring their content fixers at tier.
+  from the user's own top-level config, local-path `extends:`, a nested `.alint.yml` (all the
+  user's own tree), and first-party **bundled** rulesets. From a **remote-URL `extends:`** they
+  are **demoted to Suggestion** by default (they can propose an edit, never auto-write), because
+  the content is authored by a third party. A top-level `trusted_extends:` allowlist opts
+  specific remote URLs (a company's internal ruleset host) into honoring their content fixers at
+  tier.
 - **Spawning fixers** (`git_untrack`, a `command`-backed fix, regenerate-from-command) are
   **refused at load** from any non-top-level source (bundled included), matching the
   top-level-only posture of `SPAWNING_RULE_KINDS`.
 - **Applicability promotion** toward Safe/Unsafe is top-level-only: an inherited fixer may be
   demoted but never promoted. `allow_out_of_root` remains top-level-only, unchanged.
 
-### 5.6 DSL and CLI surface
+**This gate is new plumbing, not a reuse of an existing mechanism (correcting an earlier draft).**
+Today the loader `merge()`s every source's rules into one id-keyed list with **no source tag**,
+and `RuleSpec` / `RuleEntry` carry no origin field; `allow_out_of_root` is a top-level policy
+matched by id/kind, and inherited-rule safety is enforced by **rejecting dangerous keys at load
+and dropping the rule** (`reject_command_rules_in`, `reject_custom_facts_in` in `loader.rs`), so no
+provenance needs to survive the merge. Two consequences: (1) the spawning-fixer **refusal** fits
+that existing reject-at-load pattern directly, scanning each `extends:`-ed rule's `fix:` block; but
+(2) the content-fixer **demotion** *keeps* the rule, so its four-way source (top-level /
+local-path / bundled / remote-URL) must be newly threaded through `merge()` onto `RuleSpec` /
+`RuleEntry` and carried to fix time, and `trusted_extends:` is a new top-level config key. This is
+security-load-bearing work to build, not a mechanism to inherit.
+
+### 5.6 DSL, CLI, and downstream surface
 
 - **New `fix:` ops.** `replace` (class 2/4, capture substitution); `set_value` and
   `remove_value` (class 3); `sort` and `dedup` (for `ordered_block` / `unique_by`); `chmod`;
   `git_untrack` (spawning, top-level-only); `sync_from` (whole-file copy from a canonical
   source, 2.2); `insert_header` (comment-style-aware). Each declares a default applicability.
-- **Per-rule reclassification.** `fix: { op: ..., applicability: safe | unsafe | suggestion }`
-  (Ruff's `extend-safe-fixes` model), subject to the promotion rule of 5.5. This is also how a
-  user promotes `file_remove` back to Safe on a chosen rule.
+- **Per-rule reclassification.** The schema encodes exactly one op per `fix:` block (the op is
+  the key; each branch is `additionalProperties: false`), so applicability is a field *of the
+  op's object*, not a sibling key: `fix: { file_remove: { applicability: safe } }`. The
+  (currently empty-marker) op structs gain an optional `applicability: safe | unsafe | suggestion`
+  (Ruff's `extend-safe-fixes` model), subject to the promotion rule of 5.5. This is how a user
+  promotes `file_remove` back to Safe on a chosen rule.
 - **Trust config.** A top-level `trusted_extends:` list (URL prefixes) opts specific remote
   `extends:` sources into having their content-injecting fixers honored at tier rather than
   demoted to Suggestion (5.5), for teams that trust their own internal ruleset host.
 - **`command` rule fixability.** The `command` plugin rule may carry a user-supplied fix
   command; it is a spawning fixer, so top-level-only and gated as in 5.5. Its name is distinct
   from the agent output's existing `fix_command` field (5.7).
-- **CLI.** `alint fix` keeps applying Safe fixes by default; add `--unsafe-fixes`, `--diff`
-  (print the patch without writing), and `--fix-only`. The `agent` and `json` outputs gain a
-  per-fix `applicability` field and a proposed-edit payload for Suggestions (5.7).
+- **CLI and preview modes.** `alint fix` applies Safe fixes by default. `--unsafe-fixes` widens
+  the set to include Unsafe; Suggestions never enter the apply set and render as a separate
+  "proposed, not applied" block in every mode.
+
+  | Mode | Writes? | Prints | Exit code |
+  |---|---|---|---|
+  | `fix` | yes | applied / skipped / suggested summary | nonzero if an error-level violation is unresolved (5.7) |
+  | `fix --dry-run` (existing) | no | the same summary, "would" phrasing | same predicate, on the simulated result |
+  | `fix --diff` (new) | no | a unified diff of the would-apply edits | same predicate |
+  | `fix --fix-only` (new) | yes | applied only; residual-violation report suppressed | zero unless a fix errored |
+
+  `fix --dry-run` doubles as the CI gate (write nothing, fail if fixes are pending), so no
+  separate `fix --check` is added.
+- **Downstream artifacts (per phase).** alint gates its own generated/derived surfaces, so each
+  phase that adds an op or a status also updates, in the same PR: `schemas/v1/config.json` (the
+  `FixSpec` op enum) and `schemas/v1/fix-report.json` (the new `suggested` status) via
+  `gen-schema` (constitution invariants 7 and 11); the `facts.json` `auto_fix_ops` count, which is
+  code-derived and gated by `readme_auto_fix_ops_count_matches_fixers` (invariants 9 and 11);
+  `README.md`'s headline counts; the per-op reference in `docs/rules.md`; and `ARCHITECTURE.md`'s
+  fix-operations table and execution step 9 (which the batched engine supersedes, and which is
+  already stale: it omits `file_footer`). `ROADMAP.md` / `roadmap.json` are wired when the arc is
+  scheduled as v0.17 (section 9).
 
 ### 5.7 Interaction surfaces
 
@@ -642,19 +691,35 @@ mechanism that forces `allow_out_of_root` off for inherited rules):
   is computed against one buffer version and applied against another, edits carry a pinned
   document version (`OptionalVersionedTextDocumentIdentifier`) and are rejected on version
   drift; this is the one place true concurrency appears, and version-pinning, not operational
-  transformation, is the right tool (5.8).
-- **Agent output and the Suggestion data model.** The report types carry no tier today
-  (`FixStatus` is `Applied | Skipped | Unfixable`, and `has_unresolved` at
-  `crates/alint-core/src/report.rs:106-110` counts only `Skipped | Unfixable`, which drives the
-  nonzero `fix` exit). The proposal adds a **`FixStatus::Suggested(edit)`** variant, an
-  `applicability` field on the agent violation, a `proposed_edit: {path, range, content}[]`
-  payload, and gates `fix_command` to Safe/Unsafe (appending `--unsafe-fixes` for Unsafe). Because
-  a Suggestion is **never applied**, an error-level violation whose only fix is a Suggestion still
-  stands after `alint fix`, so **`has_unresolved` is extended to count `Suggested` as unresolved**
-  for exit-code purposes: the report distinguishes a proposed edit from a bare `unfixable`, while
-  the "fix and fail nonzero" posture of section 7 is preserved (an error-level Suggestion still
-  fails the run). This resolves the earlier ambiguity between "a new status variant" and "reframe
-  the serialization": it is a new variant *and* the `has_unresolved` extension, together.
+  transformation, is the right tool (5.8). `SetMode` (chmod) has no `WorkspaceEdit` representation
+  (LSP has no permission-bit op), so it surfaces as a non-LSP Suggestion, not a code action; the
+  new `FixEdit` and `FixStatus` variants also force mechanical match-arm updates across every
+  formatter and the LSP `fix_edit_to_workspace_edit` mapping.
+- **Platform.** `SetMode` (chmod) edits are skipped with a note on non-unix (Windows has no
+  equivalent), consistent with `executable_bit`'s evaluate path already being `#[cfg(unix)]`.
+  Symlink and `file_remove` fixes stay cross-platform, since `no_symlinks` can fire on Windows; a
+  `SetMode` edit simply never enters the apply set there.
+- **Output formats and the Suggestion data model.** Two report types must not be conflated: the
+  check-side `Report` (what `check` emits; today carries only `is_fixable: bool` per violation) and
+  the fix-side `FixReport` (what `alint fix` emits). The **automatic path is fix-side**: the
+  `FixReport` gains a **`FixStatus::Suggested(edit)`** variant, and `has_unresolved`
+  (`crates/alint-core/src/report.rs:106-110`, which today counts only `Skipped | Unfixable` and
+  drives the nonzero `fix` exit) is **extended to count `Suggested` as unresolved**, so an
+  error-level Suggestion still stands after `alint fix` and still drives a nonzero exit (the "fix
+  and fail nonzero" posture of section 7 is preserved). Carrying a fix in a **check-side finding
+  format** is a separate, deliberate feature: `alint check --format sarif` emits SARIF 2.1.0
+  `result.fixes[]` (an `artifactChange` -> `replacement` of a `deletedRegion` + `insertedContent`,
+  which `ReplaceRange { range, content }` maps onto almost 1:1) for **every tier** (Safe, Unsafe,
+  Suggestion), tagging the tier in each fix's `description`. SARIF fixes are advisory (the consumer
+  chooses to apply), so surfacing all tiers is safe and is the point of emitting SARIF at all;
+  `agent` and `json` gain the same `proposed_edit: {path, range, content}[]` + `applicability`.
+  Because computing an edit means running `collect_edits` during `check` (today `check` computes no
+  edit bytes, only `is_fixable`), it runs **only when a fix-carrying format is selected**
+  (`--format sarif` / `agent`, or `--format json --include-fixes`); the default `human` / `github`
+  / `gitlab` / `junit` check path computes nothing and pays nothing, protecting the sub-second
+  floor. `alint fix` still rejects the finding-only formats, so fixes ride the `check` path;
+  `github`-annotations, `gitlab`, `junit`, and `markdown` carry only the fixable flag (no native
+  edit slot).
 
 ### 5.8 Formal model: the guarantees the engine can and cannot make
 
@@ -753,6 +818,27 @@ validated per run, not proven; and no operational transformation or CRDT is need
 single-writer total order is stronger than eventual convergence (OT is a future LSP-only concern,
 5.7).
 
+### 5.9 Performance and the perf-gate
+
+alint's identity is speed (a benchmarked sub-second floor at ~100k files), so the fix engine must
+not erode it, and the proposal commits to keeping it on the gate rather than asserting it.
+
+- **Cost shape.** A located-edit pass is one sort (`O(e log e)` in the edits) plus a linear
+  splice; the fixpoint runs at most `k` passes (the cap). A content-only pass re-checks just the
+  touched files; a pass that applied a path-mutating edit costs a **full re-walk + re-check** (one
+  `check` pass) before the next iteration, which is the dominant term and the reason path-mutating
+  fixers are rare and the cap is small. A Safe-only run converges in at most `|V|` passes (5.8),
+  in practice one or two.
+- **The default paths stay free.** `alint check` without a fix-carrying format computes no edits
+  (5.7); `alint fix` runs serially after a single evaluation and is not on the interactive hot
+  path. Only a fix-carrying `check` (a CI SARIF/agent run) or a multi-pass `fix` pays extra, and
+  only in proportion to the fixable violations present.
+- **Gate it, do not trust it.** `fix` is **not** on the deterministic perf-gate today
+  (`crates/alint-bench/benches/det_check.rs` gates `check` scenarios only; the one `fix` bench is
+  criterion-only, dry-run, and capped at 1k files). Phase 0 adds a gated `fix` scenario and a
+  fixpoint-convergence scenario to the Valgrind/Ir gate, so a fix-path regression trips CI the way
+  a check-path one does.
+
 ## 6. The phased plan
 
 Each phase is independently shippable and ordered by value multiplied by feasibility. A phase
@@ -772,7 +858,10 @@ configs, including the adversarial same-file pairs (`no_trailing_whitespace` tri
 `final_newline`; `file_header` prepend plus `max_consecutive_blank_lines`, both touching EOF)
 that would each get only one fix under a naive `0..len` overlap-skip. The located-edit batch, the
 overlap-skip, and the fixpoint are built here but first *exercised* in Phase 1, so the Phase 0
-test plan is byte-identical snapshots of the whole-file composition, not a claim of tier or
+test plan is byte-identical snapshots of the whole-file composition **plus a per-fixer
+`apply`-vs-`fix_edit` byte-parity property test** (the batched engine composes the `fix_edit` data
+path, while today's `alint fix` uses `apply`, and those paths can drift; the codebase already
+carries such a guard, e.g. `bom_fix_edit_binary_guard_mirrors_apply`) - not a claim of tier or
 located-edit coverage. Risk: low.
 
 ### Phase 1: located content replacement + the fixpoint (classes 2 and 4)
@@ -899,6 +988,12 @@ Resolved after review (folded into the sections above):
   Suggestions, fix only new ones (5.7).
 - **Network-gated fixes:** the core stays network-free; SHA-pinning is a separate, top-level-only,
   explicitly-opted-in fix or a future WASM plugin, never a bare `alint fix` (6, Deferred).
+- **Versioning:** the arc slots as **v0.17**; it introduces the tiers and a deprecation warning,
+  then flips `file_remove` to Unsafe about two minors later (a warned, pre-1.0 MINOR change) (5.6,
+  6).
+- **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for all tiers, and
+  `agent` / `json --include-fixes` carry a `proposed_edit`; the edit is computed during `check`
+  **only** when such a format is selected, so the default check path is unchanged (5.7).
 
 Still open:
 
@@ -953,7 +1048,7 @@ hierarchy, relational dependency theory) lives in the companion
 
 ---
 
-*Revision note: revised three times after independent adversarial audits. Round 1 (technical +
+*Revision note: revised four times after independent adversarial audits. Round 1 (technical +
 design) added the rule-level `collect_edits` binding (5.2.1), a total edit order (5.2.2),
 multi-file transactions (5.2.4), the locate/serialize split (5.3, 5.4), the fixer trust boundary
 (5.5), the interaction surfaces (5.7), the recount to seven normalizers, and dropped the undefined
@@ -967,4 +1062,14 @@ inverse, 5.8), sharpened the fixed-point and counting framings, specified whole-
 sequencing (5.1, 5.2.3) and the `Suggested` exit-code plumbing (5.7), refined the trust boundary to
 gate content-injecting fixers by provenance with a `trusted_extends:` opt-in while leaving
 fixed-behavior fixers untouched (5.5), and recorded the maintainer's decisions: `file_remove`
-Unsafe-by-default with a per-rule override, baseline-aware `fix`, and a network-free core (3, 9).*
+Unsafe-by-default with a per-rule override, baseline-aware `fix`, and a network-free core (3, 9).
+Round 4 (an implementability-plus-cross-repo-consistency audit and a completeness gap-hunt)
+corrected the trust boundary's false claim that per-source provenance already exists in the loader
+(it must be built; 5.5), noted the fixpoint re-walk amends ARCHITECTURE's "walk once" invariant and
+listed ARCHITECTURE / schema / `facts.json` / README / `docs/rules.md` as downstream artifacts each
+phase must update (5.6), fixed the per-rule `applicability` schema shape, made the multi-file
+failure model honest (all-or-nothing through verify, best-effort through the per-file writes,
+5.2.4), and added SARIF `fixes[]` for all tiers on `check --format sarif`, a
+performance-and-perf-gate section (5.9), a preview-mode table, and Windows / `nested_configs`
+handling. The maintainer resolved: the v0.17 warned-migration slot, all-tier SARIF fixes, and
+computing check-side edits only when a fix-carrying format is selected.*

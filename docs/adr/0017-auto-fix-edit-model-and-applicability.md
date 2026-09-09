@@ -106,8 +106,12 @@ first-party bundled rulesets, but **demoted to Suggestion** from a remote-URL `e
 top-level `trusted_extends:` allowlist to opt specific remote sources back in. **Spawning fixers**
 (`git_untrack`, a `command`-backed fix, regenerate-from-command) are **refused at load** from any
 non-top-level source. Applicability promotion is top-level-only (an inherited fixer may be demoted
-but never promoted). The gate reuses the loader's existing top-level-versus-`extends:` provenance
-plumbing (the same mechanism that forces `allow_out_of_root` off for inherited rules).
+but never promoted). This provenance does **not** exist in the loader today (rules are merged into
+one id-keyed list with no source tag; `allow_out_of_root` is a top-level policy matched by
+id/kind, and inherited-rule safety is done by rejecting-and-dropping at load, not by tagging
+origin): the spawning-fixer *refusal* fits that existing reject-at-load pattern, but the
+content-fixer *demotion* and `trusted_extends:` require new per-source provenance threaded through
+`merge()` onto `RuleSpec` / `RuleEntry` to fix time. It is new, security-load-bearing plumbing.
 
 ## Consequences
 
@@ -118,15 +122,19 @@ first-class "proposed but not auto-applied" edits via a new `Suggested` outcome 
 `proposed_edit` payload alongside the existing `fix_command`; every fixer carries a
 machine-readable safety declaration.
 
-Harder: `Engine::fix` grows a real scheduler (rule-level collect, total-order sort,
-overlap-skip, isolation, postcondition, and from Phase 1 a fixpoint with index invalidation)
-instead of a loop, which is more code to keep deterministic and more to test; each structured
+Harder: `Engine::fix` grows a real scheduler (rule-level collect, total-order sort, overlap-skip,
+isolation, postcondition, and from Phase 1 a fixpoint whose path-mutating passes re-walk, amending
+ARCHITECTURE's "walk once per invocation" invariant for `fix`) instead of a loop; each structured
 format needs its own span resolver and value serializer because the lossy `serde_json::Value`
-pipeline cannot be reused for write-back; multi-file fixes need all-or-nothing transactions;
-`fix` must become baseline-aware so it does not rewrite grandfathered findings; and a new
-fix-level trust gate must be built and maintained because reusing the kind-level spawn gate
-would leave a fixer-on-a-non-spawning-kind hole. Reclassifying an existing op (treating
-`file_remove` as Unsafe) is a safety-default and semver decision rather than a free change.
+pipeline cannot be reused for write-back; multi-file fixes are all-or-nothing through the verify
+phase but only best-effort through the per-file write phase (no cross-file journal); `fix` becomes
+baseline-aware; new per-source provenance plumbing must be threaded through the loader for the
+content-fixer trust gate (it does not exist today); carrying fixes in `check --format sarif` /
+`agent` adds edit computation to `check` when those formats are selected; and each new op or status
+must update the gated downstream artifacts (`schemas/*.json`, `facts.json auto_fix_ops`, README
+counts, `docs/rules.md`, ARCHITECTURE.md) plus land a gated `fix` perf-bench. Reclassifying
+`file_remove` as Unsafe is a safety-default and (pre-1.0) versioning decision, sequenced as a
+warned v0.17 change that flips about two minors later, not a free change.
 
 The engine's guarantees are bounded and stated as such: reproducibility, not order-independence;
 a Safe-tier fixpoint that terminates by the multiset contract (the cap only guards Unsafe and
@@ -159,7 +167,9 @@ splice or overlap invariant, and debug_assert runtime contracts.
 
 Design doc: [`docs/design/auto-fix.md`](../design/auto-fix.md). Trust boundary:
 [ADR-0004](0004-extends-trust-boundary-and-path-confinement.md). Dispatch and determinism:
-[ADR-0003](0003-rule-engine-dispatch-and-determinism.md). The formal model (rewriting-system
+[ADR-0003](0003-rule-engine-dispatch-and-determinism.md). Baseline suppression, which
+[ADR-0006](0006-baseline-suppression.md) scopes to `check`, is extended to `fix` by this proposal
+(5.7). The formal model (rewriting-system
 determinism, the Safe-tier termination contract, the lens laws, and the verification plan) is
 section 5.8 of the design doc; the completeness-theory framing for the detection surface is the
 companion [`rule-coverage-gaps.md`](../design/rule-coverage-gaps.md). Prior art with primary
