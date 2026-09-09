@@ -13,14 +13,15 @@ Demand evidence: cross-checked against Repolinter, OpenSSF Scorecard, syncpack /
 ## Contents
 
 - [1. The scope boundary](#1-the-scope-boundary)
-- [2. What alint already covers](#2-what-alint-already-covers)
-- [3. The gap families](#3-the-gap-families)
-- [4. Borderline: route to `command` or a WASM plugin](#4-borderline-route-to-command-or-a-wasm-plugin)
-- [5. Clearly out of scope](#5-clearly-out-of-scope)
-- [6. Auto-fix tie-in](#6-auto-fix-tie-in)
-- [7. Prioritized shortlist](#7-prioritized-shortlist)
-- [8. Strategic read and reusable substrates](#8-strategic-read-and-reusable-substrates)
-- [9. References](#9-references)
+- [2. A completeness framework](#2-a-completeness-framework)
+- [3. What alint already covers](#3-what-alint-already-covers)
+- [4. The gap families](#4-the-gap-families)
+- [5. Borderline: route to `command` or a WASM plugin](#5-borderline-route-to-command-or-a-wasm-plugin)
+- [6. Clearly out of scope](#6-clearly-out-of-scope)
+- [7. Auto-fix tie-in](#7-auto-fix-tie-in)
+- [8. Prioritized shortlist](#8-prioritized-shortlist)
+- [9. Strategic read and reusable substrates](#9-strategic-read-and-reusable-substrates)
+- [10. References](#10-references)
 
 ## 1. The scope boundary
 
@@ -30,7 +31,8 @@ and the language toolchains)**. Everything proposed here sits in that band: it i
 from the local files with no network, no language AST or type checker, no `node_modules`
 metadata, no Git host API, and no cryptography. The non-goals from the README still hold
 (alint is not a code/AST linter, not SAST, not a semantic IaC scanner, not a secret scanner),
-and section 5 draws that line explicitly and honestly.
+and section 6 draws that line explicitly and honestly. Section 2 makes the boundary a theorem
+rather than a taste.
 
 Three axes classify every candidate:
 
@@ -45,7 +47,132 @@ Three axes classify every candidate:
 - **Auto-fix applicability**, using the [`auto-fix.md`](auto-fix.md) four-state model: Safe,
   Unsafe, Suggestion, Never.
 
-## 2. What alint already covers
+## 2. A completeness framework
+
+"Is the rule set complete?" has no absolute answer; completeness is only ever **relative to a
+fixed class**. This section fixes that class and locates the covered fragment and the gaps inside
+it, which turns the family list below from a wishlist into the boundary of a defined fragment.
+
+### 2.1 Two layers: recognition and assertion
+
+A repository is a finite labeled structure (a path tree; the filesystem a partial map
+`path -> bytes`; each structured file a further finite tree). alint is two composed machines, and
+confusing them is the main source of loose reasoning about coverage:
+
+- **Recognition layer (the Chomsky hierarchy).** From raw bytes it materializes *labels* (unary
+  predicates: "matches regex R", "is valid UTF-8", "has +x") and *relations* (edges, key/value
+  tuples, path lists). Content matching is *exactly* the regular languages: the RE2-style `regex`
+  engine has no backreferences, a precise ceiling, not an analogy, so a content rule cannot
+  recognize `a^n b^n`, balanced brackets, or "the same identifier twice". Format recognition is
+  roughly context-free (balanced-bracket well-formedness is the Dyck language; the honest caveat
+  is that YAML is not context-free, so the real parsers sit around or just above CF). Duplicate-code
+  detection is *fingerprinting* (winnowing over Rabin-Karp hashes; Schleimer, Wilkerson, Aiken
+  2003), not parsing, which is why it stays in scope.
+- **Assertion layer (finite model theory + dependency theory).** Over the resulting finite
+  structure it *asserts* a predicate: a first-order combination, a bounded slice of monadic
+  second-order or transitive closure, integrity constraints, and bounded counting.
+
+Every gap is then precisely a **recognition gap** (the layer that builds the structure throws the
+needed information away, or never builds it), an **assertion gap** (the structure is present but
+no kind expresses the predicate over it), or **out of band** (not a decidable function of the
+local bytes). Tagging each gap this way splits the doc's undifferentiated "needs a new kind" (K)
+verdicts into "needs a parser or scanner" versus "needs new constraint logic", which are
+different engineering.
+
+### 2.2 The scope boundary is a computability statement
+
+Every alint rule is a decidable, polynomial predicate over the given finite structure. A candidate
+is OUT on exactly one of two grounds:
+
+1. **Undecidable or semantics-dependent in general.** "Is this the same code?" is program
+   equivalence, undecidable (a corollary of Rice's theorem, 1953); full type inference, dataflow,
+   and taint need a language model alint deliberately lacks.
+2. **Not a function of the local bytes.** Branch protection, CI outcomes, advisory status,
+   registry existence, true lockfile resolution, and signature crypto depend on external or global
+   state that is not present in the committed tree.
+
+The IN band is therefore: predicates that are a decidable, deterministic function of the committed
+bytes alone, **including the local `.git` object store**. That last clause is exactly why local
+git-tag and commit-history checks are IN while the GitHub API is OUT, and why a date rule must take
+a pinned `--as-of` clock rather than reading the wall clock (a wall-clock read is not a function of
+the local bytes, violating clause 2 and the determinism invariant). This grounds the intuitive
+"between file-exists and resolve-the-dep-graph" band of section 1 as a theorem.
+
+### 2.3 What the assertion layer expresses, and the one primitive that escapes it
+
+Classifying the current kinds by finite-model-theory level:
+
+- **First-order (FO):** existence, naming, and hygiene (Gaifman-local, radius at most one), the
+  per-file structured queries, and the one-level cross-file kinds (`pair`, `cross_file`,
+  `registry_paths_resolve`, `import_gate`) that quantify over files and tuples with no recursion.
+- **The one genuine jump to MSO / transitive closure:** `file_graph`'s `acyclic` mode.
+  Reachability, connectivity, and acyclicity are provably **not** first-order-definable
+  (Ehrenfeucht-Fraisse games; Gaifman locality 1982; Aho-Ullman 1979), so acyclicity cannot be
+  desugared into the FO cross-file kinds. This is the theorem that earns `file_graph` its keep.
+  Honest correction: only `acyclic` is non-FO; `no_dangling` / `no_orphans` / `forbidden_edges` are
+  FO over the materialized edge relation, bundled with it for ergonomics, not expressiveness.
+- **Path-query expressiveness:** the navigational core of XPath is characterized as FO2 over trees
+  (Marx and de Rijke 2005); JSONPath (RFC 9535) has no such published theorem, so FO2 is a grounded
+  analogy, not a proof, for alint's `*_path_*` family. The family asserts a
+  universal-over-a-selected-set predicate, which structurally cannot compare cardinalities across
+  nodes, assert key-set equality, or see duplicate keys.
+- **Counting:** the engine does *fixed* aggregations (`max_files_per_directory`, and the size,
+  depth, line, and path-length caps), FO-with-counting in practice, but exposes no *general*
+  equality-of-counts over an extracted relation. (Parity is the classic witness that FO alone
+  cannot count.) That general fragment underlies several gaps below.
+
+### 2.4 The unifying lens: a repository is a database with integrity constraints
+
+Model the repository, plus the relations the recognition layer extracts from its structured files,
+as a relational database. Then most cross-file rules and the version/key-consistency gaps are,
+formally, **database integrity constraints** (Abiteboul, Hull, Vianu 1995):
+
+- `unique_by` = a **functional dependency (FD) / key** (no two files share the key value);
+  `no_case_conflicts` = a case-folded key.
+- `pair`, `registry_paths_resolve`, `markdown_paths_resolve` = **inclusion dependencies (IND)**,
+  i.e. referential integrity / foreign keys (Casanova, Fagin, Papadimitriou 1984);
+  `registry_paths_resolve` with `orphans` is a two-way IND.
+- `cross_file ... equals` / `identical` = **equality-generating dependencies (EGD)**; `set_equals`
+  = a two-way IND; `forbidden_edges` / `import_gate` = an **exclusion dependency**.
+- `file_graph acyclic` is the deliberate exception again: embedded dependencies are FO sentences,
+  acyclicity is not, so it is not a dependency and correctly stays bespoke. Two independent lenses
+  (FO-definability and dependency theory) agree on the same boundary.
+
+The **coverage gaps are the same dependency classes over *dynamically-extracted* relations**
+(schema-on-read, rather than a pinned file pair): `dependency_version_consistency` is an FD
+`name -> version`; `key_parity` is a two-way IND on key sets; `reuse_license_completeness` is a
+two-way IND on SPDX ids. This motivates a single, theory-grounded **`constraint` kind**: an
+`extract` spec (pull tuples from a glob via JSONPath / `lines` / `regex`, tagged by source)
+composed with a dependency to assert (`key`, `references`, `set_equals`, `equal`, `disjoint`,
+optionally a `count` / `distinct` operator for the counting fragment). It would subsume `unique_by`,
+`cross_file`, and `registry_paths_resolve` and unlock `key_parity`,
+`dependency_version_consistency`, and the toolchain-pin family as *configurations* rather than
+bespoke kinds. Guardrail: **check only, never infer**, because FD+IND implication is undecidable
+(Chandra-Vardi 1985); alint evaluates a declared constraint against an instance (polynomial), and
+must never entail or minimize a constraint set.
+
+Two caveats keep this a design vocabulary rather than an overclaim: the extracted "relations" are
+computed by heuristic extractors (the regex import-edge caveat generalizes, so a satisfied
+constraint is only as sound as its extractor), and classical dependency theory assumes a fixed
+schema whereas alint's relations are discovered per run.
+
+### 2.5 Covered versus missing, by class
+
+- **Covered (the realized fragment):** FO over the file tree and statically-declared extraction
+  points; regular content recognition (exactly); context-free format recognition into a queryable
+  tree; the FD / IND / EGD / exclusion dependency classes with *fixed* relations; exactly one
+  MSO/TC property (acyclicity); and fixed bounded counting.
+- **Missing (the gap list is the boundary of that fragment):**
+
+| Missing class | Gaps | Kind of work |
+|---|---|---|
+| Recognition upgrade (build a structure the parser drops or never builds) | B1 duplicate keys, B2 well-formed, E1/E3/E6 markdown grammar, G1 tabular, H2 Dockerfile, F2 SPDX-expression | a parser or scanner |
+| Dependency over a *dynamically-extracted* relation | C3 version consistency, D1 key parity, D2 placeholder parity, F3 REUSE completeness | new constraint logic (the `constraint` kind of 2.4) |
+| General FO+COUNT (equality-of-counts / threshold over an extracted relation) | C3 count-distinct, key-count parity, B4 mutually-exclusive (= 1), dead-pattern (= 0) | a `count` operator on the `constraint` kind |
+| A small offline decision procedure | C4 semver-range algebra | a self-contained solver |
+| Out of band (the computability boundary of 2.2) | Scorecard-via-API, dependency-graph resolution, code semantics, SAST, secrets, crypto | deliberately excluded |
+
+## 3. What alint already covers
 
 To keep the gap list honest, these are covered today and are **not** gaps (they are cited so
 a reader does not re-propose them):
@@ -78,9 +205,10 @@ single-source candidates): `json_key_sort_order`, `column_alignment`, `not_execu
 `directory_hash`, `case_collision_safe`, `dir_name_matches_field`, `balanced_delimiters`, and
 the backlogged `duplicate_blocks` (copy-paste) and WASM plugins. The `detect: linguist` /
 `detect: askalono` facts were planned for an early cut and **never shipped** (verified: no
-`licensee` or `askalono` reference exists in `crates/`; only a ROADMAP mention remains).
+`licensee` or `askalono` reference exists in `crates/`; the only mentions are in ROADMAP and
+this analysis).
 
-## 3. The gap families
+## 4. The gap families
 
 Ten families, ranked. Within each, the table columns are: gap (working kind name), what it
 detects, scope-fit, expressibility, and default auto-fix tier. The standouts carry a
@@ -126,9 +254,10 @@ itself, which a path query structurally cannot see.
 | `*_path_casing` / `*_path_mutually_exclusive` | a queried value obeys a naming case; exactly one of two paths is present | IN | K (small) | Unsafe / Never |
 
 **`no_duplicate_keys` is a gap alint's own reference documents.** `docs/rules.md` states that
-a "detect duplicate key" rule is only expressible for XML and INI (which array-collect),
-because for JSON / YAML / dotenv / properties the `Format::parse -> serde_json::Value` pipeline
-keeps the last duplicate and discards the earlier ones before any rule runs. A duplicate key
+a "detect duplicate key" rule is only expressible for XML and INI (which array-collect the
+duplicates) and TOML and HCL (which reject the file as a parse error), because for JSON / YAML /
+dotenv / properties the `Format::parse -> serde_json::Value` pipeline silently keeps the last
+duplicate and discards the earlier ones before any rule runs. A duplicate key
 from a bad merge in a large Kubernetes, Ansible, or CI file silently changes behavior;
 yamllint's `key-duplicates` is on by default. Closing this needs a duplicate-aware or spanned
 parse, which is the same substrate the auto-fix structured bridge builds.
@@ -270,7 +399,7 @@ must take a fixed "now" (a `--as-of` input or a per-run pinned clock) rather tha
 wall clock. A Keep-a-Changelog structural ruleset and a `no_committed_binaries` discovery kind
 (magic-byte scan plus allowlist, fix = git-untrack) round out the (P) composition wins.
 
-## 4. Borderline: route to `command` or a WASM plugin
+## 5. Borderline: route to `command` or a WASM plugin
 
 These are real but better served by wrapping an existing tool via the `command` rule (or a
 future WASM plugin) than by growing the core binary:
@@ -287,7 +416,7 @@ future WASM plugin) than by growing the core binary:
   secret-scanning, a stated non-goal; the defensible slice (`git_no_denied_paths`,
   `git_blame_age`) is already covered.
 
-## 5. Clearly out of scope
+## 6. Clearly out of scope
 
 Named honestly, these belong to the tools the README already points at:
 
@@ -305,7 +434,7 @@ Named honestly, these belong to the tools the README already points at:
 - **Fuzzy license classification, signature/attestation crypto, and numeric quality scores.**
 - **Whole-file reformatting:** alint is not a formatter.
 
-## 6. Auto-fix tie-in
+## 7. Auto-fix tie-in
 
 Most high-value gaps map onto the [`auto-fix.md`](auto-fix.md) four-state model, and the
 highest-value new fixes ride substrates that document already plans:
@@ -325,7 +454,7 @@ The flagship structured-value write-back engine (auto-fix Phase 2) is the enable
 highest-value new fixes here: version SSOT, structured key sort, and any `*_path_equals`-backed
 gap all ride the same path-to-span bridge.
 
-## 7. Prioritized shortlist
+## 8. Prioritized shortlist
 
 1. `editorconfig_conforms` (A1): config-as-SSOT; every primitive exists, zero conformance
    awareness; Safe auto-fix. (K)
@@ -353,7 +482,7 @@ Second tier: `well_formed`, `frontmatter_schema`, `spdx_identifier_valid`,
 `max_path_length`, `lfs_pointer_valid`, the community-schema pack, `field_date_valid`,
 `structured_key_sort` (already on the radar).
 
-## 8. Strategic read and reusable substrates
+## 9. Strategic read and reusable substrates
 
 Two clusters dominate the high-value gaps, and both are almost entirely un-owned by any single
 language-agnostic tool:
@@ -377,6 +506,11 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
   `no_duplicate_keys` (B1).
 - **A markdown link / heading / front-matter scanner** (one light line-scanner with a
   fenced-code toggle) unlocks all of Family E.
+- **A single `constraint` kind** (extract relations from a glob, then assert a dependency;
+  section 2.4) generalizes `unique_by` / `cross_file` / `registry_paths_resolve` and unlocks the
+  whole cross-file consistency vein (`dependency_version_consistency`, `key_parity`,
+  `placeholder_parity`) as configurations rather than bespoke kinds, subject to the
+  check-only-never-infer guardrail.
 
 Sequencing suggestion: ship `editorconfig_conforms` and `no_duplicate_keys` first (highest
 leverage, each a self-contained kind on an existing evaluator), package the version-SSOT and
@@ -384,7 +518,7 @@ toolchain-pins bundled rulesets (mostly (P), immediate value), then build the ma
 (Family E) and the SPDX table (Family F) as shared substrates, with `semver_range` and the
 cross-file consistency kinds following as engine capabilities.
 
-## 9. References
+## 10. References
 
 Repolinter rules; OpenSSF Scorecard checks, Allstar, Best Practices, OSPS Baseline;
 CNCF / Apache maturity models; GitHub community health files; syncpack, manypkg, knip, Nx and
@@ -395,3 +529,14 @@ eslint-plugin-i18n-json, i18n-tasks, compare-locales, gettext `msgfmt`; csvlint 
 Frictionless Table Schema; Keep a Changelog; SemVer 2.0.0; codeowners-validator;
 remark-lint-frontmatter-schema; the pre-commit-hooks battery. Full URLs are collected in the
 research artifact this doc is distilled from.
+
+The theoretical foundations behind section 2: Libkin, *Elements of Finite Model Theory*, 2004
+(FO/MSO locality, Ehrenfeucht-Fraisse games, FO+COUNT); Gaifman 1982 (locality); Aho and Ullman
+1979 (transitive closure is not first-order); Immerman, *Descriptive Complexity* (FO+TC captures
+NL); Thatcher-Wright and Doner (MSO = regular tree languages), Courcelle 1990; Marx and de Rijke
+2005 (the navigational core of XPath is FO2 over trees); IETF RFC 9535 (JSONPath); Chomsky 1956
+(the hierarchy); Schleimer, Wilkerson, Aiken 2003 (winnowing) and Karp and Rabin 1987
+(rolling-hash fingerprinting); Rice 1953 (program equivalence is undecidable); Abiteboul, Hull,
+Vianu, *Foundations of Databases*, 1995 (FD / IND / EGD / TGD, the chase); Casanova, Fagin,
+Papadimitriou 1984 (inclusion dependencies); Chandra and Vardi 1985 (FD+IND implication is
+undecidable).
