@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-08
 decision-makers: asamarts
 ---
@@ -8,7 +8,7 @@ decision-makers: asamarts
 
 ## Status
 
-Proposed. Companion design doc:
+Accepted (ratified 2026-09-09). Companion design doc:
 [`docs/design/auto-fix.md`](../design/auto-fix.md), which carries the research survey (the
 seven-class fix taxonomy), the per-format structured-write feasibility verdicts, the
 architecture, and the phased build plan. This ADR records the three load-bearing decisions

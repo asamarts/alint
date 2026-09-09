@@ -1,7 +1,7 @@
 # Auto-fix: a systematic framework for mechanical remediation
 
-Status: Draft (revised five times after independent adversarial audits; see the changelog note at the end).
-Decisions: [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) (proposed) records the load-bearing decisions (the batched range-edit apply engine, the applicability model, and the fixer trust boundary).
+Status: Accepted (ratified 2026-09-09; revised five times after independent adversarial audits, see the changelog note at the end). Execution plan to follow as a companion design doc.
+Decisions: [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) (accepted) records the load-bearing decisions (the batched range-edit apply engine, the applicability model, and the fixer trust boundary).
 Demand evidence: the structured-query family (25 kinds, the largest family) is 100% unfixable today; see the `format-coverage.md` arc and the 30-repo `examples/` corpus.
 
 > This is an arc document (the scale of `distribution.md` / `format-coverage.md`, not a
@@ -630,8 +630,9 @@ could ship a fix that silently injects bytes into the user's files or shells out
 **This gate is new plumbing, not a reuse of an existing mechanism (correcting an earlier draft).**
 Today the loader `merge()`s every source's rules into one id-keyed list with **no source tag**,
 and `RuleSpec` / `RuleEntry` carry no origin field; `allow_out_of_root` is a top-level policy
-matched by id/kind, and inherited-rule safety is enforced by **rejecting dangerous keys at load
-and dropping the rule** (`reject_command_rules_in`, `reject_custom_facts_in` in `loader.rs`), so no
+matched by id/kind, and inherited-rule safety is enforced by **rejecting dangerous keys at load**
+(`reject_command_rules_in`, `reject_custom_facts_in` in `loader.rs` abort the whole load with an
+error that names the offending source, rather than dropping one rule and continuing), so no
 provenance needs to survive the merge. Two consequences: (1) the spawning-fixer **refusal** fits
 that existing reject-at-load pattern directly, scanning each `extends:`-ed rule's `fix:` block; but
 (2) the content-fixer **demotion** *keeps* the rule, so its four-way source (top-level /
@@ -704,10 +705,13 @@ security-load-bearing work to build, not a mechanism to inherit.
   `fix --dry-run` doubles as the CI gate (write nothing, fail if fixes are pending), so no
   separate `fix --check` is added.
 - **Downstream artifacts (per phase).** alint gates its own generated/derived surfaces, so each
-  phase that adds an op or a status also updates, in the same PR: `schemas/v1/config.json` (the
-  `FixSpec` op enum) and `schemas/v1/fix-report.json` (the new `suggested` status) via
-  `gen-schema` (constitution invariants 7 and 11); the `facts.json` `auto_fix_ops` count, which is
-  code-derived and gated by `readme_auto_fix_ops_count_matches_fixers` (invariants 9 and 11);
+  phase that adds an op or a status also updates, in the same PR: the hand-written `$defs/fix`
+  branch in `schemas/v1/config.json` (`FixSpec` has no schemars derive, so `gen-schema` only
+  re-syncs the byte-identical in-crate copy `crates/alint-dsl/schemas/v1/config.json`); the
+  hand-written `schemas/v1/fix-report.json` for the new `suggested` status, guarded by the
+  `crates/alint-output` round-trip test rather than `gen-schema` (constitution invariants 7 and 11);
+  the `facts.json` `auto_fix_ops` count, which is code-derived (it counts `*Fixer` structs) and gated
+  by `readme_auto_fix_ops_count_matches_fixers` (invariants 9 and 11);
   `README.md`'s headline counts; the per-op reference in `docs/rules.md`; and `ARCHITECTURE.md`'s
   fix-operations table and execution step 9 (which the batched engine supersedes, and which is
   already stale: it omits `file_footer`). `ROADMAP.md` / `roadmap.json` are wired when the arc is
@@ -993,7 +997,7 @@ non-spawning kind); the coverage audits (invariants 7 and 8; every newly-fixable
 schema entry and gains firing + silent scenarios, plus an idempotence test); and design-doc-first
 plus ADR (invariants 12 and 13).
 
-**ADR-0017** (proposed) records: (1) the ranged edit primitive plus the batched,
+**ADR-0017** (accepted) records: (1) the ranged edit primitive plus the batched,
 conflict-resolving, postcondition-verifying apply engine (whole-file ops composed in config
 order in Phase 0; the located-edit batch and the fixpoint built in Phase 0 but first exercised in
 Phase 1); (2) the four-state
