@@ -512,6 +512,16 @@ pub fn parse(yaml: &str) -> Result<Config> {
 /// adding it here is a code-execution gap.
 pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "command_idempotent"];
 
+/// Fix ops that shell out, trust-gated identically to
+/// [`SPAWNING_RULE_KINDS`]: a spawning fix (e.g. the future `git_untrack`)
+/// may be declared **only** in the user's own top-level config, never
+/// introduced via `extends:` (auto-fix.md 5.5). Empty until Phase 3 ships
+/// the first spawning op; the SSOT exists now so W2's trust gate has a
+/// list to scan and adding a spawn-capable op without listing it here is a
+/// code-execution gap, exactly as for rule kinds. Kept empty is asserted
+/// by `spawning_fix_ops_empty_until_phase_3`.
+pub const SPAWNING_FIX_OPS: &[&str] = &[];
+
 /// Reject any process-spawning rule kind (see
 /// [`SPAWNING_RULE_KINDS`]) in the given mapping list. Used by the
 /// `extends:` resolver to enforce that only the user's own

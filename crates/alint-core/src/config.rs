@@ -346,8 +346,9 @@ pub struct RuleSpec {
     /// Optional mechanical-fix strategy. Rules whose builders understand
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
-    /// at build time.
-    #[serde(default)]
+    /// at build time. A block with more than one op key is rejected at
+    /// load (R-TWOOP), see [`deserialize_fix_spec`].
+    #[serde(default, deserialize_with = "deserialize_fix_spec")]
     pub fix: Option<FixSpec>,
     // Neither `git_tracked_only` nor `respect_gitignore` is a RuleSpec field:
     // both are kind-specific options (ADR-0008). `git_tracked_only` lives in
@@ -427,7 +428,65 @@ pub enum FixSpec {
     },
 }
 
+/// Deserialize a rule's `fix:` block, rejecting a block with more than one
+/// op key (R-TWOOP). [`FixSpec`] is `#[serde(untagged)]`, so serde silently
+/// picks the *first* matching variant and drops sibling keys (the inner
+/// structs' `deny_unknown_fields` does not apply across the fix-block map).
+/// A file-mutating feature must not inherit that latent footgun, so a
+/// two-op block is a hard config error rather than a silent first-wins.
+fn deserialize_fix_spec<'de, D>(deserializer: D) -> std::result::Result<Option<FixSpec>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let value = serde_yaml_ng::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let serde_yaml_ng::Value::Mapping(m) = &value {
+        if m.len() != 1 {
+            let mut keys: Vec<String> = m
+                .keys()
+                .map(|k| match k {
+                    serde_yaml_ng::Value::String(s) => s.clone(),
+                    other => format!("{other:?}"),
+                })
+                .collect();
+            keys.sort();
+            return Err(D::Error::custom(format!(
+                "a `fix:` block must have exactly one op key, found {}: {}. \
+                 Each rule declares a single fix op; split them into separate rules.",
+                m.len(),
+                keys.join(", ")
+            )));
+        }
+    }
+    serde_yaml_ng::from_value(value)
+        .map(Some)
+        .map_err(D::Error::custom)
+}
+
 impl FixSpec {
+    /// Every fix op's YAML key, in declaration order. The single source of
+    /// truth the fix-coverage gate (`coverage_audit_fix_coverage`)
+    /// enumerates. A new enum variant forces a new [`op_name`](Self::op_name)
+    /// arm (the match is exhaustive) and must be added here in tandem;
+    /// `fix_spec_op_name_covers_every_variant` asserts the two agree.
+    pub const ALL_OP_NAMES: &'static [&'static str] = &[
+        "file_create",
+        "file_remove",
+        "file_prepend",
+        "file_append",
+        "file_rename",
+        "file_trim_trailing_whitespace",
+        "file_append_final_newline",
+        "file_normalize_line_endings",
+        "file_strip_bidi",
+        "file_strip_zero_width",
+        "file_strip_bom",
+        "file_collapse_blank_lines",
+    ];
+
     /// The op name as it appears in YAML — used in config-error messages.
     pub fn op_name(&self) -> &'static str {
         match self {
@@ -1037,6 +1096,44 @@ mod tests {
                 serde_yaml_ng::from_str(yaml).unwrap_or_else(|e| panic!("{yaml}: {e}"));
             assert_eq!(spec.op_name(), expected);
         }
+        // The gate's SSOT must list exactly the variants op_name covers.
+        let enumerated: std::collections::BTreeSet<&str> = cases.iter().map(|(_, n)| *n).collect();
+        let ssot: std::collections::BTreeSet<&str> =
+            FixSpec::ALL_OP_NAMES.iter().copied().collect();
+        assert_eq!(
+            enumerated, ssot,
+            "FixSpec::ALL_OP_NAMES must match the op_name-covered variants"
+        );
+    }
+
+    #[test]
+    fn fix_block_rejects_two_ops() {
+        // R-TWOOP: an untagged FixSpec would silently keep the first key and
+        // drop the second; the load-time guard must reject it instead.
+        #[derive(Debug, Deserialize)]
+        struct Holder {
+            #[serde(default, deserialize_with = "deserialize_fix_spec")]
+            fix: Option<FixSpec>,
+        }
+        let err = serde_yaml_ng::from_str::<Holder>(
+            "fix:\n  file_trim_trailing_whitespace: {}\n  file_append_final_newline: {}\n",
+        )
+        .expect_err("two op keys must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exactly one op key"),
+            "unexpected error: {msg}"
+        );
+
+        // One op still parses, and an absent block stays None.
+        let one = serde_yaml_ng::from_str::<Holder>("fix:\n  file_append_final_newline: {}\n")
+            .expect("single op parses");
+        assert_eq!(
+            one.fix.as_ref().map(FixSpec::op_name),
+            Some("file_append_final_newline")
+        );
+        let none = serde_yaml_ng::from_str::<Holder>("version: 1\n").expect("absent parses");
+        assert!(none.fix.is_none());
     }
 
     #[test]

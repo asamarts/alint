@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn spawning_fix_ops_empty_until_phase_3() {
+    // Phase 0 ships no spawning fix op. The SSOT exists so W2's trust gate
+    // has a list to scan; the first entry (e.g. `git_untrack`) lands in
+    // Phase 3 alongside the extends:-rejection wiring and its test.
+    assert!(
+        SPAWNING_FIX_OPS.is_empty(),
+        "a spawning fix op was added; wire the top-level-only trust gate \
+         (like reject_command_rules_in) and update this test in the SAME change"
+    );
+}
+
+#[test]
 fn collect_drop_ins_handles_missing_dir() {
     // Missing `.alint.d/` is the common case (drop-ins
     // are opt-in by mkdir); should be silent.
