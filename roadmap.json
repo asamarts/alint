@@ -98,6 +98,12 @@
       "blurb": "XML becomes a first-class target across every format-aware rule, and dotenv, Java .properties, INI, and HCL join as new config formats with their own path-query rule families, alongside a new *_path_absent kind family and a multi-round audit that bounds every config parser against crafted-file denial-of-service."
     },
     {
+      "version": "0.17",
+      "title": "Auto-fix",
+      "kind": "release",
+      "blurb": "alint learns to fix what it flags through a tiered fix engine that applies safe fixes by default and gates unsafe and suggestion tiers behind explicit flags, rewriting file content in place, setting or removing structured values across JSON, YAML, TOML, and XML with formatting preserved, repairing file permissions and shebangs, and canonicalizing ordering and headers, with every applied edit verified against the rule that requested it and a bounded fixpoint that either converges or reports exactly what it left unresolved."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",

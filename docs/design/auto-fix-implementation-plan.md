@@ -568,20 +568,36 @@ Not numbered phases; each needs an explicit opt-in and its own design record.
 
 ## 12. Sequencing, milestones, and versioning
 
-Aligns with `auto-fix.md` section 9 (v0.17 "introduces the tiers and a deprecation warning"):
+**v0.17 ships the entire arc (Phases 0 through 4) as one release**, cut only once every phase's
+Definition of Done (section 13) is green. This supersedes the earlier "one phase per minor" mapping
+and matches `auto-fix.md` section 9: the tiers, the primitives, and every fixer through
+ordering/headers ship together, so v0.17 is `alint`'s first *fixing* release rather than a dormant
+no-op.
 
-- **v0.17 = Phase 0.** The tiers, the primitives, the `CollectedEdit`/verify machinery (dormant), the
-  flags, report/exit plumbing, the two-op guard, the coverage gate, and the R-KANI fix. Ships the
-  `file_remove` deprecation warning. No new user-facing fixer, so a genuine no-op release.
-- **Next minor = Phase 1.** `replace` + the active fixpoint + `--changed` confinement + the
-  content-fixer trust gate. The first behavior-changing minor.
-- **Phase 2 (prelude, then 2a-lib -> 2a-handrolled -> 2b -> 2c -> 2d -> 2e)**, each sub-phase its own
-  increment. `file_remove` flips to Unsafe about two minors after v0.17 (its own migration PR).
+The work is still built and reviewed **phase by phase** - each phase is one PR (or a small series
+with a forward `Next: Phase N` pointer) that lands its downstream-artifact updates in the same PR and
+merges toward a long-lived v0.17 integration line, never released on its own:
+
+- **Phase 0 (foundation).** The tiers, the primitives, the `CollectedEdit`/verify machinery, the
+  fixpoint driver (dormant: no op collects located edits yet), the flags, report/exit plumbing, the
+  two-op guard, the coverage gate, and the R-KANI proof-count fix. Ships the `file_remove`
+  deprecation warning. A genuine no-op (byte-identical) for existing configs.
+- **Phase 1.** `replace` + the active fixpoint + `--changed` confinement + the content-fixer trust
+  gate (W2 demotes existing remote-`extends:` content ops to Suggestion, R-RETRO). First Unsafe op.
+- **Phase 2** (prelude, then 2a-lib -> 2a-handrolled -> 2b -> 2c -> 2d -> 2e): the flagship
+  structured-value edits, each sub-phase its own PR.
 - **Phase 3, then Phase 4.**
-- **Deferred** items stay demand-gated.
+- **Deferred** items (section 10) stay demand-gated and out of v0.17.
 
-Each phase is one PR (or a small series with a forward `Next: Phase N` pointer), keeps `ROADMAP.md`
-untouched until scheduled, and lands its downstream-artifact updates in the same PR.
+**The one thing v0.17 does NOT do is flip the `file_remove` default.** Reclassifying `file_remove`
+from Safe to Unsafe changes an existing default (R-FILEREMOVE, DoD item 3), and the safety contract
+(`auto-fix.md` 5.6, 7) requires the deprecation warning to ship at least one full minor before the
+flip. So v0.17 ships the warning and **v0.18** flips the default in its own migration PR. This is the
+deliberate exception to "the whole arc is v0.17," and it exists so users get one release of warning
+before a default changes under them.
+
+`ROADMAP.md` / `roadmap.json` carry the public `## v0.17: Auto-fix` entry; this section is the
+source of truth for the internal phase order behind it.
 
 ## 13. Definition of done
 
