@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::facts::{FactSpec, FactValues, evaluate_facts};
 use crate::registry::RuleRegistry;
 use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
-use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation};
+use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation, write_atomic};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 
@@ -967,6 +968,13 @@ impl Engine {
             iter: None,
             env: None,
         };
+        // Compose mode for a real (non-dry-run) pass: content fixers route
+        // their whole-file writes into this buffer instead of hitting disk, so
+        // a file touched by several fixers in config order composes in memory
+        // and is flushed with a single atomic write per file (below). A
+        // `--dry-run` pass has no buffer and writes nothing, exactly as before.
+        let compose_buf: Option<RefCell<BTreeMap<PathBuf, Vec<u8>>>> =
+            (!dry_run).then(|| RefCell::new(BTreeMap::new()));
         let mut fix_ctx = FixContext {
             root,
             dry_run,
@@ -974,9 +982,7 @@ impl Engine {
             // Set per-entry inside the loop below, so each fixer confines its
             // config-declared paths against the OWNING rule's permission.
             allow_out_of_root: false,
-            // Compose mode is enabled by the engine rework (Step B); until then
-            // fixers write straight through, unchanged.
-            compose: None,
+            compose: compose_buf.as_ref(),
         };
 
         // Same `scope_filter.changed_since:` resolution as `run`, so a
@@ -1065,6 +1071,23 @@ impl Engine {
                 level: entry.rule.level(),
                 items,
             });
+        }
+
+        // Flush the compose buffer: one atomic write per file any content
+        // fixer touched, in deterministic (BTreeMap) order. `--dry-run` has no
+        // buffer, so this is a no-op there. The keys are repo-relative (the
+        // path each fixer reported), so `root.join` reproduces the exact target
+        // the fixer would have written directly. A flush failure fails the pass
+        // (the fixers reported Applied against the composed bytes; if those
+        // bytes cannot be persisted the run must not exit success).
+        if let Some(buf) = &compose_buf {
+            for (rel, bytes) in buf.borrow().iter() {
+                let abs = root.join(rel);
+                write_atomic(&abs, bytes).map_err(|source| Error::Io {
+                    path: abs.clone(),
+                    source,
+                })?;
+            }
         }
         Ok(FixReport { results })
     }

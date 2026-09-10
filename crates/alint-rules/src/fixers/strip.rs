@@ -2,7 +2,7 @@ use std::path::Path;
 
 use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
-use crate::io::{looks_binary, write_atomic};
+use crate::io::looks_binary;
 
 /// Strips Unicode bidi control characters (the Trojan Source
 /// codepoints U+202A–202E, U+2066–2069) from the file's content.
@@ -116,10 +116,11 @@ impl Fixer for FileStripBomFixer {
             )));
         };
         let stripped = &existing[bom.byte_len()..];
-        write_atomic(&abs, stripped).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, stripped)
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "stripped {} BOM from {}",
             bom.name(),
@@ -182,10 +183,11 @@ fn apply_char_filter(
             path.display()
         )));
     }
-    write_atomic(&abs, out.as_bytes()).map_err(|source| Error::Io {
-        path: abs.clone(),
-        source,
-    })?;
+    ctx.commit_write(&abs, path, out.as_bytes())
+        .map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
     Ok(FixOutcome::Applied(format!("{verb} {}", path.display())))
 }
 

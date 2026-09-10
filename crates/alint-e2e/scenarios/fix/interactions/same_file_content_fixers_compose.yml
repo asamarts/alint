@@ -1,0 +1,42 @@
+name: two content fixers on one file compose in a single pass (one write)
+tags: [fix, interactions]
+
+# Adversarial same-file pair (auto-fix plan, Phase 0): no_trailing_whitespace
+# and final_newline both target the SAME file. The engine composes their
+# edits in config order in memory and flushes one write per file, so the
+# second fixer must see the first fixer's result (buffered), not the stale
+# on-disk bytes. The file has trailing whitespace on every line AND no final
+# newline, so both fixers fire; the composed result is trimmed AND newline
+# terminated.
+
+given:
+  tree:
+    note.txt: "alpha   \nbeta\t"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.txt"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+      - id: eof
+        kind: final_newline
+        paths: "**/*.txt"
+        level: error
+        fix:
+          file_append_final_newline: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-ws, level: error, path: note.txt}
+      - {rule: eof, level: error, path: note.txt}
+  - applied: [no-ws, eof]
+  - violations: []
+
+expect_tree:
+  note.txt: "alpha\nbeta\n"

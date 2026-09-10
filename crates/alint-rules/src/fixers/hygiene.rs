@@ -2,7 +2,7 @@ use std::path::Path;
 
 use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
-use crate::io::{looks_binary, write_atomic};
+use crate::io::looks_binary;
 
 /// Strips trailing space/tab on every line of each violating
 /// file. Preserves original line endings (LF stays LF, CRLF
@@ -45,10 +45,11 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
                 path.display()
             )));
         }
-        write_atomic(&abs, trimmed.as_bytes()).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, trimmed.as_bytes())
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "trimmed trailing whitespace in {}",
             path.display()
@@ -132,10 +133,11 @@ impl Fixer for FileAppendFinalNewlineFixer {
         }
         let mut out = existing;
         out.push(b'\n');
-        write_atomic(&abs, &out).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, &out)
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "appended final newline to {}",
             path.display()
@@ -228,10 +230,11 @@ impl Fixer for FileNormalizeLineEndingsFixer {
                 self.target.name()
             )));
         }
-        write_atomic(&abs, &normalized).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, &normalized)
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "normalized {} to {}",
             path.display(),
@@ -323,10 +326,11 @@ impl Fixer for FileCollapseBlankLinesFixer {
                 path.display()
             )));
         }
-        write_atomic(&abs, collapsed.as_bytes()).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, collapsed.as_bytes())
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "collapsed blank-line runs in {} to at most {}",
             path.display(),

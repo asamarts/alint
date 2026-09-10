@@ -4,7 +4,7 @@ use alint_core::{
     ContentSourceSpec, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation,
 };
 
-use crate::io::{looks_binary, write_atomic};
+use crate::io::looks_binary;
 
 /// UTF-8 byte-order mark. Preserved across prepend operations so
 /// editors that rely on it don't break.
@@ -232,10 +232,11 @@ impl Fixer for FilePrependFixer {
             out.extend_from_slice(&prepend);
             out.extend_from_slice(&existing);
         }
-        write_atomic(&abs, &out).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, &out)
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!("prepended {}", path.display())))
     }
 
@@ -332,10 +333,11 @@ impl Fixer for FileAppendFixer {
         }
         let mut out = existing;
         out.extend_from_slice(&payload);
-        write_atomic(&abs, &out).map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+        ctx.commit_write(&abs, path, &out)
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
         Ok(FixOutcome::Applied(format!(
             "appended to {}",
             path.display()
