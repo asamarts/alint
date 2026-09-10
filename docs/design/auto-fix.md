@@ -1,6 +1,6 @@
 # Auto-fix: a systematic framework for mechanical remediation
 
-Status: Accepted (ratified 2026-09-09; revised five times after independent adversarial audits, see the changelog note at the end). Execution plan to follow as a companion design doc.
+Status: Accepted (ratified 2026-09-09; revised five times after independent adversarial audits, see the changelog note at the end). Execution is tracked in the companion [`auto-fix-implementation-plan.md`](auto-fix-implementation-plan.md).
 Decisions: [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) (accepted) records the load-bearing decisions (the batched range-edit apply engine, the applicability model, and the fixer trust boundary).
 Demand evidence: the structured-query family (25 kinds, the largest family) is 100% unfixable today; see the `format-coverage.md` arc and the 30-repo `examples/` corpus.
 
@@ -971,9 +971,11 @@ This section is mandatory (TEMPLATE section 4) and applies across the phases.
 - **Discarding human content.** Mitigation: format-preserving splices only (never parse->dump);
   minimal ranges; the Unsafe tier for anything that removes content; structural/insertion edits
   kept to Suggestion.
-- **Untrusted fixers from `extends:`.** Mitigation: the fix-level trust gate of 5.5 (content and
-  spawning fix ops top-level-only; promotion top-level-only; inherited content fixers default to
-  Suggestion). This is a new gate, distinct from the kind-level `SPAWNING_RULE_KINDS`.
+- **Untrusted fixers from `extends:`.** Mitigation: the fix-level trust gate of 5.5 (spawning fix
+  ops top-level-only; content fix ops from a **remote-URL** `extends:` demoted to Suggestion unless
+  opted back in via `trusted_extends:`, but honored from the user's own tree and first-party bundled
+  rulesets; promotion top-level-only). This is a new gate, distinct from the kind-level
+  `SPAWNING_RULE_KINDS`.
 - **Fixing a grandfathered violation.** Mitigation: baseline-aware `fix` (5.7) skips suppressed
   violations from the apply set.
 - **Overlapping edits and non-convergence.** Mitigation: the total-order sort plus skip-overlap
