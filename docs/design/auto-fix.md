@@ -971,9 +971,11 @@ This section is mandatory (TEMPLATE section 4) and applies across the phases.
 - **Discarding human content.** Mitigation: format-preserving splices only (never parse->dump);
   minimal ranges; the Unsafe tier for anything that removes content; structural/insertion edits
   kept to Suggestion.
-- **Untrusted fixers from `extends:`.** Mitigation: the fix-level trust gate of 5.5 (content and
-  spawning fix ops top-level-only; promotion top-level-only; inherited content fixers default to
-  Suggestion). This is a new gate, distinct from the kind-level `SPAWNING_RULE_KINDS`.
+- **Untrusted fixers from `extends:`.** Mitigation: the fix-level trust gate of 5.5 (spawning fix
+  ops top-level-only; content fix ops from a **remote-URL** `extends:` demoted to Suggestion unless
+  opted back in via `trusted_extends:`, but honored from the user's own tree and first-party bundled
+  rulesets; promotion top-level-only). This is a new gate, distinct from the kind-level
+  `SPAWNING_RULE_KINDS`.
 - **Fixing a grandfathered violation.** Mitigation: baseline-aware `fix` (5.7) skips suppressed
   violations from the apply set.
 - **Overlapping edits and non-convergence.** Mitigation: the total-order sort plus skip-overlap
