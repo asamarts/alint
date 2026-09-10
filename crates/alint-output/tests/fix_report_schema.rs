@@ -9,7 +9,7 @@
 //! `alint fix --format json` (CI fix-applier scripts, IDE
 //! integrations).
 
-use alint_core::{FixItem, FixReport, FixRuleResult, FixStatus, Level, Violation};
+use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult, FixStatus, Level, Violation};
 use alint_output::write_fix_json;
 
 const FIX_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/fix-report.json");
@@ -43,6 +43,25 @@ fn canonical_fix_report() -> FixReport {
                         .with_path(std::path::Path::new("src/main.ts"))
                         .with_location(42, 1),
                     status: FixStatus::Unfixable,
+                }],
+            },
+            FixRuleResult {
+                rule_id: "package-json-license".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation::new("license should be Apache-2.0")
+                        .with_path(std::path::Path::new("package.json"))
+                        .with_location(5, 3),
+                    // The Suggested variant: an Unsafe/verification-demoted fix
+                    // carried in the report but not applied. Exercises the
+                    // `suggested` status enum value and summary count.
+                    status: FixStatus::Suggested {
+                        summary: "would set $.license to \"Apache-2.0\"".into(),
+                        edit: FixEdit::SetContent {
+                            path: std::path::PathBuf::from("package.json"),
+                            content: Vec::new(),
+                        },
+                    },
                 }],
             },
         ],
@@ -96,6 +115,7 @@ fn fix_report_shape_matches_expected_keys() {
     assert_eq!(summary["applied"], 1);
     assert_eq!(summary["skipped"], 1);
     assert_eq!(summary["unfixable"], 1);
+    assert_eq!(summary["suggested"], 1);
     let results = json["results"].as_array().unwrap();
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.len(), 3);
 }

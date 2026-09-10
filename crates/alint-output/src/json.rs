@@ -181,6 +181,10 @@ struct FixSummary {
     applied: usize,
     skipped: usize,
     unfixable: usize,
+    /// Fixes available but not applied (below the tier threshold, a
+    /// suggestion, or verification-demoted). Always present (a machine
+    /// format keeps a stable envelope); `0` when none.
+    suggested: usize,
 }
 
 #[derive(Serialize)]
@@ -241,6 +245,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
             applied: report.applied(),
             skipped: report.skipped(),
             unfixable: report.unfixable(),
+            suggested: report.suggested(),
         },
         results,
     };
@@ -293,6 +298,36 @@ mod tests {
         assert!(
             !out.contains("\"notes\""),
             "empty notes must be omitted: {out}"
+        );
+    }
+
+    #[test]
+    fn fix_json_renders_suggested_status_and_detail() {
+        use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult};
+        use std::path::PathBuf;
+        let report = FixReport {
+            results: vec![FixRuleResult {
+                rule_id: "demo".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation::new("v").with_path(PathBuf::from("a.txt")),
+                    status: FixStatus::Suggested {
+                        summary: "would set $.x to 1".into(),
+                        edit: FixEdit::SetContent {
+                            path: PathBuf::from("a.txt"),
+                            content: Vec::new(),
+                        },
+                    },
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_json(&report, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("\"suggested\""), "status should render: {s}");
+        assert!(
+            s.contains("would set $.x to 1"),
+            "detail should render: {s}"
         );
     }
 

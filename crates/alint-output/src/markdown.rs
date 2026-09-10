@@ -70,15 +70,23 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     let applied = report.applied();
     let skipped = report.skipped();
     let unfixable = report.unfixable();
+    let suggested = report.suggested();
 
-    if applied + skipped + unfixable == 0 {
+    if applied + skipped + unfixable + suggested == 0 {
         writeln!(w, "No violations found.")?;
         return Ok(());
     }
 
+    // `suggested` is appended only when non-zero so a run with no suggestions
+    // renders byte-identically to before the tier machinery existed.
+    let suggested_part = if suggested > 0 {
+        format!(", **{suggested} suggested**")
+    } else {
+        String::new()
+    };
     writeln!(
         w,
-        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**.",
+        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**{suggested_part}.",
     )?;
     writeln!(w)?;
 
@@ -620,6 +628,45 @@ mod tests {
             results: Vec::new(),
         });
         assert!(out.contains("No violations found."));
+    }
+
+    #[test]
+    fn fix_report_renders_suggested_item() {
+        use alint_core::FixEdit;
+        let report = FixReport {
+            results: vec![FixRuleResult {
+                rule_id: "cfg".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation {
+                        path: Some(Path::new("app.json").into()),
+                        message: "value mismatch".into(),
+                        line: None,
+                        column: None,
+                        is_note: false,
+                        baseline_key: None,
+                    },
+                    status: FixStatus::Suggested {
+                        summary: "would set $.debug to false".into(),
+                        edit: FixEdit::SetContent {
+                            path: Path::new("app.json").into(),
+                            content: Vec::new(),
+                        },
+                    },
+                }],
+            }],
+        };
+        let out = render_fix(&report);
+        // The dot in `$.debug` is markdown-escaped by `md_escape`, so match on
+        // the stable parts: the status label and the escaped summary tail.
+        assert!(
+            out.contains("**suggested** - would set $\\.debug to false"),
+            "suggested line should carry the summary: {out}"
+        );
+        assert!(
+            out.contains("**1 suggested**"),
+            "summary should count it: {out}"
+        );
     }
 
     #[test]

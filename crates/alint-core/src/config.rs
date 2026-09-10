@@ -347,7 +347,7 @@ pub struct RuleSpec {
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
     /// at build time. A block with more than one op key is rejected at
-    /// load (R-TWOOP), see [`deserialize_fix_spec`].
+    /// load (R-TWOOP) by `deserialize_fix_spec`.
     #[serde(default, deserialize_with = "deserialize_fix_spec")]
     pub fix: Option<FixSpec>,
     // Neither `git_tracked_only` nor `respect_gitignore` is a RuleSpec field:

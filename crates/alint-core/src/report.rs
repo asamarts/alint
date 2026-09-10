@@ -274,4 +274,41 @@ mod tests {
         assert!(passing.passed());
         assert!(!failing.passed());
     }
+
+    #[test]
+    fn suggested_counts_as_unresolved_and_is_counted_separately() {
+        // W1 contract: a `Suggested` fix was NOT applied, so at error level
+        // it must drive a nonzero exit (has_unfixable_errors), and it is
+        // counted apart from applied/skipped/unfixable.
+        let sugg = || FixStatus::Suggested {
+            summary: "would set $.x".into(),
+            edit: FixEdit::SetContent {
+                path: std::path::PathBuf::from("f"),
+                content: Vec::new(),
+            },
+        };
+        let r = FixReport {
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![sugg(), FixStatus::Applied("x".into())],
+            )],
+        };
+        assert_eq!(r.suggested(), 1);
+        assert_eq!(r.applied(), 1);
+        assert_eq!(r.skipped(), 0);
+        assert_eq!(r.unfixable(), 0);
+        assert!(
+            r.has_unfixable_errors(),
+            "error-level Suggested is unresolved"
+        );
+
+        // At warning level a lone Suggested is a warning-level unresolved,
+        // not an error-level one -- severity gates the exit, same as Skipped.
+        let rw = FixReport {
+            results: vec![frr("b", Level::Warning, vec![sugg()])],
+        };
+        assert!(!rw.has_unfixable_errors());
+        assert!(rw.has_unfixable_warnings());
+    }
 }

@@ -125,24 +125,37 @@ pub fn apply_file_edits(
         outcome[i] = LocatedOutcome::Applied;
     }
 
+    // Splice the accepted edits, then verify. A `Structured` edit whose
+    // post-edit query does not match its expectation is demoted to
+    // `Suggested` rather than written. Demotion changes the spliced bytes,
+    // so the still-applied edits are re-verified against the new bytes until
+    // the applied set is stable: an edit is applied only if it verifies in
+    // the presence of the others that survive alongside it. Each pass
+    // demotes at least one edit or stops, so it terminates in at most
+    // `accepted.len()` passes. Dormant in Phase 0 (no `Structured` verifier
+    // ships until Phase 2); the loop guarantees correctness when they do.
     let mut result = splice(original, &accepted, &batch);
-
-    // Verify accepted edits against the spliced bytes; demote failures.
-    let mut demoted = false;
-    for &i in &accepted {
-        if let EditVerifier::Structured {
-            format,
-            query,
-            expect,
-        } = &batch[i].collected.verify
-        {
-            if !verify_structured(&result, *format, query, expect) {
-                outcome[i] = LocatedOutcome::Suggested;
-                demoted = true;
+    loop {
+        let mut newly_demoted = false;
+        for &i in &accepted {
+            if outcome[i] != LocatedOutcome::Applied {
+                continue;
+            }
+            if let EditVerifier::Structured {
+                format,
+                query,
+                expect,
+            } = &batch[i].collected.verify
+            {
+                if !verify_structured(&result, *format, query, expect) {
+                    outcome[i] = LocatedOutcome::Suggested;
+                    newly_demoted = true;
+                }
             }
         }
-    }
-    if demoted {
+        if !newly_demoted {
+            break;
+        }
         let survivors: Vec<usize> = accepted
             .iter()
             .copied()
@@ -159,24 +172,20 @@ pub fn apply_file_edits(
     (result, paired)
 }
 
-/// Splice the `ReplaceRange` edits named by `which` (indices into `batch`)
-/// into `original`. The ranges are pairwise disjoint by construction (the
-/// overlap-skip already ran), so applying them in descending start order
-/// keeps every earlier offset valid.
+/// Splice the `ReplaceRange` edits named by `which` into `original`.
+/// `which` is in ascending total order (`(start, end, rule, violation)`)
+/// and its ranges are pairwise disjoint by construction (overlap-skip
+/// already ran). Applying them back-to-front (highest start first) keeps
+/// every earlier offset valid; iterating `which` in reverse also lands
+/// zero-width inserts that share a start in total order (the
+/// earliest-ordered insert ends up first in the file, because a later
+/// splice at the same offset pushes ahead of an earlier one).
 fn splice(original: &[u8], which: &[usize], batch: &[LocatedEdit]) -> Vec<u8> {
-    let mut parts: Vec<(Range<usize>, &[u8])> = which
-        .iter()
-        .filter_map(|&i| match &batch[i].collected.edit {
-            FixEdit::ReplaceRange { range, content, .. } => {
-                Some((range.clone(), content.as_slice()))
-            }
-            _ => None,
-        })
-        .collect();
-    parts.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
     let mut out = original.to_vec();
-    for (range, content) in parts {
-        out.splice(range, content.iter().copied());
+    for &i in which.iter().rev() {
+        if let FixEdit::ReplaceRange { range, content, .. } = &batch[i].collected.edit {
+            out.splice(range.clone(), content.iter().copied());
+        }
     }
     out
 }
@@ -458,5 +467,73 @@ mod tests {
         let (out, o) = apply_file_edits(br#"{"x": 0}"#, vec![remove], Applicability::Safe);
         assert_eq!(out, b"{}");
         assert_eq!(o[0].1, LocatedOutcome::Applied);
+    }
+
+    #[test]
+    fn same_start_inserts_land_in_total_order() {
+        // Two zero-width inserts at the same offset from different rules must
+        // land in total order (rule 0 before rule 1), never reversed by the
+        // back-to-front splice. Pass them out of input order to prove the
+        // total-order sort decides, not input order.
+        let r0 = edit(
+            0,
+            0,
+            replace(2..2, "A"),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        );
+        let r1 = edit(
+            1,
+            0,
+            replace(2..2, "B"),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        );
+        let (out, o) = apply_file_edits(b"xy", vec![r1, r0], Applicability::Safe);
+        assert_eq!(out, b"xyAB"); // rule 0's "A" precedes rule 1's "B"
+        assert!(o.iter().all(|(_, s)| *s == LocatedOutcome::Applied));
+    }
+
+    #[test]
+    fn batch_verify_demotes_only_the_failing_edit() {
+        // Two disjoint edits on one JSON object, each Structured-verified.
+        // One sets a value matching its expectation (applies); the other
+        // expects a value it does not produce (demotes). The valid edit must
+        // survive, and it is re-verified against the survivors-only splice
+        // after the demotion (the cascade loop), staying Applied.
+        let ok_verify = EditVerifier::Structured {
+            format: Format::Json,
+            query: "$.a".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!(1)),
+        };
+        let bad_verify = EditVerifier::Structured {
+            format: Format::Json,
+            query: "$.b".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!(9)), // expects 9, writes 2
+        };
+        // {"a":0,"b":0}: a's value at byte 5, b's value at byte 11.
+        let set_a = edit(
+            0,
+            0,
+            replace(5..6, "1"),
+            Applicability::Safe,
+            ok_verify,
+            None,
+        );
+        let set_b = edit(
+            1,
+            0,
+            replace(11..12, "2"),
+            Applicability::Safe,
+            bad_verify,
+            None,
+        );
+        let (out, o) =
+            apply_file_edits(br#"{"a":0,"b":0}"#, vec![set_a, set_b], Applicability::Safe);
+        assert_eq!(o[0].1, LocatedOutcome::Applied); // set_a verified
+        assert_eq!(o[1].1, LocatedOutcome::Suggested); // set_b demoted
+        assert_eq!(out, br#"{"a":1,"b":0}"#); // only a changed
     }
 }

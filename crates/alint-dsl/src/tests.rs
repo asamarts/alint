@@ -469,6 +469,29 @@ fn parse_rejects_config_with_extends() {
 }
 
 #[test]
+fn parse_rejects_fix_block_with_two_ops() {
+    // R-TWOOP end to end: a `fix:` block carrying two op keys is rejected by
+    // the real loader, not silently first-wins (the untagged-FixSpec trap).
+    // Fires during deserialization, before any kind-compatibility build step.
+    let yaml = "\
+version: 1
+rules:
+  - id: r
+    kind: file_exists
+    level: error
+    paths: README.md
+    fix:
+      file_trim_trailing_whitespace: {}
+      file_append_final_newline: {}
+";
+    let err = parse(yaml).unwrap_err();
+    assert!(
+        err.to_string().contains("exactly one op key"),
+        "expected a two-op rejection, got: {err}"
+    );
+}
+
+#[test]
 fn load_resolves_local_extends_and_merges_rules() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path().join("base.yml");

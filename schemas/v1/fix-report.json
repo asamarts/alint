@@ -13,12 +13,13 @@
     },
     "summary": {
       "type": "object",
-      "required": ["applied", "skipped", "unfixable"],
+      "required": ["applied", "skipped", "unfixable", "suggested"],
       "additionalProperties": false,
       "properties": {
         "applied": { "type": "integer", "minimum": 0 },
         "skipped": { "type": "integer", "minimum": 0 },
-        "unfixable": { "type": "integer", "minimum": 0 }
+        "unfixable": { "type": "integer", "minimum": 0 },
+        "suggested": { "type": "integer", "minimum": 0 }
       }
     },
     "results": {
@@ -33,7 +34,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["applied", "skipped", "unfixable"]
+      "enum": ["applied", "skipped", "unfixable", "suggested"]
     },
     "rule_result": {
       "type": "object",

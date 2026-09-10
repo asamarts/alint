@@ -582,7 +582,7 @@ pub enum Applicability {
     Safe,
     /// May change semantics; applied only with `--unsafe-fixes`.
     Unsafe,
-    /// Never applied automatically; surfaced as [`FixStatus::Suggested`].
+    /// Never applied automatically; surfaced as [`FixStatus::Suggested`](crate::FixStatus).
     Suggestion,
     /// Collected for analysis/provenance only; never applied, never
     /// suggested for automatic application.
@@ -631,7 +631,7 @@ pub enum ExpectedValue {
 /// obligation the design's translation-validation rests on (R-VERIFY): a
 /// fixer returns not just an edit but the means to prove the edit did what
 /// the rule wanted, so the engine can demote an edit whose result does not
-/// verify to a [`FixStatus::Suggested`] instead of writing bad bytes.
+/// verify to a [`FixStatus::Suggested`](crate::FixStatus) instead of writing bad bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditVerifier {
     /// No semantic check (whole-file normalizers): the edit is its own

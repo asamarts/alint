@@ -539,10 +539,18 @@ pub fn write_fix_human(
     let applied = report.applied();
     let skipped = report.skipped();
     let unfixable = report.unfixable();
+    let suggested = report.suggested();
     let ok = style::SUCCESS;
+    // Append `suggested` only when non-zero, so a run without suggestions is
+    // byte-identical to pre-tier output (the fix-*.stdout snapshots).
+    let suggested_part = if suggested > 0 {
+        format!(", {suggested} suggested")
+    } else {
+        String::new()
+    };
     writeln!(
         w,
-        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable."
+        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable{suggested_part}."
     )?;
     Ok(())
 }
@@ -817,5 +825,31 @@ mod tests {
         let mut buf = Vec::new();
         write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
         assert_neutralized(&String::from_utf8(buf).unwrap());
+    }
+
+    #[test]
+    fn fix_human_renders_suggested_item() {
+        use std::path::PathBuf;
+        let report = FixReport {
+            results: vec![alint_core::FixRuleResult {
+                rule_id: "cfg".into(),
+                level: Level::Error,
+                items: vec![alint_core::FixItem {
+                    violation: Violation::new("value mismatch")
+                        .with_path(PathBuf::from("app.json")),
+                    status: FixStatus::Suggested {
+                        summary: "would set $.debug to false".into(),
+                        edit: alint_core::FixEdit::SetContent {
+                            path: PathBuf::from("app.json"),
+                            content: Vec::new(),
+                        },
+                    },
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("suggested"), "suggested should render: {out}");
     }
 }
