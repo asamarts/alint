@@ -4,15 +4,15 @@ Status: Planning (execution companion to the accepted design). This doc turns th
 [`auto-fix.md`](auto-fix.md) framework (accepted) and [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md)
 (accepted) into a phased, test-first build plan grounded in the current code. It does not
 re-argue the design; it says, per phase, exactly what changes, where, how it is tested, which
-gates must stay green, and what can go wrong. Detection-side companion:
+gates must stay green, and what can go wrong. It has been through three rounds of adversarial audit
+(three independent passes each: code-accuracy, gaps/coherence, test-coverage) plus self-review; the
+revision note at the end records what changed. Detection-side companion:
 [`rule-coverage-gaps.md`](rule-coverage-gaps.md).
 
 Conventions: file references are `path:line` into the repo at the time of writing (line numbers
 drift by a line or two; treat them as a starting point, not a contract). Each phase follows the
 [`TEMPLATE.md`](TEMPLATE.md) spirit and, when scheduled, graduates into its own
-`docs/design/vX.Y/` record. This plan is em-dash-free by house rule. It has been through two
-rounds of adversarial audit (three independent passes each: code-accuracy, gaps/coherence,
-test-coverage) plus self-review; the revision note at the end records what changed.
+`docs/design/vX.Y/` record. This plan is em-dash-free by house rule.
 
 ## Contents
 
@@ -50,9 +50,9 @@ rebuild it.
 | Structured parse | `crates/alint-core/src/structured_format.rs` (`Format` `:42-51`, `Format::ALL` `:61-70`, `parse` `:72-155`) | returns a **detached, lossy** `serde_json::Value`; `BTreeMap`-backed (keys alphabetized; `preserve_order` off) - so comments, key order, and whitespace are gone before any rule runs |
 | Structured-query rules | `crates/alint-rules/src/structured_path.rs` (`Op` `:100-116`; the 3 shared builders `build_absent` `:558` / `build_equals` `:586` / `build_matches` `:614`; thin per-format entry `json_path_equals_build` `:462`) | `query` `:314` is **non-located**; violations carry **no byte span** (never `with_location`); `*_path_equals` = one violation per node, `*_path_absent` = one file-level violation for N nodes. **All three builders IGNORE `spec.fix` today (silent, no catch-all)** because `fix` is a known `RuleSpec` field |
 | Located JSONPath | `serde_json_path` 0.7.2 exposes `query_located` -> `LocatedNodeList` -> `NormalizedPath` (`PathElement` = `Name`/`Index`) | present on the **current pin**, no upgrade needed |
-| e2e Layer A (in-process) | `crates/alint-e2e/scenarios/**/*.yml` (recursive glob, `tests/scenarios.rs:45-47`; **17** fix scenarios incl. `fix/interactions/{mixed_fixable_and_unfixable,multiple_fixes_in_one_pass}.yml`), schema `crates/alint-testkit/src/scenario.rs`, runner `runner.rs` (`run_step` `:245`, `assert_fix_status` `:402`) | `given.tree/config/git`, `when: [check, fix, fix_dry_run]` (`Step` = 4 unit variants, no `--unsafe-fixes`), `expect` + **`expect_tree`** (byte-exact). `ExpectStep` has no `suggested:` field (a gap this plan closes). 15 of 17 use `when: [check, fix, check]`; **zero** use `[fix, fix]` |
+| e2e Layer A (in-process) | `crates/alint-e2e/scenarios/**/*.yml` (recursive glob, `tests/scenarios.rs:45-47`; **17** fix scenarios incl. `fix/interactions/{mixed_fixable_and_unfixable,multiple_fixes_in_one_pass}.yml`), schema `crates/alint-testkit/src/scenario.rs`, runner `runner.rs` (`run_step`'s no-threshold `engine.fix` call at `:245`, `assert_fix_status` `:402`) | `given.tree/config/git`, `when: [check, fix, fix_dry_run]` (`Step` = 4 unit variants, no `--unsafe-fixes`), `expect` + **`expect_tree`** (byte-exact). `ExpectStep` has no `suggested:` field (a gap this plan closes). **14** of 17 use `when: [check, fix, check]` (a 15th, `multiple_fixes_in_one_pass`, uses `[fix, check]`); **zero** use `[fix, fix]` |
 | e2e Layer B (binary) | `crates/alint/tests/cli/*.toml` (trycmd); fix cases `fix-apply`, `fix-file-{append,prepend,remove,rename}`, `fix-trim` | `.in/` -> run -> `.out/` byte tree + `.stdout`; regen `TRYCMD=overwrite`; `[EXE]` placeholder gotcha in `help-*.stdout`. trycmd has **no per-OS skip** so a unix-only case needs `#[cfg(unix)]` wrapping |
-| proptest laws | `crates/alint-e2e/tests/invariants.rs` (**4** laws, `cases: 48`) + generators `crates/alint-testkit/src/strategies.rs` | `check_never_panics`, `fix_dry_run_is_pure`, `fix_is_idempotent`, `fix_converges_when_fully_resolved`. `fixable_scenario_tree` (`strategies.rs:242-249`) emits only `file_create/remove/rename/append` fixes over ASCII blobs (`file_prepend` and `file_content_forbidden` are NOT in it) |
+| proptest laws | `crates/alint-e2e/tests/invariants.rs` (**4** laws, `cases: 48`) + generators `crates/alint-testkit/src/strategies.rs` | `check_never_panics`, `fix_dry_run_is_pure`, `fix_is_idempotent`, `fix_converges_when_fully_resolved`. `fixable_scenario_tree` (entry `strategies.rs:81`; rule catalogue `fixable_rule_yaml` `:242-249`) emits only `file_create/remove/rename/append` fixes over ASCII blobs (`file_prepend` and `file_content_forbidden` are NOT in it) |
 | Kani | `crates/alint-core/src/pathsafe.rs:159` (`confine_steps_is_sound`, `#[kani::proof]` `#[kani::unwind(7)]`); CI `.github/workflows/kani.yml` | **LIVE BUG (R-KANI): the workflow runs `-p alint-rules`, which has zero `#[kani::proof]`; the only proof is in `alint-core`, so the weekly job verifies nothing** |
 | Perf gate | `crates/alint-bench/benches/det_check.rs` (gungraun / Callgrind, fixed-path byte-stable `Ir`, `check`-only); criterion `benches/fix_throughput.rs` exists | the deterministic gate is **advisory** (`DET_PERF_ADVISORY=1`, `ci.yml:313`), PR-only, and **I/O-blind** (measures `Ir`, not file reads) |
 | LSP mapping | `crates/alint-lsp/src/lib.rs:771-828` (`fix_edit_to_workspace_edit`, exhaustive match, no wildcard); code actions `:446-520` | `SetContent` arm opens at `:773` and maps to a whole-document `TextEdit` via `whole_document()` (`:763-765`); `Position.character` is **UTF-16** |
@@ -95,14 +95,18 @@ coverage gate (rung 8).
 can enumerate ops today. Phase 0 adds `FixSpec::ALL: &[&str]` (the op-name axis - 12 names; not the
 `*Fixer`-struct axis, which the README count already covers) plus a `fix_spec_op_covers_all` parity
 gate mirroring `format_all_is_complete`. The coverage gate then builds `covered_ops` by **parsing
-each `fix/*.yml` scenario's `given.config`, resolving each `applied:` rule id to its rule, and
-reading that rule's `fix:` op key**, and asserts `covered_ops` is a superset of `FixSpec::ALL` and
-that each op also has a **convergence proof**: a scenario whose second fix pass is a no-op, accepted
-in either shape - `when: [fix, fix]` with the second `applied: []`, or `when: [.., fix, check]` with
-the final `violations: []` (which 15 of the 17 scenarios already use). So the Phase-0 back-fill is
-"add a convergence scenario for the ops that lack one," not "~16 new `[fix, fix]` scenarios."
-User-supplied `command`-fix (Phase 3) is **exempt** from the convergence requirement (idempotence is
-the user's command's business, not the harness's).
+each `fix/*.yml` scenario's inline `given.config` and, for every `applied:` / `suggested:` id across
+both `fix` and `fix_unsafe` steps, resolving that id to its rule and reading the rule's `fix:` op
+key**. It resolves ops from **inline** rules only, requires at least one inline scenario per op, and
+skips an id it cannot resolve inline (a fixer supplied by an extended ruleset), so an
+`extends:`-sourced scenario never red-herrings the gate. It asserts `covered_ops` is a superset of
+`FixSpec::ALL` and that each op also has a **convergence proof**: a scenario whose second fix pass is
+a no-op, accepted in either shape - `when: [fix, fix]` with the second `applied: []` **and no residual
+`skipped:`** (else "applied nothing because it skipped" would masquerade as converged), or
+`when: [.., fix, check]` ending in `violations: []` (which 15 of the 17 scenarios already satisfy).
+All 12 shipped ops already have such a scenario, so the Phase-0 back-fill is expected to be **empty**;
+the gate exists to prevent future drift. User-supplied `command`-fix (Phase 3) is **exempt** from the
+convergence requirement (idempotence is the user's command's business, not the harness's).
 
 **Per-op / per-flag coverage matrix** (rung 8 enforces the scenario+convergence part): for each new
 op, ship `{unit fire, unit silent, unit idempotence, `build_rejects` on non-host rules, parity, one
@@ -123,17 +127,21 @@ all 17 existing scenarios - plus the threshold parameter on `Engine::fix` and a 
 - **Tier monotonicity** (**Phase 1**, once an Unsafe op exists): default `fix` never applies an
   Unsafe/Suggestion edit; `fix_unsafe` is a superset. Vacuous in Phase 0.
 - **Safe convergence, stated safely** (**Phase 1**, active fixpoint): the strict "`|V|` strictly
-  decreases each pass" law is **not** assertable as-is - the current generator's
-  `file_content_matches` fix appends an `SPDX` line regardless of the drawn pattern
-  (`strategies.rs:304-308`), so on a non-SPDX draw a Safe fix applies without resolving its own
-  violation and `|V|` does not fall. So the law is: **`|V|` is non-increasing across passes and the
-  loop terminates when a pass applies no edits** (provable), plus a `debug_assert!` in the fixpoint
-  loop. Strict descent is asserted only over a **curated orthogonal-Safe rule pool** (a new generator
-  where every rule's fix provably resolves that rule and no two interact - note even
-  `file_collapse_blank_lines` + `final_newline` interact at EOF, so the pool needs care). The
-  debug-assert needs the **global** `|V|` each pass, so it forces a full re-check (gated
-  `cfg(debug_assertions)`); the fixpoint's "re-check only touched files" optimization yields only a
-  partial count.
+  decreases each pass" law is **not** assertable over the general generator - `file_content_matches`
+  appends an `SPDX` line regardless of the drawn pattern (`strategies.rs:304-308`), so on a non-SPDX
+  draw a Safe fix applies without resolving its own violation. **Even "`|V|` is non-increasing per
+  pass" is too strong for the production loop**: a single fix can resolve one violation while
+  introducing others that a later pass clears (the run still converges), so a per-pass non-increasing
+  `debug_assert!` would fire in debug builds during the test suite. The production-loop `debug_assert!`s
+  therefore assert only the **sound** properties: the fixpoint **terminates under the cap**, and after
+  a pass that applies no edit a full re-check finds **no newly-applicable** edit. Strict (monotone)
+  descent is asserted only over a **curated proptest pool** where it holds by construction, built by
+  **file-disjointness**: N files, each subject to exactly one presence-guarded Safe fixer that
+  resolves only its own violation and touches only its own file (A -> final-newline, B -> strip-BOM, C
+  empty -> remove, D missing -> create), so `|V|` drops by the number of files fixed per pass and no
+  two rules interact. (Seeking globally-non-interacting rules on ONE file is the landmine - even
+  `file_collapse_blank_lines` + `final_newline` interact at EOF.) Both the descent and termination
+  proptests run over this curated pool, not `fixable_scenario_tree`.
 - **Order-independence modulo reproducibility** (**Phase 1**): shuffling independent rule order
   yields the same tree for disjoint edits; overlapping edits are reproducible-not-canonical (5.8, do
   not over-claim confluence).
@@ -150,7 +158,7 @@ that adds an op or a status.
 | Artifact | When | Gate that catches you |
 |---|---|---|
 | `crates/alint-core/src/config.rs` `FixSpec` variant + inner `*FixSpec` struct + `op_name()` arm + `FixSpec::ALL` entry (Phase 0 adds `ALL`) | new op | compile + `expecting`-message test (`config.rs:865-871`) + the new `fix_spec_op_covers_all` parity gate |
-| The host builder(s) accept the op | new op | per-builder `fix.<op> is not compatible with <kind>` test. **The structured-query builders (`build_equals`/`build_absent`/`build_matches`) do NOT parse `fix:` today (silent ignore, no catch-all), so the phase that binds an op to them must ADD both honoring and rejection** (Phase 1 for `build_matches`+`replace`; Phase 2 for `build_equals`+`set_value`, `build_absent`+`remove_value`) |
+| The host builder(s) accept the op | new op | per-builder `fix.<op> is not compatible with <kind>` test. **`build_equals`/`build_absent`/`build_matches` AND `file_content_forbidden` (`file_content_forbidden.rs:101-122`) do NOT parse `fix:` today (silent ignore, no catch-all); `file_content_matches` DOES (a `file_append` arm at `:117`). So Phase 1 adds honoring+rejection to `file_content_forbidden` and extends `file_content_matches`, both for `replace`; the Phase-2 prelude adds it to `build_equals`+`set_value`, `build_absent`+`remove_value`, `build_matches`+`replace`** |
 | `crates/alint-rules/src/fixers/*.rs` new `pub struct *Fixer` | new op | `readme_auto_fix_ops_count_matches_fixers` (`coverage_audit_readme_claims.rs:310`, counts `*Fixer` structs by text scan) + the NEW `coverage_audit_fix_coverage.rs` (rung 8) |
 | `schemas/v1/config.json` `$defs/fix` (hand-written `oneOf` branch, `additionalProperties:false`, `applicability` inside the op object) then `xtask gen-schema` to sync `crates/alint-dsl/schemas/v1/config.json` | new op | `gen-schema --check` + `in_crate_schema_matches_root` (`alint-dsl/src/tests.rs:1079`) |
 | `schemas/v1/fix-report.json` (hand-written) + the `FixReport` serializer in `alint-output` | the `suggested` status (**Phase 0**) | `crates/alint-output/tests/fix_report_schema.rs` (renders + **validates against the schema**; NOT gen-schema, and not a serialize/deserialize round-trip) |
@@ -170,8 +178,9 @@ Five threads span phases; scheduled inside the phases.
   reporting/exit-code plumbing. Lands in **Phase 0**. The fix formatters' `FixStatus` matches ARE
   exhaustive (`json.rs:219`, `human.rs:483`, `markdown.rs:95`) and the engine mapping
   (`engine.rs:1046-1053`) is compiler-forced; but `FixReport::applied/skipped/unfixable`
-  (`report.rs:70-86`), `has_unresolved` (`:106`), the testkit `assert_step` (`runner.rs:321-342`,
-  where the `suggested` assertion goes - NOT the generic `assert_fix_status`), and `ExpectStep`
+  (`report.rs:70-86`), `has_unresolved` (`:106`), the testkit `assert_step` (fn at `runner.rs:299`,
+  its `Fix` arm `:321-342`, where the `suggested` assertion goes - NOT the generic
+  `assert_fix_status`), and `ExpectStep`
   (`scenario.rs:220`) are **`matches!`/field-based and NOT compiler-forced**, so adding `Suggested`
   silently (a) treats a Suggestion as resolved (wrong exit) and (b) leaves the harness unable to
   assert one. W1 adds: a `FixReport::suggested()` counter + a summary line in all three fix
@@ -228,23 +237,33 @@ identical.
    Phase 1.
 2. New `Applicability` enum (Safe/Unsafe/Suggestion/Never). Classify the **existing 12 ops as Safe**,
    except `file_remove` (Safe in v0.17 with a deprecation warning per W5).
-3. **The collect contract carries its own verification obligation** (this is the load-bearing type
+3. **The collect contract carries its own verification obligation (R-VERIFY)** (this is the load-bearing type
    the design's translation-validation rests on). Rule-level
    `collect_edits(&[Violation], file, bytes, root) -> Vec<CollectedEdit>` where
    `CollectedEdit { edit: FixEdit, applicability: Applicability, verify: EditVerifier, isolation_group: Option<GroupId> }`
    and `EditVerifier` is an **executable enum** the engine can run without knowing the op:
-   `None` (whole-file normalizers - no semantic check) | `Structured { format: Format, path: NormalizedPath, expect: ExpectedValue }`
-   with `ExpectedValue = Scalar(serde_json::Value) | Absent`. A default `collect_edits` delegates to
-   the 12 existing fixers' `fix_edit` with `verify: None` and `isolation_group: None`, so they are
-   untouched. Without this, the Phase-0 verify machinery and the Phase-2 PutGet gate have nothing to
-   build against.
+   `None` (whole-file normalizers - no semantic check) | `Structured { format: Format, query: String, expect: ExpectedValue }`
+   with `ExpectedValue = Scalar(serde_json::Value) | Absent`. `query` is the **owned JSONPath source
+   string** (the rule's `path_src`), NOT a borrowed `serde_json_path::NormalizedPath`: a
+   `NormalizedPath` borrows the parsed `Value` that drops at `collect_edits` return (a dangling
+   borrow), and it is insufficient for `Absent` anyway (after a batched multi-node removal array
+   indices shift, so only re-running the query and asserting zero matches is correct). This **refines
+   ADR-0017 decision 1 / auto-fix.md 5.2.1**, whose `collect_edits -> Vec<(FixEdit, Applicability)>`
+   cannot carry the verifier the Safe acceptance test needs. `isolation_group` is assigned by the
+   collecting rule (per rule-kind/op) for edits that must not co-apply even when byte-disjoint; its
+   `GroupId` type and grouping policy are pinned when the first isolation-needing op ships, and the
+   Phase-0 exclusion test uses a fixture rule that tags two disjoint edits into one group. A default
+   `collect_edits` delegates to the 12 existing fixers' `fix_edit` with `verify: None` and
+   `isolation_group: None`, so they are untouched. Without this contract, the Phase-0 verify machinery
+   and the Phase-2 PutGet gate have nothing to build against.
 4. Rework `Engine::fix` (`engine.rs:909-1067`) into two regimes: whole-file transforms compose in
    config order in memory (one write per file); located edits go through **collect -> tier-filter ->
    group-by-file -> total-order sort `(start, end, rule_index, violation_index)` -> skip-overlap +
    isolation groups -> verify -> memoized per-(file,edit) demotion-to-Suggestion on verify failure ->
    `write_atomic`**. The `verify` step runs each `CollectedEdit`'s `EditVerifier`: for `Structured`
-   it re-parses (syntactic) AND re-queries `path` asserting `get(path) == Scalar` or `path` is
-   `Absent` (the PutGet localized-equivalence check); for `None` it is a no-op. It runs only on
+   it re-parses the post-edit bytes (syntactic) AND re-runs the JSONPath source `query`, asserting
+   `.at_most_one() == Scalar` or, for `Absent`, `.is_empty()` (the PutGet localized-equivalence
+   check); for `None` it is a no-op. It runs only on
    would-be-applied edits (a Suggestion is never applied, so never verified). `rule_index` spans the
    flattened root+nested-config rule list in deterministic discovery order (5.2.2 of the design), so
    `nested_configs` stays deterministic. **Batch, overlap-skip, isolation groups, verify, and
@@ -283,14 +302,17 @@ amended in **Phase 1**, not here.)
   parses-but-wrong-`Scalar` -> Suggested (distinct); the two-op-block rejection (R-TWOOP); the
   size-guard skip at the collect step for a located edit (invariant 4 on the new path).
 - Parity: keep the existing per-fixer guards; add one proving the `collect_edits` default matches
-  `fix_edit` byte-for-byte for the 12 existing fixers (the no-op proof).
+  `fix_edit` byte-for-byte for the 12 existing fixers, AND that the engine-generated `FixStatus`
+  (Applied/Skipped) and its reason string match today's fixer-generated ones - the rework moves
+  status generation into the engine and Layer-B `.stdout` snapshots assert those strings, so the
+  no-op proof is not just edit bytes.
 - Suggested plumbing: the W1 unit (error-level Suggested -> nonzero exit). (The Layer-B exit-code
   trycmd is in Phase 1.)
 - e2e Layer A: re-run all **17** existing `fix/**/*.yml` unchanged (the no-op regression); add the
   adversarial same-file pairs (`no_trailing_whitespace` + `final_newline`; `file_header` prepend +
   `max_consecutive_blank_lines`) asserting both fixes still apply.
 - e2e Layer B: `fix --diff` and `fix --fix-only` trycmd cases; regenerate `help-fix.stdout` (restore
-  `[EXE]`).
+  `[EXE]`, R-EXE).
 - Kani: a bounded proof (overlap detector yields a pairwise-disjoint applied set, or the splice is
   byte-correct). **Fix R-KANI in the same PR** (the `-p` arg + a proof-count assertion).
 - Perf: a `fix --dry-run` cell in `det_check.rs` PLUS a `fix_throughput.rs` wall-clock/syscall cell
@@ -313,18 +335,28 @@ gate. First Unsafe op.
    host rule's `pattern:`, wired to **`file_content_forbidden` and `file_content_matches` only**
    (matching auto-fix.md's Phase 1), emitting one `ReplaceRange` per match via `collect_edits`
    (`verify: None` - regex replace is not a structured op; correctness is byte-locality + the golden,
-   not PutGet). Unsafe by default; Safe only when the replacement is provably a normalization.
-   (`replace` on `*_path_matches` is **deferred to Phase 2**, because it needs `build_matches`
-   fix-parsing that the Phase-2 prelude adds.)
+   not PutGet). The two hosts are **asymmetric**: `file_content_matches` already parses `fix:` (extend
+   its existing arm for `replace`), but `file_content_forbidden` does NOT (`file_content_forbidden.rs`
+   reads no `spec.fix`), so it needs the full honoring+rejection scaffold added - the same work the
+   Phase-2 prelude does for the structured builders. Unsafe by default; Safe only when the replacement
+   is provably a normalization. (`replace` on `*_path_matches` is **deferred to Phase 2**, because it
+   needs `build_matches` fix-parsing that the Phase-2 prelude adds.)
 2. **Activate** the fixpoint + index-invalidation re-walk (built dormant in Phase 0): a path-mutating
    edit forces a deterministic re-walk; content-only passes re-check touched files; loop with a loud
-   non-convergence cap. **`--changed` confinement:** the fixpoint confines writes to the `--changed`
+   non-convergence cap. **Apply-once-per-(file, rule, violation-identity)** (Ruff's model): a fix
+   already attempted for a violation this run is never re-attempted. This is load-bearing, not an
+   optimization: without it a fixer whose fix does not resolve its own violation re-fires every pass -
+   e.g. a `file_content_matches` + `file_append` rule whose appended content does not literally
+   contain the rule's `pattern:` (an SPDX/boilerplate header) re-appends until the cap: N duplicated
+   copies, a **file-corruption regression for an existing valid config** (today's single pass appends
+   once). Apply-once restores "append once" and makes "terminate when no NEW fix is applicable"
+   provable. **`--changed` confinement:** the fixpoint confines writes to the `--changed`
    set plus files a fix in scope created; a required out-of-scope write is demoted to Suggestion
    (5.7). This **amends ARCHITECTURE.md's "walk once per invocation" invariant (`:39`, `:353`) for
    the fix path only** (`check` still walks once) - update both sites here (R-WALK).
 3. LSP: map `ReplaceRange` to a minimal `TextEdit`, converting the byte offset to UTF-16
    line/character from the `bytes` the fixer receives (R-UTF16).
-4. W2 content-fixer trust (section 4): provenance onto `RuleSpec`/`RuleEntry`; remote-URL content
+4. W2 content-fixer trust (section 4; R-PROV): provenance onto `RuleSpec`/`RuleEntry`; remote-URL content
    fixers -> Suggestion; `trusted_extends:`; **also demote the existing
    `file_create`/`file_prepend`/`file_append` from a remote `extends:`** (R-RETRO, a migration note).
 
@@ -338,15 +370,17 @@ amendment; `trusted_extends:` schema.
 - LSP: byte-offset -> UTF-16 conversion unit tests (multi-byte, emoji, CRLF) per R-UTF16.
 - e2e Layer A: `replace` removes a banned token and rewrites a captured span; a two-rule same-file
   overlap where the total order decides and the loser defers; a cross-fixer non-convergence hitting
-  the cap; a `--changed` case where an out-of-scope write is demoted to Suggestion.
+  the cap; a `--changed` case where an out-of-scope write is demoted to Suggestion; **an apply-once
+  case** - a `file_content_matches` + `file_append` (SPDX header) under the fixpoint applies once
+  (second pass `applied: []`, exactly one appended copy), proving the fix is not re-attempted.
 - e2e Layer B: a `fix --unsafe-fixes` trycmd (default `fix` leaves the Unsafe `replace` unapplied;
   `--unsafe-fixes` applies it); the W1 error-level-Suggested-> nonzero-exit exit-code case.
 - Trust matrix (W2): the four provenance classes each pin a tier; `trusted_extends:` re-honors a
   named remote; promotion from a non-top-level source is refused; an existing `file_prepend` from a
   remote `extends:` is demoted. Extend the `alint-dsl` loader tests + a coverage-audit gate.
-- proptest: tier-monotonicity; the non-increasing convergence law + the curated-pool strict-descent
-  law (with the `debug_assert!`, section 2); order-independence for disjoint `replace` edits. Uses
-  the new `fix_unsafe` Step.
+- proptest: tier-monotonicity; the termination + curated-pool strict-descent laws (over the
+  file-disjoint pool, with the sound `debug_assert!`s, section 2); order-independence for disjoint
+  `replace` edits. Uses the new `fix_unsafe` Step.
 
 **Acceptance gate.** `replace` fires/silents/converges; the cap is loud; the four-class trust matrix
 + `trusted_extends:` pass. **Risk: medium.**
@@ -363,8 +397,8 @@ fill (section 10). Two hard parts: **locate** the node's byte span (5.3) and **s
 **Phase 2 prelude (build first; all sub-phases depend on it).** The ops `set_value` / `remove_value`;
 a `SpanResolver` trait (normalized path -> byte range) and a `ValueSerializer` trait (value ->
 format-correct bytes), with a `Format::ALL` parity gate over both (section 3); the `query_located`
-re-query in `collect_edits`; each edit populates its `EditVerifier::Structured { format, path, expect }`
-(section 5); **and fix-parsing on the structured-query builders**: teach the 3 shared helpers each to
+re-query in `collect_edits`; each edit populates its `EditVerifier::Structured { format, query, expect }`
+(`query` = the rule's owned JSONPath source, section 5); **and fix-parsing on the structured-query builders**: teach the 3 shared helpers each to
 honor its one legal op and reject the rest - `build_equals` (`:586`) -> `set_value`, `build_absent`
 (`:558`) -> `remove_value`, `build_matches` (`:614`) -> `replace` (the `*_path_matches` extension of
 the Phase-1 op). Only after the prelude do the per-format resolvers/serializers land.
@@ -377,7 +411,7 @@ alint-owned parsers):
 | Sub | Formats | Dep reality (verified) |
 |---|---|---|
 | 2a | HCL, XML, dotenv, INI | **zero new deps.** HCL: `hcl::edit` (re-export of `hcl-edit` 0.8.8, prod). XML: `roxmltree` 0.20.0 `Node::range()` / `Attribute::range_value()` (**do not bump to 0.21**, R-ROXML). dotenv/INI: alint-owned (`dotenv.rs`, `ini.rs`), add per-value byte-offset tracking (the hand-rolled, heavier half). |
-| 2b | TOML | promote `toml_edit` 0.25.11 **dev -> prod** (`toml` 1.1.2 does NOT pull it transitively; a genuine new prod dep, R-DEP). `serde_spanned` (already prod) spans only typed `Spanned<T>` deserialization, not an arbitrary JSONPath location. |
+| 2b | TOML | add `toml_edit` 0.25.11 as a **new direct prod dep** (present today only transitively via the `trycmd` dev-tool - NOT a declared dev-dep to "promote"; `toml` 1.1.2 does not pull it either, its deps are `toml_parser`/`toml_writer`; R-DEP). `serde_spanned` (already prod) spans only typed `Spanned<T>` deserialization, not an arbitrary JSONPath location. |
 | 2c | properties | zero new deps; hand-roll a line/value-span locator over the span-less `java-properties`. |
 | 2d | JSON | **new prod dep `jsonc-parser`** (dprint). `strip_jsonc` (`structured_format.rs:227-312`) is a lossy rewrite, not a span source. |
 | 2e | YAML | **new prod dep `saphyr-parser`**, scalar-span splice only (structural stays Suggestion). Gate 2e on the open question (is scalar-only enough?) with corpus evidence. |
@@ -390,10 +424,14 @@ with an XML-sibling and a TOML-array-of-tables test before that format's ops are
 **Verify semantics per op (the design's translation validation, made buildable via the
 `EditVerifier` of section 5).** `set_value` (host `*_path_equals`, reads `path:` + value `equals:`):
 Safe only for a **scalar replacing an existing scalar**, `expect: Scalar(value)` - the engine
-re-parses and asserts `get(path) == value`. Object/array values, zero-match insertion, and nested
-creation are Suggestions (the lens `get` is undefined on a zero-match path, 5.8). `remove_value`
-(host `*_path_absent`, reads `path:`, Unsafe): `expect: Absent` - the engine re-parses and asserts
-`path` now matches **zero** nodes. Both PutGet checks run on the **detached parsed `Value`**, which
+re-parses and re-runs the JSONPath source, asserting `.at_most_one() == value`. Object/array values,
+zero-match insertion, and nested creation are Suggestions (the lens `get` is undefined on a zero-match
+path, 5.8). `remove_value` (host `*_path_absent`, reads `path:`, Unsafe): `expect: Absent` - the
+engine re-parses and asserts the JSONPath now matches **zero** nodes. The comparison **normalizes into
+the format's value domain**: dotenv / properties / INI parse every value as a string, so a typed
+`equals: 8080` is compared in its string form there (else a correct Safe fix would be spuriously
+demoted); the typed formats (JSON/YAML/TOML/HCL/XML) compare in-type. Both PutGet checks run on the
+**detached parsed `Value`**, which
 **cannot see comments, key order, or a wrong separator** - so a wrong-separator or trivia-clobbering
 splice is caught NOT by PutGet but by the **comment/order golden files + a byte-locality assertion
 (output == input outside the edited `range`)**; the plan assigns that role explicitly rather than
@@ -444,11 +482,13 @@ fidelity proven per format. **Risk: medium-high.**
 - `git_untrack` (**the first spawning fix op**), host `file_absent` (and `no_committed_binaries` once
   that kind exists): `git rm --cached` plus an optional `.gitignore` line (`gitignore: bool`). W2's
   spawning gate goes live: add `git_untrack` to `SPAWNING_FIX_OPS` and land the parity gate + the
-  `extends:`-refusal canary (section 3, two separate tests).
+  `extends:`-refusal canary (section 3, two separate tests; R-SPAWNGATE).
 - `command`-backed fix op (design 5.6): a user-supplied fix command on the `command` rule; a spawning
-  fixer, top-level-only, in `SPAWNING_FIX_OPS`. Distinct from the deferred regenerate-from-command
-  (section 10). Its own fire/silent test; **exempt from the rung-8 convergence requirement** (a
-  user's command's idempotence is not the harness's to guarantee).
+  fixer, top-level-only, in `SPAWNING_FIX_OPS`. This **lifts the existing `command.rs:285-292`
+  rejection** ("command rules do not support fix: blocks") + its test at `command.rs:490-495`
+  (analogous to the chmod / `indent_style.rs:175` rejections lifted elsewhere in this arc). Distinct
+  from the deferred regenerate-from-command (section 10). Its own fire/silent test; **exempt from the
+  rung-8 convergence requirement** (a user's command's idempotence is not the harness's to guarantee).
 - `sync_from` (**Unsafe**; whole-file copy from the host `cross_file` rule's `source:`; no
   `content_from:`-style field; `cross_file` parses no `fix:` today, so new fix-block plumbing),
   cross-file **create-and-register** and **cross-file value propagation** (propagate one canonical
@@ -460,13 +500,16 @@ fidelity proven per format. **Risk: medium-high.**
 
 **Test coverage.** Full per-op matrix (rung 8). Layer-A: chmod (unix-tagged); `git_untrack` incl. the
 negatives run-twice-on-already-untracked and on-a-non-git-tree; `sync_from`; value propagation
-(multi-file `expect_tree`); `dir_create`; relocate. Layer-B chmod trycmd wrapped `#[cfg(unix)]` + a
+(multi-file `expect_tree`); `dir_create`; relocate (the unambiguous-Safe apply AND the
+ambiguous-target -> Suggestion case). Layer-B chmod trycmd wrapped `#[cfg(unix)]` + a
 non-unix Skipped-status expectation. Spawn gate: the parity gate + the `extends:`-refusal canary for
 `git_untrack` and the `command`-fix. **Multi-file transaction:** a decided fault-injection seam - an
 **injectable writer on the engine's located-edit write step** (the engine, not the fixer, owns the
-write now), exposed via a testkit-only `Engine` builder hook - so "mid-batch verify failure writes
-nothing" and "a real per-file write failure reports a loud partial apply" are testable. **Risk:
-medium.**
+write now - itself a real rework of the 12 ops' write path, not dormant scaffolding), exposed via an
+`Engine` builder hook gated behind a `test-hooks` cargo feature (testkit enables it as a dev-dep
+feature; `pub(crate)` cannot reach a separate crate, so the feature gate, or `#[doc(hidden)]`, keeps
+it out of the stable API) - so "mid-batch verify failure writes nothing" and "a real per-file write
+failure reports a loud partial apply" are testable. **Risk: medium.**
 
 ## 9. Phase 4: ordering, canonicalization, and headers
 
@@ -510,7 +553,7 @@ Not numbered phases; each needs an explicit opt-in and its own design record.
 |---|---|---|
 | R-KANI | **Live bug:** `kani.yml` runs `-p alint-rules`, which has zero `#[kani::proof]`; the only proof is in `alint-core`, so the weekly job verifies nothing | fix the `-p` arg (the new proof belongs in `alint-core`) AND add a proof-count assertion (fail if N=0); Phase 0 |
 | R-VERIFY | the Safe acceptance test needs per-edit format/path/expected-value context that a bare `Vec<(FixEdit, Applicability)>` cannot carry | the `CollectedEdit { edit, applicability, verify: EditVerifier, isolation_group }` contract of section 5; built (dormant) in Phase 0 so Phase 2 has something to populate |
-| R-DEP | **Three** new prod deps in Phase 2 (`toml_edit` dev->prod, `jsonc-parser`, `saphyr-parser`) to the published `alint-rules` | license/supply-chain gates; a prod dep of a published crate cannot be `publish=false`; one commit each |
+| R-DEP | **Three** new direct prod deps in Phase 2 (`toml_edit` - only transitive via `trycmd` today, not a dev-dep to "promote" - plus `jsonc-parser`, `saphyr-parser`) to the published `alint-rules` | license/supply-chain gates; a prod dep of a published crate cannot be `publish=false`; one commit each |
 | R-TWOOP | `FixSpec` `#[serde(untagged)]` dispatch picks the first matching variant and silently drops sibling op-keys (the inner structs' `deny_unknown_fields` does not apply across the fix-block map) | a load-time guard rejecting a >1-op-key `fix:` block + a test, scheduled in Phase 0 (item 8) |
 | R-CSTMAP | the `NormalizedPath` is over the alphabetized detached `Value`; XML siblings / TOML array-of-tables may not map back to the CST node | per-format NormalizedPath->CST fidelity tests (XML-sibling, TOML-array-of-tables) before that format is Safe |
 | R-RETRO | W2 retroactively flips existing `file_create`/`file_prepend`/`file_append` from auto-apply to Suggestion from a remote `extends:` (not a no-op) | announce it; `trusted_extends:` opts back in; DoD item 3 exception |
@@ -556,20 +599,22 @@ A phase is done when, and only when:
 5. The design's false-positive/safety surface (auto-fix.md 7) has a test for each mitigation the
    phase touches (including isolation groups and the trust gate).
 6. The formal contracts the phase relies on (auto-fix.md 5.8) are encoded as proptest laws or
-   debug-asserts (e.g. the non-increasing convergence law as a fixpoint `debug_assert!`), not prose.
-7. Every new op is in `coverage_audit_fix_coverage.rs` (rung 8) with a fix + convergence scenario (or
-   is the explicitly-exempt user-supplied `command`-fix), so "full coverage" is gated, not claimed.
+   debug-asserts (fixpoint termination-under-cap as a `debug_assert!`; strict/monotone descent as a
+   curated-pool proptest, NOT a production per-pass assert - section 2), not prose.
+7. Every op in `FixSpec::ALL` is in `coverage_audit_fix_coverage.rs` (rung 8) with a fix +
+   convergence scenario - Phase 0 back-fills any existing op that lacks one (expected: none today) -
+   or is the explicitly-exempt user-supplied `command`-fix, so "full coverage" is gated, not claimed.
 
 The bar is deliberately high: auto-fix mutates users' files, so "a fix is not done until a gate
 asserts its invariant."
 
 ---
 
-*Revision note: revised twice after adversarial audit rounds (three independent passes each -
+*Revision note: revised three times after adversarial audit rounds (three independent passes each -
 code-accuracy, gaps/coherence, test-coverage - plus self-review). Round 1 completed the Safe
 acceptance test, added the coverage gate and the harness-capability list, re-sequenced the trust
 gate, added R-RETRO/R-FILEREMOVE/R-CSTMAP, and fixed an auto-fix.md 5.5-vs-7 contradiction. Round 2
-(this revision) fixed issues the round-1 additions themselves introduced: (a) the verify machinery
+fixed issues the round-1 additions themselves introduced: (a) the verify machinery
 could not be built against a bare `Vec<(FixEdit, Applicability)>` return, so the collect contract now
 returns a `CollectedEdit` carrying an executable `EditVerifier` (which also gives isolation groups a
 data home) - R-VERIFY; (b) `replace` was bound to `*_path_matches` in Phase 1 but that builder's
@@ -594,5 +639,23 @@ plus the fault-injection seam decided (an injectable engine writer), LSP tests s
 1-2, `nested_configs` `rule_index` ordering pinned, `sync_from` tier stated (Unsafe), the
 `fixer().is_some()` check-output flag-flip noted, `structured_doc_strategy` scoped per-format, and
 factual fixes (`fixable_scenario_tree` = create/remove/rename/append, `fix_report_schema.rs` is
-schema-validation not round-trip, the LSP `SetContent` arm at :773). The code-accuracy pass found no
-baseline-fact errors in either round.*
+schema-validation not round-trip, the LSP `SetContent` arm at :773). Round 3 confirmed convergence
+(all three passes reported the round-2 additions accurate and buildable; no critical or architectural
+findings) and fixed their local residue: (a) the `EditVerifier` stored a borrowed `NormalizedPath`
+that dangles past the parse and is insufficient for `Absent`, now an owned JSONPath source string
+re-run to assert `.at_most_one()`/`.is_empty()` (refining ADR-0017 decision 1 / auto-fix.md 5.2.1);
+(b) the active fixpoint would re-apply a non-self-resolving fixer (`file_content_matches`+`file_append`
+of a header not containing its own pattern) until the cap - a file-corruption regression for an
+existing config - now an apply-once-per-(file,rule,violation) rule; (c) the per-pass `debug_assert!`
+cannot require non-increasing `|V|` (a pass can transiently increase it and still converge), so strict
+descent is a curated file-disjoint-pool proptest only and the production asserts are termination +
+no-newly-applicable; (d) `file_content_forbidden` does NOT parse `fix:` today (unlike
+`file_content_matches`), so Phase 1 adds the scaffold there too; (e) the section-3 table still
+scheduled `build_matches`+`replace` in Phase 1 (a stale cell, now Phase 2); (f) the coverage gate must
+scan `fix_unsafe` steps and resolve ops inline-only (the Phase-0 back-fill is in fact empty). Plus the
+cross-format verify-domain normalization (string-only dotenv/INI), the `command.rs` fix-rejection
+lifted in Phase 3, the injectable-writer `test-hooks` feature gate, the 14-not-15 `[check,fix,check]`
+count, four risk-ID back-links, the `toml_edit` reframe (a new direct dep, not a dev->prod promotion),
+and the relocate ambiguous-Suggestion test. The code-accuracy pass found no baseline-fact errors in
+any round. The Kani CI live bug (R-KANI) was fixed and verified in a separate PR (#244) - the proof
+now runs against alint-core, pinned by harness name.*
