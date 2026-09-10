@@ -1042,9 +1042,12 @@ Resolved after review (folded into the sections above):
   Suggestions, fix only new ones (5.7).
 - **Network-gated fixes:** the core stays network-free; SHA-pinning is a separate, top-level-only,
   explicitly-opted-in fix or a future WASM plugin, never a bare `alint fix` (6, Deferred).
-- **Versioning:** the arc slots as **v0.17**; it introduces the tiers and a deprecation warning,
-  then flips `file_remove` to Unsafe about two minors later (a warned, pre-1.0 MINOR change) (5.6,
-  6).
+- **Versioning:** the whole arc ships as **v0.17**, released only once every phase (0 through 4) is
+  complete: the tiers, the primitives, and every fixer through ordering and headers land together, so
+  v0.17 is `alint`'s first fixing release rather than a dormant no-op. The one thing held back is the
+  `file_remove` default flip: v0.17 introduces its deprecation warning, and the Safe-to-Unsafe flip
+  lands one minor later in **v0.18** (a warned, pre-1.0 MINOR change with a full minor of overlap)
+  (5.6, 6).
 - **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for all tiers, and
   `agent` / `json --include-fixes` carry a `proposed_edit`; the edit is computed during `check`
   **only** when such a format is selected, so the default check path is unchanged (5.7).

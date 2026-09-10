@@ -1480,6 +1480,31 @@ denial-of-service. See
   depth pre-scan matching hcl-rs at each content boundary, an XML attribute-count
   cap, a 32 MiB structured-input cap, and graceful worker-pool fallback.
 
+## v0.17: Auto-fix
+<!-- roadmap-public: blurb="alint learns to fix what it flags through a tiered fix engine that applies safe fixes by default and gates unsafe and suggestion tiers behind explicit flags, rewriting file content in place, setting or removing structured values across JSON, YAML, TOML, and XML with formatting preserved, repairing file permissions and shebangs, and canonicalizing ordering and headers, with every applied edit verified against the rule that requested it and a bounded fixpoint that either converges or reports exactly what it left unresolved." -->
+
+The release that makes `alint` a fixer, not just a checker. `alint --fix`
+applies the Safe tier; the Unsafe and Suggestion tiers stay opt-in
+(`--unsafe-fixes`, `--diff`, `--fix-only`). Every edit is re-checked against
+the rule that requested it, and a bounded fixpoint either converges or reports
+exactly what it could not resolve. The whole phased arc lands together in one
+minor. See [`auto-fix.md`](auto-fix.md),
+[ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md), and the
+[implementation plan](auto-fix-implementation-plan.md).
+
+- A tiered fix engine and the `FixEdit` primitives, with a verify-after-apply
+  contract and an iterate-to-fixpoint driver that stays a genuine no-op for
+  configs that request no fixes.
+- Located content replacement for `file_content_forbidden` and
+  `file_content_matches`, driven by the host rule's `pattern:`.
+- Format-preserving `set_value` / `remove_value` for the `*_path_equals` and
+  `*_path_absent` kinds across JSON, YAML, TOML, and XML, plus templated
+  `*_path_matches` replacement: 24 of the 25 structured-query kinds become
+  fixable.
+- Permission and VCS repair: `chmod`, executable-bit, and shebang fixers, plus
+  the first repo-scale cross-file fixers.
+- Ordering, canonicalization, and header insertion.
+
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
 
