@@ -1073,20 +1073,38 @@ impl Engine {
             });
         }
 
-        // Flush the compose buffer: one atomic write per file any content
-        // fixer touched, in deterministic (BTreeMap) order. `--dry-run` has no
-        // buffer, so this is a no-op there. The keys are repo-relative (the
-        // path each fixer reported), so `root.join` reproduces the exact target
-        // the fixer would have written directly. A flush failure fails the pass
-        // (the fixers reported Applied against the composed bytes; if those
-        // bytes cannot be persisted the run must not exit success).
+        // Flush the compose buffer: one atomic write per file any content fixer
+        // touched, in deterministic (BTreeMap) order. `--dry-run` has no buffer,
+        // so this is a no-op there. Keys are the resolved absolute write targets
+        // (a symlink and its in-tree target share one key), written directly.
+        //
+        // A file that cannot be written is NOT fatal: it is collected, and every
+        // Applied item that resolves to it is downgraded to Skipped, so the rest
+        // of the pass still persists and reports. This matches the direct-write
+        // path, where a failed `write_atomic` inside a fixer surfaces as
+        // `Skipped("fix error: ...")` and the other fixers proceed (a single
+        // read-only file must not abort the whole run or lose unrelated fixes).
         if let Some(buf) = &compose_buf {
-            for (rel, bytes) in buf.borrow().iter() {
-                let abs = root.join(rel);
-                write_atomic(&abs, bytes).map_err(|source| Error::Io {
-                    path: abs.clone(),
-                    source,
-                })?;
+            let mut failed: Vec<PathBuf> = Vec::new();
+            for (target, bytes) in buf.borrow().iter() {
+                if let Err(source) = write_atomic(target, bytes) {
+                    eprintln!("alint: could not write {}: {source}", target.display());
+                    failed.push(target.clone());
+                }
+            }
+            if !failed.is_empty() {
+                for rule in &mut results {
+                    for item in &mut rule.items {
+                        let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
+                            failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
+                        });
+                        if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
+                            item.status = FixStatus::Skipped(
+                                "fix error: file could not be written".to_string(),
+                            );
+                        }
+                    }
+                }
             }
         }
         Ok(FixReport { results })

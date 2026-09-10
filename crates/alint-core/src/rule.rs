@@ -527,26 +527,26 @@ pub struct FixContext<'a> {
 }
 
 impl FixContext<'_> {
-    /// Persist a whole-file write of `bytes` for the file at repo-relative
-    /// `display_path` (its resolved absolute path is `abs`). In compose mode
-    /// the bytes are buffered for the engine's single per-file flush; otherwise
-    /// they are written atomically now — byte-for-byte the same as a direct
-    /// [`write_atomic`]. Content fixers call this instead of `write_atomic` so
-    /// the engine can unify the write path.
+    /// Persist a whole-file write of `bytes` for the file whose absolute path
+    /// is `abs`. In compose mode the bytes are buffered for the engine's single
+    /// per-file flush; otherwise they are written atomically now — byte-for-byte
+    /// the same as a direct [`write_atomic`]. Content fixers call this instead
+    /// of `write_atomic` so the engine can unify the write path.
+    ///
+    /// The compose buffer is keyed by the *resolved write target*
+    /// (`resolve_write_target`): a symlink and its in-tree target coalesce to
+    /// one entry, so two fixers touching the same underlying file through
+    /// different paths compose (the second reads the first's buffered write)
+    /// exactly as they would when writing straight to disk.
     ///
     /// # Errors
     /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
     /// buffering in compose mode is infallible.
-    pub fn commit_write(
-        &self,
-        abs: &Path,
-        display_path: &Path,
-        bytes: &[u8],
-    ) -> std::io::Result<()> {
+    pub fn commit_write(&self, abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
         match self.compose {
             Some(buf) => {
                 buf.borrow_mut()
-                    .insert(display_path.to_path_buf(), bytes.to_vec());
+                    .insert(resolve_write_target(abs), bytes.to_vec());
                 Ok(())
             }
             None => write_atomic(abs, bytes),
@@ -842,10 +842,12 @@ pub fn read_for_fix(
 ) -> Result<ReadForFix> {
     // In compose mode, an earlier fixer's write for this file lives in the
     // buffer, not on disk; read it back so fixers compose in config order.
-    // It was already size-checked on its first (disk) read, so the cap is not
-    // re-applied to in-memory bytes.
+    // Keyed by the resolved write target (matching `commit_write`), so a read
+    // through a symlink sees a write made through the target and vice versa.
+    // The bytes were already size-checked on their first (disk) read, so the
+    // cap is not re-applied to in-memory bytes.
     if let Some(buf) = ctx.compose {
-        if let Some(bytes) = buf.borrow().get(display_path) {
+        if let Some(bytes) = buf.borrow().get(&resolve_write_target(abs)) {
             return Ok(ReadForFix::Bytes(bytes.clone()));
         }
     }
@@ -857,6 +859,23 @@ pub fn read_for_fix(
         source,
     })?;
     Ok(ReadForFix::Bytes(bytes))
+}
+
+/// The actual file [`write_atomic`] targets for `path`: a symlink is followed
+/// to its canonical target (so the write goes THROUGH the link, preserving it),
+/// and any other path is returned unchanged. The compose buffer keys on this so
+/// two paths that alias the same underlying file (a symlink and its in-tree
+/// target) coalesce to one entry and compose, matching the direct-write path.
+/// Falls back to `path` when the target cannot be canonicalized (e.g. it does
+/// not exist), so a caller never loses the write location.
+#[must_use]
+pub(crate) fn resolve_write_target(path: &Path) -> PathBuf {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
@@ -883,7 +902,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // A bare temp+rename on the link path would replace the link NODE with a
     // regular file, silently diverging it from its target (common for a
     // symlinked LICENSE / README in a monorepo). `canonicalize` needs the
-    // target to exist, which it does: every caller has just read the file.
+    // target to exist, which it does: every caller has just read the file. A
+    // broken symlink errors here rather than clobbering the link (unlike the
+    // key-only `resolve_write_target`, which falls back so a key is never lost).
     let resolved = match std::fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
         _ => path.to_path_buf(),
@@ -1144,7 +1165,7 @@ mod tests {
         };
         let rel = Path::new("a.txt");
         // Compose mode: commit_write buffers; disk stays untouched.
-        ctx.commit_write(&abs, rel, b"composed").unwrap();
+        ctx.commit_write(&abs, b"composed").unwrap();
         assert_eq!(
             std::fs::read(&abs).unwrap(),
             b"on disk",
@@ -1179,7 +1200,38 @@ mod tests {
         };
         // No compose buffer: commit_write is a direct atomic write, identical
         // to calling write_atomic.
-        ctx.commit_write(&abs, Path::new("a.txt"), b"new").unwrap();
+        ctx.commit_write(&abs, b"new").unwrap();
         assert_eq!(std::fs::read(&abs).unwrap(), b"new");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compose_buffer_coalesces_symlink_and_target() {
+        // R-audit: a symlink and its in-tree target must share ONE buffer
+        // entry, so a fixer writing through the link and another reading the
+        // target compose -- matching the direct-write path, which writes
+        // through the link. Without this the two would report two independent
+        // Applied edits instead of one Applied + one Skipped.
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, b"orig").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+        };
+        // Write through the LINK; read through the TARGET must see the write.
+        ctx.commit_write(&link, b"composed").unwrap();
+        match read_for_fix(&target, Path::new("real.txt"), &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("symlink and target must share one entry"),
+        }
+        assert_eq!(buf.borrow().len(), 1, "coalesced to a single keyed entry");
     }
 }

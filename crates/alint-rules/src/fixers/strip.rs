@@ -116,7 +116,7 @@ impl Fixer for FileStripBomFixer {
             )));
         };
         let stripped = &existing[bom.byte_len()..];
-        ctx.commit_write(&abs, path, stripped)
+        ctx.commit_write(&abs, stripped)
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,
@@ -183,7 +183,7 @@ fn apply_char_filter(
             path.display()
         )));
     }
-    ctx.commit_write(&abs, path, out.as_bytes())
+    ctx.commit_write(&abs, out.as_bytes())
         .map_err(|source| Error::Io {
             path: abs.clone(),
             source,

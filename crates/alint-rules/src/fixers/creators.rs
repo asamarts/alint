@@ -232,11 +232,10 @@ impl Fixer for FilePrependFixer {
             out.extend_from_slice(&prepend);
             out.extend_from_slice(&existing);
         }
-        ctx.commit_write(&abs, path, &out)
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
+        ctx.commit_write(&abs, &out).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
         Ok(FixOutcome::Applied(format!("prepended {}", path.display())))
     }
 
@@ -333,11 +332,10 @@ impl Fixer for FileAppendFixer {
         }
         let mut out = existing;
         out.extend_from_slice(&payload);
-        ctx.commit_write(&abs, path, &out)
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
+        ctx.commit_write(&abs, &out).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
         Ok(FixOutcome::Applied(format!(
             "appended to {}",
             path.display()

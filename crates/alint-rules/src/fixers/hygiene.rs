@@ -45,7 +45,7 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
                 path.display()
             )));
         }
-        ctx.commit_write(&abs, path, trimmed.as_bytes())
+        ctx.commit_write(&abs, trimmed.as_bytes())
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,
@@ -133,11 +133,10 @@ impl Fixer for FileAppendFinalNewlineFixer {
         }
         let mut out = existing;
         out.push(b'\n');
-        ctx.commit_write(&abs, path, &out)
-            .map_err(|source| Error::Io {
-                path: abs.clone(),
-                source,
-            })?;
+        ctx.commit_write(&abs, &out).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
         Ok(FixOutcome::Applied(format!(
             "appended final newline to {}",
             path.display()
@@ -230,7 +229,7 @@ impl Fixer for FileNormalizeLineEndingsFixer {
                 self.target.name()
             )));
         }
-        ctx.commit_write(&abs, path, &normalized)
+        ctx.commit_write(&abs, &normalized)
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,
@@ -326,7 +325,7 @@ impl Fixer for FileCollapseBlankLinesFixer {
                 path.display()
             )));
         }
-        ctx.commit_write(&abs, path, collapsed.as_bytes())
+        ctx.commit_write(&abs, collapsed.as_bytes())
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,

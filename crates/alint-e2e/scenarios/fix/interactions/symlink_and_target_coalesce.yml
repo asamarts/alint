@@ -1,0 +1,38 @@
+name: a symlink and its target coalesce into one fix, not two
+tags: [fix, interactions, unix-only]
+
+# R-audit regression: with follow_links the walker indexes BOTH a symlink and
+# its in-tree target, so a content rule flags both. The compose buffer keys on
+# the resolved write target, so the two coalesce: the first fixer writes the
+# target (through the link), and the second reads that buffered write and finds
+# nothing to do. The rule therefore reports one Applied AND one Skipped item --
+# exactly as the direct-write path does (write_atomic writes through the link,
+# so the second read sees the trimmed file). Before the fix this reported two
+# independent Applied items and zero Skipped.
+
+given:
+  tree:
+    real.rs: "fn a() {}   \n"
+    link.rs: { "$symlink": "real.rs" }
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix]
+
+expect:
+  # The rule has BOTH an Applied item (the file written through one path) and a
+  # Skipped item (the alias, already clean once composed). Without coalescing
+  # this would be two Applied and no Skipped, so `skipped: [no-ws]` fails.
+  - applied: [no-ws]
+    skipped: [no-ws]
+
+expect_tree_mode: contains
+expect_tree:
+  real.rs: "fn a() {}\n"
