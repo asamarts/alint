@@ -613,7 +613,7 @@ impl Applicability {
 }
 
 /// The value a structured edit's target query must hold *after* the edit
-/// applies — the right-hand side of the localized-equivalence (PutGet)
+/// applies — the right-hand side of the localized-equivalence (`PutGet`)
 /// check the engine runs before committing a located edit.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExpectedValue {
@@ -638,10 +638,10 @@ pub enum EditVerifier {
     /// specification. The engine still confirms the write succeeded.
     None,
     /// Re-parse the post-edit bytes in `format` (syntactic validity) and
-    /// re-run the JSONPath `query` against them, asserting the result
+    /// re-run the `JSONPath` `query` against them, asserting the result
     /// matches `expect`.
     ///
-    /// `query` is the *owned* JSONPath source string (the rule's
+    /// `query` is the *owned* `JSONPath` source string (the rule's
     /// `path_src`), NOT a borrowed `serde_json_path::NormalizedPath`: a
     /// `NormalizedPath` borrows the parsed `Value` that drops when
     /// `collect_edits` returns (a dangling borrow), and it cannot express

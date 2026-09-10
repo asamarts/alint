@@ -16,6 +16,7 @@ pub mod git;
 mod ini;
 pub mod jsonpath_diagnostics;
 mod level;
+pub mod located_fix;
 mod pathsafe;
 mod registry;
 mod report;
