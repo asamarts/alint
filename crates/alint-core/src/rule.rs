@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -514,6 +515,43 @@ pub struct FixContext<'a> {
     /// MUST confine it to the repo root unless this is `true`, so an untrusted
     /// ruleset can't make `alint fix` write or read outside the tree.
     pub allow_out_of_root: bool,
+    /// Compose buffer for a real `alint fix` pass. When `Some`, a whole-file
+    /// write routed through [`FixContext::commit_write`] is captured here,
+    /// keyed by repo-relative path, instead of hitting disk, and
+    /// [`read_for_fix`] reads it back — so a file touched by several fixers in
+    /// config order composes in memory and the engine flushes it with a single
+    /// atomic write per file. `None` (the default, and every `--dry-run` run)
+    /// writes straight through, unchanged. Interior mutability because fixers
+    /// hold `&FixContext`. See auto-fix.md 5.2 and the Phase 0 engine rework.
+    pub compose: Option<&'a RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+}
+
+impl FixContext<'_> {
+    /// Persist a whole-file write of `bytes` for the file at repo-relative
+    /// `display_path` (its resolved absolute path is `abs`). In compose mode
+    /// the bytes are buffered for the engine's single per-file flush; otherwise
+    /// they are written atomically now — byte-for-byte the same as a direct
+    /// [`write_atomic`]. Content fixers call this instead of `write_atomic` so
+    /// the engine can unify the write path.
+    ///
+    /// # Errors
+    /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
+    /// buffering in compose mode is infallible.
+    pub fn commit_write(
+        &self,
+        abs: &Path,
+        display_path: &Path,
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
+        match self.compose {
+            Some(buf) => {
+                buf.borrow_mut()
+                    .insert(display_path.to_path_buf(), bytes.to_vec());
+                Ok(())
+            }
+            None => write_atomic(abs, bytes),
+        }
+    }
 }
 
 /// The result of applying (or simulating) one fix against one violation.
@@ -802,6 +840,15 @@ pub fn read_for_fix(
     display_path: &std::path::Path,
     ctx: &FixContext<'_>,
 ) -> Result<ReadForFix> {
+    // In compose mode, an earlier fixer's write for this file lives in the
+    // buffer, not on disk; read it back so fixers compose in config order.
+    // It was already size-checked on its first (disk) read, so the cap is not
+    // re-applied to in-memory bytes.
+    if let Some(buf) = ctx.compose {
+        if let Some(bytes) = buf.borrow().get(display_path) {
+            return Ok(ReadForFix::Bytes(bytes.clone()));
+        }
+    }
     if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {
         return Ok(ReadForFix::Skipped(outcome));
     }
@@ -810,6 +857,59 @@ pub fn read_for_fix(
         source,
     })?;
     Ok(ReadForFix::Bytes(bytes))
+}
+
+/// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
+/// file, copy the original's permissions onto it (so an existing mode — notably
+/// the executable bit — survives), `fsync`, then rename it over `path`. Unlike
+/// `std::fs::write` (open-truncate-then-write), a crash or I/O error mid-write
+/// leaves the original intact rather than truncated. The temp is a sibling so
+/// the rename is atomic on the same filesystem, and it is cleaned up on
+/// failure. Writes THROUGH a symlink to its canonical target, preserving the
+/// link. (Manual temp, no `tempfile` runtime dependency.)
+///
+/// Lives in `alint-core` so both the fixers (`alint-rules`) and the engine's
+/// compose flush share one implementation; `alint-rules::io` re-exports it.
+///
+/// # Errors
+/// Propagates any I/O error from creating, writing, syncing, or renaming.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Unique sibling name: the pid distinguishes concurrent processes, the
+    // atomic counter distinguishes concurrent threads in this process.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // Write THROUGH a symlink to its (canonical) target, preserving the link.
+    // A bare temp+rename on the link path would replace the link NODE with a
+    // regular file, silently diverging it from its target (common for a
+    // symlinked LICENSE / README in a monorepo). `canonicalize` needs the
+    // target to exist, which it does: every caller has just read the file.
+    let resolved = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
+        _ => path.to_path_buf(),
+    };
+    let path = resolved.as_path();
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
+    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        // Preserve the original file's mode when it exists (a rewrite).
+        if let Ok(meta) = std::fs::metadata(path) {
+            f.set_permissions(meta.permissions())?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()
+    };
+    if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -955,6 +1055,7 @@ mod tests {
             dry_run: false,
             fix_size_limit: None,
             allow_out_of_root: false,
+            compose: None,
         };
         let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
         assert!(outcome.is_none());
@@ -970,6 +1071,7 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(64),
             allow_out_of_root: false,
+            compose: None,
         };
         let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
         match outcome {
@@ -991,6 +1093,7 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(1 << 20),
             allow_out_of_root: false,
+            compose: None,
         };
         match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
             ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
@@ -1008,6 +1111,7 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(64),
             allow_out_of_root: false,
+            compose: None,
         };
         match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
             ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
@@ -1023,5 +1127,59 @@ mod tests {
         // Sanity: documented variant shapes haven't drifted.
         let _applied = FixOutcome::Applied("created LICENSE".into());
         let _skipped = FixOutcome::Skipped("already exists".into());
+    }
+
+    #[test]
+    fn compose_buffer_captures_writes_and_reads_them_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join("a.txt");
+        std::fs::write(&abs, b"on disk").unwrap();
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+        };
+        let rel = Path::new("a.txt");
+        // Compose mode: commit_write buffers; disk stays untouched.
+        ctx.commit_write(&abs, rel, b"composed").unwrap();
+        assert_eq!(
+            std::fs::read(&abs).unwrap(),
+            b"on disk",
+            "compose mode must not touch disk until flush"
+        );
+        // read_for_fix reads the buffered bytes back, so a later fixer in the
+        // same pass composes on top of the earlier one.
+        match read_for_fix(&abs, rel, &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("expected buffered bytes"),
+        }
+        // A file not in the buffer falls through to disk.
+        let abs2 = dir.path().join("b.txt");
+        std::fs::write(&abs2, b"other").unwrap();
+        match read_for_fix(&abs2, Path::new("b.txt"), &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"other"),
+            ReadForFix::Skipped(_) => panic!("expected disk bytes"),
+        }
+    }
+
+    #[test]
+    fn commit_write_direct_mode_writes_through_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join("a.txt");
+        std::fs::write(&abs, b"old").unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+        };
+        // No compose buffer: commit_write is a direct atomic write, identical
+        // to calling write_atomic.
+        ctx.commit_write(&abs, Path::new("a.txt"), b"new").unwrap();
+        assert_eq!(std::fs::read(&abs).unwrap(), b"new");
     }
 }

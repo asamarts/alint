@@ -369,6 +369,7 @@ mod tests {
             dry_run,
             fix_size_limit: None,
             allow_out_of_root: false,
+            compose: None,
         }
     }
 

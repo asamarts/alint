@@ -974,6 +974,9 @@ impl Engine {
             // Set per-entry inside the loop below, so each fixer confines its
             // config-declared paths against the OWNING rule's permission.
             allow_out_of_root: false,
+            // Compose mode is enabled by the engine rework (Step B); until then
+            // fixers write straight through, unchanged.
+            compose: None,
         };
 
         // Same `scope_filter.changed_since:` resolution as `run`, so a

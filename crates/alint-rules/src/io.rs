@@ -93,53 +93,10 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
     classify_bytes(window) == Classification::Binary
 }
 
-/// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
-/// file, copy the original's permissions onto it (so an existing mode -
-/// notably the executable bit - survives), `fsync`, then rename it over
-/// `path`. Unlike `std::fs::write` (open-truncate-then-write), a crash or
-/// I/O error mid-write leaves the original intact rather than truncated or
-/// destroyed. The temp is a sibling so the rename is atomic on the same
-/// filesystem, and it is cleaned up on failure. (Manual temp, no `tempfile`
-/// runtime dependency - matching the extends cache.)
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    // Unique sibling name: the pid distinguishes concurrent processes, the
-    // atomic counter distinguishes concurrent threads in this process.
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    // Write THROUGH a symlink to its (canonical) target, preserving the link —
-    // matching the prior `fs::write`/append behavior. A bare temp+rename on the
-    // link path would replace the link NODE with a regular file, silently
-    // diverging it from its target (common for a symlinked LICENSE / README in
-    // a monorepo). `canonicalize` needs the target to exist, which it does:
-    // every caller has just read the file via `read_for_fix`.
-    let resolved = match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
-        _ => path.to_path_buf(),
-    };
-    let path = resolved.as_path();
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
-    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        // Preserve the original file's mode when it exists (a rewrite).
-        if let Ok(meta) = std::fs::metadata(path) {
-            f.set_permissions(meta.permissions())?;
-        }
-        f.write_all(bytes)?;
-        f.sync_all()
-    };
-    if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
-}
+/// Atomic whole-file write, re-exported from `alint-core` so the fixers and the
+/// engine's compose flush share one implementation. See
+/// [`alint_core::write_atomic`].
+pub use alint_core::write_atomic;
 
 /// Hard cap on a single whole-file read across the rule/engine read paths.
 /// Generous - every realistic manifest / source / generated file is orders of
