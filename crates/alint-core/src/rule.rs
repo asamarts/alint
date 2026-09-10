@@ -547,6 +547,134 @@ pub enum FixEdit {
     DeleteFile { path: PathBuf },
     /// Rename a file (same directory or not).
     RenameFile { from: PathBuf, to: PathBuf },
+    /// Replace the half-open byte range `[range.start, range.end)` of an
+    /// existing file with `content`. The range is in bytes against the
+    /// file's current contents. This is the workhorse of *located* edits
+    /// (Phase 1+): several disjoint `ReplaceRange`s against one file can
+    /// be batched, ordered, and spliced in a single pass. No Phase-0
+    /// fixer emits one, but the primitive splice and the batching engine
+    /// are built and tested here.
+    ReplaceRange {
+        path: PathBuf,
+        range: std::ops::Range<usize>,
+        content: Vec<u8>,
+    },
+    /// Set the permission bits of a file (a `chmod`). `mode` is the full
+    /// mode word (e.g. `0o755`). Applied only on Unix; on other platforms
+    /// the engine records it as `Skipped`. Host wiring (the `chmod` op,
+    /// `executable_bit`, `shebang_has_executable`) lands in Phase 3; the
+    /// variant exists now so the engine's edit-application path is total.
+    SetMode { path: PathBuf, mode: u32 },
+}
+
+/// How safe a fix is to apply automatically. A [`CollectedEdit`] declares
+/// its tier; `alint fix` filters against the user's chosen threshold
+/// (`Safe` by default, `Unsafe` with `--unsafe-fixes`).
+///
+/// The `Ord` is the application order: `Safe < Unsafe < Suggestion <
+/// Never`, so "would this apply at `threshold`?" is `self <= threshold`
+/// for the two *applying* tiers. `Suggestion` is shown but never applied;
+/// `Never` is collected for provenance only and neither applied nor
+/// suggested. See auto-fix.md 5.5 and ADR-0017.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Applicability {
+    /// Behavior-preserving; applied by a bare `alint fix`.
+    Safe,
+    /// May change semantics; applied only with `--unsafe-fixes`.
+    Unsafe,
+    /// Never applied automatically; surfaced as [`FixStatus::Suggested`].
+    Suggestion,
+    /// Collected for analysis/provenance only; never applied, never
+    /// suggested for automatic application.
+    Never,
+}
+
+impl Applicability {
+    /// Whether an edit at this tier is *applied* when the user opted into
+    /// applying up to `threshold` (`Safe` for a bare `alint fix`, `Unsafe`
+    /// for `--unsafe-fixes`). `Suggestion` and `Never` never apply.
+    #[must_use]
+    pub fn applies_at(self, threshold: Applicability) -> bool {
+        matches!(self, Applicability::Safe | Applicability::Unsafe) && self <= threshold
+    }
+
+    /// Whether an edit at this tier is *suggested* (shown, not applied)
+    /// under `threshold`: an `Unsafe` edit the user did not opt into, or a
+    /// `Suggestion`. `Never` is never suggested; an applied tier is not
+    /// "merely" suggested.
+    #[must_use]
+    pub fn suggested_at(self, threshold: Applicability) -> bool {
+        match self {
+            Applicability::Suggestion => true,
+            Applicability::Unsafe => !self.applies_at(threshold),
+            Applicability::Safe | Applicability::Never => false,
+        }
+    }
+}
+
+/// The value a structured edit's target query must hold *after* the edit
+/// applies — the right-hand side of the localized-equivalence (PutGet)
+/// check the engine runs before committing a located edit.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExpectedValue {
+    /// The query must resolve to exactly this scalar.
+    Scalar(serde_json::Value),
+    /// The query must match nothing (used by `*_path_absent` /
+    /// `remove_value`: after a batched multi-node removal, array indices
+    /// shift, so only re-running the query and asserting zero matches is
+    /// correct).
+    Absent,
+}
+
+/// An executable post-edit check the engine can run *without knowing the
+/// op* that produced the edit. This is the load-bearing verification
+/// obligation the design's translation-validation rests on (R-VERIFY): a
+/// fixer returns not just an edit but the means to prove the edit did what
+/// the rule wanted, so the engine can demote an edit whose result does not
+/// verify to a [`FixStatus::Suggested`] instead of writing bad bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditVerifier {
+    /// No semantic check (whole-file normalizers): the edit is its own
+    /// specification. The engine still confirms the write succeeded.
+    None,
+    /// Re-parse the post-edit bytes in `format` (syntactic validity) and
+    /// re-run the JSONPath `query` against them, asserting the result
+    /// matches `expect`.
+    ///
+    /// `query` is the *owned* JSONPath source string (the rule's
+    /// `path_src`), NOT a borrowed `serde_json_path::NormalizedPath`: a
+    /// `NormalizedPath` borrows the parsed `Value` that drops when
+    /// `collect_edits` returns (a dangling borrow), and it cannot express
+    /// `Absent` after index shifts anyway. Re-running the source query is
+    /// the only correct check.
+    Structured {
+        format: crate::structured_format::Format,
+        query: String,
+        expect: ExpectedValue,
+    },
+}
+
+/// A tag marking edits that must not co-apply in a single pass even when
+/// their byte ranges are disjoint (e.g. two rewrites of the same logical
+/// node reached by different queries). The concrete grouping policy is
+/// pinned when the first isolation-needing op ships (Phase 2+); Phase 0
+/// carries the field and exercises exclusion with a fixture rule.
+pub type GroupId = u32;
+
+/// A single proposed edit plus everything the engine needs to decide
+/// whether and how to apply it *without knowing the op that produced it*:
+/// its tier, its post-edit verification obligation, and its
+/// mutual-exclusion group. Returned by [`Fixer::collect_edits`].
+///
+/// This refines ADR-0017 decision 1 / auto-fix.md 5.2.1, whose
+/// `collect_edits -> Vec<(FixEdit, Applicability)>` cannot carry the
+/// verifier the Safe acceptance test needs.
+#[derive(Debug, Clone)]
+pub struct CollectedEdit {
+    pub edit: FixEdit,
+    pub applicability: Applicability,
+    pub verify: EditVerifier,
+    pub isolation_group: Option<GroupId>,
 }
 
 /// A mechanical corrector for a specific rule's violations.
@@ -575,6 +703,43 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let _ = (violation, bytes, root);
         None
+    }
+
+    /// Collect the edits this fixer proposes for `violations` against the
+    /// current `bytes` of one file, each tagged with its tier, post-edit
+    /// verifier, and isolation group. The engine batches, tier-filters,
+    /// orders, overlap-skips, verifies, and applies the result.
+    ///
+    /// The default adapts the whole-file fixers unchanged: it delegates to
+    /// [`fix_edit`](Self::fix_edit) per violation and wraps each result as
+    /// a `Safe`, `verify: None`, ungrouped [`CollectedEdit`], so an
+    /// existing fixer's located-edit form is byte-identical to its
+    /// `fix_edit`. A fixer that emits `ReplaceRange`s, needs a tier other
+    /// than `Safe`, a semantic verifier, or an isolation group overrides
+    /// this. `file` is the edit's path relative to `root` (matching
+    /// [`Violation::path`]).
+    ///
+    /// Note: like [`fix_edit`](Self::fix_edit), this reads nothing from
+    /// disk beyond a declared template; the engine enforces the
+    /// `fix_size_limit` on `bytes` before calling it.
+    fn collect_edits(
+        &self,
+        violations: &[Violation],
+        file: &Path,
+        bytes: &[u8],
+        root: &Path,
+    ) -> Vec<CollectedEdit> {
+        let _ = file;
+        violations
+            .iter()
+            .filter_map(|v| self.fix_edit(v, bytes, root))
+            .map(|edit| CollectedEdit {
+                edit,
+                applicability: Applicability::Safe,
+                verify: EditVerifier::None,
+                isolation_group: None,
+            })
+            .collect()
     }
 }
 

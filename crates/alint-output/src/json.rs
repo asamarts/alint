@@ -218,6 +218,9 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
                     let (status, detail) = match &it.status {
                         FixStatus::Applied(s) => ("applied", Some(s.as_str())),
                         FixStatus::Skipped(s) => ("skipped", Some(s.as_str())),
+                        FixStatus::Suggested { summary, .. } => {
+                            ("suggested", Some(summary.as_str()))
+                        }
                         FixStatus::Unfixable => ("unfixable", None),
                     };
                     JsonFixItem {

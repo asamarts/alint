@@ -824,6 +824,13 @@ fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<WorkspaceEd
                 }),
             )]))
         }
+        // `ReplaceRange`'s minimal-`TextEdit` mapping (byte range ->
+        // line/character `Range`) is deferred to Phase 1, when the first op
+        // emits one; until then no located edit reaches the LSP, so `None`
+        // is correct rather than lossy.
+        FixEdit::ReplaceRange { .. } => None,
+        // A `chmod` has no LSP `WorkspaceEdit` representation.
+        FixEdit::SetMode { .. } => None,
     }
 }
 

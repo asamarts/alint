@@ -498,6 +498,19 @@ pub fn write_fix_human(
                         item.violation.message
                     ),
                 ),
+                // Available but not applied (below the tier threshold, a
+                // suggestion, or verification-demoted). No shipped op emits
+                // this yet (Phase 1+); Phase 1 refines the styling with a
+                // dedicated snapshot.
+                FixStatus::Suggested { summary, .. } => (
+                    opts.glyphs.bullet,
+                    format!("{dim}"),
+                    format!("{dim:#}"),
+                    format!(
+                        "{path_prefix}{} (suggested: {summary})",
+                        item.violation.message
+                    ),
+                ),
                 FixStatus::Unfixable => (
                     opts.glyphs.bullet,
                     format!("{dim}"),

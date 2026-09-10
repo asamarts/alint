@@ -94,6 +94,9 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
             let (status_label, show_path) = match &item.status {
                 FixStatus::Applied(msg) => (format!("**applied** - {}", md_escape(msg)), false),
                 FixStatus::Skipped(msg) => (format!("**skipped** - {}", md_escape(msg)), true),
+                FixStatus::Suggested { summary, .. } => {
+                    (format!("**suggested** - {}", md_escape(summary)), true)
+                }
                 FixStatus::Unfixable => ("**unfixable**".to_string(), true),
             };
             let path_part = if show_path {

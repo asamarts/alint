@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::level::Level;
-use crate::rule::{RuleResult, Violation};
+use crate::rule::{FixEdit, RuleResult, Violation};
 
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -62,6 +62,15 @@ pub enum FixStatus {
     /// The rule has a fixer but it declined to act (e.g. file already
     /// exists, violation lacked a path).
     Skipped(String),
+    /// A fix is available but was NOT applied, so the violation stands: an
+    /// `Unsafe` edit without `--unsafe-fixes`, a `Suggestion`-tier edit, or
+    /// an edit whose post-edit verification failed (the engine declined to
+    /// write rather than corrupt the file). `summary` is the human
+    /// one-liner; `edit` is the proposed change, carried for `alint fix
+    /// --diff` and SARIF `proposed_edit`. No Phase-0 fixer produces this
+    /// (every shipped op is `Safe` and whole-file); it is the plumbing the
+    /// located-edit tiers (Phase 1+) fill in.
+    Suggested { summary: String, edit: FixEdit },
     /// The rule has no fixer; violation stands.
     Unfixable,
 }
@@ -85,6 +94,15 @@ impl FixReport {
             .count()
     }
 
+    /// Count of fixes that are available but were not applied (below the
+    /// tier threshold, `Suggestion` tier, or verification-demoted). Each
+    /// leaves its violation standing.
+    pub fn suggested(&self) -> usize {
+        self.items()
+            .filter(|i| matches!(i.status, FixStatus::Suggested { .. }))
+            .count()
+    }
+
     /// Any rule at `level: error` whose violations were not all fixed.
     pub fn has_unfixable_errors(&self) -> bool {
         self.results
@@ -104,9 +122,16 @@ impl FixReport {
 }
 
 fn has_unresolved(items: &[FixItem]) -> bool {
-    items
-        .iter()
-        .any(|i| matches!(i.status, FixStatus::Skipped(_) | FixStatus::Unfixable))
+    // `Suggested` counts as unresolved: the fix was NOT applied, so at
+    // `level: error` it must still drive a nonzero exit (a user must opt
+    // into `--unsafe-fixes` or act on the suggestion). This is the W1
+    // exit-code contract.
+    items.iter().any(|i| {
+        matches!(
+            i.status,
+            FixStatus::Skipped(_) | FixStatus::Suggested { .. } | FixStatus::Unfixable
+        )
+    })
 }
 
 #[cfg(test)]

@@ -46,8 +46,9 @@ pub use pathsafe::{derive_target, normalize_confined};
 pub use registry::{RuleBuilder, RuleRegistry};
 pub use report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
 pub use rule::{
-    Context, FixContext, FixEdit, FixOutcome, Fixer, GitTrackedMode, PerFileRule, ReadForFix, Rule,
-    RuleResult, Violation, check_fix_size, eval_per_file, read_for_fix,
+    Applicability, CollectedEdit, Context, EditVerifier, ExpectedValue, FixContext, FixEdit,
+    FixOutcome, Fixer, GitTrackedMode, GroupId, PerFileRule, ReadForFix, Rule, RuleResult,
+    Violation, check_fix_size, eval_per_file, read_for_fix,
 };
 pub use scope::Scope;
 pub use scope_filter::{
