@@ -1,0 +1,22 @@
+# Scenario Sfix-trim — Fix-application collect read-path.
+#
+# One content fixer (trim trailing whitespace) over `**/*.rs`. The
+# det_check bench's `materialize_fixable` setup injects a trailing
+# space before every newline in every generated `.rs` file, so each
+# source file carries a violation and `alint fix --dry-run` re-reads
+# it through the fixer's collect step. This is the read-heavy fix
+# path that `fix_throughput.rs` tracks on the wall clock; the
+# `fix` cell here tracks it end to end as deterministic binary Ir
+# (I/O-blind, so read this signal ALONGSIDE the wall-clock cell, not
+# instead of it). `--dry-run` means no writes, so the tree stays
+# byte-stable across runs.
+
+version: 1
+
+rules:
+  - id: rs-trim-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
