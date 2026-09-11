@@ -77,3 +77,38 @@ fn write_failure_in_one_dir_still_fixes_the_rest() {
         "blocked.rs should degrade to Skipped, not abort the pass; output:\n{combined}"
     );
 }
+
+#[test]
+fn fix_only_still_exits_nonzero_when_a_fix_errors() {
+    // R-audit-5: --fix-only suppresses declined/unfixable residuals and exits 0,
+    // but a fix that was ATTEMPTED and ERRORED (here a write into a read-only
+    // dir) must still fail the run -- exit 1 via had_fix_error, even though the
+    // errored file is suppressed from the output.
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
+    std::fs::write(root.join("good.rs"), "fn a() {}   \n").unwrap();
+    std::fs::create_dir(root.join("ro")).unwrap();
+    std::fs::write(root.join("ro/blocked.rs"), "fn b() {}   \n").unwrap();
+    std::fs::set_permissions(root.join("ro"), std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let out = run(root, &["fix", "--fix-only", "."]);
+
+    let good = std::fs::read_to_string(root.join("good.rs")).unwrap();
+    std::fs::set_permissions(root.join("ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert_eq!(good, "fn a() {}\n", "the writable file is still fixed");
+    // The errored file's residual is suppressed from the report...
+    assert!(
+        !stdout.contains("blocked.rs"),
+        "--fix-only suppresses the residual line; stdout:\n{stdout}"
+    );
+    // ...but a fix errored, so the exit is nonzero.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "--fix-only must fail when a fix errored"
+    );
+}
