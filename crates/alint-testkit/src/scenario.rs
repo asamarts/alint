@@ -286,6 +286,32 @@ impl Scenario {
                 self.expect.len()
             )));
         }
+        // A scenario that runs a fix must assert its effect against ground
+        // truth, or it is theatre: a `fix` step with no expectations and no
+        // `expect_tree` passes unconditionally, so a completely broken fix would
+        // still be "green". Require an `expect_tree` (the on-disk check) OR at
+        // least one fix step carrying a status expectation.
+        let runs_fix = self
+            .when
+            .iter()
+            .any(|s| matches!(s, Step::Fix | Step::FixUnsafe));
+        if runs_fix && self.expect_tree.is_none() {
+            let asserts_a_fix_status = self.when.iter().zip(&self.expect).any(|(step, exp)| {
+                matches!(step, Step::Fix | Step::FixUnsafe)
+                    && (exp.applied.is_some()
+                        || exp.skipped.is_some()
+                        || exp.suggested.is_some()
+                        || exp.unfixable.is_some())
+            });
+            if !asserts_a_fix_status {
+                return Err(crate::error::Error::scenario(format!(
+                    "scenario {:?}: runs a fix but asserts nothing against ground truth. \
+                     Add an `expect_tree:` (the on-disk check) or a fix-status expectation \
+                     (`applied:`/`skipped:`/`suggested:`/`unfixable:`) on a fix step.",
+                    self.name,
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -332,6 +358,47 @@ expect:
 "#;
         let s = Scenario::from_yaml(src).unwrap();
         assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_a_fix_scenario_that_asserts_nothing() {
+        // A fix step with an empty expect and no expect_tree would pass
+        // unconditionally (theatre) - validate must reject it.
+        let src = r#"
+name: theatre
+given:
+  tree: {}
+  config: "version: 1\nrules: []\n"
+when: [fix]
+expect:
+  - {}
+"#;
+        let s = Scenario::from_yaml(src).unwrap();
+        let err = s.validate().unwrap_err();
+        assert!(
+            format!("{err}").contains("asserts nothing"),
+            "expected the assert-nothing rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_a_fix_scenario_with_a_status_assertion() {
+        // A status expectation (even `applied: []`) ties the scenario to the
+        // report, so it is not theatre.
+        let src = r#"
+name: ok
+given:
+  tree: {}
+  config: "version: 1\nrules: []\n"
+when: [fix]
+expect:
+  - applied: []
+"#;
+        let s = Scenario::from_yaml(src).unwrap();
+        assert!(
+            s.validate().is_ok(),
+            "a status assertion should satisfy validate"
+        );
     }
 
     #[test]

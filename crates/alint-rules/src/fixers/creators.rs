@@ -285,6 +285,11 @@ impl Fixer for FilePrependFixer {
 
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
+        // Mirror apply()'s binary guard on the editor (LSP) path: prepending
+        // content to a binary file corrupts it.
+        if looks_binary(bytes) {
+            return None;
+        }
         let prepend = resolve_source_bytes(&self.source, root, false).ok()?;
         // Idempotency guard (L4): already-present content is not re-prepended.
         let body = bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes);
@@ -388,6 +393,11 @@ impl Fixer for FileAppendFixer {
 
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
+        // Mirror apply()'s binary guard on the editor (LSP) path: appending
+        // content to a binary file corrupts it.
+        if looks_binary(bytes) {
+            return None;
+        }
         let payload = resolve_source_bytes(&self.source, root, false).ok()?;
         // Idempotency guard (L4): already-present content is not re-appended.
         if bytes.ends_with(payload.as_slice()) {
@@ -633,6 +643,38 @@ mod tests {
                 content: b"# Hi\n".to_vec(),
             }]
         );
+    }
+
+    #[test]
+    fn prepend_and_append_skip_binary_files_on_both_paths() {
+        // Phase-0 audit: prepend/append must refuse a NUL-bearing binary on BOTH
+        // the `alint fix` (apply) and editor (fix_edit) paths -- inserting text
+        // into a binary corrupts it. (`\x00` marks binary; the file is otherwise
+        // valid UTF-8 so `from_utf8` alone would not catch it.)
+        let binary: &[u8] = b"hdr\n\x00body\n";
+        let v = Violation::new("x").with_path(std::path::Path::new("blob"));
+        let fixers: [Box<dyn Fixer>; 2] = [
+            Box::new(FilePrependFixer::new("// header\n".into())),
+            Box::new(FileAppendFixer::new("// footer\n".into())),
+        ];
+        for fixer in &fixers {
+            let tmp = TempDir::new().unwrap();
+            std::fs::write(tmp.path().join("blob"), binary).unwrap();
+            let outcome = fixer.apply(&v, &make_ctx(&tmp, false)).unwrap();
+            assert!(
+                matches!(outcome, FixOutcome::Skipped(_)),
+                "apply() must skip a binary, got {outcome:?}"
+            );
+            assert_eq!(
+                std::fs::read(tmp.path().join("blob")).unwrap(),
+                binary,
+                "the binary file must be byte-identical after skipping"
+            );
+            assert!(
+                fixer.fix_edit(&v, binary, tmp.path()).is_none(),
+                "fix_edit() must decline a binary (the editor/LSP path)"
+            );
+        }
     }
 
     #[test]

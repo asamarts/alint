@@ -1068,9 +1068,19 @@ mod tests {
 
     #[test]
     fn fix_spec_op_name_covers_every_variant() {
-        // Round-trip every documented op name through YAML; any
-        // future fix variant added without a corresponding
-        // op_name arm will fall through serde and trip this test.
+        // Two guards below: (1) round-trip -- every `cases` YAML parses to a
+        // FixSpec whose op_name() matches, so each listed op is real and
+        // correctly named; (2) set-equality of `cases` names with ALL_OP_NAMES.
+        //
+        // The compile-time backstop for "every variant is covered" is op_name()
+        // itself -- an EXHAUSTIVE match, so a new FixSpec variant is a hard
+        // compile error there until an arm is added (right beside ALL_OP_NAMES
+        // and its doc, which says to add the name in tandem). Known limitation:
+        // both `cases` and ALL_OP_NAMES are hand-maintained, so a variant added
+        // to op_name() but omitted from BOTH would slip past this test (and the
+        // fix-coverage gate would then not require a scenario for it). A fully
+        // type-derived list (e.g. `strum::EnumCount`) would close that, but is
+        // not worth a core-crate proc-macro dependency for the current op set.
         let cases = [
             ("file_create:\n  content: x\n", "file_create"),
             ("file_remove: {}", "file_remove"),

@@ -937,8 +937,20 @@ impl Engine {
     /// become: `(repo-relative path, old bytes, new bytes)` for every file a
     /// fixer would change. Powers `alint fix --diff`. Runs the same compose
     /// pass as [`fix`](Self::fix) with the flush suppressed, so the diff
-    /// reflects exactly what a real `fix` at this `threshold` would write, plus
-    /// the [`FixReport`] (for the exit predicate).
+    /// reflects what a real `fix` at this `threshold` would write, plus the
+    /// [`FixReport`] (for the exit predicate).
+    ///
+    /// Fidelity caveat (single-pass, whole-file-op-first). Whole-file ops
+    /// (rename/remove) are *recorded* in a stage, not performed, so they don't
+    /// mutate the on-disk tree the way a real `fix` does mid-pass. If a config
+    /// applies a whole-file op to a file BEFORE a content rule that also matches
+    /// it, the real one-pass `fix` renames/removes the file first (and the
+    /// content rule then sees the vacated path via the stale index, doing
+    /// nothing until a rerun), whereas the stage shows BOTH the whole-file op and
+    /// a content edit to the pre-op path. Preview-only (no corruption), and the
+    /// dangerous content-first order is faithful (the content edit's
+    /// `has_pending_write` makes the whole-file op yield in both the stage and
+    /// the real fix). Fully reconciling both orders needs the Phase-1 re-walk.
     ///
     /// # Errors
     /// Propagates any hard error from the fix pass (walk / scope resolution).
@@ -1179,6 +1191,24 @@ impl Engine {
             let violations = match entry.rule.evaluate(ctx) {
                 Ok(v) => v,
                 Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+            };
+            // `--changed` blast-radius guard. A full-index rule (existence /
+            // cross-file, `requires_full_index() == true`) is handed the FULL
+            // index by `pick_ctx` even under `--changed`, because its *check*
+            // verdict must consider the whole tree (an unchanged committed
+            // `.env` should still fire). But the FIX must not touch files outside
+            // the diff: without this, `file_absent` + `file_remove --changed`
+            // deletes every matching file, including unchanged committed ones the
+            // user never touched. Restrict such a rule's fixes to violations
+            // whose path is in the changed set. Per-file rules already received
+            // the `--changed`-filtered index, so their violations are all
+            // in-scope and this is a no-op for them.
+            let violations = match &self.changed_paths {
+                Some(changed) if entry.rule.requires_full_index() => violations
+                    .into_iter()
+                    .filter(|v| v.path.as_deref().is_some_and(|p| changed.contains(p)))
+                    .collect(),
+                _ => violations,
             };
             if violations.is_empty() {
                 continue;

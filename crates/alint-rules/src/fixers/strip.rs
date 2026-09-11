@@ -170,6 +170,16 @@ fn apply_char_filter(
         alint_core::ReadForFix::Bytes(b) => b,
         alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
     };
+    // Binary guard (H3): a NUL byte is valid UTF-8, so the `from_utf8` check
+    // below is too weak on its own -- stripping a bidi/zero-width byte sequence
+    // out of a NUL-bearing binary would corrupt it. Match the other byte-level
+    // fixers and refuse.
+    if looks_binary(&existing) {
+        return Ok(FixOutcome::Skipped(format!(
+            "{} looks binary; not stripping {label} chars",
+            path.display()
+        )));
+    }
     let Ok(text) = std::str::from_utf8(&existing) else {
         return Ok(FixOutcome::Skipped(format!(
             "{} is not UTF-8; cannot filter {label} chars",
@@ -220,6 +230,10 @@ fn char_filter_edit(
     preserve_leading_feff: bool,
 ) -> Option<FixEdit> {
     let path = violation.path.as_deref()?;
+    // Binary guard (H3), mirroring apply_char_filter on the editor (LSP) path.
+    if looks_binary(bytes) {
+        return None;
+    }
     let text = std::str::from_utf8(bytes).ok()?;
     let out = filter_chars(text, predicate, preserve_leading_feff);
     if out.as_bytes() == bytes {
@@ -261,6 +275,48 @@ mod tests {
                 .fix_edit(&v(), b"clean ascii", std::path::Path::new("/r"))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn strip_fixers_skip_binary_on_both_paths() {
+        // Phase-0 audit / H3 consistency: strip-bidi and strip-zero-width are
+        // byte-level fixers too, so they must refuse a NUL-bearing binary on both
+        // the `alint fix` (apply) and editor (fix_edit) paths, even though the
+        // file also carries the char they would otherwise strip. NUL is valid
+        // UTF-8, so the `from_utf8` check alone would not catch it.
+        use tempfile::TempDir;
+        // valid UTF-8: 'a', U+0000 (NUL -> binary), U+202E (bidi), U+200B (ZWSP).
+        let binary = "a\u{0}\u{202e}\u{200b}b".as_bytes();
+        let viol = Violation::new("x").with_path(std::path::Path::new("blob"));
+        let fixers: [&dyn Fixer; 2] = [&FileStripBidiFixer, &FileStripZeroWidthFixer];
+        for fixer in fixers {
+            assert!(
+                fixer
+                    .fix_edit(&viol, binary, std::path::Path::new("/r"))
+                    .is_none(),
+                "strip fix_edit must decline a binary file"
+            );
+            let tmp = TempDir::new().unwrap();
+            std::fs::write(tmp.path().join("blob"), binary).unwrap();
+            let ctx = FixContext {
+                root: tmp.path(),
+                dry_run: false,
+                fix_size_limit: None,
+                allow_out_of_root: false,
+                compose: None,
+                stage_ops: None,
+            };
+            let outcome = fixer.apply(&viol, &ctx).unwrap();
+            assert!(
+                matches!(outcome, FixOutcome::Skipped(_)),
+                "strip apply() must skip a binary, got {outcome:?}"
+            );
+            assert_eq!(
+                std::fs::read(tmp.path().join("blob")).unwrap(),
+                binary,
+                "the binary file must be byte-identical after skipping"
+            );
+        }
     }
 
     #[test]

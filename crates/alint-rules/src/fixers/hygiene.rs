@@ -162,6 +162,11 @@ impl Fixer for FileAppendFinalNewlineFixer {
         if bytes.is_empty() || bytes.ends_with(b"\n") {
             return None;
         }
+        // Mirror apply()'s binary guard on the editor (LSP) path too: appending a
+        // newline to a binary file corrupts it.
+        if looks_binary(bytes) {
+            return None;
+        }
         let mut content = bytes.to_vec();
         content.push(b'\n');
         Some(FixEdit::SetContent {
@@ -257,6 +262,11 @@ impl Fixer for FileNormalizeLineEndingsFixer {
 
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
+        // Mirror apply()'s binary guard on the editor (LSP) path: rewriting line
+        // endings in a binary file inserts stray CR/LF and corrupts it.
+        if looks_binary(bytes) {
+            return None;
+        }
         let normalized = normalize_line_endings(bytes, self.target);
         if normalized == bytes {
             return None;
@@ -514,20 +524,23 @@ mod tests {
     fn assert_skips_binary(fixer: &dyn Fixer, binary: &[u8]) {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("blob"), binary).unwrap();
-        let outcome = fixer
-            .apply(
-                &Violation::new("x").with_path(std::path::Path::new("blob")),
-                &make_ctx(&tmp, false),
-            )
-            .unwrap();
+        let violation = Violation::new("x").with_path(std::path::Path::new("blob"));
+        // The `alint fix` path: apply() must skip and leave the file byte-identical.
+        let outcome = fixer.apply(&violation, &make_ctx(&tmp, false)).unwrap();
         assert!(
             matches!(outcome, FixOutcome::Skipped(_)),
-            "a byte-level fixer must skip a binary file, got {outcome:?}"
+            "a byte-level fixer's apply() must skip a binary file, got {outcome:?}"
         );
         assert_eq!(
             std::fs::read(tmp.path().join("blob")).unwrap(),
             binary,
             "a binary file must be byte-identical after the fixer skips it"
+        );
+        // The editor (LSP) path: fix_edit() must decline (None) on a binary too,
+        // or a code action would hand the editor a corrupting WorkspaceEdit.
+        assert!(
+            fixer.fix_edit(&violation, binary, tmp.path()).is_none(),
+            "a byte-level fixer's fix_edit() must return None for a binary file"
         );
     }
 
