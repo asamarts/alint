@@ -90,6 +90,7 @@
   --compact
   --dry-run
   --fail-on-warning
+  --fix-only
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -97,6 +98,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --unsafe-fixes
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>

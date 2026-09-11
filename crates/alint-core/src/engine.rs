@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::facts::{FactSpec, FactValues, evaluate_facts};
 use crate::located_fix::{self, LocatedEdit, LocatedOutcome};
 use crate::registry::RuleRegistry;
-use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
+use crate::report::{FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report};
 use crate::rule::{
     Applicability, Context, FixContext, FixEdit, FixOutcome, Fixer, ReadForFix, Rule, RuleResult,
     Violation, read_for_fix, write_atomic,
@@ -1118,7 +1118,7 @@ impl Engine {
                         Some(f) => match f.apply(&v, &fix_ctx) {
                             Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
                             Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
-                            Err(e) => FixStatus::Skipped(format!("fix error: {e}")),
+                            Err(e) => FixStatus::Skipped(format!("{FIX_ERROR_PREFIX} {e}")),
                         },
                         None => FixStatus::Unfixable,
                     };
@@ -1218,9 +1218,9 @@ impl Engine {
                             failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
                         });
                         if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
-                            item.status = FixStatus::Skipped(
-                                "fix error: file could not be written".to_string(),
-                            );
+                            item.status = FixStatus::Skipped(format!(
+                                "{FIX_ERROR_PREFIX} file could not be written"
+                            ));
                         }
                     }
                 }

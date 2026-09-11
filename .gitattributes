@@ -7,6 +7,7 @@
 
 # Snapshot files are byte-stable across platforms by design.
 crates/alint-dsl/tests/snapshots/*.txt text eol=lf
+crates/alint/tests/snapshots/*.txt text eol=lf
 
 # YAML test fixtures (testkit + e2e scenarios) feed YAML parsers
 # that mostly tolerate CRLF, but stay safe and explicit.

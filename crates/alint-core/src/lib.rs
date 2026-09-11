@@ -45,7 +45,7 @@ pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use level::Level;
 pub use pathsafe::{derive_target, normalize_confined};
 pub use registry::{RuleBuilder, RuleRegistry};
-pub use report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
+pub use report::{FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report};
 pub use rule::{
     Applicability, CollectedEdit, Context, EditVerifier, ExpectedValue, FixContext, FixEdit,
     FixOutcome, Fixer, GitTrackedMode, GroupId, PerFileRule, ReadForFix, Rule, RuleResult,

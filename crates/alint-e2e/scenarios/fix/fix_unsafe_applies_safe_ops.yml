@@ -1,0 +1,33 @@
+name: fix --unsafe-fixes applies the Safe tier too (threshold raised, inert in Phase 0)
+tags: [fix, no_trailing_whitespace, file_trim_trailing_whitespace]
+
+# `fix_unsafe` raises the applicability threshold to Unsafe. In Phase 0 every
+# shipped op is Safe, so this is observationally identical to a plain `fix`
+# (Safe <= Unsafe, so Safe ops still apply). The scenario gates the FixUnsafe
+# run path end to end; a genuinely Unsafe op arrives in Phase 1.
+
+given:
+  tree:
+    src:
+      bad.rs: "fn a() {}   \n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: no-ws, level: error, path: src/bad.rs}
+  - applied: [no-ws]
+  - violations: []
+
+expect_tree:
+  src:
+    bad.rs: "fn a() {}\n"

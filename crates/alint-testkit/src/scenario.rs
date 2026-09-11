@@ -188,6 +188,10 @@ fn default_true() -> bool {
 pub enum Step {
     Check,
     Fix,
+    /// `alint fix --unsafe-fixes`: applies the Unsafe tier as well as Safe.
+    /// Inert until a rule declares an Unsafe fix (Phase 1+); wired now so a
+    /// scenario can exercise the raised threshold.
+    FixUnsafe,
     FixDryRun,
     /// `alint check --changed` (working-tree diff, no `--base`).
     /// The runner shells out to `git ls-files --modified --others
@@ -227,6 +231,9 @@ pub struct ExpectStep {
     pub applied: Option<Vec<String>>,
     /// Rule ids expected to report `Skipped` status.
     pub skipped: Option<Vec<String>>,
+    /// Rule ids expected to report `Suggested` status (a fix available but not
+    /// applied at the chosen tier -- e.g. an Unsafe edit under a Safe threshold).
+    pub suggested: Option<Vec<String>>,
     /// Rule ids expected to report `Unfixable` status.
     pub unfixable: Option<Vec<String>>,
 }

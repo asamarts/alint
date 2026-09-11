@@ -221,6 +221,16 @@ pub(crate) enum Command {
         /// Base ref for `--changed`. Implies `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
+        /// Also apply Unsafe-tier fixes, not just Safe ones. Unsafe fixes may
+        /// change behavior, so they are opt-in. (No Unsafe fix ships yet, so
+        /// this is currently inert; it is wired for the located-edit tiers.)
+        #[arg(long)]
+        unsafe_fixes: bool,
+        /// Report only the fixes that were applied: suppress the residual
+        /// (skipped / unfixable) findings and exit 0 unless a fix errored.
+        /// For "apply what you can and move on" workflows.
+        #[arg(long)]
+        fix_only: bool,
     },
     /// Snapshot current violations so later runs fail only on new ones.
     ///

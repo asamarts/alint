@@ -3,6 +3,13 @@ use std::sync::Arc;
 use crate::level::Level;
 use crate::rule::{FixEdit, RuleResult, Violation};
 
+/// Prefix the engine puts on a [`FixStatus::Skipped`] reason when a fix was
+/// *attempted but errored* (a fixer `Err`, or a failed write) -- as opposed to
+/// a declined or unfixable skip. [`FixReport::had_fix_error`] recognizes it and
+/// `Engine::fix` produces it; kept here as the single source of truth so the
+/// two never drift.
+pub const FIX_ERROR_PREFIX: &str = "fix error:";
+
 #[derive(Debug, Clone)]
 pub struct Report {
     pub results: Vec<RuleResult>,
@@ -101,6 +108,20 @@ impl FixReport {
         self.items()
             .filter(|i| matches!(i.status, FixStatus::Suggested { .. }))
             .count()
+    }
+
+    /// Whether any fix was *attempted and errored* (as opposed to declined or
+    /// unfixable). The engine reports a fixer error or a failed write as a
+    /// `Skipped` whose reason begins with `"fix error:"` (see `Engine::fix`);
+    /// this recognizes that convention. Used by `alint fix --fix-only`, which
+    /// otherwise exits 0: an errored fix is a real problem, a declined one is
+    /// the residual the flag is meant to suppress. The `FIX_ERROR_PREFIX`
+    /// constant is the shared source of truth for the marker.
+    #[must_use]
+    pub fn had_fix_error(&self) -> bool {
+        self.items().any(|i| {
+            matches!(&i.status, FixStatus::Skipped(reason) if reason.starts_with(FIX_ERROR_PREFIX))
+        })
     }
 
     /// Any rule at `level: error` whose violations were not all fixed.
@@ -310,5 +331,33 @@ mod tests {
         };
         assert!(!rw.has_unfixable_errors());
         assert!(rw.has_unfixable_warnings());
+    }
+
+    #[test]
+    fn had_fix_error_recognizes_the_error_prefix() {
+        // A fixer error / failed write is a Skipped whose reason starts with
+        // FIX_ERROR_PREFIX; a declined skip is not.
+        let errored = FixReport {
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::Skipped(format!(
+                    "{FIX_ERROR_PREFIX} permission denied"
+                ))],
+            )],
+        };
+        assert!(errored.had_fix_error());
+
+        let declined = FixReport {
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::Skipped("already exists".into())],
+            )],
+        };
+        assert!(
+            !declined.had_fix_error(),
+            "a declined skip is not a fix error"
+        );
     }
 }

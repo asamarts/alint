@@ -245,6 +245,9 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
         Step::Fix => {
             StepOutcome::Fix(engine.fix(root, &index, false, alint_core::Applicability::Safe)?)
         }
+        Step::FixUnsafe => {
+            StepOutcome::Fix(engine.fix(root, &index, false, alint_core::Applicability::Unsafe)?)
+        }
         Step::FixDryRun => {
             StepOutcome::Fix(engine.fix(root, &index, true, alint_core::Applicability::Safe)?)
         }
@@ -315,10 +318,11 @@ fn assert_step(
         (StepOutcome::Check(_), None)
             if expect.applied.is_some()
                 || expect.skipped.is_some()
+                || expect.suggested.is_some()
                 || expect.unfixable.is_some() =>
         {
             return Err(Error::scenario(format!(
-                "{prefix}: check step cannot carry applied/skipped/unfixable expectations"
+                "{prefix}: check step cannot carry applied/skipped/suggested/unfixable expectations"
             )));
         }
         (StepOutcome::Check(_), None) => {}
@@ -331,6 +335,11 @@ fn assert_step(
             if let Some(skipped) = &expect.skipped {
                 assert_fix_status(&prefix, "skipped", report, skipped, |s| {
                     matches!(s, FixStatus::Skipped(_))
+                })?;
+            }
+            if let Some(suggested) = &expect.suggested {
+                assert_fix_status(&prefix, "suggested", report, suggested, |s| {
+                    matches!(s, FixStatus::Suggested { .. })
                 })?;
             }
             if let Some(unfixable) = &expect.unfixable {
@@ -426,4 +435,47 @@ fn assert_fix_status(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult, FixStatus, Level, Violation};
+
+    fn report_with_suggested() -> FixReport {
+        FixReport {
+            results: vec![FixRuleResult {
+                rule_id: "r".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation::new("v"),
+                    status: FixStatus::Suggested {
+                        summary: "would edit x".into(),
+                        edit: FixEdit::SetContent {
+                            path: std::path::PathBuf::from("x"),
+                            content: Vec::new(),
+                        },
+                    },
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn assert_fix_status_matches_suggested_rule_set() {
+        let report = report_with_suggested();
+        // The rule shows up in the "suggested" set.
+        assert_fix_status("t", "suggested", &report, &["r".to_string()], |s| {
+            matches!(s, FixStatus::Suggested { .. })
+        })
+        .expect("rule r is Suggested");
+        // Expecting a different rule id is a mismatch error.
+        assert!(
+            assert_fix_status("t", "suggested", &report, &["other".to_string()], |s| {
+                matches!(s, FixStatus::Suggested { .. })
+            })
+            .is_err(),
+            "a wrong rule set must fail the assertion"
+        );
+    }
 }

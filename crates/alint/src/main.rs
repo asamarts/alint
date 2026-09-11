@@ -7,7 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use alint_core::{Engine, RuleRegistry, WalkOptions, walk};
+use alint_core::{Engine, FixReport, FixRuleResult, FixStatus, RuleRegistry, WalkOptions, walk};
 use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
@@ -197,10 +197,14 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             dry_run,
             changed,
             base,
+            unsafe_fixes,
+            fix_only,
         } => cmd_fix(
             &path,
             dry_run,
             &ChangedMode::new(changed, base),
+            unsafe_fixes,
+            fix_only,
             &cli.only,
             &cli,
         ),
@@ -946,6 +950,8 @@ fn cmd_fix(
     path: &Path,
     dry_run: bool,
     changed: &ChangedMode,
+    unsafe_fixes: bool,
+    fix_only: bool,
     only: &[String],
     cli: &Cli,
 ) -> Result<ExitCode> {
@@ -999,19 +1005,60 @@ fn cmd_fix(
     };
 
     let index = walk(path, &walk_opts).context("walking repository")?;
-    // Phase 0 applies only the Safe tier; `--unsafe-fixes` (which raises this to
-    // Unsafe) lands with the first Unsafe op.
+    // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.
+    // No Unsafe op ships yet, so this is currently inert.
+    let threshold = if unsafe_fixes {
+        alint_core::Applicability::Unsafe
+    } else {
+        alint_core::Applicability::Safe
+    };
     let report = engine
-        .fix(path, &index, dry_run, alint_core::Applicability::Safe)
+        .fix(path, &index, dry_run, threshold)
         .context("applying fixes")?;
 
     let (mut out, opts) = render_env(cli)?;
-    format
-        .write_fix_with_options(&report, &mut out, opts)
-        .context("writing output")?;
+    if fix_only {
+        // Report only the fixes that were applied: drop the residual
+        // (skipped / suggested / unfixable) findings the flag suppresses.
+        let applied_only = FixReport {
+            results: report
+                .results
+                .iter()
+                .filter_map(|r| {
+                    let items: Vec<_> = r
+                        .items
+                        .iter()
+                        .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+                        .cloned()
+                        .collect();
+                    (!items.is_empty()).then(|| FixRuleResult {
+                        rule_id: r.rule_id.clone(),
+                        level: r.level,
+                        items,
+                    })
+                })
+                .collect(),
+        };
+        format
+            .write_fix_with_options(&applied_only, &mut out, opts)
+            .context("writing output")?;
+    } else {
+        format
+            .write_fix_with_options(&report, &mut out, opts)
+            .context("writing output")?;
+    }
     out.flush().ok();
 
-    let exit = if report.has_unfixable_errors()
+    let exit = if fix_only {
+        // Applied what we could; a residual finding is expected and suppressed.
+        // Fail only if a fix was attempted and errored (a hard error already
+        // propagated via `?` above).
+        if report.had_fix_error() {
+            ExitCode::from(1)
+        } else {
+            ExitCode::SUCCESS
+        }
+    } else if report.has_unfixable_errors()
         || (cli.fail_on_warning && report.has_unfixable_warnings())
     {
         ExitCode::from(1)
