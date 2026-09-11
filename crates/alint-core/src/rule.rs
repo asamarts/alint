@@ -861,21 +861,21 @@ pub fn read_for_fix(
     Ok(ReadForFix::Bytes(bytes))
 }
 
-/// The actual file [`write_atomic`] targets for `path`: a symlink is followed
-/// to its canonical target (so the write goes THROUGH the link, preserving it),
-/// and any other path is returned unchanged. The compose buffer keys on this so
-/// two paths that alias the same underlying file (a symlink and its in-tree
-/// target) coalesce to one entry and compose, matching the direct-write path.
-/// Falls back to `path` when the target cannot be canonicalized (e.g. it does
-/// not exist), so a caller never loses the write location.
+/// The canonical underlying file a write to `path` ultimately modifies, with
+/// EVERY symlink in the path resolved — a symlinked file AND a file reached
+/// through a symlinked directory both collapse to the same real path. The
+/// compose buffer keys on this so two paths that alias one underlying file
+/// coalesce to a single entry and compose, exactly as the direct-write path
+/// does (a temp+rename through either alias lands on the same real file).
+///
+/// This is a FULL canonicalization, deliberately stronger than
+/// [`write_atomic`]'s own final-component symlink check (which exists only to
+/// preserve the final link node during its rename): keying must reflect the
+/// real file, not the spelling. Falls back to `path` when it cannot be
+/// canonicalized (e.g. a race deleted it), so a key is never lost.
 #[must_use]
 pub(crate) fn resolve_write_target(path: &Path) -> PathBuf {
-    match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => {
-            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-        }
-        _ => path.to_path_buf(),
-    }
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
@@ -1233,5 +1233,45 @@ mod tests {
             ReadForFix::Skipped(_) => panic!("symlink and target must share one entry"),
         }
         assert_eq!(buf.borrow().len(), 1, "coalesced to a single keyed entry");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compose_buffer_coalesces_through_a_symlinked_dir() {
+        // R-audit-3: a file reached through a symlinked DIRECTORY must coalesce
+        // with the same file reached directly. This needs FULL canonicalization,
+        // not just a final-component symlink check (the final component --
+        // file.txt -- is a regular file in both spellings).
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        std::fs::write(dir.path().join("real/file.txt"), b"orig").unwrap();
+        symlink(dir.path().join("real"), dir.path().join("link")).unwrap(); // link/ -> real/
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+        };
+        // Write through the symlinked dir; read through the real dir -> hit.
+        ctx.commit_write(&dir.path().join("link/file.txt"), b"composed")
+            .unwrap();
+        match read_for_fix(
+            &dir.path().join("real/file.txt"),
+            Path::new("real/file.txt"),
+            &ctx,
+        )
+        .unwrap()
+        {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("dir-symlink alias must coalesce"),
+        }
+        assert_eq!(
+            buf.borrow().len(),
+            1,
+            "one entry for the real underlying file"
+        );
     }
 }

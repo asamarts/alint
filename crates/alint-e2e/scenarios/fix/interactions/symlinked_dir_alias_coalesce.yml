@@ -1,0 +1,38 @@
+name: a file reached through a symlinked directory coalesces into one fix
+tags: [fix, interactions, unix-only]
+
+# R-audit-3 regression: the compose buffer must key on the FULLY canonical
+# path, not just resolve a final-component symlink. A file reached through a
+# symlinked DIRECTORY (link/ -> real/) is the same underlying file as
+# real/file.rs, so the two must coalesce: one Applied (the file written) and
+# one Skipped (the alias, already clean once composed) -- matching the direct
+# path, where write_atomic's temp+rename lands on the same real file via either
+# spelling. Before the fix this reported two Applied and zero Skipped.
+
+given:
+  tree:
+    real:
+      file.rs: "fn a() {}   \n"
+    link: { "$symlink": "real" }
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix]
+
+expect:
+  # One Applied AND one Skipped for the same rule: the two aliases coalesced.
+  # Without full canonicalization this is two Applied / zero Skipped.
+  - applied: [no-ws]
+    skipped: [no-ws]
+
+expect_tree_mode: contains
+expect_tree:
+  real:
+    file.rs: "fn a() {}\n"
