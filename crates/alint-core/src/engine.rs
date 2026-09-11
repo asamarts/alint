@@ -9,9 +9,13 @@ use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::facts::{FactSpec, FactValues, evaluate_facts};
+use crate::located_fix::{self, LocatedEdit, LocatedOutcome};
 use crate::registry::RuleRegistry;
 use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
-use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation, write_atomic};
+use crate::rule::{
+    Applicability, Context, FixContext, FixEdit, FixOutcome, Fixer, ReadForFix, Rule, RuleResult,
+    Violation, read_for_fix, write_atomic,
+};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 
@@ -906,8 +910,20 @@ impl Engine {
     /// [`FixStatus::Unfixable`] entries so the caller sees them in the
     /// report. Rules that pass (no violations) are omitted from the
     /// result, same as [`Engine::run`]'s usual behaviour.
+    ///
+    /// `threshold` is the highest [`Applicability`] tier the caller opted into
+    /// applying (`Safe` for a bare `alint fix`, `Unsafe` for `--unsafe-fixes`);
+    /// it gates the located-edit regime. No Phase-0 op consults it (all are
+    /// `Safe` and whole-file), but it is live, not inert: the dormant located
+    /// pass below is threshold-driven.
     #[allow(clippy::too_many_lines)]
-    pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
+    pub fn fix(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        dry_run: bool,
+        threshold: Applicability,
+    ) -> Result<FixReport> {
         self.ensure_manifest_scope_resolvable()?;
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
             return Ok(FixReport {
@@ -1012,7 +1028,12 @@ impl Engine {
         }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
-        for entry in &self.entries {
+        // Accumulator for the located-edit regime, filled by fixers that opt in
+        // via `collects_located_edits` and applied once per file after the loop.
+        // Phase 0 stays empty (no shipped fixer opts in), so the located pass is
+        // a genuine no-op here.
+        let mut located_batches: BTreeMap<PathBuf, Vec<LocatedEdit>> = BTreeMap::new();
+        for (rule_index, entry) in self.entries.iter().enumerate() {
             if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                 continue;
             }
@@ -1049,6 +1070,47 @@ impl Engine {
             }
             let fixer = entry.rule.fixer();
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
+            // Located-edit fixers (Phase 1+) route through the batched
+            // located_fix path instead of `apply`: collect their byte-range
+            // edits per file (size-guarded via read_for_fix -- invariant 4 on
+            // the new path), tag each with the rule index and its ordinal for
+            // the deterministic total order, and defer application until after
+            // the loop so a file touched by several rules is spliced once. No
+            // Phase-0 fixer opts in, so this branch is never entered here.
+            if fixer.is_some_and(Fixer::collects_located_edits) {
+                let f = fixer.expect("guarded by is_some_and above");
+                let mut by_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
+                for v in violations {
+                    let Some(key) = v.path.as_deref().map(Path::to_path_buf) else {
+                        continue;
+                    };
+                    by_file.entry(key).or_default().push(v);
+                }
+                for (file, file_violations) in by_file {
+                    let abs = root.join(&file);
+                    let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
+                        Ok(ReadForFix::Bytes(b)) => b,
+                        // Over the size cap or unreadable: no located edit
+                        // (fail-open, matching the whole-file read path).
+                        Ok(ReadForFix::Skipped(_)) | Err(_) => continue,
+                    };
+                    for (ordinal, collected) in f
+                        .collect_edits(&file_violations, &file, &bytes, root)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        located_batches
+                            .entry(file.clone())
+                            .or_default()
+                            .push(LocatedEdit {
+                                rule_index,
+                                violation_index: ordinal,
+                                collected,
+                            });
+                    }
+                }
+                continue;
+            }
             let items: Vec<FixItem> = violations
                 .into_iter()
                 .map(|v| {
@@ -1071,6 +1133,60 @@ impl Engine {
                 level: entry.rule.level(),
                 items,
             });
+        }
+
+        // Apply the located-edit batches collected above. Per file, the edits
+        // are tier-filtered against `threshold`, ordered, overlap-skipped,
+        // verified, and spliced by located_fix, then written through the compose
+        // buffer so they flush once alongside the whole-file edits. Phase 0:
+        // `located_batches` is empty, so this is a no-op -- but `threshold` is
+        // genuinely consumed and the path is exercised by the engine's fixture
+        // test. Result items are grouped back to their rule and appended.
+        //
+        // Phase 1 caveat: edits are collected against the file's bytes in the
+        // loop, then re-read here. If a whole-file fixer buffered a change to the
+        // same file in between, this read (buffer-aware) would return different
+        // bytes and the located byte-offsets would be stale. That combination
+        // cannot arise in Phase 0 (no fixer emits located edits); the first
+        // located op must make the collect and apply reads consistent (collect +
+        // apply per file, or re-collect at apply time).
+        if !located_batches.is_empty() {
+            let mut located_items: BTreeMap<usize, Vec<FixItem>> = BTreeMap::new();
+            for (file, batch) in located_batches {
+                let abs = root.join(&file);
+                let original = match read_for_fix(&abs, &file, &fix_ctx) {
+                    Ok(ReadForFix::Bytes(b)) => b,
+                    Ok(ReadForFix::Skipped(_)) | Err(_) => continue,
+                };
+                let (new_bytes, outcomes) =
+                    located_fix::apply_file_edits(&original, batch, threshold);
+                if new_bytes != original {
+                    if let Err(source) = fix_ctx.commit_write(&abs, &new_bytes) {
+                        eprintln!("alint: could not stage {}: {source}", file.display());
+                    }
+                }
+                for (edit, outcome) in outcomes {
+                    located_items
+                        .entry(edit.rule_index)
+                        .or_default()
+                        .push(FixItem {
+                            violation: Violation::new(format!(
+                                "located edit in {}",
+                                file.display()
+                            ))
+                            .with_path(file.clone()),
+                            status: located_status(&edit.collected.edit, outcome),
+                        });
+                }
+            }
+            for (rule_index, items) in located_items {
+                let entry = &self.entries[rule_index];
+                results.push(FixRuleResult {
+                    rule_id: Arc::from(entry.rule.id()),
+                    level: entry.rule.level(),
+                    items,
+                });
+            }
         }
 
         // Flush the compose buffer: one atomic write per file any content fixer
@@ -1436,6 +1552,40 @@ impl Engine {
     }
 }
 
+/// Map a located edit's [`LocatedOutcome`] to its reported [`FixStatus`], with a
+/// summary derived from the edit's path. A Phase-1 op that emits located edits
+/// can carry a richer summary; Phase 0 never reaches this with real data (no
+/// fixer opts into the located path), so the generic wording is only exercised
+/// by the engine's fixture test.
+fn located_status(edit: &FixEdit, outcome: LocatedOutcome) -> FixStatus {
+    let path = located_edit_path(edit);
+    match outcome {
+        LocatedOutcome::Applied => FixStatus::Applied(format!("edited {path}")),
+        LocatedOutcome::Suggested => FixStatus::Suggested {
+            summary: format!("suggested edit to {path}"),
+            edit: edit.clone(),
+        },
+        LocatedOutcome::SkippedConflict => FixStatus::Skipped(format!(
+            "edit to {path} skipped: conflicts with another edit"
+        )),
+        LocatedOutcome::Dropped => {
+            FixStatus::Skipped(format!("edit to {path} not applicable at this tier"))
+        }
+    }
+}
+
+/// The display path a located edit touches, for its status summary.
+fn located_edit_path(edit: &FixEdit) -> String {
+    match edit {
+        FixEdit::ReplaceRange { path, .. }
+        | FixEdit::SetContent { path, .. }
+        | FixEdit::CreateFile { path, .. }
+        | FixEdit::DeleteFile { path }
+        | FixEdit::SetMode { path, .. } => path.display().to_string(),
+        FixEdit::RenameFile { from, to } => format!("{} -> {}", from.display(), to.display()),
+    }
+}
+
 /// Pick the [`Context`] a rule should evaluate against:
 /// `full_ctx` if it [`requires_full_index`](Rule::requires_full_index),
 /// otherwise the changed-only filtered context (falling back to
@@ -1623,6 +1773,141 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    // ---- Fixture for the located-edit regime (dormant in Phase 0) ----
+    //
+    // Exercises the engine wiring that no shipped fixer reaches yet: a fixer
+    // that opts into `collects_located_edits` and returns two byte-disjoint
+    // `ReplaceRange` edits tagged into ONE isolation group. The engine must
+    // collect them, splice through `located_fix`, write the result, and report.
+
+    #[derive(Debug)]
+    struct LocatedFixture;
+
+    impl crate::rule::Fixer for LocatedFixture {
+        fn describe(&self) -> String {
+            "fixture located fixer".to_string()
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            // Never called: the engine routes located fixers through collect_edits.
+            Ok(FixOutcome::Skipped("unused".to_string()))
+        }
+        fn collects_located_edits(&self) -> bool {
+            true
+        }
+        fn collect_edits(
+            &self,
+            _violations: &[Violation],
+            file: &Path,
+            _bytes: &[u8],
+            _root: &Path,
+        ) -> Vec<crate::rule::CollectedEdit> {
+            let mk = |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
+                edit: FixEdit::ReplaceRange {
+                    path: file.to_path_buf(),
+                    range,
+                    content: content.as_bytes().to_vec(),
+                },
+                applicability: Applicability::Safe,
+                verify: crate::rule::EditVerifier::None,
+                isolation_group: Some(1),
+            };
+            // Disjoint, but same isolation group: the earlier-ordered edit wins.
+            vec![mk(0..1, "X"), mk(4..5, "Y")]
+        }
+    }
+
+    #[derive(Debug)]
+    struct LocatedRule {
+        id: String,
+        scope: Scope,
+        fixer: LocatedFixture,
+    }
+
+    impl Rule for LocatedRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            Some(&self.scope)
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let mut out = Vec::new();
+            for entry in ctx.index.files() {
+                if self.scope.matches(&entry.path, ctx.index) {
+                    out.push(Violation::new("located hit").with_path(entry.path.clone()));
+                }
+            }
+            Ok(out)
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    fn located_rule() -> Box<dyn Rule> {
+        Box::new(LocatedRule {
+            id: "loc".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            fixer: LocatedFixture,
+        })
+    }
+
+    #[test]
+    fn located_regime_applies_batch_and_excludes_isolation_group() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let report = engine
+            .fix(tmp.path(), &idx(&["a.txt"]), false, Applicability::Safe)
+            .unwrap();
+        // First edit (0..1 -> X) applied; the second (same group) is a conflict.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn located_regime_honors_the_size_guard_on_the_collect_step() {
+        // A file over the fix_size_limit is skipped at the located collect read
+        // (invariant 4 on the new path): no edit is collected, nothing changes.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine =
+            Engine::new(vec![located_rule()], RuleRegistry::new()).with_fix_size_limit(Some(4));
+        let report = engine
+            .fix(tmp.path(), &idx(&["a.txt"]), false, Applicability::Safe)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "over-limit file must be left untouched"
+        );
+        // No located edits collected -> no located result rows for the rule.
+        assert!(
+            report.results.iter().all(|r| r.items.is_empty()),
+            "no items when the file is size-skipped"
+        );
     }
 
     #[test]

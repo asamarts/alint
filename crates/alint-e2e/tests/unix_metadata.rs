@@ -67,7 +67,9 @@ fn run_fix(root: &Path, config_yaml: &str) -> alint_core::FixReport {
     let config = load_config(root, config_yaml);
     let (engine, walk_opts) = build_engine(&config, alint_rules::builtin_registry());
     let index = walk(root, &walk_opts).unwrap();
-    engine.fix(root, &index, false).unwrap()
+    engine
+        .fix(root, &index, false, alint_core::Applicability::Safe)
+        .unwrap()
 }
 
 fn tempdir() -> tempfile::TempDir {

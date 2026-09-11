@@ -242,8 +242,12 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
 
     Ok(match step {
         Step::Check | Step::CheckChanged => StepOutcome::Check(engine.run(root, &index)?),
-        Step::Fix => StepOutcome::Fix(engine.fix(root, &index, false)?),
-        Step::FixDryRun => StepOutcome::Fix(engine.fix(root, &index, true)?),
+        Step::Fix => {
+            StepOutcome::Fix(engine.fix(root, &index, false, alint_core::Applicability::Safe)?)
+        }
+        Step::FixDryRun => {
+            StepOutcome::Fix(engine.fix(root, &index, true, alint_core::Applicability::Safe)?)
+        }
     })
 }
 

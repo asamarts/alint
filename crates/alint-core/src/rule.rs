@@ -779,6 +779,21 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
             })
             .collect()
     }
+
+    /// Whether this fixer emits *located* edits — byte-range
+    /// [`FixEdit::ReplaceRange`]s via [`collect_edits`](Self::collect_edits)
+    /// that the engine batches, tier-filters, verifies, and splices through the
+    /// located-edit path — rather than writing a whole file through
+    /// [`apply`](Self::apply).
+    ///
+    /// Default `false`: every Phase-0 fixer is a whole-file or path/existence op
+    /// and uses `apply`, so the located path is dormant (built and wired, but
+    /// never entered). The first `true` arrives with the Phase-1 `replace` op;
+    /// the engine then routes that rule's edits through
+    /// [`located_fix`](crate::located_fix) instead of `apply`.
+    fn collects_located_edits(&self) -> bool {
+        false
+    }
 }
 
 /// Result of [`read_for_fix`] — either the bytes of the file,

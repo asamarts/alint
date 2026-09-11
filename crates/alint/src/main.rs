@@ -999,8 +999,10 @@ fn cmd_fix(
     };
 
     let index = walk(path, &walk_opts).context("walking repository")?;
+    // Phase 0 applies only the Safe tier; `--unsafe-fixes` (which raises this to
+    // Unsafe) lands with the first Unsafe op.
     let report = engine
-        .fix(path, &index, dry_run)
+        .fix(path, &index, dry_run, alint_core::Applicability::Safe)
         .context("applying fixes")?;
 
     let (mut out, opts) = render_env(cli)?;

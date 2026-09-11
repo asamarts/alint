@@ -68,7 +68,12 @@ rules:
                     let fresh_idx = walk(fresh.path(), &WalkOptions::default()).unwrap();
                     let _ = fresh_idx;
                     engine
-                        .fix(tmp.path(), idx, /* dry_run */ true)
+                        .fix(
+                            tmp.path(),
+                            idx,
+                            /* dry_run */ true,
+                            alint_core::Applicability::Safe,
+                        )
                         .expect("fix");
                 },
             );
@@ -101,7 +106,11 @@ rules:
         let engine = build_engine(yaml);
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
-            b.iter(|| engine.fix(tmp.path(), idx, true).expect("fix"));
+            b.iter(|| {
+                engine
+                    .fix(tmp.path(), idx, true, alint_core::Applicability::Safe)
+                    .expect("fix")
+            });
         });
     }
     group.finish();
