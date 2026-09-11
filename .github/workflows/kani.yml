@@ -1,7 +1,8 @@
 # Kani bounded-proof job (Phase 5 / WS4, docs/design/formal-methods.md).
 #
-# Runs the `#[kani::proof]` harnesses (today: the path-confinement policy
-# proof in alint-core: crates/alint-core/src/pathsafe.rs). Kept OFF the PR path and on a weekly schedule +
+# Runs every `#[kani::proof]` harness in alint-core: the path-confinement
+# policy proof (pathsafe.rs) and the located-edit overlap-skip disjointness
+# proof (located_fix.rs). Kept OFF the PR path and on a weekly schedule +
 # manual dispatch, because model-checking time should never block a merge
 # — the proptest properties on the PR path are the always-on behaviour
 # spec; this is the deeper, slower guarantee.
@@ -28,8 +29,11 @@ jobs:
       - name: Run Kani proofs
         uses: model-checking/kani-github-action@2534b7aeb3c6b4b0a5ecc3981bb3e63d47b5b126 # v1
         with:
-          # Target alint-core (where the sole #[kani::proof] lives; alint-rules
-          # has none, so "-p alint-rules" verified ZERO harnesses and passed
-          # vacuously). Pin the harness by name so a future mis-target fails
-          # loudly instead of silently going green with nothing checked.
-          args: "-p alint-core --harness confine_steps_is_sound"
+          # Target alint-core, where every #[kani::proof] lives (alint-rules has
+          # none, so the original "-p alint-rules" verified ZERO harnesses and
+          # passed vacuously — R-KANI). No --harness filter, so a newly added
+          # proof runs here automatically. The anti-vacuous guard is now the
+          # always-on `kani_proofs_present` test (crates/alint-core/tests/): it
+          # reds normal PR CI if the proof set is ever emptied, so a vacuous
+          # weekly run can't reach main unnoticed.
+          args: "-p alint-core"

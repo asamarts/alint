@@ -212,6 +212,70 @@ fn verify_structured(bytes: &[u8], format: Format, query: &str, expect: &Expecte
     }
 }
 
+/// Bounded proof that the located-edit **overlap-skip** accepts a pairwise
+/// disjoint set. It models the `reserved_end` greedy in [`apply_file_edits`]:
+/// candidates arrive in the pinned total order (leading keys `(start, end)`), a
+/// running `reserved_end` holds the end of the last accepted edit, and an edit
+/// is accepted iff its `start` is at or after `reserved_end` (which then
+/// advances to that edit's `end`). The tier and isolation-group filters only
+/// *remove* candidates, and removing a candidate can never create an overlap,
+/// so they are abstracted away. The invariant proven -- every pair of accepted
+/// half-open ranges is disjoint -- is exactly what lets `splice` apply the
+/// accepted edits back-to-front without corrupting an earlier one's offsets.
+///
+/// The non-obvious step is that `reserved_end` is *overwritten* on each
+/// acceptance, not maxed: the proof confirms that acceptance's
+/// `start >= reserved_end` guard, over valid sorted ranges, keeps `reserved_end`
+/// non-decreasing, so an overwrite can never expose an earlier accepted range to
+/// a later overlapping one. This is an independent formulation of the same
+/// policy `apply_file_edits` runs; the fixture tests below exercise the real
+/// function, and this harness proves the combinatorial core exhaustively.
+#[cfg(kani)]
+mod kani_proofs {
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn overlap_skip_accepts_a_pairwise_disjoint_set() {
+        const N: usize = 5;
+        let starts: [usize; N] = kani::any();
+        let ends: [usize; N] = kani::any();
+
+        // Preconditions the real path establishes before overlap-skip runs:
+        // every range is valid (`start <= end`), and the batch is in ascending
+        // total order, whose leading keys are `(start, end)`.
+        for i in 0..N {
+            kani::assume(starts[i] <= ends[i]);
+        }
+        for i in 1..N {
+            let ordered =
+                starts[i - 1] < starts[i] || (starts[i - 1] == starts[i] && ends[i - 1] <= ends[i]);
+            kani::assume(ordered);
+        }
+
+        // The `reserved_end` greedy, structurally identical to the accept step
+        // of `apply_file_edits`.
+        let mut reserved_end: Option<usize> = None;
+        let mut accepted = [false; N];
+        for i in 0..N {
+            if reserved_end.is_some_and(|end| starts[i] < end) {
+                continue; // overlap-skip: conflicts with an accepted edit
+            }
+            reserved_end = Some(ends[i]);
+            accepted[i] = true;
+        }
+
+        // Invariant: accepted half-open ranges `[start, end)` are pairwise
+        // disjoint.
+        for a in 0..N {
+            for b in (a + 1)..N {
+                if accepted[a] && accepted[b] {
+                    let disjoint = ends[a] <= starts[b] || ends[b] <= starts[a];
+                    assert!(disjoint, "overlap-skip must accept only disjoint ranges");
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
