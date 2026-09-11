@@ -58,6 +58,11 @@ Options:
           [default: auto]
           [possible values: auto, always, never]
 
+      --diff
+          Show a unified diff of the fixes that would be applied, writing nothing. Reflects the
+          composed result at the chosen tier; the exit code matches a real `fix`. Output is a
+          unified diff regardless of `--format`
+
       --ascii
           Force ASCII glyphs in human output.
           

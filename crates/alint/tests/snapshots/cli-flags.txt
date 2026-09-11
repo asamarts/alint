@@ -88,6 +88,7 @@
   --changed
   --color <WHEN>
   --compact
+  --diff
   --dry-run
   --fail-on-warning
   --fix-only

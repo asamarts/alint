@@ -231,6 +231,12 @@ pub(crate) enum Command {
         /// For "apply what you can and move on" workflows.
         #[arg(long)]
         fix_only: bool,
+        /// Show a unified diff of the fixes that would be applied, writing
+        /// nothing. Reflects the composed result at the chosen tier; the exit
+        /// code matches a real `fix`. Output is a unified diff regardless of
+        /// `--format`.
+        #[arg(long)]
+        diff: bool,
     },
     /// Snapshot current violations so later runs fail only on new ones.
     ///

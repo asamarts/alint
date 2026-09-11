@@ -199,12 +199,16 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             base,
             unsafe_fixes,
             fix_only,
+            diff,
         } => cmd_fix(
             &path,
-            dry_run,
             &ChangedMode::new(changed, base),
-            unsafe_fixes,
-            fix_only,
+            &FixOptions {
+                dry_run,
+                unsafe_fixes,
+                fix_only,
+                diff,
+            },
             &cli.only,
             &cli,
         ),
@@ -946,15 +950,34 @@ fn report_notes_to_stderr(report: &alint_core::Report, show_notes: bool) {
     }
 }
 
+/// The boolean flags of `alint fix`, grouped so the command signature stays
+/// under clippy's argument/bool-parameter caps (mirrors [`SuggestOptions`]).
+// Independent CLI flags, not a state machine - same shape (and allow) as `Cli`.
+#[allow(clippy::struct_excessive_bools)]
+struct FixOptions {
+    /// `--dry-run`: report what would change, write nothing.
+    dry_run: bool,
+    /// `--unsafe-fixes`: raise the applied tier from Safe to Unsafe.
+    unsafe_fixes: bool,
+    /// `--fix-only`: report only what was applied; exit 0 unless a fix errored.
+    fix_only: bool,
+    /// `--diff`: render a unified diff of the composed result, write nothing.
+    diff: bool,
+}
+
 fn cmd_fix(
     path: &Path,
-    dry_run: bool,
     changed: &ChangedMode,
-    unsafe_fixes: bool,
-    fix_only: bool,
+    opts: &FixOptions,
     only: &[String],
     cli: &Cli,
 ) -> Result<ExitCode> {
+    let &FixOptions {
+        dry_run,
+        unsafe_fixes,
+        fix_only,
+        diff,
+    } = opts;
     require_directory(path)?;
     // Gate the output format *before* touching the tree: `fix` mutates files,
     // so a format we can't render must fail here, not after the write. Only
@@ -966,8 +989,14 @@ fn cmd_fix(
     // instead, and point `agent` at its real home: `check --format agent`
     // (whose per-violation `fix_command` drives the agentic fix loop; `fix`
     // itself has no agent report).
+    //
+    // `--diff` is exempt from the fix-report-format restriction: it emits a
+    // unified diff, not a fix report, so it is format-independent (a stray
+    // `--format sarif` alongside `--diff` still yields the diff, matching the
+    // flag's documented "regardless of --format"). The string is still parsed so
+    // a genuine typo (`--format bogus`) fails loudly either way.
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    if !matches!(format, Format::Human | Format::Json | Format::Markdown) {
+    if !diff && !matches!(format, Format::Human | Format::Json | Format::Markdown) {
         bail!(
             "`alint fix` supports only `--format human`, `--format json`, or \
              `--format markdown` (got {fmt:?}); the SARIF/GitHub/JUnit/GitLab/agent \
@@ -1012,6 +1041,22 @@ fn cmd_fix(
     } else {
         alint_core::Applicability::Safe
     };
+
+    // `--diff`: stage the composed result in memory and render it as a unified
+    // diff instead of writing. This is a preview, so it never touches the tree
+    // (regardless of `--dry-run`), and the diff is emitted verbatim regardless
+    // of `--format` (a unified diff is not a fix report). The exit code still
+    // matches the equivalent real `fix` so `--diff` slots into a gate.
+    if diff {
+        let (report, staged) = engine
+            .stage_fixes(path, &index, threshold)
+            .context("staging fixes")?;
+        let (mut out, _opts) = render_env(cli)?;
+        alint_output::write_fix_diff(&staged, &mut out).context("writing diff")?;
+        out.flush().ok();
+        return Ok(fix_exit_code(&report, fix_only, cli));
+    }
+
     let report = engine
         .fix(path, &index, dry_run, threshold)
         .context("applying fixes")?;
@@ -1049,10 +1094,16 @@ fn cmd_fix(
     }
     out.flush().ok();
 
-    let exit = if fix_only {
-        // Applied what we could; a residual finding is expected and suppressed.
-        // Fail only if a fix was attempted and errored (a hard error already
-        // propagated via `?` above).
+    Ok(fix_exit_code(&report, fix_only, cli))
+}
+
+/// The process exit code for a fix pass, shared by the write path, `--dry-run`,
+/// and `--diff`. `--fix-only` applied what it could, so a residual finding is
+/// expected and suppressed - it fails only if a fix was attempted and errored.
+/// Otherwise an unfixable error (or an unfixable warning under
+/// `--fail-on-warning`) fails the run.
+fn fix_exit_code(report: &FixReport, fix_only: bool, cli: &Cli) -> ExitCode {
+    if fix_only {
         if report.had_fix_error() {
             ExitCode::from(1)
         } else {
@@ -1064,8 +1115,7 @@ fn cmd_fix(
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
-    };
-    Ok(exit)
+    }
 }
 
 fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {

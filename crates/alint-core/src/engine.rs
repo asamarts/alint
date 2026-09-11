@@ -916,7 +916,6 @@ impl Engine {
     /// it gates the located-edit regime. No Phase-0 op consults it (all are
     /// `Safe` and whole-file), but it is live, not inert: the dormant located
     /// pass below is threshold-driven.
-    #[allow(clippy::too_many_lines)]
     pub fn fix(
         &self,
         root: &Path,
@@ -924,11 +923,126 @@ impl Engine {
         dry_run: bool,
         threshold: Applicability,
     ) -> Result<FixReport> {
+        // A real pass composes and flushes; a dry run composes nothing (so the
+        // flush is a no-op on the empty buffer regardless of the flag). No stage
+        // sink: whole-file fixers perform their effect directly (or, in a dry
+        // run, report only).
+        self.fix_run(
+            root, index, dry_run, threshold, /* flush */ !dry_run, /* stage_ops */ None,
+        )
+        .map(|(report, _staged)| report)
+    }
+
+    /// Compose the fixes without writing, and hand back what each file would
+    /// become: `(repo-relative path, old bytes, new bytes)` for every file a
+    /// fixer would change. Powers `alint fix --diff`. Runs the same compose
+    /// pass as [`fix`](Self::fix) with the flush suppressed, so the diff
+    /// reflects exactly what a real `fix` at this `threshold` would write, plus
+    /// the [`FixReport`] (for the exit predicate).
+    ///
+    /// # Errors
+    /// Propagates any hard error from the fix pass (walk / scope resolution).
+    pub fn stage_fixes(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        threshold: Applicability,
+    ) -> Result<(FixReport, Vec<StagedFix>)> {
+        // Whole-file fixers (create / remove / rename) write directly rather
+        // than through the compose buffer, so they would mutate the tree during
+        // a preview. The stage sink makes them record their `FixEdit` instead;
+        // `Some(&sink)` puts every direct-write fixer into that record-not-write
+        // mode (see `FixContext::stage_ops`), which is what keeps `--diff` from
+        // touching disk.
+        let stage_ops = RefCell::new(Vec::new());
+        let (report, buffer) = self.fix_run(
+            root,
+            index,
+            /* dry_run */ false,
+            threshold,
+            /* flush */ false,
+            Some(&stage_ops),
+        )?;
+
+        // Compose-buffer entries are in-place content edits. Keys are resolved
+        // absolute write targets; present them repo-relative, paired with the
+        // current on-disk (unwritten) bytes.
+        let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let mut staged: Vec<StagedFix> = buffer
+            .into_iter()
+            .map(|(target, new)| StagedFix {
+                path: target
+                    .strip_prefix(&canon_root)
+                    .unwrap_or(&target)
+                    .to_path_buf(),
+                old: std::fs::read(&target).unwrap_or_default(),
+                new,
+                kind: StagedKind::Modify,
+            })
+            .collect();
+
+        // Whole-file ops recorded by the stage sink. A fixer only reaches the
+        // sink on the path where it would really act (create only when absent,
+        // remove/rename only when present), so `old`/`new` follow from the op.
+        for edit in stage_ops.into_inner() {
+            match edit {
+                FixEdit::CreateFile { path, content } => staged.push(StagedFix {
+                    path,
+                    old: Vec::new(),
+                    new: content,
+                    kind: StagedKind::Create,
+                }),
+                FixEdit::DeleteFile { path } => {
+                    let old = std::fs::read(root.join(&path)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path,
+                        old,
+                        new: Vec::new(),
+                        kind: StagedKind::Delete,
+                    });
+                }
+                FixEdit::RenameFile { from, to } => {
+                    let old = std::fs::read(root.join(&from)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path: to,
+                        new: old.clone(),
+                        old,
+                        kind: StagedKind::Rename { from },
+                    });
+                }
+                // Content-shaped edits belong in the compose buffer, not here;
+                // ignore defensively so a future mis-wired fixer can't smuggle a
+                // content write past the diff.
+                FixEdit::SetContent { .. }
+                | FixEdit::ReplaceRange { .. }
+                | FixEdit::SetMode { .. } => {}
+            }
+        }
+
+        // Deterministic output: the compose buffer is sorted, the sink is
+        // push-ordered, so re-sort the union by the presented path.
+        staged.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok((report, staged))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn fix_run(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        dry_run: bool,
+        threshold: Applicability,
+        flush: bool,
+        stage_ops: Option<&RefCell<Vec<FixEdit>>>,
+    ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
-            return Ok(FixReport {
-                results: Vec::new(),
-            });
+            return Ok((
+                FixReport {
+                    results: Vec::new(),
+                },
+                BTreeMap::new(),
+            ));
         }
 
         let fact_values = evaluate_facts(&self.facts, root, index)?;
@@ -999,6 +1113,7 @@ impl Engine {
             // config-declared paths against the OWNING rule's permission.
             allow_out_of_root: false,
             compose: compose_buf.as_ref(),
+            stage_ops,
         };
 
         // Same `scope_filter.changed_since:` resolution as `run`, so a
@@ -1193,9 +1308,11 @@ impl Engine {
         }
 
         // Flush the compose buffer: one atomic write per file any content fixer
-        // touched, in deterministic (BTreeMap) order. `--dry-run` has no buffer,
-        // so this is a no-op there. Keys are the resolved absolute write targets
-        // (a symlink and its in-tree target share one key), written directly.
+        // touched, in deterministic (BTreeMap) order. Keys are the resolved
+        // absolute write targets (a symlink and its in-tree target share one
+        // key), written directly. `flush` is false for a stage (`--diff`) so the
+        // buffer is left unwritten for `stage_fixes` to diff; `--dry-run` has no
+        // buffer, so both are no-ops there.
         //
         // A file that cannot be written is NOT fatal: it is collected, and every
         // Applied item that resolves to it is downgraded to Skipped, so the rest
@@ -1203,30 +1320,35 @@ impl Engine {
         // path, where a failed `write_atomic` inside a fixer surfaces as
         // `Skipped("fix error: ...")` and the other fixers proceed (a single
         // read-only file must not abort the whole run or lose unrelated fixes).
-        if let Some(buf) = &compose_buf {
-            let mut failed: Vec<PathBuf> = Vec::new();
-            for (target, bytes) in buf.borrow().iter() {
-                if let Err(source) = write_atomic(target, bytes) {
-                    eprintln!("alint: could not write {}: {source}", target.display());
-                    failed.push(target.clone());
+        if flush {
+            if let Some(buf) = &compose_buf {
+                let mut failed: Vec<PathBuf> = Vec::new();
+                for (target, bytes) in buf.borrow().iter() {
+                    if let Err(source) = write_atomic(target, bytes) {
+                        eprintln!("alint: could not write {}: {source}", target.display());
+                        failed.push(target.clone());
+                    }
                 }
-            }
-            if !failed.is_empty() {
-                for rule in &mut results {
-                    for item in &mut rule.items {
-                        let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
-                            failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
-                        });
-                        if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
-                            item.status = FixStatus::Skipped(format!(
-                                "{FIX_ERROR_PREFIX} file could not be written"
-                            ));
+                if !failed.is_empty() {
+                    for rule in &mut results {
+                        for item in &mut rule.items {
+                            let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
+                                failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
+                            });
+                            if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
+                                item.status = FixStatus::Skipped(format!(
+                                    "{FIX_ERROR_PREFIX} file could not be written"
+                                ));
+                            }
                         }
                     }
                 }
             }
         }
-        Ok(FixReport { results })
+        Ok((
+            FixReport { results },
+            compose_buf.map_or_else(BTreeMap::new, RefCell::into_inner),
+        ))
     }
 
     /// Collect git's tracked-paths set, but only if at least one
@@ -1553,6 +1675,36 @@ impl Engine {
         }
         index.set_manifest_paths(map);
     }
+}
+
+/// One file a fix pass would change, captured by [`Engine::stage_fixes`] for
+/// `alint fix --diff`: the repo-relative `path` and the `old` / `new` byte
+/// contents (the composed result of every fixer that touched it), so a caller
+/// can render a diff without the change being written. [`kind`](Self::kind)
+/// distinguishes an in-place content edit from a whole-file create / delete /
+/// rename so the renderer can use the `/dev/null` and rename conventions.
+#[derive(Debug, Clone)]
+pub struct StagedFix {
+    pub path: PathBuf,
+    pub old: Vec<u8>,
+    pub new: Vec<u8>,
+    pub kind: StagedKind,
+}
+
+/// How a [`StagedFix`] changes its file, so a diff renderer can pick the right
+/// header convention (git uses `/dev/null` for a create/delete and explicit
+/// `rename from`/`rename to` lines for a rename).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedKind {
+    /// An existing file's contents change in place (the content-fixer path).
+    Modify,
+    /// A new file (`old` is empty; the diff's `---` side is `/dev/null`).
+    Create,
+    /// A removed file (`new` is empty; the diff's `+++` side is `/dev/null`).
+    Delete,
+    /// A rename from `from` to [`StagedFix::path`]; `old`/`new` are the file's
+    /// bytes (equal when the rename doesn't also rewrite content).
+    Rename { from: PathBuf },
 }
 
 /// Map a located edit's [`LocatedOutcome`] to its reported [`FixStatus`], with a
@@ -2008,6 +2160,31 @@ mod tests {
             std::fs::read(tmp.path().join("a.txt")).unwrap(),
             b"X1234567"
         );
+    }
+
+    #[test]
+    fn stage_fixes_composes_without_writing() {
+        // stage_fixes (for --diff) runs the compose pass but does NOT flush:
+        // it returns the composed (old, new) per file, and disk is untouched.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let (_report, staged) = engine
+            .stage_fixes(tmp.path(), &idx(&["a.txt"]), Applicability::Safe)
+            .unwrap();
+        // Disk is unchanged: nothing was flushed.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "stage_fixes must not write"
+        );
+        // One staged change carries old + the composed new bytes.
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].path, std::path::Path::new("a.txt"));
+        assert_eq!(staged[0].old, b"01234567");
+        assert_eq!(staged[0].new, b"X1234567");
+        // A content edit is an in-place modify.
+        assert_eq!(staged[0].kind, StagedKind::Modify);
     }
 
     #[test]

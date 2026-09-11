@@ -410,6 +410,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         }
     }
 
@@ -447,6 +448,7 @@ mod tests {
             fix_size_limit: Some(100),
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         let outcome = FileTrimTrailingWhitespaceFixer
             .apply(

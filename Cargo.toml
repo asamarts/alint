@@ -71,6 +71,8 @@ roxmltree = "0.20"
 java-properties = "2"
 encoding_rs = "0.8"
 hcl = { package = "hcl-rs", version = "0.18" }
+# Line-level unified diffs for `alint fix --diff`.
+similar = "3"
 
 # LSP server, slated for v0.11. Crate-choice rationale (`tower-lsp`
 # over `lsp-server`) is in `docs/design/v0.11/lsp_server.md`.

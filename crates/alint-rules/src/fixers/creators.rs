@@ -67,7 +67,16 @@ impl Fixer for FileCreateFixer {
             Ok(bytes) => bytes,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
-        if ctx.dry_run {
+        // A dry run reports only; a stage (`--diff`) records the create (with
+        // its resolved content) so the diff can render the new file. Both return
+        // before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::CreateFile {
+                    path: self.path.clone(),
+                    content: content.clone(),
+                });
+            }
             return Ok(FixOutcome::Applied(format!(
                 "would create {}",
                 self.path.display()
@@ -370,6 +379,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         }
     }
 
@@ -502,6 +512,36 @@ mod tests {
             FixOutcome::Skipped(_) => panic!("expected Applied"),
         }
         assert!(!tmp.path().join("x.txt").exists());
+    }
+
+    #[test]
+    fn file_create_in_stage_mode_records_content_without_writing() {
+        // Stage mode (`--diff`): a sink present, `dry_run` false. The create is
+        // recorded with its resolved content, and disk stays untouched.
+        let tmp = TempDir::new().unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("README.md"), "# Hi\n".into(), true);
+        let sink = std::cell::RefCell::new(Vec::new());
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: Some(&sink),
+        };
+        let outcome = fixer.apply(&Violation::new("missing"), &ctx).unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        assert!(
+            !tmp.path().join("README.md").exists(),
+            "stage must not create the file"
+        );
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::CreateFile {
+                path: PathBuf::from("README.md"),
+                content: b"# Hi\n".to_vec(),
+            }]
+        );
     }
 
     #[test]

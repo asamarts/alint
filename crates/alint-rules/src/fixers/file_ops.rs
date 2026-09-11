@@ -27,7 +27,14 @@ impl Fixer for FileRemoveFixer {
                 path.display()
             )));
         }
-        if ctx.dry_run {
+        // A dry run reports only; a stage (`--diff`) records the delete so the
+        // diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::DeleteFile {
+                    path: path.to_path_buf(),
+                });
+            }
             return Ok(FixOutcome::Applied(format!(
                 "would remove {}",
                 path.display()
@@ -115,7 +122,15 @@ impl Fixer for FileRenameFixer {
                 new_path.display()
             )));
         }
-        if ctx.dry_run {
+        // A dry run reports only; a stage (`--diff`) records the rename so the
+        // diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::RenameFile {
+                    from: path.to_path_buf(),
+                    to: new_path.clone(),
+                });
+            }
             return Ok(FixOutcome::Applied(format!(
                 "would rename {} -> {}",
                 path.display(),
@@ -172,6 +187,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         }
     }
 
@@ -347,5 +363,69 @@ mod tests {
             .unwrap();
         assert!(tmp.path().join("FooBar.rs").exists());
         assert!(!tmp.path().join("foo_bar.rs").exists());
+    }
+
+    // A `FixContext` in stage mode (`--diff`): a sink is present, `dry_run` is
+    // false. Direct-write fixers must record their `FixEdit` here and leave the
+    // tree untouched.
+    fn stage_ctx<'a>(
+        tmp: &'a TempDir,
+        sink: &'a std::cell::RefCell<Vec<FixEdit>>,
+    ) -> FixContext<'a> {
+        FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: Some(sink),
+        }
+    }
+
+    #[test]
+    fn file_remove_in_stage_mode_records_without_deleting() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("debug.log");
+        std::fs::write(&target, "noise").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let outcome = FileRemoveFixer
+            .apply(
+                &Violation::new("forbidden").with_path(Path::new("debug.log")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        assert!(target.exists(), "stage must not delete the file");
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::DeleteFile {
+                path: PathBuf::from("debug.log")
+            }]
+        );
+    }
+
+    #[test]
+    fn file_rename_in_stage_mode_records_without_renaming() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("FooBar.rs"), "x").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(Path::new("FooBar.rs")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(
+            tmp.path().join("FooBar.rs").exists(),
+            "stage must not rename"
+        );
+        assert!(!tmp.path().join("foo_bar.rs").exists());
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::RenameFile {
+                from: PathBuf::from("FooBar.rs"),
+                to: PathBuf::from("foo_bar.rs"),
+            }]
+        );
     }
 }

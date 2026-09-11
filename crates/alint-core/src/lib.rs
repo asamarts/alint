@@ -38,7 +38,7 @@ pub use config::{
     FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
     resolve_content_source,
 };
-pub use engine::{Engine, RuleEntry};
+pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};
 pub use extract::{Extract, ExtractSpec, LinesOpts, WholeFileOpts, extract_values, is_non_literal};
 pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};

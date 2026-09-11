@@ -524,6 +524,17 @@ pub struct FixContext<'a> {
     /// writes straight through, unchanged. Interior mutability because fixers
     /// hold `&FixContext`. See auto-fix.md 5.2 and the Phase 0 engine rework.
     pub compose: Option<&'a RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+    /// Sink for whole-file filesystem ops (create / remove / rename) when
+    /// *staging* for `alint fix --diff`. A content fixer routes through the
+    /// [`compose`](Self::compose) buffer, but a whole-file fixer performs its
+    /// effect directly in [`apply`](Fixer::apply) and would otherwise mutate the
+    /// tree during a preview. When this is `Some`, such a fixer records its
+    /// [`FixEdit`] here and returns *without touching disk*, so the diff can
+    /// render the op and `--diff` keeps its no-write contract. `Some` only in a
+    /// stage pass; a real `fix` and a `--dry-run` both leave it `None` (a real
+    /// fix writes directly; a dry run reports only). Interior mutability for the
+    /// same reason as `compose`.
+    pub stage_ops: Option<&'a RefCell<Vec<FixEdit>>>,
 }
 
 impl FixContext<'_> {
@@ -1092,6 +1103,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
         assert!(outcome.is_none());
@@ -1108,6 +1120,7 @@ mod tests {
             fix_size_limit: Some(64),
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
         match outcome {
@@ -1130,6 +1143,7 @@ mod tests {
             fix_size_limit: Some(1 << 20),
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
             ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
@@ -1148,6 +1162,7 @@ mod tests {
             fix_size_limit: Some(64),
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
             ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
@@ -1177,6 +1192,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: Some(&buf),
+            stage_ops: None,
         };
         let rel = Path::new("a.txt");
         // Compose mode: commit_write buffers; disk stays untouched.
@@ -1212,6 +1228,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: None,
+            stage_ops: None,
         };
         // No compose buffer: commit_write is a direct atomic write, identical
         // to calling write_atomic.
@@ -1240,6 +1257,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: Some(&buf),
+            stage_ops: None,
         };
         // Write through the LINK; read through the TARGET must see the write.
         ctx.commit_write(&link, b"composed").unwrap();
@@ -1269,6 +1287,7 @@ mod tests {
             fix_size_limit: None,
             allow_out_of_root: false,
             compose: Some(&buf),
+            stage_ops: None,
         };
         // Write through the symlinked dir; read through the real dir -> hit.
         ctx.commit_write(&dir.path().join("link/file.txt"), b"composed")
