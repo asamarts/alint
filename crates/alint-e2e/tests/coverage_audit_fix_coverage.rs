@@ -113,6 +113,51 @@ fn is_fix_step(step: &str) -> bool {
     step == "fix" || step == "fix_unsafe"
 }
 
+/// Classify one scenario's `when`/`expect` pass sequence: add every op a fix
+/// step *exercises* (its applied/suggested ids) to `covered`, and every op a
+/// step *proves convergent* to `converged`. Convergence is credited to a fix
+/// step's applied ops when the next step shows a fixpoint - either a clean
+/// `check` (Case B) or a no-op trailing `fix` with no residual skip (Case A).
+/// Ids that don't resolve inline (an `extends:`-sourced fixer) contribute
+/// nothing. Extracted so both branches are unit-tested directly, since the
+/// corpus's redundant Case-B coverage can't isolate Case A.
+fn classify_scenario(
+    when: &[String],
+    expect: &[Value],
+    id_to_op: &HashMap<String, String>,
+    covered: &mut BTreeSet<String>,
+    converged: &mut BTreeSet<String>,
+) {
+    for (i, step) in when.iter().enumerate() {
+        if !is_fix_step(step) {
+            continue;
+        }
+        let Some(exp) = expect.get(i) else {
+            continue;
+        };
+        // Exercised: every applied/suggested id this fix step names.
+        let mut fired = str_list(exp, "applied");
+        fired.extend(str_list(exp, "suggested"));
+        resolve_into(&fired, id_to_op, covered);
+
+        // Convergence: this fix step's applied ops, when the *next* step shows
+        // the pass reached a fixpoint.
+        let (Some(next_step), Some(next_exp)) = (when.get(i + 1), expect.get(i + 1)) else {
+            continue;
+        };
+        let applied = str_list(exp, "applied");
+        // Case B: a clean check right after the fix.
+        let clean_check = next_step == "check" && violations_empty(next_exp);
+        // Case A: a trailing fix that changed nothing (and skipped nothing).
+        let noop_refix = is_fix_step(next_step)
+            && str_list(next_exp, "applied").is_empty()
+            && str_list(next_exp, "skipped").is_empty();
+        if clean_check || noop_refix {
+            resolve_into(&applied, id_to_op, converged);
+        }
+    }
+}
+
 #[test]
 fn convergence_exempt_stays_empty() {
     assert!(
@@ -123,10 +168,6 @@ fn convergence_exempt_stays_empty() {
     );
 }
 
-// One linear pass: scan every scenario, resolve applied ids to ops, and
-// classify coverage/convergence, then emit a structured report. Splitting the
-// scan from the reporting would obscure the single accumulation loop.
-#[allow(clippy::too_many_lines)]
 #[test]
 fn every_fix_op_is_exercised_and_proven_convergent() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -174,34 +215,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
             .cloned()
             .unwrap_or_default();
 
-        for (i, step) in when.iter().enumerate() {
-            if !is_fix_step(step) {
-                continue;
-            }
-            let Some(exp) = expect.get(i) else {
-                continue;
-            };
-            // Exercised: every applied/suggested id this fix step names.
-            let mut fired = str_list(exp, "applied");
-            fired.extend(str_list(exp, "suggested"));
-            resolve_into(&fired, &id_to_op, &mut covered);
-
-            // Convergence: this fix step's applied ops, when the *next* step
-            // shows the pass reached a fixpoint.
-            let (Some(next_step), Some(next_exp)) = (when.get(i + 1), expect.get(i + 1)) else {
-                continue;
-            };
-            let applied = str_list(exp, "applied");
-            // Case B: a clean check right after the fix.
-            let clean_check = next_step == "check" && violations_empty(next_exp);
-            // Case A: a trailing fix that changed nothing (and skipped nothing).
-            let noop_refix = is_fix_step(next_step)
-                && str_list(next_exp, "applied").is_empty()
-                && str_list(next_exp, "skipped").is_empty();
-            if clean_check || noop_refix {
-                resolve_into(&applied, &id_to_op, &mut converged);
-            }
-        }
+        classify_scenario(&when, &expect, &id_to_op, &mut covered, &mut converged);
     }
 
     let all: Vec<&str> = FixSpec::ALL_OP_NAMES.to_vec();
@@ -257,4 +271,144 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
         );
     }
     panic!("\n{report}");
+}
+
+/// Deterministic unit tests for [`classify_scenario`], so both convergence
+/// shapes are gated directly on synthetic input. The corpus proves Case B many
+/// times over but has thin Case-A coverage (one scenario), and a corpus edit
+/// can't isolate one branch when an op has redundant proofs - these can.
+mod classify {
+    use std::collections::{BTreeSet, HashMap};
+
+    use serde_yaml_ng::Value;
+
+    use super::classify_scenario;
+
+    fn steps(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    fn exp(items: &[&str]) -> Vec<Value> {
+        items
+            .iter()
+            .map(|s| serde_yaml_ng::from_str(s).expect("valid expect yaml"))
+            .collect()
+    }
+
+    fn ops(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(id, op)| ((*id).to_string(), (*op).to_string()))
+            .collect()
+    }
+
+    fn run(
+        when: &[&str],
+        expect: &[&str],
+        map: &[(&str, &str)],
+    ) -> (BTreeSet<String>, BTreeSet<String>) {
+        let (mut covered, mut converged) = (BTreeSet::new(), BTreeSet::new());
+        classify_scenario(
+            &steps(when),
+            &exp(expect),
+            &ops(map),
+            &mut covered,
+            &mut converged,
+        );
+        (covered, converged)
+    }
+
+    #[test]
+    fn case_a_fix_fix_noop_credits_convergence() {
+        // [fix, fix] whose second fix applied nothing (and skipped nothing).
+        let (covered, converged) = run(
+            &["fix", "fix"],
+            &["applied: [r]", "applied: []"],
+            &[("r", "file_trim_trailing_whitespace")],
+        );
+        assert!(covered.contains("file_trim_trailing_whitespace"));
+        assert!(
+            converged.contains("file_trim_trailing_whitespace"),
+            "a no-op second fix is a convergence proof (Case A)"
+        );
+    }
+
+    #[test]
+    fn case_a_second_fix_with_a_residual_skip_does_not_converge() {
+        // "applied nothing because it skipped" must not masquerade as converged.
+        let (covered, converged) = run(
+            &["fix", "fix"],
+            &["applied: [r]", "{applied: [], skipped: [r]}"],
+            &[("r", "file_trim_trailing_whitespace")],
+        );
+        assert!(covered.contains("file_trim_trailing_whitespace"));
+        assert!(
+            !converged.contains("file_trim_trailing_whitespace"),
+            "a residual skip is not convergence"
+        );
+    }
+
+    #[test]
+    fn case_b_fix_then_clean_check_credits_convergence() {
+        let (_covered, converged) = run(
+            &["check", "fix", "check"],
+            &["violations: [{rule: r}]", "applied: [r]", "violations: []"],
+            &[("r", "file_create")],
+        );
+        assert!(
+            converged.contains("file_create"),
+            "clean check after fix converges (Case B)"
+        );
+    }
+
+    #[test]
+    fn case_b_fix_then_dirty_check_does_not_converge() {
+        let (covered, converged) = run(
+            &["fix", "check"],
+            &["applied: [r]", "violations: [{rule: r}]"],
+            &[("r", "file_create")],
+        );
+        assert!(covered.contains("file_create"));
+        assert!(
+            !converged.contains("file_create"),
+            "a check that still reports violations is not convergence"
+        );
+    }
+
+    #[test]
+    fn a_lone_fix_step_exercises_but_never_converges() {
+        let (covered, converged) = run(&["fix"], &["applied: [r]"], &[("r", "file_remove")]);
+        assert!(covered.contains("file_remove"));
+        assert!(
+            converged.is_empty(),
+            "a single fix pass proves nothing about a re-run"
+        );
+    }
+
+    #[test]
+    fn an_extends_sourced_id_contributes_nothing() {
+        // `external` isn't declared inline, so it resolves to no op - an
+        // `extends:`'d scenario can't red-herring the gate.
+        let (covered, converged) = run(
+            &["fix", "check"],
+            &["applied: [external]", "violations: []"],
+            &[("r", "file_create")],
+        );
+        assert!(
+            covered.is_empty(),
+            "unresolvable inline ids contribute nothing to coverage"
+        );
+        assert!(converged.is_empty());
+    }
+
+    #[test]
+    fn fix_unsafe_is_treated_as_a_fix_step() {
+        let (covered, converged) = run(
+            &["check", "fix_unsafe", "check"],
+            &["violations: [{rule: r}]", "applied: [r]", "violations: []"],
+            &[("r", "file_normalize_line_endings")],
+        );
+        assert!(covered.contains("file_normalize_line_endings"));
+        assert!(converged.contains("file_normalize_line_endings"));
+    }
 }
