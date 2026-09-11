@@ -27,6 +27,15 @@ impl Fixer for FileRemoveFixer {
                 path.display()
             )));
         }
+        // Yield to a pending content edit: if a content fixer earlier in this
+        // pass composed this file, removing it now would let the post-loop flush
+        // resurrect it. Skip; the remove applies on a rerun once the edit lands.
+        if ctx.has_pending_write(&abs) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a pending content edit this pass; rerun to remove it",
+                path.display()
+            )));
+        }
         // A dry run reports only; a stage (`--diff`) records the delete so the
         // diff can render it. Both return before touching disk.
         if ctx.dry_run || ctx.stage_ops.is_some() {
@@ -103,6 +112,15 @@ impl Fixer for FileRenameFixer {
                 path.display()
             )));
         }
+        // A non-UTF-8 extension can't survive the string-based basename rebuild:
+        // silently dropping it would rename `x.<non-utf8>` to `x` and change the
+        // file's type. Skip (the stem is already UTF-8-guarded above).
+        if path.extension().is_some_and(|e| e.to_str().is_none()) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a non-UTF-8 extension; not renaming",
+                path.display()
+            )));
+        }
 
         let mut new_basename = new_stem;
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
@@ -120,6 +138,16 @@ impl Fixer for FileRenameFixer {
             return Ok(FixOutcome::Skipped(format!(
                 "target {} already exists",
                 new_path.display()
+            )));
+        }
+        // Yield to a pending content edit on the source: if a content fixer
+        // earlier in this pass composed it, renaming now would strand the
+        // composed bytes at the vacated old path when the flush runs (a
+        // file-duplication corruption). Skip; the rename applies on a rerun.
+        if ctx.has_pending_write(&abs_from) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a pending content edit this pass; rerun to rename it",
+                path.display()
             )));
         }
         // A dry run reports only; a stage (`--diff`) records the rename so the
@@ -153,6 +181,11 @@ impl Fixer for FileRenameFixer {
         let stem = path.file_stem().and_then(|s| s.to_str())?;
         let new_stem = self.case.convert(stem);
         if new_stem == stem || new_stem.is_empty() {
+            return None;
+        }
+        // A non-UTF-8 extension can't survive the string rebuild; don't propose a
+        // rename that would drop it (mirrors the apply() guard).
+        if path.extension().is_some_and(|e| e.to_str().is_none()) {
             return None;
         }
         let mut new_basename = new_stem;
@@ -281,6 +314,29 @@ mod tests {
             FixOutcome::Skipped(reason) => assert!(reason.contains("already")),
             FixOutcome::Applied(_) => panic!("expected Skipped"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_rename_skips_a_non_utf8_extension_rather_than_dropping_it() {
+        // Phase-0 audit: a UTF-8 stem with a non-UTF-8 extension must NOT rename
+        // to a bare stem (dropping the extension changes the file's type). Skip.
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let tmp = TempDir::new().unwrap();
+        let name = OsStr::from_bytes(b"FooBar.\xff"); // UTF-8 stem, non-UTF-8 ext
+        std::fs::write(tmp.path().join(name), b"").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new(name)),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &outcome else {
+            panic!("expected Skipped for a non-UTF-8 extension, got {outcome:?}")
+        };
+        assert!(msg.contains("non-UTF-8 extension"), "message: {msg}");
+        assert!(tmp.path().join(name).exists(), "the file must be untouched");
     }
 
     #[test]

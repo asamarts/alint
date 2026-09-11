@@ -63,6 +63,23 @@ impl Fixer for FileCreateFixer {
                 self.path.display()
             )));
         }
+        // Defense in depth: never create-write THROUGH a symlink at the target.
+        // `abs.exists()` follows the link, so an existing target is caught above;
+        // a BROKEN symlink (target absent) is where it matters - it slips past
+        // the lexical/canonicalize confinement (a non-existent target
+        // canonicalizes to nothing, so a planted `evil -> /outside` link reads
+        // as in-root) and `fs::write` would then follow it out of the tree. A
+        // create should only ever make a NEW regular file, so refuse a symlink
+        // node here (`symlink_metadata` does not follow the link).
+        if abs
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is a symlink; refusing to create through it",
+                self.path.display()
+            )));
+        }
         let content = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
             Ok(bytes) => bytes,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
@@ -151,8 +168,26 @@ fn resolve_source_bytes(
             // confined, so an untrusted ruleset can't exfiltrate an out-of-tree
             // secret (`content_from: ../../secret`) into an in-repo file.
             let abs = confine_fix_path(rel, ctx_root, allow_out_of_root)?;
-            std::fs::read(&abs)
-                .map_err(|e| format!("content_from `{}` could not be read: {e}", rel.display()))
+            // Read through the capped/regular-file helper, NOT raw `fs::read`: a
+            // config-declared `content_from` is an attacker-reachable path, so a
+            // planted in-tree FIFO would otherwise block the whole run forever
+            // (even under `--dry-run`/`--diff`, which read here before their
+            // no-write early return), and a huge template would be slurped whole
+            // (OOM). `read_capped` refuses a non-regular file via a stat before
+            // opening and bounds the read at `MAX_ANALYZE_BYTES`.
+            crate::io::read_capped(&abs).map_err(|e| match e {
+                crate::io::ReadCapError::TooLarge(n) => format!(
+                    "content_from `{}` is too large to inline ({})",
+                    rel.display(),
+                    crate::io::over_cap(n)
+                ),
+                crate::io::ReadCapError::Io(source) => {
+                    format!(
+                        "content_from `{}` could not be read: {source}",
+                        rel.display()
+                    )
+                }
+            })
         }
     }
 }
@@ -444,6 +479,62 @@ mod tests {
         // The target file should NOT have been created since
         // we skipped before the write.
         assert!(!tmp.path().join("LICENSE").exists());
+    }
+
+    #[test]
+    fn file_create_rejects_a_non_regular_content_from_source() {
+        // Phase-0 audit: `content_from` reads through `read_capped`, which
+        // refuses a non-regular file (FIFO/socket/device/dir) via a stat BEFORE
+        // opening. A planted in-tree FIFO would otherwise block `alint fix`
+        // (even `--dry-run`/`--diff`) forever on the `O_RDONLY` open. A directory
+        // is the portable, hang-free proxy (`is_file() == false`, same as a
+        // FIFO) - this crate takes no libc dep, so it cannot `mkfifo` here.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("tmpl_dir")).unwrap();
+        let fixer = FileCreateFixer::new(
+            PathBuf::from("LICENSE"),
+            ContentSourceSpec::File(PathBuf::from("tmpl_dir")),
+            true,
+        );
+        let outcome = fixer
+            .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &outcome else {
+            panic!("expected Skipped for a non-regular content_from, got {outcome:?}")
+        };
+        assert!(
+            msg.contains("could not be read") && msg.contains("not a regular file"),
+            "message should name the non-regular source: {msg}"
+        );
+        assert!(!tmp.path().join("LICENSE").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_create_refuses_to_write_through_a_symlink_target() {
+        // Phase-0 audit (defense in depth): a broken symlink at the target slips
+        // past the canonicalize-based confinement (its absent target
+        // canonicalizes to nothing = in-root), and `fs::write` would follow it
+        // out of the tree. The fixer must refuse a symlink node.
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        let outside = tmp.path().join("OUTSIDE.txt"); // target absent -> broken link
+        symlink(&outside, tmp.path().join("evil")).unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("evil"), "PWNED\n".into(), true);
+        let outcome = fixer
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &outcome else {
+            panic!("expected Skipped for a symlink target, got {outcome:?}")
+        };
+        assert!(
+            msg.contains("symlink"),
+            "message should name the symlink: {msg}"
+        );
+        assert!(
+            !outside.exists(),
+            "must NOT have written through the symlink to the out-of-tree target"
+        );
     }
 
     #[test]

@@ -1,0 +1,47 @@
+name: a content fix and a rename on the same file compose safely (no duplication)
+tags: [fix, interactions, no_trailing_whitespace, file_trim_trailing_whitespace, filename_case, file_rename]
+
+# Phase-0 audit regression. Content fixers compose their write into an in-memory
+# buffer flushed AFTER the fixer loop; a whole-file op (rename) executes DURING
+# the loop. When both target one file, an unguarded rename moves the pre-edit
+# file and the flush then strands the composed bytes at the vacated old path -- a
+# file DUPLICATION (foo_bar.rs untrimmed AND a resurrected FooBar.rs trimmed).
+# The rename now YIELDS to a pending content edit (skips this pass), so:
+#   pass 1: trim applies (FooBar.rs trimmed), rename skipped -> NO duplication
+#   pass 2: FooBar.rs is clean, rename applies -> foo_bar.rs, trimmed
+# The final tree has exactly ONE file with the trimmed content.
+
+given:
+  tree:
+    src:
+      FooBar.rs: "pub fn a() {}   \n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+      - id: rust-snake
+        kind: filename_case
+        paths: "src/**/*.rs"
+        case: snake
+        level: error
+        fix:
+          file_rename: {}
+
+when: [fix, fix]
+
+expect:
+  # Pass 1: the content edit wins; the rename yields (no corruption).
+  - applied: [no-ws]
+    skipped: [rust-snake]
+  # Pass 2: the file is clean, so the rename applies.
+  - applied: [rust-snake]
+
+expect_tree:
+  src:
+    # Renamed AND trimmed, present at exactly one path -- no resurrected FooBar.rs.
+    foo_bar.rs: "pub fn a() {}\n"

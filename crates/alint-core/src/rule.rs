@@ -563,6 +563,19 @@ impl FixContext<'_> {
             None => write_atomic(abs, bytes),
         }
     }
+
+    /// True when a content fixer earlier in this pass has already composed a
+    /// pending whole-file write for `abs` (coalesced by resolved target, so a
+    /// symlink and its target share the answer). A whole-file op (remove /
+    /// rename) MUST yield when this is true: the pending content write is
+    /// flushed *after* the fixer loop, so acting on the pre-edit file now would
+    /// let the flush resurrect the removed/renamed path or strand the composed
+    /// bytes at a vacated path (a file-duplication corruption). Returns `false`
+    /// when there is no compose buffer (a `--dry-run` pass composes nothing).
+    pub fn has_pending_write(&self, abs: &Path) -> bool {
+        self.compose
+            .is_some_and(|buf| buf.borrow().contains_key(&resolve_write_target(abs)))
+    }
 }
 
 /// The result of applying (or simulating) one fix against one violation.

@@ -110,6 +110,17 @@ pub fn apply_file_edits(
             outcome[i] = LocatedOutcome::Dropped;
             continue;
         };
+        // Range validity is a precondition of `splice` (and of the sort's
+        // disjointness reasoning): `Vec::splice` panics on an inverted
+        // (`start > end`) or out-of-bounds (`end > len`) range. A fixer's ranges
+        // can go stale if an earlier fixer shortened the same file (the engine's
+        // Phase-1 caveat), so drop a malformed range defensively rather than
+        // crash the whole `fix`. This is what makes the overlap-skip Kani
+        // proof's `start <= end` assumption an established fact downstream.
+        if range.start > range.end || range.end > original.len() {
+            outcome[i] = LocatedOutcome::Dropped;
+            continue;
+        }
         if reserved_end.is_some_and(|end| range.start < end) {
             outcome[i] = LocatedOutcome::SkippedConflict;
             continue;
@@ -132,8 +143,20 @@ pub fn apply_file_edits(
     // the applied set is stable: an edit is applied only if it verifies in
     // the presence of the others that survive alongside it. Each pass
     // demotes at least one edit or stops, so it terminates in at most
-    // `accepted.len()` passes. Dormant in Phase 0 (no `Structured` verifier
-    // ships until Phase 2); the loop guarantees correctness when they do.
+    // `accepted.len()` passes.
+    //
+    // SAFETY vs MAXIMALITY: the output is always safe -- every edit that stays
+    // `Applied` verifies against the final bytes, so nothing corrupt is ever
+    // written. It is NOT guaranteed maximal: a batch-demote (all failures in one
+    // pass) can over-demote when two edits fail together only because a third
+    // made the doc invalid, and a `Suggested`-demoted isolation-group leader is
+    // never re-promoted nor releases its group, so a group-mate it excluded
+    // stays `SkippedConflict`. Both drop good fixes but never write bad ones.
+    // The maximal (culprit-attributing / group-releasing) algorithm is deferred
+    // to Phase 2, when `Structured` verifiers and isolation groups first ship
+    // and can be designed + tested against real ops -- both are DORMANT in
+    // Phase 0 (no fixer emits a `Structured` verifier or a group), so this loop
+    // is never entered from a shipped config today.
     let mut result = splice(original, &accepted, &batch);
     loop {
         let mut newly_demoted = false;
@@ -332,6 +355,50 @@ mod tests {
         // replace: non-empty range, non-empty content.
         let (out, _) = apply_file_edits(b"abcd", vec![safe(1..3, "ZZZ")], Applicability::Safe);
         assert_eq!(out, b"aZZZd");
+    }
+
+    #[test]
+    fn out_of_bounds_range_is_dropped_not_panicked() {
+        // end 10 > len 4: `Vec::splice` would panic. The guard drops it instead.
+        let (out, o) = apply_file_edits(b"abcd", vec![safe(2..10, "X")], Applicability::Safe);
+        assert_eq!(
+            out, b"abcd",
+            "an out-of-bounds edit must not change the file"
+        );
+        assert_eq!(o[0].1, LocatedOutcome::Dropped);
+    }
+
+    #[test]
+    fn inverted_range_is_dropped_not_panicked() {
+        // start 5 > end 2: `Vec::splice` would panic. The guard drops it instead.
+        // Built as a struct literal, not `5..2`, so clippy's reversed-empty-range
+        // lint doesn't flag the range whose inversion is the point of the test.
+        let inverted = std::ops::Range::<usize> { start: 5, end: 2 };
+        let (out, o) = apply_file_edits(b"abcd", vec![safe(inverted, "X")], Applicability::Safe);
+        assert_eq!(out, b"abcd", "an inverted edit must not change the file");
+        assert_eq!(o[0].1, LocatedOutcome::Dropped);
+    }
+
+    #[test]
+    fn a_valid_edit_applies_when_a_malformed_sibling_is_dropped() {
+        // The guard drops only the malformed edit; a valid disjoint one applies.
+        let (out, o) = apply_file_edits(
+            b"abcd",
+            vec![safe(0..1, "X"), safe(2..10, "Y")],
+            Applicability::Safe,
+        );
+        assert_eq!(out, b"Xbcd");
+        // sorted by (start,end): the 0..1 edit is first, the 2..10 second.
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
+        assert_eq!(o[1].1, LocatedOutcome::Dropped);
+    }
+
+    #[test]
+    fn a_range_ending_exactly_at_len_is_valid() {
+        // Boundary: end == len is in-bounds for splice (it truncates the tail).
+        let (out, o) = apply_file_edits(b"abcd", vec![safe(2..4, "Z")], Applicability::Safe);
+        assert_eq!(out, b"abZ");
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
     }
 
     #[test]

@@ -1046,7 +1046,10 @@ fn cmd_fix(
     // diff instead of writing. This is a preview, so it never touches the tree
     // (regardless of `--dry-run`), and the diff is emitted verbatim regardless
     // of `--format` (a unified diff is not a fix report). The exit code still
-    // matches the equivalent real `fix` so `--diff` slots into a gate.
+    // matches the equivalent real `fix` so `--diff` slots into a gate -- with the
+    // one caveat inherent to any no-write preview: it cannot predict an I/O write
+    // failure (a read-only target), which a real `fix` would surface as an
+    // unfixable error (exit 1); the preview reports the edit as would-apply.
     if diff {
         let (report, staged) = engine
             .stage_fixes(path, &index, threshold)

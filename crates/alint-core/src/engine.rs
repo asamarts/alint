@@ -1332,6 +1332,19 @@ impl Engine {
                 if !failed.is_empty() {
                     for rule in &mut results {
                         for item in &mut rule.items {
+                            // Keying note: `failed` holds write-time canonical
+                            // targets; this re-derives `resolve_write_target` at
+                            // report time. If the file (or its parent) vanished
+                            // between the failed write and here, the report-time
+                            // canonicalize falls back to the non-canonical path
+                            // and won't match, so the item stays `Applied`. That
+                            // needs a write failure on a target that then
+                            // disappears -- exotic, and the common case (a
+                            // read-only file, permission denied) leaves the file
+                            // extant so the keys match. A whole-file op can no
+                            // longer vanish a composed file itself (it yields via
+                            // `has_pending_write`), which removes the in-engine
+                            // route to the mismatch.
                             let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
                                 failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
                             });

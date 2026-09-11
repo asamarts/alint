@@ -72,10 +72,12 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     let unfixable = report.unfixable();
     let suggested = report.suggested();
 
-    if applied + skipped + unfixable + suggested == 0 {
-        writeln!(w, "No violations found.")?;
-        return Ok(());
-    }
+    // NB: a fix report is about *fixes*, not violations, so it must NOT reuse
+    // check's "No violations found." for an empty report - under `--fix-only`
+    // the residual (skipped/unfixable) items are filtered out, so an empty
+    // report there means "0 fixes applied" over a tree that still has violations,
+    // not a clean tree. Always print the honest summary counts, matching the
+    // human and JSON formatters (which have no emptiness special-case).
 
     // `suggested` is appended only when non-zero so a run with no suggestions
     // renders byte-identically to before the tier machinery existed.
@@ -623,11 +625,21 @@ mod tests {
     }
 
     #[test]
-    fn fix_report_empty_renders_clean() {
+    fn fix_report_empty_renders_honest_summary_not_a_clean_banner() {
+        // A fix report must never claim "No violations found." (that's a check
+        // message): under `--fix-only` an empty report means 0 fixes applied over
+        // a still-dirty tree. It prints the honest zeroed summary instead.
         let out = render_fix(&FixReport {
             results: Vec::new(),
         });
-        assert!(out.contains("No violations found."));
+        assert!(
+            !out.contains("No violations found."),
+            "a fix report must not reuse check's clean banner: {out:?}"
+        );
+        assert!(
+            out.contains("**0 applied**, **0 skipped**, **0 unfixable**."),
+            "expected the zeroed fix summary: {out:?}"
+        );
     }
 
     #[test]

@@ -32,6 +32,17 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        // A NUL byte is valid UTF-8 (U+0000) but marks binary content, so the
+        // `from_utf8` check below is too weak on its own: without this guard a
+        // NUL-bearing file caught by a `paths: "**"` glob would be silently
+        // rewritten (H3 contract). Mirror the guard the sibling hygiene fixers
+        // already carry.
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not trimming",
+                path.display()
+            )));
+        }
         let Ok(text) = std::str::from_utf8(&existing) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is not UTF-8; cannot trim",
@@ -58,6 +69,9 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
 
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
+        if looks_binary(bytes) {
+            return None;
+        }
         let text = std::str::from_utf8(bytes).ok()?;
         let trimmed = strip_trailing_whitespace(text);
         if trimmed.as_bytes() == bytes {
@@ -312,6 +326,15 @@ impl Fixer for FileCollapseBlankLinesFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        // A NUL byte is valid UTF-8 but marks binary content: guard like the
+        // sibling hygiene fixers so a NUL-bearing file caught by `paths: "**"`
+        // is not silently rewritten (H3 contract).
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not collapsing blank lines",
+                path.display()
+            )));
+        }
         let Ok(text) = std::str::from_utf8(&existing) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is not UTF-8; cannot collapse",
@@ -339,6 +362,9 @@ impl Fixer for FileCollapseBlankLinesFixer {
 
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
+        if looks_binary(bytes) {
+            return None;
+        }
         let text = std::str::from_utf8(bytes).ok()?;
         let collapsed = collapse_blank_lines(text, self.max);
         if collapsed.as_bytes() == bytes {
@@ -485,25 +511,51 @@ mod tests {
         );
     }
 
-    #[test]
-    fn byte_level_fixers_skip_binary_files() {
-        // H3 regression: a byte-level fixer must not corrupt a binary file
-        // caught by a `paths: "**"` glob — a lone \n here would otherwise
-        // gain a \r and the NUL bytes would survive a line-ending rewrite.
+    fn assert_skips_binary(fixer: &dyn Fixer, binary: &[u8]) {
         let tmp = TempDir::new().unwrap();
-        let binary: &[u8] = b"\x00\x01\x02\nPNGish\x00\xff\n\x00";
-        std::fs::write(tmp.path().join("blob.bin"), binary).unwrap();
-        let outcome = FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf)
+        std::fs::write(tmp.path().join("blob"), binary).unwrap();
+        let outcome = fixer
             .apply(
-                &Violation::new("eol").with_path(std::path::Path::new("blob.bin")),
+                &Violation::new("x").with_path(std::path::Path::new("blob")),
                 &make_ctx(&tmp, false),
             )
             .unwrap();
-        assert!(matches!(outcome, FixOutcome::Skipped(_)));
+        assert!(
+            matches!(outcome, FixOutcome::Skipped(_)),
+            "a byte-level fixer must skip a binary file, got {outcome:?}"
+        );
         assert_eq!(
-            std::fs::read(tmp.path().join("blob.bin")).unwrap(),
+            std::fs::read(tmp.path().join("blob")).unwrap(),
             binary,
             "a binary file must be byte-identical after the fixer skips it"
+        );
+    }
+
+    #[test]
+    fn byte_level_fixers_skip_binary_files() {
+        // H3 regression + Phase-0 audit. A NUL byte is valid UTF-8 (U+0000), so a
+        // `from_utf8` check alone is too weak: EVERY byte-level fixer must consult
+        // `looks_binary` and refuse a NUL-bearing file caught by a `paths: "**"`
+        // glob. This one fixture would otherwise be edited by all four fixers -
+        // it has trailing whitespace (trim), a 3-blank-line run (collapse), LF
+        // line endings (normalize), and no final newline (append) - yet each must
+        // skip it and leave it byte-identical.
+        let binary: &[u8] = b"a \n\x00\n\n\nb";
+        assert!(
+            std::str::from_utf8(binary).is_ok(),
+            "the fixture must be valid UTF-8 so it exercises looks_binary, not from_utf8"
+        );
+        assert_skips_binary(&FileTrimTrailingWhitespaceFixer, binary);
+        assert_skips_binary(&FileCollapseBlankLinesFixer::new(1), binary);
+        assert_skips_binary(
+            &FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf),
+            binary,
+        );
+        assert_skips_binary(&FileAppendFinalNewlineFixer, binary);
+        // An invalid-UTF-8 binary (the weaker case) must skip too.
+        assert_skips_binary(
+            &FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf),
+            b"\x00\x01\x02\nPNGish\x00\xff\n\x00",
         );
     }
 

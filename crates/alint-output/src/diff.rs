@@ -31,12 +31,27 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
                 write_hunks(&format!("a/{path}"), &format!("b/{path}"), old, new, w)?;
             }
             // New file: the `---` side is `/dev/null` (git's create convention).
+            // `similar` emits nothing (header included) when the two sides are
+            // equal, so a content-less create (an empty marker: `.keep`,
+            // `py.typed`, empty `__init__.py`) would render as blank output. Emit
+            // the header explicitly in that case so the created file is visible.
             StagedKind::Create => {
-                write_hunks("/dev/null", &format!("b/{path}"), old, new, w)?;
+                if new.is_empty() {
+                    writeln!(w, "--- /dev/null")?;
+                    writeln!(w, "+++ b/{path}")?;
+                } else {
+                    write_hunks("/dev/null", &format!("b/{path}"), old, new, w)?;
+                }
             }
-            // Removed file: the `+++` side is `/dev/null`.
+            // Removed file: the `+++` side is `/dev/null`. Same empty-file guard
+            // as Create (deleting an already-empty file).
             StagedKind::Delete => {
-                write_hunks(&format!("a/{path}"), "/dev/null", old, new, w)?;
+                if old.is_empty() {
+                    writeln!(w, "--- a/{path}")?;
+                    writeln!(w, "+++ /dev/null")?;
+                } else {
+                    write_hunks(&format!("a/{path}"), "/dev/null", old, new, w)?;
+                }
             }
             StagedKind::Rename { from } => {
                 writeln!(w, "rename from {}", from.display())?;
@@ -185,5 +200,27 @@ mod tests {
     #[test]
     fn no_staged_fixes_renders_nothing() {
         assert_eq!(render(&[]), "");
+    }
+
+    #[test]
+    fn empty_file_create_still_emits_a_header() {
+        // An empty marker create (.keep / py.typed) must still appear in the
+        // diff, even though `similar` renders nothing for two equal empty sides.
+        let out = render(&[fix("NEW.keep", "", "", StagedKind::Create)]);
+        assert!(
+            out.contains("--- /dev/null"),
+            "empty create header missing: {out:?}"
+        );
+        assert!(out.contains("+++ b/NEW.keep"), "{out:?}");
+    }
+
+    #[test]
+    fn empty_file_delete_still_emits_a_header() {
+        let out = render(&[fix("gone.empty", "", "", StagedKind::Delete)]);
+        assert!(
+            out.contains("--- a/gone.empty"),
+            "empty delete header missing: {out:?}"
+        );
+        assert!(out.contains("+++ /dev/null"), "{out:?}");
     }
 }
