@@ -243,7 +243,9 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_strip_bom` | `{}` | `no_bom` |
 | `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
 
-Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. Fixers run serially after parallel evaluation so the tree is mutated from a single thread.
+Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full.
+
+Every op carries an applicability tier (`Safe` / `Unsafe` / `Suggestion` / `Never`); all shipped ops are `Safe`, so the default `alint fix` applies them and `--unsafe-fixes` is currently inert. Fixers run serially after the parallel evaluation, from a single thread. A content-editing op does not write as it runs: it routes its result into an in-memory compose buffer keyed by the resolved file target, and the engine flushes one atomic write per touched file, so several fixers editing the same file compose in config order rather than racing or clobbering. Path-only ops apply to the filesystem directly. `--dry-run` runs the whole pass but writes nothing; `--diff` stages the same composed result and prints it as a unified diff.
 
 ### Path template tokens
 
@@ -347,10 +349,10 @@ The pipeline from `alint check` to output:
 6. **Match.** Per rule, resolve matching files/dirs through `Scope::matches(&Path, &FileIndex)` (v0.9.10), so globs *and* `scope_filter:` ancestor predicates evaluate in one call. For `git_tracked_only:` rules the engine substitutes a pre-filtered `FileIndex` so out-of-scope paths never reach `evaluate` (v0.9.11).
 7. **Evaluate.** Per-file rules receive a pre-loaded `&[u8]` slice via `evaluate_file` (read once per file regardless of how many per-file rules match it); cross-file rules read what they need from the index. Both fan out via `rayon`.
 8. **Aggregate.** Collect `RuleResult`s into a `Report`.
-9. **Fix (optional).** Apply fixers serially; re-run checks.
+9. **Fix (optional).** Rules with a `fix:` block remediate what they flagged, gated by an applicability tier: the default threshold applies only `Safe` ops, `--unsafe-fixes` raises it to include `Unsafe` ones, and `Suggestion`-tier edits are reported but never written. Content-editing ops don't write as they go: each routes its result into a per-run in-memory buffer that composes every edit to a file in config order, so the engine emits a *single atomic write per file* however many fixers touched it. Path-only ops (create / remove / rename) act on the filesystem directly. A located-edit regime (collect, tier-filter, total-order, overlap-skip, verify, splice) is built alongside but stays dormant until an op emits ranged edits. Each result is reported `Applied`, `Skipped`, `Suggested`, or `Unfixable`; `--dry-run` computes all of it without writing, and `--diff` renders the composed result as a unified diff.
 10. **Emit.** Format via selected output.
 
-Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially (they mutate the tree).
+Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially, and a file's content edits compose in memory and flush as a single atomic write per file.
 
 Step 2 in detail: facts are evaluated once (sequentially, cached), then gate which rules run via their `when:` conditions.
 
