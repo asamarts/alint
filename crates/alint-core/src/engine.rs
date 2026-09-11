@@ -1160,7 +1160,10 @@ impl Engine {
                 };
                 let (new_bytes, outcomes) =
                     located_fix::apply_file_edits(&original, batch, threshold);
-                if new_bytes != original {
+                // `--dry-run` reports the outcomes but writes nothing: skip the
+                // stage entirely (commit_write in a dry run has no compose buffer
+                // and would write straight to disk, exactly what dry-run forbids).
+                if !dry_run && new_bytes != original {
                     if let Err(source) = fix_ctx.commit_write(&abs, &new_bytes) {
                         eprintln!("alint: could not stage {}: {source}", file.display());
                     }
@@ -1175,7 +1178,7 @@ impl Engine {
                                 file.display()
                             ))
                             .with_path(file.clone()),
-                            status: located_status(&edit.collected.edit, outcome),
+                            status: located_status(&edit.collected.edit, outcome, dry_run),
                         });
                 }
             }
@@ -1557,10 +1560,14 @@ impl Engine {
 /// can carry a richer summary; Phase 0 never reaches this with real data (no
 /// fixer opts into the located path), so the generic wording is only exercised
 /// by the engine's fixture test.
-fn located_status(edit: &FixEdit, outcome: LocatedOutcome) -> FixStatus {
+fn located_status(edit: &FixEdit, outcome: LocatedOutcome, dry_run: bool) -> FixStatus {
     let path = located_edit_path(edit);
     match outcome {
-        LocatedOutcome::Applied => FixStatus::Applied(format!("edited {path}")),
+        LocatedOutcome::Applied => FixStatus::Applied(if dry_run {
+            format!("would edit {path}")
+        } else {
+            format!("edited {path}")
+        }),
         LocatedOutcome::Suggested => FixStatus::Suggested {
             summary: format!("suggested edit to {path}"),
             edit: edit.clone(),
@@ -1783,7 +1790,9 @@ mod tests {
     // collect them, splice through `located_fix`, write the result, and report.
 
     #[derive(Debug)]
-    struct LocatedFixture;
+    struct LocatedFixture {
+        app: Applicability,
+    }
 
     impl crate::rule::Fixer for LocatedFixture {
         fn describe(&self) -> String {
@@ -1803,16 +1812,18 @@ mod tests {
             _bytes: &[u8],
             _root: &Path,
         ) -> Vec<crate::rule::CollectedEdit> {
-            let mk = |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
-                edit: FixEdit::ReplaceRange {
-                    path: file.to_path_buf(),
-                    range,
-                    content: content.as_bytes().to_vec(),
-                },
-                applicability: Applicability::Safe,
-                verify: crate::rule::EditVerifier::None,
-                isolation_group: Some(1),
-            };
+            let app = self.app;
+            let mk =
+                move |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range,
+                        content: content.as_bytes().to_vec(),
+                    },
+                    applicability: app,
+                    verify: crate::rule::EditVerifier::None,
+                    isolation_group: Some(1),
+                };
             // Disjoint, but same isolation group: the earlier-ordered edit wins.
             vec![mk(0..1, "X"), mk(4..5, "Y")]
         }
@@ -1849,12 +1860,16 @@ mod tests {
         }
     }
 
-    fn located_rule() -> Box<dyn Rule> {
+    fn located_rule_with(app: Applicability) -> Box<dyn Rule> {
         Box::new(LocatedRule {
             id: "loc".into(),
             scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
-            fixer: LocatedFixture,
+            fixer: LocatedFixture { app },
         })
+    }
+
+    fn located_rule() -> Box<dyn Rule> {
+        located_rule_with(Applicability::Safe)
     }
 
     #[test]
@@ -1907,6 +1922,91 @@ mod tests {
         assert!(
             report.results.iter().all(|r| r.items.is_empty()),
             "no items when the file is size-skipped"
+        );
+    }
+
+    #[test]
+    fn located_regime_dry_run_reports_but_does_not_write() {
+        // R-audit-4: the located application must NOT write in --dry-run (a dry
+        // run has no compose buffer, so an unguarded commit_write would hit
+        // disk). It still reports the outcome, as "would edit".
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                /* dry_run */ true,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "dry-run must not touch the file"
+        );
+        // Still reported: one "would edit" Applied + one conflict Skipped.
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(&i.status, FixStatus::Applied(s) if s.starts_with("would edit")))
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn located_regime_threshold_gates_unsafe_edits_through_the_engine() {
+        // The threshold reaches located_fix through the engine: an Unsafe edit
+        // is a Suggestion under a Safe threshold (not written), and applies once
+        // the caller opts into Unsafe.
+        let mk = || {
+            let tmp = tempfile::tempdir().unwrap();
+            std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+            tmp
+        };
+
+        // Safe threshold: both Unsafe edits are Suggestions; file untouched.
+        let tmp = mk();
+        let report = Engine::new(
+            vec![located_rule_with(Applicability::Unsafe)],
+            RuleRegistry::new(),
+        )
+        .fix(tmp.path(), &idx(&["a.txt"]), false, Applicability::Safe)
+        .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Suggested { .. }))
+                .count(),
+            2,
+            "both Unsafe edits are suggestions below the Safe threshold"
+        );
+
+        // Unsafe threshold: the batch applies (one edit; the other is an
+        // isolation conflict), and the file is written.
+        let tmp = mk();
+        Engine::new(
+            vec![located_rule_with(Applicability::Unsafe)],
+            RuleRegistry::new(),
+        )
+        .fix(tmp.path(), &idx(&["a.txt"]), false, Applicability::Unsafe)
+        .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
         );
     }
 
