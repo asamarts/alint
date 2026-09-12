@@ -52,6 +52,17 @@ impl Rule for FilenameCaseRule {
             let Some(stem) = entry.path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
+            // Dotfiles (`.gitignore`, `.env`, `.eslintrc`) have a structural
+            // leading dot that is not a case concern: their `file_stem` IS the
+            // dotted name, and there is no case-corrected form that keeps the
+            // dot (`tokenize` drops it). Flagging them would advertise a
+            // "fixable" violation whose only rename -- `.gitignore` -> `gitignore`
+            // -- silently changes the file's meaning (git stops honoring it; a
+            // `.env` with secrets becomes committable). Exempt them entirely so
+            // `check` and `fix` agree.
+            if stem.starts_with('.') {
+                continue;
+            }
             if !self.case.check(stem) {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
@@ -189,6 +200,30 @@ mod tests {
         let idx = index(&["docs/MainDoc.md"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert!(v.is_empty(), "out-of-scope shouldn't fire: {v:?}");
+    }
+
+    #[test]
+    fn evaluate_exempts_dotfiles() {
+        // Round-5 audit (A2): a dotfile's leading dot is structural, not a case
+        // concern; flagging it would advertise a "fixable" rename
+        // (`.gitignore` -> `gitignore`) that silently changes the file's meaning.
+        // Dotfiles are exempt, but a normal mis-cased file alongside them still
+        // fires (the exemption is targeted, not a blanket off-switch).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_case\n\
+             paths: \"**/*\"\n\
+             case: snake_case\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&[".gitignore", ".env", ".eslintrc.json", "Foo.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "only the non-dotfile PascalCase file fires; dotfiles exempt: {v:?}"
+        );
     }
 
     #[test]

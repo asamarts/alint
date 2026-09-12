@@ -96,6 +96,69 @@ fn diff_never_mutates_the_tree() {
     );
 }
 
+fn git(dir: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .expect("run git")
+}
+
+#[test]
+fn diff_output_applies_cleanly_with_git_apply() {
+    // Round-5 audit: the `--diff` output is documented as consumable by
+    // `git apply`. The rename op is a git-only construct that needs a
+    // `diff --git` envelope; without it `git apply` silently drops the rename
+    // (or rejects the whole patch). This gate applies the real preview to a git
+    // tree covering ALL four op kinds and asserts the result matches a real fix.
+    let tmp = setup();
+    let root = tmp.path();
+    // A committed baseline so `git apply` has something to patch against.
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    // Capture the preview, then apply it.
+    let diff = run(root, &["fix", "--diff", "."]);
+    let patch = root.join("fix.patch");
+    std::fs::write(&patch, &diff.stdout).unwrap();
+    let check = git(root, &["apply", "--check", "fix.patch"]);
+    assert!(
+        check.status.success(),
+        "`git apply --check` must accept the --diff output (all four op kinds); stderr:\n{}\n--- patch ---\n{}",
+        String::from_utf8_lossy(&check.stderr),
+        String::from_utf8_lossy(&diff.stdout),
+    );
+    let applied = git(root, &["apply", "fix.patch"]);
+    assert!(
+        applied.status.success(),
+        "git apply failed: {}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    std::fs::remove_file(&patch).unwrap();
+
+    // The applied tree must match what a real `alint fix` produces.
+    assert!(root.join("README.md").exists(), "create applied");
+    assert_eq!(
+        std::fs::read_to_string(root.join("README.md")).unwrap(),
+        "# Project\n"
+    );
+    assert!(!root.join("debug.log").exists(), "delete applied");
+    assert!(
+        root.join("src/foo_bar.rs").exists() && !root.join("src/FooBar.rs").exists(),
+        "rename applied (this is the regression: bare rename lines are dropped by git apply)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/bad.rs")).unwrap(),
+        "fn a() {}\n",
+        "modify applied"
+    );
+}
+
 #[test]
 fn diff_renders_every_op_kind() {
     let tmp = setup();

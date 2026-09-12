@@ -257,6 +257,36 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn write_atomic_preserves_setuid_and_setgid_bits() {
+        // Round-5 audit: `write_atomic` set the temp file's mode BEFORE writing,
+        // and a `write()` clears S_ISUID/S_ISGID (the kernel's
+        // `should_remove_suid`), silently stripping setuid/setgid from a fixed
+        // file. The plain executable bit survived, which is why the test above
+        // missed it. Now the mode is applied AFTER the last write, preserving the
+        // full mode word. `2775` = setgid + rwxrwxr-x is the tell (setgid is
+        // cleared on write only when group-executable).
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("helper.sh");
+        std::fs::write(&p, b"echo old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o6755)).unwrap();
+        // Re-read: the FS may already mask bits we can't set unprivileged; assert
+        // against what actually stuck so the test is meaningful either way.
+        let before = std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777;
+        write_atomic(&p, b"echo new").unwrap();
+        let after = std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            after, before,
+            "the full mode word (incl. setuid/setgid) must survive an atomic write"
+        );
+        // And specifically: if setgid stuck before, it must still be set.
+        if before & 0o2000 != 0 {
+            assert_ne!(after & 0o2000, 0, "setgid must survive an atomic write");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn write_atomic_writes_through_a_symlink_preserving_the_link() {
         // Regression: a bare temp+rename would replace the symlink NODE with a
         // regular file, diverging it from its target. write_atomic must write

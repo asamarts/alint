@@ -99,16 +99,39 @@ impl Fixer for FileRenameFixer {
                 path.display()
             )));
         };
-        let new_stem = self.case.convert(stem);
-        if new_stem == stem {
+        // Dotfiles are exempt (mirrors the `filename_case` detector): renaming
+        // `.gitignore` -> `gitignore` drops the structural leading dot and
+        // changes the file's meaning. The detector already skips them, so this
+        // is defense-in-depth (and covers any other rule that drives a rename).
+        if stem.starts_with('.') {
             return Ok(FixOutcome::Skipped(format!(
-                "{} already matches target case",
+                "{} is a dotfile; not renaming",
                 path.display()
             )));
         }
+        let new_stem = self.case.convert(stem);
         if new_stem.is_empty() {
             return Ok(FixOutcome::Skipped(format!(
                 "case conversion produced an empty stem for {}",
+                path.display()
+            )));
+        }
+        // The conversion must actually produce a CONFORMING name, or the rename
+        // would not converge (`check` keeps flagging it). A stem with no
+        // reachable target form -- a non-ASCII letter under an ASCII convention
+        // like snake (`café`), a leading-digit/all-symbol stem under camel/pascal
+        // -- is reported honestly here, NOT with the false "already matches
+        // target case" that made `fix` claim success on a still-flagged file.
+        if !self.case.check(&new_stem) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} cannot be renamed to a valid {} name",
+                path.display(),
+                self.case.display_name()
+            )));
+        }
+        if new_stem == stem {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already matches target case",
                 path.display()
             )));
         }
@@ -135,10 +158,22 @@ impl Fixer for FileRenameFixer {
         let abs_from = ctx.root.join(path);
         let abs_to = ctx.root.join(&new_path);
         if abs_to.exists() {
-            return Ok(FixOutcome::Skipped(format!(
-                "target {} already exists",
-                new_path.display()
-            )));
+            // On a case-INSENSITIVE filesystem (macOS/Windows) a pure case flip
+            // (`Foo.rs` -> `foo.rs`) reports the target as "existing" because it
+            // IS the source file (same inode), which would wrongly abort the
+            // rename and never converge. That is not a real collision: allow it
+            // through only when the two paths resolve to the SAME file. On a
+            // case-sensitive FS the target genuinely does not exist yet, so this
+            // branch isn't even entered and behaviour is unchanged.
+            let from_canon = std::fs::canonicalize(&abs_from).ok();
+            let to_canon = std::fs::canonicalize(&abs_to).ok();
+            let same_file = from_canon.is_some() && from_canon == to_canon;
+            if !same_file {
+                return Ok(FixOutcome::Skipped(format!(
+                    "target {} already exists",
+                    new_path.display()
+                )));
+            }
         }
         // Yield to a pending content edit on the source: if a content fixer
         // earlier in this pass composed it, renaming now would strand the
@@ -314,6 +349,80 @@ mod tests {
             FixOutcome::Skipped(reason) => assert!(reason.contains("already")),
             FixOutcome::Applied(_) => panic!("expected Skipped"),
         }
+    }
+
+    #[test]
+    fn file_rename_never_strips_the_leading_dot_off_a_dotfile() {
+        // Round-5 audit (A2): renaming `.gitignore` -> `gitignore` would drop the
+        // structural leading dot and change the file's meaning (git stops
+        // honoring it; a `.env` with secrets becomes committable). Dotfiles are
+        // exempt -- the fixer must skip, not rename.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".gitignore"), "build/\n").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new(".gitignore")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("dotfile")));
+        assert!(
+            tmp.path().join(".gitignore").exists(),
+            "the dotfile is untouched"
+        );
+        assert!(
+            !tmp.path().join("gitignore").exists(),
+            "no de-dotted copy created"
+        );
+    }
+
+    #[test]
+    fn file_rename_reports_honestly_when_no_conforming_name_exists() {
+        // Round-5 audit (A3): a stem with no reachable target form (a non-ASCII
+        // letter under snake) must NOT report the false "already matches target
+        // case" (which left `fix` claiming success on a still-flagged file). It
+        // is skipped with an honest "cannot be renamed" message and the file is
+        // left in place.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("café.rs"), "").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("café.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        match outcome {
+            FixOutcome::Skipped(reason) => {
+                assert!(
+                    reason.contains("cannot be renamed"),
+                    "honest reason: {reason}"
+                );
+                assert!(
+                    !reason.contains("already matches"),
+                    "must not lie: {reason}"
+                );
+            }
+            FixOutcome::Applied(_) => panic!("expected Skipped"),
+        }
+        assert!(tmp.path().join("café.rs").exists());
+    }
+
+    #[test]
+    fn file_rename_allows_a_pure_case_flip() {
+        // Round-5 audit (A5): a case-only rename (`Foo.rs` -> `foo.rs`) must work.
+        // On a case-sensitive FS (this CI) the target doesn't exist so it renames
+        // straightforwardly; on a case-INSENSITIVE FS the same-file check added
+        // for A5 keeps it from being wrongly rejected as a self-collision. This
+        // guards the common-case path on every platform.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Foo.rs"), "").unwrap();
+        FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("Foo.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(tmp.path().join("foo.rs").exists());
     }
 
     #[cfg(unix)]

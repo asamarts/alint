@@ -958,11 +958,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
     let write = || -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
-        // Preserve the original file's mode when it exists (a rewrite).
+        f.write_all(bytes)?;
+        // Preserve the original file's mode when it exists (a rewrite) -- AFTER
+        // the write, not before. A `write()` clears the setuid/setgid bits (the
+        // kernel's `should_remove_suid`), so copying the mode before writing
+        // would silently drop S_ISUID/S_ISGID from a setgid group helper or the
+        // like. Applying the mode after the last write preserves the full mode
+        // word (the plain executable bit survived either way, which is why the
+        // ordering bug went unnoticed).
         if let Ok(meta) = std::fs::metadata(path) {
             f.set_permissions(meta.permissions())?;
         }
-        f.write_all(bytes)?;
         f.sync_all()
     };
     if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {

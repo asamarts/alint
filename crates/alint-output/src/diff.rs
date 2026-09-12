@@ -2,9 +2,15 @@
 //! would-apply edits, computed with `similar`. A text file gets a line-level
 //! unified diff; a file whose content isn't UTF-8 gets a one-line binary
 //! summary (a line diff of binary is not meaningful). The header follows git
-//! conventions so the output pastes into standard diff tooling: `a/<path>` and
-//! `b/<path>` for an in-place edit, `/dev/null` on the absent side of a create
-//! or delete, and explicit `rename from` / `rename to` lines for a rename.
+//! conventions so the output is consumable by `git apply`: a traditional
+//! `a/<path>` / `b/<path>` unified diff for an in-place edit, `/dev/null` on the
+//! absent side of a create or delete, and a full `diff --git` envelope with
+//! `similarity index` / `rename from` / `rename to` for a rename (a git-only
+//! construct that `git apply` ignores -- silently, or by rejecting the whole
+//! patch -- unless wrapped in the envelope). Paths containing a control byte
+//! (a tab is git's field separator; a newline ends the line), a double quote,
+//! or a backslash are C-quoted the way git's `core.quotePath` does, so an
+//! unusual filename cannot corrupt the header.
 
 use std::io::Write;
 
@@ -19,7 +25,7 @@ use similar::TextDiff;
 /// Propagates any write error from `w`.
 pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Result<()> {
     for fix in staged {
-        let path = fix.path.display();
+        let path = fix.path.display().to_string();
         // Non-UTF-8 on either side: a line diff isn't meaningful, so summarize.
         let (Ok(old), Ok(new)) = (std::str::from_utf8(&fix.old), std::str::from_utf8(&fix.new))
         else {
@@ -28,7 +34,7 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
         };
         match &fix.kind {
             StagedKind::Modify => {
-                write_hunks(&format!("a/{path}"), &format!("b/{path}"), old, new, w)?;
+                write_hunks(&a(&path), &b(&path), old, new, w)?;
             }
             // New file: the `---` side is `/dev/null` (git's create convention).
             // `similar` emits nothing (header included) when the two sides are
@@ -38,39 +44,91 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
             StagedKind::Create => {
                 if new.is_empty() {
                     writeln!(w, "--- /dev/null")?;
-                    writeln!(w, "+++ b/{path}")?;
+                    writeln!(w, "+++ {}", b(&path))?;
                 } else {
-                    write_hunks("/dev/null", &format!("b/{path}"), old, new, w)?;
+                    write_hunks("/dev/null", &b(&path), old, new, w)?;
                 }
             }
             // Removed file: the `+++` side is `/dev/null`. Same empty-file guard
             // as Create (deleting an already-empty file).
             StagedKind::Delete => {
                 if old.is_empty() {
-                    writeln!(w, "--- a/{path}")?;
+                    writeln!(w, "--- {}", a(&path))?;
                     writeln!(w, "+++ /dev/null")?;
                 } else {
-                    write_hunks(&format!("a/{path}"), "/dev/null", old, new, w)?;
+                    write_hunks(&a(&path), "/dev/null", old, new, w)?;
                 }
             }
+            // A rename is a git-only construct: bare `rename from`/`rename to`
+            // lines are silently ignored (or reject the whole patch) unless
+            // wrapped in a `diff --git` envelope, so emit the full git form that
+            // `git apply` accepts -- `similarity index 100%` for a pure rename,
+            // otherwise the rename headers plus the content hunks.
             StagedKind::Rename { from } => {
-                writeln!(w, "rename from {}", from.display())?;
-                writeln!(w, "rename to {path}")?;
-                // A pure rename has no content hunk; only emit one when the
-                // rename also rewrites the file.
+                let from = from.display().to_string();
+                writeln!(
+                    w,
+                    "diff --git {} {}",
+                    git_quote_path(&format!("a/{from}")),
+                    git_quote_path(&format!("b/{path}"))
+                )?;
+                if fix.old == fix.new {
+                    writeln!(w, "similarity index 100%")?;
+                }
+                writeln!(w, "rename from {}", git_quote_path(&from))?;
+                writeln!(w, "rename to {}", git_quote_path(&path))?;
                 if fix.old != fix.new {
-                    write_hunks(
-                        &format!("a/{}", from.display()),
-                        &format!("b/{path}"),
-                        old,
-                        new,
-                        w,
-                    )?;
+                    write_hunks(&a(&from), &b(&path), old, new, w)?;
                 }
             }
         }
     }
     Ok(())
+}
+
+/// `a/<path>`, git-C-quoted if the path needs it (the `---` / `diff --git` side).
+fn a(path: &str) -> String {
+    git_quote_path(&format!("a/{path}"))
+}
+
+/// `b/<path>`, git-C-quoted if the path needs it (the `+++` / `diff --git` side).
+fn b(path: &str) -> String {
+    git_quote_path(&format!("b/{path}"))
+}
+
+/// Quote a path for a git diff header the way git's `quote_c_style` does, so a
+/// path containing a control byte (a tab is git's field separator; a newline
+/// ends the line), a double quote, or a backslash cannot corrupt the header or
+/// be silently mis-parsed by `git apply`. A path needing no quoting is returned
+/// unchanged; when quoting IS triggered, high bytes (>= 0x80) are octal-escaped
+/// too so the quoted form is unambiguous (matching git). A path whose only
+/// unusual bytes are high (plain non-ASCII, no control/quote/backslash) is left
+/// raw -- `git apply` accepts raw UTF-8 -- to keep common names readable.
+fn git_quote_path(s: &str) -> String {
+    let needs_quote = s
+        .bytes()
+        .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\' || byte == 0x7f);
+    if !needs_quote {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for &byte in s.as_bytes() {
+        match byte {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\t' => out.push_str("\\t"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            0x20..=0x7e => out.push(byte as char),
+            _ => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\{byte:03o}");
+            }
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Write the `--- <a>` / `+++ <b>` header and unified hunks for one file.
@@ -88,7 +146,17 @@ fn write_binary_summary(fix: &StagedFix, w: &mut dyn Write) -> std::io::Result<(
         StagedKind::Create => writeln!(w, "Binary file {path} created ({} bytes)", fix.new.len()),
         StagedKind::Delete => writeln!(w, "Binary file {path} deleted ({} bytes)", fix.old.len()),
         StagedKind::Rename { from } => {
-            writeln!(w, "Binary file renamed {} -> {path}", from.display())
+            if fix.old == fix.new {
+                writeln!(w, "Binary file renamed {} -> {path}", from.display())
+            } else {
+                writeln!(
+                    w,
+                    "Binary file renamed {} -> {path} ({} -> {} bytes)",
+                    from.display(),
+                    fix.old.len(),
+                    fix.new.len()
+                )
+            }
         }
         StagedKind::Modify => writeln!(
             w,
@@ -145,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn pure_rename_emits_only_the_rename_headers() {
+    fn pure_rename_emits_a_git_rename_envelope() {
         let body = "keep\n";
         let out = render(&[fix(
             "b.rs",
@@ -155,6 +223,11 @@ mod tests {
                 from: PathBuf::from("A.rs"),
             },
         )]);
+        // The `diff --git` envelope + `similarity index 100%` is what makes a
+        // rename consumable by `git apply` (bare rename lines are silently
+        // dropped). Round-5 audit regression.
+        assert!(out.contains("diff --git a/A.rs b/b.rs"), "{out}");
+        assert!(out.contains("similarity index 100%"), "{out}");
         assert!(out.contains("rename from A.rs"), "{out}");
         assert!(out.contains("rename to b.rs"), "{out}");
         // Content unchanged: no +/- content hunk.
@@ -165,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_with_content_change_shows_both() {
+    fn rename_with_content_change_shows_envelope_and_hunks() {
         let out = render(&[fix(
             "b.rs",
             "old\n",
@@ -174,12 +247,29 @@ mod tests {
                 from: PathBuf::from("A.rs"),
             },
         )]);
+        assert!(out.contains("diff --git a/A.rs b/b.rs"), "{out}");
         assert!(out.contains("rename from A.rs"), "{out}");
+        // A content-changing rename is NOT 100% similar.
+        assert!(!out.contains("similarity index 100%"), "{out}");
         assert!(
             out.contains("--- a/A.rs") && out.contains("+++ b/b.rs"),
             "{out}"
         );
         assert!(out.contains("-old") && out.contains("+new"), "{out}");
+    }
+
+    #[test]
+    fn header_paths_are_git_c_quoted_when_they_contain_control_bytes() {
+        // A tab is git's field separator and a newline ends the line; an
+        // unquoted such path corrupts the header. git C-quotes them.
+        let out = render(&[fix("ta\tb.rs", "a\n", "b\n", StagedKind::Modify)]);
+        assert!(out.contains("--- \"a/ta\\tb.rs\""), "{out}");
+        assert!(out.contains("+++ \"b/ta\\tb.rs\""), "{out}");
+        // A plain path (no control/quote/backslash) is left unquoted.
+        assert_eq!(git_quote_path("a/src/x.rs"), "a/src/x.rs");
+        // Quote + backslash are escaped; a high byte octal-escaped once quoting fires.
+        assert_eq!(git_quote_path("a/x\"y\\z"), "\"a/x\\\"y\\\\z\"");
+        assert_eq!(git_quote_path("a/\tcaf\u{e9}"), "\"a/\\tcaf\\303\\251\"");
     }
 
     #[test]

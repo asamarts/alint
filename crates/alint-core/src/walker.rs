@@ -670,7 +670,24 @@ fn result_to_entry(
     root: &Path,
     result: std::result::Result<ignore::DirEntry, ignore::Error>,
 ) -> Result<Option<FileEntry>> {
-    let entry = result?;
+    let entry = match result {
+        Ok(entry) => entry,
+        Err(err) => {
+            // A broken (dangling) symlink surfaces as an I/O `NotFound` walk
+            // error under `follow_links(true)`: the target can't be stat'd. Skip
+            // it rather than abort the ENTIRE run -- `filter_entry` above already
+            // intends to prune broken symlinks, and a repo containing one
+            // dangling link must still be lintable (and `file_remove` able to
+            // clean it up). A `NotFound` also covers a file that vanished mid-walk
+            // (listed then removed), which is equally correct to skip. Any other
+            // error (permission denied, ...) still propagates and stops the walk
+            // as before.
+            if err.io_error().map(std::io::Error::kind) == Some(std::io::ErrorKind::NotFound) {
+                return Ok(None);
+            }
+            return Err(err.into());
+        }
+    };
     let abs = entry.path();
     let Ok(rel) = abs.strip_prefix(root) else {
         return Ok(None);
@@ -1394,6 +1411,29 @@ mod tests {
         assert!(
             !names.iter().any(|p| p.as_os_str() == "pipe.txt"),
             "FIFO must be skipped, not indexed: {names:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn dangling_symlink_is_skipped_not_fatal() {
+        // Round-5 audit: with `follow_links(true)` a broken (dangling) symlink
+        // surfaced as a FATAL walk error, aborting the whole run before any rule
+        // ran -- so a repo containing one dangling link was entirely un-lintable
+        // (and `file_remove` could not clean it up). It must be skipped, leaving
+        // the rest of the tree indexed.
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("real.txt"), b"hi\n").unwrap();
+        symlink("/does/not/exist/at/all", root.join("dangling")).unwrap();
+
+        let idx = walk(root, &WalkOptions::default())
+            .expect("a dangling symlink must not abort the walk");
+        let names: Vec<_> = idx.entries.iter().map(|e| e.path.to_path_buf()).collect();
+        assert!(
+            names.iter().any(|p| p.as_os_str() == "real.txt"),
+            "the real file must still be indexed: {names:?}"
         );
     }
 

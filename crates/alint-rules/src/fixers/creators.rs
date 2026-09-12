@@ -58,6 +58,16 @@ impl Fixer for FileCreateFixer {
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
         if abs.exists() {
+            // A DIRECTORY at the target is not the required file: `file_exists`
+            // counts only files, so it keeps flagging while the fixer used to
+            // report the false "already exists" and never converge. Report the
+            // real blocker honestly.
+            if abs.is_dir() {
+                return Ok(FixOutcome::Skipped(format!(
+                    "{} is a directory; cannot create a file there",
+                    self.path.display()
+                )));
+            }
             return Ok(FixOutcome::Skipped(format!(
                 "{} already exists",
                 self.path.display()
@@ -442,6 +452,33 @@ mod tests {
         assert!(matches!(outcome, FixOutcome::Applied(_)));
         let written = std::fs::read_to_string(tmp.path().join("LICENSE")).unwrap();
         assert_eq!(written, "Apache-2.0\n");
+    }
+
+    #[test]
+    fn file_create_reports_honestly_when_a_directory_occupies_the_target() {
+        // Round-5 audit (A4): `file_exists` counts only files, so a DIRECTORY at
+        // the target keeps it flagging; the fixer used to skip with the false
+        // "already exists" and never converge. It must report the real blocker.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("LICENSE")).unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("LICENSE"), "MIT\n".into(), true);
+        let outcome = fixer
+            .apply(&Violation::new("missing LICENSE"), &make_ctx(&tmp, false))
+            .unwrap();
+        match outcome {
+            FixOutcome::Skipped(reason) => {
+                assert!(reason.contains("is a directory"), "honest reason: {reason}");
+                assert!(
+                    !reason.contains("already exists"),
+                    "must not mislead: {reason}"
+                );
+            }
+            FixOutcome::Applied(_) => panic!("expected Skipped for a dir at the target"),
+        }
+        assert!(
+            tmp.path().join("LICENSE").is_dir(),
+            "the directory is untouched"
+        );
     }
 
     #[test]
