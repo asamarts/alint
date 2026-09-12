@@ -63,12 +63,15 @@ fn run_check(root: &Path, config_yaml: &str) -> Report {
     engine.run(root, &index).unwrap()
 }
 
-fn run_fix(root: &Path, config_yaml: &str) -> alint_core::FixReport {
+/// `fix` at the Unsafe threshold, i.e. what `--unsafe-fixes` selects.
+/// The only fixer exercised here is `file_remove`, which is Unsafe-tier:
+/// a Safe-tier bare `fix` would only *suggest* it, not apply it.
+fn run_fix_unsafe(root: &Path, config_yaml: &str) -> alint_core::FixReport {
     let config = load_config(root, config_yaml);
     let (engine, walk_opts) = build_engine(&config, alint_rules::builtin_registry());
     let index = walk(root, &walk_opts).unwrap();
     engine
-        .fix(root, &index, false, alint_core::Applicability::Safe)
+        .fix(root, &index, false, alint_core::Applicability::Unsafe)
         .unwrap()
 }
 
@@ -117,7 +120,10 @@ fn no_symlinks_fix_removes_the_link_but_keeps_the_target() {
     materialize(&tree_from("target.txt: \"real file\"\n"), root).unwrap();
     symlink("target.txt", root.join("alias.txt")).unwrap();
 
-    let report = run_fix(
+    // `file_remove` is an Unsafe-tier fixer, so it applies only under
+    // `--unsafe-fixes`. The property under test is a Unix safety guarantee:
+    // removing the offending *link* must not follow it and delete the *target*.
+    let report = run_fix_unsafe(
         root,
         "version: 1\nrules:\n  - id: no-links\n    kind: no_symlinks\n    paths: \"**\"\n    level: error\n    fix:\n      file_remove: {}\n",
     );

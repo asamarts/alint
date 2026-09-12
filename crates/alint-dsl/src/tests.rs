@@ -1598,3 +1598,44 @@ fn parse_rejects_a_yaml_flow_bomb_without_hanging() {
         "expected a flow-depth error, got: {err}"
     );
 }
+
+#[test]
+fn extends_promoting_file_remove_to_safe_is_rejected() {
+    use serde_yaml_ng::Mapping;
+    let parse_rule = |y: &str| -> Mapping { serde_yaml_ng::from_str(y).unwrap() };
+
+    // An INHERITED rule promoting `file_remove` to Safe is refused (5.5: an
+    // inherited fixer may be demoted, never promoted -- an extended ruleset must
+    // not silently opt a repo into auto-deleting files).
+    let promote = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: { applicability: safe } }",
+    );
+    let err = crate::reject_fix_promotion_in(std::slice::from_ref(&promote), "./base.yml")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("applicability: safe"), "{err}");
+    assert!(err.contains("top-level"), "{err}");
+
+    // The default (no override, so Unsafe) from an inherited config is fine.
+    let plain = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: {} }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&plain), "./base.yml").is_ok());
+
+    // A DEMOTE (toward suggestion) from an inherited config is allowed.
+    let demote = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: { applicability: suggestion } }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&demote), "./base.yml").is_ok());
+
+    // A promotion buried in a nested `require:` block is caught too.
+    let nested = parse_rule(
+        "id: parent\nkind: for_each_dir\npaths: '*'\nlevel: error\n\
+         require:\n  - id: n\n    kind: file_absent\n    paths: '**/*.bak'\n    \
+         fix: { file_remove: { applicability: safe } }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&nested), "./base.yml").is_err());
+}

@@ -1,0 +1,31 @@
+name: file_remove applies (and converges) under --unsafe-fixes
+tags: [fix, file_absent, file_remove, applicability]
+
+# The Unsafe tier is opt-in: `alint fix --unsafe-fixes` (the `fix_unsafe` step)
+# raises the threshold to Unsafe, so `file_remove` applies and the tree
+# converges. This is the counterpart of `file_remove_unsafe_by_default` (a bare
+# fix only suggests) and `file_remove` (a top-level `applicability: safe`
+# promotion applies at the Safe default).
+
+given:
+  tree:
+    stale.bak: "junk\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bak
+        kind: file_absent
+        paths: "**/*.bak"
+        level: error
+        fix:
+          file_remove: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: no-bak, level: error, path: stale.bak}
+  - applied: [no-bak]
+  - violations: []
+
+expect_tree: {}

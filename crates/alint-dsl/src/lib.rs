@@ -540,6 +540,55 @@ pub fn reject_command_rules_in(rules: &[Mapping], source: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reject a per-rule fix-tier PROMOTION (`fix: { <op>: { applicability: safe } }`)
+/// declared in an inherited config. `file_remove` defaults to `Unsafe` -- a bare
+/// `alint fix` will not delete a file irreversibly -- and a user may promote it
+/// back to `Safe` on a specific rule, but that is ONLY the user's own top-level
+/// config's call (auto-fix.md 5.5: an inherited fixer may be *demoted*, never
+/// *promoted*). An extended ruleset promoting `file_remove` to `Safe` would
+/// silently opt a repo into auto-deletion, so it is refused here. Same trust
+/// model as [`reject_command_rules_in`]. Scans nested `require:` blocks too.
+pub fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result<()> {
+    for rule in rules {
+        reject_fix_promotion_in_rule(rule, source)?;
+    }
+    Ok(())
+}
+
+fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
+    if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
+        for (op, args) in fix {
+            let promotes = args
+                .as_mapping()
+                .and_then(|m| m.get("applicability"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
+            if promotes {
+                let id = rule
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(unknown)");
+                let op = op.as_str().unwrap_or("<fix>");
+                return Err(Error::Other(format!(
+                    "rule {id:?}: `fix.{op}.applicability: safe` promotes a fix to auto-apply and \
+                     is only allowed in your own top-level config; an extended config ({source}) \
+                     may not opt this repo into auto-applying a destructive fix (it may still \
+                     demote to `suggestion`/`never`). Declare the promotion in your top-level \
+                     `rules:`."
+                )));
+            }
+        }
+    }
+    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
+        for nested in require {
+            if let Some(nested_map) = nested.as_mapping() {
+                reject_fix_promotion_in_rule(nested_map, source)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reject a spawning `kind` in `rule` OR in any of its nested `require:`
 /// specs, recursively. `for_each_dir` / `for_each_file` /
 /// `every_matching_has` carry a `require:` block of nested rules

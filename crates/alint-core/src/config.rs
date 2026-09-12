@@ -538,7 +538,17 @@ fn default_create_parents() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileRemoveFixSpec {}
+pub struct FileRemoveFixSpec {
+    /// Per-rule applicability override (auto-fix.md 5.5). `file_remove` defaults
+    /// to `Unsafe` -- deleting a whole file irreversibly is a poor default for a
+    /// bare `alint fix`, so it is surfaced as a suggestion and applied only with
+    /// `--unsafe-fixes`. A user may promote it back to `safe` on a specific rule
+    /// (`fix: { file_remove: { applicability: safe } }`) in their OWN top-level
+    /// config; an extends'd ruleset attempting the promotion is rejected upstream
+    /// by the DSL trust gate (inherited fixers may be demoted, never promoted).
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

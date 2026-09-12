@@ -13,7 +13,7 @@ given:
         paths: "**"
         level: warning
         fix:
-          file_remove: {}
+          file_remove: { applicability: safe }
 
 when: [check, fix, check]
 

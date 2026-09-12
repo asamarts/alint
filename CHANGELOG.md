@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `file_remove` (the fix for `file_absent`, `no_empty_files`,
+  `no_submodules`, `no_symlinks`, and the bundled `hygiene/no-tracked-artifacts`
+  ruleset) is now **Unsafe** rather than Safe. A bare `alint fix` no longer
+  deletes files; it surfaces the removal as a suggestion. Apply removals with
+  `alint fix --unsafe-fixes`, or promote a specific rule back to auto-applied
+  with `fix: { file_remove: { applicability: safe } }` in your own top-level
+  config (an `extends:`'d ruleset may not promote it). Deleting a whole file
+  irreversibly is a poor default for an unattended fix. `--unsafe-fixes`, which
+  was previously inert, now gates this tier.
+
 ## [0.16.1] - 2026-09-04
 
 This release ships the PyPI distribution channel: alint is now installable via

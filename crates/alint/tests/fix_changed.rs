@@ -33,7 +33,7 @@ rules:
     kind: file_absent
     paths: \"**/*.log\"
     level: error
-    fix: { file_remove: {} }
+    fix: { file_remove: { applicability: safe } }
 ";
 
 #[test]

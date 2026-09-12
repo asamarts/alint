@@ -23,7 +23,7 @@ given:
         paths: "**/*.bak"
         level: error
         fix:
-          file_remove: {}
+          file_remove: { applicability: safe }
 
       - id: rust-header
         kind: file_header

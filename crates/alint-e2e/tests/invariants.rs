@@ -135,8 +135,11 @@ proptest! {
         };
         // Only assert convergence when the fix resolved every violation it
         // encountered. A fixer that skipped (binary file, size limit, ...) leaves
-        // a real violation on disk; that is not a convergence failure.
-        if fix_report.skipped() > 0 || fix_report.unfixable() > 0 {
+        // a real violation on disk; that is not a convergence failure. Likewise a
+        // fix surfaced as `suggested` was deliberately withheld at this threshold
+        // (an Unsafe fixer such as `file_remove` under a bare `fix`), so its
+        // violation correctly survives -- also not a convergence failure.
+        if fix_report.skipped() > 0 || fix_report.unfixable() > 0 || fix_report.suggested() > 0 {
             return Ok(());
         }
         let residual: usize = check_report.results.iter()

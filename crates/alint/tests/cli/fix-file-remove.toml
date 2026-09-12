@@ -1,3 +1,3 @@
 bin.name = "alint"
-args = ["fix", "."]
+args = ["fix", "--unsafe-fixes", "."]
 fs.sandbox = true

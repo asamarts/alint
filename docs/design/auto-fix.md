@@ -314,10 +314,13 @@ be demoted but never promoted.
 behavior and are classified Safe on introduction. The one intentional change is `file_remove`
 (used by `file_absent`, `no_empty_files`, `no_submodules`, `no_symlinks`, and the bundled
 `hygiene/no-tracked-artifacts` ruleset): it is **reclassified Unsafe by default**, because deleting
-a whole file irreversibly is a poor default for a bare `alint fix`. A one-release deprecation
-warning ships first, and a user can **promote it back to Safe on a specific rule** via
+a whole file irreversibly is a poor default for a bare `alint fix`. The flip lands with the
+v0.17 fix-engine rework (a natural breaking point, noted in the changelog) rather than after a
+separate deprecation-warning release: a bare `alint fix` surfaces the removal as a suggestion
+and `--unsafe-fixes` applies it. A user can **promote it back to Safe on a specific rule** via
 `fix: { file_remove: { applicability: safe } }` in their own top-level config (per-rule promotion
-is top-level-only, 5.5).
+is top-level-only, 5.5 — an `extends:`'d ruleset may demote but never promote, enforced by the
+DSL trust gate `reject_fix_promotion_in`).
 
 ## 4. Prevalence and usefulness
 

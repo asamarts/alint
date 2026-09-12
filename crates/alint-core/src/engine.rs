@@ -1268,11 +1268,40 @@ impl Engine {
                 .into_iter()
                 .map(|v| {
                     let status = match fixer {
-                        Some(f) => match f.apply(&v, &fix_ctx) {
-                            Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
-                            Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
-                            Err(e) => FixStatus::Skipped(format!("{FIX_ERROR_PREFIX} {e}")),
-                        },
+                        // Applied tier at the current threshold: run the fixer.
+                        Some(f) if f.applicability().applies_at(threshold) => {
+                            match f.apply(&v, &fix_ctx) {
+                                Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
+                                Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
+                                Err(e) => FixStatus::Skipped(format!("{FIX_ERROR_PREFIX} {e}")),
+                            }
+                        }
+                        // Available but below the threshold (e.g. `Unsafe`
+                        // `file_remove` without `--unsafe-fixes`): surface it as a
+                        // Suggestion carrying the proposed edit so `--diff` /
+                        // SARIF / the agent format show it and the user can opt
+                        // in, rather than silently applying a destructive fix.
+                        // `fix_edit` supplies the edit; the only Phase-0 op that
+                        // reaches here is the whole-file `file_remove`, which
+                        // ignores the bytes.
+                        Some(f) if f.applicability().suggested_at(threshold) => {
+                            match f.fix_edit(&v, &[], fix_ctx.root) {
+                                Some(edit) => FixStatus::Suggested {
+                                    summary: format!("{} (requires --unsafe-fixes)", f.describe()),
+                                    edit,
+                                },
+                                None => FixStatus::Skipped(format!(
+                                    "{} is available but not applicable here",
+                                    f.describe()
+                                )),
+                            }
+                        }
+                        // A fixer whose tier neither applies nor is suggested here
+                        // (`Never`) -- collected for provenance only.
+                        Some(f) => FixStatus::Skipped(format!(
+                            "{} is not applied at this tier",
+                            f.describe()
+                        )),
                         None => FixStatus::Unfixable,
                     };
                     FixItem {

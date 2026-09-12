@@ -638,7 +638,8 @@ pub enum FixEdit {
 /// for the two *applying* tiers. `Suggestion` is shown but never applied;
 /// `Never` is collected for provenance only and neither applied nor
 /// suggested. See auto-fix.md 5.5 and ADR-0017.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Applicability {
     /// Behavior-preserving; applied by a bare `alint fix`.
     Safe,
@@ -817,6 +818,18 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     /// [`located_fix`](crate::located_fix) instead of `apply`.
     fn collects_located_edits(&self) -> bool {
         false
+    }
+
+    /// The [`Applicability`] tier this whole-file / path fixer applies at, gating
+    /// it against the user's threshold (`Safe` for a bare `alint fix`, `Unsafe`
+    /// for `--unsafe-fixes`). Default `Safe`: the content and path-normalizing
+    /// ops are behavior-preserving. `file_remove` overrides this to `Unsafe`
+    /// (deleting a whole file irreversibly is a poor default), so a bare
+    /// `alint fix` surfaces it as a suggestion rather than deleting; a user may
+    /// promote it per-rule (auto-fix.md 5.5). (The located-edit path carries its
+    /// tier on each `CollectedEdit` instead; this is the whole-file analogue.)
+    fn applicability(&self) -> Applicability {
+        Applicability::Safe
     }
 }
 

@@ -166,7 +166,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|msg| Error::rule_config(&spec.id, msg))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
+        Some(FixSpec::FileRemove { file_remove }) => Some(FileRemoveFixer::new(
+            file_remove
+                .applicability
+                .unwrap_or(alint_core::Applicability::Unsafe),
+        )),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

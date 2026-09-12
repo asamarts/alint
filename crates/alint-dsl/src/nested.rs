@@ -203,6 +203,8 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // are refused wholesale just above, and `finalize` re-checks the
     // expanded rule set as a backstop.
     crate::reject_command_rules_in(&config.rules, &source)?;
+    // ...and no inherited rule may promote a destructive fix to auto-apply.
+    crate::reject_fix_promotion_in(&config.rules, &source)?;
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

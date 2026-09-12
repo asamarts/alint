@@ -1,17 +1,38 @@
 use std::path::{Path, PathBuf};
 
-use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
+use alint_core::{Applicability, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
 use crate::case::CaseConvention;
 
 /// Removes the file named by the violation's `path`. Used by
-/// `file_absent` to purge committed files that shouldn't be there.
+/// `file_absent`, `no_empty_files`, `no_submodules`, `no_symlinks`.
+///
+/// Carries an [`Applicability`] tier (auto-fix.md 5.5): `file_remove` is
+/// **`Unsafe` by default**, because deleting a whole file irreversibly is a poor
+/// default for a bare `alint fix` -- it is surfaced as a suggestion and applied
+/// only with `--unsafe-fixes`. A user may promote it back to `Safe` per-rule via
+/// `fix: { file_remove: { applicability: safe } }` in their own top-level config.
 #[derive(Debug)]
-pub struct FileRemoveFixer;
+pub struct FileRemoveFixer {
+    applicability: Applicability,
+}
+
+impl FileRemoveFixer {
+    /// Construct with the resolved tier (default [`Applicability::Unsafe`]; a
+    /// top-level rule may promote to `Safe`). The rule builders pass
+    /// `spec.applicability.unwrap_or(Applicability::Unsafe)`.
+    pub fn new(applicability: Applicability) -> Self {
+        Self { applicability }
+    }
+}
 
 impl Fixer for FileRemoveFixer {
     fn describe(&self) -> String {
         "remove the violating file".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -286,7 +307,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("debug.log");
         std::fs::write(&target, "noise").unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(
                 &Violation::new("forbidden").with_path(std::path::Path::new("debug.log")),
                 &make_ctx(&tmp, false),
@@ -297,9 +318,32 @@ mod tests {
     }
 
     #[test]
+    fn file_remove_carries_its_tier() {
+        // Close-off (auto-fix.md 5.5): `file_remove` is Unsafe by default (the
+        // rule builders pass `Unsafe`), so a bare `alint fix` surfaces it as a
+        // suggestion; a top-level rule may promote it to `Safe`. The engine gates
+        // `apply` on this tier (`applies_at`/`suggested_at`), so the value must be
+        // reported faithfully. `apply` itself is tier-agnostic (it just deletes),
+        // which is why the tests above call it directly.
+        assert_eq!(
+            FileRemoveFixer::new(Applicability::Unsafe).applicability(),
+            Applicability::Unsafe
+        );
+        assert_eq!(
+            FileRemoveFixer::new(Applicability::Safe).applicability(),
+            Applicability::Safe
+        );
+        // Sibling whole-file fixers keep the trait default (Safe).
+        assert_eq!(
+            FileRenameFixer::new(CaseConvention::Snake).applicability(),
+            Applicability::Safe
+        );
+    }
+
+    #[test]
     fn file_remove_skips_when_violation_has_no_path() {
         let tmp = TempDir::new().unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(&Violation::new("no path"), &make_ctx(&tmp, false))
             .unwrap();
         match outcome {
@@ -313,7 +357,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("victim.bak");
         std::fs::write(&target, "bytes").unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(
                 &Violation::new("forbidden").with_path(std::path::Path::new("victim.bak")),
                 &make_ctx(&tmp, true),
@@ -524,7 +568,7 @@ mod tests {
     #[test]
     fn file_remove_fix_edit_returns_delete() {
         let v = Violation::new("forbidden").with_path(std::path::Path::new("debug.log"));
-        let edit = FileRemoveFixer
+        let edit = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .fix_edit(&v, &[], std::path::Path::new("/repo"))
             .unwrap();
         assert_eq!(
@@ -626,7 +670,7 @@ mod tests {
         let target = tmp.path().join("debug.log");
         std::fs::write(&target, "noise").unwrap();
         let sink = std::cell::RefCell::new(Vec::new());
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(
                 &Violation::new("forbidden").with_path(Path::new("debug.log")),
                 &stage_ctx(&tmp, &sink),

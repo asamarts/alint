@@ -162,6 +162,7 @@ pub(crate) fn load_recursive(
         // write. Same trust model on both sides.
         alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
         reject_command_rules_in(&parent.rules, url)?;
+        crate::reject_fix_promotion_in(&parent.rules, url)?;
         reject_spawning_templates_in(&parent.templates, url)?;
         reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
         reject_baseline_in(&parent.baseline, url)?;

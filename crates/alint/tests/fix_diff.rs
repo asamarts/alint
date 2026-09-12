@@ -38,7 +38,7 @@ rules:
     kind: file_absent
     paths: \"debug.log\"
     level: error
-    fix: { file_remove: {} }
+    fix: { file_remove: { applicability: safe } }
   - id: need-readme
     kind: file_exists
     paths: \"README.md\"
