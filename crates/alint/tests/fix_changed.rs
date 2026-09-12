@@ -93,3 +93,48 @@ fn full_fix_still_removes_every_match() {
     );
     assert!(!root.join("a.log").exists(), "full fix removes all matches");
 }
+
+const CREATE_CONFIG: &str = "\
+version: 1
+rules:
+  - id: need-readme
+    kind: file_exists
+    paths: README.md
+    root_only: true
+    level: error
+    fix: { file_create: { content: \"# R\\n\" } }
+";
+
+#[test]
+fn fix_changed_recreates_a_required_file_deleted_in_the_diff() {
+    // A `file_exists` create violation is PATHLESS (its target comes from config,
+    // not the violation). The --changed blast-radius filter must NOT drop it, or
+    // `fix --changed` would never create a required file -- not even one deleted
+    // in the very diff being fixed (which IS in the changed set and re-fires the
+    // existence rule). Regression guard: the round-2 filter's `is_some_and`
+    // wrongly dropped pathless violations.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("README.md"), "# R\n").unwrap();
+    std::fs::write(root.join(".alint.yml"), CREATE_CONFIG).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // Delete README.md -> it is in the working-tree diff (changed set).
+    std::fs::remove_file(root.join("README.md")).unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed");
+    assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
+    assert!(
+        root.join("README.md").exists(),
+        "fix --changed must re-create a required file deleted in the diff"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("README.md")).unwrap(),
+        "# R\n"
+    );
+}

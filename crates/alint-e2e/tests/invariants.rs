@@ -11,14 +11,38 @@
 //!    `Step::FixDryRun`, the resulting on-disk state equals the
 //!    input tree byte-for-byte.
 //! 3. `fix_is_idempotent` — running `fix` twice never performs
-//!    applied operations on the second pass.
-//! 4. `fix_converges` — when the fix pass reports zero skipped
-//!    and zero unfixable, a subsequent `check` reports no errors.
+//!    applied operations on the second pass. Single-rule (Phase-0
+//!    idempotence is a per-fixer guarantee) over the full 12-fixer
+//!    catalogue.
+//! 4. `fix_converges_when_fully_resolved` — when a single fix pass
+//!    reports zero skipped and zero unfixable, a subsequent `check`
+//!    reports NO violation (of any level). Single-rule, all 12 fixers.
+//! 5. `fix_dry_run_is_pure_single_rule` — dry-run purity over the full
+//!    12-fixer catalogue (the multi-rule `fix_dry_run_is_pure` covers
+//!    only 4 fixers).
+//!
+//! The single-rule invariants use one fixable rule per scenario on
+//! purpose. `alint fix` is single-pass in Phase 0 (the fixpoint re-walk
+//! arrives in Phase 1), so a MULTI-rule tree is neither idempotent nor
+//! convergent across passes by design: one rule creating a file that
+//! another must then fix, or two content fixers racing on one file via
+//! the compose buffer, are known limitations deferred to the next phase.
+//! One rule isolates each fixer's own fixed-point behaviour, which is
+//! exactly what Phase 0 guarantees.
+//!
+//! IMPORTANT: these property invariants build scenarios with an empty
+//! `expect` and assert against the returned `ScenarioRun` directly, so
+//! `run_scenario` must NOT enforce `Scenario::validate` (the
+//! corpus-authoring "assert something" lint) — that would reject every
+//! scenario here and turn all of these vacuous. The corpus loader
+//! (`scenarios.rs`) enforces `validate` instead.
 //!
 //! Tuning knobs: `PROPTEST_CASES` env var scales case count.
 
 use alint_testkit::scenario::Step;
-use alint_testkit::strategies::{any_scenario_tree, fixable_scenario_tree, with_steps};
+use alint_testkit::strategies::{
+    any_scenario_tree, fixable_scenario_tree, single_fixable_scenario_tree, with_steps,
+};
 use alint_testkit::treespec::{Discrepancy, VerifyMode, verify};
 use alint_testkit::{ScenarioRun, StepOutcome, run_scenario};
 use proptest::prelude::*;
@@ -63,7 +87,22 @@ proptest! {
     }
 
     #[test]
-    fn fix_is_idempotent(base in fixable_scenario_tree()) {
+    fn fix_is_idempotent(base in single_fixable_scenario_tree()) {
+        // Phase-0 idempotence is a PER-FIXER guarantee: with one rule, a second
+        // `fix` pass applies nothing (each fixer is a genuine fixed point). This
+        // is the property-level guard for the round-3 non-convergence bugs (F1
+        // doubled-CR, F2 interior-CR, F3 stacked-BOM), each a fixer whose second
+        // pass still applied.
+        //
+        // It is deliberately SINGLE-rule. `alint fix` is single-pass in Phase 0
+        // (the fixpoint re-walk is Phase 1), so a MULTI-rule tree is not
+        // idempotent across two `fix` invocations by design: e.g. rule A's
+        // `file_create` makes a `REQUIRED.md` that rule B's `file_content_matches`
+        // (`**/*.md`) then flags and appends to on the SECOND pass. Asserting
+        // multi-rule idempotence here would encode a guarantee Phase 0 does not
+        // make. (This assertion was silently vacuous before the round-3 fix that
+        // stopped `run_scenario` from rejecting assertion-free property
+        // scenarios, which is why the interaction went unnoticed.)
         let scenario = with_steps(base, vec![Step::Fix, Step::Fix]);
         let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
         let Some(StepOutcome::Fix(second)) = run.steps.get(1) else {
@@ -72,31 +111,60 @@ proptest! {
         prop_assert_eq!(
             second.applied(),
             0,
-            "second fix pass applied {} op(s); expected idempotence",
+            "second fix pass applied {} op(s) for a single fixer; expected idempotence; config:\n{}",
             second.applied(),
+            scenario.given.config,
         );
     }
 
     #[test]
-    fn fix_converges_when_fully_resolved(base in fixable_scenario_tree()) {
+    fn fix_converges_when_fully_resolved(base in single_fixable_scenario_tree()) {
+        // Convergence law: after a single, fully-applied `fix` (nothing skipped,
+        // nothing unfixable), a subsequent `check` finds NOTHING. Driven by the
+        // SINGLE-rule strategy so every one of the 12 fixers is exercised with no
+        // cross-rule single-pass ordering interference, and asserted against
+        // residuals of ANY level. (The old form used the multi-rule strategy --
+        // whose fixers were all `level: warning` -- and counted only ERROR-level
+        // residuals, so it could never fail: vacuous. Round-3 audit fix.)
         let scenario = with_steps(base, vec![Step::Fix, Step::Check]);
         let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
         let Some((fix_report, check_report)) = extract_fix_then_check(&run) else {
             return Ok(());
         };
-        // Only assert convergence when the fix resolved every
-        // violation it encountered. Fixers that skipped leave real
-        // violations on disk; those aren't bugs.
+        // Only assert convergence when the fix resolved every violation it
+        // encountered. A fixer that skipped (binary file, size limit, ...) leaves
+        // a real violation on disk; that is not a convergence failure.
         if fix_report.skipped() > 0 || fix_report.unfixable() > 0 {
             return Ok(());
         }
+        let residual: usize = check_report.results.iter()
+            .map(|r| r.violations.len())
+            .sum();
+        prop_assert_eq!(
+            residual,
+            0,
+            "check still reported {} violation(s) after a fully-applied single-rule fix \
+             (non-convergent fixer); config:\n{}",
+            residual,
+            scenario.given.config,
+        );
+    }
+
+    #[test]
+    fn fix_dry_run_is_pure_single_rule(base in single_fixable_scenario_tree()) {
+        // Dry-run purity over the full 12-fixer catalogue: even the content
+        // fixers (compose buffer) and the direct-write trio (create/remove/
+        // rename, via the stage sink) must leave the tree byte-identical under
+        // `fix --dry-run`.
+        let scenario = with_steps(base, vec![Step::FixDryRun]);
+        let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
+        let Ok(mut report) = verify(&scenario.given.tree, &run.root, VerifyMode::Strict) else {
+            return Ok(());
+        };
+        ignore_runner_machinery(&mut report.discrepancies);
         prop_assert!(
-            !check_report.has_errors(),
-            "check reported {} error-level violations after a fully-applied fix",
-            check_report.results.iter()
-                .filter(|r| matches!(r.level, alint_core::Level::Error))
-                .map(|r| r.violations.len())
-                .sum::<usize>(),
+            report.is_match(),
+            "dry-run mutated disk state:\n{report}",
         );
     }
 }

@@ -92,13 +92,17 @@ fn strip_trailing_whitespace(text: &str) -> String {
             out.push('\n');
         }
         first = false;
-        // Preserve CR before the (upcoming) LF so CRLF endings survive.
-        let (body, cr) = match line.strip_suffix('\r') {
-            Some(stripped) => (stripped, "\r"),
-            None => (line, ""),
-        };
-        out.push_str(body.trim_end_matches([' ', '\t']));
-        out.push_str(cr);
+        // Trim trailing space/tab AND CR from the ws region, then re-add ONE CR
+        // iff the line ended in CR, to preserve a CRLF ending. Trimming the CR
+        // matters for idempotence: the rule strips a trailing CR before its ws
+        // check, so a line like `"x \r "` (ws, CR, ws) that trims only to
+        // `"x \r"` would be re-flagged (strip CR -> `"x "` -> trailing ws). Also
+        // collapses a doubled trailing CR (`\r\r`) like the line-ending fixer.
+        let had_cr = line.ends_with('\r');
+        out.push_str(line.trim_end_matches([' ', '\t', '\r']));
+        if had_cr {
+            out.push('\r');
+        }
     }
     out
 }
@@ -284,9 +288,11 @@ fn normalize_line_endings(bytes: &[u8], target: LineEndingTarget) -> Vec<u8> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\n' {
-            // Drop a preceding CR so `\r\n` collapses to `\n` before
-            // we emit the target.
-            if out.last().copied() == Some(b'\r') {
+            // Drop ALL preceding CRs so `\r\n` -- and a malformed `\r\r\n`
+            // (doubled CR) -- collapse before we emit the target. Popping only
+            // one CR would leave `\r\n` for `\r\r\n`, which the rule re-flags, so
+            // the fix never converged (a second `fix` kept re-applying).
+            while out.last().copied() == Some(b'\r') {
                 out.pop();
             }
             out.extend_from_slice(target_bytes);
@@ -457,6 +463,21 @@ mod tests {
     }
 
     #[test]
+    fn strip_trailing_whitespace_converges_with_interior_cr() {
+        // Regression (round-3 audit F2): a CR sitting *inside* the trailing-ws
+        // run (`space CR space`) must clean to a genuine fixed point in one pass.
+        // `no_trailing_whitespace` strips a trailing CR before its ws test, so
+        // trimming only to `"x \r"` leaves `"x "` under the check and re-flags --
+        // `fix` would never converge.
+        assert_eq!(strip_trailing_whitespace("x \r \n"), "x\n");
+        // The original repro: a bare line with no final newline.
+        assert_eq!(strip_trailing_whitespace("x \r "), "x");
+        // Fixed point: a second application is a no-op.
+        let once = strip_trailing_whitespace("x \r \n");
+        assert_eq!(strip_trailing_whitespace(&once), once);
+    }
+
+    #[test]
     fn file_trim_trailing_whitespace_rewrites_in_place() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("x.rs"), "let _ = 1;   \n").unwrap();
@@ -584,6 +605,23 @@ mod tests {
         let mixed = b"a\r\nb\nc\r\nd".to_vec();
         let out = normalize_line_endings(&mixed, LineEndingTarget::Crlf);
         assert_eq!(out, b"a\r\nb\r\nc\r\nd");
+    }
+
+    #[test]
+    fn normalize_line_endings_converges_on_doubled_cr() {
+        // Regression (round-3 audit F1): a malformed `\r\r\n` (doubled CR before
+        // LF) must collapse to the target in ONE pass. Popping only one preceding
+        // CR would leave `\r\n` under an LF target, which `line_endings` re-flags,
+        // so a second `fix` kept applying (never a fixed point).
+        let once = normalize_line_endings(b"x\r\r\ny\r\n", LineEndingTarget::Lf);
+        assert_eq!(once, b"x\ny\n");
+        // Fixed point: re-normalizing the output changes nothing.
+        assert_eq!(normalize_line_endings(&once, LineEndingTarget::Lf), once);
+        // A doubled CR under a CRLF target collapses to a single CRLF too.
+        assert_eq!(
+            normalize_line_endings(b"x\r\r\n", LineEndingTarget::Crlf),
+            b"x\r\n"
+        );
     }
 
     #[test]

@@ -5,15 +5,21 @@
 //! purity, fix idempotence, fix→check convergence) without blowing
 //! up the state space. Tune via the [`ScenarioTreeParams`] knobs.
 //!
-//! Two factories are provided:
+//! Three factories are provided:
 //!
 //! - [`any_scenario_tree`] — tree + config drawn from a broad
 //!   catalogue. Covers non-fixable rule kinds too; use for
 //!   invariants that only require alint to not panic.
-//! - [`fixable_scenario_tree`] — restricts the rule catalogue to
-//!   kinds whose fix strategy is well-defined for random inputs
-//!   (`file_create`, `file_remove`, `file_prepend`, `file_append`,
-//!   `file_rename`). Use for invariants that exercise `alint fix`.
+//! - [`fixable_scenario_tree`] — multi-rule; restricts the rule
+//!   catalogue to four whole-file-ish fixers (`file_create`,
+//!   `file_remove`, `file_rename`, `file_append`) whose combination
+//!   stays well-behaved for dry-run purity. Use for invariants that
+//!   exercise `alint fix` with several rules at once.
+//! - [`single_fixable_scenario_tree`] — EXACTLY ONE rule, drawn from
+//!   the full 12-op fixer catalogue (adds the content-hygiene and
+//!   strip fixers). Use for the idempotence / convergence invariants:
+//!   Phase-0 guarantees a per-fixer fixed point, not multi-rule
+//!   single-pass convergence, so these are asserted one rule at a time.
 
 use std::collections::BTreeMap;
 
@@ -105,6 +111,36 @@ pub fn fixable_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<V
     })
 }
 
+/// A scenario with EXACTLY ONE fixable rule, drawn from the full 12-op
+/// catalogue (including the content-hygiene and strip fixers the multi-rule
+/// [`fixable_scenario_tree`] omits). Single-rule by design: with one rule there
+/// is no cross-rule, single-pass ordering interaction, so the fix→check
+/// convergence law ("a fully-applied fix leaves the check clean") holds per
+/// fixer and can be asserted without false positives from Phase-0's known
+/// order-dependence limitation. This is the strategy that makes the convergence
+/// invariant non-vacuous and actually exercises every fixer.
+pub fn single_fixable_scenario_tree() -> impl Strategy<Value = Scenario> {
+    let params = ScenarioTreeParams::default();
+    let tree_strategy = any_tree(params.max_files, params.max_depth);
+    (tree_strategy, one_fixable_rule_yaml()).prop_map(|(tree, rule_yaml)| {
+        let config = compose_config(std::slice::from_ref(&rule_yaml));
+        Scenario {
+            name: "property-single-fixable".into(),
+            tags: vec!["proptest".into()],
+            given: Given {
+                tree,
+                config,
+                git: None,
+            },
+            when: vec![],
+            expect: vec![],
+            expect_tree: None,
+            expect_tree_mode: crate::scenario::ExpectTreeMode::default(),
+            docs: None,
+        }
+    })
+}
+
 /// Attach `steps` to a scenario produced by one of the strategies.
 /// The `expect:` list is left empty — invariant tests inspect the
 /// [`crate::ScenarioRun`] directly rather than scripted assertions.
@@ -177,7 +213,25 @@ fn content_blob() -> impl Strategy<Value = String> {
         Just(String::new()),
         Just("hello\n".to_string()),
         Just("// Copyright 2026\n".to_string()),
-        string_regex(r"[a-zA-Z0-9 \n]{0,40}").unwrap(),
+        // Fixtures that actually *trigger* the content-hygiene / strip fixers.
+        // Without these (and the `\t`/`\r` in the regex arm below) the generated
+        // corpus never exercised trim / normalize / collapse / append-newline /
+        // strip-bom / strip-bidi / strip-zero-width -- the fixers where the
+        // round-3 non-convergence bugs lived -- so the fix invariants were
+        // vacuous for them.
+        Just("trailing   \n".to_string()), // no_trailing_whitespace
+        Just("tab\tmid\tend \n".to_string()), // tabs + trailing space
+        Just("crlf\r\nline\r\n".to_string()), // line_endings (lf target)
+        Just("lf\nonly\n".to_string()),    // line_endings (crlf target)
+        Just("dbl\r\r\ncr\r\n".to_string()), // doubled CR (round-3 F1)
+        Just("a\n\n\n\n\nb\n".to_string()), // max_consecutive_blank_lines
+        Just("no final newline".to_string()), // final_newline
+        Just("\u{FEFF}bom\n".to_string()), // no_bom
+        Just("\u{FEFF}\u{FEFF}stacked bom\n".to_string()), // stacked BOM (round-3 F3)
+        Just("bidi\u{202E}rtl\u{202C}\n".to_string()), // no_bidi_controls
+        Just("zero\u{200B}width\u{200D}\n".to_string()), // no_zero_width_chars
+        // Widen the random arm to include tab and CR (was `[a-zA-Z0-9 \n]`).
+        string_regex(r"[a-zA-Z0-9 \t\r\n]{0,40}").unwrap(),
     ]
 }
 
@@ -298,15 +352,20 @@ fn rule_file_content_matches(fix: bool) -> impl Strategy<Value = String> {
     let glob = select(&["**/*.md", "**/*.rs", "README.md"][..]);
     let pattern = select(&["SPDX", "Copyright", "TODO"][..]);
     (rule_id("fcm"), glob, pattern).prop_map(move |(id, glob, pattern)| {
-        let mut yaml = format!(
-            "  - id: {id}\n    kind: file_content_matches\n    paths: \"{glob}\"\n    pattern: \"{pattern}\"\n    level: warning\n"
-        );
-        if fix {
-            yaml.push_str(
-                "    fix:\n      file_append:\n        content: \"\\nSPDX-License-Identifier: Apache-2.0\\n\"\n",
-            );
-        }
-        yaml
+        // The appended text MUST contain the checked pattern, or the fix does
+        // not resolve the "content must match" violation and the rule re-flags
+        // forever (non-convergent / non-idempotent). Each pattern here is a
+        // literal, so a line containing it satisfies the regex.
+        let fix_block = if fix {
+            format!(
+                "    fix:\n      file_append:\n        content: \"\\n{pattern} (added by alint)\\n\"\n"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "  - id: {id}\n    kind: file_content_matches\n    paths: \"{glob}\"\n    pattern: \"{pattern}\"\n    level: warning\n{fix_block}"
+        )
     })
 }
 
@@ -318,6 +377,114 @@ fn rule_file_content_forbidden() -> impl Strategy<Value = String> {
             "  - id: {id}\n    kind: file_content_forbidden\n    paths: \"{glob}\"\n    pattern: '{pattern}'\n    level: warning\n"
         )
     })
+}
+
+// ─── single-rule fixable catalogue (all 12 fix ops) ──────────────
+//
+// These generators each emit ONE fixable rule covering a fix op that the
+// multi-rule `fixable_rule_yaml` deliberately omits. They are drawn one at a
+// time by `single_fixable_scenario_tree`: with exactly one rule there is no
+// cross-rule, single-pass ordering interaction (two content fixers racing on
+// the same file via the compose buffer -- a known Phase-0 limitation, tracked
+// for Phase 1), so "a fully-applied fix leaves the check clean" is a sound
+// convergence law to assert per fixer. All use `level: error` so the property
+// is also exercised at error level. The content-hygiene fixers only trigger on
+// the `content_blob` fixtures added for them.
+//
+// The glob is `**/*.{md,rs,txt,toml,json,tsx}` -- every extension the tree
+// generator emits EXCEPT `.yml` -- rather than `**/*`, because the scenario
+// runner writes the config to `.alint.yml` *inside* the linted tree. A `**/*`
+// rule would match the config and a structural fixer (e.g. `file_prepend`)
+// would rewrite it into invalid YAML, breaking the between-steps re-walk. Real
+// corpus scenarios avoid this the same way (scoped globs).
+
+fn rule_no_trailing_whitespace() -> impl Strategy<Value = String> {
+    rule_id("ntw").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: no_trailing_whitespace\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    level: error\n    fix:\n      file_trim_trailing_whitespace: {{}}\n"
+        )
+    })
+}
+
+fn rule_line_endings() -> impl Strategy<Value = String> {
+    (rule_id("le"), select(&["lf", "crlf"][..])).prop_map(|(id, target)| {
+        format!(
+            "  - id: {id}\n    kind: line_endings\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    target: {target}\n    level: error\n    fix:\n      file_normalize_line_endings: {{}}\n"
+        )
+    })
+}
+
+fn rule_final_newline() -> impl Strategy<Value = String> {
+    rule_id("fnl").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: final_newline\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    level: error\n    fix:\n      file_append_final_newline: {{}}\n"
+        )
+    })
+}
+
+fn rule_max_blank_lines() -> impl Strategy<Value = String> {
+    (rule_id("mbl"), select(&[0u32, 1, 2][..])).prop_map(|(id, max)| {
+        format!(
+            "  - id: {id}\n    kind: max_consecutive_blank_lines\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    max: {max}\n    level: error\n    fix:\n      file_collapse_blank_lines: {{}}\n"
+        )
+    })
+}
+
+fn rule_no_bom() -> impl Strategy<Value = String> {
+    rule_id("nb").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: no_bom\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    level: error\n    fix:\n      file_strip_bom: {{}}\n"
+        )
+    })
+}
+
+fn rule_no_bidi_controls() -> impl Strategy<Value = String> {
+    rule_id("nbd").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: no_bidi_controls\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    level: error\n    fix:\n      file_strip_bidi: {{}}\n"
+        )
+    })
+}
+
+fn rule_no_zero_width_chars() -> impl Strategy<Value = String> {
+    rule_id("nzw").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: no_zero_width_chars\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    level: error\n    fix:\n      file_strip_zero_width: {{}}\n"
+        )
+    })
+}
+
+fn rule_file_header_prepend() -> impl Strategy<Value = String> {
+    // `file_header` + `file_prepend`: prepending the required header lands the
+    // pattern inside the first `lines`, so the check passes on the next read.
+    rule_id("fh").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: file_header\n    paths: \"**/*.{{md,rs,txt,toml,json,tsx}}\"\n    pattern: \"(?s)Copyright\"\n    lines: 3\n    level: error\n    fix:\n      file_prepend:\n        content: \"// Copyright 2026\\n\"\n"
+        )
+    })
+}
+
+/// The full fixable catalogue: every one of the 12 fix ops, one rule at a time.
+/// The four whole-file-ish ops reuse the multi-rule generators (at
+/// `level: warning`); the eight content/header ops come from the single-rule
+/// generators above. Drives `single_fixable_scenario_tree`.
+fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
+    prop_oneof![
+        // file_create, file_remove, file_rename, file_append.
+        rule_file_exists(true),
+        rule_file_absent(true),
+        rule_filename_case(true),
+        rule_file_content_matches(true),
+        // file_prepend, and the seven content-hygiene / strip ops.
+        rule_file_header_prepend(),
+        rule_no_trailing_whitespace(),
+        rule_line_endings(),
+        rule_final_newline(),
+        rule_max_blank_lines(),
+        rule_no_bom(),
+        rule_no_bidi_controls(),
+        rule_no_zero_width_chars(),
+    ]
 }
 
 fn compose_config(rules: &[String]) -> String {
@@ -379,5 +546,59 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn single_fixable_scenario_tree_emits_exactly_one_fixable_rule() {
+        let mut runner = TestRunner::default();
+        for _ in 0..50 {
+            let scenario = single_fixable_scenario_tree()
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
+            let cfg = alint_dsl::parse(&scenario.given.config).unwrap();
+            assert_eq!(
+                cfg.rules.len(),
+                1,
+                "single-fixable strategy must emit exactly one rule, got {}",
+                cfg.rules.len()
+            );
+            assert!(
+                cfg.rules[0].fix.is_some(),
+                "single-fixable rule {:?} (kind {}) has no `fix:` block",
+                cfg.rules[0].id,
+                cfg.rules[0].kind,
+            );
+        }
+    }
+
+    #[test]
+    fn single_fixable_scenario_tree_covers_all_twelve_fix_ops() {
+        // The whole point of the single-rule strategy is that it exercises
+        // EVERY fixer (the multi-rule catalogue covers only 4 of 12). Draw
+        // enough scenarios that each of the 12 uniform arms is overwhelmingly
+        // likely to appear (P(miss) ~ 12 * (11/12)^1500 ~ 1e-53), and assert we
+        // saw the whole `FixSpec::ALL_OP_NAMES` set.
+        use std::collections::BTreeSet;
+        let mut runner = TestRunner::default();
+        let mut seen: BTreeSet<&'static str> = BTreeSet::new();
+        for _ in 0..1500 {
+            let scenario = single_fixable_scenario_tree()
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
+            let cfg = alint_dsl::parse(&scenario.given.config).unwrap();
+            if let Some(fix) = &cfg.rules[0].fix {
+                seen.insert(fix.op_name());
+            }
+        }
+        let expected: BTreeSet<&'static str> =
+            alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+        assert_eq!(
+            seen,
+            expected,
+            "single-fixable strategy did not cover every fix op; missing: {:?}",
+            expected.difference(&seen).collect::<Vec<_>>()
+        );
     }
 }

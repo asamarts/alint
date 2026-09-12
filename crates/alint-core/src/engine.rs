@@ -1196,17 +1196,25 @@ impl Engine {
             // cross-file, `requires_full_index() == true`) is handed the FULL
             // index by `pick_ctx` even under `--changed`, because its *check*
             // verdict must consider the whole tree (an unchanged committed
-            // `.env` should still fire). But the FIX must not touch files outside
-            // the diff: without this, `file_absent` + `file_remove --changed`
-            // deletes every matching file, including unchanged committed ones the
-            // user never touched. Restrict such a rule's fixes to violations
-            // whose path is in the changed set. Per-file rules already received
-            // the `--changed`-filtered index, so their violations are all
-            // in-scope and this is a no-op for them.
+            // `.env` should still fire). But the FIX must not DESTROY files
+            // outside the diff: without this, `file_absent` + `file_remove
+            // --changed` deletes every matching file, including unchanged
+            // committed ones the user never touched. So drop a violation that
+            // names a specific file NOT in the changed set. A PATHLESS violation
+            // (e.g. `file_exists`, whose create target comes from config, not the
+            // violation) is kept: it is not a per-file destructive op, its fixer
+            // picks its own target, and a create is additive -- dropping it here
+            // would silently stop `fix --changed` from creating a required file,
+            // even one deleted in the very diff being fixed. Per-file rules
+            // already got the `--changed`-filtered index, so this is a no-op for
+            // them (their violations are all in-scope).
             let violations = match &self.changed_paths {
                 Some(changed) if entry.rule.requires_full_index() => violations
                     .into_iter()
-                    .filter(|v| v.path.as_deref().is_some_and(|p| changed.contains(p)))
+                    .filter(|v| match v.path.as_deref() {
+                        Some(p) => changed.contains(p),
+                        None => true,
+                    })
                     .collect(),
                 _ => violations,
             };

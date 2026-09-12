@@ -109,13 +109,17 @@ impl Fixer for FileStripBomFixer {
                 path.display()
             )));
         }
-        let Some(bom) = crate::no_bom::detect_bom(&existing) else {
+        // Strip the whole *run* of leading BOMs, not just the first: a stacked
+        // BOM (a tool prepended a mark to a file that already had one) would
+        // otherwise leave a leading BOM that `no_bom` re-flags, and `fix` would
+        // not converge. See `no_bom::leading_bom_run` for the reasoning.
+        let Some((bom, strip_len)) = crate::no_bom::leading_bom_run(&existing) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} has no BOM",
                 path.display()
             )));
         };
-        let stripped = &existing[bom.byte_len()..];
+        let stripped = &existing[strip_len..];
         ctx.commit_write(&abs, stripped)
             .map_err(|source| Error::Io {
                 path: abs.clone(),
@@ -136,10 +140,12 @@ impl Fixer for FileStripBomFixer {
         if looks_binary(bytes) {
             return None;
         }
-        let bom = crate::no_bom::detect_bom(bytes)?;
+        // Strip the whole run of leading BOMs so the editor path converges in
+        // one shot, exactly like `apply` on disk (see `leading_bom_run`).
+        let (_, strip_len) = crate::no_bom::leading_bom_run(bytes)?;
         Some(FixEdit::SetContent {
             path: path.to_path_buf(),
-            content: bytes[bom.byte_len()..].to_vec(),
+            content: bytes[strip_len..].to_vec(),
         })
     }
 }

@@ -72,6 +72,33 @@ pub fn detect_bom(bytes: &[u8]) -> Option<BomKind> {
     None
 }
 
+/// The first BOM kind and the total byte length of the run of consecutive
+/// BOMs at the very start of `bytes`.
+///
+/// A file can carry a *stack* of BOMs -- e.g. a tool prepends a UTF-8 BOM to a
+/// file that already had one, or two conversion passes each add one. The
+/// `no_bom` check flags a file whenever `detect_bom` matches its leading bytes,
+/// so a fixer that strips only the first mark leaves a second leading BOM that
+/// the check immediately re-flags: `fix` would not converge. Reporting the
+/// whole run lets the fixer strip it in a single shot and land on a genuine
+/// fixed point (content whose prefix no longer matches any BOM signature).
+///
+/// The dominant real case is a homogeneous stack of the same mark. A
+/// heterogeneous run (e.g. a UTF-8 BOM followed by bytes that look like a
+/// UTF-16 BOM) is adversarial/corrupt rather than genuine text -- valid UTF-8
+/// after a UTF-8 BOM can never start with `FF FE`/`FE FF` -- but the check
+/// flags it all the same, so stripping the run is exactly what convergence
+/// requires. Runs whose bytes include NUL (the UTF-32 marks) are moot here:
+/// the fixer's `looks_binary` guard skips such files before this is consulted.
+pub fn leading_bom_run(bytes: &[u8]) -> Option<(BomKind, usize)> {
+    let first = detect_bom(bytes)?;
+    let mut len = first.byte_len();
+    while let Some(next) = detect_bom(&bytes[len..]) {
+        len += next.byte_len();
+    }
+    Some((first, len))
+}
+
 #[derive(Debug)]
 pub struct NoBomRule {
     id: String,
@@ -191,5 +218,28 @@ mod tests {
     fn no_bom_on_ascii() {
         assert_eq!(detect_bom(b"hello"), None);
         assert_eq!(detect_bom(b""), None);
+    }
+
+    #[test]
+    fn leading_bom_run_spans_a_stacked_bom() {
+        // Regression (round-3 audit F3): a *stack* of BOMs must be reported as a
+        // single run so `file_strip_bom` removes it all in one shot. Stripping
+        // one mark leaves a leading BOM the rule re-flags -- `fix` never
+        // converges.
+        let two = b"\xEF\xBB\xBF\xEF\xBB\xBF# h\n";
+        assert_eq!(leading_bom_run(two), Some((BomKind::Utf8, 6)));
+        // Stripping the whole run yields content with no leading BOM: a genuine
+        // fixed point (the rule's pass condition is `detect_bom == None`).
+        let (_, n) = leading_bom_run(two).unwrap();
+        assert!(detect_bom(&two[n..]).is_none());
+        // Degenerate cases: a lone BOM is a run of one; no BOM is None.
+        assert_eq!(leading_bom_run(b"\xEF\xBB\xBFx"), Some((BomKind::Utf8, 3)));
+        assert_eq!(leading_bom_run(b"plain"), None);
+        // A mixed run (UTF-8 then a UTF-16 BE mark) is still one run: the check
+        // flags either leading mark, so convergence requires stripping both.
+        assert_eq!(
+            leading_bom_run(b"\xEF\xBB\xBF\xFE\xFFx"),
+            Some((BomKind::Utf8, 5))
+        );
     }
 }

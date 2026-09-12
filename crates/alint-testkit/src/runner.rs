@@ -33,8 +33,17 @@ pub struct ScenarioRun {
 /// Materialize the scenario, drive its steps, collect outcomes.
 /// Caller asserts against [`ScenarioRun`] via
 /// [`assert_scenario`] (or by hand).
+///
+/// This does NOT call [`Scenario::validate`]. That method enforces
+/// *corpus-authoring* rules -- `when`/`expect` length parity and "a fix
+/// scenario must assert its effect" -- which apply to the hand-written YAML
+/// corpus, not to programmatic callers. The property harness (`invariants.rs`)
+/// and other direct-inspection callers legitimately build scenarios with an
+/// empty `expect` and assert against the returned [`ScenarioRun`] instead;
+/// validating here would reject every one of them and silently turn those tests
+/// vacuous. The corpus loader (`scenarios.rs`) calls [`Scenario::validate`]
+/// explicitly before running, so the corpus stays gated.
 pub fn run_scenario(scenario: &Scenario) -> Result<ScenarioRun> {
-    scenario.validate()?;
     let tmp = tempfile::Builder::new()
         .prefix("alint-testkit-")
         .tempdir()

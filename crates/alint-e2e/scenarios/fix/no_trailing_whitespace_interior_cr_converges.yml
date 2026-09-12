@@ -1,0 +1,36 @@
+name: file_trim_trailing_whitespace converges when a CR sits inside the ws run
+tags: [fix, no_trailing_whitespace, file_trim_trailing_whitespace, idempotence]
+
+# Non-convergence regression (Phase-0 round-3 audit, finding F2). A line whose
+# trailing-whitespace run straddles a CR (`space CR space`) must clean to a
+# genuine fixed point in ONE fix. The old fixer trimmed to `"x \r"`, but the
+# check strips a trailing CR before its whitespace test, so it saw `"x "` and
+# re-flagged -- a second `fix` kept applying. The new fixer trims space/tab/CR
+# out of the ws run (re-adding a single CR only for a real CRLF ending), so the
+# line becomes `"x"`. The final `check` asserts the tree is clean after one fix.
+
+given:
+  tree:
+    src:
+      a.txt: "x \r \n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.txt"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-ws, level: error, path: src/a.txt}
+  - applied: [no-ws]
+  - violations: []
+
+expect_tree:
+  src:
+    a.txt: "x\n"
