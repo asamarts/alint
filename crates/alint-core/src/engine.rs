@@ -722,6 +722,7 @@ impl Engine {
             // were dropped, so a silently-passing per-file rule was
             // missing from "All N rule(s) passed" (the count read as 0).
             let violations = bucket.remove(&idx).unwrap_or_default();
+            let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
             results.push((
                 idx,
                 RuleResult::new(
@@ -729,7 +730,7 @@ impl Engine {
                     entry.rule.level(),
                     entry.rule.policy_url().map(Arc::from),
                     violations,
-                    entry.rule.fixer().is_some(),
+                    is_fixable,
                 ),
             ));
         }
@@ -882,6 +883,7 @@ impl Engine {
         let mut by_idx: HashMap<usize, RuleResult> = when_errors.into_iter().collect();
         for (idx, entry) in &live {
             if let Some(violations) = bucket.remove(idx) {
+                let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
                 by_idx.insert(
                     *idx,
                     RuleResult::new(
@@ -889,7 +891,7 @@ impl Engine {
                         entry.rule.level(),
                         entry.rule.policy_url().map(Arc::from),
                         violations,
-                        entry.rule.fixer().is_some(),
+                        is_fixable,
                     ),
                 );
             }
@@ -1883,18 +1885,41 @@ fn run_entry(
     Some(run_one(entry.rule.as_ref(), ctx))
 }
 
+/// Stamp each violation's per-violation fixability ([`Violation::is_fixable`])
+/// from the rule's fixer, and return the rule-level flag ("the rule declares a
+/// fixer") alongside. Centralizes the two-level derivation for the `RuleResult`
+/// assembly sites: `check` can then tag fixability per-violation (an
+/// unconvertible `café.rs` under `snake` is not tagged fixable even though its
+/// rule has a fixer -- [`Fixer::can_fix`]) while the rule-level flag that backs
+/// the machine formats and [`RuleResult::is_fixable`] stays unchanged.
+fn mark_fixability(
+    mut violations: Vec<Violation>,
+    fixer: Option<&dyn Fixer>,
+) -> (Vec<Violation>, bool) {
+    match fixer {
+        Some(f) => {
+            for v in &mut violations {
+                v.is_fixable = f.can_fix(v);
+            }
+            (violations, true)
+        }
+        None => (violations, false),
+    }
+}
+
 fn run_one(rule: &dyn Rule, ctx: &Context<'_>) -> RuleResult {
     let violations = match rule.evaluate(ctx) {
         Ok(v) => v,
         Err(e) => vec![Violation::new(format!("rule error: {e}"))],
     };
     // `new` partitions any note-flagged violations into `notes`.
+    let (violations, is_fixable) = mark_fixability(violations, rule.fixer());
     RuleResult::new(
         Arc::from(rule.id()),
         rule.level(),
         rule.policy_url().map(Arc::from),
         violations,
-        rule.fixer().is_some(),
+        is_fixable,
     )
 }
 

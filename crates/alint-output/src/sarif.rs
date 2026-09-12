@@ -454,6 +454,7 @@ mod tests {
                     column: Some(3),
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
                 }],
                 notes: Vec::new(),
                 is_fixable: false,

@@ -18,6 +18,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   irreversibly is a poor default for an unattended fix. `--unsafe-fixes`, which
   was previously inert, now gates this tier.
 
+### Fixed
+
+- `alint check` now tags a violation `fixable` (and counts it as "auto-fixable")
+  only when the fix would actually resolve that specific violation, rather than
+  whenever its rule declares a fixer. A `filename_case` violation on a stem with
+  no valid target under the requested convention (e.g. `café.rs` under `snake`,
+  which `alint fix` honestly skips) is no longer falsely advertised as fixable,
+  so the "N auto-fixable" total matches what `alint fix` will apply.
+
 ## [0.16.1] - 2026-09-04
 
 This release ships the PyPI distribution channel: alint is now installable via

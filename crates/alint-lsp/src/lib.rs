@@ -871,6 +871,7 @@ mod tests {
             column,
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
         }
     }
 

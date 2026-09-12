@@ -45,6 +45,16 @@ pub struct Violation {
     /// content" (see [`crate::baseline::violation_fingerprint`]). It
     /// never affects rendering or pass/fail.
     pub baseline_key: Option<Cow<'static, str>>,
+    /// Engine-computed: whether the rule's [`Fixer`] can actually fix *this*
+    /// violation ([`Fixer::can_fix`]). A rule sets this to `false` at
+    /// construction (rules do not know about fixers); the engine overwrites it at
+    /// result-assembly time. It lets `check`'s human output tag fixability
+    /// per-violation -- so an unconvertible `café.rs` under `snake` (which `fix`
+    /// honestly skips) is not falsely tagged `fixable`, while a convertible
+    /// sibling in the same rule still is. `false` whenever the rule has no fixer.
+    /// The rule-level [`RuleResult::is_fixable`] ("the rule declares a fixer") is
+    /// unchanged and still backs the machine formats.
+    pub is_fixable: bool,
 }
 
 impl Violation {
@@ -56,6 +66,7 @@ impl Violation {
             column: None,
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
         }
     }
 
@@ -830,6 +841,29 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     /// tier on each `CollectedEdit` instead; this is the whole-file analogue.)
     fn applicability(&self) -> Applicability {
         Applicability::Safe
+    }
+
+    /// Whether this fixer can actually fix *this specific* violation -- a pure,
+    /// no-I/O predicate the engine calls at result-assembly time so `check` can
+    /// tag fixability per-violation (see [`Violation::is_fixable`]) rather than
+    /// per-rule.
+    ///
+    /// Default `true`: after the Phase-0 detector/fixer domain-alignment work
+    /// (rounds 3-6), a content or path/existence fixer fixes every violation its
+    /// rule flags. The one exception is `FileRenameFixer` (in `alint-rules`),
+    /// which overrides this:
+    /// a stem with no reachable target form under the requested case (a non-ASCII
+    /// letter under `snake` like `café`, a leading-digit stem under `camel`, a
+    /// caseless script under `lower`/`upper`) is flagged by the detector but has
+    /// no valid rename, so `fix` honestly skips it -- `check` must not promise it.
+    ///
+    /// This is a *convertibility* verdict, independent of the [`Applicability`]
+    /// tier (an Unsafe `file_remove` still `can_fix`; `--unsafe-fixes` gates
+    /// whether it is *applied*) and of fix-time filesystem state (collisions,
+    /// pending writes), which only the fix pass can know.
+    fn can_fix(&self, violation: &Violation) -> bool {
+        let _ = violation;
+        true
     }
 }
 

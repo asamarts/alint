@@ -172,6 +172,22 @@ impl Fixer for FileRenameFixer {
         format!("rename stems to {}", self.case.display_name())
     }
 
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // A rename is possible only when the stem has a reachable target form
+        // under this convention. `resolve_rename_target` is the shared, PURE
+        // (no-I/O) convertibility test: an unconvertible stem (`café` under
+        // snake, a leading-digit stem under camel, a caseless script under
+        // lower/upper) is flagged by the detector but returns `Err` here, so
+        // `fix` honestly skips it -- `check` must not tag it fixable. The
+        // filesystem-state guards (collision, pending write, staging) live in
+        // `apply`/`fix_edit`, NOT here: those are fix-time concerns `check`
+        // cannot and need not predict.
+        violation
+            .path
+            .as_deref()
+            .is_some_and(|p| self.resolve_rename_target(p).is_ok())
+    }
+
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
         let Some(path) = &violation.path else {
             return Ok(FixOutcome::Skipped(
@@ -496,6 +512,38 @@ mod tests {
             FixOutcome::Applied(_) => panic!("expected Skipped"),
         }
         assert!(tmp.path().join("café.rs").exists());
+    }
+
+    #[test]
+    fn file_rename_can_fix_matches_convertibility() {
+        // Close-off item 2: `can_fix` is the per-violation convertibility verdict
+        // `check` tags with -- it must exactly track what `apply`/`fix_edit` will
+        // actually do, so `check` never promises a rename `fix` then skips. Pure
+        // and path-only (no disk touched here).
+        let snake = FileRenameFixer::new(CaseConvention::Snake);
+        let camel = FileRenameFixer::new(CaseConvention::Camel);
+        let v = |p: &str| Violation::new("case").with_path(std::path::Path::new(p));
+        // Convertible stems -> can_fix true.
+        assert!(
+            snake.can_fix(&v("myFile.rs")),
+            "myFile -> my_file is fixable"
+        );
+        assert!(snake.can_fix(&v("Foo.rs")), "pure case flip is fixable");
+        // Unconvertible under this convention -> can_fix false (the false-promise
+        // cases: non-ASCII under snake, leading digit under camel).
+        assert!(!snake.can_fix(&v("café.rs")), "café has no snake target");
+        assert!(
+            !camel.can_fix(&v("2fast.rs")),
+            "leading digit has no camel target"
+        );
+        // Structural-dot stem (compound extension / dotfile) is detector-exempt,
+        // so it is also correctly not fixable.
+        assert!(!snake.can_fix(&v("index.d.ts")), "compound ext not fixable");
+        // A violation with no path can't be renamed.
+        assert!(
+            !snake.can_fix(&Violation::new("case")),
+            "no path -> not fixable"
+        );
     }
 
     #[test]

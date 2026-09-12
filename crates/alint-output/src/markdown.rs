@@ -426,6 +426,7 @@ mod tests {
                     column: Some(4),
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
                 }],
             )],
         };
@@ -449,6 +450,7 @@ mod tests {
                         column: None,
                         is_note: false,
                         baseline_key: None,
+                        is_fixable: false,
                     }],
                 ),
                 rule(
@@ -461,6 +463,7 @@ mod tests {
                         column: None,
                         is_note: false,
                         baseline_key: None,
+                        is_fixable: false,
                     }],
                 ),
             ],
@@ -589,6 +592,7 @@ mod tests {
                     column: None,
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
                 }],
             )],
         };
@@ -606,6 +610,7 @@ mod tests {
             column: Some(1),
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
         };
         let v2 = Violation {
             path: Some(Path::new("a.rs").into()),
@@ -614,6 +619,7 @@ mod tests {
             column: Some(1),
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
         };
         let r1 = Report {
             results: vec![rule("r1", Level::Error, vec![v1.clone(), v2.clone()])],
@@ -657,6 +663,7 @@ mod tests {
                         column: None,
                         is_note: false,
                         baseline_key: None,
+                        is_fixable: false,
                     },
                     status: FixStatus::Suggested {
                         summary: "would set $.debug to false".into(),
@@ -696,6 +703,7 @@ mod tests {
                             column: None,
                             is_note: false,
                             baseline_key: None,
+                            is_fixable: false,
                         },
                         status: FixStatus::Applied("trimmed trailing whitespace in a.rs".into()),
                     },
@@ -707,6 +715,7 @@ mod tests {
                             column: None,
                             is_note: false,
                             baseline_key: None,
+                            is_fixable: false,
                         },
                         status: FixStatus::Unfixable,
                     },
