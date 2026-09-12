@@ -132,7 +132,24 @@ impl Fixer for FileCreateFixer {
         // editor (LSP) fix path doesn't thread `allow_out_of_root`, so confine
         // strictly (deny escape): an editor code-action must never create a
         // file — or read a template — outside the repo root.
-        confine_fix_path(&self.path, root, false).ok()?;
+        let abs = confine_fix_path(&self.path, root, false).ok()?;
+        // Refuse a symlink AT the target (mirrors apply()): a BROKEN symlink
+        // slips past `exists()` below (which follows the link) AND past
+        // `confine_fix_path` (a non-existent target canonicalizes to nothing, so a
+        // planted `evil -> /outside` reads as in-root), and the editor's CreateFile
+        // would then follow it out of the tree. `symlink_metadata` does not follow.
+        if abs
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return None;
+        }
+        // Don't propose creating a file where a directory (or any node) already
+        // sits -- the editor's CreateFile would fail, and `file_exists` would keep
+        // flagging (mirrors apply()'s dir-at-target guard).
+        if abs.exists() {
+            return None;
+        }
         let content = resolve_source_bytes(&self.source, root, false).ok()?;
         Some(FixEdit::CreateFile {
             path: self.path.clone(),
@@ -588,6 +605,26 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn file_create_fix_edit_refuses_to_propose_a_create_through_a_symlink() {
+        // Round-6 audit: the symlink-target refusal was in apply() only, so the
+        // editor (LSP) code-action would still hand the editor a CreateFile that
+        // follows a broken `evil -> /outside` link out of the tree. fix_edit must
+        // mirror apply's `symlink_metadata` guard.
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        let outside = tmp.path().join("OUTSIDE.txt"); // absent -> broken link
+        symlink(&outside, tmp.path().join("evil")).unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("evil"), "PWNED\n".into(), true);
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("x"), &[], tmp.path())
+                .is_none(),
+            "fix_edit must not propose creating through a symlink target"
+        );
+    }
+
     #[test]
     fn file_prepend_with_content_from_reads_at_apply() {
         let tmp = TempDir::new().unwrap();
@@ -881,6 +918,21 @@ mod tests {
                 path: PathBuf::from("LICENSE"),
                 content: b"Apache-2.0\n".to_vec(),
             }
+        );
+    }
+
+    #[test]
+    fn file_create_fix_edit_declines_when_a_node_occupies_the_target() {
+        // Round-6 audit: mirror apply()'s dir-at-target guard on the editor path
+        // -- don't propose creating a file where a directory already sits (the
+        // editor's CreateFile would fail and `file_exists` would keep flagging).
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("LICENSE")).unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("LICENSE"), "MIT\n".into(), true);
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("missing"), &[], tmp.path())
+                .is_none()
         );
     }
 

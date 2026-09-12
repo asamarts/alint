@@ -52,15 +52,18 @@ impl Rule for FilenameCaseRule {
             let Some(stem) = entry.path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            // Dotfiles (`.gitignore`, `.env`, `.eslintrc`) have a structural
-            // leading dot that is not a case concern: their `file_stem` IS the
-            // dotted name, and there is no case-corrected form that keeps the
-            // dot (`tokenize` drops it). Flagging them would advertise a
-            // "fixable" violation whose only rename -- `.gitignore` -> `gitignore`
-            // -- silently changes the file's meaning (git stops honoring it; a
-            // `.env` with secrets becomes committable). Exempt them entirely so
-            // `check` and `fix` agree.
-            if stem.starts_with('.') {
+            // A dot ANYWHERE in the stem is structural, not a case concern, and
+            // `tokenize` would DROP it -- so a rename corrupts the file:
+            //   * a dotfile (`.gitignore` -> `gitignore`) loses its leading dot
+            //     and changes meaning (git stops honoring it; a secrets `.env`
+            //     becomes committable);
+            //   * a compound extension (`index.d.ts` -> `index-d.ts`,
+            //     `Button.test.tsx` -> `button-test.tsx`) loses the sub-extension
+            //     delimiter and breaks TS declaration / test discovery / etc.
+            // `file_stem` only strips the LAST extension, so both cases leave a
+            // `.` in the stem. Exempt them entirely so `check` and `fix` agree
+            // and no rename ever mangles a structural dot.
+            if stem.contains('.') {
                 continue;
             }
             if !self.case.check(stem) {
@@ -203,12 +206,13 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_exempts_dotfiles() {
-        // Round-5 audit (A2): a dotfile's leading dot is structural, not a case
-        // concern; flagging it would advertise a "fixable" rename
-        // (`.gitignore` -> `gitignore`) that silently changes the file's meaning.
-        // Dotfiles are exempt, but a normal mis-cased file alongside them still
-        // fires (the exemption is targeted, not a blanket off-switch).
+    fn evaluate_exempts_structural_dots() {
+        // Round-5 (A2) + round-6 (Finding 1): a dot ANYWHERE in the stem is
+        // structural, not a case concern -- a dotfile (`.gitignore`) or a compound
+        // extension (`index.d.ts`, `Button.test.tsx`). `tokenize` would drop it,
+        // so a rename corrupts the file (`.gitignore`->`gitignore` un-ignores;
+        // `index.d.ts`->`index-d.ts` breaks TS). Both are exempt, but a normal
+        // mis-cased file alongside them still fires (targeted, not a blanket off).
         let spec = spec_yaml(
             "id: t\n\
              kind: filename_case\n\
@@ -217,12 +221,18 @@ mod tests {
              level: error\n",
         );
         let rule = build(&spec).unwrap();
-        let idx = index(&[".gitignore", ".env", ".eslintrc.json", "Foo.rs"]);
+        let idx = index(&[
+            ".gitignore",      // dotfile
+            ".env",            // dotfile
+            "index.d.ts",      // compound extension (stem `index.d`)
+            "Button.test.tsx", // compound extension (stem `Button.test`)
+            "Foo.rs",          // normal mis-cased -> the only one that fires
+        ]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert_eq!(
             v.len(),
             1,
-            "only the non-dotfile PascalCase file fires; dotfiles exempt: {v:?}"
+            "only the plain PascalCase file fires; dotfiles + compound exts exempt: {v:?}"
         );
     }
 

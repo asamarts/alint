@@ -160,6 +160,46 @@ fn diff_output_applies_cleanly_with_git_apply() {
 }
 
 #[test]
+fn diff_does_not_emit_a_self_conflicting_rename_patch() {
+    // Round-6 audit: two distinctly-cased files can convert to ONE snake target
+    // (`fooBar` and `foo_Bar` both -> `foo_bar`). Direct `fix` skips the second
+    // (collision guard), but the stage path doesn't mutate disk, so without a
+    // staged-target check `--diff` emitted TWO `rename to <same>` hunks -- a
+    // self-conflicting patch `git apply` rejects/clobbers. The preview must stage
+    // only one, and must apply cleanly.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: s\n    kind: filename_case\n    \
+         paths: \"src/**/*\"\n    case: snake\n    level: error\n    fix: { file_rename: {} }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/fooBar.rs"), "a\n").unwrap();
+    std::fs::write(root.join("src/foo_Bar.rs"), "b\n").unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let diff = run(root, &["fix", "--diff", "."]);
+    let stdout = String::from_utf8_lossy(&diff.stdout);
+    assert_eq!(
+        stdout.matches("rename to src/foo_bar.rs").count(),
+        1,
+        "exactly one rename to the shared target must be staged; diff:\n{stdout}"
+    );
+    // And it must be a valid patch.
+    std::fs::write(root.join("p.patch"), &diff.stdout).unwrap();
+    let check = git(root, &["apply", "--check", "p.patch"]);
+    assert!(
+        check.status.success(),
+        "the --diff output must not be a self-conflicting patch; stderr:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
 fn diff_renders_every_op_kind() {
     let tmp = setup();
     let out = run(tmp.path(), &["fix", "--diff", "."]);

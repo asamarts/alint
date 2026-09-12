@@ -80,6 +80,70 @@ impl FileRenameFixer {
     pub fn new(case: CaseConvention) -> Self {
         Self { case }
     }
+
+    /// Compute the rename TARGET path for `path` under this convention, or an
+    /// `Err(reason)` explaining why the file must be left untouched. Shared by
+    /// `apply` (disk) and `fix_edit` (editor) so their stem-level decisions can
+    /// never drift -- both get the same dotfile / compound-extension exemption,
+    /// empty-conversion guard, no-conforming-form (non-convergence) guard, and
+    /// non-UTF-8-extension guard. Callers add their own filesystem-side checks
+    /// (collision, pending write, staging).
+    fn resolve_rename_target(&self, path: &Path) -> std::result::Result<PathBuf, String> {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            return Err(format!(
+                "cannot decode filename stem for {}",
+                path.display()
+            ));
+        };
+        // A dot ANYWHERE in the stem is structural, not a case concern (mirrors
+        // the detector): a dotfile (`.gitignore`) or a compound extension
+        // (`index.d.ts`, `Button.test.tsx`) would have its dot DROPPED by
+        // `tokenize`, corrupting the file.
+        if stem.contains('.') {
+            return Err(format!(
+                "{} has a structural dot in its stem; not renaming",
+                path.display()
+            ));
+        }
+        let new_stem = self.case.convert(stem);
+        if new_stem.is_empty() {
+            return Err(format!(
+                "case conversion produced an empty stem for {}",
+                path.display()
+            ));
+        }
+        // The conversion must produce a CONFORMING name, or the rename would not
+        // converge (`check` keeps flagging it). A stem with no reachable target
+        // form (a non-ASCII letter under snake like `café`, a leading-digit stem
+        // under camel) is reported honestly, NOT with the false "already matches".
+        if !self.case.check(&new_stem) {
+            return Err(format!(
+                "{} cannot be renamed to a valid {} name",
+                path.display(),
+                self.case.display_name()
+            ));
+        }
+        if new_stem == stem {
+            return Err(format!("{} already matches target case", path.display()));
+        }
+        // A non-UTF-8 extension can't survive the string-based basename rebuild;
+        // dropping it would change the file's type.
+        if path.extension().is_some_and(|e| e.to_str().is_none()) {
+            return Err(format!(
+                "{} has a non-UTF-8 extension; not renaming",
+                path.display()
+            ));
+        }
+        let mut new_basename = new_stem;
+        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            new_basename.push('.');
+            new_basename.push_str(ext);
+        }
+        Ok(match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
+            _ => PathBuf::from(&new_basename),
+        })
+    }
 }
 
 impl Fixer for FileRenameFixer {
@@ -93,66 +157,11 @@ impl Fixer for FileRenameFixer {
                 "violation did not carry a path".to_string(),
             ));
         };
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            return Ok(FixOutcome::Skipped(format!(
-                "cannot decode filename stem for {}",
-                path.display()
-            )));
-        };
-        // Dotfiles are exempt (mirrors the `filename_case` detector): renaming
-        // `.gitignore` -> `gitignore` drops the structural leading dot and
-        // changes the file's meaning. The detector already skips them, so this
-        // is defense-in-depth (and covers any other rule that drives a rename).
-        if stem.starts_with('.') {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} is a dotfile; not renaming",
-                path.display()
-            )));
-        }
-        let new_stem = self.case.convert(stem);
-        if new_stem.is_empty() {
-            return Ok(FixOutcome::Skipped(format!(
-                "case conversion produced an empty stem for {}",
-                path.display()
-            )));
-        }
-        // The conversion must actually produce a CONFORMING name, or the rename
-        // would not converge (`check` keeps flagging it). A stem with no
-        // reachable target form -- a non-ASCII letter under an ASCII convention
-        // like snake (`café`), a leading-digit/all-symbol stem under camel/pascal
-        // -- is reported honestly here, NOT with the false "already matches
-        // target case" that made `fix` claim success on a still-flagged file.
-        if !self.case.check(&new_stem) {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} cannot be renamed to a valid {} name",
-                path.display(),
-                self.case.display_name()
-            )));
-        }
-        if new_stem == stem {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} already matches target case",
-                path.display()
-            )));
-        }
-        // A non-UTF-8 extension can't survive the string-based basename rebuild:
-        // silently dropping it would rename `x.<non-utf8>` to `x` and change the
-        // file's type. Skip (the stem is already UTF-8-guarded above).
-        if path.extension().is_some_and(|e| e.to_str().is_none()) {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} has a non-UTF-8 extension; not renaming",
-                path.display()
-            )));
-        }
-
-        let mut new_basename = new_stem;
-        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            new_basename.push('.');
-            new_basename.push_str(ext);
-        }
-        let new_path: PathBuf = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
-            _ => PathBuf::from(&new_basename),
+        // Compute the target name (and all stem-level guards) via the shared
+        // helper, so `apply` and `fix_edit` can't drift on which files they touch.
+        let new_path = match self.resolve_rename_target(path) {
+            Ok(target) => target,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
 
         let abs_from = ctx.root.join(path);
@@ -174,6 +183,24 @@ impl Fixer for FileRenameFixer {
                     new_path.display()
                 )));
             }
+        }
+        // In a stage/preview pass (`--diff`), the disk is NOT mutated, so the
+        // `exists()` check above can't see a rename an EARLIER fixer already
+        // staged onto this same target. Two distinct source names can convert to
+        // one target (`fooBar` and `foo_Bar` both -> `foo_bar`); without this the
+        // preview would emit two `rename to <same>` hunks -- a self-conflicting
+        // patch `git apply` rejects/clobbers. Treat an already-staged target as a
+        // collision, mirroring the direct-fix behaviour (the second is skipped).
+        if let Some(sink) = ctx.stage_ops
+            && sink
+                .borrow()
+                .iter()
+                .any(|edit| matches!(edit, FixEdit::RenameFile { to, .. } if *to == new_path))
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "target {} is already staged for a rename this pass",
+                new_path.display()
+            )));
         }
         // Yield to a pending content edit on the source: if a content fixer
         // earlier in this pass composed it, renaming now would strand the
@@ -213,28 +240,23 @@ impl Fixer for FileRenameFixer {
 
     fn fix_edit(&self, violation: &Violation, _bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
-        let stem = path.file_stem().and_then(|s| s.to_str())?;
-        let new_stem = self.case.convert(stem);
-        if new_stem == stem || new_stem.is_empty() {
-            return None;
-        }
-        // A non-UTF-8 extension can't survive the string rebuild; don't propose a
-        // rename that would drop it (mirrors the apply() guard).
-        if path.extension().is_some_and(|e| e.to_str().is_none()) {
-            return None;
-        }
-        let mut new_basename = new_stem;
-        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            new_basename.push('.');
-            new_basename.push_str(ext);
-        }
-        let new_path: PathBuf = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
-            _ => PathBuf::from(&new_basename),
-        };
-        // Collision: don't propose a rename onto an existing file.
-        if root.join(&new_path).exists() {
-            return None;
+        // Same stem-level guards + target as apply() (the shared helper): dotfile
+        // / compound-extension exemption, empty / no-conforming-form conversion,
+        // non-UTF-8 extension. An editor code-action must not diverge from what
+        // `alint fix` would do.
+        let new_path = self.resolve_rename_target(path).ok()?;
+        // Collision: don't propose a rename onto a DIFFERENT existing file. A pure
+        // case flip on a case-INSENSITIVE FS sees the target as "existing" (it is
+        // the same file); allow that through -- mirrors apply()'s A5 same-file
+        // check -- so the editor can still offer `Foo.rs` -> `foo.rs`.
+        let abs_to = root.join(&new_path);
+        if abs_to.exists() {
+            let from_canon = std::fs::canonicalize(root.join(path)).ok();
+            let to_canon = std::fs::canonicalize(&abs_to).ok();
+            let same_file = from_canon.is_some() && from_canon == to_canon;
+            if !same_file {
+                return None;
+            }
         }
         Some(FixEdit::RenameFile {
             from: path.to_path_buf(),
@@ -365,7 +387,7 @@ mod tests {
                 &make_ctx(&tmp, false),
             )
             .unwrap();
-        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("dotfile")));
+        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("structural dot")));
         assert!(
             tmp.path().join(".gitignore").exists(),
             "the dotfile is untouched"
@@ -373,6 +395,31 @@ mod tests {
         assert!(
             !tmp.path().join("gitignore").exists(),
             "no de-dotted copy created"
+        );
+    }
+
+    #[test]
+    fn file_rename_skips_a_compound_extension() {
+        // Round-6 audit (Finding 1): `Button.test.tsx` has stem `Button.test`
+        // (file_stem strips only `.tsx`); `tokenize` would drop the inner `.`,
+        // renaming to `button-test.tsx` and destroying the `.test` sub-extension.
+        // Any dot in the stem is structural -> skip, don't corrupt.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Button.test.tsx"), "").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Kebab)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("Button.test.tsx")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("structural dot")));
+        assert!(
+            tmp.path().join("Button.test.tsx").exists(),
+            "the compound-extension file is untouched"
+        );
+        assert!(
+            !tmp.path().join("button-test.tsx").exists(),
+            "no de-dotted corruption"
         );
     }
 
@@ -513,6 +560,32 @@ mod tests {
             FileRenameFixer::new(CaseConvention::Snake)
                 .fix_edit(&v, &[], tmp.path())
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn file_rename_fix_edit_mirrors_apply_guards() {
+        // Round-6 audit: the round-5 dotfile / unconvertible-stem guards were
+        // added to apply() only, leaving the editor (LSP) path proposing
+        // `.gitignore` -> `gitignore` (the security-adjacent data-integrity bug)
+        // and a non-converging rename for an unconvertible stem. fix_edit must
+        // mirror apply.
+        let tmp = TempDir::new().unwrap();
+        // Dotfile: no edit proposed (the leading dot is structural).
+        let dot = Violation::new("case").with_path(std::path::Path::new(".gitignore"));
+        assert!(
+            FileRenameFixer::new(CaseConvention::Snake)
+                .fix_edit(&dot, &[], tmp.path())
+                .is_none(),
+            "fix_edit must not propose renaming a dotfile"
+        );
+        // Unconvertible stem: no edit proposed (would not converge).
+        let cafe = Violation::new("case").with_path(std::path::Path::new("café.rs"));
+        assert!(
+            FileRenameFixer::new(CaseConvention::Snake)
+                .fix_edit(&cafe, &[], tmp.path())
+                .is_none(),
+            "fix_edit must not propose a rename that doesn't converge"
         );
     }
 
