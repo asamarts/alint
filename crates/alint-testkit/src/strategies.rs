@@ -122,7 +122,14 @@ pub fn fixable_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<V
 pub fn single_fixable_scenario_tree() -> impl Strategy<Value = Scenario> {
     let params = ScenarioTreeParams::default();
     let tree_strategy = any_tree(params.max_files, params.max_depth);
-    (tree_strategy, one_fixable_rule_yaml()).prop_map(|(tree, rule_yaml)| {
+    (tree_strategy, one_fixable_rule_yaml()).prop_map(|(mut tree, rule_yaml)| {
+        // Plant guaranteed triggers so the drawn fixer is ACTUALLY exercised.
+        // Drawing the rule (~1/12) and the file content independently otherwise
+        // triggers a given fixer only a fraction of the time -- the invariants
+        // missed an injected non-idempotence bug ~40% of the time at 48 cases.
+        // With a matching trigger present, every case exercises its fixer, so
+        // the property is a reliable standalone gate at the default case count.
+        plant_fixable_triggers(&mut tree.root);
         let config = compose_config(std::slice::from_ref(&rule_yaml));
         Scenario {
             name: "property-single-fixable".into(),
@@ -230,9 +237,49 @@ fn content_blob() -> impl Strategy<Value = String> {
         Just("\u{FEFF}\u{FEFF}stacked bom\n".to_string()), // stacked BOM (round-3 F3)
         Just("bidi\u{202E}rtl\u{202C}\n".to_string()), // no_bidi_controls
         Just("zero\u{200B}width\u{200D}\n".to_string()), // no_zero_width_chars
+        // NUL-bearing "binary" (U+0000 is valid UTF-8, so it fits a String): the
+        // content detectors must SKIP it and the fixers must not touch it, so the
+        // invariants also cover the binary path.
+        Just("data\u{0}here  \r\n\n\n\n".to_string()),
         // Widen the random arm to include tab and CR (was `[a-zA-Z0-9 \n]`).
         string_regex(r"[a-zA-Z0-9 \t\r\n]{0,40}").unwrap(),
     ]
+}
+
+/// Plant files under `_trig/` that trigger every fixer in the single-rule
+/// catalogue, so whichever rule is drawn has a matching violation to fix. The
+/// random dir names never include `_trig`, so these don't collide. Only ONE rule
+/// is active per single-rule scenario, so the several flaws in the kitchen-sink
+/// file never interact.
+fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
+    let dir = "_trig".to_string();
+    // Kitchen-sink `.txt`: a leading BOM, a bidi override, a zero-width char,
+    // trailing whitespace, a CRLF, a >max blank run, and no final newline. Its
+    // `.txt` name matches every content/strip rule's glob
+    // (`**/*.{md,rs,txt,toml,json,tsx}`) plus `file_header`'s, so it triggers
+    // trim / normalize / collapse / final_newline / strip_bom / strip_bidi /
+    // strip_zero_width / file_prepend.
+    insert_file(
+        root,
+        &[dir.clone(), "sink.txt".to_string()],
+        "\u{FEFF}a\u{202E}\u{200B}  \r\n\n\n\n\nb".to_string(),
+    );
+    // PascalCase files with no header pattern: trigger filename_case (rename) and
+    // file_content_matches (append, whose globs are `**/*.rs` / `**/*.md`).
+    insert_file(
+        root,
+        &[dir.clone(), "Pascal.rs".to_string()],
+        "fn x() {}\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "Pascal.md".to_string()],
+        "# doc\n".to_string(),
+    );
+    // A backup file triggers file_absent (remove).
+    insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
+    // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
+    // NOTES.txt, which `_trig/` does not contain -- no plant needed.
 }
 
 fn insert_file(root: &mut BTreeMap<String, TreeNode>, segments: &[String], content: String) {

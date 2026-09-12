@@ -68,6 +68,13 @@ impl PerFileRule for MaxConsecutiveBlankLinesRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: a NUL byte is valid UTF-8 (U+0000), so the
+        // `from_utf8` gate below does NOT catch a NUL-bearing binary, but the
+        // `file_collapse_blank_lines` fixer refuses it via `looks_binary`. Guard
+        // here too so `check` and `fix` agree on scope.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // The blank-line check uses `line_is_blank` (str-based,
         // matches the fixer's logic — they share the helper) so
         // we keep the UTF-8 validation pass here. Non-UTF-8

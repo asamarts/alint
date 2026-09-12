@@ -44,6 +44,48 @@ fn setup() -> tempfile::TempDir {
 }
 
 #[test]
+fn dry_run_reports_the_same_skip_as_the_real_run_for_an_oversized_file() {
+    // Round-4 audit: `fix --dry-run` must run the same read/size/binary guards as
+    // the real `fix` and report Skipped for files the real run skips -- not a
+    // false optimistic "would apply". A gate using `--dry-run` must not
+    // false-green. Here `fix_size_limit` makes the only file oversized.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nfix_size_limit: 100\nrules:\n  - id: no-ws\n    \
+         kind: no_trailing_whitespace\n    paths: \"**/*.rs\"\n    level: error\n    \
+         fix:\n      file_trim_trailing_whitespace: {}\n",
+    )
+    .unwrap();
+    let big = "let _ = 1;   \n".repeat(50); // > 100 bytes, all with trailing ws
+    std::fs::write(root.join("big.rs"), &big).unwrap();
+
+    let dry = run(root, &["fix", "--dry-run", "."]);
+    let real = run(root, &["fix", "."]);
+    let dry_out = String::from_utf8_lossy(&dry.stdout);
+    let real_out = String::from_utf8_lossy(&real.stdout);
+
+    // Both must report the file as SKIPPED (not applied), and agree on the exit
+    // code -- the dry run cannot be optimistic where the real run declines.
+    assert!(
+        dry_out.contains("0 applied") && dry_out.contains("1 skipped"),
+        "dry-run must skip the oversized file, not report would-apply; got:\n{dry_out}"
+    );
+    assert!(
+        real_out.contains("0 applied") && real_out.contains("1 skipped"),
+        "real run skips the oversized file; got:\n{real_out}"
+    );
+    assert_eq!(
+        dry.status.code(),
+        real.status.code(),
+        "dry-run and real fix must agree on the exit code"
+    );
+    // The tree is untouched by both.
+    assert_eq!(std::fs::read_to_string(root.join("big.rs")).unwrap(), big);
+}
+
+#[test]
 fn fix_only_suppresses_residual_and_exits_zero() {
     let tmp = setup();
     let out = run(tmp.path(), &["fix", "--fix-only", "."]);

@@ -1112,9 +1112,16 @@ fn fix_exit_code(report: &FixReport, fix_only: bool, cli: &Cli) -> ExitCode {
         } else {
             ExitCode::SUCCESS
         }
-    } else if report.has_unfixable_errors()
+    } else if report.had_fix_error()
+        || report.has_unfixable_errors()
         || (cli.fail_on_warning && report.has_unfixable_warnings())
     {
+        // `had_fix_error()`: a fix was ATTEMPTED and hit a genuine I/O error (a
+        // read-only target, ENOSPC, ...), recorded as a `Skipped("fix error: ...")`.
+        // That is not a benign declined skip (already-clean, binary, size-limit),
+        // so it must fail the process regardless of the rule's level -- otherwise
+        // `alint fix` reports success (exit 0) while a warning/info-level fix
+        // silently did not land. This matches the `--fix-only` branch above.
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS

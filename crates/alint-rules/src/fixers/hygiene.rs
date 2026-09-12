@@ -22,41 +22,36 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would trim trailing whitespace in {}",
-                path.display()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
-        // A NUL byte is valid UTF-8 (U+0000) but marks binary content, so the
-        // `from_utf8` check below is too weak on its own: without this guard a
-        // NUL-bearing file caught by a `paths: "**"` glob would be silently
-        // rewritten (H3 contract). Mirror the guard the sibling hygiene fixers
-        // already carry.
+        // A NUL byte marks binary content: refuse (H3), and the detector carries
+        // the SAME guard so `check` and `fix` agree on which files are in scope.
         if looks_binary(&existing) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} looks binary; not trimming",
                 path.display()
             )));
         }
-        let Ok(text) = std::str::from_utf8(&existing) else {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} is not UTF-8; cannot trim",
-                path.display()
-            )));
-        };
-        let trimmed = strip_trailing_whitespace(text);
-        if trimmed.as_bytes() == existing {
+        // No `from_utf8` gate: `no_trailing_whitespace` detects at the byte level
+        // (a file with one junk byte is still flagged), so the fixer trims at the
+        // byte level too and preserves any invalid bytes -- otherwise a file with
+        // one junk byte would be flagged-fixable forever yet never fixed.
+        let trimmed = strip_trailing_whitespace(&existing);
+        if trimmed == existing {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already clean",
                 path.display()
             )));
         }
-        ctx.commit_write(&abs, trimmed.as_bytes())
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would trim trailing whitespace in {}",
+                path.display()
+            )));
+        }
+        ctx.commit_write(&abs, &trimmed)
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,
@@ -72,24 +67,27 @@ impl Fixer for FileTrimTrailingWhitespaceFixer {
         if looks_binary(bytes) {
             return None;
         }
-        let text = std::str::from_utf8(bytes).ok()?;
-        let trimmed = strip_trailing_whitespace(text);
-        if trimmed.as_bytes() == bytes {
+        let trimmed = strip_trailing_whitespace(bytes);
+        if trimmed == bytes {
             return None;
         }
         Some(FixEdit::SetContent {
             path: path.to_path_buf(),
-            content: trimmed.into_bytes(),
+            content: trimmed,
         })
     }
 }
 
-fn strip_trailing_whitespace(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+/// Trim trailing space/tab (and CR from a CRLF run) on every line, at the BYTE
+/// level so it matches its byte-level detector and preserves any invalid UTF-8
+/// bytes. Space/tab/CR/LF are all ASCII and can never be a UTF-8 continuation
+/// byte, so trimming them from the raw bytes is unambiguous.
+fn strip_trailing_whitespace(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
     let mut first = true;
-    for line in text.split('\n') {
+    for line in bytes.split(|&b| b == b'\n') {
         if !first {
-            out.push('\n');
+            out.push(b'\n');
         }
         first = false;
         // Trim trailing space/tab AND CR from the ws region, then re-add ONE CR
@@ -98,10 +96,14 @@ fn strip_trailing_whitespace(text: &str) -> String {
         // check, so a line like `"x \r "` (ws, CR, ws) that trims only to
         // `"x \r"` would be re-flagged (strip CR -> `"x "` -> trailing ws). Also
         // collapses a doubled trailing CR (`\r\r`) like the line-ending fixer.
-        let had_cr = line.ends_with('\r');
-        out.push_str(line.trim_end_matches([' ', '\t', '\r']));
+        let had_cr = line.last() == Some(&b'\r');
+        let end = line
+            .iter()
+            .rposition(|&b| b != b' ' && b != b'\t' && b != b'\r')
+            .map_or(0, |i| i + 1);
+        out.extend_from_slice(&line[..end]);
         if had_cr {
-            out.push('\r');
+            out.push(b'\r');
         }
     }
     out
@@ -124,12 +126,6 @@ impl Fixer for FileAppendFinalNewlineFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would append final newline to {}",
-                path.display()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
@@ -146,6 +142,13 @@ impl Fixer for FileAppendFinalNewlineFixer {
         if looks_binary(&existing) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} looks binary; not appending a newline",
+                path.display()
+            )));
+        }
+        // Dry-run AFTER the read + guards, so a preview matches the real run.
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would append final newline to {}",
                 path.display()
             )));
         }
@@ -227,13 +230,6 @@ impl Fixer for FileNormalizeLineEndingsFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would normalize line endings in {} to {}",
-                path.display(),
-                self.target.name()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
@@ -248,6 +244,14 @@ impl Fixer for FileNormalizeLineEndingsFixer {
         if normalized == existing {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already {}",
+                path.display(),
+                self.target.name()
+            )));
+        }
+        // Dry-run AFTER the read + guards, so a preview matches the real run.
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would normalize line endings in {} to {}",
                 path.display(),
                 self.target.name()
             )));
@@ -331,20 +335,12 @@ impl Fixer for FileCollapseBlankLinesFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would collapse blank lines in {} to at most {}",
-                path.display(),
-                self.max,
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
-        // A NUL byte is valid UTF-8 but marks binary content: guard like the
-        // sibling hygiene fixers so a NUL-bearing file caught by `paths: "**"`
-        // is not silently rewritten (H3 contract).
+        // A NUL byte marks binary content: guard (H3), and the detector carries
+        // the SAME guard so `check` and `fix` agree on scope.
         if looks_binary(&existing) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} looks binary; not collapsing blank lines",
@@ -362,6 +358,14 @@ impl Fixer for FileCollapseBlankLinesFixer {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already clean",
                 path.display()
+            )));
+        }
+        // Dry-run AFTER the read + guards, so a preview matches the real run.
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would collapse blank lines in {} to at most {}",
+                path.display(),
+                self.max,
             )));
         }
         ctx.commit_write(&abs, collapsed.as_bytes())
@@ -458,8 +462,8 @@ mod tests {
 
     #[test]
     fn strip_trailing_whitespace_preserves_lf_and_crlf() {
-        assert_eq!(strip_trailing_whitespace("a  \nb\t\n"), "a\nb\n");
-        assert_eq!(strip_trailing_whitespace("a  \r\nb\t\r\n"), "a\r\nb\r\n");
+        assert_eq!(strip_trailing_whitespace(b"a  \nb\t\n"), b"a\nb\n");
+        assert_eq!(strip_trailing_whitespace(b"a  \r\nb\t\r\n"), b"a\r\nb\r\n");
     }
 
     #[test]
@@ -469,12 +473,23 @@ mod tests {
         // `no_trailing_whitespace` strips a trailing CR before its ws test, so
         // trimming only to `"x \r"` leaves `"x "` under the check and re-flags --
         // `fix` would never converge.
-        assert_eq!(strip_trailing_whitespace("x \r \n"), "x\n");
+        assert_eq!(strip_trailing_whitespace(b"x \r \n"), b"x\n");
         // The original repro: a bare line with no final newline.
-        assert_eq!(strip_trailing_whitespace("x \r "), "x");
+        assert_eq!(strip_trailing_whitespace(b"x \r "), b"x");
         // Fixed point: a second application is a no-op.
-        let once = strip_trailing_whitespace("x \r \n");
+        let once = strip_trailing_whitespace(b"x \r \n");
         assert_eq!(strip_trailing_whitespace(&once), once);
+    }
+
+    #[test]
+    fn strip_trailing_whitespace_is_byte_level_and_preserves_invalid_utf8() {
+        // Round-4 audit F2: `no_trailing_whitespace` detects at the byte level, so
+        // the fixer must trim a file that carries an invalid UTF-8 byte rather
+        // than skip it (which left the violation flagged-fixable forever). The
+        // junk `0xFF` survives; only the trailing spaces go.
+        assert_eq!(strip_trailing_whitespace(b"a\xFF  \n"), b"a\xFF\n".to_vec());
+        // A trailing junk byte is not whitespace and is preserved.
+        assert_eq!(strip_trailing_whitespace(b"a \xFF"), b"a \xFF".to_vec());
     }
 
     #[test]

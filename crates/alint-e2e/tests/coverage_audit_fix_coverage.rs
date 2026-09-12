@@ -100,6 +100,17 @@ fn violations_empty(exp: &Value) -> bool {
         .is_some_and(std::vec::Vec::is_empty)
 }
 
+/// True when `field` is present AND an empty sequence (`applied: []`), not merely
+/// absent. An absent field is unasserted by the runner, so it must not be
+/// credited as a fixpoint proof -- a `[fix, fix]` whose second step is a bare
+/// `{}` would otherwise be counted as a convergence proof while asserting
+/// nothing about the no-op. (Round-4 audit hardening.)
+fn present_and_empty(exp: &Value, field: &str) -> bool {
+    exp.get(field)
+        .and_then(Value::as_sequence)
+        .is_some_and(std::vec::Vec::is_empty)
+}
+
 /// Insert the op key of every resolvable inline id into `set`.
 fn resolve_into(ids: &[String], id_to_op: &HashMap<String, String>, set: &mut BTreeSet<String>) {
     for id in ids {
@@ -148,9 +159,11 @@ fn classify_scenario(
         let applied = str_list(exp, "applied");
         // Case B: a clean check right after the fix.
         let clean_check = next_step == "check" && violations_empty(next_exp);
-        // Case A: a trailing fix that changed nothing (and skipped nothing).
+        // Case A: a trailing fix that changed nothing (and skipped nothing). The
+        // `applied: []` must be EXPLICIT (present-and-empty) -- an absent
+        // `applied:` asserts nothing and cannot prove a fixpoint.
         let noop_refix = is_fix_step(next_step)
-            && str_list(next_exp, "applied").is_empty()
+            && present_and_empty(next_exp, "applied")
             && str_list(next_exp, "skipped").is_empty();
         if clean_check || noop_refix {
             resolve_into(&applied, id_to_op, converged);

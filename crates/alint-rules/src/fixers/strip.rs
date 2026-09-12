@@ -93,12 +93,6 @@ impl Fixer for FileStripBomFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would strip BOM from {}",
-                path.display()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
@@ -119,6 +113,14 @@ impl Fixer for FileStripBomFixer {
                 path.display()
             )));
         };
+        // Dry-run AFTER the read + guards, so a preview matches the real run
+        // (Skipped for a binary/oversized/no-BOM file, not a false "would strip").
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would strip BOM from {}",
+                path.display()
+            )));
+        }
         let stripped = &existing[strip_len..];
         ctx.commit_write(&abs, stripped)
             .map_err(|source| Error::Io {
@@ -166,69 +168,111 @@ fn apply_char_filter(
         ));
     };
     let abs = ctx.root.join(path);
-    if ctx.dry_run {
-        return Ok(FixOutcome::Applied(format!(
-            "would strip {label} chars from {}",
-            path.display()
-        )));
-    }
     let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
         alint_core::ReadForFix::Bytes(b) => b,
         alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
     };
-    // Binary guard (H3): a NUL byte is valid UTF-8, so the `from_utf8` check
-    // below is too weak on its own -- stripping a bidi/zero-width byte sequence
-    // out of a NUL-bearing binary would corrupt it. Match the other byte-level
-    // fixers and refuse.
+    // Binary guard (H3): a NUL byte marks binary content; stripping a
+    // bidi/zero-width byte sequence out of a NUL-bearing binary would corrupt
+    // it. The detector carries the SAME guard (so `check` and `fix` agree on
+    // which files are in scope -- otherwise a binary would be flagged-fixable
+    // forever but never fixed).
     if looks_binary(&existing) {
         return Ok(FixOutcome::Skipped(format!(
             "{} looks binary; not stripping {label} chars",
             path.display()
         )));
     }
-    let Ok(text) = std::str::from_utf8(&existing) else {
-        return Ok(FixOutcome::Skipped(format!(
-            "{} is not UTF-8; cannot filter {label} chars",
-            path.display()
-        )));
-    };
-    let out = filter_chars(text, predicate, preserve_leading_feff);
-    if out.as_bytes() == existing {
+    // NOTE: no `from_utf8` gate. The detectors decode with `from_utf8_lossy`
+    // (fail-open, so an invalid byte can't hide a later bidi/zero-width control
+    // -- a Trojan-Source evasion), so the fixer must strip at the BYTE level and
+    // preserve any invalid bytes verbatim, or a file with one junk byte would be
+    // flagged-fixable forever yet never fixed (non-convergent; a security
+    // fail-open for the bidi rule).
+    let out = filter_chars(&existing, predicate, preserve_leading_feff);
+    if out == existing {
         return Ok(FixOutcome::Skipped(format!(
             "{} has no {label} chars to strip",
             path.display()
         )));
     }
-    ctx.commit_write(&abs, out.as_bytes())
-        .map_err(|source| Error::Io {
-            path: abs.clone(),
-            source,
-        })?;
+    // Dry-run AFTER the read + guards + transform, so a preview reports what the
+    // real run would actually do (Skipped for a binary/oversized file, not a
+    // false "would strip").
+    if ctx.dry_run {
+        return Ok(FixOutcome::Applied(format!(
+            "would strip {label} chars from {}",
+            path.display()
+        )));
+    }
+    ctx.commit_write(&abs, &out).map_err(|source| Error::Io {
+        path: abs.clone(),
+        source,
+    })?;
     Ok(FixOutcome::Applied(format!("{verb} {}", path.display())))
 }
 
 /// Pure "drop every char matching `predicate`" transform, shared by the
-/// disk-writing `apply_char_filter` and the editor-edit `char_filter_edit`
-/// so the two paths can't diverge.
+/// disk-writing `apply_char_filter` and the editor-edit `char_filter_edit` so
+/// the two paths can't diverge.
+///
+/// Operates at the BYTE level so it can match its byte-level detector: valid
+/// UTF-8 runs are scanned char-by-char and flagged chars dropped, while any
+/// invalid byte is emitted verbatim (the file may contain junk bytes and must
+/// survive intact except for the flagged controls). This is why it takes
+/// `&[u8]` rather than `&str`.
 fn filter_chars(
-    text: &str,
+    bytes: &[u8],
     predicate: impl Fn(char) -> bool,
     preserve_leading_feff: bool,
-) -> String {
-    let mut out = String::with_capacity(text.len());
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
     let mut first_char = true;
-    for c in text.chars() {
-        let keep_because_leading_bom = preserve_leading_feff && first_char && c == '\u{FEFF}';
-        if keep_because_leading_bom || !predicate(c) {
-            out.push(c);
+    let mut buf = [0u8; 4];
+    let mut push_valid = |out: &mut Vec<u8>, valid: &str, first_char: &mut bool| {
+        for c in valid.chars() {
+            let keep_because_leading_bom = preserve_leading_feff && *first_char && c == '\u{FEFF}';
+            if keep_because_leading_bom || !predicate(c) {
+                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            }
+            *first_char = false;
         }
-        first_char = false;
+    };
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                push_valid(&mut out, valid, &mut first_char);
+                break;
+            }
+            Err(e) => {
+                let up_to = e.valid_up_to();
+                if up_to > 0 {
+                    // Safe: `valid_up_to` guarantees this prefix is valid UTF-8.
+                    let valid = std::str::from_utf8(&rest[..up_to]).unwrap_or("");
+                    push_valid(&mut out, valid, &mut first_char);
+                }
+                let Some(len) = e.error_len() else {
+                    // Truncated trailing sequence: emit the rest verbatim.
+                    out.extend_from_slice(&rest[up_to..]);
+                    break;
+                };
+                // Emit the invalid byte(s) verbatim; a junk byte is not a leading
+                // BOM, so subsequent chars are no longer "first".
+                out.extend_from_slice(&rest[up_to..up_to + len]);
+                first_char = false;
+                rest = &rest[up_to + len..];
+            }
+        }
     }
     out
 }
 
 /// [`FixEdit`] form of the char-filter fixers: returns `None` when the
-/// violation has no path, the content isn't UTF-8, or nothing changes.
+/// violation has no path, the content is binary, or nothing changes. Mirrors
+/// `apply_char_filter` byte-for-byte (shared `filter_chars`), including the
+/// no-`from_utf8`-gate byte-level strip, so the editor (LSP) path and the disk
+/// path can't diverge.
 fn char_filter_edit(
     violation: &Violation,
     bytes: &[u8],
@@ -240,14 +284,13 @@ fn char_filter_edit(
     if looks_binary(bytes) {
         return None;
     }
-    let text = std::str::from_utf8(bytes).ok()?;
-    let out = filter_chars(text, predicate, preserve_leading_feff);
-    if out.as_bytes() == bytes {
+    let out = filter_chars(bytes, predicate, preserve_leading_feff);
+    if out == bytes {
         return None;
     }
     Some(FixEdit::SetContent {
         path: path.to_path_buf(),
-        content: out.into_bytes(),
+        content: out,
     })
 }
 
@@ -280,6 +323,37 @@ mod tests {
             FileStripBidiFixer
                 .fix_edit(&v(), b"clean ascii", std::path::Path::new("/r"))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn filter_chars_is_byte_level_and_preserves_invalid_utf8() {
+        // Round-4 audit F1: the bidi/zero-width detectors decode with
+        // `from_utf8_lossy` (a lone junk byte must not hide a later control), so
+        // the fixer strips at the byte level and keeps the junk byte verbatim --
+        // a strict `from_utf8` skip left a Trojan-Source char flagged-fixable
+        // forever but never fixed. `a` `0xFF` U+202E `b` -> `a` `0xFF` `b`.
+        let out = filter_chars(
+            b"a\xFF\xE2\x80\xAEb",
+            crate::no_bidi_controls::is_bidi_control,
+            false,
+        );
+        assert_eq!(out, b"a\xFFb".to_vec());
+        // A leading BOM is preserved when asked, even with a trailing junk byte.
+        let out = filter_chars(
+            b"\xEF\xBB\xBFa\xFF",
+            |c| crate::no_zero_width_chars::is_flagged_zero_width(c, false),
+            true,
+        );
+        assert_eq!(out, b"\xEF\xBB\xBFa\xFF".to_vec());
+        // A truncated multi-byte sequence at EOF is emitted verbatim, not dropped.
+        assert_eq!(
+            filter_chars(
+                b"ok\xE2\x80",
+                crate::no_bidi_controls::is_bidi_control,
+                false
+            ),
+            b"ok\xE2\x80".to_vec()
         );
     }
 

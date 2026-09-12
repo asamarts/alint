@@ -237,13 +237,6 @@ impl Fixer for FilePrependFixer {
             Ok(b) => b,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would prepend {} byte(s) to {}",
-                prepend.len(),
-                path.display()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
@@ -264,6 +257,15 @@ impl Fixer for FilePrependFixer {
         if body.starts_with(prepend.as_slice()) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already begins with the required content",
+                path.display()
+            )));
+        }
+        // Dry-run AFTER the read + guards, so a preview matches the real run
+        // (Skipped for a binary/oversized/already-satisfied file).
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would prepend {} byte(s) to {}",
+                prepend.len(),
                 path.display()
             )));
         }
@@ -354,13 +356,6 @@ impl Fixer for FileAppendFixer {
             Ok(b) => b,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
-        if ctx.dry_run {
-            return Ok(FixOutcome::Applied(format!(
-                "would append {} byte(s) to {}",
-                payload.len(),
-                path.display()
-            )));
-        }
         let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
@@ -376,6 +371,15 @@ impl Fixer for FileAppendFixer {
         if existing.ends_with(payload.as_slice()) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already ends with the required content",
+                path.display()
+            )));
+        }
+        // Dry-run AFTER the read + guards, so a preview matches the real run
+        // (Skipped for a binary/oversized/already-satisfied file).
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would append {} byte(s) to {}",
+                payload.len(),
                 path.display()
             )));
         }

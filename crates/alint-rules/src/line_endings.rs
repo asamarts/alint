@@ -76,6 +76,12 @@ impl PerFileRule for LineEndingsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: the `file_normalize_line_endings` fixer refuses
+        // it, so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed).
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let Some(line_no) = first_mismatched_line(bytes, self.target) else {
             return Ok(Vec::new());
         };

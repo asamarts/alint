@@ -25,8 +25,10 @@
 //! purpose. `alint fix` is single-pass in Phase 0 (the fixpoint re-walk
 //! arrives in Phase 1), so a MULTI-rule tree is neither idempotent nor
 //! convergent across passes by design: one rule creating a file that
-//! another must then fix, or two content fixers racing on one file via
-//! the compose buffer, are known limitations deferred to the next phase.
+//! another must then fix, one rule RENAMING a file out from under another
+//! rule's stale-index violation (the vacated fix is silently deferred to
+//! the next `fix`), or two content fixers racing on one file via the
+//! compose buffer, are known limitations deferred to the next phase.
 //! One rule isolates each fixer's own fixed-point behaviour, which is
 //! exactly what Phase 0 guarantees.
 //!

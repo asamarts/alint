@@ -58,6 +58,12 @@ impl PerFileRule for NoTrailingWhitespaceRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: the `file_trim_trailing_whitespace` fixer refuses
+        // it, so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed).
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let Some(line_no) = first_offending_line(bytes) else {
             return Ok(Vec::new());
         };

@@ -81,6 +81,14 @@ impl PerFileRule for NoBidiControlsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content (NUL-bearing): the `file_strip_bidi` fixer refuses
+        // it (editing binary would corrupt it), so flagging it here would nag a
+        // file that can never be fixed -- `check` and `fix` must agree on scope.
+        // A lone invalid byte (`0xFF`, no NUL) is NOT binary, so this does not
+        // reopen the fail-open evasion below: such a file is still scanned.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Lossily decode rather than abandon the whole file on the first invalid
         // byte: this is a Trojan-Source (CVE-2021-42574) defense, so a single
         // stray `0xFF` must NOT suppress detection of a bidi override elsewhere

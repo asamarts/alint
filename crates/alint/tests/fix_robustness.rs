@@ -78,6 +78,51 @@ fn write_failure_in_one_dir_still_fixes_the_rest() {
     );
 }
 
+const WARNING_CONFIG: &str = "\
+version: 1
+rules:
+  - id: no-ws
+    kind: no_trailing_whitespace
+    paths: \"**/*.rs\"
+    level: warning
+    fix:
+      file_trim_trailing_whitespace: {}
+";
+
+#[test]
+fn default_fix_exits_nonzero_when_a_fix_errors_even_at_warning_level() {
+    // Round-4 audit: a genuine I/O write error (read-only dir) is not a benign
+    // declined skip. The default `alint fix` path must fail (exit 1) on it,
+    // regardless of the rule's LEVEL -- matching the `--fix-only` path -- or a
+    // warning/info-level hygiene fix silently doesn't land yet the run reports
+    // success. (Previously the default path was purely level-gated: exit 0.)
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), WARNING_CONFIG).unwrap();
+    std::fs::write(root.join("good.rs"), "fn a() {}   \n").unwrap();
+    std::fs::create_dir(root.join("ro")).unwrap();
+    std::fs::write(root.join("ro/blocked.rs"), "fn b() {}   \n").unwrap();
+    std::fs::set_permissions(root.join("ro"), std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let out = run(root, &["fix", "."]);
+
+    let good = std::fs::read_to_string(root.join("good.rs")).unwrap();
+    std::fs::set_permissions(root.join("ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert_eq!(good, "fn a() {}\n", "the writable file is still fixed");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a genuine write error must fail the default fix even at warning level; output:\n{combined}"
+    );
+}
+
 #[test]
 fn fix_only_still_exits_nonzero_when_a_fix_errors() {
     // R-audit-5: --fix-only suppresses declined/unfixable residuals and exits 0,

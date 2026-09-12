@@ -64,6 +64,13 @@ impl PerFileRule for FinalNewlineRule {
         if bytes.last().copied() == Some(b'\n') {
             return Ok(Vec::new());
         }
+        // Skip binary content: the `file_append_final_newline` fixer refuses it,
+        // so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed). Consulted only when a newline is
+        // actually missing, so the common (clean) case pays nothing.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let msg = self
             .message
             .clone()

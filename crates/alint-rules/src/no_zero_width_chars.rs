@@ -77,6 +77,13 @@ impl PerFileRule for NoZeroWidthCharsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content (NUL-bearing): the `file_strip_zero_width` fixer
+        // refuses it, so flagging it here would nag a file that can never be
+        // fixed -- `check` and `fix` must agree on scope. A lone invalid byte
+        // (no NUL) is NOT binary, so the fail-open evasion below stays closed.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Lossily decode rather than abandon the file on the first invalid byte:
         // this is a security-posture rule, so a stray non-UTF-8 byte must NOT
         // suppress detection of a zero-width char elsewhere (fail-open evasion).
