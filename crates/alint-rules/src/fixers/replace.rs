@@ -22,6 +22,13 @@ use regex::Regex;
 /// so a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` (or a
 /// per-rule top-level promotion, when the rewrite is provably a normalization)
 /// applies it.
+///
+/// CONVERGENCE: for a forbidden-pattern host, a replacement that itself still
+/// matches the pattern is dropped (with a stderr warning) -- applying it would
+/// leave the forbidden pattern present and grow the file across passes. This is
+/// single-pass in Phase 1: it does NOT catch a re-match that forms across the
+/// splice boundary with surrounding text; the Phase-1 fixpoint (whole-file
+/// re-check + a loud non-convergence cap) is the complete guarantee.
 #[derive(Debug)]
 pub struct ReplaceFixer {
     pattern: Regex,
@@ -71,12 +78,29 @@ impl Fixer for ReplaceFixer {
         // yields disjoint matches, so the batch never self-overlaps; the byte
         // offsets are into the file's current bytes, exactly what ReplaceRange
         // wants. `expand` performs `$1` / `${name}` capture substitution.
-        self.pattern
+        let mut nonconverging = 0usize;
+        let edits: Vec<CollectedEdit> = self
+            .pattern
             .captures_iter(text)
             .filter_map(|caps| {
                 let m = caps.get(0)?;
                 let mut content = String::new();
                 caps.expand(&self.replacement, &mut content);
+                // CONVERGENCE guard (this fixer only serves `file_content_forbidden`,
+                // where the pattern is FORBIDDEN): a replacement that itself still
+                // matches the pattern is not a valid fix -- applying it leaves the
+                // forbidden pattern present and, across passes, GROWS the file
+                // unboundedly (`foo`->`foofoo`; or a zero-width pattern like
+                // `(?m)^` whose insert point is re-matched). Skip it: better a
+                // clean no-op (the violation honestly stands, `check` still fails)
+                // than a non-terminating rewrite. NOTE: a re-match forming across
+                // the splice BOUNDARY with surrounding text (e.g. `aa`->`a` on
+                // `aaa`) is NOT caught here -- the Phase-1 fixpoint's whole-file
+                // re-check + loud non-convergence cap is the complete guarantee.
+                if self.pattern.is_match(&content) {
+                    nonconverging += 1;
+                    return None;
+                }
                 Some(CollectedEdit {
                     edit: FixEdit::ReplaceRange {
                         path: file.to_path_buf(),
@@ -90,7 +114,18 @@ impl Fixer for ReplaceFixer {
                     isolation_group: None,
                 })
             })
-            .collect()
+            .collect();
+        if nonconverging > 0 {
+            // Surface the skip (the file otherwise silently keeps its violation),
+            // matching the `fix_size_limit` over-cap warning's style.
+            eprintln!(
+                "alint: warning: {}: {nonconverging} `replace` match(es) left unfixed \
+                 because the replacement still matches the pattern (a non-convergent \
+                 config; the forbidden pattern would remain)",
+                file.display()
+            );
+        }
+        edits
     }
 
     // `apply` / `fix_edit` are the whole-file and LSP paths; a located fixer is
@@ -177,6 +212,34 @@ mod tests {
         assert!(
             f.collect_edits(&[], Path::new("a"), &[0xff, 0xfe, b'x'], Path::new("/r"))
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn skips_a_self_reintroducing_replacement() {
+        // `foo`->`foofoo`: the replacement still contains `foo`, so applying it
+        // would leave the forbidden pattern present and grow the file each pass.
+        // The convergence guard drops such matches (no edit emitted).
+        let f = fixer("foo", "foofoo");
+        assert!(
+            f.collect_edits(&[], Path::new("a"), b"foo bar foo\n", Path::new("/r"))
+                .is_empty(),
+            "a replacement that re-matches the pattern must not be emitted"
+        );
+        // A zero-width pattern whose insert point is re-matched is likewise dropped.
+        let zw = fixer("(?m)^", "> ");
+        assert!(
+            zw.collect_edits(&[], Path::new("a"), b"one\ntwo\n", Path::new("/r"))
+                .is_empty(),
+            "a zero-width pattern that always re-matches must not be emitted"
+        );
+        // A resolving replacement is still emitted.
+        let ok = fixer("TODO", "DONE");
+        assert_eq!(
+            ok.collect_edits(&[], Path::new("a"), b"TODO\n", Path::new("/r"))
+                .len(),
+            1,
+            "a resolving replacement is applied"
         );
     }
 

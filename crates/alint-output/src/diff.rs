@@ -45,6 +45,17 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
             write_binary_summary(fix, w)?;
             continue;
         };
+        // Content carrying raw terminal-control bytes (ESC, BEL, ...) must never
+        // reach the terminal verbatim: a `--diff` of an untrusted repo -- or of a
+        // config-controlled `replace` replacement -- would otherwise inject a
+        // screen-clear / banner-forge sequence the way `sanitize_terminal` stops
+        // everywhere else (M8). A text diff of such content is not meaningful (and
+        // is not reliably `git apply`-able through a color-stripping pipe anyway),
+        // so summarize it like binary rather than emit the raw bytes.
+        if has_terminal_control(&fix.old) || has_terminal_control(&fix.new) {
+            write_binary_summary(fix, w)?;
+            continue;
+        }
         // Every entry leads with a `diff --git a/… b/…` line so the whole patch
         // is uniformly git-format. Mixing a git-envelope entry (a rename, or an
         // empty-file create/delete, which have no hunk to self-terminate) with a
@@ -107,6 +118,18 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
         }
     }
     Ok(())
+}
+
+/// Whether `bytes` contain a raw terminal-control byte that must not be echoed
+/// verbatim into a diff on a terminal: a C0 control other than tab / newline /
+/// carriage-return (which are legitimate text), or `DEL`. Matches the notion of
+/// "dangerous control" that `sanitize_terminal` neutralizes on the other output
+/// paths. `ESC` (0x1b) and `BEL` (0x07) -- the screen-clear / banner-forge /
+/// OSC-injection vectors -- are the ones that matter.
+fn has_terminal_control(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .any(|&c| (c < 0x20 && c != b'\t' && c != b'\n' && c != b'\r') || c == 0x7f)
 }
 
 /// `a/<path>`, git-C-quoted if the path needs it (the `---` / `diff --git` side).
@@ -217,6 +240,34 @@ mod tests {
         assert!(out.contains("--- a/src/x.rs"), "{out}");
         assert!(out.contains("+++ b/src/x.rs"), "{out}");
         assert!(out.contains("-b") && out.contains("+B"), "{out}");
+    }
+
+    #[test]
+    fn content_with_terminal_control_bytes_is_summarized_not_echoed() {
+        // A `replace` replacement (or any content) carrying a raw ESC must not
+        // reach the terminal verbatim through `--diff` -- it would inject a
+        // screen-clear / banner-forge sequence. Such content is summarized like
+        // binary; NO raw ESC/BEL appears in the output.
+        let out = render(&[fix(
+            "app.js",
+            "console.log(x)\n",
+            "A\u{1b}[2JB\u{7}\n",
+            StagedKind::Modify,
+        )]);
+        assert!(
+            !out.as_bytes().contains(&0x1b) && !out.as_bytes().contains(&0x07),
+            "no raw ESC/BEL may reach the diff output: {out:?}"
+        );
+        assert!(
+            out.contains("app.js") && out.to_lowercase().contains("binary"),
+            "control-byte content is summarized, not line-diffed: {out}"
+        );
+        // Clean CRLF / tab content is still a normal text diff (not summarized).
+        let clean = render(&[fix("w.txt", "a\tb\r\n", "a\tB\r\n", StagedKind::Modify)]);
+        assert!(
+            clean.contains("--- a/w.txt") && !clean.to_lowercase().contains("binary"),
+            "tab/CRLF content is legitimate text, still line-diffed: {clean}"
+        );
     }
 
     #[test]

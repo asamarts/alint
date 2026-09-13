@@ -14,7 +14,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   edit per match, spliced in a single pass -- and is `Unsafe` by default (a regex
   rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a
   suggestion and `alint fix --unsafe-fixes` applies it. Example: rewrite
-  `console.log` to `logger.debug`, or strip a banned token.
+  `console.log` to `logger.debug`, or strip a banned token. A replacement that
+  would itself still match the forbidden pattern (e.g. `foo` -> `foofoo`, or a
+  zero-width pattern) is left unfixed with a warning rather than applied, so the
+  fix never loops or grows the file.
 
 ### Changed
 
@@ -50,6 +53,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a write into a read-only directory) instead of silently dropping it with the
   benign residuals; previously the run exited nonzero with a report that read as
   a clean success and no cause anywhere.
+- `alint fix --diff` now summarizes (rather than echoing) file content that
+  carries raw terminal-control bytes (ESC, BEL, ...), so a diff of an untrusted
+  repo -- or of a config-controlled `replace` replacement -- can no longer inject
+  a screen-clear / banner-forge sequence into the terminal.
+- A malformed single-op `fix:` block (a missing required field or an unknown
+  field, e.g. `replace:` without `replacement`) now names the offending op in
+  the error instead of the misleading "a map with exactly one fix op".
 
 ## [0.16.1] - 2026-09-04
 

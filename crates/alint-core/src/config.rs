@@ -464,9 +464,30 @@ where
             )));
         }
     }
+    // For a single-op block, name the op in any deserialize error. `FixSpec` is
+    // `#[serde(untagged)]`, so a variant that fails on a missing/unknown field is
+    // silently discarded and the enum falls to its generic `expecting` string --
+    // which misleadingly says "exactly one fix op" when the user HAS exactly one
+    // op that merely has a bad field (e.g. `replace:` without `replacement`, or an
+    // unknown key). Naming the op turns that into an actionable message without a
+    // second op-name SSOT (the name comes straight from the single key).
+    let single_op: Option<String> = match &value {
+        serde_yaml_ng::Value::Mapping(m) => m
+            .iter()
+            .next()
+            .and_then(|(k, _)| k.as_str())
+            .map(str::to_owned),
+        _ => None,
+    };
     serde_yaml_ng::from_value(value)
         .map(Some)
-        .map_err(D::Error::custom)
+        .map_err(|e| match single_op {
+            Some(op) => D::Error::custom(format!(
+                "`{op}`: not a recognized fix op, or it has a missing or invalid field \
+             (a fix op's required fields must be present and unknown fields are rejected)"
+            )),
+            None => D::Error::custom(e),
+        })
 }
 
 impl FixSpec {
@@ -682,9 +703,11 @@ pub struct FileStripBomFixSpec {}
 pub struct FileCollapseBlankLinesFixSpec {}
 
 /// The `replace` op (Phase 1): rewrite each span the host rule's `pattern:`
-/// matches with `replacement`. Wired to `file_content_forbidden` and
-/// `file_content_matches` only -- the pattern comes from the host rule, not a
-/// field here. `replacement` is a byte template supporting `$1` / `${name}`
+/// matches with `replacement`. Wired to `file_content_forbidden` only -- the
+/// pattern comes from the host rule, not a field here. (`file_content_matches`
+/// violates on the pattern's *absence*, so `replace` -- which rewrites matches
+/// -- has nothing to act on there and rejects the op.) `replacement` is a byte
+/// template supporting `$1` / `${name}`
 /// capture references (the regex-crate substitution syntax); a literal `$` is
 /// written `$$`. This is a *located* op (one [`FixEdit::ReplaceRange`] per
 /// match), Unsafe by default (a regex rewrite is not behavior-preserving in
