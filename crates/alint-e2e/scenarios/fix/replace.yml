@@ -1,0 +1,36 @@
+name: replace rewrites forbidden matches under --unsafe-fixes and converges
+tags: [fix, file_content_forbidden, replace, applicability]
+
+# Phase 1: the `replace` located op rewrites each span matching the host
+# `file_content_forbidden` rule's `pattern:`. It emits one byte-range edit per
+# match through the located path (all matches spliced in one pass). `replace` is
+# Unsafe (a regex rewrite is not behaviour-preserving), so a bare `alint fix`
+# SUGGESTS it and `--unsafe-fixes` (the `fix_unsafe` step) applies it. The
+# `[check, fix_unsafe, check]` shape proves both matches are rewritten and the
+# tree then converges (a second check finds nothing).
+
+given:
+  tree:
+    app.js: "let x = 1;\nconsole.log(x);\nconsole.log(2);\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-console
+        kind: file_content_forbidden
+        paths: "**/*.js"
+        pattern: "console\\.log"
+        level: error
+        fix:
+          replace:
+            replacement: "logger.debug"
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: no-console, level: error, path: app.js}
+  - applied: [no-console]
+  - violations: []
+
+expect_tree:
+  app.js: "let x = 1;\nlogger.debug(x);\nlogger.debug(2);\n"

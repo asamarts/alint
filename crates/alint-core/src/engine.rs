@@ -1162,6 +1162,17 @@ impl Engine {
         // Phase 0 stays empty (no shipped fixer opts in), so the located pass is
         // a genuine no-op here.
         let mut located_batches: BTreeMap<PathBuf, Vec<LocatedEdit>> = BTreeMap::new();
+        // Byte-consistency for the located pass (Phase 1): the edits' byte
+        // offsets are computed against the file's bytes AT COLLECT TIME. Capture
+        // those bytes per file so `apply` splices against the exact bytes the
+        // offsets index -- never a re-read that a whole-file fixer may have
+        // changed in between (stale-offset corruption). If two rules collect for
+        // one file against DIFFERENT bytes (a whole-file fixer buffered it mid-
+        // loop), the batch is inconsistent: mark it deferred and skip it this
+        // pass (it re-applies on a rerun / the Phase-1 fixpoint), never corrupt.
+        let mut located_bytes: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
+        let mut located_deferred: std::collections::HashSet<PathBuf> =
+            std::collections::HashSet::new();
         for (rule_index, entry) in self.entries.iter().enumerate() {
             if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
                 continue;
@@ -1249,6 +1260,17 @@ impl Engine {
                         // (fail-open, matching the whole-file read path).
                         Ok(ReadForFix::Skipped(_)) | Err(_) => continue,
                     };
+                    // Capture the collect-time bytes; a second rule reading
+                    // different bytes for the same file poisons the batch.
+                    match located_bytes.get(&file) {
+                        Some(prev) if prev != &bytes => {
+                            located_deferred.insert(file.clone());
+                        }
+                        Some(_) => {}
+                        None => {
+                            located_bytes.insert(file.clone(), bytes.clone());
+                        }
+                    }
                     for (ordinal, collected) in f
                         .collect_edits(&file_violations, &file, &bytes, root)
                         .into_iter()
@@ -1335,21 +1357,47 @@ impl Engine {
         // genuinely consumed and the path is exercised by the engine's fixture
         // test. Result items are grouped back to their rule and appended.
         //
-        // Phase 1 caveat: edits are collected against the file's bytes in the
-        // loop, then re-read here. If a whole-file fixer buffered a change to the
-        // same file in between, this read (buffer-aware) would return different
-        // bytes and the located byte-offsets would be stale. That combination
-        // cannot arise in Phase 0 (no fixer emits located edits); the first
-        // located op must make the collect and apply reads consistent (collect +
-        // apply per file, or re-collect at apply time).
+        // Byte-consistency (Phase 1): the offsets index the bytes captured in
+        // `located_bytes` at collect time. Splice against THOSE, not a re-read --
+        // a whole-file fixer may have buffered a change to the same file after
+        // collection, which would make the offsets stale (corruption). If the
+        // file is poisoned (inconsistent reads across rules) or its current bytes
+        // differ from the captured ones (a whole-file fixer changed it since),
+        // DEFER the batch: report each edit as skipped and leave the file for a
+        // rerun / the Phase-1 fixpoint. Never splice into bytes the offsets do
+        // not index.
         if !located_batches.is_empty() {
             let mut located_items: BTreeMap<usize, Vec<FixItem>> = BTreeMap::new();
             for (file, batch) in located_batches {
                 let abs = root.join(&file);
-                let original = match read_for_fix(&abs, &file, &fix_ctx) {
-                    Ok(ReadForFix::Bytes(b)) => b,
-                    Ok(ReadForFix::Skipped(_)) | Err(_) => continue,
+                let deferred = located_deferred.contains(&file);
+                let current = match read_for_fix(&abs, &file, &fix_ctx) {
+                    Ok(ReadForFix::Bytes(b)) => Some(b),
+                    Ok(ReadForFix::Skipped(_)) | Err(_) => None,
                 };
+                let original = located_bytes.get(&file);
+                // Defer unless the file is consistent AND its current bytes still
+                // equal the captured bytes the offsets index.
+                if deferred || current.as_ref() != original {
+                    for edit in batch {
+                        located_items
+                            .entry(edit.rule_index)
+                            .or_default()
+                            .push(FixItem {
+                                violation: Violation::new(format!(
+                                    "located edit in {}",
+                                    file.display()
+                                ))
+                                .with_path(file.clone()),
+                                status: FixStatus::Skipped(format!(
+                                    "{} was also changed by another fix this pass; rerun to apply",
+                                    file.display()
+                                )),
+                            });
+                    }
+                    continue;
+                }
+                let original = original.expect("current == original implies Some").clone();
                 let (new_bytes, outcomes) =
                     located_fix::apply_file_edits(&original, batch, threshold);
                 // `--dry-run` reports the outcomes but writes nothing: skip the
@@ -1370,7 +1418,12 @@ impl Engine {
                                 file.display()
                             ))
                             .with_path(file.clone()),
-                            status: located_status(&edit.collected.edit, outcome, dry_run),
+                            status: located_status(
+                                &edit.collected.edit,
+                                edit.collected.applicability,
+                                outcome,
+                                dry_run,
+                            ),
                         });
                 }
             }
@@ -1802,7 +1855,12 @@ pub enum StagedKind {
 /// can carry a richer summary; Phase 0 never reaches this with real data (no
 /// fixer opts into the located path), so the generic wording is only exercised
 /// by the engine's fixture test.
-fn located_status(edit: &FixEdit, outcome: LocatedOutcome, dry_run: bool) -> FixStatus {
+fn located_status(
+    edit: &FixEdit,
+    tier: Applicability,
+    outcome: LocatedOutcome,
+    dry_run: bool,
+) -> FixStatus {
     let path = located_edit_path(edit);
     match outcome {
         LocatedOutcome::Applied => FixStatus::Applied(if dry_run {
@@ -1811,7 +1869,15 @@ fn located_status(edit: &FixEdit, outcome: LocatedOutcome, dry_run: bool) -> Fix
             format!("edited {path}")
         }),
         LocatedOutcome::Suggested => FixStatus::Suggested {
-            summary: format!("suggested edit to {path}"),
+            // Tier-specific hint, matching the whole-file suggested path: an
+            // Unsafe edit IS applied by `--unsafe-fixes`; a Suggestion-tier edit
+            // never auto-applies. Avoids the formatter's "(suggested: suggested
+            // ...)" doubling.
+            summary: if tier == Applicability::Unsafe {
+                format!("rewrite {path} (requires --unsafe-fixes)")
+            } else {
+                format!("rewrite {path} (suggestion only; not auto-applied)")
+            },
             edit: edit.clone(),
         },
         LocatedOutcome::SkippedConflict => FixStatus::Skipped(format!(

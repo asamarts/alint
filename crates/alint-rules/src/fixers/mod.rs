@@ -14,10 +14,13 @@
 //!   `FileCollapseBlankLinesFixer`).
 //! - [`strip`] — byte-stripping (`FileStripBidiFixer`,
 //!   `FileStripZeroWidthFixer`, `FileStripBomFixer`).
+//! - [`replace`] — the located regex `replace` op (`ReplaceFixer`), emitting
+//!   byte-range edits rather than a whole-file rewrite.
 
 pub mod creators;
 pub mod file_ops;
 pub mod hygiene;
+pub mod replace;
 pub mod strip;
 
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
@@ -27,4 +30,5 @@ pub use hygiene::{
     FileAppendFinalNewlineFixer, FileCollapseBlankLinesFixer, FileNormalizeLineEndingsFixer,
     FileTrimTrailingWhitespaceFixer, LineEndingTarget,
 };
+pub use replace::ReplaceFixer;
 pub use strip::{FileStripBidiFixer, FileStripBomFixer, FileStripZeroWidthFixer};

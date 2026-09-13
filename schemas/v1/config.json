@@ -747,7 +747,17 @@
           "properties": {
             "file_remove": {
               "additionalProperties": false,
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. `file_remove` defaults to `unsafe` (a bare `alint fix` surfaces the deletion as a suggestion; `--unsafe-fixes` applies it). Set `safe` in your OWN top-level config to auto-apply; an inherited (`extends:`'d) config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -943,6 +953,38 @@
           },
           "required": [
             "file_collapse_blank_lines"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "replace": {
+              "additionalProperties": false,
+              "description": "Rewrite each span matching the rule's `pattern:` with `replacement`. Wired to `file_content_forbidden` (a violation there means the banned pattern is present, so replacing each occurrence removes/rewrites it). A located edit, Unsafe by default (a regex rewrite is not behavior-preserving): a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `unsafe`; set `safe` in your OWN top-level config when the rewrite is provably a normalization (an inherited config may only demote to `suggestion`/`never`).",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
+                "replacement": {
+                  "description": "Replacement template written in place of each match. Supports the regex crate's `$1` / `${name}` capture references; write `$$` for a literal `$`.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "replacement"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "replace"
           ],
           "type": "object"
         }

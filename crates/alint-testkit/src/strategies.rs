@@ -16,8 +16,8 @@
 //!   stays well-behaved for dry-run purity. Use for invariants that
 //!   exercise `alint fix` with several rules at once.
 //! - [`single_fixable_scenario_tree`] — EXACTLY ONE rule, drawn from
-//!   the full 12-op fixer catalogue (adds the content-hygiene and
-//!   strip fixers). Use for the idempotence / convergence invariants:
+//!   the full fixer catalogue (adds the content-hygiene, strip, and
+//!   located `replace` fixers). Use for the idempotence / convergence invariants:
 //!   Phase-0 guarantees a per-fixer fixed point, not multi-rule
 //!   single-pass convergence, so these are asserted one rule at a time.
 
@@ -111,8 +111,8 @@ pub fn fixable_scenario_tree_with(params: ScenarioTreeParams) -> impl Strategy<V
     })
 }
 
-/// A scenario with EXACTLY ONE fixable rule, drawn from the full 12-op
-/// catalogue (including the content-hygiene and strip fixers the multi-rule
+/// A scenario with EXACTLY ONE fixable rule, drawn from the full
+/// catalogue (including the content-hygiene, strip, and located `replace` fixers the multi-rule
 /// [`fixable_scenario_tree`] omits). Single-rule by design: with one rule there
 /// is no cross-rule, single-pass ordering interaction, so the fix→check
 /// convergence law ("a fully-applied fix leaves the check clean") holds per
@@ -276,6 +276,16 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "Pascal.md".to_string()],
         "# doc\n".to_string(),
     );
+    // A file containing the forbidden `DEBUGME` token triggers
+    // file_content_forbidden + the located `replace` fix (rewrites DEBUGME ->
+    // LOGGED). `.txt` keeps it out of filename_case's `.rs`/`.md` scope, and the
+    // content is otherwise clean (final newline, no trailing ws / BOM / bidi), so
+    // no other single-rule draw touches it. The token appears nowhere else.
+    insert_file(
+        root,
+        &[dir.clone(), "replaceme.txt".to_string()],
+        "DEBUGME token\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -426,7 +436,19 @@ fn rule_file_content_forbidden() -> impl Strategy<Value = String> {
     })
 }
 
-// ─── single-rule fixable catalogue (all 12 fix ops) ──────────────
+/// A `file_content_forbidden` rule fixed via the located `replace` op (Phase 1):
+/// rewrites the forbidden `DEBUGME` token (planted only in `_trig/replaceme.txt`)
+/// to `LOGGED`. Unsafe by default, so it is *suggested* under a bare `Fix` and
+/// *applied* under `FixUnsafe` -- exercising the located path + the tier gate.
+fn rule_file_content_forbidden_replace() -> impl Strategy<Value = String> {
+    rule_id("repl").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: file_content_forbidden\n    paths: \"**/*.txt\"\n    pattern: 'DEBUGME'\n    level: error\n    fix:\n      replace:\n        replacement: \"LOGGED\"\n"
+        )
+    })
+}
+
+// ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
 // multi-rule `fixable_rule_yaml` deliberately omits. They are drawn one at a
@@ -511,7 +533,7 @@ fn rule_file_header_prepend() -> impl Strategy<Value = String> {
     })
 }
 
-/// The full fixable catalogue: every one of the 12 fix ops, one rule at a time.
+/// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
 /// generators above. Drives `single_fixable_scenario_tree`.
@@ -531,6 +553,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_bom(),
         rule_no_bidi_controls(),
         rule_no_zero_width_chars(),
+        // the located `replace` op (Phase 1).
+        rule_file_content_forbidden_replace(),
     ]
 }
 
@@ -620,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn single_fixable_scenario_tree_covers_all_twelve_fix_ops() {
+    fn single_fixable_scenario_tree_covers_all_fix_ops() {
         // The whole point of the single-rule strategy is that it exercises
         // EVERY fixer (the multi-rule catalogue covers only 4 of 12). Draw
         // enough scenarios that each of the 12 uniform arms is overwhelmingly

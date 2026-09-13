@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- New `replace` auto-fix op for `file_content_forbidden`: rewrites each span
+  matching the rule's `pattern:` with a `replacement` template (regex `$1` /
+  `${name}` capture references). It is the first *located* fix -- one byte-range
+  edit per match, spliced in a single pass -- and is `Unsafe` by default (a regex
+  rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a
+  suggestion and `alint fix --unsafe-fixes` applies it. Example: rewrite
+  `console.log` to `logger.debug`, or strip a banned token.
+
 ### Changed
 
 - **Breaking:** `file_remove` (the fix for `file_absent`, `no_empty_files`,

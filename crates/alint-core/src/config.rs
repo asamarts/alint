@@ -426,6 +426,9 @@ pub enum FixSpec {
     FileCollapseBlankLines {
         file_collapse_blank_lines: FileCollapseBlankLinesFixSpec,
     },
+    Replace {
+        replace: ReplaceFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -485,6 +488,7 @@ impl FixSpec {
         "file_strip_zero_width",
         "file_strip_bom",
         "file_collapse_blank_lines",
+        "replace",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -502,6 +506,7 @@ impl FixSpec {
             Self::FileStripZeroWidth { .. } => "file_strip_zero_width",
             Self::FileStripBom { .. } => "file_strip_bom",
             Self::FileCollapseBlankLines { .. } => "file_collapse_blank_lines",
+            Self::Replace { .. } => "replace",
         }
     }
 }
@@ -675,6 +680,28 @@ pub struct FileStripBomFixSpec {}
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FileCollapseBlankLinesFixSpec {}
+
+/// The `replace` op (Phase 1): rewrite each span the host rule's `pattern:`
+/// matches with `replacement`. Wired to `file_content_forbidden` and
+/// `file_content_matches` only -- the pattern comes from the host rule, not a
+/// field here. `replacement` is a byte template supporting `$1` / `${name}`
+/// capture references (the regex-crate substitution syntax); a literal `$` is
+/// written `$$`. This is a *located* op (one [`FixEdit::ReplaceRange`] per
+/// match), Unsafe by default (a regex rewrite is not behavior-preserving in
+/// general), applied only under `--unsafe-fixes` unless promoted per-rule.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceFixSpec {
+    /// The replacement template written in place of each match. Supports the
+    /// regex crate's `$1` / `${name}` capture references; `$$` is a literal `$`.
+    pub replacement: String,
+    /// Per-rule applicability override (auto-fix.md 5.5). `replace` defaults to
+    /// `Unsafe`; a user may set `safe` in their OWN top-level config when the
+    /// rewrite is provably a normalization (an inherited config may only demote,
+    /// enforced by the DSL trust gate).
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed
@@ -1110,6 +1137,7 @@ mod tests {
             ("file_strip_zero_width: {}", "file_strip_zero_width"),
             ("file_strip_bom: {}", "file_strip_bom"),
             ("file_collapse_blank_lines: {}", "file_collapse_blank_lines"),
+            ("replace:\n  replacement: x\n", "replace"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

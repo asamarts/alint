@@ -1665,6 +1665,18 @@ fn extends_promoting_file_remove_to_safe_is_rejected() {
     assert!(err.contains("applicability: safe"), "{err}");
     assert!(err.contains("top-level"), "{err}");
 
+    // The gate is op-agnostic: the Phase-1 `replace` op (also Unsafe, also
+    // promotable) is refused from an inherited config just the same.
+    let promote_replace = parse_rule(
+        "id: no-console\nkind: file_content_forbidden\npaths: '**/*.js'\nlevel: error\n\
+         fix: { replace: { replacement: 'logger.debug', applicability: safe } }",
+    );
+    assert!(
+        crate::reject_fix_promotion_in(std::slice::from_ref(&promote_replace), "./base.yml")
+            .is_err(),
+        "an inherited `replace` promotion to safe must be refused"
+    );
+
     // The default (no override, so Unsafe) from an inherited config is fine.
     let plain = parse_rule(
         "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\

@@ -12,13 +12,13 @@
 //!    input tree byte-for-byte.
 //! 3. `fix_is_idempotent` — running `fix` twice never performs
 //!    applied operations on the second pass. Single-rule (Phase-0
-//!    idempotence is a per-fixer guarantee) over the full 12-fixer
+//!    idempotence is a per-fixer guarantee) over the full fixer
 //!    catalogue.
 //! 4. `fix_converges_when_fully_resolved` — when a single fix pass
 //!    reports zero skipped and zero unfixable, a subsequent `check`
-//!    reports NO violation (of any level). Single-rule, all 12 fixers.
+//!    reports NO violation (of any level). Single-rule, all fixers.
 //! 5. `fix_dry_run_is_pure_single_rule` — dry-run purity over the full
-//!    12-fixer catalogue (the multi-rule `fix_dry_run_is_pure` covers
+//!    fixer catalogue (the multi-rule `fix_dry_run_is_pure` covers
 //!    only 4 fixers).
 //! 6. `check_fixable_never_overlaps_a_suggestion` — `check` never tags a
 //!    violation auto-fixable when a bare `fix` merely suggests it (the
@@ -129,7 +129,7 @@ proptest! {
     fn fix_converges_when_fully_resolved(base in single_fixable_scenario_tree()) {
         // Convergence law: after a single, fully-applied `fix` (nothing skipped,
         // nothing unfixable), a subsequent `check` finds NOTHING. Driven by the
-        // SINGLE-rule strategy so every one of the 12 fixers is exercised with no
+        // SINGLE-rule strategy so every fixer is exercised with no
         // cross-rule single-pass ordering interference, and asserted against
         // residuals of ANY level. (The old form used the multi-rule strategy --
         // whose fixers were all `level: warning` -- and counted only ERROR-level
@@ -163,7 +163,7 @@ proptest! {
 
     #[test]
     fn fix_dry_run_is_pure_single_rule(base in single_fixable_scenario_tree()) {
-        // Dry-run purity over the full 12-fixer catalogue: even the content
+        // Dry-run purity over the full fixer catalogue: even the content
         // fixers (compose buffer) and the direct-write trio (create/remove/
         // rename, via the stage sink) must leave the tree byte-identical under
         // `fix --dry-run`.
