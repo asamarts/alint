@@ -636,6 +636,7 @@ mod tests {
         // message): under `--fix-only` an empty report means 0 fixes applied over
         // a still-dirty tree. It prints the honest zeroed summary instead.
         let out = render_fix(&FixReport {
+            non_convergent: false,
             results: Vec::new(),
         });
         assert!(
@@ -652,6 +653,7 @@ mod tests {
     fn fix_report_renders_suggested_item() {
         use alint_core::FixEdit;
         let report = FixReport {
+            non_convergent: false,
             results: vec![FixRuleResult {
                 rule_id: "cfg".into(),
                 level: Level::Error,
@@ -691,6 +693,7 @@ mod tests {
     #[test]
     fn fix_report_groups_by_rule_with_status() {
         let report = FixReport {
+            non_convergent: false,
             results: vec![FixRuleResult {
                 rule_id: "trim".into(),
                 level: Level::Warning,

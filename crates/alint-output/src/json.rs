@@ -306,6 +306,7 @@ mod tests {
         use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult};
         use std::path::PathBuf;
         let report = FixReport {
+            non_convergent: false,
             results: vec![FixRuleResult {
                 rule_id: "demo".into(),
                 level: Level::Error,

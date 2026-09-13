@@ -47,6 +47,12 @@ impl Report {
 #[derive(Debug, Clone)]
 pub struct FixReport {
     pub results: Vec<FixRuleResult>,
+    /// Set by the fixpoint loop when it hit the pass cap without converging (a
+    /// config whose fixes keep re-triggering). Drives the distinct `exit 2`
+    /// ("fix could not complete", vs `1` = "ran, violations remain"). `false`
+    /// for a converged run and for any single-pass construction.
+    /// See docs/design/v0.17/fixpoint.md.
+    pub non_convergent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +238,7 @@ mod tests {
     #[test]
     fn fix_report_applied_skipped_unfixable_counts_summed_across_rules() {
         let r = FixReport {
+            non_convergent: false,
             results: vec![
                 frr(
                     "a",
@@ -257,6 +264,7 @@ mod tests {
     #[test]
     fn has_unfixable_errors_true_when_error_rule_has_unresolved() {
         let r = FixReport {
+            non_convergent: false,
             results: vec![frr("a", Level::Error, vec![FixStatus::Unfixable])],
         };
         assert!(r.has_unfixable_errors());
@@ -266,6 +274,7 @@ mod tests {
     #[test]
     fn has_unfixable_errors_false_when_all_applied() {
         let r = FixReport {
+            non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Error,
@@ -280,6 +289,7 @@ mod tests {
         // Skips at warning level matter for `has_unfixable_warnings`,
         // not `has_unfixable_errors` — severity gates the check.
         let r = FixReport {
+            non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Warning,
@@ -311,6 +321,7 @@ mod tests {
             },
         };
         let r = FixReport {
+            non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Error,
@@ -329,6 +340,7 @@ mod tests {
         // At warning level a lone Suggested is a warning-level unresolved,
         // not an error-level one -- severity gates the exit, same as Skipped.
         let rw = FixReport {
+            non_convergent: false,
             results: vec![frr("b", Level::Warning, vec![sugg()])],
         };
         assert!(!rw.has_unfixable_errors());
@@ -340,6 +352,7 @@ mod tests {
         // A fixer error / failed write is a Skipped whose reason starts with
         // FIX_ERROR_PREFIX; a declined skip is not.
         let errored = FixReport {
+            non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Error,
@@ -351,6 +364,7 @@ mod tests {
         assert!(errored.had_fix_error());
 
         let declined = FixReport {
+            non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Error,

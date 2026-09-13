@@ -16,6 +16,7 @@ const FIX_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/fix-report.jso
 
 fn canonical_fix_report() -> FixReport {
     FixReport {
+        non_convergent: false,
         results: vec![
             FixRuleResult {
                 rule_id: "no-trailing-whitespace".into(),
@@ -101,6 +102,7 @@ fn fix_report_validates_against_published_schema() {
 #[test]
 fn empty_fix_report_validates_against_published_schema() {
     let report = FixReport {
+        non_convergent: false,
         results: Vec::new(),
     };
     validate(&render_json(&report));

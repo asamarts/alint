@@ -1062,7 +1062,7 @@ fn cmd_fix(
     }
 
     let report = engine
-        .fix(path, &index, dry_run, threshold)
+        .fix(path, &index, &walk_opts, dry_run, threshold)
         .context("applying fixes")?;
 
     let (mut out, opts) = render_env(cli)?;
@@ -1074,6 +1074,7 @@ fn cmd_fix(
         // (`fix_exit_code` below), so hiding it would leave a CI operator with a
         // failed step, a report reading "0 applied, 0 skipped", and no cause.
         let applied_only = FixReport {
+            non_convergent: false,
             results: report
                 .results
                 .iter()
@@ -1112,31 +1113,42 @@ fn cmd_fix(
 }
 
 /// The process exit code for a fix pass, shared by the write path, `--dry-run`,
-/// and `--diff`. `--fix-only` applied what it could, so a residual finding is
-/// expected and suppressed - it fails only if a fix was attempted and errored.
-/// Otherwise an unfixable error (or an unfixable warning under
-/// `--fail-on-warning`) fails the run.
+/// and `--diff`. Thin wrapper over [`fix_exit_status`] (which carries the logic
+/// and is unit-testable, `ExitCode` being opaque).
 fn fix_exit_code(report: &FixReport, fix_only: bool, cli: &Cli) -> ExitCode {
-    if fix_only {
-        if report.had_fix_error() {
-            ExitCode::from(1)
-        } else {
-            ExitCode::SUCCESS
-        }
-    } else if report.had_fix_error()
-        || report.has_unfixable_errors()
-        || (cli.fail_on_warning && report.has_unfixable_warnings())
-    {
-        // `had_fix_error()`: a fix was ATTEMPTED and hit a genuine I/O error (a
-        // read-only target, ENOSPC, ...), recorded as a `Skipped("fix error: ...")`.
-        // That is not a benign declined skip (already-clean, binary, size-limit),
-        // so it must fail the process regardless of the rule's level -- otherwise
-        // `alint fix` reports success (exit 0) while a warning/info-level fix
-        // silently did not land. This matches the `--fix-only` branch above.
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
+    ExitCode::from(fix_exit_status(report, fix_only, cli.fail_on_warning))
+}
+
+/// The numeric exit status for a fix pass: `0` success, `1` a residual that
+/// stands (an unfixable/errored fix), `2` the fixpoint could not converge.
+/// `--fix-only` applied what it could, so a residual finding is expected and
+/// suppressed - it fails only if a fix was attempted and errored. Otherwise an
+/// unfixable error (or an unfixable warning under `--fail-on-warning`) fails.
+fn fix_exit_status(report: &FixReport, fix_only: bool, fail_on_warning: bool) -> u8 {
+    // Non-convergence is the most severe fix outcome and outranks every other
+    // branch, including `--fix-only`'s residual suppression: the fixpoint loop
+    // hit its pass cap without settling (a config whose fixes keep re-triggering,
+    // see docs/design/v0.17/fixpoint.md 2). Exit 2 -- "fix could not complete" --
+    // is distinct from 1 ("ran, violations remain") and shares the code alint
+    // already uses for a user-fixable config error (M11), which is what this is.
+    if report.non_convergent {
+        return 2;
     }
+    if fix_only {
+        // A benign residual is suppressed; only a genuine fix error fails.
+        return u8::from(report.had_fix_error());
+    }
+    // `had_fix_error()`: a fix was ATTEMPTED and hit a genuine I/O error (a
+    // read-only target, ENOSPC, ...), recorded as a `Skipped("fix error: ...")`.
+    // That is not a benign declined skip (already-clean, binary, size-limit), so
+    // it must fail the process regardless of the rule's level -- otherwise `alint
+    // fix` reports success (exit 0) while a warning/info-level fix silently did
+    // not land. This matches the `--fix-only` branch above.
+    u8::from(
+        report.had_fix_error()
+            || report.has_unfixable_errors()
+            || (fail_on_warning && report.has_unfixable_warnings()),
+    )
 }
 
 fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {

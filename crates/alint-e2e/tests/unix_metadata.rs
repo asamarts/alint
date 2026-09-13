@@ -71,7 +71,13 @@ fn run_fix_unsafe(root: &Path, config_yaml: &str) -> alint_core::FixReport {
     let (engine, walk_opts) = build_engine(&config, alint_rules::builtin_registry());
     let index = walk(root, &walk_opts).unwrap();
     engine
-        .fix(root, &index, false, alint_core::Applicability::Unsafe)
+        .fix(
+            root,
+            &index,
+            &walk_opts,
+            false,
+            alint_core::Applicability::Unsafe,
+        )
         .unwrap()
 }
 

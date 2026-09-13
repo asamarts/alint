@@ -913,6 +913,7 @@ mod tests {
         let v = Violation::new(format!("{RAW_CLEAR}forged"))
             .with_path(PathBuf::from(format!("src/{RAW_CLEAR}evil.rs")));
         let report = FixReport {
+            non_convergent: false,
             results: vec![alint_core::FixRuleResult {
                 rule_id: "demo".into(),
                 level: Level::Warning,
@@ -931,6 +932,7 @@ mod tests {
     fn fix_human_renders_suggested_item() {
         use std::path::PathBuf;
         let report = FixReport {
+            non_convergent: false,
             results: vec![alint_core::FixRuleResult {
                 rule_id: "cfg".into(),
                 level: Level::Error,

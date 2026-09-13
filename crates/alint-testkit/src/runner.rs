@@ -251,15 +251,27 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
 
     Ok(match step {
         Step::Check | Step::CheckChanged => StepOutcome::Check(engine.run(root, &index)?),
-        Step::Fix => {
-            StepOutcome::Fix(engine.fix(root, &index, false, alint_core::Applicability::Safe)?)
-        }
-        Step::FixUnsafe => {
-            StepOutcome::Fix(engine.fix(root, &index, false, alint_core::Applicability::Unsafe)?)
-        }
-        Step::FixDryRun => {
-            StepOutcome::Fix(engine.fix(root, &index, true, alint_core::Applicability::Safe)?)
-        }
+        Step::Fix => StepOutcome::Fix(engine.fix(
+            root,
+            &index,
+            &walk_opts,
+            false,
+            alint_core::Applicability::Safe,
+        )?),
+        Step::FixUnsafe => StepOutcome::Fix(engine.fix(
+            root,
+            &index,
+            &walk_opts,
+            false,
+            alint_core::Applicability::Unsafe,
+        )?),
+        Step::FixDryRun => StepOutcome::Fix(engine.fix(
+            root,
+            &index,
+            &walk_opts,
+            true,
+            alint_core::Applicability::Safe,
+        )?),
     })
 }
 
@@ -453,6 +465,7 @@ mod tests {
 
     fn report_with_suggested() -> FixReport {
         FixReport {
+            non_convergent: false,
             results: vec![FixRuleResult {
                 rule_id: "r".into(),
                 level: Level::Error,

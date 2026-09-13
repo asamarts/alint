@@ -71,6 +71,7 @@ rules:
                         .fix(
                             tmp.path(),
                             idx,
+                            &WalkOptions::default(),
                             /* dry_run */ true,
                             alint_core::Applicability::Safe,
                         )
@@ -108,7 +109,13 @@ rules:
         group.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
             b.iter(|| {
                 engine
-                    .fix(tmp.path(), idx, true, alint_core::Applicability::Safe)
+                    .fix(
+                        tmp.path(),
+                        idx,
+                        &WalkOptions::default(),
+                        true,
+                        alint_core::Applicability::Safe,
+                    )
                     .expect("fix")
             });
         });

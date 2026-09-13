@@ -28,15 +28,18 @@
 //!    (e.g. `file_remove`) that the Safe convergence law skips.
 //!
 //! The single-rule invariants use one fixable rule per scenario on
-//! purpose. `alint fix` is single-pass in Phase 0 (the fixpoint re-walk
-//! arrives in Phase 1), so a MULTI-rule tree is neither idempotent nor
-//! convergent across passes by design: one rule creating a file that
-//! another must then fix, one rule RENAMING a file out from under another
-//! rule's stale-index violation (the vacated fix is silently deferred to
-//! the next `fix`), or two content fixers racing on one file via the
-//! compose buffer, are known limitations deferred to the next phase.
-//! One rule isolates each fixer's own fixed-point behaviour, which is
-//! exactly what Phase 0 guarantees.
+//! purpose: they isolate each fixer's OWN fixed-point behaviour (a fixer must
+//! be its own fixed point in a single pass). As of Phase 1 `alint fix` is a
+//! fixpoint (re-walk and re-fix to convergence, docs/design/v0.17/fixpoint.md),
+//! so the CROSS-rule cascades these once excluded -- one rule creating a file
+//! another must then fix, one rule renaming a file out from under another rule's
+//! violation, a content edit and a whole-file op on one file -- now DO converge
+//! in a single `fix`. Those are covered by the dedicated e2e scenarios
+//! (`fix/interactions/create_then_content_fix_cascades`,
+//! `content_edit_and_rename_same_file_no_corruption`,
+//! `append_applies_once_when_not_self_satisfying`), which assert the exact
+//! multi-pass outcome; the single-rule properties here stay single-rule so a
+//! per-fixer regression is not masked by a cascade.
 //!
 //! IMPORTANT: these property invariants build scenarios with an empty
 //! `expect` and assert against the returned `ScenarioRun` directly, so
@@ -96,21 +99,21 @@ proptest! {
 
     #[test]
     fn fix_is_idempotent(base in single_fixable_scenario_tree()) {
-        // Phase-0 idempotence is a PER-FIXER guarantee: with one rule, a second
-        // `fix` pass applies nothing (each fixer is a genuine fixed point). This
-        // is the property-level guard for the round-3 non-convergence bugs (F1
-        // doubled-CR, F2 interior-CR, F3 stacked-BOM), each a fixer whose second
-        // pass still applied.
+        // Per-fixer idempotence: with one rule, a second `fix` applies nothing
+        // (each fixer is a genuine fixed point). This is the property-level guard
+        // for the round-3 non-convergence bugs (F1 doubled-CR, F2 interior-CR, F3
+        // stacked-BOM), each a fixer whose second pass still applied.
         //
-        // It is deliberately SINGLE-rule. `alint fix` is single-pass in Phase 0
-        // (the fixpoint re-walk is Phase 1), so a MULTI-rule tree is not
-        // idempotent across two `fix` invocations by design: e.g. rule A's
-        // `file_create` makes a `REQUIRED.md` that rule B's `file_content_matches`
-        // (`**/*.md`) then flags and appends to on the SECOND pass. Asserting
-        // multi-rule idempotence here would encode a guarantee Phase 0 does not
-        // make. (This assertion was silently vacuous before the round-3 fix that
-        // stopped `run_scenario` from rejecting assertion-free property
-        // scenarios, which is why the interaction went unnoticed.)
+        // Deliberately SINGLE-rule. Since Phase 1 `alint fix` is a fixpoint, a
+        // single `fix` already runs a MULTI-rule cascade to convergence internally
+        // (rule A's `file_create` makes a file that rule B then fixes on the next
+        // internal pass), so those cascades are asserted by the dedicated
+        // `fix/interactions` scenarios instead. Kept single-rule here so a
+        // per-fixer non-convergence regression cannot hide behind a cascade. NOTE:
+        // cross-INVOCATION idempotence still needs a NORMALIZING fixer -- a
+        // non-self-satisfying fix (append that never matches its own pattern)
+        // re-applies on a fresh `fix` because apply-once state is per-invocation;
+        // the single fixable rules here are all normalizing, so `[fix, fix]` holds.
         let scenario = with_steps(base, vec![Step::Fix, Step::Fix]);
         let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
         let Some(StepOutcome::Fix(second)) = run.steps.get(1) else {

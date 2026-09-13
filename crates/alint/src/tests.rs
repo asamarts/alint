@@ -48,6 +48,47 @@ fn url_encode_handles_unicode() {
     assert_eq!(url_encode("ñ"), "%C3%B1");
 }
 
+#[test]
+fn fix_exit_status_maps_the_fix_contract() {
+    use alint_core::{FixItem, FixRuleResult, FixStatus, Level, Violation};
+
+    let report = |results, non_convergent| FixReport {
+        results,
+        non_convergent,
+    };
+    let err_rule = || FixRuleResult {
+        rule_id: "r".into(),
+        level: Level::Error,
+        items: vec![FixItem {
+            violation: Violation::new("v"),
+            status: FixStatus::Unfixable,
+        }],
+    };
+
+    // Converged + clean -> 0.
+    assert_eq!(fix_exit_status(&report(vec![], false), false, false), 0);
+    // An unfixable error-level residual -> 1.
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], false), false, false),
+        1
+    );
+    // `--fix-only` suppresses that benign residual -> 0.
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], false), true, false),
+        0
+    );
+
+    // Non-convergence -> 2, and it OUTRANKS everything: a clean report, and even
+    // `--fix-only` (which otherwise suppresses residuals) still yields 2.
+    assert_eq!(fix_exit_status(&report(vec![], true), false, false), 2);
+    assert_eq!(fix_exit_status(&report(vec![], true), true, false), 2);
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], true), true, true),
+        2,
+        "non-convergence (exit 2) outranks a residual (exit 1) and --fix-only suppression"
+    );
+}
+
 fn fact_spec(id: &str, kind: FactKind) -> FactSpec {
     FactSpec {
         id: id.to_string(),

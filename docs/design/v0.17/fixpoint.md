@@ -1,6 +1,7 @@
 # The fix fixpoint: re-walk, apply-once, termination (Phase 1, increment 2)
 
-Status: design accepted 2026-09-13 (decisions below); implementation in progress.
+Status: design accepted 2026-09-13 (decisions below); 2a (core fixpoint)
+implemented and gated 2026-09-13. 2b (`--changed` confinement) is next.
 Scope: `alint fix` only. `alint check` still walks exactly once per invocation.
 
 ## 1. Problem
@@ -105,15 +106,56 @@ state.
 
 Two mechanisms, in order:
 
-- **Apply-once (primary).** The loop maintains a set of attempted
-  `(rule_id, file, fingerprint)` triples. A pass only applies a fix for a triple
-  not already in the set, then inserts it. So each pass either adds >=1 new
-  triple or applies nothing (fixpoint reached). For a **normalizing** fixer the
-  set of triples that ever appears is finite and small (the fix removes the
-  violation, so its fingerprint does not recur), and the loop terminates in a few
-  passes without the cap. This is the Dershowitz-Manna well-founded-multiset
-  contract of auto-fix.md 5.8: a Safe fix strictly reduces the violation multiset
-  without introducing new violations, so the fixpoint descends to empty.
+- **Apply-once (primary).** The loop maintains a set of attempted violation
+  fingerprints (`violation_fingerprint` already encodes `rule_id` + path +
+  identity). Before dispatching a rule's violations, those already in the set are
+  skipped. A survivor's fingerprint is added **only if its fix was `Applied`**
+  (see the interaction note below). So each progressing pass either resolves a
+  violation (gone next pass) or marks a non-resolving-but-applied one (skipped
+  next pass) -- the set of still-appliable violations strictly shrinks by >=1, so
+  the loop terminates. For a **normalizing** fixer the fix removes the violation,
+  so its fingerprint does not recur; the loop terminates in a few passes without
+  the cap. This is the Dershowitz-Manna well-founded-multiset contract of
+  auto-fix.md 5.8: a Safe fix strictly reduces the violation multiset without
+  introducing new violations, so the fixpoint descends to empty.
+
+  **Granularity (as-built).** The apply-once fingerprint is computed with
+  `file_bytes: None`, so `violation_fingerprint`'s discriminator is: the
+  `baseline_key` if the rule set one; else, for a **path-bearing** violation, the
+  empty discriminator -- identity is `(rule_id, path)`, and the (volatile)
+  message and line number are NOT hashed; else (pathless) the trimmed message.
+  Consequence: a rule fixes a given `(rule_id, path)` **at most once per `fix`
+  invocation**, regardless of how its message/line shift as the file changes.
+  This is exactly what makes real fixers bound naturally -- a `file_append` /
+  `file_prepend` / `replace` / whole-file content fixer re-firing on the same
+  file after its own edit is filtered, so it cannot loop. The cap (below) is only
+  reachable by the residual pathological shape the fingerprint cannot bound: a
+  **pathless** violation whose message changes every pass (a rule with no stable
+  identity that never resolves). That shape is what the `fix_bails_at_the_cap...`
+  engine test constructs to exercise the cap deterministically.
+
+  **Interaction with increment-1's within-pass defers (audit finding).** Two
+  outcomes are "skip THIS pass, retry NEXT": a `file_rename`/`file_remove`
+  yielding to a pending content edit on the same file (`has_pending_write`), and
+  the located byte-consistency defer. These fire exactly when a content fixer and
+  a path/located fixer touch one file -- the common case the fixpoint exists to
+  resolve (the next pass sees the flushed content and lands the deferred edit).
+  Marking a violation attempted **before** dispatch (or on any non-applied
+  outcome) would mark these and the next pass would skip them, silently **losing**
+  the deferred fix. Marking **only on `Applied`** avoids it with no "is-this-a-
+  defer" flag: a deferred edit is not applied -> not marked -> retried and landed
+  next pass, then (if it now persists) marked. A terminal skip (binary / size /
+  unfixable / below-threshold suggestion) is also not marked; it re-evaluates each
+  pass but contributes zero applied, so it neither blocks termination nor is lost
+  -- the cross-pass report (section 7) dedupes it by fingerprint.
+
+  **Located-path fingerprint (audit finding).** The located path reports synthetic
+  "located edit in X" items whose fingerprint does NOT match the originating rule
+  violation's (different path-identity derivation). Apply-once must therefore mark
+  the **original** violation's fingerprint (the one the pre-dispatch filter saw),
+  threaded through the located collection: remember each `(rule, file)` batch's
+  originating fingerprints at collect time and mark them iff that file's batch was
+  applied (not deferred).
 - **Cap (backstop).** A *non-normalizing* fixer can churn fingerprints -- each
   pass produces a violation with a *new* fingerprint (a rewrite that shifts
   content, or two rules that oscillate). Apply-once does not bound that, so the
@@ -140,25 +182,61 @@ per-keystroke hot path the sub-second floor protects. Plan:
 
 ## 7. Report semantics across passes
 
-`Engine::fix` aggregates the per-pass `FixReport`s into one: `Applied` items
-accumulate across passes (a cascade legitimately applies in several passes); a
-violation's terminal status is its status on the last pass that saw it. The
-`fix_exit_code` contract (round-7) is unchanged except for the new exit-2
-non-convergence case.
+`Engine::fix` aggregates the per-pass `FixReport`s into one with **keep-last-per-
+violation** semantics: as each pass merges in, any earlier item for a violation
+it re-touched is retained-out and replaced by this pass's item (keyed by the same
+fingerprint `attempt_fingerprint` uses). So a violation's terminal status is its
+status on the last pass that produced an item for it, and `Applied` items across
+distinct violations accumulate (a cascade legitimately applies over several
+passes). Two consequences worth stating:
+
+- **Within-pass siblings both survive.** A located batch can emit an `Applied`
+  edit AND an isolation-conflict `Skipped` under one source violation. Apply-once
+  marks that source attempted the moment the batch lands, so it never re-appears
+  to be superseded -- both items stay in the aggregate (this is the
+  `located_regime_applies_batch_and_excludes_isolation_group` invariant, now
+  asserted through the multi-pass loop).
+- **Transient defers are not reported.** The located byte-consistency / removal
+  defer (a batch yielding to a concurrent write, increment 1) no longer emits a
+  provisional "rerun to apply" skip: the re-walk IS the rerun, so the retry pass
+  reports the real outcome (applied, or a genuine terminal skip). Emitting the
+  provisional skip would either duplicate that outcome or, when the same
+  concurrent change resolves the source (e.g. the file was removed), strand a
+  stale skip that wrongly drives a nonzero exit.
+
+The `fix_exit_code` contract (round-7) is unchanged except for the new exit-2
+non-convergence case (`fix_exit_status` returns 2 when `non_convergent`, and it
+outranks every other branch including `--fix-only`'s residual suppression).
 
 ## 8. Scope + gates
 
-- **2a (this increment):** the loop in `Engine::fix`, apply-once threaded into
-  the fix dispatch, the cap + exit-2, report aggregation, the ARCHITECTURE `:39`
-  / `:353` "walk once" amendment for the fix path (R-WALK), benchmarks, and:
-  - the **apply-once regression** gate: a `file_content_matches` + `file_append`
-    (SPDX header) applies once -- second pass `applied: []`, exactly one copy;
-  - a **cascade** gate: `file_create` then a content fix on the created file
-    converges over passes;
-  - a **cap** gate: a genuinely non-convergent config bails loudly at 10 with
-    exit 2;
-  - the property invariants (`fix_is_idempotent`, `fix_converges...`) re-pointed
-    to exercise the multi-pass loop.
+- **2a (this increment, delivered):** the loop in `Engine::fix` (re-walk via
+  `walk`, `MAX_PASSES = 10`), apply-once threaded through `fix_run` (marking only
+  on `Applied`, keyed off original violation fingerprints on the located path),
+  the cap + exit-2 (`fix_exit_status`), keep-last-per-violation report
+  aggregation, and these gates:
+  - the **apply-once regression** gate: `append_applies_once_when_not_self_satisfying`
+    -- a `file_content_matches` + `file_append` whose boilerplate does not satisfy
+    the pattern applies exactly ONCE (one appended copy), not once per pass;
+  - a **cascade** gate: `create_then_content_fix_cascades` -- `file_create` then a
+    content fix on the created file converges in a single `fix` (the created file
+    enters the index on the re-walk);
+  - the updated **content-edit + rename** gate:
+    `content_edit_and_rename_same_file_no_corruption` -- one `fix` now lands both
+    (was two manual `fix` steps), no duplication;
+  - a **cap** gate: `fix_bails_at_the_cap_on_a_nonconvergent_config` (engine unit
+    test) -- a pathless changing-message config hard-stops at 10 with
+    `non_convergent`, capped applications on disk, no rollback;
+  - an **exit-2** gate: `fix_exit_status_maps_the_fix_contract` -- `non_convergent`
+    maps to exit 2 and outranks `--fix-only` and residual findings;
+  - the property invariants (`fix_is_idempotent`, `fix_converges...`) re-pointed:
+    their stale "single-pass in Phase 0" rationale is corrected, and cross-rule
+    cascades now covered by the scenarios above.
+
+  The ARCHITECTURE "walk once" invariant (principles 1 and 4, and the pipeline
+  invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not
+  blocking 2a): a fixpoint **benchmark cell** on `kbench` (create-then-cascade + a
+  converging content fixpoint), recorded per the bench protocol.
 - **2b (next):** `--changed` confinement -- created files join the changed set so
   create-cascades finish; a required out-of-scope write demotes to `Suggestion`
   (auto-fix.md 5.7).

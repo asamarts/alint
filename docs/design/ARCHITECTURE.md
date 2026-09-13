@@ -36,10 +36,10 @@ The clarity of these non-goals is itself a feature.
 
 ## Design principles
 
-1. **The repository tree is the input.** Every rule sees a unified file/directory index. The walk happens once per invocation.
+1. **The repository tree is the input.** Every rule sees a unified file/directory index. `check` walks once per invocation; `fix` walks once per fixpoint pass (it re-walks after applying edits and re-fixes to convergence, see the [v0.17 fixpoint design](v0.17/fixpoint.md)).
 2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](https://alint.org/docs/rules/) lists every kind by family.
 3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
-4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism.
+4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism. (`fix` reuses this same walk+evaluate primitive once per fixpoint pass.)
 5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
 6. **Every rule carries its own story.** Severity, message, `policy_url`, and optional `fix` are first-class fields.
 7. **Modern output formats from day one.** Eight formats: human, json, sarif, github, gitlab, junit, markdown, and agent.
@@ -355,7 +355,7 @@ The pipeline from `alint check` to output:
 9. **Fix (optional).** Rules with a `fix:` block remediate what they flagged, gated by an applicability tier: the default threshold applies only `Safe` ops, `--unsafe-fixes` raises it to include `Unsafe` ones, and `Suggestion`-tier edits are reported but never written. Content-editing ops don't write as they go: each routes its result into a per-run in-memory buffer that composes every edit to a file in config order, so the engine emits a *single atomic write per file* however many fixers touched it. Path-only ops (create / remove / rename) act on the filesystem directly. A located-edit regime (collect, tier-filter, total-order, overlap-skip, verify, splice) handles byte-ranged edits; the `replace` op is its first user (a file also touched by a whole-file fixer this pass defers its located edits to a rerun, so offsets never splice into changed bytes). Each result is reported `Applied`, `Skipped`, `Suggested`, or `Unfixable`; `--dry-run` computes all of it without writing, and `--diff` renders the composed result as a unified diff.
 10. **Emit.** Format via selected output.
 
-Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially, and a file's content edits compose in memory and flush as a single atomic write per file.
+Invariants (per pass): the walk runs exactly once; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially, and a file's content edits compose in memory and flush as a single atomic write per file. `check` runs one such pass; `fix` runs this pass repeatedly, re-walking after each until no new edit applies (bounded by a non-convergence cap), so across a `fix` the walk and per-file read recur once per pass. See the [v0.17 fixpoint design](v0.17/fixpoint.md).
 
 Step 2 in detail: facts are evaluated once (sequentially, cached), then gate which rules run via their `when:` conditions.
 
