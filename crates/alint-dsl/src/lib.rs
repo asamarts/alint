@@ -652,6 +652,29 @@ pub fn reject_spawning_templates_in(templates: &[Mapping], source: &str) -> Resu
     Ok(())
 }
 
+/// Reject a fix-tier PROMOTION (`fix: { <op>: { applicability: safe } }`)
+/// declared inside a `templates:` block of an inherited ruleset -- the template
+/// analogue of [`reject_fix_promotion_in`]. A template instance
+/// (`extends_template:`) carries the template's `fix:` block, which is spliced
+/// into the referencing rule at `finalize` time -- AFTER the rule-level
+/// promotion gate has run -- so a promotion smuggled through a template would
+/// silently opt a repo into auto-applying a destructive fix (a bare `alint fix`
+/// deleting files), defeating the whole point of that gate (5.5: inherited
+/// fixers may be demoted, never promoted). Same trust model as
+/// [`reject_spawning_templates_in`]; each template is rule-shaped, so it is
+/// scanned exactly like a rule (its `fix` block plus any nested `require:`).
+///
+/// A `finalize` backstop cannot substitute here: unlike a spawning kind (never
+/// legal in any template), a promotion in the user's OWN top-level template is
+/// legitimate, so the refusal must be source-aware -- which only this
+/// extends-time, per-source check is.
+pub fn reject_fix_promotion_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
+    for template in templates {
+        reject_fix_promotion_in_rule(template, source)?;
+    }
+    Ok(())
+}
+
 /// Reject a non-default `allow_out_of_root:` in an inherited ruleset.
 /// Like [`reject_command_rules_in`], the path-confinement escape hatch
 /// may only be opened by the user's own top-level config — an

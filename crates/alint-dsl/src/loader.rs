@@ -164,6 +164,10 @@ pub(crate) fn load_recursive(
         reject_command_rules_in(&parent.rules, url)?;
         crate::reject_fix_promotion_in(&parent.rules, url)?;
         reject_spawning_templates_in(&parent.templates, url)?;
+        // ...and the same promotion refusal for a `templates:` block, which a
+        // template instance would otherwise smuggle a `fix.<op>.applicability:
+        // safe` past the rule-level gate above (it expands at finalize time).
+        crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
         reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
         reject_baseline_in(&parent.baseline, url)?;
         parent.rules = apply_rule_filter(parent.rules, entry)?;

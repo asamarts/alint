@@ -958,6 +958,54 @@ fn finalize_rejects_a_top_level_spawning_template() {
 }
 
 #[test]
+fn load_rejects_fix_promotion_template_smuggled_via_extends() {
+    // Round-7 (arbitrary file DELETION bypass): an extended ruleset can't
+    // promote `file_remove` to Safe on a `rules:` entry (caught by
+    // `reject_fix_promotion_in`), but it could hide the promotion in a
+    // `templates:` block referenced by a `kind`-less `extends_template:` rule.
+    // The template expands into the rule at finalize, *after* the rule-level
+    // gate -- so without the template gate a bare `alint fix` would irreversibly
+    // DELETE files the moment the user adds one `extends:` line. Mirrors the
+    // spawning-template bypass gate above.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+            &base,
+            "version: 1\ntemplates:\n  - id: rm\n    kind: file_absent\n    paths: \"*.log\"\n    fix: { file_remove: { applicability: safe } }\nrules:\n  - id: no-logs\n    level: error\n    extends_template: rm\n",
+        )
+        .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(
+        err.contains("applicability: safe"),
+        "promotion not named: {err}"
+    );
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("top-level"), "{err}");
+}
+
+#[test]
+fn load_allows_a_non_promoting_template_via_extends() {
+    // No over-rejection: an inherited template with a DEFAULT (Unsafe)
+    // `file_remove` -- the common case -- must still load. Only a `safe`
+    // promotion is refused.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+            &base,
+            "version: 1\ntemplates:\n  - id: rm\n    kind: file_absent\n    paths: \"*.log\"\n    fix: { file_remove: {} }\nrules:\n  - id: no-logs\n    level: error\n    extends_template: rm\n",
+        )
+        .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    assert!(
+        load(&child).is_ok(),
+        "a non-promoting inherited template must load"
+    );
+}
+
+#[test]
 fn top_level_command_rule_still_loads() {
     // Guard against over-rejection: a process-spawning rule declared
     // directly in the user's own top-level `rules:` is the allowed case
