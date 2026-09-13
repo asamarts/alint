@@ -21,11 +21,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - `alint check` now tags a violation `fixable` (and counts it as "auto-fixable")
-  only when the fix would actually resolve that specific violation, rather than
-  whenever its rule declares a fixer. A `filename_case` violation on a stem with
-  no valid target under the requested convention (e.g. `café.rs` under `snake`,
-  which `alint fix` honestly skips) is no longer falsely advertised as fixable,
-  so the "N auto-fixable" total matches what `alint fix` will apply.
+  only when a bare `alint fix` would actually resolve that specific violation,
+  rather than whenever its rule declares a fixer. Two cases that were falsely
+  advertised as fixable no longer are: a `filename_case` violation on a stem with
+  no valid target under the requested convention (e.g. `café.rs` under `snake`),
+  and an `Unsafe`-tier `file_remove` violation (which a bare `fix` only suggests,
+  pending `--unsafe-fixes`). The "N auto-fixable" total, the `fixable` tag, and
+  the `agent` format's per-violation `fix_available` / `fix_command` all now match
+  what a bare `alint fix` applies.
+- A symlink cycle in the tree (a `sub/up -> ..` parent link, a self-loop, or a
+  mutual loop) no longer aborts the entire `alint check` / `alint fix` run with
+  exit 2. The offending link is skipped, like a dangling symlink, so the rest of
+  the repository is still linted and fixed.
+- `alint fix --diff` now emits the git extended-header form for an empty-file
+  create or delete (a `.keep` / `py.typed` marker, or removing an empty file), so
+  `git apply` no longer silently drops it from a multi-file patch.
+- `alint fix --fix-only` now surfaces a fix that was attempted and errored (e.g.
+  a write into a read-only directory) instead of silently dropping it with the
+  benign residuals; previously the run exited nonzero with a report that read as
+  a clean success and no cause anywhere.
 
 ## [0.16.1] - 2026-09-04
 

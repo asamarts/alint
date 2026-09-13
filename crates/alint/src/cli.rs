@@ -221,9 +221,11 @@ pub(crate) enum Command {
         /// Base ref for `--changed`. Implies `--changed`.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
-        /// Also apply Unsafe-tier fixes, not just Safe ones. Unsafe fixes may
-        /// change behavior, so they are opt-in. (No Unsafe fix ships yet, so
-        /// this is currently inert; it is wired for the located-edit tiers.)
+        /// Also apply Unsafe-tier fixes, not just Safe ones. Unsafe fixes may be
+        /// destructive or change behavior, so they are opt-in: without this flag
+        /// they are surfaced as suggestions instead of applied. `file_remove`
+        /// (the fix for `file_absent` / `no_empty_files` / `no_submodules` /
+        /// `no_symlinks`) is Unsafe, so this flag is what applies it.
         #[arg(long)]
         unsafe_fixes: bool,
         /// Report only the fixes that were applied: suppress the residual

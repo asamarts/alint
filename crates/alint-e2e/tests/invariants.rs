@@ -20,6 +20,12 @@
 //! 5. `fix_dry_run_is_pure_single_rule` — dry-run purity over the full
 //!    12-fixer catalogue (the multi-rule `fix_dry_run_is_pure` covers
 //!    only 4 fixers).
+//! 6. `check_fixable_never_overlaps_a_suggestion` — `check` never tags a
+//!    violation auto-fixable when a bare `fix` merely suggests it (the
+//!    honesty net for the Unsafe-tier `file_remove` reporting).
+//! 7. `fix_unsafe_converges_when_fully_resolved` — a fully-applied
+//!    `fix --unsafe-fixes` converges, covering the Unsafe apply path
+//!    (e.g. `file_remove`) that the Safe convergence law skips.
 //!
 //! The single-rule invariants use one fixable rule per scenario on
 //! purpose. `alint fix` is single-pass in Phase 0 (the fixpoint re-walk
@@ -170,6 +176,73 @@ proptest! {
         prop_assert!(
             report.is_match(),
             "dry-run mutated disk state:\n{report}",
+        );
+    }
+
+    #[test]
+    fn check_fixable_never_overlaps_a_suggestion(base in single_fixable_scenario_tree()) {
+        // Honesty law (round-7): `check` tags a violation `is_fixable` only when a
+        // bare `alint fix` would RESOLVE it. A single-rule tree shares one fixer
+        // tier, so if that bare fix produced ANY `Suggested` (a below-Safe-threshold
+        // fixer such as the now-Unsafe `file_remove`), then NONE of its violations
+        // may be tagged fixable by `check` -- otherwise `check` promises a
+        // resolution the bare `fix` withholds (it needs `--unsafe-fixes`). This is
+        // the net that would have caught the pre-fix regression where an Unsafe
+        // `file_remove` was still counted "auto-fixable" in `check`.
+        let scenario = with_steps(base, vec![Step::Check, Step::Fix]);
+        let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
+        let (Some(StepOutcome::Check(check)), Some(StepOutcome::Fix(fix))) =
+            (run.steps.first(), run.steps.get(1))
+        else {
+            return Ok(());
+        };
+        if fix.suggested() == 0 {
+            return Ok(()); // no below-threshold fixer in play; nothing to assert
+        }
+        let check_fixable: usize = check
+            .results
+            .iter()
+            .flat_map(|r| &r.violations)
+            .filter(|v| v.is_fixable)
+            .count();
+        prop_assert_eq!(
+            check_fixable,
+            0,
+            "check tagged {} violation(s) auto-fixable, but a bare fix only SUGGESTED \
+             (did not resolve) them; config:\n{}",
+            check_fixable,
+            scenario.given.config,
+        );
+    }
+
+    #[test]
+    fn fix_unsafe_converges_when_fully_resolved(base in single_fixable_scenario_tree()) {
+        // Convergence under `--unsafe-fixes` (round-7): the Safe-threshold
+        // convergence law early-returns on a `Suggested` below-threshold fixer, so
+        // since `file_remove` became Unsafe that op got ZERO apply/convergence
+        // coverage from the property net. At the Unsafe threshold every shipped
+        // fixer applies (`Safe <= Unsafe`, `Unsafe == Unsafe`), so a single
+        // fully-applied `fix --unsafe-fixes` must leave `check` finding nothing --
+        // restoring file_remove's apply + convergence coverage.
+        let scenario = with_steps(base, vec![Step::FixUnsafe, Step::Check]);
+        let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
+        let Some((fix_report, check_report)) = extract_fix_then_check(&run) else {
+            return Ok(());
+        };
+        // Same guard as the Safe law: a genuine skip/unfixable leaves a real
+        // violation. No Suggestion-tier fixer is generated, so `suggested` is 0 at
+        // the Unsafe threshold; guard it anyway for parity.
+        if fix_report.skipped() > 0 || fix_report.unfixable() > 0 || fix_report.suggested() > 0 {
+            return Ok(());
+        }
+        let residual: usize = check_report.results.iter().map(|r| r.violations.len()).sum();
+        prop_assert_eq!(
+            residual,
+            0,
+            "check still reported {} violation(s) after a fully-applied single-rule \
+             `fix --unsafe-fixes` (non-convergent fixer); config:\n{}",
+            residual,
+            scenario.given.config,
         );
     }
 }

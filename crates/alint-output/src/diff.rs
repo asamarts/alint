@@ -2,12 +2,17 @@
 //! would-apply edits, computed with `similar`. A text file gets a line-level
 //! unified diff; a file whose content isn't UTF-8 gets a one-line binary
 //! summary (a line diff of binary is not meaningful). The header follows git
-//! conventions so the output is consumable by `git apply`: a traditional
-//! `a/<path>` / `b/<path>` unified diff for an in-place edit, `/dev/null` on the
-//! absent side of a create or delete, and a full `diff --git` envelope with
-//! `similarity index` / `rename from` / `rename to` for a rename (a git-only
-//! construct that `git apply` ignores -- silently, or by rejecting the whole
-//! patch -- unless wrapped in the envelope). Paths containing a control byte
+//! conventions so the output is consumable by `git apply`: EVERY entry leads
+//! with a `diff --git a/<path> b/<path>` line (a uniformly git-format patch --
+//! mixing a git-envelope entry with a bare traditional `--- a/…` entry makes
+//! `git apply` misparse the boundary), then `--- a/<path>` / `+++ b/<path>` and
+//! hunks for an in-place edit, `/dev/null` on the absent side of a create or
+//! delete (an empty-file create/delete has no hunk, so it carries only
+//! `new file mode`/`deleted file mode` + an `index` line against the empty-blob
+//! hash), and `rename from` / `rename to` (+ `similarity index 100%` for a pure
+//! rename) for a rename. No `index` line is emitted for content edits -- `git
+//! apply` does not require it and alint does not compute git blob hashes. Paths
+//! containing a control byte
 //! (a tab is git's field separator; a newline ends the line), a double quote,
 //! or a backslash are C-quoted the way git's `core.quotePath` does, so an
 //! unusual filename cannot corrupt the header.
@@ -16,6 +21,14 @@ use std::io::Write;
 
 use alint_core::{StagedFix, StagedKind};
 use similar::TextDiff;
+
+/// git's abbreviated all-zero object id (the absent side of a create/delete
+/// `index` line).
+const NULL_OID: &str = "0000000";
+/// git's well-known abbreviated empty-blob object id
+/// (`e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`). A zero-byte file hashes to this,
+/// so it is the correct `index` endpoint for an empty-file create/delete.
+const EMPTY_BLOB_OID: &str = "e69de29";
 
 /// Write a unified diff for every staged fix. No staged fixes writes nothing
 /// (an empty diff; the exit code is still driven by the report). See the module
@@ -32,29 +45,39 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
             write_binary_summary(fix, w)?;
             continue;
         };
+        // Every entry leads with a `diff --git a/… b/…` line so the whole patch
+        // is uniformly git-format. Mixing a git-envelope entry (a rename, or an
+        // empty-file create/delete, which have no hunk to self-terminate) with a
+        // bare traditional `--- a/…` entry makes `git apply` misparse the boundary
+        // and reject or silently drop hunks (round-7 A2-F1); `git apply` accepts
+        // the `diff --git` form without an `index` line, which alint cannot cheaply
+        // compute for arbitrary content.
         match &fix.kind {
             StagedKind::Modify => {
+                writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
                 write_hunks(&a(&path), &b(&path), old, new, w)?;
             }
-            // New file: the `---` side is `/dev/null` (git's create convention).
-            // `similar` emits nothing (header included) when the two sides are
-            // equal, so a content-less create (an empty marker: `.keep`,
-            // `py.typed`, empty `__init__.py`) would render as blank output. Emit
-            // the header explicitly in that case so the created file is visible.
+            // New file: the `---` side is `/dev/null` (git's create convention). A
+            // content-less create (an empty marker: `.keep`, `py.typed`, empty
+            // `__init__.py`) has no hunk; the `index 0000000..e69de29` (the
+            // well-known empty-blob hash) line completes a create `git apply`
+            // accepts, where a hunkless `--- /dev/null` stanza would be dropped.
             StagedKind::Create => {
+                writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
+                writeln!(w, "new file mode 100644")?;
                 if new.is_empty() {
-                    writeln!(w, "--- /dev/null")?;
-                    writeln!(w, "+++ {}", b(&path))?;
+                    writeln!(w, "index {NULL_OID}..{EMPTY_BLOB_OID}")?;
                 } else {
                     write_hunks("/dev/null", &b(&path), old, new, w)?;
                 }
             }
-            // Removed file: the `+++` side is `/dev/null`. Same empty-file guard
+            // Removed file: the `+++` side is `/dev/null`. Same empty-file hazard
             // as Create (deleting an already-empty file).
             StagedKind::Delete => {
+                writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
+                writeln!(w, "deleted file mode 100644")?;
                 if old.is_empty() {
-                    writeln!(w, "--- {}", a(&path))?;
-                    writeln!(w, "+++ /dev/null")?;
+                    writeln!(w, "index {EMPTY_BLOB_OID}..{NULL_OID}")?;
                 } else {
                     write_hunks(&a(&path), "/dev/null", old, new, w)?;
                 }
@@ -293,24 +316,37 @@ mod tests {
     }
 
     #[test]
-    fn empty_file_create_still_emits_a_header() {
-        // An empty marker create (.keep / py.typed) must still appear in the
-        // diff, even though `similar` renders nothing for two equal empty sides.
+    fn empty_file_create_emits_git_new_file_envelope() {
+        // An empty marker create (.keep / py.typed) must render as git's canonical
+        // empty-file create -- a `diff --git` envelope with `new file mode` +
+        // `index 0000000..e69de29` -- NOT a hunkless `--- /dev/null` stanza, which
+        // `git apply` silently drops in a multi-file patch (round-7 A2-F1).
         let out = render(&[fix("NEW.keep", "", "", StagedKind::Create)]);
         assert!(
-            out.contains("--- /dev/null"),
-            "empty create header missing: {out:?}"
+            out.contains("diff --git a/NEW.keep b/NEW.keep"),
+            "empty create git envelope missing: {out:?}"
         );
-        assert!(out.contains("+++ b/NEW.keep"), "{out:?}");
+        assert!(out.contains("new file mode 100644"), "{out:?}");
+        assert!(out.contains("index 0000000..e69de29"), "{out:?}");
+        // The old hunkless traditional stanza must be gone.
+        assert!(
+            !out.contains("--- /dev/null"),
+            "stale hunkless stanza: {out:?}"
+        );
     }
 
     #[test]
-    fn empty_file_delete_still_emits_a_header() {
+    fn empty_file_delete_emits_git_deleted_file_envelope() {
         let out = render(&[fix("gone.empty", "", "", StagedKind::Delete)]);
         assert!(
-            out.contains("--- a/gone.empty"),
-            "empty delete header missing: {out:?}"
+            out.contains("diff --git a/gone.empty b/gone.empty"),
+            "empty delete git envelope missing: {out:?}"
         );
-        assert!(out.contains("+++ /dev/null"), "{out:?}");
+        assert!(out.contains("deleted file mode 100644"), "{out:?}");
+        assert!(out.contains("index e69de29..0000000"), "{out:?}");
+        assert!(
+            !out.contains("+++ /dev/null"),
+            "stale hunkless stanza: {out:?}"
+        );
     }
 }

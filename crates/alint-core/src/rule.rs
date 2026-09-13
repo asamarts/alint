@@ -45,15 +45,17 @@ pub struct Violation {
     /// content" (see [`crate::baseline::violation_fingerprint`]). It
     /// never affects rendering or pass/fail.
     pub baseline_key: Option<Cow<'static, str>>,
-    /// Engine-computed: whether the rule's [`Fixer`] can actually fix *this*
-    /// violation ([`Fixer::can_fix`]). A rule sets this to `false` at
-    /// construction (rules do not know about fixers); the engine overwrites it at
-    /// result-assembly time. It lets `check`'s human output tag fixability
-    /// per-violation -- so an unconvertible `café.rs` under `snake` (which `fix`
-    /// honestly skips) is not falsely tagged `fixable`, while a convertible
-    /// sibling in the same rule still is. `false` whenever the rule has no fixer.
-    /// The rule-level [`RuleResult::is_fixable`] ("the rule declares a fixer") is
-    /// unchanged and still backs the machine formats.
+    /// Engine-computed: whether a bare `alint fix` would resolve *this*
+    /// violation. A rule sets this to `false` at construction (rules do not know
+    /// about fixers); the engine overwrites it at result-assembly time as
+    /// per-violation convertibility ([`Fixer::can_fix`]) AND the fixer applying
+    /// at the default (`Safe`) threshold. So an unconvertible `café.rs` under
+    /// `snake` (which `fix` skips) is not tagged `fixable`, and neither is an
+    /// `Unsafe`-tier `file_remove` violation (which a bare `fix` only *suggests*,
+    /// needing `--unsafe-fixes`) -- `check` must not promise a resolution a bare
+    /// `fix` never delivers. A convertible Safe-tier sibling still is. `false`
+    /// whenever the rule has no fixer. The rule-level [`RuleResult::is_fixable`]
+    /// ("the rule declares a fixer") is independent and backs the machine formats.
     pub is_fixable: bool,
 }
 
@@ -804,12 +806,20 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
         root: &Path,
     ) -> Vec<CollectedEdit> {
         let _ = file;
+        // Carry the fixer's OWN tier, not a hardcoded `Safe`: the located path is
+        // tier-gated on each `CollectedEdit`, so hardcoding `Safe` here would let
+        // an Unsafe fixer (e.g. `file_remove`) that opts into the located regime
+        // in a future phase have its edits applied by a bare `alint fix`, silently
+        // bypassing the tier gate. (Dormant in Phase 0 -- no shipped fixer returns
+        // `collects_located_edits() == true` -- but this closes the landmine before
+        // the path is ever activated.)
+        let tier = self.applicability();
         violations
             .iter()
             .filter_map(|v| self.fix_edit(v, bytes, root))
             .map(|edit| CollectedEdit {
                 edit,
-                applicability: Applicability::Safe,
+                applicability: tier,
                 verify: EditVerifier::None,
                 isolation_group: None,
             })
@@ -1050,6 +1060,55 @@ mod tests {
         assert!(v.path.is_none());
         assert!(v.line.is_none());
         assert!(v.column.is_none());
+    }
+
+    /// A whole-file fixer at a configurable tier that emits a `DeleteFile` edit
+    /// and does NOT override `collect_edits` -- exercises the default adapter.
+    #[derive(Debug)]
+    struct TierEdgeFixer(Applicability);
+    impl Fixer for TierEdgeFixer {
+        fn describe(&self) -> String {
+            "tier-edge".to_string()
+        }
+        fn applicability(&self) -> Applicability {
+            self.0
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> Result<FixOutcome> {
+            Ok(FixOutcome::Skipped("n/a".to_string()))
+        }
+        fn fix_edit(&self, v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            v.path.as_deref().map(|p| FixEdit::DeleteFile {
+                path: p.to_path_buf(),
+            })
+        }
+    }
+
+    #[test]
+    fn default_collect_edits_carries_the_fixers_tier_not_safe() {
+        // The default `collect_edits` adapter must tag each CollectedEdit with the
+        // fixer's OWN applicability, not a hardcoded `Safe` -- otherwise an Unsafe
+        // fixer routed through the (Phase-1) located path would have its edits
+        // applied at the Safe threshold, bypassing the tier gate.
+        let v = Violation::new("x").with_path(Path::new("junk.bak"));
+        for tier in [
+            Applicability::Safe,
+            Applicability::Unsafe,
+            Applicability::Suggestion,
+            Applicability::Never,
+        ] {
+            let f = TierEdgeFixer(tier);
+            let edits = f.collect_edits(
+                std::slice::from_ref(&v),
+                Path::new("junk.bak"),
+                b"",
+                Path::new("/repo"),
+            );
+            assert_eq!(edits.len(), 1, "tier {tier:?}");
+            assert_eq!(
+                edits[0].applicability, tier,
+                "collect_edits must carry the fixer's tier ({tier:?}), not Safe"
+            );
+        }
     }
 
     #[test]

@@ -1278,18 +1278,26 @@ impl Engine {
                                 Err(e) => FixStatus::Skipped(format!("{FIX_ERROR_PREFIX} {e}")),
                             }
                         }
-                        // Available but below the threshold (e.g. `Unsafe`
-                        // `file_remove` without `--unsafe-fixes`): surface it as a
-                        // Suggestion carrying the proposed edit so `--diff` /
-                        // SARIF / the agent format show it and the user can opt
-                        // in, rather than silently applying a destructive fix.
-                        // `fix_edit` supplies the edit; the only Phase-0 op that
-                        // reaches here is the whole-file `file_remove`, which
-                        // ignores the bytes.
+                        // Available but not applied at this threshold: surface it
+                        // as a Suggestion carrying the proposed edit (so
+                        // `fix --diff --unsafe-fixes` can preview it and the
+                        // check-side finding formats can emit it) rather than
+                        // silently applying a destructive fix. The hint is
+                        // tier-specific: an `Unsafe` fixer below the threshold IS
+                        // applied by `--unsafe-fixes`, but a `Suggestion`-tier
+                        // fixer never auto-applies, so telling the user to pass
+                        // `--unsafe-fixes` would be wrong. `fix_edit` supplies the
+                        // edit; the only Phase-0 op that reaches here is the
+                        // whole-file `file_remove`, which ignores the bytes.
                         Some(f) if f.applicability().suggested_at(threshold) => {
+                            let hint = if f.applicability() == Applicability::Unsafe {
+                                " (requires --unsafe-fixes)"
+                            } else {
+                                " (suggestion only; not auto-applied)"
+                            };
                             match f.fix_edit(&v, &[], fix_ctx.root) {
                                 Some(edit) => FixStatus::Suggested {
-                                    summary: format!("{} (requires --unsafe-fixes)", f.describe()),
+                                    summary: format!("{}{hint}", f.describe()),
                                     edit,
                                 },
                                 None => FixStatus::Skipped(format!(
@@ -1888,18 +1896,28 @@ fn run_entry(
 /// Stamp each violation's per-violation fixability ([`Violation::is_fixable`])
 /// from the rule's fixer, and return the rule-level flag ("the rule declares a
 /// fixer") alongside. Centralizes the two-level derivation for the `RuleResult`
-/// assembly sites: `check` can then tag fixability per-violation (an
-/// unconvertible `café.rs` under `snake` is not tagged fixable even though its
-/// rule has a fixer -- [`Fixer::can_fix`]) while the rule-level flag that backs
-/// the machine formats and [`RuleResult::is_fixable`] stays unchanged.
+/// assembly sites.
+///
+/// `is_fixable` means "a bare `alint fix` would resolve THIS violation", so it
+/// is BOTH per-violation convertibility ([`Fixer::can_fix`] -- an unconvertible
+/// `café.rs` under `snake` is not fixable even though its rule has a fixer) AND
+/// tier-gated at the default (`Safe`) threshold: an `Unsafe` fixer such as
+/// `file_remove` only *suggests* under a bare `fix`, so its violations are not
+/// tagged/counted "auto-fixable" by `check` (that would promise a resolution a
+/// bare `fix` never delivers -- `--unsafe-fixes` is required, which `check` does
+/// not assume). The rule-level [`RuleResult::is_fixable`] ("the rule declares a
+/// fixer") is independent and still backs the machine formats.
 fn mark_fixability(
     mut violations: Vec<Violation>,
     fixer: Option<&dyn Fixer>,
 ) -> (Vec<Violation>, bool) {
     match fixer {
         Some(f) => {
+            // The default bare-`fix` threshold. An Unsafe/Suggestion/Never tier
+            // does not apply here, so those violations are not "auto-fixable".
+            let applies_by_default = f.applicability().applies_at(Applicability::Safe);
             for v in &mut violations {
-                v.is_fixable = f.can_fix(v);
+                v.is_fixable = applies_by_default && f.can_fix(v);
             }
             (violations, true)
         }

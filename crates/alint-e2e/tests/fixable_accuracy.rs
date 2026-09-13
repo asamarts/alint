@@ -29,8 +29,12 @@ rules:
 ";
 
 fn run_check(root: &Path) -> alint_core::Report {
+    run_check_with(root, CONFIG)
+}
+
+fn run_check_with(root: &Path, config_yaml: &str) -> alint_core::Report {
     let config_path = root.join(".alint.yml");
-    std::fs::write(&config_path, CONFIG).unwrap();
+    std::fs::write(&config_path, config_yaml).unwrap();
     let cache = alint_dsl::extends::Cache::at(root.join(".alint-cache"));
     let opts = alint_dsl::LoadOptions::with_cache(cache);
     let config = alint_dsl::load_with(&config_path, &opts).unwrap();
@@ -101,4 +105,49 @@ fn check_tags_only_the_convertible_stem_fixable() {
         .filter(|v| v.is_fixable)
         .count();
     assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_does_not_tag_an_unsafe_file_remove_auto_fixable() {
+    // Round-7 (tier honesty): `file_remove` is Unsafe, so a bare `alint fix` only
+    // SUGGESTS the deletion (needs --unsafe-fixes). `check` must therefore NOT tag
+    // the violation `fixable` nor count it "auto-fixable" -- promising "run alint
+    // fix to resolve" a violation a bare fix leaves untouched is the false-promise
+    // this guards. (The rule still declares a fixer, so the per-rule flag holds.)
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-remove-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    let tree: TreeSpec = serde_yaml_ng::from_str("stale.bak: \"junk\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: no-bak\n    kind: file_absent\n    paths: \"**/*.bak\"\n    level: error\n    fix:\n      file_remove: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "no-bak")
+        .expect("no-bak produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(result.violations.len(), 1);
+    assert!(
+        !result.violations[0].is_fixable,
+        "an Unsafe file_remove violation must NOT be auto-fixable in check (bare fix only suggests it)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(
+        fixable_count, 0,
+        "nothing is auto-fixable by a bare fix here"
+    );
 }

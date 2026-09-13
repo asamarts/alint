@@ -124,11 +124,14 @@ fn default_fix_exits_nonzero_when_a_fix_errors_even_at_warning_level() {
 }
 
 #[test]
-fn fix_only_still_exits_nonzero_when_a_fix_errors() {
-    // R-audit-5: --fix-only suppresses declined/unfixable residuals and exits 0,
-    // but a fix that was ATTEMPTED and ERRORED (here a write into a read-only
-    // dir) must still fail the run -- exit 1 via had_fix_error, even though the
-    // errored file is suppressed from the output.
+fn fix_only_surfaces_a_fix_error_and_exits_nonzero() {
+    // Round-7 (A3-F2): --fix-only suppresses BENIGN residuals (declined /
+    // unfixable / suggested), but a fix that was ATTEMPTED and ERRORED (here a
+    // write into a read-only dir) must both fail the run (exit 1 via
+    // had_fix_error) AND be VISIBLE in the report -- previously the errored item
+    // was filtered out with the benign residuals, leaving a nonzero exit with a
+    // report reading "0 applied, 0 skipped" and no cause anywhere (stdout or
+    // stderr): a CI operator saw a failed step and no reason.
     use std::os::unix::fs::PermissionsExt as _;
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -145,12 +148,16 @@ fn fix_only_still_exits_nonzero_when_a_fix_errors() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     assert_eq!(good, "fn a() {}\n", "the writable file is still fixed");
-    // The errored file's residual is suppressed from the report...
+    // The fix ERROR is surfaced (not suppressed like a benign residual)...
     assert!(
-        !stdout.contains("blocked.rs"),
-        "--fix-only suppresses the residual line; stdout:\n{stdout}"
+        stdout.contains("blocked.rs"),
+        "--fix-only must surface the errored file so the failure has a cause; stdout:\n{stdout}"
     );
-    // ...but a fix errored, so the exit is nonzero.
+    assert!(
+        stdout.contains("fix error"),
+        "the surfaced item must be labeled a fix error; stdout:\n{stdout}"
+    );
+    // ...and the exit is nonzero.
     assert_eq!(
         out.status.code(),
         Some(1),

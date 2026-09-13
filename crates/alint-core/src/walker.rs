@@ -660,6 +660,54 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     Ok((builder, escaping))
 }
 
+/// Whether a walk error is a PER-ENTRY condition to skip (return `Ok(None)`)
+/// rather than a fatal abort of the whole walk: a dangling symlink or a file
+/// that vanished mid-walk (I/O `NotFound`), or a symlink cycle. Any other error
+/// (permission denied, ...) is left to propagate.
+fn is_skippable_walk_error(err: &ignore::Error) -> bool {
+    if err.io_error().map(std::io::Error::kind) == Some(std::io::ErrorKind::NotFound) {
+        return true;
+    }
+    is_symlink_loop(err) || is_eloop(err)
+}
+
+/// Whether an `ignore` walk error is (or wraps) a symlink-cycle `Loop`. The
+/// `ignore` crate nests the real error under `WithPath` / `WithDepth` /
+/// `WithLineNumber` / `Partial`, and `Loop` carries no `io_error()`, so a
+/// straight `io_error().kind()` check misses it -- unwrap to find it. Catches
+/// the ancestor-based cycles the crate detects itself (`..`, mutual links).
+fn is_symlink_loop(err: &ignore::Error) -> bool {
+    use ignore::Error;
+    match err {
+        Error::Loop { .. } => true,
+        Error::WithPath { err, .. }
+        | Error::WithDepth { err, .. }
+        | Error::WithLineNumber { err, .. } => is_symlink_loop(err),
+        Error::Partial(errs) => errs.iter().any(is_symlink_loop),
+        _ => false,
+    }
+}
+
+/// Whether a walk error is a kernel `ELOOP` (too many levels of symbolic links)
+/// -- a DIRECT self-loop (`ln -s x x`) that the crate's ancestor tracking does
+/// not flag as a `Loop`. `std::io::ErrorKind::FilesystemLoop` is still unstable
+/// (rust #86442), so match the platform errno: 40 on Linux/Android, 62 on
+/// macOS/*BSD. Non-unix targets have no ELOOP here (symlink cycles surface via
+/// the crate's `Loop`), so this is a no-op there.
+#[cfg(unix)]
+fn is_eloop(err: &ignore::Error) -> bool {
+    const ELOOP: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+        40
+    } else {
+        62
+    };
+    err.io_error().and_then(std::io::Error::raw_os_error) == Some(ELOOP)
+}
+#[cfg(not(unix))]
+fn is_eloop(_err: &ignore::Error) -> bool {
+    false
+}
+
 /// Convert one `ignore::DirEntry` (or its error) into a
 /// `FileEntry`. Returns `Ok(None)` for entries we deliberately
 /// skip (the walk root itself, or anything outside the root).
@@ -673,16 +721,23 @@ fn result_to_entry(
     let entry = match result {
         Ok(entry) => entry,
         Err(err) => {
-            // A broken (dangling) symlink surfaces as an I/O `NotFound` walk
-            // error under `follow_links(true)`: the target can't be stat'd. Skip
-            // it rather than abort the ENTIRE run -- `filter_entry` above already
-            // intends to prune broken symlinks, and a repo containing one
-            // dangling link must still be lintable (and `file_remove` able to
-            // clean it up). A `NotFound` also covers a file that vanished mid-walk
-            // (listed then removed), which is equally correct to skip. Any other
-            // error (permission denied, ...) still propagates and stops the walk
-            // as before.
-            if err.io_error().map(std::io::Error::kind) == Some(std::io::ErrorKind::NotFound) {
+            // Skip a handful of PER-ENTRY conditions rather than aborting the
+            // ENTIRE run (one bad path anywhere must not make a whole repo
+            // un-lintable / un-fixable):
+            //   * a broken (dangling) symlink -- under `follow_links(true)` the
+            //     target can't be stat'd, surfacing as I/O `NotFound`. (The link
+            //     itself is not indexed, so `no_symlinks`/`file_remove` do not see
+            //     it -- a known detection gap, tracked separately.) `NotFound`
+            //     also covers a file that vanished mid-walk (listed then removed).
+            //   * a symlink CYCLE -- `sub/up -> ..`, a self-loop, or a mutual
+            //     loop. The `ignore` crate reports its own `Loop`, and the kernel
+            //     reports `ELOOP` (`FilesystemLoop`); neither is `NotFound`, so
+            //     before this both aborted the run with exit 2 on a single stray
+            //     link. `filter_entry` already prunes the recursion; the emitted
+            //     error just needs to be non-fatal too.
+            // Any OTHER error (permission denied, ...) still propagates and stops
+            // the walk, matching the prior contract.
+            if is_skippable_walk_error(&err) {
                 return Ok(None);
             }
             return Err(err.into());
@@ -1435,6 +1490,41 @@ mod tests {
             names.iter().any(|p| p.as_os_str() == "real.txt"),
             "the real file must still be indexed: {names:?}"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_cycles_are_skipped_not_fatal() {
+        // Round-7 (5a): a symlink CYCLE surfaces as `ignore::Error::Loop`
+        // (ancestor-based: `..`, mutual) or a kernel ELOOP (a direct self-loop) --
+        // neither is `NotFound`, so before this a single stray cycle aborted the
+        // ENTIRE walk (exit 2), making the whole repo un-lintable / un-fixable.
+        // Each cycle shape must be skipped, leaving the rest of the tree indexed.
+        use std::os::unix::fs::symlink;
+        for shape in ["parent", "selfdir", "mutual", "selfref"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            std::fs::write(root.join("real.txt"), b"hi\n").unwrap();
+            match shape {
+                "parent" => {
+                    std::fs::create_dir(root.join("sub")).unwrap();
+                    symlink("..", root.join("sub/up")).unwrap();
+                }
+                "selfdir" => symlink(".", root.join("selfloop")).unwrap(),
+                "mutual" => {
+                    symlink("cyc_y", root.join("cyc_x")).unwrap();
+                    symlink("cyc_x", root.join("cyc_y")).unwrap();
+                }
+                "selfref" => symlink("loop", root.join("loop")).unwrap(),
+                _ => unreachable!(),
+            }
+            let idx = walk(root, &WalkOptions::default())
+                .unwrap_or_else(|e| panic!("cycle shape {shape:?} must not abort the walk: {e}"));
+            assert!(
+                idx.entries.iter().any(|e| e.path.as_os_str() == "real.txt"),
+                "cycle shape {shape:?}: the real file must still be indexed"
+            );
+        }
     }
 
     #[test]

@@ -73,10 +73,12 @@ pub enum FixStatus {
     /// `Unsafe` edit without `--unsafe-fixes`, a `Suggestion`-tier edit, or
     /// an edit whose post-edit verification failed (the engine declined to
     /// write rather than corrupt the file). `summary` is the human
-    /// one-liner; `edit` is the proposed change, carried for `alint fix
-    /// --diff` and SARIF `proposed_edit`. No Phase-0 fixer produces this
-    /// (every shipped op is `Safe` and whole-file); it is the plumbing the
-    /// located-edit tiers (Phase 1+) fill in.
+    /// one-liner; `edit` is the proposed change, carried so `fix --diff
+    /// --unsafe-fixes` can preview it and the check-side finding formats can
+    /// emit it. Produced whenever a fixer's tier is below the run's threshold --
+    /// in Phase 0 that is the `Unsafe` `file_remove` (for `file_absent` /
+    /// `no_empty_files` / `no_submodules` / `no_symlinks`) under a bare
+    /// `alint fix`, or any fixer a user demotes to `suggestion`.
     Suggested { summary: String, edit: FixEdit },
     /// The rule has no fixer; violation stands.
     Unfixable,

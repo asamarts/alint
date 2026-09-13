@@ -160,6 +160,67 @@ fn diff_output_applies_cleanly_with_git_apply() {
 }
 
 #[test]
+fn diff_empty_file_create_and_delete_apply_cleanly_with_git_apply() {
+    // Round-7 (A2-F1): an EMPTY-file create (a `.keep` / `py.typed` marker) and
+    // an empty-file delete have no hunk. Rendered as a hunkless traditional
+    // `--- /dev/null` stanza they are silently DROPPED by `git apply` when they
+    // ride in a multi-file patch (the create simply never happens -- data loss),
+    // and a solo empty create is rejected outright. This gate builds a MIXED
+    // patch (empty create + empty delete + a content modify) and asserts the real
+    // `git apply` performs all three.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  \
+         - id: keep\n    kind: file_exists\n    paths: \".keep\"\n    level: error\n    fix: { file_create: { path: \".keep\", content: \"\" } }\n  \
+         - id: no-empty-tmp\n    kind: file_absent\n    paths: \"drop.tmp\"\n    level: error\n    fix: { file_remove: { applicability: safe } }\n  \
+         - id: no-ws\n    kind: no_trailing_whitespace\n    paths: \"code.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("code.txt"), "line  \n").unwrap();
+    std::fs::write(root.join("drop.tmp"), "").unwrap(); // an empty committed file to delete
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let diff = run(root, &["fix", "--diff", "."]);
+    let patch = root.join("fix.patch");
+    std::fs::write(&patch, &diff.stdout).unwrap();
+    let check = git(root, &["apply", "--check", "fix.patch"]);
+    assert!(
+        check.status.success(),
+        "git apply --check must accept an empty-create/delete mixed patch; stderr:\n{}\n--- patch ---\n{}",
+        String::from_utf8_lossy(&check.stderr),
+        String::from_utf8_lossy(&diff.stdout),
+    );
+    assert!(
+        git(root, &["apply", "fix.patch"]).status.success(),
+        "git apply must succeed"
+    );
+    // All three edits landed: the empty marker was created, the empty file
+    // deleted, and the content trimmed.
+    assert!(
+        root.join(".keep").exists(),
+        "empty .keep create was applied"
+    );
+    assert_eq!(
+        std::fs::read(root.join(".keep")).unwrap().len(),
+        0,
+        ".keep is empty"
+    );
+    assert!(
+        !root.join("drop.tmp").exists(),
+        "empty-file delete was applied"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("code.txt")).unwrap(),
+        "line\n",
+        "content modify was applied"
+    );
+}
+
+#[test]
 fn diff_does_not_emit_a_self_conflicting_rename_patch() {
     // Round-6 audit: two distinctly-cased files can convert to ONE snake target
     // (`fooBar` and `foo_Bar` both -> `foo_bar`). Direct `fix` skips the second

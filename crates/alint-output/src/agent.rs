@@ -110,7 +110,13 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 Level::Info => by_sev.info += 1,
                 Level::Off => {} // off rules don't produce violations, but be explicit
             }
-            if r.is_fixable {
+            // Per-VIOLATION fixability, not per-rule `r.is_fixable`: an agent
+            // acts on a single violation, and `fix_command` is documented as the
+            // argv to fix THIS violation. A rule with a fixer that skips this
+            // violation (an unconvertible stem) -- or an Unsafe-tier fixer a bare
+            // `alint fix` only suggests -- must not advertise a fix here, or an
+            // agent runs the command, the violation persists, and it loops.
+            if v.is_fixable {
                 fixable_violations += 1;
             }
             violations.push(AgentViolation {
@@ -121,8 +127,8 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 column: v.column,
                 human_message: v.message.as_ref(),
                 agent_instruction: build_agent_instruction(r, v),
-                fix_available: r.is_fixable,
-                fix_command: r
+                fix_available: v.is_fixable,
+                fix_command: v
                     .is_fixable
                     .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
                 policy_url: r.policy_url.as_deref(),
@@ -207,7 +213,7 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
         }
     }
 
-    if rule.is_fixable {
+    if violation.is_fixable {
         out.push_str(" (or run `alint fix --only ");
         out.push_str(&rule.rule_id);
         out.push_str("` to apply the auto-fix)");
@@ -284,11 +290,13 @@ mod tests {
 
     #[test]
     fn fixable_violation_suggests_alint_fix_in_instruction() {
+        let mut v = Violation::new("A README is required at the root.");
+        v.is_fixable = true; // a bare `alint fix` would create it (Safe tier)
         let result = RuleResult {
             rule_id: "readme-exists".into(),
             level: Level::Error,
             policy_url: Some("https://example.com/policy".into()),
-            violations: vec![Violation::new("A README is required at the root.")],
+            violations: vec![v],
             notes: Vec::new(),
             is_fixable: true,
         };
@@ -316,6 +324,72 @@ mod tests {
         );
         assert_eq!(v["violations"][0]["fix_available"], true);
         assert_eq!(v["summary"]["fixable_violations"], 1);
+    }
+
+    #[test]
+    fn fix_affordance_is_per_violation_not_per_rule() {
+        // Round-7 (A3-F1): the agent format must derive fix_available / fix_command
+        // / the instruction hint / the fixable_violations count from the
+        // PER-VIOLATION flag, not the per-rule one. A rule that declares a fixer
+        // (is_fixable: true) but has a violation a bare fix won't resolve (an
+        // unconvertible stem, or an Unsafe file_remove) must NOT advertise a fix
+        // for that violation -- else an agent runs the command, the violation
+        // persists, and it loops.
+        let mut ok =
+            Violation::new("stem myFile is not snake_case").with_path(PathBuf::from("myFile.rs"));
+        ok.is_fixable = true;
+        let stuck =
+            Violation::new("stem café is not snake_case").with_path(PathBuf::from("café.rs"));
+        // stuck.is_fixable stays false
+        let result = RuleResult {
+            rule_id: "snake-names".into(),
+            level: Level::Warning,
+            policy_url: None,
+            violations: vec![stuck, ok],
+            notes: Vec::new(),
+            is_fixable: true, // the RULE has a fixer
+        };
+        let out = run(vec![result]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["summary"]["fixable_violations"], 1,
+            "count is per-violation"
+        );
+        let by_file = |needle: &str| -> serde_json::Value {
+            v["violations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|viol| viol["file"].as_str().is_some_and(|f| f.contains(needle)))
+                .unwrap()
+                .clone()
+        };
+        let myfile = by_file("myFile");
+        let cafe = by_file("café");
+        assert_eq!(myfile["fix_available"], true);
+        assert!(
+            !myfile["fix_command"].is_null(),
+            "convertible has a fix_command"
+        );
+        assert!(
+            myfile["agent_instruction"]
+                .as_str()
+                .unwrap()
+                .contains("alint fix"),
+            "convertible instruction offers the fix"
+        );
+        assert_eq!(cafe["fix_available"], false, "unconvertible has no fix");
+        assert!(
+            cafe["fix_command"].is_null(),
+            "unconvertible has no fix_command"
+        );
+        assert!(
+            !cafe["agent_instruction"]
+                .as_str()
+                .unwrap()
+                .contains("alint fix"),
+            "unconvertible instruction must not offer a fix that won't apply"
+        );
     }
 
     #[test]

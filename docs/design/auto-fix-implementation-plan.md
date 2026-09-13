@@ -287,8 +287,9 @@ identical.
 11. Build the **`coverage_audit_fix_coverage.rs` gate** (rung 8) with the `FixSpec::ALL` substrate and
     the parse-config -> resolve-`applied:`-id -> op-key mechanism of section 2; back-fill a
     convergence scenario for any of the 12 ops that lacks one.
-12. New CLI flags on `Command::Fix` (`cli.rs:208-224`): `--unsafe-fixes` (inert until Phase 1, wired
-    now), `--diff`, `--fix-only`. `fix --dry-run` remains the CI gate.
+12. New CLI flags on `Command::Fix` (`cli.rs:208-224`): `--unsafe-fixes` (gates the Unsafe tier --
+    live from Phase 0, since `file_remove` is Unsafe: a bare `fix` suggests it, `--unsafe-fixes`
+    applies it), `--diff`, `--fix-only`. `fix --dry-run` remains the CI gate.
 
 **Downstream artifacts.** ARCHITECTURE.md execution step 9 + the fix-ops table (the engine rework
 legitimately changes step 9); `FixSpec::ALL` + its parity gate; `fix-report.json` + validation test.

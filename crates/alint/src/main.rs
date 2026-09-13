@@ -1035,7 +1035,8 @@ fn cmd_fix(
 
     let index = walk(path, &walk_opts).context("walking repository")?;
     // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.
-    // No Unsafe op ships yet, so this is currently inert.
+    // At Safe, an Unsafe op (`file_remove`) is surfaced as a suggestion; this
+    // flag is what applies it.
     let threshold = if unsafe_fixes {
         alint_core::Applicability::Unsafe
     } else {
@@ -1066,8 +1067,12 @@ fn cmd_fix(
 
     let (mut out, opts) = render_env(cli)?;
     if fix_only {
-        // Report only the fixes that were applied: drop the residual
-        // (skipped / suggested / unfixable) findings the flag suppresses.
+        // Report the fixes that were applied AND any that ERRORED. `--fix-only`
+        // suppresses BENIGN residuals (already-clean / binary / size-limit skips,
+        // suggestions, unfixable) -- but a genuine fix error (a `Skipped` carrying
+        // `FIX_ERROR_PREFIX`, e.g. a read-only target) drives a nonzero exit
+        // (`fix_exit_code` below), so hiding it would leave a CI operator with a
+        // failed step, a report reading "0 applied, 0 skipped", and no cause.
         let applied_only = FixReport {
             results: report
                 .results
@@ -1076,7 +1081,13 @@ fn cmd_fix(
                     let items: Vec<_> = r
                         .items
                         .iter()
-                        .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+                        .filter(|i| match &i.status {
+                            FixStatus::Applied(_) => true,
+                            FixStatus::Skipped(reason) => {
+                                reason.starts_with(alint_core::FIX_ERROR_PREFIX)
+                            }
+                            _ => false,
+                        })
                         .cloned()
                         .collect();
                     (!items.is_empty()).then(|| FixRuleResult {
