@@ -18,6 +18,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   would itself still match the forbidden pattern (e.g. `foo` -> `foofoo`, or a
   zero-width pattern) is left unfixed with a warning rather than applied, so the
   fix never loops or grows the file.
+- The LSP now offers the located `replace` fix as an editor code action. Its
+  byte-range edits are mapped to LSP `TextEdit`s with UTF-16 character positions
+  (so a fix after a non-BMP character such as an emoji lands in the right place),
+  and every occurrence in the file becomes one `TextEdit` in a single
+  `WorkspaceEdit`, so applying the action rewrites them all at once.
 
 ### Changed
 

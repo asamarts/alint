@@ -20,9 +20,11 @@
 //!   and `policy_url` from the per-file cache of the last-published
 //!   findings.
 //! - **Code actions** offer an "Apply fix" quick-fix for any violation
-//!   whose rule declares a fixer, returning a `WorkspaceEdit`
-//!   ([`alint_core::Fixer::fix_edit`] → [`alint_core::FixEdit`]) the
-//!   editor applies to the buffer.
+//!   whose rule declares a fixer, returning a `WorkspaceEdit` the editor
+//!   applies to the buffer. A whole-file fixer maps via
+//!   [`alint_core::Fixer::fix_edit`] → [`alint_core::FixEdit`]; a *located*
+//!   fixer (e.g. `replace`) maps its `collect_edits` byte ranges to UTF-16
+//!   `TextEdit`s (one per match) so a single action rewrites every occurrence.
 //! - **Watched files** (`didChangeWatchedFiles`) reload the session, so
 //!   `.alint.yml` edits take effect without saving an open document.
 //!
@@ -48,7 +50,8 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result as JsonRpcResult};
 
 use alint_core::{
-    Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult, Violation, WalkOptions, walk,
+    CollectedEdit, Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult, Violation,
+    WalkOptions, walk,
 };
 
 /// One cached finding for a file: enough to publish a diagnostic and to
@@ -493,11 +496,31 @@ impl LanguageServer for Backend {
             // the right line/column (not just whole-file fixers).
             violation.line = finding.line;
             violation.column = finding.column;
-            let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
-                continue;
-            };
-            let Some(workspace_edit) = fix_edit_to_workspace_edit(&edit, &session.root) else {
-                continue;
+            // A LOCATED fixer (Phase 1 `replace`) emits byte-range edits via
+            // `collect_edits`, not `fix_edit`. Collect ALL of them for this file and
+            // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
+            // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
+            // `alint fix` (the diagnostic is one-per-file but the located fix is
+            // per-match). A whole-file fixer keeps the `fix_edit` -> edit path.
+            let workspace_edit = if fixer.collects_located_edits() {
+                let edits = fixer.collect_edits(
+                    std::slice::from_ref(&violation),
+                    &rel,
+                    bytes,
+                    &session.root,
+                );
+                match located_edits_to_workspace_edit(&edits, &text, &rel, &session.root) {
+                    Some(we) => we,
+                    None => continue,
+                }
+            } else {
+                let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
+                    continue;
+                };
+                match fix_edit_to_workspace_edit(&edit, &session.root) {
+                    Some(we) => we,
+                    None => continue,
+                }
             };
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("alint: fix `{}`", finding.rule_id),
@@ -764,6 +787,69 @@ fn whole_document() -> Range {
     Range::new(Position::new(0, 0), Position::new(u32::MAX, u32::MAX))
 }
 
+/// Convert a byte offset into `text` (valid UTF-8) to an LSP [`Position`]:
+/// 0-indexed line, and a character column counted in UTF-16 code units (the LSP
+/// default position encoding). A non-BMP scalar (e.g. an emoji) is two UTF-16
+/// units, so a byte or `char` count would misplace the edit. `'\n'` ends a line; a
+/// lone `'\r'` counts as an ordinary character (the located `replace` matches
+/// content, never a line terminator, so an edit range never straddles a `\r\n`).
+/// An offset at or past the end of `text` clamps to the final position.
+fn byte_offset_to_position(text: &str, byte_offset: usize) -> Position {
+    let mut line: u32 = 0;
+    let mut character: u32 = 0;
+    for (idx, ch) in text.char_indices() {
+        if idx >= byte_offset {
+            return Position::new(line, character);
+        }
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += u32::try_from(ch.len_utf16()).unwrap_or(0);
+        }
+    }
+    Position::new(line, character)
+}
+
+/// Map a located fixer's collected byte-range edits (Phase 1 `replace`) to an LSP
+/// [`WorkspaceEdit`] for one file: each [`FixEdit::ReplaceRange`] becomes a
+/// [`TextEdit`] whose range is the byte offsets converted to UTF-16 positions
+/// against `text` (the current buffer, which is what the offsets index).
+/// `collect_edits` yields DISJOINT, left-to-right matches, so the `TextEdit`s never
+/// overlap -- exactly what the LSP requires of a single edit set. Returns `None`
+/// when there are no range edits, a replacement isn't UTF-8, or the path can't
+/// become a URI, so the caller offers no action rather than a partial one.
+fn located_edits_to_workspace_edit(
+    edits: &[CollectedEdit],
+    text: &str,
+    rel: &Path,
+    root: &Path,
+) -> Option<WorkspaceEdit> {
+    let uri = Url::from_file_path(root.join(rel)).ok()?;
+    let mut text_edits = Vec::new();
+    for ce in edits {
+        if let FixEdit::ReplaceRange { range, content, .. } = &ce.edit {
+            let new_text = String::from_utf8(content.clone()).ok()?;
+            let start = byte_offset_to_position(text, range.start);
+            let end = byte_offset_to_position(text, range.end);
+            text_edits.push(TextEdit {
+                range: Range::new(start, end),
+                new_text,
+            });
+        }
+    }
+    if text_edits.is_empty() {
+        return None;
+    }
+    let mut changes = HashMap::new();
+    changes.insert(uri, text_edits);
+    Some(WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    })
+}
+
 /// Map a core [`FixEdit`] to an LSP [`WorkspaceEdit`]. Content edits use
 /// the widely-supported `changes` map; create/delete/rename use resource
 /// operations (the client must advertise `resourceOperations` support).
@@ -824,11 +910,13 @@ fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<WorkspaceEd
                 }),
             )]))
         }
-        // `ReplaceRange`'s minimal-`TextEdit` mapping (byte range ->
-        // line/character `Range`) is deferred to Phase 1, when the first op
-        // emits one; until then no located edit reaches the LSP. A `chmod`
-        // (`SetMode`) has no LSP `WorkspaceEdit` representation at all. Both
-        // map to `None` for now rather than a lossy edit.
+        // A `ReplaceRange` reaches the LSP through `collect_edits` (a located
+        // fixer's real path), mapped to UTF-16 `TextEdit`s by
+        // `located_edits_to_workspace_edit` -- NOT through `fix_edit`, which no
+        // located fixer implements (it returns `None`). So a `ReplaceRange` here
+        // is unreachable, and there is no buffer context to map its byte offsets
+        // anyway. A `chmod` (`SetMode`) has no LSP `WorkspaceEdit` representation at
+        // all. Both map to `None`.
         FixEdit::ReplaceRange { .. } | FixEdit::SetMode { .. } => None,
     }
 }
@@ -1127,5 +1215,115 @@ mod tests {
             content: vec![0xff, 0xfe],
         };
         assert!(fix_edit_to_workspace_edit(&edit, &repo_root()).is_none());
+    }
+
+    #[test]
+    fn byte_offset_to_position_counts_utf16_code_units() {
+        // ASCII, single line.
+        assert_eq!(byte_offset_to_position("hello", 0), Position::new(0, 0));
+        assert_eq!(byte_offset_to_position("hello", 3), Position::new(0, 3));
+        assert_eq!(byte_offset_to_position("hello", 5), Position::new(0, 5)); // clamps at end
+        // Multi-line: the offset just after '\n' is line 1, character 0.
+        let two = "ab\ncd";
+        assert_eq!(byte_offset_to_position(two, 2), Position::new(0, 2)); // before '\n'
+        assert_eq!(byte_offset_to_position(two, 3), Position::new(1, 0)); // 'c'
+        assert_eq!(byte_offset_to_position(two, 5), Position::new(1, 2)); // end of "cd"
+        // R-UTF16: U+1F600 is 4 UTF-8 bytes but TWO UTF-16 code units, so a byte- or
+        // `char`-based column would misplace an edit after it.
+        let emoji = "a\u{1F600}b";
+        assert_eq!(byte_offset_to_position(emoji, 1), Position::new(0, 1)); // before the emoji
+        assert_eq!(
+            byte_offset_to_position(emoji, 5),
+            Position::new(0, 3),
+            "the emoji is two UTF-16 units, so 'b' is at character 3"
+        );
+    }
+
+    #[test]
+    fn located_edits_map_to_utf16_text_edits() {
+        // A non-BMP char BEFORE the edit range: a byte- or char-based column would be
+        // wrong. The located edit replaces the 4-byte "TODO" with "DONE".
+        let root = repo_root();
+        let text = "x\u{1F600} TODO\n";
+        let todo = text.find("TODO").unwrap();
+        let edit = CollectedEdit {
+            edit: FixEdit::ReplaceRange {
+                path: PathBuf::from("a.txt"),
+                range: todo..todo + 4,
+                content: b"DONE".to_vec(),
+            },
+            applicability: alint_core::Applicability::Unsafe,
+            verify: alint_core::EditVerifier::None,
+            isolation_group: None,
+        };
+        let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
+        let changes = ws.changes.expect("a located edit uses the changes map");
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let edits = &changes[&uri];
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "DONE");
+        // 'x'=0, emoji=cols 1-2 (two units), ' '=3, so "TODO" starts at character 4.
+        assert_eq!(
+            edits[0].range.start,
+            Position::new(0, 4),
+            "the emoji counts as two UTF-16 units"
+        );
+        assert_eq!(edits[0].range.end, Position::new(0, 8));
+        assert!(ws.document_changes.is_none());
+    }
+
+    #[test]
+    fn located_edits_with_no_range_edits_yield_none() {
+        // A located fixer that collected nothing offers NO action (not an empty one).
+        assert!(
+            located_edits_to_workspace_edit(&[], "abc", Path::new("a.txt"), &repo_root()).is_none()
+        );
+    }
+
+    #[test]
+    fn located_lsp_path_maps_a_real_replace_fixer_to_utf16_text_edits() {
+        // End-to-end for the located `code_action` path: a REAL `file_content_forbidden`
+        // + `replace` rule, its `ReplaceFixer::collect_edits`, mapped to UTF-16
+        // `TextEdit`s -- the exact sequence `code_action` runs for a located fixer.
+        // A non-BMP char precedes the matches so the UTF-16 column mapping is
+        // load-bearing, and there are TWO occurrences so the per-match multi-edit
+        // behavior (not just the diagnostic's first match) is exercised.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(root)
+            .expect("build_session succeeds")
+            .expect("a config is present");
+        let fixer = session
+            .engine
+            .fixer_for("no-todo")
+            .expect("no-todo declares a fixer");
+        assert!(
+            fixer.collects_located_edits(),
+            "replace is a located fixer, so code_action takes the collect_edits path"
+        );
+        let text = "x\u{1F600} TODO and TODO\n";
+        let violation = Violation::new("forbidden").with_path(PathBuf::from("a.txt"));
+        let edits = fixer.collect_edits(
+            std::slice::from_ref(&violation),
+            Path::new("a.txt"),
+            text.as_bytes(),
+            root,
+        );
+        let ws = located_edits_to_workspace_edit(&edits, text, Path::new("a.txt"), root)
+            .expect("the located edits map to a workspace edit");
+        let changes = ws.changes.expect("located edits use the changes map");
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let tes = &changes[&uri];
+        assert_eq!(tes.len(), 2, "both TODO occurrences become TextEdits");
+        assert!(tes.iter().all(|te| te.new_text == "DONE"));
+        // 'x'=0, emoji=cols 1-2 (two UTF-16 units), ' '=3 -> first TODO at character 4.
+        assert_eq!(tes[0].range.start, Position::new(0, 4));
     }
 }
