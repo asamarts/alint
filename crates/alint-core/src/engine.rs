@@ -3348,6 +3348,31 @@ mod tests {
             "an untouched, uncreated file is out of scope -> demoted to a Suggestion"
         );
 
+        // A PATHLESS violation (a create, whose target comes from config not the
+        // violation) is judged by the rule's `path_scope`: in scope iff the scope
+        // matches some changed-or-created path. `stub` exposes a `Rule::path_scope`.
+        let pathless = Violation::new("needs creating");
+        let in_scope_rule = stub("in", "a.txt"); // scope matches the changed a.txt
+        let created_scope_rule = stub("cr", "made.txt"); // scope matches a created file
+        let out_scope_rule = stub("out", "zzz.txt"); // scope matches nothing in scope
+        assert!(
+            !engine.writes_outside_changed(in_scope_rule.as_ref(), &pathless, &index, &created),
+            "a pathless create whose scope is in the changed set is in scope"
+        );
+        assert!(
+            !engine.writes_outside_changed(
+                created_scope_rule.as_ref(),
+                &pathless,
+                &index,
+                &created
+            ),
+            "a pathless create whose scope matches a created file is in scope (2b)"
+        );
+        assert!(
+            engine.writes_outside_changed(out_scope_rule.as_ref(), &pathless, &index, &created),
+            "a pathless create whose scope matches nothing in scope is out of scope -> demoted"
+        );
+
         let full_engine = Engine::new(vec![], RuleRegistry::new());
         assert!(
             !full_engine.writes_outside_changed(rule.as_ref(), &v("other.txt"), &index, &created),

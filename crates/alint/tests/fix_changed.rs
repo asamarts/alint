@@ -260,3 +260,106 @@ fn fix_changed_demotes_out_of_scope_write_to_a_suggestion() {
         "check does not mutate; build/old.log is still there"
     );
 }
+
+#[test]
+fn fix_changed_confinement_wins_over_unsafe_fixes() {
+    // 2b invariant: `--changed` confinement is INDEPENDENT of the safety tier. The
+    // out-of-scope demote is checked BEFORE the tier arms, so even `--unsafe-fixes`
+    // (which raises the applied tier to Unsafe) must NOT apply an out-of-scope
+    // write. Here `file_remove` is Unsafe by DEFAULT (no `applicability: safe`), so
+    // `--unsafe-fixes` applies the in-scope removal -- but the out-of-scope one is
+    // still only suggested. Guards against a regression that reordered the status
+    // arms so the tier check ran first.
+    const UNSAFE_CONFIG: &str = "\
+version: 1
+rules:
+  - id: no-logs
+    kind: file_absent
+    paths: \"**/*.log\"
+    level: error
+    fix: { file_remove: {} }
+";
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("build/old.log"), "old\n").unwrap(); // OUT of diff
+    std::fs::write(root.join("logs/today.log"), "today\n").unwrap(); // IN diff
+    std::fs::write(root.join(".alint.yml"), UNSAFE_CONFIG).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("logs/today.log"), "edited\n").unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed --unsafe-fixes");
+    // In-scope Unsafe removal APPLIES (--unsafe-fixes); out-of-scope stays suggested.
+    assert!(
+        !root.join("logs/today.log").exists(),
+        "in-scope Unsafe removal applies under --unsafe-fixes"
+    );
+    assert!(
+        root.join("build/old.log").exists(),
+        "out-of-scope removal must NOT be applied even with --unsafe-fixes (confinement \
+         wins over the tier)"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.to_lowercase().contains("scope"),
+        "the out-of-scope removal is surfaced as an out-of-scope suggestion; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn fix_changed_renames_only_in_scope_files() {
+    // 2b (rename interaction): `filename_case` + `file_rename` writes a NEW name,
+    // which `writes_outside_changed` does not directly inspect. But the rename is
+    // confined the RIGHT way regardless: `filename_case` gets the filtered index
+    // (`requires_full_index == false`), so it only EVALUATES in-diff (+ created)
+    // files -- an out-of-diff mis-named file is never seen, so never renamed. The
+    // in-scope rename's new name is a "file a fix in scope created" (spec-permitted)
+    // and cannot clobber an existing file (the fixer's collision guard). Guards
+    // against a regression that leaked out-of-diff files into the rename path.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("Src.md"), "a\n").unwrap(); // PascalCase, will be edited (IN diff)
+    std::fs::write(root.join("Docs.md"), "b\n").unwrap(); // PascalCase, committed (OUT of diff)
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: kebab\n    kind: filename_case\n    paths: \"**/*.md\"\n    \
+         case: kebab\n    level: error\n    fix: { file_rename: {} }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("Src.md"), "a2\n").unwrap(); // Src.md now IN diff
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed");
+    assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
+    // In-scope Src.md renamed to src.md (its new name is an allowed created file).
+    assert!(
+        root.join("src.md").exists(),
+        "in-scope Src.md is renamed to src.md"
+    );
+    assert!(
+        !root.join("Src.md").exists(),
+        "the in-scope original is gone"
+    );
+    // Out-of-diff Docs.md is never evaluated, so never renamed or created.
+    assert!(
+        root.join("Docs.md").exists(),
+        "out-of-diff Docs.md must NOT be renamed under --changed"
+    );
+    assert!(
+        !root.join("docs.md").exists(),
+        "no out-of-diff rename target may be created"
+    );
+}

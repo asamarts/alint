@@ -38,7 +38,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   violations stand. A file that a fix in scope CREATES during the run joins the
   changed set, so a create-then-fix cascade completes under `--changed` instead of
   leaving the created file half-fixed. Writes to files inside the diff are applied
-  exactly as before; the blast radius is never widened.
+  exactly as before, and no file OUTSIDE the diff is ever modified or deleted (an
+  in-scope fix may still additively create a new file, e.g. a required file, which
+  is the one write the confinement model permits beyond the diff).
 
 ### Fixed
 
