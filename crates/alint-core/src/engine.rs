@@ -967,12 +967,6 @@ impl Engine {
         // must be dropped, or `fix` reports a phantom finding and fails an
         // otherwise-clean tree.
         let mut final_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        // Keys of non-Applied items that are WITHIN-PASS siblings of an `Applied`
-        // from the SAME rule (a compose-coalesce alias skip, a located isolation
-        // conflict): these document a real outcome of a pass that DID fix and are
-        // EXEMPT from residual reconciliation, unlike a phantom left standing by a
-        // no-fixer rule whose violation another rule resolved.
-        let mut sticky_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
             let (report, _buf) = self.fix_run(root, cur, false, threshold, true, None)?;
@@ -987,17 +981,6 @@ impl Engine {
                 })
                 .map(|rr| Arc::clone(&rr.rule_id))
                 .collect();
-            for rr in &report.results {
-                if rr
-                    .items
-                    .iter()
-                    .any(|i| matches!(i.status, FixStatus::Applied(_)))
-                {
-                    for it in &rr.items {
-                        sticky_keys.insert(Self::violation_key(&rr.rule_id, &it.violation));
-                    }
-                }
-            }
             let all_keys: std::collections::HashSet<String> = report
                 .results
                 .iter()
@@ -1072,21 +1055,25 @@ impl Engine {
         }
         // Reconcile the residual against the converged final state (see
         // `final_keys` above): keep every `Applied` (the audit trail of what
-        // changed) and every non-Applied item whose violation the final pass
-        // still saw, but drop a non-Applied item whose violation is gone -- it was
-        // resolved by another rule's fix on a later pass, so reporting it would
-        // fail an otherwise-clean tree with a finding the user cannot even locate.
+        // changed), every fix ERROR (a `Skipped` that hit an I/O failure -- never
+        // "resolved", must always surface), and every non-Applied item whose
+        // violation the final pass still saw; but drop a non-Applied item whose
+        // violation is gone -- it was resolved by another rule's fix on a later
+        // pass, so reporting it would fail an otherwise-clean tree with a finding
+        // the user cannot even locate (e.g. a size-skip on a file another rule
+        // deleted).
         if converged {
             for rr in &mut results {
                 rr.items.retain(|it| {
                     if matches!(it.status, FixStatus::Applied(_)) {
                         return true; // audit trail: what changed always stays
                     }
-                    let key = Self::violation_key(&rr.rule_id, &it.violation);
-                    // Keep a violation the final pass still saw, or a within-pass
-                    // sibling of an Applied (a coalesce/conflict skip). Drop a
-                    // phantom: a standalone finding another rule's fix resolved.
-                    final_keys.contains(&key) || sticky_keys.contains(&key)
+                    // A genuine write error never resolves; keep it so the exit
+                    // code surfaces the I/O failure regardless of the final state.
+                    if matches!(&it.status, FixStatus::Skipped(reason) if reason.starts_with(FIX_ERROR_PREFIX)) {
+                        return true;
+                    }
+                    final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                 });
             }
         }
@@ -1462,9 +1449,28 @@ impl Engine {
                     let abs = root.join(&file);
                     let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
                         Ok(ReadForFix::Bytes(b)) => b,
-                        // Over the size cap or unreadable: no located edit
-                        // (fail-open, matching the whole-file read path).
-                        Ok(ReadForFix::Skipped(_)) | Err(_) => continue,
+                        // Over the `fix_size_limit`: emit a Skip PER VIOLATION so a
+                        // standing violation is not silently dropped. The whole-file
+                        // dispatch surfaces the same over-size skip (via the fixer's
+                        // own `read_for_fix`); without this the located path would
+                        // report "0 unfixable", exit 0, and leave the violation on
+                        // disk while `check` (which reads to a far larger cap) still
+                        // fails -- a false negative on files between fix_size_limit
+                        // and the check read cap. `Skipped` carries the reason.
+                        Ok(ReadForFix::Skipped(outcome)) => {
+                            let reason = match outcome {
+                                FixOutcome::Skipped(s) | FixOutcome::Applied(s) => s,
+                            };
+                            for v in file_violations {
+                                declined.push(FixItem {
+                                    violation: v,
+                                    status: FixStatus::Skipped(reason.clone()),
+                                });
+                            }
+                            continue;
+                        }
+                        // Truly unreadable (I/O error): fail-open, as before.
+                        Err(_) => continue,
                     };
                     // Capture the collect-time bytes; a second rule reading
                     // different bytes for the same file poisons the batch.
@@ -2566,8 +2572,11 @@ mod tests {
 
     #[test]
     fn located_regime_honors_the_size_guard_on_the_collect_step() {
-        // A file over the fix_size_limit is skipped at the located collect read
-        // (invariant 4 on the new path): no edit is collected, nothing changes.
+        // A file over the fix_size_limit is not edited (invariant 4), AND the
+        // violation on it must be REPORTED as a size-skip -- not silently dropped.
+        // The whole-file path surfaces the same skip; without parity a large file
+        // with a forbidden pattern would pass `fix` (exit 0) while `check` (which
+        // reads to a far larger cap) flags it -- an audit-found false negative.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
         let engine =
@@ -2586,10 +2595,21 @@ mod tests {
             b"01234567",
             "over-limit file must be left untouched"
         );
-        // No located edits collected -> no located result rows for the rule.
+        // The size-skipped violation is reported exactly once, as a Skip (so it
+        // drives the exit code), and the loop converges (nothing applies).
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items.len(),
+            1,
+            "the size-skipped violation is reported once"
+        );
         assert!(
-            report.results.iter().all(|r| r.items.is_empty()),
-            "no items when the file is size-skipped"
+            matches!(items[0].status, FixStatus::Skipped(_)),
+            "reported as a Skip, not Applied or silently dropped"
+        );
+        assert!(
+            !report.non_convergent,
+            "a size-skip converges: nothing applies"
         );
     }
 
@@ -2880,6 +2900,53 @@ mod tests {
             10,
             "the fix ran to completion (10 bytes); the dry-run confirmation did not write"
         );
+    }
+
+    #[test]
+    fn cap_confirm_preserves_a_standing_unfixable_at_the_boundary() {
+        // At the cap-confirmation boundary a GENUINE unfixable that still stands
+        // must survive the residual reconciliation. `grow` reaches its fixed point
+        // exactly at the cap (converged via the dry-run confirm), while a no-fixer
+        // error rule leaves an unfixable standing on another file -- the confirm's
+        // `final_keys` must include it, else it is dropped and `fix` exits 0 on a
+        // dirty tree (false negative). Gates the confirm-path `final_keys`
+        // population, which `fix_converges_exactly_at_the_pass_cap` (a clean tree,
+        // Applied-only) does not exercise.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("grow.txt");
+        std::fs::write(&target, b"").unwrap();
+        std::fs::write(tmp.path().join("keep.rs"), b"x").unwrap();
+        let engine = Engine::new(
+            vec![
+                Box::new(GrowRule {
+                    id: "grow".into(),
+                    fixer: GrowFixer {
+                        target: target.clone(),
+                    },
+                    stop_at: Some(10),
+                }),
+                stub("nofix", "**/*.rs"), // Error level, no fixer -> Unfixable
+            ],
+            RuleRegistry::new(),
+        );
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["grow.txt", "keep.rs"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert!(
+            !report.non_convergent,
+            "grow reaches its fixed point at the cap; the run is not non-convergent"
+        );
+        assert!(
+            report.has_unfixable_errors(),
+            "the standing no-fixer error must survive reconciliation on the confirm path"
+        );
+        assert_eq!(std::fs::read(&target).unwrap().len(), 10);
     }
 
     #[test]

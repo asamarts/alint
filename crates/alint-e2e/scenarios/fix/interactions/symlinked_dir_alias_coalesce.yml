@@ -1,13 +1,16 @@
 name: a file reached through a symlinked directory coalesces into one fix
 tags: [fix, interactions, unix-only]
 
-# R-audit-3 regression: the compose buffer must key on the FULLY canonical
-# path, not just resolve a final-component symlink. A file reached through a
-# symlinked DIRECTORY (link/ -> real/) is the same underlying file as
-# real/file.rs, so the two must coalesce: one Applied (the file written) and
-# one Skipped (the alias, already clean once composed) -- matching the direct
-# path, where write_atomic's temp+rename lands on the same real file via either
-# spelling. Before the fix this reported two Applied and zero Skipped.
+# R-audit-3 regression: the compose buffer must key on the FULLY canonical path,
+# not just resolve a final-component symlink. A file reached through a symlinked
+# DIRECTORY (link/ -> real/) is the same underlying file as real/file.rs, so the
+# two COALESCE onto one write target. Before the fix this wrote twice.
+#
+# Reporting (Phase-1 fixpoint): the coalesced write leaves both spellings clean,
+# so `fix` reports the ONE fix (`no-ws` applied) and exits 0 -- the residual
+# reconciliation drops the alias's "already clean once composed" skip (an
+# error-level skip for a now-clean file would wrongly fail the run). `check`
+# afterward agrees.
 
 given:
   tree:
@@ -24,13 +27,12 @@ given:
         fix:
           file_trim_trailing_whitespace: {}
 
-when: [fix]
+when: [fix, check]
 
 expect:
-  # One Applied AND one Skipped for the same rule: the two aliases coalesced.
-  # Without full canonicalization this is two Applied / zero Skipped.
   - applied: [no-ws]
-    skipped: [no-ws]
+    skipped: []
+  - violations: []
 
 expect_tree_mode: contains
 expect_tree:

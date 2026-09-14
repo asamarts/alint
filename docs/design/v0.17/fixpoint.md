@@ -213,25 +213,35 @@ an aggregation key here, NOT a termination device):
   progress and the next pass's re-eval differs. This is the
   `located_regime_applies_batch_and_excludes_isolation_group` invariant, now
   asserted through the multi-pass loop.
-- **A declined located violation is reported (audit finding).** The located path
-  emits report items per *edit*, so a violation whose fixer collects NO edit
-  (e.g. `replace` dropping a self-re-matching replacement) used to produce no item
-  at all -- `fix` printed "0 unfixable", exited 0, and left the forbidden pattern
-  on disk (a false negative: a banned string survives a green `fix`). The located
-  branch now emits a `Skipped` for each such violation, matching the whole-file
-  dispatch's one-item-per-violation contract, so the standing violation is
-  reported and the exit code agrees with `check`.
+- **A declined / size-skipped located violation is reported (audit finding).**
+  The located path emits report items per *edit*, so a violation the fixer does
+  not turn into an edit used to produce no item at all -- `fix` printed "0
+  unfixable", exited 0, and left the pattern on disk (a false negative: a banned
+  string survives a green `fix`). This bit two spots: `replace` dropping a
+  self-re-matching replacement (collects no edit), and a file over the
+  `fix_size_limit` (the `read_for_fix` size-skip `continue`d before collecting).
+  Both now emit a `Skipped` per violation, matching the whole-file dispatch's
+  one-item-per-violation contract, so the standing violation is reported and the
+  exit code agrees with `check` (which reads to a far larger cap, so a file
+  between `fix_size_limit` and that cap would otherwise pass `fix` yet fail
+  `check`).
 - **The residual is reconciled against the converged final state (audit
   finding).** A non-Applied item can go stale: rule A's violation is resolved by
   rule B's fix on a later pass, but A does not re-emit it on the resolving pass,
   so the touched-key retain never drops it -- `fix` then reports a phantom finding
   and exits 1 on a tree `check` calls clean. After convergence the loop drops any
   non-Applied item whose violation the final pass no longer saw. Two carve-outs
-  keep this from dropping a *real* outcome: an `Applied` item is always kept (the
-  audit trail of what changed), and a non-Applied item that is a **within-pass
-  sibling of an `Applied` from the same rule** (a compose-coalesce alias skip, a
-  located isolation conflict) is exempt -- those document a pass that DID fix,
-  unlike a phantom left by a no-fixer rule.
+  keep a *real* outcome: an `Applied` item is always kept (the audit trail of what
+  changed), and a genuine **write error** (a `Skipped` carrying `FIX_ERROR_PREFIX`)
+  is always kept -- it never "resolves", so the exit code must surface the I/O
+  failure regardless of the final state. (An earlier "sticky within-pass sibling"
+  carve-out was REMOVED after a follow-up audit: it was coarser than intended --
+  it exempted every item of any rule that applied anything that pass, resurrecting
+  the phantom for, e.g., a size-skip on a file another rule then deleted -- and it
+  guarded nothing reachable: the located isolation conflict never occurs with the
+  sole located fixer `replace`, and the compose-coalesce alias skip it protected
+  was itself a false-positive exit-1 on a clean tree, now correctly dropped so a
+  coalesced symlink+target run exits 0.)
 - **Transient defers are not reported.** The located byte-consistency / removal
   defer (a batch yielding to a concurrent write, increment 1) emits no provisional
   "rerun to apply" skip: the re-walk IS the rerun, so the retry pass reports the
@@ -292,6 +302,20 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
   positive (`cross_rule_resolution_drops_phantom` -- exit 0 not a phantom exit 1);
   the **located no-op downgrade** (`located_identity_edit_reports_skip_and_converges`,
   engine); and `located_regime_applies_batch...` now also asserts `!non_convergent`.
+
+  Third-audit fixes (all gated): the **size-skipped located violation** false
+  negative (`located_fix_over_size_limit_is_reported_not_dropped`, CLI +
+  `located_regime_honors_the_size_guard...`, engine -- reported skip, not silent
+  exit 0); **removed sticky-keys** which resurrected the phantom
+  (`no_phantom_skip_for_a_file_another_rule_removed`, CLI -- exit 0 after another
+  rule deletes the size-skipped file; the two symlink-coalesce scenarios updated
+  to the corrected exit-0-clean behaviour); the **cap-confirm standing residual**
+  (`cap_confirm_preserves_a_standing_unfixable_at_the_boundary`, engine -- a real
+  unfixable survives the confirm-path reconciliation); the **write-error carve-out**
+  in reconciliation (a `FIX_ERROR_PREFIX` skip is never dropped); the **declined
+  exit-code** (`fix_exit_status_maps_the_fix_contract` gains an error-level declined
+  skip -> exit 1); and a **`debug_assert!(!dry_run)` at `commit_write`** so a
+  future fixer that writes during the cap-confirm dry-run fails loudly.
 
 - **Known Phase-2 pre-reqs (latent, not reachable with today's single located
   fixer `replace`).** Two coarse-grained spots must be tightened before a SECOND

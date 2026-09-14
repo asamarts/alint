@@ -210,3 +210,64 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
         "the JSON summary must flag non-convergence; got: {stdout}"
     );
 }
+
+/// Audit regression (false negative, size path): a located `replace` on a file
+/// larger than `fix_size_limit` (default 1 MiB) but smaller than the check read
+/// cap used to produce NO report item -> `fix` exited 0 while the forbidden
+/// pattern stayed on disk. It must now report the size-skip and exit 1, agreeing
+/// with `check`. See docs/design/v0.17/fixpoint.md.
+#[test]
+fn located_fix_over_size_limit_is_reported_not_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let mut big = b"FORBIDDEN\n".to_vec();
+    big.resize(1_600_000, b'x'); // > 1 MiB fix cap, < 256 MiB check cap
+    write(root, "big.txt", &big);
+    config(
+        root,
+        "version: 1\nrules:\n  - id: no-forbidden\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"FORBIDDEN\"\n    level: error\n    fix: { replace: { replacement: \"OK\" } }\n",
+    );
+    let out = Command::new(alint())
+        .args(["fix", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "an over-size located fix must REPORT the skip and exit 1, not silently exit 0"
+    );
+    assert!(
+        !check_is_clean(root),
+        "the forbidden pattern genuinely still stands; fix and check agree"
+    );
+}
+
+/// Audit regression (false positive, sticky phantom): a rule that Applies on one
+/// file and size-skips a large file must not strand a phantom skip after ANOTHER
+/// rule deletes the large file -> `fix` must exit 0 on the resulting clean tree.
+#[test]
+fn no_phantom_skip_for_a_file_another_rule_removed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "small.txt", b"hi \n"); // trailing ws, fixable
+    let mut big = b"y \n".to_vec(); // trailing ws on line 1
+    big.resize(1_800_000, b'y'); // > 1 MiB -> ntw size-skips it during fix
+    write(root, "big.txt", &big);
+    config(
+        root,
+        "version: 1\nrules:\n  - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n  - id: drop-big\n    kind: file_absent\n    paths: \"big.txt\"\n    level: error\n    fix: { file_remove: {} }\n",
+    );
+    let out = Command::new(alint())
+        .args(["fix", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "big.txt was removed by another rule, so its ntw size-skip is a phantom -> exit 0"
+    );
+    assert!(check_is_clean(root), "the tree is genuinely clean");
+    assert!(!root.join("big.txt").exists(), "big.txt was removed");
+}

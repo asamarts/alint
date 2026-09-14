@@ -567,6 +567,15 @@ impl FixContext<'_> {
     /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
     /// buffering in compose mode is infallible.
     pub fn commit_write(&self, abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        // A dry run must write NOTHING: every fixer guards `if ctx.dry_run` before
+        // reaching here, and the fixpoint's cap-confirmation pass relies on that
+        // (it runs `fix_run(dry_run=true)` purely to test convergence). Assert the
+        // invariant at the choke point so a fixer that forgets the guard fails
+        // loudly in tests/debug rather than silently mutating the tree.
+        debug_assert!(
+            !self.dry_run,
+            "commit_write reached during a dry run; a fixer must check ctx.dry_run before writing"
+        );
         match self.compose {
             Some(buf) => {
                 buf.borrow_mut()

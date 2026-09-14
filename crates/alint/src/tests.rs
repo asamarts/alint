@@ -90,6 +90,25 @@ fn fix_exit_status_maps_the_fix_contract() {
         fix_exit_status(&report(vec![err_rule()], false), true, false),
         0
     );
+    // A DECLINED error-level Skip (a located fixer collected no edit, or a
+    // size-skip) is NOT a fix error but a standing violation -> exit 1. This is
+    // the exit-code half of BUG B (the located declined-skip): the report set is
+    // gated by a scenario, the exit code here.
+    assert_eq!(
+        fix_exit_status(
+            &report(
+                vec![rule(
+                    Level::Error,
+                    FixStatus::Skipped("no applicable fix".into())
+                )],
+                false
+            ),
+            false,
+            false
+        ),
+        1,
+        "an error-level declined skip is a standing violation -> exit 1"
+    );
     // A warning-level residual is 0 by default, 1 under --fail-on-warning.
     assert_eq!(
         fix_exit_status(&report(vec![warn_residual()], false), false, false),
