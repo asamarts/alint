@@ -36,8 +36,10 @@ given:
 when: [fix, check]
 
 expect:
-  # Applied once (pass 1); pass 2's idempotence skip does not mask it.
+  # Applied once (pass 1); pass 2's idempotence skip is suppressed by the lock, so
+  # it neither masks the Applied nor leaks as a spurious skip.
   - applied: [needs-spdx]
+    skipped: []
   # The append does not contain the pattern, so the violation legitimately
   # STANDS -- `check` still reports it. That is honest: the config is
   # non-self-satisfying, not silently "fixed".

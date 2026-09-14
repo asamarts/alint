@@ -157,6 +157,18 @@ mechanisms:
   the honest opposite of the removed apply-once, which would have converged such a
   config silently at exit 0 with the violation standing.
 
+  **Cap-confirmation (slow-but-convergent, audit finding).** The budget counts
+  *applying* passes, so a config that reaches its fixed point on the very last
+  budgeted pass has no room for the confirming `applied()==0` pass -- e.g. a
+  hand-rolled `replace` that strips one trailing space per pass converges cleanly
+  in exactly 10 passes, but the loop would exhaust its budget mid-progress and
+  brand a **clean tree** non-convergent (exit 2). So when the budget is exhausted,
+  the loop runs ONE non-mutating `fix_run(dry_run)`: if it would apply nothing the
+  fix DID converge (just at the boundary) and is not flagged; a genuine
+  oscillation still shows work and stays non-convergent. The message also softens
+  to "did not settle ... re-run to continue if it is only slow", since a config
+  needing more than the budget of *progressing* passes is convergent, just slow.
+
   The one edge to keep the primary signal honest: a **located identity edit**
   (replacement equal to the spanned bytes, or a batch whose edits cancel) makes no
   byte change, so the loop must not read it as progress. When a located batch nets
@@ -201,6 +213,25 @@ an aggregation key here, NOT a termination device):
   progress and the next pass's re-eval differs. This is the
   `located_regime_applies_batch_and_excludes_isolation_group` invariant, now
   asserted through the multi-pass loop.
+- **A declined located violation is reported (audit finding).** The located path
+  emits report items per *edit*, so a violation whose fixer collects NO edit
+  (e.g. `replace` dropping a self-re-matching replacement) used to produce no item
+  at all -- `fix` printed "0 unfixable", exited 0, and left the forbidden pattern
+  on disk (a false negative: a banned string survives a green `fix`). The located
+  branch now emits a `Skipped` for each such violation, matching the whole-file
+  dispatch's one-item-per-violation contract, so the standing violation is
+  reported and the exit code agrees with `check`.
+- **The residual is reconciled against the converged final state (audit
+  finding).** A non-Applied item can go stale: rule A's violation is resolved by
+  rule B's fix on a later pass, but A does not re-emit it on the resolving pass,
+  so the touched-key retain never drops it -- `fix` then reports a phantom finding
+  and exits 1 on a tree `check` calls clean. After convergence the loop drops any
+  non-Applied item whose violation the final pass no longer saw. Two carve-outs
+  keep this from dropping a *real* outcome: an `Applied` item is always kept (the
+  audit trail of what changed), and a non-Applied item that is a **within-pass
+  sibling of an `Applied` from the same rule** (a compose-coalesce alias skip, a
+  located isolation conflict) is exempt -- those document a pass that DID fix,
+  unlike a phantom left by a no-fixer rule.
 - **Transient defers are not reported.** The located byte-consistency / removal
   defer (a batch yielding to a concurrent write, increment 1) emits no provisional
   "rerun to apply" skip: the re-walk IS the rerun, so the retry pass reports the
@@ -247,11 +278,32 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
     `fix_changed_confinement_holds_across_the_multipass_fixpoint` -- an in-scope
     create-then-trim cascade completes across the re-walk while an out-of-diff file
     is never touched (the "safe under `--changed`" claim);
-  - the JSON **non-convergence** gate: `non_convergent_report_surfaces_the_flag_and_validates`;
+  - the JSON **non-convergence** gate: `non_convergent_report_surfaces_the_flag_and_validates`
+    (renderer/schema) + a `--format json` assertion in the CLI oscillation gate;
   - the property invariants (`fix_is_idempotent`, `fix_converges...`) re-pointed:
     stale "single-pass in Phase 0" rationale corrected, and `fix_converges...` now
     asserts `!non_convergent` (no single fixable rule may fail to converge -- the
     direct invariant that replaces the old fingerprint-stability coupling).
+
+  Second-audit fixes (all gated): the **slow-but-convergent cap-confirmation**
+  (`fix_converges_exactly_at_the_pass_cap`, engine); the **declined located
+  violation** false negative (`replace_declined_reports_standing_violation` --
+  reported skip + exit 1 not a silent exit 0); the **cross-rule phantom** false
+  positive (`cross_rule_resolution_drops_phantom` -- exit 0 not a phantom exit 1);
+  the **located no-op downgrade** (`located_identity_edit_reports_skip_and_converges`,
+  engine); and `located_regime_applies_batch...` now also asserts `!non_convergent`.
+
+- **Known Phase-2 pre-reqs (latent, not reachable with today's single located
+  fixer `replace`).** Two coarse-grained spots must be tightened before a SECOND
+  located fixer (Phase-2 `set_value` / `remove_value` with `Structured` verifiers
+  and isolation groups) ships: (1) `violation_key` uses `file_bytes: None`, so all
+  located items on one file collapse to `(rule_id, path)` -- a per-match `Skipped`
+  after an `Applied` on the same file could then be lock-masked; key located items
+  by byte range. (2) the located no-op downgrade uses a per-FILE `batch_changed`,
+  not a per-edit content check, so a mixed real+identity batch reports the
+  identity edit as `Applied`; compare each accepted edit's content to its spanned
+  bytes. `ReplaceFixer` triggers neither (disjoint edits, no isolation group, no
+  self-matching edit emitted), so both are dormant today.
 
   The ARCHITECTURE "walk once" invariant (principles 1 and 4, and the pipeline
   invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not

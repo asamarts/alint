@@ -1,0 +1,44 @@
+name: a violation resolved by another rule's fix is not reported as a phantom
+tags: [fix, interactions, file_content_forbidden, replace, fixpoint]
+
+# Audit regression (false positive): `no-foobar` has no fixer, so pass 1 records
+# it as unfixable; `no-foo` then rewrites `foo` -> `xoo`, turning `foobar` into
+# `xoobar` and RESOLVING no-foobar as a side effect. On the converged pass
+# no-foobar no longer fires, so its stale unfixable item was never retained out
+# of the aggregate -- `fix` reported `no-foobar: forbidden pattern /foobar/ found
+# (no fixer)` and exited 1, while `check` on the identical tree was clean (exit
+# 0), a finding the user cannot even locate. The fixpoint now reconciles the
+# residual against the converged final state and drops that phantom.
+
+given:
+  tree:
+    f.txt: "foobar\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-foobar
+        kind: file_content_forbidden
+        paths: "*.txt"
+        pattern: "foobar"
+        level: error
+      - id: no-foo
+        kind: file_content_forbidden
+        paths: "*.txt"
+        pattern: "foo"
+        level: error
+        fix:
+          replace:
+            replacement: "xoo"
+
+when: [fix_unsafe, check]
+
+expect:
+  # Only no-foo applied; no-foobar's phantom unfixable was reconciled away.
+  - applied: [no-foo]
+    unfixable: []
+    skipped: []
+  # The tree is genuinely clean -- `fix` and `check` agree (both exit 0).
+  - violations: []
+
+expect_tree:
+  f.txt: "xoobar\n"

@@ -186,11 +186,27 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("did not converge"),
+        stderr.contains("did not settle"),
         "the cap must warn loudly on stderr; got: {stderr}"
     );
     assert!(
         stderr.contains("no-a") || stderr.contains("no-b"),
         "the warning must name a stuck rule; got: {stderr}"
+    );
+    // The same non-convergence must be visible STRUCTURALLY in the JSON summary
+    // (the only machine signal of exit 2 -- the items are all `applied`, so
+    // without it a capped run is indistinguishable from a clean one).
+    let json = Command::new(alint())
+        .args(["fix", "--unsafe-fixes", "--format", "json", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --format json");
+    assert_eq!(json.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&json.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("fix json parses");
+    assert_eq!(
+        parsed["summary"]["non_convergent"],
+        serde_json::json!(true),
+        "the JSON summary must flag non-convergence; got: {stdout}"
     );
 }
