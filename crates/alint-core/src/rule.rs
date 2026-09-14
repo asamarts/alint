@@ -576,6 +576,13 @@ impl FixContext<'_> {
             !self.dry_run,
             "commit_write reached during a dry run; a fixer must check ctx.dry_run before writing"
         );
+        // Release-safe backstop (the assert is compiled out in release): a dry run
+        // writes NOTHING, so a fixer that forgot its `ctx.dry_run` guard becomes a
+        // silent no-op here instead of mutating the tree during, e.g., the
+        // fixpoint's cap-confirmation pass.
+        if self.dry_run {
+            return Ok(());
+        }
         match self.compose {
             Some(buf) => {
                 buf.borrow_mut()
@@ -1312,6 +1319,25 @@ mod tests {
         // Sanity: documented variant shapes haven't drifted.
         let _applied = FixOutcome::Applied("created LICENSE".into());
         let _skipped = FixOutcome::Skipped("already exists".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "commit_write reached during a dry run")]
+    fn commit_write_asserts_against_a_dry_run_write() {
+        // A fixer that reaches `commit_write` during a dry run is a bug -- it must
+        // guard `ctx.dry_run` first. The `debug_assert!` catches it loudly in
+        // debug/tests (this test); in release the early-return makes it a safe
+        // no-op instead of a silent tree mutation during the cap-confirmation pass.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: true,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let _ = ctx.commit_write(&dir.path().join("x"), b"nope");
     }
 
     #[test]

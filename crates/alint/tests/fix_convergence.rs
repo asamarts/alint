@@ -12,9 +12,17 @@
 //!     attacker also dropped one invalid byte.
 //!   * NUL-bearing binary: the fixers refuse it (editing binary corrupts it), so
 //!     the detectors now skip it too -- `check` and `fix` agree.
+//!   * unreadable file (mode 000 / permission denied): `check` reads via the
+//!     engine's `read_capped_or_skip`, which SKIPS an unreadable file before
+//!     dispatch, so `check` exits 0. But `fix` finds violations through each
+//!     rule's whole-index `evaluate`, whose read arm flagged an "could not read
+//!     file" violation -- unfixable -> `fix` exited 1 on the very tree `check`
+//!     called clean. The per-file content rules now fail open on a read error
+//!     (skip, matching `check`), closing that exit-code divergence.
 //!
 //! These live as an integration test rather than a scenario/property because a
-//! raw `0xFF` byte cannot be represented in a UTF-8 YAML scenario tree.
+//! raw `0xFF` byte cannot be represented in a UTF-8 YAML scenario tree, and an
+//! unreadable file needs a runtime `chmod` no fixture tree can express.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -270,4 +278,65 @@ fn no_phantom_skip_for_a_file_another_rule_removed() {
     );
     assert!(check_is_clean(root), "the tree is genuinely clean");
     assert!(!root.join("big.txt").exists(), "big.txt was removed");
+}
+
+/// Audit regression (R3, fix-vs-check exit-code divergence on an unreadable file):
+/// `check` skips a mode-000 file via the engine's `read_capped_or_skip` and exits
+/// 0, but every per-file content rule's whole-index `evaluate` (the read path
+/// `fix` uses) flagged it "could not read file" -> unfixable -> `fix` exited 1 on
+/// the same tree. The rules now fail open on a read error (skip, matching
+/// `check`), so `fix` and `check` agree. Exercises both distinct read paths:
+/// `file_content_forbidden` reads via `read_capped`, `file_is_text` via
+/// `read_prefix`. `#[cfg(unix)]` -- mode 000 is the portable "unreadable" proxy.
+#[cfg(unix)]
+#[test]
+fn unreadable_file_is_skipped_by_both_check_and_fix() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // Content that WOULD be flagged if readable: it contains FORBIDDEN and is
+    // valid text -- so the skip below is meaningful, not a trivial no-match.
+    write(root, "secret.txt", b"FORBIDDEN\n");
+    let p = root.join("secret.txt");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Running as root (common in CI containers) bypasses mode bits, so the file
+    // stays readable and this test cannot exercise the unreadable path. Probe and
+    // skip rather than assert a premise that only holds unprivileged.
+    if std::fs::read(&p).is_ok() {
+        eprintln!("skipping: mode 000 file is still readable (running as root?)");
+        return;
+    }
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: no-forbidden\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"FORBIDDEN\"\n    level: error\n    fix: { replace: { replacement: \"OK\" } }\n\
+         \x20 - id: must-be-text\n    kind: file_is_text\n    paths: \"*.txt\"\n    level: error\n",
+    );
+    // check already skips the unreadable file (its read path is
+    // `read_capped_or_skip`), so the tree reads "clean" -> exit 0.
+    assert!(
+        check_is_clean(root),
+        "check must skip an unreadable file, not flag it"
+    );
+    // fix must AGREE: skip the unreadable file and exit 0. Before R3, `evaluate`
+    // flagged "could not read file" (both rules) -> unfixable -> exit 1.
+    let out = fix(root);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "fix must skip an unreadable file and exit 0, agreeing with check; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !combined.contains("could not read file"),
+        "fix must not surface a 'could not read file' violation; got: {combined}"
+    );
+    // Restore perms so tempdir cleanup is unencumbered on exotic platforms.
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
 }

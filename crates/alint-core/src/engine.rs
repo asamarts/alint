@@ -1055,25 +1055,24 @@ impl Engine {
         }
         // Reconcile the residual against the converged final state (see
         // `final_keys` above): keep every `Applied` (the audit trail of what
-        // changed), every fix ERROR (a `Skipped` that hit an I/O failure -- never
-        // "resolved", must always surface), and every non-Applied item whose
-        // violation the final pass still saw; but drop a non-Applied item whose
-        // violation is gone -- it was resolved by another rule's fix on a later
-        // pass, so reporting it would fail an otherwise-clean tree with a finding
-        // the user cannot even locate (e.g. a size-skip on a file another rule
-        // deleted).
+        // changed) and every non-Applied item whose violation the final pass still
+        // saw; drop a non-Applied item whose violation is gone -- it was resolved
+        // by another rule's fix on a later pass, so reporting it would fail an
+        // otherwise-clean tree with a finding the user cannot even locate (e.g. a
+        // size-skip on a file another rule deleted).
+        //
+        // A fix ERROR is NOT special-cased. A PERSISTENT write error (a read-only
+        // target, ENOSPC) keeps re-firing, so its violation stays in `final_keys`
+        // and is kept -> exit 1, as intended. An error whose file another rule
+        // then removed is MOOT (the file is gone, the tree is in the desired
+        // state), so its key leaves `final_keys` and it is dropped -> exit 0,
+        // agreeing with `check`. Keeping it here would strand a phantom I/O error
+        // on a clean tree.
         if converged {
             for rr in &mut results {
                 rr.items.retain(|it| {
-                    if matches!(it.status, FixStatus::Applied(_)) {
-                        return true; // audit trail: what changed always stays
-                    }
-                    // A genuine write error never resolves; keep it so the exit
-                    // code surfaces the I/O failure regardless of the final state.
-                    if matches!(&it.status, FixStatus::Skipped(reason) if reason.starts_with(FIX_ERROR_PREFIX)) {
-                        return true;
-                    }
-                    final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
+                    matches!(it.status, FixStatus::Applied(_))
+                        || final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                 });
             }
         }
@@ -1469,8 +1468,25 @@ impl Engine {
                             }
                             continue;
                         }
-                        // Truly unreadable (I/O error): fail-open, as before.
-                        Err(_) => continue,
+                        // An I/O read error at fix time (a file readable at walk
+                        // time -- persistently-unreadable files are dropped by the
+                        // walker -- but not now: a TOCTOU race, or a special file).
+                        // Report it as a fix error PER VIOLATION so the located path
+                        // matches the whole-file dispatch (which surfaces the same
+                        // `read_for_fix` error as a `FIX_ERROR_PREFIX` skip) instead
+                        // of silently dropping the violation.
+                        Err(e) => {
+                            for v in file_violations {
+                                declined.push(FixItem {
+                                    violation: v,
+                                    status: FixStatus::Skipped(format!(
+                                        "{FIX_ERROR_PREFIX} could not read {}: {e}",
+                                        file.display()
+                                    )),
+                                });
+                            }
+                            continue;
+                        }
                     };
                     // Capture the collect-time bytes; a second rule reading
                     // different bytes for the same file poisons the batch.
@@ -2947,6 +2963,110 @@ mod tests {
             "the standing no-fixer error must survive reconciliation on the confirm path"
         );
         assert_eq!(std::fs::read(&target).unwrap().len(), 10);
+    }
+
+    // A rule that is its own fixer: it fires while `file` (relative to the run
+    // root) exists, and its fixer either ERRORS (a fix I/O error) or DELETES the
+    // file. Used to reach the exotic case the reconciliation's write-error
+    // carve-out guards: a fix error on a file that ANOTHER rule then removes.
+    #[derive(Debug)]
+    enum FixAction {
+        Err,
+        Delete,
+    }
+    #[derive(Debug)]
+    struct ActionRule {
+        id: String,
+        file: PathBuf, // relative to the run root
+        action: FixAction,
+    }
+    impl crate::rule::Fixer for ActionRule {
+        fn describe(&self) -> String {
+            "test action".to_string()
+        }
+        fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            match self.action {
+                FixAction::Err => Err(crate::error::Error::Other("simulated fix I/O error".into())),
+                FixAction::Delete => {
+                    std::fs::remove_file(ctx.root.join(&self.file)).ok();
+                    Ok(FixOutcome::Applied("deleted".to_string()))
+                }
+            }
+        }
+        fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            None
+        }
+    }
+    impl Rule for ActionRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            None
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            if ctx.root.join(&self.file).exists() {
+                Ok(vec![Violation::new("stands").with_path(self.file.clone())])
+            } else {
+                Ok(Vec::new()) // resolved once the file is gone
+            }
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(self)
+        }
+    }
+
+    #[test]
+    fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
+        // A fix that errored on X because ANOTHER rule removed X is MOOT: X is
+        // gone, the tree is in the desired state, and `check` on it is clean. So
+        // `fix` must also converge clean (exit 0), NOT strand a phantom I/O error
+        // on the deleted file. A PERSISTENT error (X still standing) would instead
+        // stay in `final_keys` and be kept -- that path is exercised by
+        // fix_robustness.rs. Here `errs` errors on x.txt while `removes` deletes
+        // it, so x.txt leaves the converged residual and the error is reconciled
+        // away.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("x.txt"), b"hi").unwrap();
+        let engine = Engine::new(
+            vec![
+                Box::new(ActionRule {
+                    id: "errs".into(),
+                    file: PathBuf::from("x.txt"),
+                    action: FixAction::Err,
+                }),
+                Box::new(ActionRule {
+                    id: "removes".into(),
+                    file: PathBuf::from("x.txt"),
+                    action: FixAction::Delete,
+                }),
+            ],
+            RuleRegistry::new(),
+        );
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["x.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert!(
+            !report.non_convergent,
+            "x.txt is removed -> the rules stop firing -> converges"
+        );
+        assert!(
+            !report.had_fix_error(),
+            "a fix error on a file another rule REMOVED is moot and must be dropped (fix agrees with check: exit 0)"
+        );
+        assert!(
+            !report.has_unfixable_errors(),
+            "no residual on the clean tree"
+        );
     }
 
     #[test]

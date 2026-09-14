@@ -28,6 +28,8 @@ expect:
   # so a rule with a mix matches both lists.
   - applied: [no-ws]
     skipped: [no-ws]
+    suggested: []
+    unfixable: []
 
 expect_tree:
   src:

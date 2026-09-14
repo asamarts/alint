@@ -38,15 +38,12 @@ impl Rule for FileIsTextRule {
             // the whole file from the engine and inspects only
             // the prefix.
             let full = ctx.root.join(&entry.path);
-            let bytes = match read_prefix(&full) {
-                Ok(b) => b,
-                Err(e) => {
-                    violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(entry.path.clone()),
-                    );
-                    continue;
-                }
+            // Fail open on a read error, matching `check`'s per-file path
+            // (`read_capped_or_skip` skips an unreadable file before dispatch, so
+            // `check` never flags one). Flagging here -- the read path `fix` uses --
+            // made `fix` exit 1 while `check` skipped and exited 0. Skip.
+            let Ok(bytes) = read_prefix(&full) else {
+                continue;
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }

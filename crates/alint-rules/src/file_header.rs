@@ -58,16 +58,16 @@ impl Rule for FileHeaderRule {
             // via the `for_each`-nested path (which bypasses the engine's cap).
             // Over-cap → skip, matching the engine's per-file batch so the same
             // rule behaves identically whether top-level or nested (M3-F1).
-            let bytes = match crate::io::read_capped(&full) {
-                Ok(b) => b,
-                Err(crate::io::ReadCapError::TooLarge(_)) => continue,
-                Err(crate::io::ReadCapError::Io(e)) => {
-                    violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(entry.path.clone()),
-                    );
-                    continue;
-                }
+            // A read error (permission / I/O) now skips too -- not just the
+            // over-cap case above -- failing open to match `check`'s per-file read
+            // path (`read_capped_or_skip`, which skips an unreadable file before it
+            // ever calls `evaluate_file`). Flagging it here (this whole-index
+            // `evaluate` is the read path `fix` uses) made `fix` exit 1 with an
+            // unfixable "could not read file" while `check` skipped and exited 0 on
+            // the same tree. Per-file content rules fail open by design
+            // (`MAX_ANALYZE_BYTES`).
+            let Ok(bytes) = crate::io::read_capped(&full) else {
+                continue;
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
