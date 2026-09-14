@@ -30,6 +30,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   config (an `extends:`'d ruleset may not promote it). Deleting a whole file
   irreversibly is a poor default for an unattended fix. `--unsafe-fixes`, which
   was previously inert, now gates this tier.
+- `alint fix --changed` now SURFACES a required out-of-scope write as a suggestion
+  instead of silently dropping it. When a full-index rule (e.g. `file_absent` +
+  `file_remove`) would fix a file OUTSIDE the working-tree diff, that fix is no
+  longer quietly discarded; it is reported as a suggestion (apply it with a full
+  `alint fix`), so `fix --changed` and `check --changed` now agree on which
+  violations stand. A file that a fix in scope CREATES during the run joins the
+  changed set, so a create-then-fix cascade completes under `--changed` instead of
+  leaving the created file half-fixed. Writes to files inside the diff are applied
+  exactly as before; the blast radius is never widened.
 
 ### Fixed
 

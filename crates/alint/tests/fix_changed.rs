@@ -196,3 +196,67 @@ fn fix_changed_confinement_holds_across_the_multipass_fixpoint() {
         "fix --changed must not trim an out-of-diff file on any pass"
     );
 }
+
+#[test]
+fn fix_changed_demotes_out_of_scope_write_to_a_suggestion() {
+    // 2b: a full-index rule with SOME in-scope target still RUNS under `--changed`,
+    // but a fix whose target is OUTSIDE the changed set is DEMOTED to a Suggestion --
+    // surfaced (so the user can see and apply it) rather than APPLIED (which would
+    // widen the blast radius to an untouched committed file) or silently DROPPED
+    // (the pre-2b behavior, which let `fix --changed` exit 0 while `check --changed`
+    // reported the same file and exited 1). This closes that check/fix divergence.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("build/old.log"), "old\n").unwrap(); // committed, OUT of diff
+    std::fs::write(root.join("logs/today.log"), "today\n").unwrap(); // will be edited (IN diff)
+    std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("logs/today.log"), "edited\n").unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // In-scope removal applied; out-of-scope removal only suggested.
+    assert!(
+        !root.join("logs/today.log").exists(),
+        "the in-scope logs/today.log is removed"
+    );
+    assert!(
+        root.join("build/old.log").exists(),
+        "the out-of-scope build/old.log must NOT be removed -- only suggested"
+    );
+    assert!(
+        stdout.contains("1 suggested") && stdout.to_lowercase().contains("scope"),
+        "the out-of-scope removal must surface as a Suggestion naming the scope; got:\n{stdout}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a standing out-of-scope Suggestion is unresolved -> exit 1 (not a silent exit 0)"
+    );
+
+    // Agreement: on the resulting tree, `check --changed` still reports the standing
+    // out-of-scope violation and exits 1 -- the same verdict `fix` reached.
+    let check = Command::new(alint())
+        .args(["check", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint check --changed");
+    assert_eq!(
+        check.status.code(),
+        Some(1),
+        "check --changed agrees: the out-of-scope violation still stands"
+    );
+    assert!(
+        root.join("build/old.log").exists(),
+        "check does not mutate; build/old.log is still there"
+    );
+}

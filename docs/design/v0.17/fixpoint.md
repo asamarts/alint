@@ -1,7 +1,8 @@
 # The fix fixpoint: re-walk, converge, cap (Phase 1, increment 2)
 
 Status: design accepted 2026-09-13 (decisions below); 2a (core fixpoint)
-implemented and gated 2026-09-13. 2b (`--changed` confinement) is next.
+implemented and gated 2026-09-13; 2b (`--changed` confinement) implemented and
+gated 2026-09-14.
 Scope: `alint fix` only. `alint check` still walks exactly once per invocation.
 
 ## 1. Problem
@@ -333,6 +334,19 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
   invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not
   blocking 2a): a fixpoint **benchmark cell** on `kbench` (create-then-cascade + a
   converging content fixpoint), recorded per the bench protocol.
-- **2b (next):** `--changed` confinement -- created files join the changed set so
-  create-cascades finish; a required out-of-scope write demotes to `Suggestion`
-  (auto-fix.md 5.7).
+- **2b (done, 2026-09-14):** `--changed` confinement. A file THIS `fix` run created
+  joins the changed set -- a `created` set is threaded through `fix_run` into
+  `build_filtered_index` (so a per-file rule SEES the created file) and
+  `writes_outside_changed` (so a write TO it is not demoted), letting a
+  create-then-fix cascade complete on it. A fix whose target is OUTSIDE the changed
+  set (and the created set) is DEMOTED to a `Suggestion` in the whole-file dispatch
+  -- surfaced, not applied (which would widen the blast radius to an untouched
+  committed file) and not silently dropped (the pre-2b blast-radius filter, which
+  let `fix --changed` exit 0 while `check --changed` reported the same file and
+  exited 1). A rule scoped ENTIRELY outside the changed set is still skipped
+  (`skip_for_changed`), exactly as `check --changed` skips it, so the two agree on
+  which rules run. Gated: `fix_changed_demotes_out_of_scope_write_to_a_suggestion`
+  (CLI, incl. the check/fix exit-code agreement),
+  `build_filtered_index_includes_changed_and_created_files` and
+  `writes_outside_changed_judges_a_fix_by_its_target` (engine units). (auto-fix.md
+  5.7.)

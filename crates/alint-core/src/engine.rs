@@ -366,7 +366,7 @@ impl Engine {
         phase!(t_git, "git_setup");
 
         let t_filter = Instant::now();
-        let filtered_index = self.build_filtered_index(index);
+        let filtered_index = self.build_filtered_index(index, None);
         phase!(
             t_filter,
             "build_filtered_index",
@@ -485,7 +485,7 @@ impl Engine {
                     if entry.rule.as_per_file().is_some() {
                         return None;
                     }
-                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
+                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None) {
                         return None;
                     }
                     let ctx = pick_ctx(
@@ -759,7 +759,7 @@ impl Engine {
             if entry.rule.as_per_file().is_none() {
                 continue;
             }
-            if self.skip_for_changed(entry.rule.as_ref(), index) {
+            if self.skip_for_changed(entry.rule.as_ref(), index, None) {
                 continue;
             }
             if let Some(expr) = &entry.when {
@@ -936,7 +936,15 @@ impl Engine {
             // changed tree to re-walk. It shows the first pass; a real `fix` may
             // do more (docs/design/v0.17/fixpoint.md 2). No stage sink.
             return self
-                .fix_run(root, index, true, threshold, false, None)
+                .fix_run(
+                    root,
+                    index,
+                    &std::collections::HashSet::new(),
+                    true,
+                    threshold,
+                    false,
+                    None,
+                )
                 .map(|(report, _staged)| report);
         }
         // Byte-level fixpoint (docs/design/v0.17/fixpoint.md): re-walk and re-fix
@@ -967,9 +975,23 @@ impl Engine {
         // must be dropped, or `fix` reports a phantom finding and fails an
         // otherwise-clean tree.
         let mut final_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // `--changed` created-file tracking (2b): a path present now that was NOT in
+        // the pre-fix tree was made by a fix in scope this run. Such files join the
+        // effective changed set each pass so a create-then-fix cascade can complete
+        // (they are not in the git diff, so per-file rules would otherwise stay
+        // confined away from them). Empty and unused when `--changed` is inactive;
+        // recomputed from each re-walk against the original paths, so a file a later
+        // pass deletes drops back out.
+        let track_created = self.changed_paths.is_some();
+        let orig_paths: std::collections::HashSet<PathBuf> = if track_created {
+            index.entries.iter().map(|e| e.path.to_path_buf()).collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        let mut created: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (report, _buf) = self.fix_run(root, cur, false, threshold, true, None)?;
+            let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
             let applied = report.applied();
             last_applied_rules = report
                 .results
@@ -1029,6 +1051,18 @@ impl Engine {
             }
             // Something landed; re-walk so the next pass sees the new tree.
             owned_index = Some(crate::walker::walk(root, walk_opts)?);
+            if track_created {
+                // Recompute the created set from the fresh tree: any path not in the
+                // pre-fix tree was created by a fix this run (2b). Recomputing (vs.
+                // accumulating) means a file a later pass DELETES drops back out.
+                let fresh = owned_index.as_ref().expect("just assigned");
+                created = fresh
+                    .entries
+                    .iter()
+                    .map(|e| e.path.to_path_buf())
+                    .filter(|p| !orig_paths.contains(p))
+                    .collect();
+            }
         }
         // Budget exhausted without an `applied()==0` pass. A slow-but-convergent
         // config may have reached a fixed point on the very last budgeted pass
@@ -1039,7 +1073,7 @@ impl Engine {
         // and stays non-convergent.
         if !converged {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (confirm, _) = self.fix_run(root, cur, true, threshold, false, None)?;
+            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, false, None)?;
             if confirm.applied() == 0 {
                 converged = true;
                 final_keys = confirm
@@ -1137,6 +1171,7 @@ impl Engine {
         let (report, buffer) = self.fix_run(
             root,
             index,
+            /* created */ &std::collections::HashSet::new(),
             /* dry_run */ false,
             threshold,
             /* flush */ false,
@@ -1226,11 +1261,19 @@ impl Engine {
         )
     }
 
-    #[allow(clippy::too_many_lines)]
+    // `created` (2b) is the eighth parameter; the signature stays flat rather than
+    // bundling into a struct because every caller passes a distinct, local value and
+    // the grouping would not clarify anything at the call sites.
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
     fn fix_run(
         &self,
         root: &Path,
         index: &FileIndex,
+        // Files THIS `fix` run created on an earlier pass (2b): they join the
+        // `--changed` set so a create-then-fix cascade completes. Empty for a
+        // single-pass caller (`--dry-run` / `--diff`) and for a full (non-changed)
+        // fix, where it has no effect.
+        created: &HashSet<PathBuf>,
         dry_run: bool,
         threshold: Applicability,
         flush: bool,
@@ -1250,7 +1293,7 @@ impl Engine {
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
         let git_blame = self.build_blame_cache_if_needed(root);
-        let filtered_index = self.build_filtered_index(index);
+        let filtered_index = self.build_filtered_index(index, Some(created));
         let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
         let full_ctx = Context {
             root,
@@ -1362,7 +1405,15 @@ impl Engine {
         let mut located_deferred: std::collections::HashSet<PathBuf> =
             std::collections::HashSet::new();
         for (rule_index, entry) in self.entries.iter().enumerate() {
-            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
+            // Skip a rule scoped ENTIRELY outside the changed set (plus files this
+            // run created), exactly as `check --changed` does, so `fix` and `check`
+            // run the same rules and agree. A rule with SOME in-scope target still
+            // runs; its OUT-of-scope violations are demoted to Suggestions in the
+            // whole-file status loop below (2b), not applied (blast radius) and not
+            // dropped (the old silent behavior, which made `fix` exit 0 while
+            // `check` reported them and exited 1). `Some(created)` keeps a rule
+            // alive for a file a fix in scope created (its cascade must finish).
+            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created)) {
                 continue;
             }
             let ctx = pick_ctx(
@@ -1393,35 +1444,23 @@ impl Engine {
                 Ok(v) => v,
                 Err(e) => vec![Violation::new(format!("rule error: {e}"))],
             };
-            // `--changed` blast-radius guard. A full-index rule (existence /
-            // cross-file, `requires_full_index() == true`) is handed the FULL
-            // index by `pick_ctx` even under `--changed`, because its *check*
-            // verdict must consider the whole tree (an unchanged committed
-            // `.env` should still fire). But the FIX must not DESTROY files
-            // outside the diff: without this, `file_absent` + `file_remove
-            // --changed` deletes every matching file, including unchanged
-            // committed ones the user never touched. So drop a violation that
-            // names a specific file NOT in the changed set. A PATHLESS violation
-            // (e.g. `file_exists`, whose create target comes from config, not the
-            // violation) is kept: it is not a per-file destructive op, its fixer
-            // picks its own target, and a create is additive -- dropping it here
-            // would silently stop `fix --changed` from creating a required file,
-            // even one deleted in the very diff being fixed. Per-file rules
-            // already got the `--changed`-filtered index, so this is a no-op for
-            // them (their violations are all in-scope).
-            let violations = match &self.changed_paths {
-                Some(changed) if entry.rule.requires_full_index() => violations
-                    .into_iter()
-                    .filter(|v| match v.path.as_deref() {
-                        Some(p) => changed.contains(p),
-                        None => true,
-                    })
-                    .collect(),
-                _ => violations,
-            };
             if violations.is_empty() {
                 continue;
             }
+            // `--changed` blast-radius confinement (2b). A full-index rule
+            // (existence / cross-file, `requires_full_index() == true`) is handed
+            // the FULL index by `pick_ctx` even under `--changed`, because its
+            // *check* verdict must consider the whole tree (an unchanged committed
+            // `.env` should still fire). But the FIX must not silently widen the
+            // blast radius: a fix whose target is OUTSIDE the changed set (and the
+            // files this run created) is DEMOTED to a Suggestion in the whole-file
+            // status loop below (`writes_outside_changed`), not applied (would
+            // delete/rewrite an untouched committed file) and not dropped (the older
+            // behavior, which silently hid a required out-of-scope write). An
+            // in-scope target -- a changed file, or one a fix in scope created this
+            // run -- applies normally. The located regime (per-file only today) is
+            // confined by the filtered index, so out-of-scope violations never reach
+            // it; the demote lives in the whole-file loop that full-index fixers use.
             let fixer = entry.rule.fixer();
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
             // Located-edit fixers (Phase 1+) route through the batched
@@ -1544,6 +1583,31 @@ impl Engine {
             let mut items: Vec<FixItem> = Vec::with_capacity(violations.len());
             for v in violations {
                 let status = match fixer {
+                    // `--changed` confinement (2b): this fix would write OUTSIDE the
+                    // changed set (and the files this run created), so demote it to a
+                    // Suggestion carrying the proposed edit -- whatever its tier --
+                    // rather than applying it (widening the blast radius) or dropping
+                    // it (the old silent behavior). `fix_edit` supplies the edit
+                    // (`file_remove` ignores the bytes; `file_create` builds a create
+                    // edit). Tried FIRST; the guard is `false` for a full (non-
+                    // changed) fix, so that path is byte-for-byte unchanged.
+                    Some(f)
+                        if self.writes_outside_changed(entry.rule.as_ref(), &v, index, created) =>
+                    {
+                        match f.fix_edit(&v, &[], fix_ctx.root) {
+                            Some(edit) => FixStatus::Suggested {
+                                summary: format!(
+                                    "{} (outside --changed scope; not auto-applied)",
+                                    f.describe()
+                                ),
+                                edit,
+                            },
+                            None => FixStatus::Skipped(format!(
+                                "{} skipped: target is outside the --changed set",
+                                f.describe()
+                            )),
+                        }
+                    }
                     // Applied tier at the current threshold: run the fixer.
                     Some(f) if f.applicability().applies_at(threshold) => {
                         match f.apply(&v, &fix_ctx) {
@@ -1814,12 +1878,23 @@ impl Engine {
     /// said they care about (the `--changed` set). Returns `None`
     /// when no changed-set is configured — callers fall back to
     /// the full index.
-    fn build_filtered_index(&self, full: &FileIndex) -> Option<FileIndex> {
+    /// Build the `--changed`-filtered index used to confine per-file rules to the
+    /// working-tree diff. `created` (2b) is the set of files THIS `fix` run created
+    /// on an earlier pass: they are not in the git diff, but a fix in scope made
+    /// them, so they join the changed set and a per-file content rule can complete
+    /// a create-then-fix cascade on them (the design's "changed set plus files a
+    /// fix in scope created", auto-fix.md 5.7). `None` (the `check` path) confines
+    /// to the diff alone.
+    fn build_filtered_index(
+        &self,
+        full: &FileIndex,
+        created: Option<&HashSet<PathBuf>>,
+    ) -> Option<FileIndex> {
         let set = self.changed_paths.as_ref()?;
         let entries = full
             .entries
             .iter()
-            .filter(|e| set.contains(&*e.path))
+            .filter(|e| set.contains(&*e.path) || created.is_some_and(|c| c.contains(&*e.path)))
             .cloned()
             .collect();
         Some(FileIndex::from_entries(entries))
@@ -1921,14 +1996,59 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
-    fn skip_for_changed(&self, rule: &dyn Rule, index: &FileIndex) -> bool {
+    fn skip_for_changed(
+        &self,
+        rule: &dyn Rule,
+        index: &FileIndex,
+        created: Option<&HashSet<PathBuf>>,
+    ) -> bool {
         let Some(set) = &self.changed_paths else {
             return false;
         };
         let Some(scope) = rule.path_scope() else {
             return false;
         };
-        !set.iter().any(|p| scope.matches(p, index))
+        // A file THIS `fix` run created (2b) joins the changed set, so a rule scoped
+        // ENTIRELY to created files is not skipped -- its cascade can complete.
+        // `check` passes `None` (nothing is created during a check), so `check` and
+        // `fix` skip the same rules on the original tree; `fix` only additionally
+        // keeps a rule alive for files it creates.
+        !set.iter()
+            .chain(created.into_iter().flatten())
+            .any(|p| scope.matches(p, index))
+    }
+
+    /// Whether a fix for `violation` under `rule` would write OUTSIDE the
+    /// `--changed` blast radius (the diff plus files this run created). Only
+    /// meaningful when `--changed` is active (`changed_paths` set); returns
+    /// `false` otherwise, so a full `fix` is unaffected. A path-bearing violation
+    /// is judged by its own path; a PATHLESS one (a create whose target comes from
+    /// config, e.g. `file_exists`) is judged by the rule's scope matching some
+    /// in-scope path -- the same test [`skip_for_changed`] uses. A rule with no
+    /// scope for a pathless violation cannot be confined (an additive create with a
+    /// config-chosen target), so it is treated as in-scope. Out-of-scope writes are
+    /// demoted to Suggestions in the fix loop rather than applied (would widen the
+    /// blast radius) or dropped silently (2b, auto-fix.md 5.7).
+    fn writes_outside_changed(
+        &self,
+        rule: &dyn Rule,
+        violation: &Violation,
+        index: &FileIndex,
+        created: &HashSet<PathBuf>,
+    ) -> bool {
+        let Some(set) = &self.changed_paths else {
+            return false;
+        };
+        match violation.path.as_deref() {
+            Some(p) => !(set.contains(p) || created.contains(p)),
+            None => match rule.path_scope() {
+                Some(scope) => !set
+                    .iter()
+                    .chain(created.iter())
+                    .any(|p| scope.matches(p, index)),
+                None => false,
+            },
+        }
     }
 
     /// Resolve every distinct `scope_filter.changed_since:` ref across
@@ -3149,6 +3269,90 @@ mod tests {
         // one), so it sees both files.
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].violations.len(), 2);
+    }
+
+    #[test]
+    fn build_filtered_index_includes_changed_and_created_files() {
+        // 2b: the `--changed`-filtered index (which confines per-file rules) must
+        // include BOTH the diff files AND files this fix run created, so a per-file
+        // content rule can complete a create-then-fix cascade on a created file
+        // (which is not in the git diff). `None` (the `check` path) confines to the
+        // diff alone. Teeth: drop `|| created.is_some_and(...)` and `made.txt` is
+        // no longer visible.
+        let mut changed = HashSet::new();
+        changed.insert(std::path::PathBuf::from("a.txt"));
+        let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
+        let full = idx(&["a.txt", "b.txt", "made.txt"]);
+        let mut created = HashSet::new();
+        created.insert(std::path::PathBuf::from("made.txt"));
+
+        let fi = engine
+            .build_filtered_index(&full, Some(&created))
+            .expect("a changed set is present");
+        let paths: std::collections::HashSet<std::path::PathBuf> =
+            fi.entries.iter().map(|e| e.path.to_path_buf()).collect();
+        assert!(
+            paths.contains(std::path::Path::new("a.txt")),
+            "changed file kept"
+        );
+        assert!(
+            paths.contains(std::path::Path::new("made.txt")),
+            "a file this run created joins the changed set (2b)"
+        );
+        assert!(
+            !paths.contains(std::path::Path::new("b.txt")),
+            "an untouched, uncreated file stays confined out"
+        );
+
+        // The `check` path (no created set) sees only the diff file.
+        let fi_check = engine.build_filtered_index(&full, None).unwrap();
+        let check_paths: std::collections::HashSet<std::path::PathBuf> = fi_check
+            .entries
+            .iter()
+            .map(|e| e.path.to_path_buf())
+            .collect();
+        assert!(check_paths.contains(std::path::Path::new("a.txt")));
+        assert!(
+            !check_paths.contains(std::path::Path::new("made.txt")),
+            "check does not carry created files (nothing is created during a check)"
+        );
+    }
+
+    #[test]
+    fn writes_outside_changed_judges_a_fix_by_its_target() {
+        // 2b: a path-bearing fix is in scope iff its path is in the changed set OR
+        // was created by this fix run; anything else is out of scope and is demoted
+        // to a Suggestion in the fix loop. With no `--changed` set, confinement is
+        // inactive so nothing is ever out of scope (a full fix is unaffected).
+        let mut changed = HashSet::new();
+        changed.insert(std::path::PathBuf::from("a.txt"));
+        let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
+        // The rule is only consulted for a PATHLESS violation; for path-bearing ones
+        // the violation's own path decides, so any stub rule serves here.
+        let rule = stub("r", "**/*");
+        let index = idx(&["a.txt", "made.txt", "other.txt"]);
+        let mut created = HashSet::new();
+        created.insert(std::path::PathBuf::from("made.txt"));
+        let v = |p: &str| Violation::new("x").with_path(std::path::PathBuf::from(p));
+
+        assert!(
+            !engine.writes_outside_changed(rule.as_ref(), &v("a.txt"), &index, &created),
+            "a changed file is in scope"
+        );
+        assert!(
+            !engine.writes_outside_changed(rule.as_ref(), &v("made.txt"), &index, &created),
+            "a file this run created is in scope (2b)"
+        );
+        assert!(
+            engine.writes_outside_changed(rule.as_ref(), &v("other.txt"), &index, &created),
+            "an untouched, uncreated file is out of scope -> demoted to a Suggestion"
+        );
+
+        let full_engine = Engine::new(vec![], RuleRegistry::new());
+        assert!(
+            !full_engine.writes_outside_changed(rule.as_ref(), &v("other.txt"), &index, &created),
+            "a full (non-changed) fix never demotes for scope"
+        );
     }
 
     #[test]
