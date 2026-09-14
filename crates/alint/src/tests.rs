@@ -56,14 +56,27 @@ fn fix_exit_status_maps_the_fix_contract() {
         results,
         non_convergent,
     };
-    let err_rule = || FixRuleResult {
+    let rule = |level, status| FixRuleResult {
         rule_id: "r".into(),
-        level: Level::Error,
+        level,
         items: vec![FixItem {
             violation: Violation::new("v"),
-            status: FixStatus::Unfixable,
+            status,
         }],
     };
+    let err_rule = || rule(Level::Error, FixStatus::Unfixable);
+    // A fix that was ATTEMPTED and errored (a `Skipped` carrying FIX_ERROR_PREFIX).
+    let fix_error = || {
+        rule(
+            Level::Warning,
+            FixStatus::Skipped(format!(
+                "{} permission denied",
+                alint_core::FIX_ERROR_PREFIX
+            )),
+        )
+    };
+    // An unresolved WARNING-level residual (no error).
+    let warn_residual = || rule(Level::Warning, FixStatus::Unfixable);
 
     // Converged + clean -> 0.
     assert_eq!(fix_exit_status(&report(vec![], false), false, false), 0);
@@ -76,6 +89,27 @@ fn fix_exit_status_maps_the_fix_contract() {
     assert_eq!(
         fix_exit_status(&report(vec![err_rule()], false), true, false),
         0
+    );
+    // A warning-level residual is 0 by default, 1 under --fail-on-warning.
+    assert_eq!(
+        fix_exit_status(&report(vec![warn_residual()], false), false, false),
+        0
+    );
+    assert_eq!(
+        fix_exit_status(&report(vec![warn_residual()], false), false, true),
+        1,
+        "an unfixable warning fails under --fail-on-warning"
+    );
+    // A genuine fix ERROR fails (exit 1) regardless of level, and even under
+    // `--fix-only` (which suppresses only BENIGN residuals).
+    assert_eq!(
+        fix_exit_status(&report(vec![fix_error()], false), false, false),
+        1
+    );
+    assert_eq!(
+        fix_exit_status(&report(vec![fix_error()], false), true, false),
+        1,
+        "--fix-only still fails on an attempted-and-errored fix"
     );
 
     // Non-convergence -> 2, and it OUTRANKS everything: a clean report, and even

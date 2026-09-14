@@ -185,6 +185,13 @@ struct FixSummary {
     /// suggestion, or verification-demoted). Always present (a machine
     /// format keeps a stable envelope); `0` when none.
     suggested: usize,
+    /// `true` when the fix loop hit its pass cap without settling (a
+    /// non-convergent config). This is the ONLY structured signal of the
+    /// distinct exit 2 ("fix could not complete"): without it a capped run --
+    /// whose items are mostly `applied` because the fixes kept re-firing --
+    /// is indistinguishable in this envelope from a clean run. Always present;
+    /// `false` for a converged run. See docs/design/v0.17/fixpoint.md.
+    non_convergent: bool,
 }
 
 #[derive(Serialize)]
@@ -246,6 +253,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
             skipped: report.skipped(),
             unfixable: report.unfixable(),
             suggested: report.suggested(),
+            non_convergent: report.non_convergent,
         },
         results,
     };

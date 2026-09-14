@@ -154,3 +154,43 @@ fn detectors_skip_binary_so_check_and_fix_agree() {
         "the binary is left byte-identical"
     );
 }
+
+/// Non-convergence (fixpoint cap): two `replace` rules that undo each other
+/// (`a` -> `b`, `b` -> `a`) change the tree every pass and never settle. The
+/// byte-level fixpoint must hard-stop at the cap and exit `2` ("fix could not
+/// complete"), naming the stuck rule on stderr -- never a silent exit-0 success.
+/// This is the sole end-to-end exercise of the exit-2 contract: it is reachable
+/// only because there is no apply-once shortcut (the loop converges on "a pass
+/// changed nothing", so a genuine oscillation runs to the cap).
+/// See docs/design/v0.17/fixpoint.md.
+#[test]
+fn nonconvergent_config_hits_the_cap_and_exits_2() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "f.txt", b"a\n");
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: no-a\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"a\"\n    level: error\n    fix: { replace: { replacement: \"b\" } }\n\
+         \x20 - id: no-b\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"b\"\n    level: error\n    fix: { replace: { replacement: \"a\" } }\n",
+    );
+    let out = Command::new(alint())
+        .args(["fix", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --unsafe-fixes");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a non-convergent config must exit 2, not silently succeed"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("did not converge"),
+        "the cap must warn loudly on stderr; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-a") || stderr.contains("no-b"),
+        "the warning must name a stuck rule; got: {stderr}"
+    );
+}

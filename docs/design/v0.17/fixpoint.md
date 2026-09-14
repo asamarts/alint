@@ -1,4 +1,4 @@
-# The fix fixpoint: re-walk, apply-once, termination (Phase 1, increment 2)
+# The fix fixpoint: re-walk, converge, cap (Phase 1, increment 2)
 
 Status: design accepted 2026-09-13 (decisions below); 2a (core fixpoint)
 implemented and gated 2026-09-13. 2b (`--changed` confinement) is next.
@@ -16,24 +16,39 @@ apply fixers, done. That is correct for a self-contained fix but cannot handle a
 - A `file_rename` vacates a path a stale-index violation still points at.
 - A content edit changes a file a cross-file rule relates to another.
 
-It is also **unsound for a non-normalizing fixer that does not resolve its own
-violation**. The motivating regression: a `file_content_matches` + `file_append`
-rule whose appended boilerplate does not literally contain the rule's `pattern:`
-(an SPDX/licence header) re-appends **every** pass -- N duplicated copies, a
-file-corruption regression for an existing valid config -- unless the loop knows
-not to re-attempt a fix it already tried.
+A single pass is also insufficient for a fixer that makes **partial progress**:
+`replace` clears matches left-to-right but its replacement can re-form the
+forbidden pattern across a splice boundary (`--` -> `-` on `---` yields `--`),
+which it explicitly defers to the fixpoint to finish (`--- -> -- -> -`).
 
-Increment 2 activates a **fixpoint**: re-detect and re-fix until nothing new
-applies, with an **apply-once** guard that makes "nothing new applies"
-well-defined and a **cap** that bounds the pathological case.
+Increment 2 activates a **byte-level fixpoint**: re-walk and re-fix until a pass
+changes nothing (a fixed point), bounded by a **cap** that turns a genuinely
+non-convergent config into a loud exit-2 failure rather than an infinite loop.
+(An earlier design added an `apply-once` guard on top of this; the 2a audit
+removed it -- it broke `replace`'s multi-pass progress and, worse, silently
+converged genuine non-convergence. See decision 1 and section 5.)
 
 ## 2. Decisions (asamarts, 2026-09-13)
 
-1. **Apply-once key = `(rule_id, file, violation-fingerprint)`** (fine, per
-   violation), reusing `baseline::violation_fingerprint`. A rule may re-fix a
-   file across passes only for a genuinely *new* violation; a re-appearing
-   identical violation is never re-attempted. Matches the plan (Ruff/ESLint
-   model); the cap backstops re-matches whose fingerprint changes each pass.
+1. ~~**Apply-once key = `(rule_id, file, violation-fingerprint)`** (fine, per
+   violation), reusing `baseline::violation_fingerprint`.~~ **SUPERSEDED after the
+   2a audit (2026-09-13) -- apply-once was removed; see the note below.** The
+   original intent (don't re-attempt a non-resolving fix) assumed a re-forming
+   violation would get a *new* fingerprint each pass so the cap could catch it.
+   But `violation_fingerprint` for a path-bearing rule is **constant across
+   passes** (it keys on `(rule_id, path)` / `baseline_key`, not content), so
+   apply-once filtered a legitimately re-forming violation after one pass and the
+   loop "converged" against a still-violating file (`replace` on `file_content_forbidden`:
+   `--` -> `-` on `---` stopped at `--`, exit 0, `check` fails). Two further facts
+   made apply-once pure downside: every shipped fixer already self-bounds
+   (`file_append` skips when the file already ends with the content; `replace`
+   drops a self-reintroducing match; normalizing fixers are idempotent), so it
+   guarded nothing real; and its one live effect was to turn a genuinely
+   non-convergent config's *loud* exit-2 into a *silent* exit-0 with the violation
+   standing. **Resolution: byte-level fixpoint** -- re-run while a pass changes the
+   tree (`applied() > 0`), converge when a pass applies nothing, cap the rest. The
+   Ruff/ESLint model, and the Dershowitz-Manna argument (5) holds directly. This
+   preserves decisions 2-4.
 2. **Non-convergence cap = 10 passes -> hard error, exit 2.** On the cap, alint
    prints a loud stderr error naming the rules/files that keep re-triggering and
    exits `2` ("fix could not complete"), distinct from `1` ("fix ran, violations
@@ -102,68 +117,52 @@ state.
   fixed; the apply order is the engine's existing deterministic order. Same input
   tree + config -> same sequence of passes.
 
-## 5. Termination
+## 5. Termination (byte-level fixpoint)
 
-Two mechanisms, in order:
+The loop terminates on **progress, not on a fingerprint heuristic** (the original
+apply-once design was removed after the 2a audit; see decision 1). It has two
+mechanisms:
 
-- **Apply-once (primary).** The loop maintains a set of attempted violation
-  fingerprints (`violation_fingerprint` already encodes `rule_id` + path +
-  identity). Before dispatching a rule's violations, those already in the set are
-  skipped. A survivor's fingerprint is added **only if its fix was `Applied`**
-  (see the interaction note below). So each progressing pass either resolves a
-  violation (gone next pass) or marks a non-resolving-but-applied one (skipped
-  next pass) -- the set of still-appliable violations strictly shrinks by >=1, so
-  the loop terminates. For a **normalizing** fixer the fix removes the violation,
-  so its fingerprint does not recur; the loop terminates in a few passes without
-  the cap. This is the Dershowitz-Manna well-founded-multiset contract of
-  auto-fix.md 5.8: a Safe fix strictly reduces the violation multiset without
-  introducing new violations, so the fixpoint descends to empty.
+- **Converge on no change (primary).** After each pass, `Engine::fix` checks
+  `report.applied()`: a pass that applied nothing is a **fixed point** and the
+  loop stops. A pass that applied something re-walks and runs again. `applied()`
+  is a faithful "the tree changed" signal because every effect is idempotent at
+  the fixer level: a whole-file fixer returns `Skipped` when there is nothing left
+  to do (so `Applied` <=> it changed bytes), a create/remove/rename returns
+  `Skipped` when the target is already in the desired state, and a located batch
+  that nets no byte change is reported `Skipped` (so an identity edit is not read
+  as progress). Termination is the Dershowitz-Manna well-founded-multiset contract
+  of auto-fix.md 5.8: a Safe/normalizing fix strictly reduces the violation
+  multiset without introducing new violations, so each progressing pass descends
+  and the descent is finite. A `replace` that re-forms a match across a splice
+  boundary (`--` -> `-` on `---`) keeps making progress (`--- -> -- -> -`) and
+  then a pass finds no match and converges -- exactly the multi-pass case the
+  removed apply-once heuristic wrongly cut off after one pass.
 
-  **Granularity (as-built).** The apply-once fingerprint is computed with
-  `file_bytes: None`, so `violation_fingerprint`'s discriminator is: the
-  `baseline_key` if the rule set one; else, for a **path-bearing** violation, the
-  empty discriminator -- identity is `(rule_id, path)`, and the (volatile)
-  message and line number are NOT hashed; else (pathless) the trimmed message.
-  Consequence: a rule fixes a given `(rule_id, path)` **at most once per `fix`
-  invocation**, regardless of how its message/line shift as the file changes.
-  This is exactly what makes real fixers bound naturally -- a `file_append` /
-  `file_prepend` / `replace` / whole-file content fixer re-firing on the same
-  file after its own edit is filtered, so it cannot loop. The cap (below) is only
-  reachable by the residual pathological shape the fingerprint cannot bound: a
-  **pathless** violation whose message changes every pass (a rule with no stable
-  identity that never resolves). That shape is what the `fix_bails_at_the_cap...`
-  engine test constructs to exercise the cap deterministically.
+  *Why no apply-once:* the shipped fixers already self-bound (their own
+  idempotence guards make a non-progressing pass apply nothing), so a fingerprint
+  "tried it, don't retry" set added no termination guarantee -- and, keyed on a
+  content-independent fingerprint, it actively broke legitimate multi-pass
+  progress and silently converged genuine non-convergence. Removing it makes the
+  loop both simpler and strictly more correct.
 
-  **Interaction with increment-1's within-pass defers (audit finding).** Two
-  outcomes are "skip THIS pass, retry NEXT": a `file_rename`/`file_remove`
-  yielding to a pending content edit on the same file (`has_pending_write`), and
-  the located byte-consistency defer. These fire exactly when a content fixer and
-  a path/located fixer touch one file -- the common case the fixpoint exists to
-  resolve (the next pass sees the flushed content and lands the deferred edit).
-  Marking a violation attempted **before** dispatch (or on any non-applied
-  outcome) would mark these and the next pass would skip them, silently **losing**
-  the deferred fix. Marking **only on `Applied`** avoids it with no "is-this-a-
-  defer" flag: a deferred edit is not applied -> not marked -> retried and landed
-  next pass, then (if it now persists) marked. A terminal skip (binary / size /
-  unfixable / below-threshold suggestion) is also not marked; it re-evaluates each
-  pass but contributes zero applied, so it neither blocks termination nor is lost
-  -- the cross-pass report (section 7) dedupes it by fingerprint.
+- **Cap (backstop).** A genuinely non-convergent config changes the tree every
+  pass and never reaches a fixed point: two `replace` rules that undo each other
+  (`a` -> `b`, `b` -> `a`), or any fixer that rewrites without settling. The loop
+  hard-stops after **`MAX_PASSES` = 10** and reports non-convergence -- exit 2,
+  with a loud stderr line naming the rules that were still applying on the final
+  pass (`last_applied_rules`; a pass that applies nothing would have converged, so
+  the final pass of a capped run always applied >=1 and the culprit set is
+  non-empty). Whatever landed before the cap stays on disk (no rollback). This is
+  the honest opposite of the removed apply-once, which would have converged such a
+  config silently at exit 0 with the violation standing.
 
-  **Located-path fingerprint (audit finding).** The located path reports synthetic
-  "located edit in X" items whose fingerprint does NOT match the originating rule
-  violation's (different path-identity derivation). Apply-once must therefore mark
-  the **original** violation's fingerprint (the one the pre-dispatch filter saw),
-  threaded through the located collection: remember each `(rule, file)` batch's
-  originating fingerprints at collect time and mark them iff that file's batch was
-  applied (not deferred).
-- **Cap (backstop).** A *non-normalizing* fixer can churn fingerprints -- each
-  pass produces a violation with a *new* fingerprint (a rewrite that shifts
-  content, or two rules that oscillate). Apply-once does not bound that, so the
-  loop hard-stops after **10 passes** with the exit-2 error. The
-  increment-1 `replace` guard (drop a replacement that itself still matches)
-  already removes the common self-reintroducing case *before* it reaches the
-  loop; the cap covers the residual (e.g. a boundary re-match, or a genuine
-  oscillation between two rules).
+  The one edge to keep the primary signal honest: a **located identity edit**
+  (replacement equal to the spanned bytes, or a batch whose edits cancel) makes no
+  byte change, so the loop must not read it as progress. When a located batch nets
+  `new_bytes == original`, its edits are reported `Skipped` ("left the file
+  unchanged"), not `Applied`. `ReplaceFixer` already refuses to emit such an edit,
+  so this only guards a future located fixer or the engine test fixture.
 
 ## 6. Performance: measure, then decide
 
@@ -182,56 +181,77 @@ per-keystroke hot path the sub-second floor protects. Plan:
 
 ## 7. Report semantics across passes
 
-`Engine::fix` aggregates the per-pass `FixReport`s into one with **keep-last-per-
-violation** semantics: as each pass merges in, any earlier item for a violation
-it re-touched is retained-out and replaced by this pass's item (keyed by the same
-fingerprint `attempt_fingerprint` uses). So a violation's terminal status is its
-status on the last pass that produced an item for it, and `Applied` items across
-distinct violations accumulate (a cascade legitimately applies over several
-passes). Two consequences worth stating:
+`Engine::fix` aggregates the per-pass `FixReport`s into one with **Applied-wins
+per violation** semantics, keyed by `violation_key` (the baseline fingerprint --
+an aggregation key here, NOT a termination device):
 
+- An **`Applied`** for a violation WINS and is *locked*. Once a pass records an
+  `Applied` for a key, a later pass cannot overwrite it. This matters because a
+  fix that lands in an early pass will, on the confirming pass, find nothing to do
+  and report a `Skipped` (its own idempotence guard) -- that later skip must not
+  mask the fix that actually happened. `Applied` items across distinct violations
+  thus accumulate (a cascade legitimately applies over several passes).
+- A violation **never yet `Applied`** keeps its LAST status: a later pass's item
+  for the key retains-out the earlier one, so a transient state is superseded by
+  the real outcome once a later pass acts on it.
 - **Within-pass siblings both survive.** A located batch can emit an `Applied`
-  edit AND an isolation-conflict `Skipped` under one source violation. Apply-once
-  marks that source attempted the moment the batch lands, so it never re-appears
-  to be superseded -- both items stay in the aggregate (this is the
+  edit AND an isolation-conflict `Skipped` under one source violation (same key).
+  The lock is applied only AFTER a whole pass's items are merged, so the sibling
+  skip is kept; and it does not re-appear, because the batch that produced it made
+  progress and the next pass's re-eval differs. This is the
   `located_regime_applies_batch_and_excludes_isolation_group` invariant, now
-  asserted through the multi-pass loop).
+  asserted through the multi-pass loop.
 - **Transient defers are not reported.** The located byte-consistency / removal
-  defer (a batch yielding to a concurrent write, increment 1) no longer emits a
-  provisional "rerun to apply" skip: the re-walk IS the rerun, so the retry pass
-  reports the real outcome (applied, or a genuine terminal skip). Emitting the
-  provisional skip would either duplicate that outcome or, when the same
-  concurrent change resolves the source (e.g. the file was removed), strand a
-  stale skip that wrongly drives a nonzero exit.
+  defer (a batch yielding to a concurrent write, increment 1) emits no provisional
+  "rerun to apply" skip: the re-walk IS the rerun, so the retry pass reports the
+  real outcome. Emitting one would duplicate that outcome or, when the same
+  concurrent change resolves the source, strand a stale skip that wrongly drives a
+  nonzero exit.
 
 The `fix_exit_code` contract (round-7) is unchanged except for the new exit-2
-non-convergence case (`fix_exit_status` returns 2 when `non_convergent`, and it
-outranks every other branch including `--fix-only`'s residual suppression).
+non-convergence case: `fix_exit_status` returns 2 when `non_convergent`, and it
+outranks every other branch including `--fix-only`'s residual suppression. The
+flag is also surfaced in `--format json` (`summary.non_convergent`) -- the only
+structured signal of the distinct exit 2, since a capped run's items are mostly
+`applied` and otherwise look like a clean run.
 
 ## 8. Scope + gates
 
-- **2a (this increment, delivered):** the loop in `Engine::fix` (re-walk via
-  `walk`, `MAX_PASSES = 10`), apply-once threaded through `fix_run` (marking only
-  on `Applied`, keyed off original violation fingerprints on the located path),
-  the cap + exit-2 (`fix_exit_status`), keep-last-per-violation report
-  aggregation, and these gates:
-  - the **apply-once regression** gate: `append_applies_once_when_not_self_satisfying`
-    -- a `file_content_matches` + `file_append` whose boilerplate does not satisfy
-    the pattern applies exactly ONCE (one appended copy), not once per pass;
+- **2a (this increment, delivered):** the byte-level fixpoint loop in
+  `Engine::fix` (re-walk via `walk`, converge on `applied() == 0`, `MAX_PASSES =
+  10`), the located no-op reporting that keeps `applied()` honest, the cap +
+  exit-2 (`fix_exit_status`), Applied-wins report aggregation, `non_convergent` in
+  the JSON summary, and these gates:
+  - the **boundary-re-match** gate (the audit's F1 regression):
+    `replace_boundary_rematch_converges` -- `replace` `--` -> `-` on `---` runs
+    `--- -> -- -> -` to a CLEAN file in one `fix` (a premature cutoff stopped at
+    `--`, exit 0, `check` failing);
+  - a **progressive-convergence** gate: `fix_converges_after_several_progressing_passes`
+    (engine) -- a fixer making progress over several passes runs to completion, not
+    cut off after one;
   - a **cascade** gate: `create_then_content_fix_cascades` -- `file_create` then a
-    content fix on the created file converges in a single `fix` (the created file
-    enters the index on the re-walk);
-  - the updated **content-edit + rename** gate:
-    `content_edit_and_rename_same_file_no_corruption` -- one `fix` now lands both
-    (was two manual `fix` steps), no duplication;
-  - a **cap** gate: `fix_bails_at_the_cap_on_a_nonconvergent_config` (engine unit
-    test) -- a pathless changing-message config hard-stops at 10 with
-    `non_convergent`, capped applications on disk, no rollback;
-  - an **exit-2** gate: `fix_exit_status_maps_the_fix_contract` -- `non_convergent`
-    maps to exit 2 and outranks `--fix-only` and residual findings;
+    content fix on the created file converges in a single `fix`;
+  - the **content-edit + rename** gate:
+    `content_edit_and_rename_same_file_no_corruption` -- one `fix` lands both, no
+    duplication;
+  - the **append-once** end-to-end gate: `append_applies_once_when_not_self_satisfying`
+    -- a non-self-satisfying `file_append` leaves exactly one copy (its own
+    self-guard, confirmed end-to-end);
+  - a **cap** gate: `fix_bails_at_the_cap_on_a_nonconvergent_config` (engine) --
+    a never-settling fixer hard-stops at 10 with `non_convergent`, capped writes on
+    disk, no rollback;
+  - an **exit-2** gate: `nonconvergent_config_hits_the_cap_and_exits_2` (CLI, two
+    oscillating `replace` rules) -- exit 2 + loud stderr naming a stuck rule; plus
+    `fix_exit_status_maps_the_fix_contract` (unit) for the exit-code precedence;
+  - a **`--changed` multi-pass confinement** gate:
+    `fix_changed_confinement_holds_across_the_multipass_fixpoint` -- an in-scope
+    create-then-trim cascade completes across the re-walk while an out-of-diff file
+    is never touched (the "safe under `--changed`" claim);
+  - the JSON **non-convergence** gate: `non_convergent_report_surfaces_the_flag_and_validates`;
   - the property invariants (`fix_is_idempotent`, `fix_converges...`) re-pointed:
-    their stale "single-pass in Phase 0" rationale is corrected, and cross-rule
-    cascades now covered by the scenarios above.
+    stale "single-pass in Phase 0" rationale corrected, and `fix_converges...` now
+    asserts `!non_convergent` (no single fixable rule may fail to converge -- the
+    direct invariant that replaces the old fingerprint-stability coupling).
 
   The ARCHITECTURE "walk once" invariant (principles 1 and 4, and the pipeline
   invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not

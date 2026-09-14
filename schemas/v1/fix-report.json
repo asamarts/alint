@@ -13,13 +13,17 @@
     },
     "summary": {
       "type": "object",
-      "required": ["applied", "skipped", "unfixable", "suggested"],
+      "required": ["applied", "skipped", "unfixable", "suggested", "non_convergent"],
       "additionalProperties": false,
       "properties": {
         "applied": { "type": "integer", "minimum": 0 },
         "skipped": { "type": "integer", "minimum": 0 },
         "unfixable": { "type": "integer", "minimum": 0 },
-        "suggested": { "type": "integer", "minimum": 0 }
+        "suggested": { "type": "integer", "minimum": 0 },
+        "non_convergent": {
+          "type": "boolean",
+          "description": "True when the fix loop hit its pass cap without converging (exit 2, 'fix could not complete')."
+        }
       }
     },
     "results": {

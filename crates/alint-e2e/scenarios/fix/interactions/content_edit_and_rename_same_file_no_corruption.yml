@@ -44,6 +44,9 @@ expect:
   - applied: [no-ws, rust-snake]
 
 expect_tree:
+  # Default (Strict) mode is LOAD-BEARING here: it flags an extra file, so a
+  # resurrected `FooBar.rs` (the duplication bug) fails this block. Do not relax
+  # to `contains` -- the applied-set above cannot detect a stranded duplicate.
   src:
     # Renamed AND trimmed, present at exactly one path -- no resurrected FooBar.rs.
     foo_bar.rs: "pub fn a() {}\n"

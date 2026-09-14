@@ -138,3 +138,61 @@ fn fix_changed_recreates_a_required_file_deleted_in_the_diff() {
         "# R\n"
     );
 }
+
+const CONFINE_CASCADE_CONFIG: &str = "\
+version: 1
+rules:
+  - id: has-req
+    kind: file_exists
+    paths: req.md
+    root_only: true
+    level: error
+    fix: { file_create: { content: \"# req   \\n\" } }
+  - id: no-ws
+    kind: no_trailing_whitespace
+    paths: \"**/*.md\"
+    level: error
+    fix: { file_trim_trailing_whitespace: {} }
+";
+
+#[test]
+fn fix_changed_confinement_holds_across_the_multipass_fixpoint() {
+    // The Phase-1 fixpoint re-walks after each pass. Under --changed the changed
+    // set is frozen (computed once, before the loop), so a per-file content rule
+    // stays confined to it on EVERY pass. This gates two things at once:
+    //   * an IN-scope file's create-then-content cascade completes ACROSS passes
+    //     (req.md is deleted-in-diff, so it is in the changed set: pass 1 recreates
+    //     it with trailing whitespace, pass 2's re-walk lets no-ws trim it);
+    //   * an OUT-of-scope file is never touched, even though every re-walk sees it
+    //     (other.md has trailing whitespace but is not in the diff).
+    // Regression guard for the design's "2a is safe under --changed" claim -- a
+    // re-walk that leaked newly-seen files into the per-file filtered index would
+    // trim other.md here. (Audit finding: multi-pass --changed was ungated.)
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("req.md"), "# req\n").unwrap();
+    std::fs::write(root.join("other.md"), "x   \n").unwrap();
+    std::fs::write(root.join(".alint.yml"), CONFINE_CASCADE_CONFIG).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // Delete req.md -> the sole working-tree-diff file (the changed set).
+    std::fs::remove_file(root.join("req.md")).unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed");
+    assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
+    assert_eq!(
+        std::fs::read_to_string(root.join("req.md")).unwrap(),
+        "# req\n",
+        "the in-scope create-then-trim cascade must complete across the re-walk"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("other.md")).unwrap(),
+        "x   \n",
+        "fix --changed must not trim an out-of-diff file on any pass"
+    );
+}

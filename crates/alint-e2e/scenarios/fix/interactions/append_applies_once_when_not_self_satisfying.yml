@@ -1,17 +1,22 @@
 name: a non-self-satisfying file_append applies once, not once per fixpoint pass
 tags: [fix, interactions, file_content_matches, file_append, fixpoint]
 
-# Phase-1 fixpoint apply-once regression (docs/design/v0.17/fixpoint.md 1, 5).
-# The fixpoint re-walks and re-fixes until nothing new applies. A file_append
+# Phase-1 fixpoint convergence, end-to-end (docs/design/v0.17/fixpoint.md 5). The
+# fixpoint re-walks and re-fixes until a pass changes nothing. A `file_append`
 # whose boilerplate does NOT contain the rule's `pattern:` never resolves its own
-# violation: every pass the pattern is still absent. WITHOUT apply-once this
-# appends the boilerplate on every pass -- N duplicated copies until the cap, a
-# file-corruption regression. Apply-once marks the violation's fingerprint the
-# moment its fix is Applied, so the second pass filters it out and the loop
-# converges. The gate: exactly ONE appended copy in the final tree (not two, not
-# ten). This also pins the design's assumption that the violation fingerprint is
-# STABLE across passes (a shifting fingerprint would defeat apply-once and append
-# repeatedly), so a regression there fails here loudly.
+# violation: the pattern is still absent after appending. What stops an infinite
+# re-append is `file_append`'s OWN idempotence guard -- it skips when the file
+# already ends with the content -- so:
+#   pass 1: the pattern is absent -> append the boilerplate (the file changes)
+#   pass 2: the file already ends with the boilerplate -> file_append SKIPS
+#           (nothing changed) -> the loop converges
+# The gate: exactly ONE appended copy, the append is reported (Applied-wins keeps
+# pass 1's `Applied` from being masked by pass 2's idempotence skip), and the
+# violation honestly still stands (`check` fails) because the config is
+# non-self-satisfying. A broken fixpoint (re-append every pass) would show many
+# copies here; a broken Applied-wins aggregation would report a skip, not applied.
+# The load-bearing checks are the byte-exact `expect_tree` (one copy) and the
+# `applied:` set.
 
 given:
   tree:
@@ -31,8 +36,7 @@ given:
 when: [fix, check]
 
 expect:
-  # One `fix` fixpoints: pass 1 appends (Applied), pass 2 sees the still-absent
-  # pattern but apply-once filters it, so the loop converges after one append.
+  # Applied once (pass 1); pass 2's idempotence skip does not mask it.
   - applied: [needs-spdx]
   # The append does not contain the pattern, so the violation legitimately
   # STANDS -- `check` still reports it. That is honest: the config is
@@ -41,5 +45,5 @@ expect:
       - {rule: needs-spdx, level: warning, path: README.md}
 
 expect_tree:
-  # Exactly ONE appended copy -- apply-once stopped the per-pass duplication.
+  # Exactly ONE appended copy -- the fixpoint converged after one append.
   README.md: "# Project\n\n<!-- license: see COPYING -->\n"

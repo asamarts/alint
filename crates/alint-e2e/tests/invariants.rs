@@ -104,16 +104,16 @@ proptest! {
         // for the round-3 non-convergence bugs (F1 doubled-CR, F2 interior-CR, F3
         // stacked-BOM), each a fixer whose second pass still applied.
         //
-        // Deliberately SINGLE-rule. Since Phase 1 `alint fix` is a fixpoint, a
-        // single `fix` already runs a MULTI-rule cascade to convergence internally
-        // (rule A's `file_create` makes a file that rule B then fixes on the next
-        // internal pass), so those cascades are asserted by the dedicated
+        // Deliberately SINGLE-rule. Since Phase 1 `alint fix` is a byte-level
+        // fixpoint, a single `fix` already runs a MULTI-rule cascade to convergence
+        // internally (rule A's `file_create` makes a file that rule B then fixes on
+        // the next internal pass), so those cascades are asserted by the dedicated
         // `fix/interactions` scenarios instead. Kept single-rule here so a
-        // per-fixer non-convergence regression cannot hide behind a cascade. NOTE:
-        // cross-INVOCATION idempotence still needs a NORMALIZING fixer -- a
-        // non-self-satisfying fix (append that never matches its own pattern)
-        // re-applies on a fresh `fix` because apply-once state is per-invocation;
-        // the single fixable rules here are all normalizing, so `[fix, fix]` holds.
+        // per-fixer non-convergence regression cannot hide behind a cascade. This
+        // `[fix, fix]` shape holds because every shipped fixer is normalizing or
+        // self-guarding (a second invocation finds nothing to do): the fixpoint
+        // keeps no cross-invocation state, so idempotence rests entirely on the
+        // fixers' own idempotence, which this asserts.
         let scenario = with_steps(base, vec![Step::Fix, Step::Fix]);
         let Ok(run) = run_scenario(&scenario) else { return Ok(()); };
         let Some(StepOutcome::Fix(second)) = run.steps.get(1) else {
@@ -142,6 +142,18 @@ proptest! {
         let Some((fix_report, check_report)) = extract_fix_then_check(&run) else {
             return Ok(());
         };
+        // A single fixable rule must reach a fixed point. The byte-level fixpoint
+        // fails to converge only on a genuinely oscillating config (the tree keeps
+        // changing every pass) -- which no single normalizing / self-guarding
+        // fixer is. This directly gates "no fixable rule is non-convergent": a
+        // future fixer that changes bytes every pass without settling would cap
+        // out and trip this. (With apply-once removed, this is the direct
+        // invariant, not the round-3 fingerprint-stability coupling it replaced.)
+        prop_assert!(
+            !fix_report.non_convergent,
+            "a single-rule fix hit the non-convergence cap; config:\n{}",
+            scenario.given.config,
+        );
         // Only assert convergence when the fix resolved every violation it
         // encountered. A fixer that skipped (binary file, size limit, ...) leaves
         // a real violation on disk; that is not a convergence failure. Likewise a

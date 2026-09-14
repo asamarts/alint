@@ -118,6 +118,32 @@ fn fix_report_shape_matches_expected_keys() {
     assert_eq!(summary["skipped"], 1);
     assert_eq!(summary["unfixable"], 1);
     assert_eq!(summary["suggested"], 1);
+    // Always present; false for this converged report.
+    assert_eq!(summary["non_convergent"], false);
     let results = json["results"].as_array().unwrap();
     assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn non_convergent_report_surfaces_the_flag_and_validates() {
+    // A capped fix run sets `non_convergent`; it must appear (true) in the JSON
+    // summary -- the sole structured signal of the distinct exit 2 -- and the
+    // output must still validate against the published schema.
+    let report = FixReport {
+        non_convergent: true,
+        results: vec![FixRuleResult {
+            rule_id: "no-double-dash".into(),
+            level: Level::Error,
+            items: vec![FixItem {
+                violation: Violation::new("forbidden pattern /--/ found")
+                    .with_path(std::path::Path::new("x.txt"))
+                    .with_location(1, 1),
+                status: FixStatus::Applied("edited x.txt".into()),
+            }],
+        }],
+    };
+    let text = render_json(&report);
+    validate(&text);
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["summary"]["non_convergent"], true);
 }
