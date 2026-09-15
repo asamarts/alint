@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    ContentSourceSpec, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation,
+    Applicability, ContentSourceSpec, Error, FixContext, FixEdit, FixOutcome, Fixer, Result,
+    Violation,
 };
 
 use crate::io::looks_binary;
@@ -19,6 +20,7 @@ pub struct FileCreateFixer {
     path: PathBuf,
     source: ContentSourceSpec,
     create_parents: bool,
+    applicability: Applicability,
 }
 
 impl FileCreateFixer {
@@ -27,11 +29,27 @@ impl FileCreateFixer {
             path,
             source,
             create_parents,
+            // Behavior-preserving by default; the rule builder demotes a remote
+            // `extends:`'d create to a suggestion via `with_applicability` (W2).
+            applicability: Applicability::Safe,
         }
+    }
+
+    /// Override the fix tier. W2 content-fixer trust demotes a `file_create` from
+    /// an untrusted remote `extends:` to [`Applicability::Suggestion`]. Defaults to
+    /// `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 }
 
 impl Fixer for FileCreateFixer {
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
     fn describe(&self) -> String {
         match &self.source {
             ContentSourceSpec::Inline(s) => format!(
@@ -228,15 +246,31 @@ fn resolve_source_bytes(
 #[derive(Debug)]
 pub struct FilePrependFixer {
     source: ContentSourceSpec,
+    applicability: Applicability,
 }
 
 impl FilePrependFixer {
     pub fn new(source: ContentSourceSpec) -> Self {
-        Self { source }
+        Self {
+            source,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_prepend` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`]. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 }
 
 impl Fixer for FilePrependFixer {
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
     fn describe(&self) -> String {
         match &self.source {
             ContentSourceSpec::Inline(s) => format!(
@@ -347,15 +381,31 @@ impl Fixer for FilePrependFixer {
 #[derive(Debug)]
 pub struct FileAppendFixer {
     source: ContentSourceSpec,
+    applicability: Applicability,
 }
 
 impl FileAppendFixer {
     pub fn new(source: ContentSourceSpec) -> Self {
-        Self { source }
+        Self {
+            source,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_append` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`]. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 }
 
 impl Fixer for FileAppendFixer {
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
     fn describe(&self) -> String {
         match &self.source {
             ContentSourceSpec::Inline(s) => format!(

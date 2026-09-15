@@ -810,6 +810,169 @@ fn load_resolves_https_extends_via_cache_hit() {
     assert_eq!(ids, vec!["inherited", "local"]);
 }
 
+// --- W2 content-fixer trust (auto-fix.md 5.5) ---------------------------------
+
+/// The applicability a loaded rule's content fixer DECLARES (`None` = unset, so the
+/// builder's default tier applies). W2 sets it to `Suggestion` for a content fixer
+/// from an untrusted remote.
+fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Applicability> {
+    use alint_core::FixSpec;
+    match rule.fix.as_ref()? {
+        FixSpec::Replace { replace } => replace.applicability,
+        FixSpec::FileCreate { file_create } => file_create.applicability,
+        FixSpec::FilePrepend { file_prepend } => file_prepend.applicability,
+        FixSpec::FileAppend { file_append } => file_append.applicability,
+        _ => None,
+    }
+}
+
+/// Seed `cache` with `body` under its own SRI and return the `https://…#sha256-…`
+/// URL a config would `extends:`. Its base (no fragment) is
+/// `https://example.invalid/remote.yml`.
+fn seed_remote(cache: &extends::Cache, body: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(body.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for b in &digest {
+        use std::fmt::Write as _;
+        write!(hex, "{b:02x}").unwrap();
+    }
+    let sri_str = format!("sha256-{hex}");
+    let sri = extends::Sri::parse(&sri_str).unwrap();
+    cache.put(&sri, body.as_bytes()).unwrap();
+    format!("https://example.invalid/remote.yml#{sri_str}")
+}
+
+const REMOTE_REPLACE: &str = "version: 1\nrules:\n  - id: no-todo\n    \
+     kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    \
+     level: error\n    fix: { replace: { replacement: DONE } }\n";
+
+fn load_extending(remote_body: &str, top_extra: &str) -> alint_core::Config {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let url = seed_remote(&cache, remote_body);
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        format!("version: 1\nextends: [\"{url}\"]\n{top_extra}rules: []\n"),
+    )
+    .unwrap();
+    // Keep the tempdir alive for the duration of the load by leaking it into the
+    // cache path (the cache is read during load); simplest is to load before drop.
+    let opts = LoadOptions::with_cache(cache);
+    let cfg = load_with(&config_path, &opts).unwrap();
+    drop(tmp);
+    cfg
+}
+
+#[test]
+fn w2_remote_replace_is_demoted_to_suggestion() {
+    // A `replace` (content-injecting) from a REMOTE `extends:` the user has not
+    // trusted may propose but never auto-write: its tier is capped to `suggestion`.
+    let cfg = load_extending(REMOTE_REPLACE, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `replace` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_file_create_is_demoted_to_suggestion() {
+    // R-RETRO: the pre-existing inline-content ops are demoted too. `file_create`
+    // gained an `applicability` field precisely so this cap has somewhere to land.
+    let body = "version: 1\nrules:\n  - id: need-notice\n    kind: file_exists\n    \
+        paths: NOTICE\n    root_only: true\n    level: error\n    \
+        fix: { file_create: { content: \"(c) them\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "need-notice").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_create` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_trusted_extends_re_honors_a_named_remote() {
+    // Listing the remote's URL in the top-level `trusted_extends:` opts it back in:
+    // its content fixers are honored at their own tier (no demotion -> unset spec).
+    let cfg = load_extending(
+        REMOTE_REPLACE,
+        "trusted_extends: [\"https://example.invalid/remote.yml\"]\n",
+    );
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "a trusted remote's `replace` keeps its own (unset -> Unsafe) tier"
+    );
+}
+
+#[test]
+fn w2_local_extends_content_fixer_is_not_demoted() {
+    // A content fixer from a LOCAL `extends:` (the user's own tree) is honored at
+    // tier -- only remote-URL sources are demoted.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    std::fs::write(&base, REMOTE_REPLACE).unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        "version: 1\nextends: [\"base.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let opts = LoadOptions::with_cache(extends::Cache::at(tmp.path().join("cache")));
+    let cfg = load_with(&config_path, &opts).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "a LOCAL extends is the user's own tree -- not demoted"
+    );
+}
+
+#[test]
+fn w2_remote_hygiene_fixer_is_not_demoted() {
+    // A fixed-behavior fixer (no ruleset bytes) is honored from any source. It has
+    // no `applicability` field, so if the demotion wrongly targeted it the load
+    // would ERROR (deny_unknown_fields); a clean load proves it is left alone.
+    let body = "version: 1\nrules:\n  - id: ws\n    kind: no_trailing_whitespace\n    \
+        paths: \"*.txt\"\n    level: error\n    \
+        fix: { file_trim_trailing_whitespace: {} }\n";
+    let cfg = load_extending(body, "");
+    assert!(
+        cfg.rules.iter().any(|r| r.id == "ws"),
+        "a remote hygiene fixer loads and is honored (never demoted)"
+    );
+}
+
+#[test]
+fn w2_trusted_extends_in_an_extended_config_is_rejected() {
+    // A ruleset must not allowlist ITSELF: `trusted_extends:` in an extended config
+    // is refused at load (only the user's top-level config grants trust).
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    std::fs::write(
+        &base,
+        "version: 1\ntrusted_extends: [\"https://evil.example/x.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        "version: 1\nextends: [\"base.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let opts = LoadOptions::with_cache(extends::Cache::at(tmp.path().join("cache")));
+    let err = load_with(&config_path, &opts).unwrap_err().to_string();
+    assert!(
+        err.contains("trusted_extends") && err.contains("top-level"),
+        "an extended config's `trusted_extends:` must be refused; got: {err}"
+    );
+}
+
 #[test]
 fn load_rejects_custom_fact_declared_in_local_extends() {
     let tmp = tempfile::tempdir().unwrap();

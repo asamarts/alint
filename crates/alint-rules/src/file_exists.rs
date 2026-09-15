@@ -260,7 +260,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 &cfg.content,
                 &cfg.content_from,
             )?;
-            Some(FileCreateFixer::new(target, source, cfg.create_parents))
+            Some(
+                FileCreateFixer::new(target, source, cfg.create_parents).with_applicability(
+                    cfg.applicability.unwrap_or(alint_core::Applicability::Safe),
+                ),
+            )
         }
         Some(other) => {
             return Err(Error::rule_config(

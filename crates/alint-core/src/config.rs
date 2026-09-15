@@ -556,6 +556,13 @@ pub struct FileCreateFixSpec {
     /// Whether to create intermediate directories. Defaults to true.
     #[serde(default = "default_create_parents")]
     pub create_parents: bool,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`
+    /// (creating a required file is behavior-preserving). W2 uses this to demote a
+    /// `file_create` from an untrusted remote `extends:` to `suggestion` -- its
+    /// content is third-party-authored. An extends'd ruleset may only DEMOTE; a
+    /// promotion is rejected upstream by the DSL trust gate.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 fn default_create_parents() -> bool {
@@ -588,6 +595,11 @@ pub struct FilePrependFixSpec {
     /// will be prepended. Mutually exclusive with `content`.
     #[serde(default)]
     pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes a `file_prepend` from an untrusted remote `extends:` to `suggestion`
+    /// (the header bytes are third-party-authored); demote-only, promotion refused.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -602,6 +614,11 @@ pub struct FileAppendFixSpec {
     /// will be appended. Mutually exclusive with `content`.
     #[serde(default)]
     pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes a `file_append` from an untrusted remote `extends:` to `suggestion`
+    /// (the footer bytes are third-party-authored); demote-only, promotion refused.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 /// Resolution of an `(content, content_from)` pair to a single

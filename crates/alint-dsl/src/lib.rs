@@ -92,7 +92,10 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     // `is_top: true` — the user's own top-level config may open the
     // `allow_out_of_root` escape hatch; an `extends:`'d ruleset may not (that
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
-    let mut raw = loader::load_recursive(path, &mut visiting, opts, Some(&confine_root), true)?;
+    // `&[]` trusted: the top-level config reads its OWN `trusted_extends:` inside
+    // `load_recursive` (is_top), so the seed list is empty.
+    let mut raw =
+        loader::load_recursive(path, &mut visiting, opts, Some(&confine_root), true, &[])?;
 
     // `.alint.d/*.yml` drop-ins — auto-discovered next to the
     // top-level config and merged in alphabetical order. The
@@ -122,6 +125,8 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
             opts,
             Some(&confine_root),
             true,
+            // is_top: a drop-in reads its own `trusted_extends:`, so seed empty.
+            &[],
         )?;
         raw = merge(raw, drop_in);
     }
@@ -233,6 +238,14 @@ pub(crate) struct RawConfig {
     /// `docs/design/baseline.md` §2.3.
     #[serde(default)]
     baseline: Option<std::path::PathBuf>,
+    /// `trusted_extends:` -- remote `extends:` URLs whose CONTENT-injecting fixers
+    /// (`replace` / `file_create` / `file_prepend` / `file_append`) are honored at
+    /// their declared tier instead of demoted to a suggestion. Top-level-only (the
+    /// loader rejects a value from any `extends:`'d / nested config): a remote must
+    /// never be able to allowlist itself. Consumed at load (it gates the demotion
+    /// there), so it is not carried onto `Config`. See auto-fix.md 5.5.
+    #[serde(default)]
+    trusted_extends: Vec<String>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -589,6 +602,74 @@ fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
     Ok(())
 }
 
+/// The `fix:` ops that write ruleset-authored BYTES into a file: a regex
+/// `replace`ment template, or the inline `content:` / `content_from:` of a
+/// create / prepend / append. These are the content-injection surface a remote
+/// `extends:` could abuse, so they demote to `suggestion` from an untrusted remote
+/// (auto-fix.md 5.5). The fixed-behavior ops (the hygiene normalizers,
+/// `file_remove`, `file_rename`, `chmod`) carry no ruleset bytes and are honored at
+/// their own tier from any source; a destructive one like `file_remove` is already
+/// gated by its Unsafe tier, independent of source.
+pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] =
+    &["replace", "file_create", "file_prepend", "file_append"];
+
+/// Demote every content-injecting fixer in `rules` to `applicability: suggestion`
+/// (unless it already declares the stricter `suggestion` / `never`), so a remote
+/// `extends:` the user has NOT listed in `trusted_extends:` can PROPOSE a content
+/// edit but never auto-write it. Rewrites the raw `Mapping` in place, before the
+/// merge, so the built fixer carries the capped tier. Scans nested `require:`
+/// blocks too (a `for_each_dir` etc. can bury a content fixer). Mirrors the
+/// read-only [`reject_fix_promotion_in`] navigation.
+pub(crate) fn demote_content_fixers_in(rules: &mut [Mapping]) {
+    for rule in rules.iter_mut() {
+        demote_content_fixers_in_rule(rule);
+    }
+}
+
+fn demote_content_fixers_in_rule(rule: &mut Mapping) {
+    if let Some(fix) = rule
+        .get_mut("fix")
+        .and_then(serde_yaml_ng::Value::as_mapping_mut)
+    {
+        for (op, args) in fix.iter_mut() {
+            let is_content = op
+                .as_str()
+                .is_some_and(|o| CONTENT_INJECTING_FIX_OPS.contains(&o));
+            if !is_content {
+                continue;
+            }
+            let Some(args_map) = args.as_mapping_mut() else {
+                continue;
+            };
+            // Cap to `suggestion`, but never PROMOTE a stricter declared tier: a
+            // ruleset that opted its own content fix out entirely (`never`) or down
+            // to `suggestion` already stays there. A demote is one-directional.
+            let already_stricter = args_map
+                .get("applicability")
+                .and_then(serde_yaml_ng::Value::as_str)
+                .is_some_and(|a| {
+                    a.eq_ignore_ascii_case("suggestion") || a.eq_ignore_ascii_case("never")
+                });
+            if !already_stricter {
+                args_map.insert(
+                    serde_yaml_ng::Value::from("applicability"),
+                    serde_yaml_ng::Value::from("suggestion"),
+                );
+            }
+        }
+    }
+    if let Some(require) = rule
+        .get_mut("require")
+        .and_then(serde_yaml_ng::Value::as_sequence_mut)
+    {
+        for nested in require {
+            if let Some(nested_map) = nested.as_mapping_mut() {
+                demote_content_fixers_in_rule(nested_map);
+            }
+        }
+    }
+}
+
 /// Reject a spawning `kind` in `rule` OR in any of its nested `require:`
 /// specs, recursively. `for_each_dir` / `for_each_file` /
 /// `every_matching_has` carry a `require:` block of nested rules
@@ -703,6 +784,22 @@ pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -
             "`baseline:` is only allowed in the user's top-level config; \
              declaring it in an extended config ({source}) is refused because it would \
              let a ruleset choose which findings the gate suppresses"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a `trusted_extends:` in an inherited ruleset. The allowlist grants a
+/// remote's content-injecting fixers auto-apply rights, so a remote (or any
+/// non-top-level config) that could set it would allowlist ITSELF, defeating the
+/// gate. Only the user's own top-level config (and its `.alint.d/` drop-ins) may
+/// grant trust. `source` names the offending config. See auto-fix.md 5.5.
+pub fn reject_trusted_extends_in(trusted_extends: &[String], source: &str) -> Result<()> {
+    if !trusted_extends.is_empty() {
+        return Err(Error::Other(format!(
+            "`trusted_extends:` is only allowed in the user's top-level config; \
+             declaring it in an extended config ({source}) is refused because it would \
+             let a ruleset allowlist itself into auto-applying its own content fixers"
         )));
     }
     Ok(())
@@ -907,6 +1004,12 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         .collect();
     rules.extend(orphans);
 
+    // `trusted_extends:` is top-level-only -- consumed at is_top before any merge,
+    // and rejected from an extended / nested source. Concatenate defensively so a
+    // stray non-empty value still survives to the per-source rejection upstream.
+    let mut trusted_extends = a.trusted_extends;
+    trusted_extends.extend(b.trusted_extends);
+
     RawConfig {
         version,
         extends: Vec::new(),
@@ -920,6 +1023,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         nested_configs,
         allow_out_of_root,
         baseline,
+        trusted_extends,
     }
 }
 

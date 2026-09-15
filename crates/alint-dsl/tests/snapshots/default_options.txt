@@ -497,6 +497,7 @@ FileContentMatchesRule {
             source: Inline(
                 "\n// Copyright (c) 2026\n",
             ),
+            applicability: Safe,
         },
     ),
 }
@@ -538,6 +539,7 @@ FileExistsRule {
                 "root = true\n[*]\nend_of_line = lf\nindent_style = space\nindent_size = 2\n",
             ),
             create_parents: true,
+            applicability: Safe,
         },
     ),
 }
@@ -683,6 +685,7 @@ FileHeaderRule {
             source: Inline(
                 "// Copyright (c) 2026 Acme Corp\n// SPDX-License-Identifier: Apache-2.0\n",
             ),
+            applicability: Safe,
         },
     ),
 }

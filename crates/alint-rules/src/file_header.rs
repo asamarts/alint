@@ -140,7 +140,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 &file_prepend.content,
                 &file_prepend.content_from,
             )?;
-            Some(FilePrependFixer::new(source))
+            Some(
+                FilePrependFixer::new(source).with_applicability(
+                    file_prepend
+                        .applicability
+                        .unwrap_or(alint_core::Applicability::Safe),
+                ),
+            )
         }
         Some(other) => {
             return Err(Error::rule_config(

@@ -173,7 +173,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 &file_append.content,
                 &file_append.content_from,
             )?;
-            Some(FileAppendFixer::new(source))
+            Some(
+                FileAppendFixer::new(source).with_applicability(
+                    file_append
+                        .applicability
+                        .unwrap_or(alint_core::Applicability::Safe),
+                ),
+            )
         }
         Some(other) => {
             return Err(Error::rule_config(

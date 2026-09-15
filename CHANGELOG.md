@@ -23,6 +23,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (so a fix after a non-BMP character such as an emoji lands in the right place),
   and every occurrence in the file becomes one `TextEdit` in a single
   `WorkspaceEdit`, so applying the action rewrites them all at once.
+- New `trusted_extends:` top-level config key: a list of remote `extends:` URLs
+  whose content-injecting fixers (`replace` / `file_create` / `file_prepend` /
+  `file_append`) are honored at their declared tier instead of demoted to a
+  suggestion (see the security note under Changed). Use it to opt a company's
+  internal ruleset host back into auto-applying its own content fixes. Only your
+  own top-level config (or a `.alint.d/` drop-in) may grant trust; a ruleset may
+  not allowlist itself. A per-rule `applicability:` field was also added to the
+  `file_create` / `file_prepend` / `file_append` fix ops.
 
 ### Changed
 
@@ -46,6 +54,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exactly as before, and no file OUTSIDE the diff is ever modified or deleted (an
   in-scope fix may still additively create a new file, e.g. a required file, which
   is the one write the confinement model permits beyond the diff).
+- **Security / breaking:** a **content-injecting** fixer (`replace`, `file_create`,
+  `file_prepend`, `file_append`) reached through a **remote `https:// extends:`**
+  now DEMOTES to a suggestion -- it may propose an edit but no longer auto-writes
+  third-party-authored bytes into your files. Fixers from your own tree (top-level,
+  local-path / nested `extends:`) and first-party bundled rulesets are unaffected,
+  as are the fixed-behavior fixers (the hygiene normalizers, `file_remove`,
+  `file_rename`, `chmod`) from any source. Opt a specific remote back in with
+  `trusted_extends:` (above). This retroactively affects `file_create` /
+  `file_prepend` / `file_append` reached via a remote `extends:` (they previously
+  auto-applied).
 
 ### Fixed
 
