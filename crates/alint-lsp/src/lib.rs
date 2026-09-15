@@ -790,10 +790,11 @@ fn whole_document() -> Range {
 /// Convert a byte offset into `text` (valid UTF-8) to an LSP [`Position`]:
 /// 0-indexed line, and a character column counted in UTF-16 code units (the LSP
 /// default position encoding). A non-BMP scalar (e.g. an emoji) is two UTF-16
-/// units, so a byte or `char` count would misplace the edit. `'\n'` ends a line; a
-/// lone `'\r'` counts as an ordinary character (the located `replace` matches
-/// content, never a line terminator, so an edit range never straddles a `\r\n`).
-/// An offset at or past the end of `text` clamps to the final position.
+/// units, so a byte or `char` count would misplace the edit. `'\n'` ends a line and
+/// resets the column; a lone `'\r'` counts as an ordinary character. A range that
+/// spans several lines (a multi-line `replace` pattern, e.g. `(?s)foo.bar`) is
+/// handled -- start and end are converted independently. An offset at or past the
+/// end of `text` clamps to the final position.
 fn byte_offset_to_position(text: &str, byte_offset: usize) -> Position {
     let mut line: u32 = 0;
     let mut character: u32 = 0;
@@ -828,15 +829,21 @@ fn located_edits_to_workspace_edit(
     let uri = Url::from_file_path(root.join(rel)).ok()?;
     let mut text_edits = Vec::new();
     for ce in edits {
-        if let FixEdit::ReplaceRange { range, content, .. } = &ce.edit {
-            let new_text = String::from_utf8(content.clone()).ok()?;
-            let start = byte_offset_to_position(text, range.start);
-            let end = byte_offset_to_position(text, range.end);
-            text_edits.push(TextEdit {
-                range: Range::new(start, end),
-                new_text,
-            });
-        }
+        // Every located fixer today (ReplaceFixer, the only one) emits ReplaceRange.
+        // A future located fixer that emitted a whole-file edit here would have it
+        // silently dropped -- pin the invariant so that regresses LOUDLY in debug,
+        // and skip (never mis-apply) in release.
+        let FixEdit::ReplaceRange { range, content, .. } = &ce.edit else {
+            debug_assert!(false, "located edit is not a ReplaceRange: {:?}", ce.edit);
+            continue;
+        };
+        let new_text = String::from_utf8(content.clone()).ok()?;
+        let start = byte_offset_to_position(text, range.start);
+        let end = byte_offset_to_position(text, range.end);
+        text_edits.push(TextEdit {
+            range: Range::new(start, end),
+            new_text,
+        });
     }
     if text_edits.is_empty() {
         return None;
@@ -1237,6 +1244,13 @@ mod tests {
             Position::new(0, 3),
             "the emoji is two UTF-16 units, so 'b' is at character 3"
         );
+        // CRLF: '\r' counts as an ordinary character; a position after the CRLF is
+        // line 1, character 0 (so a match on the next line lands correctly).
+        let crlf = "ab\r\ncd";
+        assert_eq!(byte_offset_to_position(crlf, 2), Position::new(0, 2)); // end of line-0 text
+        assert_eq!(byte_offset_to_position(crlf, 4), Position::new(1, 0)); // 'c' after \r\n
+        // Empty text: only the origin is reachable.
+        assert_eq!(byte_offset_to_position("", 0), Position::new(0, 0));
     }
 
     #[test]
@@ -1273,11 +1287,129 @@ mod tests {
     }
 
     #[test]
+    fn located_edit_spanning_a_newline_maps_to_a_multi_line_range() {
+        // A `(?s)`-style pattern can match across a line break; the resulting
+        // `TextEdit` range must cross lines. Replace "foo\nbar" (bytes 0..7) with "X".
+        let root = repo_root();
+        let text = "foo\nbar\n";
+        let edit = CollectedEdit {
+            edit: FixEdit::ReplaceRange {
+                path: PathBuf::from("a.txt"),
+                range: 0..7,
+                content: b"X".to_vec(),
+            },
+            applicability: alint_core::Applicability::Unsafe,
+            verify: alint_core::EditVerifier::None,
+            isolation_group: None,
+        };
+        let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let te = &ws.changes.unwrap()[&uri][0];
+        assert_eq!(te.range.start, Position::new(0, 0));
+        assert_eq!(
+            te.range.end,
+            Position::new(1, 3),
+            "the range crosses into line 1, character 3 (past 'bar')"
+        );
+        assert_eq!(te.new_text, "X");
+    }
+
+    #[test]
     fn located_edits_with_no_range_edits_yield_none() {
         // A located fixer that collected nothing offers NO action (not an empty one).
         assert!(
             located_edits_to_workspace_edit(&[], "abc", Path::new("a.txt"), &repo_root()).is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn code_action_offers_the_located_replace_fix_end_to_end() {
+        // Drive the real async `code_action` for a located fixer: a genuine
+        // `file_content_forbidden` + `replace` session, an open buffer with the
+        // forbidden pattern, and a diagnostic over it. The response must carry a
+        // quick-fix whose `WorkspaceEdit` replaces the match with a UTF-16 `TextEdit`.
+        // Gates the routing (`collects_located_edits` branch) + state handling that
+        // the mapper unit tests don't reach. `code_action` touches only `self.state`
+        // (never `self.client`), so it runs without a live LSP socket.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 2), Position::new(0, 3)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-todo".to_string(),
+            message: "forbidden".to_string(),
+            line: Some(1),
+            column: Some(3),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), "x TODO\n".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 2), Position::new(0, 3)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        assert_eq!(
+            resp.len(),
+            1,
+            "exactly one quick-fix for the replace violation"
+        );
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction, not a Command");
+        };
+        let ws = action
+            .edit
+            .as_ref()
+            .expect("the action carries a workspace edit");
+        let changes = ws
+            .changes
+            .as_ref()
+            .expect("a located edit uses the changes map");
+        let tes = &changes[&uri];
+        assert_eq!(tes.len(), 1, "one TextEdit for the single TODO");
+        assert_eq!(tes[0].new_text, "DONE");
+        // "x TODO": 'x'=0, ' '=1, "TODO" occupies characters 2..6.
+        assert_eq!(tes[0].range.start, Position::new(0, 2));
+        assert_eq!(tes[0].range.end, Position::new(0, 6));
     }
 
     #[test]
