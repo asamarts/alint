@@ -1746,17 +1746,36 @@ impl Engine {
                         outcome,
                         dry_run,
                     );
-                    // A batch that nets NO byte change is a no-op: an edit
-                    // `apply_file_edits` marked applied was an identity rewrite (its
-                    // replacement equalled the spanned bytes, or the batch's changes
-                    // cancelled). Report it as a skip, not `Applied`, so the byte-
-                    // level fixpoint (which converges on "a pass applied nothing")
-                    // does not read a no-op as progress and re-walk forever.
-                    // `ReplaceFixer` guards against emitting such an edit, so this
-                    // only bites a future located fixer or the engine test fixture.
-                    let status = if !batch_changed && matches!(status, FixStatus::Applied(_)) {
+                    // Per-EDIT discriminators derived from the edit's byte range.
+                    // `range_key` distinguishes two edits on ONE file: without it
+                    // they collapse to the same `violation_key` (`(rule_id, path)`,
+                    // Phase-2 pre-req 1), letting an `Applied` for one node lock-mask
+                    // a standing `Skipped` for another across fixpoint passes. Keying
+                    // each item by its range keeps them distinct. `is_identity` flags
+                    // a no-op rewrite (its replacement equals the bytes it spans).
+                    // `ReplaceFixer` emits disjoint, non-identity ranges, so both are
+                    // dormant for `replace`; they arm for a multi-node located fixer
+                    // (Phase-2 `set_value`).
+                    let (range_key, is_identity) = match &edit.collected.edit {
+                        FixEdit::ReplaceRange { range, content, .. } => (
+                            format!("{}..{}", range.start, range.end),
+                            original
+                                .get(range.clone())
+                                .is_some_and(|orig| orig == content.as_slice()),
+                        ),
+                        _ => (String::new(), false),
+                    };
+                    // A PER-EDIT identity rewrite is a no-op even when OTHER edits in
+                    // the batch changed the file: report it as a skip, not `Applied`,
+                    // so the byte-level fixpoint (converges on "a pass applied
+                    // nothing") does not read a no-op as progress and re-walk
+                    // forever. The old whole-file `batch_changed` check missed a
+                    // MIXED real+identity batch (Phase-2 pre-req 2); the per-edit
+                    // check subsumes it -- disjoint edits cannot cancel, so an
+                    // unchanged file means every edit was an identity.
+                    let status = if is_identity && matches!(status, FixStatus::Applied(_)) {
                         FixStatus::Skipped(format!(
-                            "{}: located edit left the file unchanged",
+                            "{}: located edit at {range_key} left its span unchanged",
                             file.display()
                         ))
                     } else {
@@ -1767,10 +1786,11 @@ impl Engine {
                         .or_default()
                         .push(FixItem {
                             violation: Violation::new(format!(
-                                "located edit in {}",
+                                "located edit at {range_key} in {}",
                                 file.display()
                             ))
-                            .with_path(file.clone()),
+                            .with_path(file.clone())
+                            .with_baseline_key(range_key),
                             status,
                         });
                 }
@@ -2654,6 +2674,144 @@ mod tests {
 
     fn located_rule() -> Box<dyn Rule> {
         located_rule_with(Applicability::Safe)
+    }
+
+    // ---- Fixture for a MIXED real+identity located batch (Phase-2 pre-reqs) ----
+    //
+    // Two DISJOINT, non-grouped edits so both apply: one changes bytes, one is an
+    // identity rewrite (its replacement equals the bytes it spans). Exercises the
+    // per-edit no-op downgrade (pre-req 2) and the per-edit range keying (pre-req 1)
+    // that arm for a multi-node located fixer (Phase-2 `set_value`); `ReplaceFixer`
+    // triggers neither.
+    #[derive(Debug)]
+    struct MixedBatchFixture;
+
+    impl crate::rule::Fixer for MixedBatchFixture {
+        fn describe(&self) -> String {
+            "fixture mixed-batch located fixer".to_string()
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            Ok(FixOutcome::Skipped("unused".to_string()))
+        }
+        fn collects_located_edits(&self) -> bool {
+            true
+        }
+        fn collect_edits(
+            &self,
+            _violations: &[Violation],
+            file: &Path,
+            _bytes: &[u8],
+            _root: &Path,
+        ) -> Vec<crate::rule::CollectedEdit> {
+            let mk =
+                move |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range,
+                        content: content.as_bytes().to_vec(),
+                    },
+                    applicability: Applicability::Safe,
+                    verify: crate::rule::EditVerifier::None,
+                    isolation_group: None, // disjoint + independent -> BOTH apply
+                };
+            // On "01234567": 0..1 -> "X" CHANGES a byte; 4..5 -> "4" is an IDENTITY
+            // rewrite (file[4] == '4'). apply_file_edits applies both (disjoint, no
+            // group), so the file DID change -- the old whole-file `batch_changed`
+            // reported the identity edit `Applied` too; the per-edit check skips it.
+            vec![mk(0..1, "X"), mk(4..5, "4")]
+        }
+    }
+
+    #[derive(Debug)]
+    struct MixedBatchRule {
+        id: String,
+        scope: Scope,
+        fixer: MixedBatchFixture,
+    }
+
+    impl Rule for MixedBatchRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            Some(&self.scope)
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let mut out = Vec::new();
+            for entry in ctx.index.files() {
+                if self.scope.matches(&entry.path, ctx.index) {
+                    out.push(Violation::new("mixed hit").with_path(entry.path.clone()));
+                }
+            }
+            Ok(out)
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    #[test]
+    fn located_mixed_real_and_identity_batch_downgrades_only_the_identity_edit() {
+        // Phase-2 pre-req 2 (per-edit no-op downgrade): a batch mixing a REAL edit
+        // with an IDENTITY edit must report the real one Applied and the identity
+        // one Skipped. The old whole-file `batch_changed` reported BOTH Applied
+        // because the file DID change (only the real edit moved a byte). Pre-req 1
+        // (per-edit range keying): the two items must carry DISTINCT `violation_key`s
+        // so an Applied for one node cannot lock-mask a standing Skipped for another.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let rule: Box<dyn Rule> = Box::new(MixedBatchRule {
+            id: "mixed".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            fixer: MixedBatchFixture,
+        });
+        let report = Engine::new(vec![rule], RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        // The real edit landed; the identity edit changed nothing.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        let applied = items
+            .iter()
+            .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+            .count();
+        let skipped = items
+            .iter()
+            .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+            .count();
+        assert_eq!(
+            applied, 1,
+            "only the real edit is Applied; the identity edit is a per-edit no-op"
+        );
+        assert_eq!(skipped, 1, "the identity edit is downgraded to Skipped");
+        // Pre-req 1: two edits on one file get DISTINCT keys (range-keyed), not a
+        // single `(rule, path)` that could lock-mask one behind the other.
+        let keys: std::collections::HashSet<String> = items
+            .iter()
+            .map(|it| Engine::violation_key("mixed", &it.violation))
+            .collect();
+        assert_eq!(
+            keys.len(),
+            2,
+            "two located edits on one file must have distinct violation_keys"
+        );
+        // The identity edit is not read as progress, so the fixpoint converges.
+        assert!(
+            !report.non_convergent,
+            "a mixed real+identity batch converges (the identity edit is a no-op)"
+        );
     }
 
     #[test]
