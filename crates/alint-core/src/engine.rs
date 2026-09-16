@@ -1472,6 +1472,28 @@ impl Engine {
             // Phase-0 fixer opts in, so this branch is never entered here.
             if fixer.is_some_and(Fixer::collects_located_edits) {
                 let f = fixer.expect("guarded by is_some_and above");
+                // `--changed` BLAST-RADIUS INVARIANT (whole-phase audit, F1/LG-1): the
+                // located branch confines `--changed` PURELY via the filtered index
+                // (`pick_ctx` hands a per-file rule the changed-filtered ctx); it never
+                // consults `writes_outside_changed`. Sound ONLY while every located
+                // fixer hosts on a PER-FILE rule. A future located fixer on a
+                // `requires_full_index()` / git-tracked rule would get the FULL index
+                // under `--changed`, and its edits would splice into out-of-diff files
+                // with NO demote -- a silent blast-radius escape. `replace` (the sole
+                // located fixer) hosts on `file_content_forbidden` (per-file), and the
+                // fix-op/kind gate refuses `replace` on any other kind, so this holds
+                // today. The escape only exists UNDER `--changed` (without it there is
+                // no blast radius to escape), so the tripwire is gated on it; a real
+                // per-file located `replace` under `--changed` exercises the passing
+                // path (`located_replace_under_changed_is_confined_to_the_diff`). Pin
+                // it (docs/design/v0.17/fixpoint.md Phase-2 pre-reqs).
+                debug_assert!(
+                    self.changed_paths.is_none() || entry.rule.as_per_file().is_some(),
+                    "located fixer on non-per-file rule {:?} under `--changed`: located \
+                     confinement assumes a per-file host; wire writes_outside_changed \
+                     into the located branch before shipping such a fixer",
+                    entry.rule.id()
+                );
                 let mut by_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
                 for v in violations {
                     let Some(key) = v.path.as_deref().map(Path::to_path_buf) else {
@@ -2029,6 +2051,16 @@ impl Engine {
     /// config-chosen target), so it is treated as in-scope. Out-of-scope writes are
     /// demoted to Suggestions in the fix loop rather than applied (would widen the
     /// blast radius) or dropped silently (2b, auto-fix.md 5.7).
+    ///
+    /// SYMLINK write-through (by design, whole-phase audit F2): this judges the
+    /// LOGICAL `violation.path` (what the diff names), not the resolved physical
+    /// target [`write_atomic`] writes through to. If an in-scope path is a symlink
+    /// to an out-of-diff file, the write follows the link (`write_atomic` resolves
+    /// symlinks so the link node is preserved) and physically lands outside the
+    /// changed set. That matches how `--changed` membership is defined (git reports
+    /// logical paths) and how a fix WITHOUT `--changed` already writes through
+    /// symlinks; the demote gate is a blast-radius policy on named paths, not a
+    /// physical-containment sandbox.
     fn writes_outside_changed(
         &self,
         rule: &dyn Rule,

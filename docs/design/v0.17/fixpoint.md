@@ -231,11 +231,17 @@ an aggregation key here, NOT a termination device):
   rule B's fix on a later pass, but A does not re-emit it on the resolving pass,
   so the touched-key retain never drops it -- `fix` then reports a phantom finding
   and exits 1 on a tree `check` calls clean. After convergence the loop drops any
-  non-Applied item whose violation the final pass no longer saw. Two carve-outs
-  keep a *real* outcome: an `Applied` item is always kept (the audit trail of what
-  changed), and a genuine **write error** (a `Skipped` carrying `FIX_ERROR_PREFIX`)
-  is always kept -- it never "resolves", so the exit code must surface the I/O
-  failure regardless of the final state. (An earlier "sticky within-pass sibling"
+  non-Applied item whose violation the final pass no longer saw. ONE carve-out
+  keeps a *real* outcome: an `Applied` item is always kept (the audit trail of what
+  changed). A write error is NOT separately carved out (a follow-up audit removed
+  that carve-out): a `Skipped` carrying `FIX_ERROR_PREFIX` is kept exactly when its
+  violation is still in `final_keys`. A PERSISTENT write error (a read-only target,
+  ENOSPC) re-fires on the converged pass, so its key IS in `final_keys` -> kept ->
+  exit 1, as intended; a MOOT error whose file another rule then removed leaves
+  `final_keys` -> dropped -> exit 0, agreeing with `check`. (An "always keep" here
+  would strand a phantom I/O error on a clean tree -- the false positive
+  `reconciliation_drops_a_moot_fix_error_when_the_file_is_removed` now gates
+  against.) (An earlier "sticky within-pass sibling"
   carve-out was REMOVED after a follow-up audit: it was coarser than intended --
   it exempted every item of any rule that applied anything that pass, resurrecting
   the phantom for, e.g., a size-skip on a file another rule then deleted -- and it
@@ -312,14 +318,17 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
   rule deletes the size-skipped file; the two symlink-coalesce scenarios updated
   to the corrected exit-0-clean behaviour); the **cap-confirm standing residual**
   (`cap_confirm_preserves_a_standing_unfixable_at_the_boundary`, engine -- a real
-  unfixable survives the confirm-path reconciliation); the **write-error carve-out**
-  in reconciliation (a `FIX_ERROR_PREFIX` skip is never dropped); the **declined
+  unfixable survives the confirm-path reconciliation); a **write-error carve-out**
+  in reconciliation (a `FIX_ERROR_PREFIX` skip is never dropped) -- **SUPERSEDED**: a
+  follow-up (round-4) audit REVERSED this carve-out (a MOOT fix error is now dropped;
+  see section 7), because "always keep" stranded a phantom I/O error on a clean tree;
+  a persistent error is instead kept via `final_keys`; the **declined
   exit-code** (`fix_exit_status_maps_the_fix_contract` gains an error-level declined
   skip -> exit 1); and a **`debug_assert!(!dry_run)` at `commit_write`** so a
   future fixer that writes during the cap-confirm dry-run fails loudly.
 
 - **Known Phase-2 pre-reqs (latent, not reachable with today's single located
-  fixer `replace`).** Two coarse-grained spots must be tightened before a SECOND
+  fixer `replace`).** Three coarse-grained spots must be tightened before a SECOND
   located fixer (Phase-2 `set_value` / `remove_value` with `Structured` verifiers
   and isolation groups) ships: (1) `violation_key` uses `file_bytes: None`, so all
   located items on one file collapse to `(rule_id, path)` -- a per-match `Skipped`
@@ -327,8 +336,21 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
   by byte range. (2) the located no-op downgrade uses a per-FILE `batch_changed`,
   not a per-edit content check, so a mixed real+identity batch reports the
   identity edit as `Applied`; compare each accepted edit's content to its spanned
-  bytes. `ReplaceFixer` triggers neither (disjoint edits, no isolation group, no
-  self-matching edit emitted), so both are dormant today.
+  bytes. (3) the located branch confines `--changed` PURELY through the filtered
+  index (`pick_ctx` hands a per-file rule the changed-filtered ctx) and NEVER
+  consults `writes_outside_changed`; sound only while every located fixer hosts on
+  a PER-FILE rule. A future located fixer on a `requires_full_index()` /
+  git-tracked rule would receive the FULL index under `--changed` and splice edits
+  into out-of-diff files with no demote -- a silent blast-radius escape. A
+  `debug_assert!(changed_paths.is_none() || entry.rule.as_per_file().is_some())` in
+  the located branch (engine) pins the assumption today -- gated on `--changed`,
+  the only regime where the escape exists, and exercised on the passing path by
+  `located_replace_under_changed_is_confined_to_the_diff`; wire
+  `writes_outside_changed` (or a per-edit demote) into the located branch before
+  shipping such a fixer. `ReplaceFixer`
+  triggers none (disjoint edits, no isolation group, no self-matching edit
+  emitted, hosts on the per-file `file_content_forbidden`), so all three are
+  dormant today.
 
   The ARCHITECTURE "walk once" invariant (principles 1 and 4, and the pipeline
   invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not

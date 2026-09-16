@@ -207,6 +207,21 @@ pub(crate) fn load_recursive(
         // gate), so a remote content fixer smuggled through a `templates:` entry
         // would otherwise escape the cap (the template analogue of
         // `reject_fix_promotion_templates_in`).
+        //
+        // KNOWN RESIDUAL of this load-time cap (whole-phase audit W2-1, LOW,
+        // targeted-only; auto-fix.md 5.5). The cap keys on where the fixer CONTENT
+        // is DEFINED, not on which rule USES it: a rule from THIS untrusted remote
+        // that `extends_template:`s a template defined by a TRUSTED source (the
+        // user's own top-level config -- no bundled ruleset ships `templates:`
+        // today) acquires that template's fixer at its declared tier at `finalize`,
+        // because the trusted template is never demoted and the untrusted rule
+        // carries no INLINE fixer here to demote. Pinned by
+        // `w2_known_residual_remote_rule_instantiating_a_trusted_template`. Closing
+        // it needs the deferred fix-time-provenance approach (tag each rule's origin,
+        // demote its EFFECTIVE fixer after expansion), which the arc traded away for
+        // this simpler cap; it is bounded (needs the user to author a content-fix
+        // template, the remote to know its id/var-names, and to already `extends:`
+        // the remote), so it is documented, not closed here.
         if url.starts_with("https://") {
             let base = url.split('#').next().unwrap_or(url);
             let trusted_remote = trusted.iter().any(|t| t == base || t == url);

@@ -363,3 +363,58 @@ fn fix_changed_renames_only_in_scope_files() {
         "no out-of-diff rename target may be created"
     );
 }
+
+#[test]
+fn located_replace_under_changed_is_confined_to_the_diff() {
+    // 2b + Phase-1 located regime (whole-phase audit, F1/LG-1): the ONLY located
+    // fixer, `replace` on the per-file `file_content_forbidden`, must respect the
+    // `--changed` blast radius. Unlike whole-file fixers it is NOT gated by
+    // `writes_outside_changed`; its confinement comes entirely from the FILTERED
+    // INDEX (`pick_ctx` hands a per-file rule the changed-filtered ctx), so an
+    // out-of-diff file is never even evaluated, hence never spliced. This is the
+    // first committed test of a located fixer under `--changed`, and it exercises
+    // the located branch's `debug_assert!(changed_paths.is_none() ||
+    // as_per_file().is_some())` on the PASSING path (a real per-file host under
+    // `--changed`). `replace` defaults to Unsafe, so `--unsafe-fixes` arms it.
+    const REPLACE_CONFIG: &str = "\
+version: 1
+rules:
+  - id: no-todo
+    kind: file_content_forbidden
+    paths: \"**/*.txt\"
+    pattern: TODO
+    level: error
+    fix: { replace: { replacement: DONE } }
+";
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("in_scope.txt"), "TODO here\n").unwrap();
+    std::fs::write(root.join("out_of_diff.txt"), "TODO there\n").unwrap();
+    std::fs::write(root.join(".alint.yml"), REPLACE_CONFIG).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // Edit ONLY in_scope.txt (still contains TODO) -> it is the sole diff file.
+    std::fs::write(root.join("in_scope.txt"), "TODO here, edited\n").unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed --unsafe-fixes");
+    assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
+
+    // In-diff file: the located replace applied (TODO -> DONE).
+    assert_eq!(
+        std::fs::read_to_string(root.join("in_scope.txt")).unwrap(),
+        "DONE here, edited\n",
+        "the in-diff located replace must apply under --changed --unsafe-fixes"
+    );
+    // Out-of-diff file: never evaluated (filtered index), so its TODO survives.
+    assert_eq!(
+        std::fs::read_to_string(root.join("out_of_diff.txt")).unwrap(),
+        "TODO there\n",
+        "the out-of-diff file must NOT be spliced -- located confinement via the \
+         filtered index, independent of --unsafe-fixes"
+    );
+}

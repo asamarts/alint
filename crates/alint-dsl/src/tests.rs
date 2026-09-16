@@ -916,6 +916,53 @@ fn w2_remote_content_fixer_via_template_is_demoted() {
 }
 
 #[test]
+fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
+    // KNOWN RESIDUAL of the load-time cap (whole-phase audit W2-1, LOW,
+    // targeted-only; auto-fix.md 5.5, loader.rs demotion site). The cap demotes an
+    // untrusted remote's OWN content fixers (inline `fix:` + its own `templates:`),
+    // keying on where the CONTENT is defined. It does NOT re-examine which rule
+    // USES a fixer after template expansion, so an untrusted remote rule that
+    // `extends_template:`s a template defined by the TRUSTED top-level config
+    // acquires that (never-demoted) fixer at its declared tier -- and, through a
+    // `{{vars.*}}` hole, with attacker-chosen bytes. This test PINS the residual so
+    // it cannot drift silently: the deferred fix-time-provenance approach would
+    // close it, flipping this assert to `Some(Suggestion)` (update the docs then).
+    //
+    // The user's top-level config authors the parameterized content-fix template;
+    // the untrusted remote authors only a rule that instantiates it and fills the
+    // `{{vars.text}}` hole with its own bytes.
+    let remote = "version: 1\nrules:\n  - id: pwned\n    \
+        extends_template: user_inject\n    paths: \"*.txt\"\n    \
+        vars:\n      text: PWNED\n";
+    let top_template = "templates:\n  - id: user_inject\n    \
+        kind: file_content_forbidden\n    pattern: TODO\n    level: error\n    \
+        fix: { replace: { replacement: \"{{vars.text}}\" } }\n";
+    let cfg = load_extending(remote, top_template);
+    let rule = cfg.rules.iter().find(|r| r.id == "pwned").unwrap();
+    // NOT demoted: the trusted template's `replace` keeps its declared tier
+    // (unset -> defaults to Unsafe, auto-applies under --unsafe-fixes), not
+    // `suggestion`. If a future provenance fix demotes it, this becomes
+    // `Some(Suggestion)` -- update this test and auto-fix.md 5.5 together.
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "KNOWN RESIDUAL: a remote rule instantiating a TRUSTED template's content \
+         fixer is not demoted by the load-time cap (auto-fix.md 5.5)"
+    );
+    // And the injected bytes are the remote's own (var-hole amplification), proving
+    // this is arbitrary-byte injection, not merely triggering the user's own fixer.
+    match rule.fix.as_ref().expect("pwned carries the expanded fixer") {
+        alint_core::FixSpec::Replace { replace } => {
+            assert_eq!(
+                replace.replacement, "PWNED",
+                "the untrusted instance's `vars:` filled the trusted template's hole"
+            );
+        }
+        other => panic!("expected a Replace fixer, got {other:?}"),
+    }
+}
+
+#[test]
 fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
     // Defense-in-depth for the W2 audit's architectural risk: the demotion keys on
     // a hand-maintained SSOT (`CONTENT_INJECTING_FIX_OPS`), so a FUTURE fix op that

@@ -643,6 +643,29 @@ local-path / bundled / remote-URL) must be newly threaded through `merge()` onto
 `RuleEntry` and carried to fix time, and `trusted_extends:` is a new top-level config key. This is
 security-load-bearing work to build, not a mechanism to inherit.
 
+**Shipped design and its one known residual (load-time cap, chosen over fix-time provenance).**
+The demotion is implemented as a *load-time cap*, not the fix-time provenance the previous
+paragraph sketches: an untrusted remote's content-injecting fixers are rewritten to `suggestion`
+on the raw config during `load_recursive` -- across BOTH its `rules[]` (inline `fix:` blocks) and
+its `templates[]` (a template's `fix:` splices into its referencing rule at `finalize`, *after*
+this cap, so both are scanned) -- before any `RuleSpec` / `RuleEntry` is built. That is simpler
+than threading a four-way source tag through `merge()` to fix time, and it covers every case where
+the untrusted *content* is authored by the untrusted source. Its one residual: the cap keys on
+where the fixer content is DEFINED, not on which rule USES it. A rule from an untrusted remote that
+`extends_template:`s a template defined by a TRUSTED source (the user's own top-level config -- no
+bundled ruleset ships a `templates:` block today) acquires that template's fixer at its declared
+tier at `finalize`, because the trusted template was never demoted and the untrusted rule carried
+no inline fixer to demote. The untrusted rule then picks which of the user's files the
+(trusted-template-shaped) auto-write lands on via its host kind / scope / pattern; if the template
+exposes a `{{vars.*}}` hole in its fix content, the untrusted instance's `vars:` fill it, so the
+injected bytes can be attacker-chosen rather than the user's own. This is bounded and
+targeted-only: it needs the user to have authored a content-fix template, the remote to know that
+template's id (and var names), and the user to already `extends:` the remote -- and there is no
+public or bundled template id to target. It is pinned by
+`w2_known_residual_remote_rule_instantiating_a_trusted_template` (alint-dsl `tests.rs`); the
+deferred fix-time-provenance approach (tag each rule's origin, demote its EFFECTIVE fixer after
+template expansion) closes it, and closing it flips that test.
+
 ### 5.6 DSL, CLI, and downstream surface
 
 - **New `fix:` ops and their config surface.** Each new op declares a default applicability and
