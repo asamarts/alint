@@ -177,6 +177,13 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              trusted, root-only input; declare it in the top-level config"
         )));
     }
+    if !config.trusted_extends.is_empty() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `trusted_extends:` - it is a trusted, \
+             root-only grant (a subtree config must not allowlist a remote ruleset's \
+             content fixers); declare it in the top-level config"
+        )));
+    }
     if !config.allow_out_of_root.is_confined() {
         return Err(Error::Other(format!(
             "nested config {source} declares `allow_out_of_root:` - the out-of-root \

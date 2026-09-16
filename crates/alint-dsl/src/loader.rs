@@ -201,11 +201,18 @@ pub(crate) fn load_recursive(
         // (first-party) sources are honored at their declared tier. A remote is a
         // leaf (no nested `extends:`), so this caps exactly that source's own rules;
         // the URL matches with or without its `#sha256-` integrity fragment.
+        //
+        // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
+        // spliced into its referencing rule at `finalize` (after this per-source
+        // gate), so a remote content fixer smuggled through a `templates:` entry
+        // would otherwise escape the cap (the template analogue of
+        // `reject_fix_promotion_templates_in`).
         if url.starts_with("https://") {
             let base = url.split('#').next().unwrap_or(url);
             let trusted_remote = trusted.iter().any(|t| t == base || t == url);
             if !trusted_remote {
                 crate::demote_content_fixers_in(&mut parent.rules);
+                crate::demote_content_fixers_in(&mut parent.templates);
             }
         }
         merged = merge(merged, parent);

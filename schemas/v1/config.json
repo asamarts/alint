@@ -716,6 +716,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Literal bytes to write. Mutually exclusive with `content_from`. Pass \"\" for an empty file.",
                   "type": "string"
@@ -784,6 +793,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Bytes to insert at the start of each violating file. Mutually exclusive with `content_from`. A trailing newline is the caller's responsibility.",
                   "type": "string"
@@ -819,6 +837,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Bytes to append to each violating file. Mutually exclusive with `content_from`. A leading newline is the caller's responsibility.",
                   "type": "string"
@@ -4398,6 +4425,13 @@
       "description": "Reusable rule shapes referenced by `extends_template:` in `rules:` entries. Each template carries an `id:` and any other rule-spec fields; `{{vars.<name>}}` placeholders in those fields substitute from each instance's `vars:` map at expansion time. Templates are leaf-only - a template may not itself `extends_template:` another. Templates merge through the `extends:` chain by id, so a downstream config can override an upstream template's body.",
       "items": {
         "$ref": "#/$defs/template"
+      },
+      "type": "array"
+    },
+    "trusted_extends": {
+      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },

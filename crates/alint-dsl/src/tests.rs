@@ -895,6 +895,73 @@ fn w2_remote_file_create_is_demoted_to_suggestion() {
 }
 
 #[test]
+fn w2_remote_content_fixer_via_template_is_demoted() {
+    // Bypass vector (audit): a remote provides a content-fix TEMPLATE plus a rule
+    // that references it. The template's `fix:` block is spliced into the rule at
+    // `finalize` -- AFTER the per-source demotion -- so the cap must cover
+    // `templates:` too, or the remote content fixer auto-applies (escaping a
+    // rules-only cap). Teeth: dropping the `parent.templates` demotion in
+    // `load_recursive` makes this assert `None`.
+    let body = "version: 1\ntemplates:\n  - id: inject\n    \
+        kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    \
+        level: error\n    fix: { replace: { replacement: PWNED } }\nrules:\n  \
+        - extends_template: inject\n    id: pwned\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "pwned").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "a content fixer smuggled through a remote TEMPLATE must also be demoted"
+    );
+}
+
+#[test]
+fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
+    // Defense-in-depth for the W2 audit's architectural risk: the demotion keys on
+    // a hand-maintained SSOT (`CONTENT_INJECTING_FIX_OPS`), so a FUTURE fix op that
+    // writes ruleset bytes could be added to the engine yet forgotten here -- left
+    // un-demoted from a remote `extends:` (the class of the templates bypass this
+    // audit found). This gate forces EVERY fix op to be classified content-vs-fixed,
+    // so a new op fails the build until the call is made (and, if content, wired in).
+    use std::collections::BTreeSet;
+    // Fix ops that carry NO ruleset-authored bytes (no injection surface): honored
+    // from any source. The exhaustive complement of the content SSOT.
+    const FIXED_BEHAVIOR_FIX_OPS: &[&str] = &[
+        "file_remove",
+        "file_rename",
+        "file_trim_trailing_whitespace",
+        "file_append_final_newline",
+        "file_normalize_line_endings",
+        "file_strip_bidi",
+        "file_strip_zero_width",
+        "file_strip_bom",
+        "file_collapse_blank_lines",
+    ];
+    let content: BTreeSet<&str> = crate::CONTENT_INJECTING_FIX_OPS.iter().copied().collect();
+    let fixed: BTreeSet<&str> = FIXED_BEHAVIOR_FIX_OPS.iter().copied().collect();
+    let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+
+    assert!(
+        content.is_subset(&all),
+        "content SSOT names an unknown op: {:?}",
+        &content - &all
+    );
+    assert!(
+        content.is_disjoint(&fixed),
+        "op(s) marked BOTH content-injecting and fixed-behavior: {:?}",
+        &content & &fixed
+    );
+    let classified: BTreeSet<&str> = content.union(&fixed).copied().collect();
+    assert_eq!(
+        classified,
+        all,
+        "unclassified fix op(s) -- decide content-injecting (must demote from a \
+         remote `extends:`, add to CONTENT_INJECTING_FIX_OPS) vs fixed-behavior: {:?}",
+        &all - &classified
+    );
+}
+
+#[test]
 fn w2_trusted_extends_re_honors_a_named_remote() {
     // Listing the remote's URL in the top-level `trusted_extends:` opts it back in:
     // its content fixers are honored at their own tier (no demotion -> unset spec).
@@ -1459,6 +1526,26 @@ fn nested_allow_out_of_root_is_rejected() {
     .unwrap();
     let err = load(&root_cfg).unwrap_err();
     assert!(err.to_string().contains("allow_out_of_root"), "{err}");
+}
+
+#[test]
+fn nested_trusted_extends_is_rejected() {
+    // A nested config may not declare `trusted_extends:` -- it is a trusted,
+    // root-only grant (a subtree must not allowlist a remote ruleset's content
+    // fixers). Parallels `nested_baseline_is_rejected`; closes the silent-drop gap
+    // where the key parsed but was ignored without feedback (W2 audit).
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\ntrusted_extends: [\"https://x.example/r.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let err = load(&root_cfg).unwrap_err();
+    assert!(err.to_string().contains("trusted_extends"), "{err}");
 }
 
 #[test]
