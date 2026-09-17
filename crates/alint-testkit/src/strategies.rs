@@ -317,6 +317,19 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "rv.xml".to_string()],
         "<root>\n  <keep>1</keep>\n  <banned>x</banned>\n</root>\n".to_string(),
     );
+    // dotenv analogs. The `dotenv_path_*` kind FORCES dotenv parsing regardless
+    // of the filename, so `sv.env`/`rv.env` need not be `.env`. Flat KEY=value;
+    // the removal target is a unique key (a duplicate would decline).
+    insert_file(
+        root,
+        &[dir.clone(), "sv.env".to_string()],
+        "REGION=OLD\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.env".to_string()],
+        "KEEP=1\nBANNED=x\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -531,6 +544,31 @@ fn rule_xml_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `dotenv_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.REGION` (planted as "OLD" only in `_trig/sv.env`)
+/// to "NEW". dotenv leaves are strings, so the target is a STRING literal. Safe,
+/// so a bare `Fix` applies it -- exercising the hand-rolled dotenv resolver
+/// (re-scan the raw text -> value span -> splice -> re-parse verify).
+fn rule_dotenv_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("dsetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: dotenv_path_equals\n    paths: \"**/sv.env\"\n    path: \"$.REGION\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// A `dotenv_path_absent` rule fixed via the located `remove_value` op (Phase 2):
+/// deletes the unique `$.BANNED` key line (planted only in `_trig/rv.env`).
+/// Unsafe by default, so it is *suggested* under a bare `Fix` and *applied*
+/// under `FixUnsafe` -- exercising the dotenv whole-line removal + the tier gate.
+fn rule_dotenv_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("dremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: dotenv_path_absent\n    paths: \"**/rv.env\"\n    path: \"$.BANNED\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -638,11 +676,13 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2), HCL + XML resolvers.
+        // the located structured ops (Phase 2), HCL + XML + dotenv resolvers.
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
         rule_xml_path_equals_set_value(),
         rule_xml_path_absent_remove_value(),
+        rule_dotenv_path_equals_set_value(),
+        rule_dotenv_path_absent_remove_value(),
     ]
 }
 

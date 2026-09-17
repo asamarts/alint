@@ -6,12 +6,13 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`) and XML (`roxmltree` node/attribute ranges) are span-capable
-//! today. Every other [`Format`] returns `None`, so its `set_value` /
-//! `remove_value` declines cleanly (the violation is reported unfixed) until that
-//! format's resolver lands. This is a SAFE degradation: a `None` never corrupts
-//! bytes, and a wrong-but-parseable splice is still caught by the engine's
-//! post-edit re-verify.
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv (a
+//! hand-rolled re-scan of the raw text, since the `.env` parser keeps no spans)
+//! are span-capable today. Every other [`Format`] returns `None`, so its
+//! `set_value` / `remove_value` declines cleanly (the violation is reported
+//! unfixed) until that format's resolver lands. This is a SAFE degradation: a
+//! `None` never corrupts bytes, and a wrong-but-parseable splice is still caught
+//! by the engine's post-edit re-verify.
 //!
 //! R-CSTMAP realism: the `JSONPath` is resolved over the detached, parsed
 //! [`Value`](serde_json::Value); mapping its concrete path back to the CST node
@@ -50,6 +51,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
     match format {
         Format::Hcl => hcl::hcl_value_span(text, path),
         Format::Xml => xml::xml_value_span(text, path),
+        Format::Dotenv => dotenv::dotenv_value_span(text, path),
         _ => None,
     }
 }
@@ -68,6 +70,7 @@ pub fn resolve_removal_span(
     match format {
         Format::Hcl => hcl::hcl_removal_span(text, path),
         Format::Xml => xml::xml_removal_span(text, path),
+        Format::Dotenv => dotenv::dotenv_removal_span(text, path),
         _ => None,
     }
 }
@@ -81,6 +84,7 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
     match format {
         Format::Hcl => hcl::hcl_serialize_scalar(value),
         Format::Xml => xml::xml_serialize_scalar(value),
+        Format::Dotenv => dotenv::dotenv_serialize_scalar(value),
         _ => None,
     }
 }
@@ -567,6 +571,209 @@ mod xml {
     }
 }
 
+/// dotenv (`.env`) span resolution + value serialization.
+///
+/// The [`crate::dotenv`] parser flattens a file to `{ KEY: "value" }` of strings
+/// and keeps NO byte offsets, so this re-scans the raw text to locate a key's
+/// value / line (the "hand-rolled" resolver, vs HCL/XML's spanned CSTs). dotenv
+/// is FLAT -- a resolved path is a SINGLE `Key` -- and each key owns exactly one
+/// physical line, so `remove_value` is a whole-line delete with NONE of the
+/// nested-structure over-deletion risk the HCL/XML resolvers must guard. A key
+/// that appears MORE THAN ONCE (the parser's last-wins duplicate) collapses to
+/// one JSON key but many lines, which a single contiguous range cannot express,
+/// so the resolver DECLINES it (degrade to a Suggestion) rather than edit an
+/// ambiguous occurrence.
+mod dotenv {
+    use super::PathSeg;
+    use std::ops::Range;
+
+    /// A located key line.
+    struct Located {
+        /// The whole physical line INCLUDING its trailing newline (what
+        /// `remove_value` deletes).
+        full: Range<usize>,
+        /// The value region `set_value` overwrites.
+        value: Range<usize>,
+    }
+
+    /// The byte range of the value at `path` (what `set_value` overwrites).
+    pub(super) fn dotenv_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        locate(text, single_key(path)?).map(|l| l.value)
+    }
+
+    /// The whole-line removal span at `path` (what `remove_value` deletes).
+    pub(super) fn dotenv_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        locate(text, single_key(path)?).map(|l| l.full)
+    }
+
+    /// A dotenv path is FLAT: exactly one `Key` segment, never nested or indexed.
+    fn single_key(path: &[PathSeg]) -> Option<&str> {
+        match path {
+            [PathSeg::Key(k)] => Some(k.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Scan the raw text for the UNIQUE assignment line whose key is `name`,
+    /// mirroring [`crate::dotenv::parse`]'s key extraction (BOM strip, `export `
+    /// prefix, first `=`, trimmed key). `None` if the key is absent OR appears
+    /// more than once (ambiguous last-wins duplicate -- decline).
+    fn locate(text: &str, name: &str) -> Option<Located> {
+        // The parser strips a leading BOM before splitting into lines; mirror
+        // that and offset every span past it so ranges stay in ORIGINAL bytes.
+        let (body, base) = match text.strip_prefix('\u{feff}') {
+            Some(rest) => (rest, '\u{feff}'.len_utf8()),
+            None => (text, 0),
+        };
+        let mut found: Option<Located> = None;
+        let mut cursor = 0usize; // offset within `body`
+        for chunk in body.split_inclusive('\n') {
+            let line_start = base + cursor;
+            let full = line_start..line_start + chunk.len();
+            cursor += chunk.len();
+            // `str::lines()` content = the chunk minus its `\n` and a preceding `\r`.
+            let content = chunk
+                .strip_suffix('\n')
+                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
+            let Some(vspan) = value_span_in_line(content, name) else {
+                continue;
+            };
+            if found.is_some() {
+                return None; // a second match -> ambiguous, decline
+            }
+            found = Some(Located {
+                full,
+                value: line_start + vspan.start..line_start + vspan.end,
+            });
+        }
+        found
+    }
+
+    /// If `content` is an assignment line for key `name`, return the value region
+    /// as a range WITHIN `content`; else `None`.
+    fn value_span_in_line(content: &str, name: &str) -> Option<Range<usize>> {
+        let trimmed = content.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+        let lead = content.len() - trimmed.len();
+        // Optional `export ` prefix (only with a following space), then re-trim.
+        let (after, after_off) = match trimmed.strip_prefix("export ") {
+            Some(rest) => {
+                let r = rest.trim_start();
+                (r, "export ".len() + (rest.len() - r.len()))
+            }
+            None => (trimmed, 0),
+        };
+        let after_start = lead + after_off;
+        let eq = after.find('=')?;
+        if after[..eq].trim_end() != name {
+            return None;
+        }
+        let value_raw_start = after_start + eq + 1;
+        let value_raw = &content[value_raw_start..];
+        let (vs, ve) = value_region(value_raw)?;
+        Some(value_raw_start + vs..value_raw_start + ve)
+    }
+
+    /// The byte range (within `value_raw`, the text right after `=`) that
+    /// `set_value` overwrites, mirroring [`crate::dotenv::parse_value`]'s view of
+    /// the value: the whole quoted region for a quoted value, the trimmed token
+    /// for an unquoted one, a zero-width point for an empty value. Replacing the
+    /// WHOLE region (quotes included) lets the serializer re-decide the quoting
+    /// for the new value; a trailing comment after a quoted value is preserved.
+    fn value_region(value_raw: &str) -> Option<(usize, usize)> {
+        let v = value_raw.trim_start();
+        let vlead = value_raw.len() - v.len();
+        if let Some(rest) = v.strip_prefix('\'') {
+            // Single-quoted: literal to the next `'`. Region = the whole `'...'`.
+            let end = rest.find('\'')?;
+            Some((vlead, vlead + 1 + end + 1))
+        } else if let Some(inner) = v.strip_prefix('"') {
+            // Double-quoted: to the next UNESCAPED `"`. Region = the whole `"..."`.
+            let mut it = inner.char_indices();
+            let close = loop {
+                match it.next() {
+                    None => return None, // unterminated (declines; unreachable post-parse)
+                    Some((_, '\\')) => {
+                        it.next(); // skip the escaped char
+                    }
+                    Some((ci, '"')) => break ci,
+                    Some(_) => {}
+                }
+            };
+            Some((vlead, vlead + 1 + close + 1))
+        } else {
+            // Unquoted: an inline comment starts at ` #` (detected on the raw
+            // value, so `KEY= # c` is an empty value + a comment); the value is
+            // the trimmed token before it.
+            let cut = value_raw.find(" #").unwrap_or(value_raw.len());
+            let region = &value_raw[..cut];
+            let token = region.trim();
+            if token.is_empty() {
+                Some((0, 0)) // empty value: a zero-width insert right after `=`
+            } else {
+                let start = region.len() - region.trim_start().len();
+                Some((start, start + token.len()))
+            }
+        }
+    }
+
+    /// Serialize a scalar as a dotenv value: unquoted when it round-trips as-is,
+    /// else double-quoted with the `\n \r \t \\ \"` escapes. Declines a value
+    /// containing a control char dotenv cannot escape (only `\n \r \t` are
+    /// representable), so `set_value` degrades to a Suggestion rather than emit a
+    /// raw control byte.
+    pub(super) fn dotenv_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value;
+        let s = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            // Null has no natural dotenv literal; an object/array is not a scalar
+            // (the caller already declines it) -- decline all three.
+            Value::Null | Value::Array(_) | Value::Object(_) => return None,
+        };
+        if s.chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        {
+            return None;
+        }
+        Some(if needs_double_quoting(&s) {
+            let mut out = String::with_capacity(s.len() + 2);
+            out.push('"');
+            for c in s.chars() {
+                match c {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    other => out.push(other),
+                }
+            }
+            out.push('"');
+            out.into_bytes()
+        } else {
+            s.into_bytes()
+        })
+    }
+
+    /// Whether `s` would NOT round-trip as a bare unquoted dotenv value (so it
+    /// must be double-quoted): leading/trailing whitespace (the parser trims it),
+    /// an inline-comment ` #`, a leading quote (would start a quoted value), or a
+    /// newline / CR / tab.
+    fn needs_double_quoting(s: &str) -> bool {
+        s != s.trim()
+            || s.contains(" #")
+            || s.starts_with('\'')
+            || s.starts_with('"')
+            || s.contains('\n')
+            || s.contains('\r')
+            || s.contains('\t')
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,13 +1024,10 @@ mod tests {
         // three entry points.
         for &f in Format::ALL {
             let has_resolver = match f {
-                Format::Hcl | Format::Xml => true,
-                Format::Json
-                | Format::Yaml
-                | Format::Toml
-                | Format::Dotenv
-                | Format::Properties
-                | Format::Ini => false,
+                Format::Hcl | Format::Xml | Format::Dotenv => true,
+                Format::Json | Format::Yaml | Format::Toml | Format::Properties | Format::Ini => {
+                    false
+                }
             };
             if !has_resolver {
                 assert!(
@@ -842,6 +1046,7 @@ mod tests {
         }
         // A supported format actually resolves.
         assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
+        assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
     }
 
     // ---- XML (roxmltree spans): elements, attributes, text, siblings ----
@@ -969,5 +1174,148 @@ mod tests {
         let src = "<v>  1.0  </v>";
         let span = resolve_value_span(Format::Xml, src.as_bytes(), &[key("v")]).unwrap();
         assert_eq!(&src[span], "1.0"); // the trimmed value, not "  1.0  "
+    }
+
+    // ---- dotenv (hand-rolled re-scan; flat KEY=value) ----
+
+    fn denv_value(src: &str, k: &str) -> std::ops::Range<usize> {
+        resolve_value_span(Format::Dotenv, src.as_bytes(), &[key(k)]).unwrap()
+    }
+
+    fn denv_removal(src: &str, k: &str) -> std::ops::Range<usize> {
+        resolve_removal_span(Format::Dotenv, src.as_bytes(), &[key(k)]).unwrap()
+    }
+
+    /// Serialize `v`, splice it into `K=<here>\n`, re-parse, and return the value
+    /// the parser reads back -- the round-trip invariant `set_value` relies on.
+    fn denv_roundtrip(v: &serde_json::Value) -> serde_json::Value {
+        let repl = serialize_scalar(Format::Dotenv, v).unwrap();
+        let out = format!("K={}\n", std::str::from_utf8(&repl).unwrap());
+        crate::dotenv::parse(&out).unwrap()["K"].clone()
+    }
+
+    #[test]
+    fn dotenv_value_span_covers_unquoted_single_and_double_quoted() {
+        let src = "A=plain\nB='lit'\nC=\"esc\\n\"\n";
+        assert_eq!(&src[denv_value(src, "A")], "plain");
+        assert_eq!(&src[denv_value(src, "B")], "'lit'"); // the WHOLE quoted region
+        assert_eq!(&src[denv_value(src, "C")], "\"esc\\n\"");
+    }
+
+    #[test]
+    fn dotenv_value_span_skips_export_and_keeps_the_inline_comment() {
+        let src = "export PORT = 8080 # the port\n";
+        assert_eq!(&src[denv_value(src, "PORT")], "8080"); // token only, comment kept
+    }
+
+    #[test]
+    fn dotenv_value_span_for_an_empty_value_is_zero_width_after_equals() {
+        let src = "EMPTY=\n";
+        let span = denv_value(src, "EMPTY");
+        assert_eq!(span.start, span.end); // a zero-width insertion point
+        assert_eq!(&src[..span.start], "EMPTY=");
+    }
+
+    #[test]
+    fn dotenv_value_span_is_offset_past_a_leading_bom() {
+        let src = "\u{feff}A=hi\n";
+        assert_eq!(&src[denv_value(src, "A")], "hi");
+    }
+
+    #[test]
+    fn dotenv_set_can_drop_quotes_and_round_trips() {
+        // `'old'` -> a simple value serializes bare, so the quotes go.
+        let src = "A='old'\n";
+        let span = denv_value(src, "A");
+        let repl = serialize_scalar(Format::Dotenv, &json!("new")).unwrap();
+        let out = format!(
+            "{}{}{}",
+            &src[..span.start],
+            std::str::from_utf8(&repl).unwrap(),
+            &src[span.end..]
+        );
+        assert_eq!(out, "A=new\n");
+        assert_eq!(crate::dotenv::parse(&out).unwrap()["A"], json!("new"));
+    }
+
+    #[test]
+    fn dotenv_removal_span_takes_the_whole_line_with_its_newline() {
+        let src = "A=1\nDROP=2\nB=3\n";
+        assert_eq!(&src[denv_removal(src, "DROP")], "DROP=2\n");
+    }
+
+    #[test]
+    fn dotenv_removal_span_on_the_last_line_without_a_newline() {
+        let src = "A=1\nDROP=2";
+        let span = denv_removal(src, "DROP");
+        assert_eq!(&src[span.clone()], "DROP=2");
+        let out = format!("{}{}", &src[..span.start], &src[span.end..]);
+        assert_eq!(out, "A=1\n"); // A=1 (and its newline) survive
+    }
+
+    #[test]
+    fn dotenv_removal_span_handles_crlf_and_preserves_a_leading_bom() {
+        let src = "\u{feff}A=1\r\nDROP=2\r\n";
+        let span = denv_removal(src, "DROP");
+        assert_eq!(&src[span.clone()], "DROP=2\r\n"); // the whole CRLF line
+        let out = format!("{}{}", &src[..span.start], &src[span.end..]);
+        assert_eq!(out, "\u{feff}A=1\r\n"); // BOM + first line intact
+    }
+
+    #[test]
+    fn dotenv_declines_a_duplicate_key_for_both_set_and_remove() {
+        // A last-wins duplicate collapses to one JSON key but two lines: one
+        // contiguous range can't express it, so decline (degrade to Suggestion).
+        let src = "K=1\nK=2\n";
+        assert!(resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("K")]).is_none());
+        assert!(resolve_removal_span(Format::Dotenv, src.as_bytes(), &[key("K")]).is_none());
+    }
+
+    #[test]
+    fn dotenv_declines_a_nested_or_indexed_path() {
+        let src = "A=1\n";
+        assert!(
+            resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("A"), key("B")]).is_none()
+        );
+        assert!(resolve_value_span(Format::Dotenv, src.as_bytes(), &[idx(0)]).is_none());
+    }
+
+    #[test]
+    fn dotenv_serialize_quotes_only_when_needed() {
+        let b = |v: &serde_json::Value| serialize_scalar(Format::Dotenv, v).unwrap();
+        assert_eq!(b(&json!("plain")), b"plain"); // simple -> bare
+        assert_eq!(b(&json!("a b")), b"a b"); // interior space -> bare
+        assert_eq!(b(&json!("q\"x")), b"q\"x"); // interior quote -> bare (literal)
+        assert_eq!(b(&json!(" pad ")), b"\" pad \""); // edge ws -> quote
+        assert_eq!(b(&json!("a #c")), b"\"a #c\""); // ` #` comment marker -> quote
+        assert_eq!(b(&json!("'x")), b"\"'x\""); // leading quote -> quote
+        assert_eq!(b(&json!("l1\nl2")), b"\"l1\\nl2\""); // newline -> quote + escape
+        assert_eq!(b(&json!("a\tb")), b"\"a\\tb\""); // tab -> quote + escape
+    }
+
+    #[test]
+    fn dotenv_serialize_round_trips_tricky_values() {
+        for v in [
+            json!("plain"),
+            json!("a b"),
+            json!("q\"x"),     // interior quote, bare
+            json!(" pad "),    // edge whitespace
+            json!("a #c"),     // inline-comment marker
+            json!("'quoted'"), // leading single quote
+            json!("\"dq\""),   // leading double quote
+            json!("back\\slash"),
+            json!("l1\nl2\r\n"), // newlines + CR
+            json!("tab\tsep"),
+            json!(""), // empty
+            json!("#leading-hash-no-space"),
+        ] {
+            assert_eq!(denv_roundtrip(&v), v, "value did not round-trip: {v:?}");
+        }
+    }
+
+    #[test]
+    fn dotenv_serialize_declines_an_unescapable_control_char() {
+        assert!(serialize_scalar(Format::Dotenv, &json!("a\u{0}b")).is_none()); // NUL
+        assert!(serialize_scalar(Format::Dotenv, &json!("a\u{1b}b")).is_none()); // ESC
     }
 }
