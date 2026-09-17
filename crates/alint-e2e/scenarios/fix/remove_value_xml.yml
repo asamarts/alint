@@ -1,0 +1,39 @@
+name: remove_value deletes an XML element line, keeping its siblings
+tags: [fix, xml_path_absent, remove_value, xml]
+
+# `remove_value` deletes the whole `<debug>..</debug>` element. Because it owns
+# its physical line, the line (and its trailing newline) go too, leaving the
+# sibling `<keep>` and the indentation intact. `remove_value` is Unsafe by
+# default; this rule promotes it to `safe` so a bare `fix` applies.
+
+given:
+  tree:
+    config.xml: |
+      <config>
+        <debug>true</debug>
+        <keep>1</keep>
+      </config>
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: xml_path_absent
+        paths: "**/*.xml"
+        path: "$.config.debug"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: config.xml}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  config.xml: |
+    <config>
+      <keep>1</keep>
+    </config>

@@ -6,21 +6,24 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! Only HCL is span-capable today (`hcl::edit`, a re-export of `hcl-edit`).
-//! Every other [`Format`] returns `None`, so its `set_value` / `remove_value`
-//! declines cleanly (the violation is reported unfixed) until that format's
-//! resolver lands. This is a SAFE degradation: a `None` never corrupts bytes.
+//! HCL (`hcl::edit`) and XML (`roxmltree` node/attribute ranges) are span-capable
+//! today. Every other [`Format`] returns `None`, so its `set_value` /
+//! `remove_value` declines cleanly (the violation is reported unfixed) until that
+//! format's resolver lands. This is a SAFE degradation: a `None` never corrupts
+//! bytes, and a wrong-but-parseable splice is still caught by the engine's
+//! post-edit re-verify.
 //!
 //! R-CSTMAP realism: the `JSONPath` is resolved over the detached, parsed
 //! [`Value`](serde_json::Value); mapping its concrete path back to the CST node
-//! is done by navigating leaf attributes, unlabeled blocks, LABELED blocks (the
-//! labels consume the matching path segments, so `resource "t" "n"` is reached
-//! by `resource.t.n`), and OBJECT-valued attributes (`x = { a = 1 }`, `x.a`).
-//! Where that mapping is not 1:1 -- a repeated block, an attribute/block key
-//! clash, a quoted object key -- the resolver returns `None` rather than guess,
-//! so an ambiguous edit degrades to a Suggestion instead of splicing the wrong
-//! span. Array indices and removal of an object member (comma surgery) are not
-//! yet resolved (they decline).
+//! is per-format. HCL navigates leaf attributes, unlabeled blocks, LABELED
+//! blocks (the labels consume the matching path segments, so `resource "t" "n"`
+//! is reached by `resource.t.n`), and OBJECT-valued attributes (`x = { a = 1 }`,
+//! `x.a`). XML navigates child elements (a repeated same-name set is an array
+//! reached by index, `item[1]`), `@attr` attributes, and leaf text. Where the
+//! mapping is not 1:1 -- a repeated HCL block, an attribute/block key clash, a
+//! quoted key, an XML mixed/empty element -- the resolver returns `None` rather
+//! than guess, so an ambiguous edit degrades to a Suggestion. HCL object-member
+//! removal + array indices, and XML mixed-content set, are not yet resolved.
 
 use crate::structured_format::Format;
 use std::ops::Range;
@@ -46,6 +49,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Hcl => hcl::hcl_value_span(text, path),
+        Format::Xml => xml::xml_value_span(text, path),
         _ => None,
     }
 }
@@ -63,6 +67,7 @@ pub fn resolve_removal_span(
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Hcl => hcl::hcl_removal_span(text, path),
+        Format::Xml => xml::xml_removal_span(text, path),
         _ => None,
     }
 }
@@ -75,6 +80,7 @@ pub fn resolve_removal_span(
 pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec<u8>> {
     match format {
         Format::Hcl => hcl::hcl_serialize_scalar(value),
+        Format::Xml => xml::xml_serialize_scalar(value),
         _ => None,
     }
 }
@@ -292,6 +298,197 @@ mod hcl {
                 '%' if chars.peek() == Some(&'{') => out.push_str("%%"),
                 c if c.is_control() => {
                     let _ = write!(out, "\\u{:04X}", c as u32);
+                }
+                other => out.push(other),
+            }
+        }
+        out
+    }
+}
+
+/// XML span resolution + value serialization over `roxmltree` node / attribute
+/// byte ranges (the `positions` feature, on by default). `set_value` replaces a
+/// leaf element's text or an attribute's value; `remove_value` deletes a whole
+/// element or an attribute. Repeated same-name child elements (which the parse
+/// maps to a JSON array) are reached by index (`items.item[0]`). Namespaces are
+/// flattened to local names, matching `Format::parse`.
+mod xml {
+    use super::PathSeg;
+    use roxmltree::{Document, Node};
+    use std::ops::Range;
+
+    /// A resolved XML target.
+    struct XmlTarget {
+        /// The value span `set_value` overwrites: a leaf element's text, or an
+        /// attribute's value. `None` for an empty / mixed element (no single text
+        /// span to replace; the caller declines a non-scalar anyway).
+        value_span: Option<Range<usize>>,
+        /// The node span `remove_value` deletes: the element (`<x>..</x>`) or the
+        /// attribute (`name="value"`).
+        removal_span: Range<usize>,
+        /// Whether `removal_span` is an attribute (trim one leading space) versus
+        /// an element (line-ownership widening).
+        is_attribute: bool,
+    }
+
+    pub(super) fn xml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let doc = Document::parse(text).ok()?;
+        resolve(&doc, path)?.value_span
+    }
+
+    pub(super) fn xml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let doc = Document::parse(text).ok()?;
+        let target = resolve(&doc, path)?;
+        if target.is_attribute {
+            // ` name="value"` -> also drop the single leading space separating it
+            // from the previous attribute or the tag name.
+            let start = target.removal_span.start;
+            let trim_space = start > 0 && text.as_bytes().get(start - 1) == Some(&b' ');
+            Some((if trim_space { start - 1 } else { start })..target.removal_span.end)
+        } else {
+            Some(element_line_span(text, target.removal_span))
+        }
+    }
+
+    /// Widen an element's `<x>..</x>` span to its whole physical line when it
+    /// OWNS the line (only whitespace before and after) -- otherwise remove just
+    /// the element (it shares a line with a sibling or its parent's tags).
+    fn element_line_span(text: &str, span: Range<usize>) -> Range<usize> {
+        let bytes = text.as_bytes();
+        let line_start = bytes[..span.start]
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1);
+        let line_end = bytes[span.end..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(bytes.len(), |i| span.end + i + 1);
+        let before = &text[line_start..span.start];
+        let after = &text[span.end..line_end];
+        if before.chars().all(char::is_whitespace)
+            && after.trim_matches(char::is_whitespace).is_empty()
+        {
+            line_start..line_end
+        } else {
+            span
+        }
+    }
+
+    /// Navigate the parsed doc by `path`; `path[0]` is the root element's tag.
+    fn resolve(doc: &Document, path: &[PathSeg]) -> Option<XmlTarget> {
+        let (seg, rest) = path.split_first()?;
+        let PathSeg::Key(name) = seg else {
+            return None;
+        };
+        let root = doc.root_element();
+        if root.tag_name().name() != name {
+            return None;
+        }
+        resolve_in_element(root, rest)
+    }
+
+    fn resolve_in_element(elem: Node, path: &[PathSeg]) -> Option<XmlTarget> {
+        let Some((seg, rest)) = path.split_first() else {
+            // The path ends at this element: set -> its text; remove -> the element.
+            return Some(XmlTarget {
+                value_span: text_span(elem),
+                removal_span: elem.range(),
+                is_attribute: false,
+            });
+        };
+        match seg {
+            // The mixed-element text pseudo-key: `set` replaces it. (Removing
+            // `#text` is not meaningful, but a removal span is filled for totality.)
+            PathSeg::Key(k) if k == "#text" => {
+                if !rest.is_empty() {
+                    return None;
+                }
+                let span = text_span(elem)?;
+                Some(XmlTarget {
+                    value_span: Some(span.clone()),
+                    removal_span: span,
+                    is_attribute: false,
+                })
+            }
+            // `@name` -> an attribute; it cannot be navigated past.
+            PathSeg::Key(k) if k.starts_with('@') => {
+                if !rest.is_empty() {
+                    return None;
+                }
+                let attr = elem.attributes().find(|a| a.name() == &k[1..])?;
+                Some(XmlTarget {
+                    value_span: Some(attr.range_value()),
+                    removal_span: attr.range(),
+                    is_attribute: true,
+                })
+            }
+            // A child element by tag name. A single child is navigated directly; a
+            // repeated same-name set (an array) needs the next segment as its index.
+            PathSeg::Key(k) => {
+                let children: Vec<Node> = elem
+                    .children()
+                    .filter(Node::is_element)
+                    .filter(|c| c.tag_name().name() == k)
+                    .collect();
+                match children.as_slice() {
+                    [] => None,
+                    [only] => resolve_in_element(*only, rest),
+                    many => {
+                        let (idx, sub) = rest.split_first()?;
+                        let PathSeg::Index(i) = idx else {
+                            return None;
+                        };
+                        resolve_in_element(*many.get(*i)?, sub)
+                    }
+                }
+            }
+            PathSeg::Index(_) => None,
+        }
+    }
+
+    /// The byte range of an element's text content (its single text child).
+    /// `None` for an empty element, or one whose text is split by child elements
+    /// (mixed content -- a partial text span is ambiguous, so decline).
+    fn text_span(elem: Node) -> Option<Range<usize>> {
+        if elem.children().any(|c| c.is_element()) {
+            return None; // mixed content
+        }
+        let mut texts = elem.children().filter(Node::is_text);
+        let first = texts.next()?;
+        if texts.next().is_some() {
+            return None; // multiple text nodes
+        }
+        Some(first.range())
+    }
+
+    /// Serialize a scalar as XML character data, entity-escaping the SUPERSET
+    /// `& < > "` -- valid in BOTH element text and double-quoted attribute values,
+    /// so no context threading is needed -- plus control chars as `&#xN;`. (A `"`
+    /// in element text becomes `&quot;`: valid, if slightly noisy.)
+    pub(super) fn xml_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value;
+        let raw = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Null => String::new(),
+            Value::Array(_) | Value::Object(_) => return None,
+        };
+        Some(xml_escape(&raw).into_bytes())
+    }
+
+    fn xml_escape(s: &str) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                '\t' | '\n' | '\r' => out.push(c),
+                c if c.is_control() => {
+                    let _ = write!(out, "&#x{:X};", c as u32);
                 }
                 other => out.push(other),
             }
@@ -537,11 +734,10 @@ mod tests {
         // three entry points.
         for &f in Format::ALL {
             let has_resolver = match f {
-                Format::Hcl => true,
+                Format::Hcl | Format::Xml => true,
                 Format::Json
                 | Format::Yaml
                 | Format::Toml
-                | Format::Xml
                 | Format::Dotenv
                 | Format::Properties
                 | Format::Ini => false,
@@ -561,7 +757,87 @@ mod tests {
                 );
             }
         }
-        // The sole supported format actually resolves.
+        // A supported format actually resolves.
         assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
+    }
+
+    // ---- XML (roxmltree spans): elements, attributes, text, siblings ----
+
+    fn idx(i: usize) -> PathSeg {
+        PathSeg::Index(i)
+    }
+
+    #[test]
+    fn xml_value_span_resolves_element_text_and_attribute() {
+        let src = "<config version=\"1.0\"><name>old</name></config>";
+        let text =
+            resolve_value_span(Format::Xml, src.as_bytes(), &[key("config"), key("name")]).unwrap();
+        assert_eq!(&src[text], "old");
+        let attr = resolve_value_span(
+            Format::Xml,
+            src.as_bytes(),
+            &[key("config"), key("@version")],
+        )
+        .unwrap();
+        assert_eq!(&src[attr], "1.0"); // the value INSIDE the quotes
+    }
+
+    #[test]
+    fn xml_value_span_resolves_a_sibling_by_index() {
+        // R-CSTMAP: repeated same-name children map to a JSON array; `item[1]`
+        // must select the SECOND element's text, not the first.
+        let src = "<items><item>a</item><item>b</item></items>";
+        let span = resolve_value_span(
+            Format::Xml,
+            src.as_bytes(),
+            &[key("items"), key("item"), idx(1)],
+        )
+        .unwrap();
+        assert_eq!(&src[span], "b");
+    }
+
+    #[test]
+    fn xml_value_span_declines_mixed_and_empty() {
+        // Mixed content (text split by a child element) and an empty element have
+        // no single text span -> decline.
+        assert!(resolve_value_span(Format::Xml, b"<a>text<b/>more</a>", &[key("a")]).is_none());
+        assert!(resolve_value_span(Format::Xml, b"<a></a>", &[key("a")]).is_none());
+    }
+
+    #[test]
+    fn xml_removal_span_removes_element_and_attribute() {
+        // An element on its own line -> the whole line.
+        let src = "<c>\n  <drop>x</drop>\n  <keep>1</keep>\n</c>\n";
+        let span =
+            resolve_removal_span(Format::Xml, src.as_bytes(), &[key("c"), key("drop")]).unwrap();
+        let mut out = src.to_string();
+        out.replace_range(span, "");
+        assert_eq!(out, "<c>\n  <keep>1</keep>\n</c>\n");
+        // An inline element -> just the element (siblings on the line survive).
+        let src2 = "<c><drop>x</drop><keep>1</keep></c>";
+        let span2 =
+            resolve_removal_span(Format::Xml, src2.as_bytes(), &[key("c"), key("drop")]).unwrap();
+        assert_eq!(&src2[span2], "<drop>x</drop>");
+        // An attribute -> the attribute plus its leading space.
+        let src3 = "<c drop=\"x\" keep=\"1\"/>";
+        let span3 =
+            resolve_removal_span(Format::Xml, src3.as_bytes(), &[key("c"), key("@drop")]).unwrap();
+        assert_eq!(&src3[span3], " drop=\"x\"");
+    }
+
+    #[test]
+    fn xml_serialize_escapes_entities_and_controls() {
+        assert_eq!(
+            serialize_scalar(Format::Xml, &json!("a & b < c > d \" e")).unwrap(),
+            "a &amp; b &lt; c &gt; d &quot; e".as_bytes()
+        );
+        assert_eq!(
+            serialize_scalar(Format::Xml, &json!("x\u{0}y")).unwrap(),
+            "x&#x0;y".as_bytes()
+        );
+        assert_eq!(
+            serialize_scalar(Format::Xml, &json!(8080)).unwrap(),
+            b"8080"
+        );
     }
 }
