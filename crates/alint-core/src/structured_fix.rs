@@ -85,6 +85,20 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
     }
 }
 
+/// Whether `format`'s parse maps every leaf value to a STRING (XML, dotenv,
+/// properties, INI -- none carry native numbers/booleans). On such a format a
+/// non-string `equals` (`equals: 8080`) can never match the parsed string, so
+/// the `*_path_equals` rule is unsatisfiable and `set_value` can never help. The
+/// fixer's `can_fix` consults this so `check` does not promise an auto-fix that
+/// `fix` will always decline (the `mark_fixability` / fixable-accuracy contract).
+#[must_use]
+pub fn format_leaves_are_strings(format: Format) -> bool {
+    matches!(
+        format,
+        Format::Xml | Format::Dotenv | Format::Properties | Format::Ini
+    )
+}
+
 /// HCL span resolution + value serialization over the `hcl::edit` CST.
 mod hcl {
     use super::PathSeg;
@@ -250,12 +264,18 @@ mod hcl {
     }
 
     /// Whether the bytes from an attribute's end to the line end are only
-    /// whitespace, or whitespace then a `#` / `//` line comment -- i.e. the
-    /// attribute owns the rest of its line. A `}` (single-line block close) or
-    /// any other token returns `false`.
+    /// whitespace, or whitespace then a trailing comment -- i.e. the attribute
+    /// owns the rest of its line. A `}` (single-line block close) or any other
+    /// token returns `false`. A `/* .. */` block comment counts ONLY when it
+    /// closes on this same line (the tail ends with `*/`); a multi-line block
+    /// comment's tail would not end with `*/`, so removal stays conservative
+    /// (attribute-span only) and never splits the comment.
     fn line_tail_is_blank_or_comment(after: &str) -> bool {
         let tail = after.trim_matches(char::is_whitespace);
-        tail.is_empty() || tail.starts_with('#') || tail.starts_with("//")
+        tail.is_empty()
+            || tail.starts_with('#')
+            || tail.starts_with("//")
+            || (tail.starts_with("/*") && tail.ends_with("*/"))
     }
 
     /// Serialize a scalar `Value` as HCL bytes. Strings are quoted with HCL
@@ -324,8 +344,11 @@ mod xml {
         /// span to replace; the caller declines a non-scalar anyway).
         value_span: Option<Range<usize>>,
         /// The node span `remove_value` deletes: the element (`<x>..</x>`) or the
-        /// attribute (`name="value"`).
-        removal_span: Range<usize>,
+        /// attribute (`name="value"`). `None` when the target cannot be removed in
+        /// place -- the document ROOT element, where deleting it would empty the
+        /// file to malformed XML that the `Absent` re-verify cannot catch (an
+        /// empty document parses as `{}`).
+        removal_span: Option<Range<usize>>,
         /// Whether `removal_span` is an attribute (trim one leading space) versus
         /// an element (line-ownership widening).
         is_attribute: bool,
@@ -339,14 +362,15 @@ mod xml {
     pub(super) fn xml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
         let doc = Document::parse(text).ok()?;
         let target = resolve(&doc, path)?;
+        let removal = target.removal_span?;
         if target.is_attribute {
             // ` name="value"` -> also drop the single leading space separating it
             // from the previous attribute or the tag name.
-            let start = target.removal_span.start;
+            let start = removal.start;
             let trim_space = start > 0 && text.as_bytes().get(start - 1) == Some(&b' ');
-            Some((if trim_space { start - 1 } else { start })..target.removal_span.end)
+            Some((if trim_space { start - 1 } else { start })..removal.end)
         } else {
-            Some(element_line_span(text, target.removal_span))
+            Some(element_line_span(text, removal))
         }
     }
 
@@ -389,10 +413,15 @@ mod xml {
 
     fn resolve_in_element(elem: Node, path: &[PathSeg]) -> Option<XmlTarget> {
         let Some((seg, rest)) = path.split_first() else {
-            // The path ends at this element: set -> its text; remove -> the element.
+            // The path ends at this element: set -> its text; remove -> the
+            // element, UNLESS it is the document ROOT (its parent is not an
+            // element). Deleting the root would empty the file to malformed XML,
+            // which the Absent re-verify cannot catch (an empty doc parses as
+            // `{}`), so decline removal there (-> Suggestion).
+            let removable = elem.parent().is_some_and(|p| p.is_element());
             return Some(XmlTarget {
                 value_span: text_span(elem),
-                removal_span: elem.range(),
+                removal_span: removable.then(|| elem.range()),
                 is_attribute: false,
             });
         };
@@ -406,7 +435,7 @@ mod xml {
                 let span = text_span(elem)?;
                 Some(XmlTarget {
                     value_span: Some(span.clone()),
-                    removal_span: span,
+                    removal_span: Some(span),
                     is_attribute: false,
                 })
             }
@@ -415,10 +444,19 @@ mod xml {
                 if !rest.is_empty() {
                     return None;
                 }
-                let attr = elem.attributes().find(|a| a.name() == &k[1..])?;
+                // Match the LOCAL name (the parse flattens namespaces). If more
+                // than one attribute shares the local name (`a:b` + `d:b` in
+                // different namespaces), the parse's last-wins key and a
+                // first-match here would disagree -> decline (R-CSTMAP).
+                let name = &k[1..];
+                let mut matching = elem.attributes().filter(|a| a.name() == name);
+                let attr = matching.next()?;
+                if matching.next().is_some() {
+                    return None;
+                }
                 Some(XmlTarget {
                     value_span: Some(attr.range_value()),
-                    removal_span: attr.range(),
+                    removal_span: Some(attr.range()),
                     is_attribute: true,
                 })
             }
@@ -458,13 +496,38 @@ mod xml {
         if texts.next().is_some() {
             return None; // multiple text nodes
         }
-        Some(first.range())
+        let full = first.range();
+        let raw = first.text()?;
+        // The parse TRIMS a leaf's text, so replace only the trimmed content and
+        // preserve surrounding whitespace. This offset math is valid ONLY when the
+        // node's byte range maps 1:1 to its decoded text (`full.len() ==
+        // raw.len()`): with entities (`a &amp; b`) or a CDATA section the range is
+        // longer than the decoded text, so fall back to replacing the whole node
+        // (padding not preserved -- a CDATA section becomes plain text -- but the
+        // value is correct and the result valid). A whitespace-only leaf trims to
+        // empty -> decline, like an empty element.
+        if full.len() == raw.len() {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let lead = raw.len() - raw.trim_start().len();
+            return Some(full.start + lead..full.start + lead + trimmed.len());
+        }
+        if raw.trim().is_empty() {
+            return None;
+        }
+        Some(full)
     }
 
     /// Serialize a scalar as XML character data, entity-escaping the SUPERSET
-    /// `& < > "` -- valid in BOTH element text and double-quoted attribute values,
-    /// so no context threading is needed -- plus control chars as `&#xN;`. (A `"`
-    /// in element text becomes `&quot;`: valid, if slightly noisy.)
+    /// `& < > " '` -- valid in BOTH element text and single- OR double-quoted
+    /// attribute values, so no edit-context threading is needed -- with `\t`/`\n`/
+    /// `\r` and other control chars as NUMERIC char refs (exempt from XML
+    /// attribute-value normalization, so they round-trip). NOTE: a numeric/bool
+    /// value never round-trips on a STRING-typed format (XML/dotenv/properties/INI
+    /// parse every leaf as a string, so `equals: 8080` there is unsatisfiable --
+    /// the fixer's `can_fix` reports it unfixable rather than promising a no-op).
     pub(super) fn xml_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
         use serde_json::Value;
         let raw = match value {
@@ -486,7 +549,14 @@ mod xml {
                 '<' => out.push_str("&lt;"),
                 '>' => out.push_str("&gt;"),
                 '"' => out.push_str("&quot;"),
-                '\t' | '\n' | '\r' => out.push(c),
+                '\'' => out.push_str("&#39;"),
+                // Whitespace controls as NUMERIC char refs, not raw: XML attribute-
+                // value normalization turns a raw tab/newline into a space (and CR
+                // into a newline), so a raw one would not round-trip through the
+                // re-verify; a char ref is exempt from normalization.
+                '\t' => out.push_str("&#x9;"),
+                '\n' => out.push_str("&#xA;"),
+                '\r' => out.push_str("&#xD;"),
                 c if c.is_control() => {
                     let _ = write!(out, "&#x{:X};", c as u32);
                 }
@@ -696,6 +766,19 @@ mod tests {
     }
 
     #[test]
+    fn hcl_removal_span_takes_a_same_line_block_comment_but_not_a_multiline_one() {
+        // A `/* .. */` that closes on the attribute's line is removed with it.
+        let src = "drop = 2 /* note */\nkeep = 1\n";
+        let span = resolve_removal_span(Format::Hcl, src.as_bytes(), &[key("drop")]).unwrap();
+        assert_eq!(&src[span], "drop = 2 /* note */\n");
+        // A block comment that does NOT close on the line stays conservative
+        // (attribute-span only) so widening can never split the comment.
+        let src2 = "drop = 2 /* a\nb */\nkeep = 1\n";
+        let span2 = resolve_removal_span(Format::Hcl, src2.as_bytes(), &[key("drop")]).unwrap();
+        assert_eq!(&src2[span2], "drop = 2"); // just the attribute, comment intact
+    }
+
+    #[test]
     fn hcl_removal_span_declines_an_object_member() {
         // Removing an object MEMBER (comma/separator surgery) is deferred.
         let src = "tags = { Team = \"core\" }\n";
@@ -831,6 +914,16 @@ mod tests {
             serialize_scalar(Format::Xml, &json!("a & b < c > d \" e")).unwrap(),
             "a &amp; b &lt; c &gt; d &quot; e".as_bytes()
         );
+        // Apostrophe (for single-quoted attribute values) and the whitespace
+        // controls as numeric char refs (so they survive XML normalization).
+        assert_eq!(
+            serialize_scalar(Format::Xml, &json!("a'b")).unwrap(),
+            "a&#39;b".as_bytes()
+        );
+        assert_eq!(
+            serialize_scalar(Format::Xml, &json!("a\tb\nc\rd")).unwrap(),
+            "a&#x9;b&#xA;c&#xD;d".as_bytes()
+        );
         assert_eq!(
             serialize_scalar(Format::Xml, &json!("x\u{0}y")).unwrap(),
             "x&#x0;y".as_bytes()
@@ -839,5 +932,42 @@ mod tests {
             serialize_scalar(Format::Xml, &json!(8080)).unwrap(),
             b"8080"
         );
+    }
+
+    #[test]
+    fn xml_removal_declines_the_document_root() {
+        // Removing a path that resolves to the document ROOT would empty the file
+        // to malformed XML that the Absent re-verify can't catch -> must decline.
+        let src = "<project>\n  <version>1.0</version>\n</project>\n";
+        assert!(
+            resolve_removal_span(Format::Xml, src.as_bytes(), &[key("project")]).is_none(),
+            "root-element removal must decline (would empty the file)"
+        );
+        // A non-root child is still removable.
+        assert!(
+            resolve_removal_span(
+                Format::Xml,
+                src.as_bytes(),
+                &[key("project"), key("version")]
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn xml_declines_a_namespaced_attribute_name_collision() {
+        // Two attributes share the local name `b` (different namespaces). The
+        // parse's last-wins key and a first-match resolve would disagree -> decline.
+        let src = "<c xmlns:a=\"urn:a\" xmlns:d=\"urn:d\" a:b=\"AA\" d:b=\"DD\"/>";
+        assert!(resolve_value_span(Format::Xml, src.as_bytes(), &[key("c"), key("@b")]).is_none());
+    }
+
+    #[test]
+    fn xml_set_preserves_surrounding_whitespace() {
+        // The parse trims a leaf's text; set must replace only the trimmed value,
+        // keeping the padding (byte-locality).
+        let src = "<v>  1.0  </v>";
+        let span = resolve_value_span(Format::Xml, src.as_bytes(), &[key("v")]).unwrap();
+        assert_eq!(&src[span], "1.0"); // the trimmed value, not "  1.0  "
     }
 }

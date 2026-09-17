@@ -1,0 +1,42 @@
+name: remove_value on XML is all-or-nothing -- a partial match writes nothing
+tags: [fix, xml_path_absent, remove_value, xml, safety]
+
+# The XML counterpart to the HCL all-or-nothing law. `$..node` matches TWO
+# elements: the document root `<node>` (removal declined -- deleting the root
+# would empty the file) and the nested `<node>inner</node>` (removable). Only
+# the nested edit can be formed; splicing it alone would leave the root `<node>`
+# still matching, so the shared whole-file `Absent` verifier fails and the WHOLE
+# batch demotes to a suggestion. Nothing is written (byte-identical tree) and the
+# violation survives -- fix and check agree, and no partial deletion escapes.
+
+given:
+  tree:
+    n.xml: |
+      <node>
+        <node>inner</node>
+      </node>
+  config: |
+    version: 1
+    rules:
+      - id: no-node
+        kind: xml_path_absent
+        paths: "**/*.xml"
+        path: "$..node"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-node, level: error, path: n.xml}
+  - suggested: [no-node]
+  - violations:
+      - {rule: no-node, level: error, path: n.xml}
+
+expect_tree:
+  n.xml: |
+    <node>
+      <node>inner</node>
+    </node>

@@ -286,11 +286,14 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "replaceme.txt".to_string()],
         "DEBUGME token\n".to_string(),
     );
-    // Phase-2 structured ops. Distinct single-file globs (`**/sv.tf` / `**/rv.tf`)
-    // so each rule matches ONLY its own trigger; the tree generator emits no `.tf`
-    // and no content/strip/case rule globs `.tf`, so these files are otherwise
-    // inert. set_value: `$.region` is "OLD" (!= the rule's "NEW"), rewritten in
-    // place. remove_value: `$.banned` is present, its whole line deleted.
+    // Phase-2 structured ops. Distinct single-file globs (`**/sv.tf` / `**/rv.tf`
+    // / `**/sv.xml` / `**/rv.xml`) so each rule matches ONLY its own trigger; the
+    // tree generator emits no `.tf`/`.xml` and no content/strip/case rule globs
+    // them, so these files are otherwise inert. set_value: `$.region` is "OLD"
+    // (!= the rule's "NEW"), rewritten in place. remove_value: the `banned` node
+    // is present, its whole line deleted -- and it is a NON-root element (its
+    // parent is `<root>`), since removing the document root is declined (it would
+    // empty the file).
     insert_file(
         root,
         &[dir.clone(), "sv.tf".to_string()],
@@ -300,6 +303,19 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         root,
         &[dir.clone(), "rv.tf".to_string()],
         "keep = 1\nbanned = \"x\"\n".to_string(),
+    );
+    // XML analogs. XML leaves parse as strings, so the `equals` target is a
+    // STRING ("NEW"); the removal target is a nested element so the resolver does
+    // not decline it as the root.
+    insert_file(
+        root,
+        &[dir.clone(), "sv.xml".to_string()],
+        "<region>OLD</region>\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.xml".to_string()],
+        "<root>\n  <keep>1</keep>\n  <banned>x</banned>\n</root>\n".to_string(),
     );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
@@ -487,6 +503,34 @@ fn rule_hcl_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// An `xml_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar text at `$.region` (planted as "OLD" only in
+/// `_trig/sv.xml`) to "NEW". XML leaves parse as strings, so the target is a
+/// STRING literal. Safe, so a bare `Fix` applies it -- exercising the *XML*
+/// structured resolver (element text span -> splice -> re-parse verify), a
+/// distinct code path from the HCL analog above.
+fn rule_xml_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("xsetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: xml_path_equals\n    paths: \"**/sv.xml\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// An `xml_path_absent` rule fixed via the located `remove_value` op (Phase 2):
+/// deletes the nested `$.root.banned` element (planted only in `_trig/rv.xml`).
+/// The target is deliberately NON-root (its parent is `<root>`), since removing
+/// the document root is declined. Unsafe by default, so it is *suggested* under
+/// a bare `Fix` and *applied* under `FixUnsafe` -- exercising the XML removal
+/// path (element-line span) + the tier gate.
+fn rule_xml_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("xremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: xml_path_absent\n    paths: \"**/rv.xml\"\n    path: \"$.root.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -594,9 +638,11 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2).
+        // the located structured ops (Phase 2), HCL + XML resolvers.
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
+        rule_xml_path_equals_set_value(),
+        rule_xml_path_absent_remove_value(),
     ]
 }
 
