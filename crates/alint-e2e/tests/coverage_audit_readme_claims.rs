@@ -17,7 +17,7 @@
 //! | rule kinds             | distinct `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` |
 //! | families               | non-meta `## ` headings in `docs/rules.md`                 |
 //! | bundled rulesets       | `.yml` files under `crates/alint-dsl/rulesets/v1/`          |
-//! | auto-fix ops           | `pub struct *Fixer` declarations under `crates/alint-rules/src/fixers/` |
+//! | auto-fix ops           | `FixSpec::ALL_OP_NAMES` (the canonical fix-op list; one fixer may back several ops) |
 //! | output formats         | variants of `Format` enum in `crates/alint-output/src/lib.rs` |
 //! | subcommands            | variants of `Command` enum in `crates/alint/src/cli.rs`     |
 //!

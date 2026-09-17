@@ -1,0 +1,38 @@
+name: remove_value is Unsafe by default -- a bare fix suggests, does not delete
+tags: [fix, hcl_path_absent, remove_value, applicability]
+
+# Counterpart to `remove_value.yml` (which promotes to `safe`): at the DEFAULT
+# Unsafe tier, a bare `fix` SURFACES the removal as a suggestion rather than
+# applying it (a deletion is not behavior-preserving). The `[check, fix]` shape
+# asserts the fix step SUGGESTS, and `expect_tree` proves the file is untouched
+# -- the Suggestion-surfaced-not-written case from the Phase-2 acceptance bar.
+
+given:
+  tree:
+    main.tf: |
+      locals {
+        secret = "do-not-commit"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-secret
+        kind: hcl_path_absent
+        paths: "**/*.tf"
+        path: "$.locals.secret"
+        level: error
+        fix:
+          remove_value: {}
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: no-secret, level: error, path: main.tf}
+  - suggested: [no-secret]
+
+expect_tree:
+  main.tf: |
+    locals {
+      secret = "do-not-commit"
+    }

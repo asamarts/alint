@@ -152,11 +152,19 @@ pub fn apply_file_edits(
     // made the doc invalid, and a `Suggested`-demoted isolation-group leader is
     // never re-promoted nor releases its group, so a group-mate it excluded
     // stays `SkippedConflict`. Both drop good fixes but never write bad ones.
-    // The maximal (culprit-attributing / group-releasing) algorithm is deferred
-    // to Phase 2, when `Structured` verifiers and isolation groups first ship
-    // and can be designed + tested against real ops -- both are DORMANT in
-    // Phase 0 (no fixer emits a `Structured` verifier or a group), so this loop
-    // is never entered from a shipped config today.
+    //
+    // As of Phase 2 this loop IS entered by a shipped config: `set_value` /
+    // `remove_value` emit `Structured` verifiers (this is the R-VERIFY safety
+    // net -- an edit whose re-parse + re-query disagrees with its expectation is
+    // demoted, not written). The over-demotion cost stays BENIGN for them: they
+    // set `isolation_group: None` (so the group-release gap can't bite), and a
+    // `remove_value` batch that can only partially remove (some node's span
+    // unresolvable) correctly demotes ALL its edits via the shared whole-file
+    // `Absent` re-query -- an all-or-nothing removal, never a partial write. The
+    // maximal (culprit-attributing / group-releasing) algorithm is still
+    // deferred to a FUTURE op that actually uses isolation groups (a structured
+    // op with isolation groups is not yet shipped), when it can be designed +
+    // tested against a real grouped op.
     let mut result = splice(original, &accepted, &batch);
     loop {
         let mut newly_demoted = false;
@@ -598,6 +606,27 @@ mod tests {
         let (out, o) = apply_file_edits(br#"{"x": 0}"#, vec![remove], Applicability::Safe);
         assert_eq!(out, b"{}");
         assert_eq!(o[0].1, LocatedOutcome::Applied);
+    }
+
+    #[test]
+    fn verify_absent_failure_demotes() {
+        // An `Absent` edit whose post-splice query STILL matches (it removed the
+        // wrong bytes, leaving the target present) is demoted, not written. This
+        // is the all-or-nothing safety net a partial `remove_value` relies on: if
+        // not every matched node can be removed, the shared whole-file `Absent`
+        // re-query fails and the batch is demoted rather than partially written.
+        let verify = EditVerifier::Structured {
+            format: Format::Json,
+            query: "$.x".to_string(),
+            expect: ExpectedValue::Absent,
+        };
+        // {"a": 0, "x": 0}: remove the `"a": 0, ` member. Valid JSON results, but
+        // `$.x` is still present, so `Absent` fails and the edit demotes.
+        let src = br#"{"a": 0, "x": 0}"#;
+        let e = edit(0, 0, replace(1..9, ""), Applicability::Safe, verify, None);
+        let (out, o) = apply_file_edits(src, vec![e], Applicability::Safe);
+        assert_eq!(out, src); // unchanged: demoted before write
+        assert_eq!(o[0].1, LocatedOutcome::Suggested);
     }
 
     #[test]

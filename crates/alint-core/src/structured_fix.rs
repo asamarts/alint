@@ -13,10 +13,14 @@
 //!
 //! R-CSTMAP realism: the `JSONPath` is resolved over the detached, parsed
 //! [`Value`](serde_json::Value); mapping its concrete path back to the CST node
-//! can be ambiguous (repeated / labeled HCL blocks map to arrays / nested
-//! objects the same key would reach). Where the mapping is not 1:1 the resolver
-//! returns `None` rather than guess, so an ambiguous edit degrades to a
-//! Suggestion instead of splicing the wrong span.
+//! is done by navigating leaf attributes, unlabeled blocks, LABELED blocks (the
+//! labels consume the matching path segments, so `resource "t" "n"` is reached
+//! by `resource.t.n`), and OBJECT-valued attributes (`x = { a = 1 }`, `x.a`).
+//! Where that mapping is not 1:1 -- a repeated block, an attribute/block key
+//! clash, a quoted object key -- the resolver returns `None` rather than guess,
+//! so an ambiguous edit degrades to a Suggestion instead of splicing the wrong
+//! span. Array indices and removal of an object member (comma surgery) are not
+//! yet resolved (they decline).
 
 use crate::structured_format::Format;
 use std::ops::Range;
@@ -79,82 +83,183 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
 mod hcl {
     use super::PathSeg;
     use hcl::edit::Span as _;
-    use hcl::edit::structure::Body;
+    use hcl::edit::expr::Expression;
+    use hcl::edit::structure::{Attribute, Block, Body};
     use std::ops::Range;
 
-    /// Parse `text` into a spanned CST and return the value span at `path`.
-    pub(super) fn hcl_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        let body = hcl::edit::parser::parse_body(text).ok()?;
-        value_span_in(&body, path)
+    /// The located target of a resolved path.
+    struct Target {
+        /// The value's byte range (what `set_value` overwrites).
+        value_span: Range<usize>,
+        /// The full `key = value` attribute span, present ONLY when the target
+        /// is a real leaf HCL attribute (not an object-member value).
+        /// `remove_value` needs it plus the line context; it declines when this
+        /// is `None` (an object member -- comma surgery is deferred).
+        attr_span: Option<Range<usize>>,
     }
 
-    /// The value span of the attribute the `path` names, navigating unlabeled
-    /// blocks. Returns `None` on any ambiguity (a key matching more than one
-    /// structure -- repeated blocks, an attribute-and-block clash) so an
-    /// unclear mapping degrades to a Suggestion rather than a wrong splice.
-    fn value_span_in(body: &Body, path: &[PathSeg]) -> Option<Range<usize>> {
+    /// Parse `text` into a spanned CST and return the VALUE span at `path`
+    /// (what `set_value` overwrites).
+    pub(super) fn hcl_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let body = hcl::edit::parser::parse_body(text).ok()?;
+        resolve_in_body(&body, path).map(|t| t.value_span)
+    }
+
+    /// Resolve `path` within a block body to a single unambiguous target. A
+    /// path segment names either an ATTRIBUTE (a leaf, or one whose value is an
+    /// object we navigate into) or a BLOCK -- unlabeled, or LABELED, in which
+    /// case its labels consume the next path segments (so `resource "t" "n"` is
+    /// reached by `resource.t.n`). Requires EXACTLY ONE matching structure: an
+    /// attribute+block key clash, or a repeated block/label, declines (`None`)
+    /// so an ambiguous CST mapping degrades to a Suggestion, never a wrong
+    /// splice (R-CSTMAP).
+    fn resolve_in_body(body: &Body, path: &[PathSeg]) -> Option<Target> {
         let (seg, rest) = path.split_first()?;
-        // Array indices (and any non-key step) are not resolved in this first
-        // HCL cut: an attribute whose value is a list/object is left to a
-        // Suggestion. Keys reach attributes (leaves) and unlabeled blocks.
+        // Array indices (and any non-key step) are not resolved: an attribute
+        // whose value is a list is left to a Suggestion.
         let PathSeg::Key(key) = seg else {
             return None;
         };
-        let mut leaf_span: Option<Range<usize>> = None;
-        let mut sub_body: Option<&Body> = None;
+        let mut found: Option<Target> = None;
         let mut matches = 0usize;
         for structure in body {
             if let Some(attr) = structure.as_attribute() {
                 if attr.key.as_str() == key {
-                    leaf_span = attr.value.span();
                     matches += 1;
+                    found = resolve_in_attribute(attr, rest);
                 }
             } else if let Some(block) = structure.as_block() {
-                // Only UNLABELED single blocks map 1:1 to an object key. A
-                // labeled block (`resource "t" "n" {}`) or a repeat introduces
-                // an array/label layer the flat key does not capture -> decline.
-                if block.labels.is_empty() && block.ident.as_str() == key {
-                    sub_body = Some(&block.body);
+                if block.ident.as_str() == key && labels_match(block, rest) {
                     matches += 1;
+                    found = resolve_block_body(block, &rest[block.labels.len()..]);
                 }
             }
         }
+        // Exactly one structure matched the key (and, for a block, its labels).
+        // Two matches -- an attribute AND a block, or two blocks sharing
+        // ident+labels -- is ambiguous: decline.
         if matches != 1 {
-            return None; // absent or ambiguous
+            return None;
         }
+        found
+    }
+
+    /// Whether `block`'s labels match the leading `rest` path segments (so they
+    /// can be consumed before recursing into the block body). An unlabeled block
+    /// matches trivially.
+    fn labels_match(block: &Block, rest: &[PathSeg]) -> bool {
+        rest.len() >= block.labels.len()
+            && block
+                .labels
+                .iter()
+                .zip(rest)
+                .all(|(label, seg)| matches!(seg, PathSeg::Key(k) if label.as_str() == k))
+    }
+
+    /// Resolve within a block's body after its labels are consumed. An empty
+    /// `after` names the block itself, which has no scalar value -> decline.
+    fn resolve_block_body(block: &Block, after: &[PathSeg]) -> Option<Target> {
+        if after.is_empty() {
+            return None;
+        }
+        resolve_in_body(&block.body, after)
+    }
+
+    /// Resolve within a leaf attribute. An empty `rest` names the attribute's
+    /// own value; otherwise its value must be an object we navigate into (the
+    /// result is an object MEMBER, so `attr_span` is `None` -- removal of a
+    /// member is deferred, but `set_value` works).
+    fn resolve_in_attribute(attr: &Attribute, rest: &[PathSeg]) -> Option<Target> {
         if rest.is_empty() {
-            leaf_span // a leaf attribute's value
+            return Some(Target {
+                value_span: attr.value.span()?,
+                attr_span: attr.span(),
+            });
+        }
+        Some(Target {
+            value_span: object_value_span(&attr.value, rest)?,
+            attr_span: None,
+        })
+    }
+
+    /// Navigate an object `Expression` by `rest`, returning the target member's
+    /// value span. IDENT keys only (`{ a = 1 }`); a quoted / expression key
+    /// (`{ "a" = 1 }`) or an ambiguous match declines.
+    fn object_value_span(expr: &Expression, rest: &[PathSeg]) -> Option<Range<usize>> {
+        let object = expr.as_object()?;
+        let (seg, sub) = rest.split_first()?;
+        let PathSeg::Key(key) = seg else {
+            return None;
+        };
+        let mut found = None;
+        let mut matches = 0usize;
+        for (k, v) in object {
+            if k.as_ident().is_some_and(|i| i.as_str() == key.as_str()) {
+                matches += 1;
+                found = Some(v);
+            }
+        }
+        if matches != 1 {
+            return None;
+        }
+        let value = found?;
+        if sub.is_empty() {
+            value.expr().span()
         } else {
-            sub_body.and_then(|b| value_span_in(b, rest))
+            object_value_span(value.expr(), sub)
         }
     }
 
-    /// The removal span for the node `path` names: the whole source line of the
-    /// target attribute, including its trailing newline, so `key = value\n`
-    /// vanishes cleanly. `None` on ambiguity or if the target is not a leaf
-    /// attribute (removing a whole block is left to a Suggestion here).
+    /// The byte range `remove_value` deletes for the leaf attribute `path`
+    /// names. Removes the whole physical line (`key = value`, a trailing
+    /// `# comment`, and the newline) when the attribute OWNS its line; when the
+    /// attribute shares its line with a single-line block wrapper
+    /// (`ident { key = value }`), removes ONLY the attribute span, leaving the
+    /// wrapper (`ident {  }`) -- never engulfing the `{`/`}` (the single-line
+    /// block over-deletion the audit found). Declines (`None`) for an object
+    /// member (comma surgery deferred) or a block.
     pub(super) fn hcl_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
         let body = hcl::edit::parser::parse_body(text).ok()?;
-        let value_span = value_span_in(&body, path)?;
-        // Widen from the value span to the whole physical line: back to the
-        // start of the line (after the preceding newline) and forward past the
-        // trailing newline. The byte-locality golden asserts nothing outside
-        // this line changes.
+        let attr_span = resolve_in_body(&body, path)?.attr_span?;
         let bytes = text.as_bytes();
-        let line_start = bytes[..value_span.start]
+        let line_start = bytes[..attr_span.start]
             .iter()
             .rposition(|&b| b == b'\n')
             .map_or(0, |i| i + 1);
-        let line_end = bytes[value_span.end..]
+        let line_end = bytes[attr_span.end..]
             .iter()
             .position(|&b| b == b'\n')
-            .map_or(bytes.len(), |i| value_span.end + i + 1);
-        Some(line_start..line_end)
+            .map_or(bytes.len(), |i| attr_span.end + i + 1);
+        // The attribute OWNS its line iff only whitespace precedes it and only
+        // whitespace (or a trailing `#` / `//` comment) follows it. A `{` before
+        // or `}` after means a single-line block wraps it -- widening to the
+        // line would delete the block, so remove just the attribute span.
+        let before = &text[line_start..attr_span.start];
+        let after = &text[attr_span.end..line_end];
+        if before.chars().all(char::is_whitespace) && line_tail_is_blank_or_comment(after) {
+            Some(line_start..line_end)
+        } else {
+            Some(attr_span)
+        }
+    }
+
+    /// Whether the bytes from an attribute's end to the line end are only
+    /// whitespace, or whitespace then a `#` / `//` line comment -- i.e. the
+    /// attribute owns the rest of its line. A `}` (single-line block close) or
+    /// any other token returns `false`.
+    fn line_tail_is_blank_or_comment(after: &str) -> bool {
+        let tail = after.trim_matches(char::is_whitespace);
+        tail.is_empty() || tail.starts_with('#') || tail.starts_with("//")
     }
 
     /// Serialize a scalar `Value` as HCL bytes. Strings are quoted with HCL
-    /// escapes (including `${`/`%{` template-interpolation guards); numbers,
-    /// booleans, and null use their literal HCL forms. `None` for a non-scalar.
+    /// escapes (control chars as `\uXXXX`, the `${`/`%{` template markers
+    /// neutralized); numbers, booleans, and null use their literal HCL forms.
+    /// `None` for a non-scalar. NOTE (limitation): an integer-valued float
+    /// `equals` (`2.0`) serializes to `2.0`, but `hcl-rs` re-parses that as the
+    /// integer `2`, so the re-verify fails and the fix is (correctly) demoted --
+    /// the same number-normalization that makes `hcl_path_equals` with
+    /// `equals: 2.0` unsatisfiable in `check` too. Genuine floats (`1.5`) work.
     pub(super) fn hcl_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
         use serde_json::Value;
         let out = match value {
@@ -167,11 +272,13 @@ mod hcl {
         Some(out.into_bytes())
     }
 
-    /// Escape a string for an HCL double-quoted literal. Beyond the usual
-    /// `\`/`"`/control escapes, the HCL template markers `${` and `%{` are
-    /// neutralized (`$${` / `%%{`) so a value containing them is not
-    /// reinterpreted as an interpolation/directive.
+    /// Escape a string for an HCL double-quoted literal: the usual
+    /// `\`/`"`/`\n`/`\r`/`\t`, every OTHER control char as `\uXXXX` (so a raw
+    /// NUL/ESC/DEL is never written into a text config -- the Go HCL parser
+    /// Terraform uses rejects raw control bytes), and the HCL template markers
+    /// `${` / `%{` neutralized (`$${` / `%%{`).
     fn hcl_escape(s: &str) -> String {
+        use std::fmt::Write as _;
         let mut out = String::with_capacity(s.len() + 2);
         let mut chars = s.chars().peekable();
         while let Some(c) = chars.next() {
@@ -183,6 +290,9 @@ mod hcl {
                 '\t' => out.push_str("\\t"),
                 '$' if chars.peek() == Some(&'{') => out.push_str("$$"),
                 '%' if chars.peek() == Some(&'{') => out.push_str("%%"),
+                c if c.is_control() => {
+                    let _ = write!(out, "\\u{:04X}", c as u32);
+                }
                 other => out.push(other),
             }
         }
@@ -287,5 +397,171 @@ mod tests {
     fn a_format_without_a_resolver_declines() {
         assert!(resolve_value_span(Format::Toml, b"a = 1\n", &[key("a")]).is_none());
         assert!(serialize_scalar(Format::Toml, &json!("x")).is_none());
+    }
+
+    // ---- F4: labeled blocks (the dominant Terraform shape) ----
+
+    #[test]
+    fn hcl_value_span_navigates_a_labeled_block() {
+        let src = "resource \"aws_instance\" \"web\" {\n  ami = \"ami-1\"\n}\n";
+        let span = resolve_value_span(
+            Format::Hcl,
+            src.as_bytes(),
+            &[key("resource"), key("aws_instance"), key("web"), key("ami")],
+        )
+        .unwrap();
+        assert_eq!(&src[span], "\"ami-1\"");
+    }
+
+    #[test]
+    fn hcl_value_span_resolves_the_right_labeled_block_by_its_labels() {
+        // Two `resource "aws_instance"` blocks -> serde nests them by label; the
+        // path's labels must select `web`, not `db`.
+        let src = "resource \"aws_instance\" \"web\" {\n  ami = \"WEB\"\n}\n\
+                   resource \"aws_instance\" \"db\" {\n  ami = \"DB\"\n}\n";
+        let span = resolve_value_span(
+            Format::Hcl,
+            src.as_bytes(),
+            &[key("resource"), key("aws_instance"), key("web"), key("ami")],
+        )
+        .unwrap();
+        assert_eq!(&src[span], "\"WEB\"");
+    }
+
+    #[test]
+    fn hcl_value_span_declines_identical_labeled_blocks() {
+        // Two blocks sharing ident AND labels are ambiguous -> decline.
+        let src = "resource \"t\" \"n\" {\n  a = 1\n}\nresource \"t\" \"n\" {\n  a = 2\n}\n";
+        assert!(
+            resolve_value_span(
+                Format::Hcl,
+                src.as_bytes(),
+                &[key("resource"), key("t"), key("n"), key("a")],
+            )
+            .is_none()
+        );
+    }
+
+    // ---- F5: object-valued attributes ----
+
+    #[test]
+    fn hcl_value_span_navigates_an_object_attribute() {
+        let src = "locals {\n  tags = { Team = \"core\" }\n}\n";
+        let span = resolve_value_span(
+            Format::Hcl,
+            src.as_bytes(),
+            &[key("locals"), key("tags"), key("Team")],
+        )
+        .unwrap();
+        assert_eq!(&src[span], "\"core\"");
+    }
+
+    #[test]
+    fn hcl_value_span_declines_a_quoted_object_key() {
+        // A quoted/expression object key (`{ "Team" = ... }`) is not an ident
+        // key, so the resolver declines rather than guess.
+        let src = "tags = { \"Team\" = \"core\" }\n";
+        assert!(
+            resolve_value_span(Format::Hcl, src.as_bytes(), &[key("tags"), key("Team")],).is_none()
+        );
+    }
+
+    // ---- A1: single-line block removal must not engulf the block ----
+
+    #[test]
+    fn hcl_removal_span_keeps_a_single_line_block_wrapper() {
+        // Removing `enabled` from `settings { enabled = true }` must delete ONLY
+        // the attribute, leaving the `settings {  }` wrapper -- NOT the whole
+        // block (the audit's verifier-invisible over-deletion).
+        let src = "settings { enabled = true }\nkeep = 1\n";
+        let span = resolve_removal_span(
+            Format::Hcl,
+            src.as_bytes(),
+            &[key("settings"), key("enabled")],
+        )
+        .unwrap();
+        assert_eq!(&src[span.clone()], "enabled = true");
+        let mut out = src.to_string();
+        out.replace_range(span, "");
+        assert_eq!(out, "settings {  }\nkeep = 1\n");
+    }
+
+    #[test]
+    fn hcl_removal_span_takes_the_whole_line_with_a_trailing_comment() {
+        // An attribute that owns its line is removed whole, including a trailing
+        // comment that annotates it.
+        let src = "drop = 2 # the note\nkeep = 1\n";
+        let span = resolve_removal_span(Format::Hcl, src.as_bytes(), &[key("drop")]).unwrap();
+        assert_eq!(&src[span.clone()], "drop = 2 # the note\n");
+        let mut out = src.to_string();
+        out.replace_range(span, "");
+        assert_eq!(out, "keep = 1\n");
+    }
+
+    #[test]
+    fn hcl_removal_span_declines_an_object_member() {
+        // Removing an object MEMBER (comma/separator surgery) is deferred.
+        let src = "tags = { Team = \"core\" }\n";
+        assert!(
+            resolve_removal_span(Format::Hcl, src.as_bytes(), &[key("tags"), key("Team")],)
+                .is_none()
+        );
+    }
+
+    // ---- A2: control-char escaping ----
+
+    #[test]
+    fn hcl_serialize_escapes_control_chars() {
+        // A raw NUL / ESC / DEL must never be written into a text config; they
+        // are emitted as `\uXXXX`.
+        assert_eq!(
+            serialize_scalar(Format::Hcl, &json!("a\u{0}b")).unwrap(),
+            "\"a\\u0000b\"".as_bytes()
+        );
+        assert_eq!(
+            serialize_scalar(Format::Hcl, &json!("x\u{1b}y")).unwrap(),
+            "\"x\\u001By\"".as_bytes()
+        );
+        assert_eq!(
+            serialize_scalar(Format::Hcl, &json!("z\u{7f}")).unwrap(),
+            "\"z\\u007F\"".as_bytes()
+        );
+    }
+
+    #[test]
+    fn every_format_is_classified_for_structured_fix() {
+        // A new `Format` must be consciously classified as having a structured-fix
+        // resolver or explicitly not-yet-supported. The exhaustive match is
+        // compile-forced, so a new variant can't silently decline forever; the
+        // runtime checks pin that an unsupported format actually declines all
+        // three entry points.
+        for &f in Format::ALL {
+            let has_resolver = match f {
+                Format::Hcl => true,
+                Format::Json
+                | Format::Yaml
+                | Format::Toml
+                | Format::Xml
+                | Format::Dotenv
+                | Format::Properties
+                | Format::Ini => false,
+            };
+            if !has_resolver {
+                assert!(
+                    resolve_value_span(f, b"", &[key("a")]).is_none(),
+                    "unsupported {f:?} must decline set_value span resolution"
+                );
+                assert!(
+                    resolve_removal_span(f, b"", &[key("a")]).is_none(),
+                    "unsupported {f:?} must decline remove_value span resolution"
+                );
+                assert!(
+                    serialize_scalar(f, &json!("x")).is_none(),
+                    "unsupported {f:?} must decline serialization"
+                );
+            }
+        }
+        // The sole supported format actually resolves.
+        assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
     }
 }

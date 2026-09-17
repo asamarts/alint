@@ -1,0 +1,50 @@
+name: remove_value is all-or-nothing -- a partial match writes nothing
+tags: [fix, hcl_path_absent, remove_value]
+
+# The safety-critical property: `$..secret` matches a top-level attribute
+# (resolvable) plus two inside REPEATED unlabeled blocks (serde arrays, so their
+# paths carry array indices the resolver declines). Since not every matched node
+# can be removed, splicing only the one resolvable removal would leave the query
+# still matching -- so the shared whole-file `Absent` verifier fails and the
+# WHOLE batch demotes to a suggestion. Nothing is written (the tree is
+# byte-identical) and `check` still reports the violation: fix and check agree.
+
+given:
+  tree:
+    main.tf: |
+      secret = "top"
+      item {
+        secret = "a"
+      }
+      item {
+        secret = "b"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-secret
+        kind: hcl_path_absent
+        paths: "**/*.tf"
+        path: "$..secret"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-secret, level: error, path: main.tf}
+  - suggested: [no-secret]
+  - violations:
+      - {rule: no-secret, level: error, path: main.tf}
+
+expect_tree:
+  main.tf: |
+    secret = "top"
+    item {
+      secret = "a"
+    }
+    item {
+      secret = "b"
+    }

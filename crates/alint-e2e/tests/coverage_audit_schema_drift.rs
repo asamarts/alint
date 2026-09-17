@@ -269,3 +269,74 @@ fn schema_accepts_canonical_path_equals_rule() {
         "canonical `*_path_equals` with native bool should validate cleanly: {result:?}",
     );
 }
+
+// ---- Phase 2 structured fix blocks (`set_value` / `remove_value`) ----
+
+#[test]
+fn schema_accepts_set_value_fix_on_path_equals() {
+    let doc = serde_json::json!({
+        "version": 1,
+        "rules": [{
+            "id": "x", "kind": "hcl_path_equals", "level": "error",
+            "paths": "**/*.tf",
+            "path": "$.terraform.required_version",
+            "equals": ">= 1.5",
+            "fix": { "set_value": {} },
+        }],
+    });
+    let result = validate_against_schema(&doc);
+    assert!(
+        result.is_ok(),
+        "`fix: {{ set_value }}` must validate: {result:?}"
+    );
+}
+
+#[test]
+fn schema_accepts_remove_value_fix_with_applicability() {
+    let doc = serde_json::json!({
+        "version": 1,
+        "rules": [{
+            "id": "x", "kind": "hcl_path_absent", "level": "error",
+            "paths": "**/*.tf",
+            "path": "$.locals.secret",
+            "fix": { "remove_value": { "applicability": "safe" } },
+        }],
+    });
+    let result = validate_against_schema(&doc);
+    assert!(
+        result.is_ok(),
+        "`fix: {{ remove_value: {{ applicability }} }}` must validate: {result:?}",
+    );
+}
+
+#[test]
+fn schema_rejects_bad_applicability_on_set_value() {
+    let doc = serde_json::json!({
+        "version": 1,
+        "rules": [{
+            "id": "x", "kind": "hcl_path_equals", "level": "error",
+            "paths": "**/*.tf", "path": "$.a", "equals": 1,
+            "fix": { "set_value": { "applicability": "sometimes" } },
+        }],
+    });
+    assert!(
+        validate_against_schema(&doc).is_err(),
+        "schema must reject an out-of-enum `applicability` on `set_value`",
+    );
+}
+
+#[test]
+fn schema_rejects_unknown_field_in_set_value() {
+    let doc = serde_json::json!({
+        "version": 1,
+        "rules": [{
+            "id": "x", "kind": "hcl_path_equals", "level": "error",
+            "paths": "**/*.tf", "path": "$.a", "equals": 1,
+            "fix": { "set_value": { "value": "nope" } },
+        }],
+    });
+    assert!(
+        validate_against_schema(&doc).is_err(),
+        "schema must reject an unknown field in `set_value` (additionalProperties:false)",
+    );
+}

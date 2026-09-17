@@ -326,6 +326,34 @@ mod tests {
     }
 
     #[test]
+    fn remove_value_emits_one_edit_per_matched_node() {
+        // A query matching several nodes yields one removal edit each (the engine
+        // splices them back-to-front; the shared `Absent` verifier makes the
+        // batch all-or-nothing). Splicing all removals clears the block body.
+        let src = "locals {\n  a = 1\n  b = 2\n}\n";
+        let f = StructuredFixer::remove(
+            Format::Hcl,
+            jp("$.locals.*"),
+            "$.locals.*".into(),
+            Applicability::Unsafe,
+        );
+        let mut edits = f.collect_edits(&[], Path::new("a.tf"), src.as_bytes(), Path::new("/r"));
+        assert_eq!(edits.len(), 2, "one removal edit per matched node");
+        // Apply back-to-front (highest start first) so earlier offsets stay valid.
+        edits.sort_by_key(|e| match &e.edit {
+            FixEdit::ReplaceRange { range, .. } => std::cmp::Reverse(range.start),
+            _ => unreachable!(),
+        });
+        let mut out = src.to_string();
+        for e in &edits {
+            let (start, end, content, _) = edit_of(e);
+            assert_eq!(content, "");
+            out.replace_range(start..end, "");
+        }
+        assert_eq!(out, "locals {\n}\n", "both members removed, block kept");
+    }
+
+    #[test]
     fn is_located_and_declines_a_parse_failure() {
         let f = StructuredFixer::set(
             Format::Hcl,

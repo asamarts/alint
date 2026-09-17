@@ -822,6 +822,8 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         FixSpec::FileCreate { file_create } => file_create.applicability,
         FixSpec::FilePrepend { file_prepend } => file_prepend.applicability,
         FixSpec::FileAppend { file_append } => file_append.applicability,
+        FixSpec::SetValue { set_value } => set_value.applicability,
+        FixSpec::RemoveValue { remove_value } => remove_value.applicability,
         _ => None,
     }
 }
@@ -891,6 +893,41 @@ fn w2_remote_file_create_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `file_create` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_remote_set_value_is_demoted_to_suggestion() {
+    // Phase 2: `set_value` writes the host rule's `equals` bytes, so a REMOTE
+    // untrusted `extends:` may PROPOSE it but never auto-write -> capped to
+    // suggestion. Teeth: reclassifying `set_value` out of CONTENT_INJECTING_FIX_OPS
+    // (or dropping it) makes this assert `None` (auto-applies).
+    let body = "version: 1\nrules:\n  - id: sv\n    kind: hcl_path_equals\n    \
+        paths: \"*.tf\"\n    path: \"$.region\"\n    equals: \"x\"\n    level: error\n    \
+        fix: { set_value: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "sv").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `set_value` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_remove_value_is_not_demoted() {
+    // `remove_value` deletes a node (no ruleset bytes) -> fixed-behavior, gated
+    // by its Unsafe tier like `file_remove`, NOT demoted by W2. Its tier stays
+    // unset (None -> default Unsafe at fix time), never forced to suggestion.
+    let body = "version: 1\nrules:\n  - id: rv\n    kind: hcl_path_absent\n    \
+        paths: \"*.tf\"\n    path: \"$.secret\"\n    level: error\n    \
+        fix: { remove_value: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "rv").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "an untrusted remote's `remove_value` is fixed-behavior, not demoted"
     );
 }
 
