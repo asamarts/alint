@@ -429,6 +429,12 @@ pub enum FixSpec {
     Replace {
         replace: ReplaceFixSpec,
     },
+    SetValue {
+        set_value: SetValueFixSpec,
+    },
+    RemoveValue {
+        remove_value: RemoveValueFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -510,6 +516,8 @@ impl FixSpec {
         "file_strip_bom",
         "file_collapse_blank_lines",
         "replace",
+        "set_value",
+        "remove_value",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -528,6 +536,8 @@ impl FixSpec {
             Self::FileStripBom { .. } => "file_strip_bom",
             Self::FileCollapseBlankLines { .. } => "file_collapse_blank_lines",
             Self::Replace { .. } => "replace",
+            Self::SetValue { .. } => "set_value",
+            Self::RemoveValue { .. } => "remove_value",
         }
     }
 }
@@ -739,6 +749,42 @@ pub struct ReplaceFixSpec {
     /// `Unsafe`; a user may set `safe` in their OWN top-level config when the
     /// rewrite is provably a normalization (an inherited config may only demote,
     /// enforced by the DSL trust gate).
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `set_value` (Phase 2): the located structured-value setter. Hosts on the
+/// eight `*_path_equals` kinds and reads BOTH its parameters -- the `JSONPath`
+/// `path:` and the expected value `equals:` -- from the host rule, so the fix
+/// restates nothing the rule already carries. Format-preservingly rewrites the
+/// value at `path` to `equals` via a byte-range splice against a span-resolving
+/// parser (auto-fix.md 5.3/5.4). Content-injecting (it writes the rule's
+/// `equals` bytes), so a remote `extends:` demotes it under W2.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetValueFixSpec {
+    /// Per-rule applicability override. `set_value` defaults to `Safe`, but ONLY
+    /// a scalar replacing an existing scalar node is ever applied at tier: the
+    /// fixer itself demotes object/array values, zero-match insertion, and
+    /// nested creation to `Suggestion` regardless of this field (the re-parse
+    /// postcondition is undefined there, auto-fix.md 5.8). An inherited config
+    /// may only demote (the DSL trust gate), never promote.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `remove_value` (Phase 2): the located structured-value remover. Hosts on the
+/// eight `*_path_absent` kinds and reads its `path:` from the host rule.
+/// Deletes the node the `JSONPath` selects, along with its format-specific
+/// separator (a trailing comma, a whole `key = value` line, an XML element),
+/// via a byte-range splice. Fixed-behavior (it injects no ruleset bytes), so W2
+/// never demotes it; `Unsafe` by default because a deletion is not
+/// behavior-preserving in general.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveValueFixSpec {
+    /// Per-rule applicability override. `remove_value` defaults to `Unsafe`; a
+    /// user may promote a specific rule to `Safe` in their OWN top-level config.
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1178,6 +1224,8 @@ mod tests {
             ("file_strip_bom: {}", "file_strip_bom"),
             ("file_collapse_blank_lines: {}", "file_collapse_blank_lines"),
             ("replace:\n  replacement: x\n", "replace"),
+            ("set_value: {}", "set_value"),
+            ("remove_value: {}", "remove_value"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

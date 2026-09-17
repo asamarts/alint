@@ -1014,6 +1014,56 @@
             "replace"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_value": {
+              "additionalProperties": false,
+              "description": "Overwrite the value at the host `*_path_equals` rule's `path:` with its `equals:` value, format-preservingly (a located byte-range splice). Safe by default, but only a scalar replacing an existing scalar is applied at tier; object/array values, zero-match insertion, and nested creation decline. Content-injecting (it writes the rule's `equals` bytes), so a remote `extends:` demotes it to `suggestion`.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `safe`; an inherited config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "remove_value": {
+              "additionalProperties": false,
+              "description": "Delete the node the host `*_path_absent` rule's `path:` selects, along with its format-specific separator (the whole `key = value` line, a trailing comma, an XML element). A located edit, Unsafe by default (a deletion is not behavior-preserving); a user may promote it to `safe` in their OWN top-level config.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `unsafe`; an inherited config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "remove_value"
+          ],
+          "type": "object"
         }
       ],
       "type": "object"

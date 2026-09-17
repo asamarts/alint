@@ -86,7 +86,9 @@ fn build_facts() -> Result<Facts> {
         .collect();
     subcommands.sort();
     let fact_predicates = fact_predicates();
-    let auto_fix_ops = auto_fix_ops_count(&root)?;
+    // The canonical fix-op list, not the `*Fixer` struct count: one fixer can
+    // back several ops (`StructuredFixer` serves `set_value` + `remove_value`).
+    let auto_fix_ops = alint_core::FixSpec::ALL_OP_NAMES.len();
     let categories: Vec<CategoryEntry> = alint_core::Category::ALL
         .iter()
         .map(|c| CategoryEntry {
@@ -433,30 +435,6 @@ fn output_formats(root: &Path) -> Result<Vec<String>> {
         .collect();
     names.sort();
     Ok(names)
-}
-
-/// `pub struct *Fixer` declarations (recursive) under `fixers/`.
-fn auto_fix_ops_count(root: &Path) -> Result<usize> {
-    fn walk(dir: &Path) -> Result<usize> {
-        let mut n = 0;
-        for entry in fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
-            let path = entry?.path();
-            if path.is_dir() {
-                n += walk(&path)?;
-            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                let src = fs::read_to_string(&path)
-                    .with_context(|| format!("read {}", path.display()))?;
-                for line in src.lines() {
-                    let line = line.trim_start();
-                    if line.starts_with("pub struct ") && line.contains("Fixer") {
-                        n += 1;
-                    }
-                }
-            }
-        }
-        Ok(n)
-    }
-    walk(&root.join("crates/alint-rules/src/fixers"))
 }
 
 /// The built-in fact-kind names, taken from `alint_core::FactKind::ALL_NAMES`

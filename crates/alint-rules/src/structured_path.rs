@@ -58,8 +58,11 @@
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    Context, Error, Format, Level, PathsSpec, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+    Applicability, Context, Error, FixSpec, Fixer, Format, Level, PathsSpec, PerFileRule, Result,
+    Rule, RuleSpec, Scope, Violation,
 };
+
+use crate::fixers::StructuredFixer;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
@@ -217,6 +220,10 @@ pub struct StructuredPathRule {
     /// "every `uses:` in a workflow must be SHA-pinned" - a
     /// workflow with no `uses:` at all shouldn't be flagged).
     if_present: bool,
+    /// The located structured fixer, when the rule declares a compatible
+    /// `fix:` (`set_value` on `*_path_equals`, `remove_value` on
+    /// `*_path_absent`). `None` for `*_path_matches` and unfixed rules.
+    fixer: Option<StructuredFixer>,
 }
 
 impl Rule for StructuredPathRule {
@@ -228,6 +235,10 @@ impl Rule for StructuredPathRule {
     }
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -568,6 +579,27 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
             alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
         )
     })?;
+    // Only `remove_value` is compatible with a `*_path_absent` kind (it deletes
+    // the matched node the rule requires to be absent). Any other op is a config
+    // error rather than a silently-ignored `fix:`. Unsafe by default.
+    let fixer = match &spec.fix {
+        Some(FixSpec::RemoveValue { remove_value }) => Some(StructuredFixer::remove(
+            format,
+            path_expr.clone(),
+            opts.path.clone(),
+            remove_value.applicability.unwrap_or(Applicability::Unsafe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `remove_value` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -580,6 +612,7 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         path_src: opts.path,
         op: Op::Absent,
         if_present: false,
+        fixer,
     }))
 }
 
@@ -596,6 +629,29 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
             alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
         )
     })?;
+    // Only `set_value` is compatible with a `*_path_equals` kind (it overwrites
+    // the matched node with the rule's `equals` value). Safe by default, but the
+    // fixer only emits at tier for a scalar replacing an existing scalar
+    // (`StructuredFixer::collect_edits`); anything else declines.
+    let fixer = match &spec.fix {
+        Some(FixSpec::SetValue { set_value }) => Some(StructuredFixer::set(
+            format,
+            path_expr.clone(),
+            opts.path.clone(),
+            opts.equals.clone(),
+            set_value.applicability.unwrap_or(Applicability::Safe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `set_value` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -608,6 +664,7 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         path_src: opts.path,
         op: Op::Equals(opts.equals),
         if_present: opts.if_present,
+        fixer,
     }))
 }
 
@@ -639,6 +696,10 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         path_src: opts.path,
         op: Op::Matches(re),
         if_present: opts.if_present,
+        // `*_path_matches` fixability (the Phase-1 `replace` op extended to a
+        // user-supplied template) is a separable follow-up; a `*_path_matches`
+        // rule is unfixed for now.
+        fixer: None,
     }))
 }
 

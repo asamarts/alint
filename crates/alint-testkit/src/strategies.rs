@@ -286,6 +286,21 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "replaceme.txt".to_string()],
         "DEBUGME token\n".to_string(),
     );
+    // Phase-2 structured ops. Distinct single-file globs (`**/sv.tf` / `**/rv.tf`)
+    // so each rule matches ONLY its own trigger; the tree generator emits no `.tf`
+    // and no content/strip/case rule globs `.tf`, so these files are otherwise
+    // inert. set_value: `$.region` is "OLD" (!= the rule's "NEW"), rewritten in
+    // place. remove_value: `$.banned` is present, its whole line deleted.
+    insert_file(
+        root,
+        &[dir.clone(), "sv.tf".to_string()],
+        "region = \"OLD\"\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.tf".to_string()],
+        "keep = 1\nbanned = \"x\"\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -448,6 +463,30 @@ fn rule_file_content_forbidden_replace() -> impl Strategy<Value = String> {
     })
 }
 
+/// An `hcl_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.tf`) to
+/// "NEW". Safe, so a bare `Fix` applies it -- exercising the structured located
+/// path (query -> span resolve -> serialize -> splice -> re-parse verify).
+fn rule_hcl_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("setv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: hcl_path_equals\n    paths: \"**/sv.tf\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// An `hcl_path_absent` rule fixed via the located `remove_value` op (Phase 2):
+/// deletes the `$.banned` node (planted only in `_trig/rv.tf`). Unsafe by
+/// default, so it is *suggested* under a bare `Fix` and *applied* under
+/// `FixUnsafe` -- exercising the located removal path + the tier gate.
+fn rule_hcl_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("remv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: hcl_path_absent\n    paths: \"**/rv.tf\"\n    path: \"$.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -555,6 +594,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
+        // the located structured ops (Phase 2).
+        rule_hcl_path_equals_set_value(),
+        rule_hcl_path_absent_remove_value(),
     ]
 }
 

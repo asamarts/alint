@@ -139,29 +139,6 @@ fn count_yml_files_recursive(dir: &Path) -> usize {
     total
 }
 
-/// Count `pub struct ...Fixer` lines across every `.rs` under `dir`.
-fn count_fixer_structs(dir: &Path) -> usize {
-    let mut total = 0;
-    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let src = fs::read_to_string(&path).unwrap();
-        for line in src.lines() {
-            let t = line.trim_start();
-            if t.starts_with("pub struct ") && t.contains("Fixer") {
-                // Match either `pub struct FooFixer;` (unit struct)
-                // or `pub struct FooFixer {` / `pub struct FooFixer(...);`
-                // — both indicate one distinct fixer type.
-                total += 1;
-            }
-        }
-    }
-    total
-}
-
 /// Find `enum <name> {` in `source` and count comma-terminated or
 /// brace-terminated variant identifiers in its body. Tolerates
 /// docstrings, attributes, and variants with struct/tuple fields.
@@ -312,15 +289,16 @@ fn readme_auto_fix_ops_count_matches_fixers() {
     let claimed =
         num_before(&readme, "auto-fix ops").expect("README must contain 'N auto-fix ops'");
 
-    let dir = workspace_root().join("crates/alint-rules/src/fixers");
-    let actual = count_fixer_structs(&dir);
+    // The canonical op list, not the `*Fixer` struct count: one fixer can serve
+    // several ops (`StructuredFixer` backs both `set_value` and `remove_value`),
+    // so the op SSOT is what the "auto-fix ops" claim must track -- consistent
+    // with the sibling gates counting the `Format` / `Command` enum SSOTs.
+    let actual = alint_core::FixSpec::ALL_OP_NAMES.len();
 
     assert_eq!(
-        claimed,
-        actual,
-        "README claims {claimed} auto-fix ops; {actual} `pub struct *Fixer` declarations in {}.\n\
-         Update README.md or check whether a new fixer was added without bumping the count.",
-        dir.display()
+        claimed, actual,
+        "README claims {claimed} auto-fix ops; FixSpec::ALL_OP_NAMES lists {actual}.\n\
+         Update README.md or check whether a new fix op was added without bumping the count.",
     );
 }
 

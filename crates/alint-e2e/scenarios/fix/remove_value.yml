@@ -1,0 +1,43 @@
+name: remove_value deletes a forbidden HCL attribute line, keeping its neighbors
+tags: [fix, hcl_path_absent, remove_value]
+
+# The located structured remover (Phase 2). `hcl_path_absent` requires
+# `$.locals.secret` to be absent; the file declares it, so `remove_value`
+# deletes the whole `secret = ...` line (value span widened to the physical
+# line, including its newline). `remove_value` is Unsafe by default (a deletion
+# is not behavior-preserving); this rule promotes it to Safe in its OWN
+# top-level config so a bare `fix` applies it. The trailing `check` proves the
+# node is gone; `expect_tree` proves the sibling `keep` line is untouched.
+
+given:
+  tree:
+    main.tf: |
+      locals {
+        keep   = "ok"
+        secret = "do-not-commit"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-secret
+        kind: hcl_path_absent
+        paths: "**/*.tf"
+        path: "$.locals.secret"
+        level: error
+        fix:
+          remove_value:
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-secret, level: error, path: main.tf}
+  - applied: [no-secret]
+  - violations: []
+
+expect_tree:
+  main.tf: |
+    locals {
+      keep   = "ok"
+    }

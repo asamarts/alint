@@ -31,6 +31,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own top-level config (or a `.alint.d/` drop-in) may grant trust; a ruleset may
   not allowlist itself. A per-rule `applicability:` field was also added to the
   `file_create` / `file_prepend` / `file_append` fix ops.
+- New located structured fix ops `set_value` (for the `*_path_equals` kinds) and
+  `remove_value` (for the `*_path_absent` kinds): they edit a structured config
+  value in place, preserving comments, key order, and line endings by splicing
+  only the target node's byte range rather than re-serializing the document.
+  `set_value` rewrites the value at the rule's `path:` to its `equals:` (Safe for
+  a scalar replacing an existing scalar; object/array/insertion cases decline);
+  `remove_value` deletes the matched node with its separator (Unsafe by default).
+  Available for **HCL** now; the other structured formats surface the violation
+  but decline the fix until their span resolvers land. `set_value` is
+  content-injecting, so a remote `extends:` demotes it under the trust boundary
+  above.
 
 ### Changed
 

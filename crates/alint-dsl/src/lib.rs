@@ -610,8 +610,17 @@ fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
 /// `file_remove`, `file_rename`, `chmod`) carry no ruleset bytes and are honored at
 /// their own tier from any source; a destructive one like `file_remove` is already
 /// gated by its Unsafe tier, independent of source.
-pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] =
-    &["replace", "file_create", "file_prepend", "file_append"];
+pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
+    "replace",
+    "file_create",
+    "file_prepend",
+    "file_append",
+    // `set_value` writes the host rule's `equals:` value into the file -- ruleset-
+    // authored bytes, so a remote must PROPOSE it, never auto-write (auto-fix.md
+    // 5.5). `remove_value` is a DELETION (no ruleset bytes) -> fixed-behavior,
+    // gated by its Unsafe tier like `file_remove`, so it is deliberately absent.
+    "set_value",
+];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`
 /// (unless it already declares the stricter `suggestion` / `never`), so a remote

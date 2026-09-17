@@ -983,6 +983,8 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         "file_strip_zero_width",
         "file_strip_bom",
         "file_collapse_blank_lines",
+        // `remove_value` deletes (no ruleset bytes); `set_value` is content-injecting.
+        "remove_value",
     ];
     let content: BTreeSet<&str> = crate::CONTENT_INJECTING_FIX_OPS.iter().copied().collect();
     let fixed: BTreeSet<&str> = FIXED_BEHAVIOR_FIX_OPS.iter().copied().collect();

@@ -23,6 +23,7 @@ mod report;
 mod rule;
 mod scope;
 mod scope_filter;
+pub mod structured_fix;
 mod structured_format;
 pub mod template;
 mod walker;

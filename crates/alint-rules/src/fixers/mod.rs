@@ -16,12 +16,16 @@
 //!   `FileStripZeroWidthFixer`, `FileStripBomFixer`).
 //! - [`replace`] — the located regex `replace` op (`ReplaceFixer`), emitting
 //!   byte-range edits rather than a whole-file rewrite.
+//! - [`structured`] — the located structured `set_value` / `remove_value` ops
+//!   (`StructuredFixer`), splicing a value/removal span located via a
+//!   span-resolving parser (Phase 2).
 
 pub mod creators;
 pub mod file_ops;
 pub mod hygiene;
 pub mod replace;
 pub mod strip;
+pub mod structured;
 
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
 pub use file_ops::{FileRemoveFixer, FileRenameFixer};
@@ -32,3 +36,4 @@ pub use hygiene::{
 };
 pub use replace::ReplaceFixer;
 pub use strip::{FileStripBidiFixer, FileStripBomFixer, FileStripZeroWidthFixer};
+pub use structured::StructuredFixer;
