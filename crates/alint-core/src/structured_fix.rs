@@ -1318,4 +1318,24 @@ mod tests {
         assert!(serialize_scalar(Format::Dotenv, &json!("a\u{0}b")).is_none()); // NUL
         assert!(serialize_scalar(Format::Dotenv, &json!("a\u{1b}b")).is_none()); // ESC
     }
+
+    #[test]
+    fn dotenv_value_span_is_byte_accurate_with_multibyte_neighbors() {
+        // A multibyte key AND value: the span must land on exact byte boundaries
+        // so the splice touches only the value (café=☕, with a plain sibling).
+        let src = "café=☕\nPORT=1\n";
+        let span = resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("café")]).unwrap();
+        assert_eq!(&src[span], "☕");
+    }
+
+    #[test]
+    fn dotenv_a_commented_occurrence_does_not_trigger_the_duplicate_decline() {
+        // A `#`-comment mentioning the key is skipped by the scan, so a SINGLE
+        // real assignment still resolves -- no false "ambiguous duplicate" decline.
+        let src = "# DBURL=commented-out\nDBURL=real\n";
+        let removal =
+            resolve_removal_span(Format::Dotenv, src.as_bytes(), &[key("DBURL")]).unwrap();
+        assert_eq!(&src[removal], "DBURL=real\n");
+        assert!(resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("DBURL")]).is_some());
+    }
 }

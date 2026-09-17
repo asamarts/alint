@@ -90,15 +90,33 @@ impl StructuredFixer {
         }
     }
 
-    /// A `set_value` whose wanted value can NEVER match the parsed leaf: a
-    /// non-string `equals` against a string-typed format (XML / dotenv /
-    /// properties / INI parse every leaf as a string), so `equals: 8080` is
-    /// unsatisfiable and no splice can ever satisfy the rule. Consulted by BOTH
-    /// `can_fix` (so `check` does not advertise an auto-fix) AND `collect_edits`
-    /// (so `fix` emits nothing rather than a suggestion that would be demoted by
-    /// re-verify anyway) -- keeping the two honest with each other.
-    fn set_is_statically_unsatisfiable(&self, want: &Value) -> bool {
-        structured_fix::format_leaves_are_strings(self.format) && !want.is_string()
+    /// The STATIC (config-only, no-document, no-I/O) preconditions for a
+    /// `set_value` to be able to apply, all pure functions of the rule's `equals`
+    /// value and this format:
+    /// - it is a SCALAR (an object/array is never overwritten at tier);
+    /// - it can MATCH the parsed leaf -- a non-string `equals` against a
+    ///   string-typed format (XML / dotenv / properties / INI parse every leaf as
+    ///   a string) is unsatisfiable, so `equals: 8080` there can never match; and
+    /// - it can be SERIALIZED to this format -- dotenv, for one, declines a value
+    ///   carrying a control char it cannot escape.
+    ///
+    /// Consulted by BOTH `can_fix` (so `check` does not advertise an auto-fix)
+    /// AND `collect_edits` (so `fix` emits nothing rather than a suggestion that
+    /// re-verify would demote anyway), so the two CANNOT disagree about a
+    /// config-only decline. Document-dependent preconditions (a single scalar
+    /// match, a resolvable span) stay fix-time-only.
+    fn set_value_is_statically_applicable(&self, want: &Value) -> bool {
+        if !is_scalar(want) {
+            return false;
+        }
+        // A non-string `equals` can never match a string-leaf format.
+        let string_leaf_type_mismatch =
+            structured_fix::format_leaves_are_strings(self.format) && !want.is_string();
+        if string_leaf_type_mismatch {
+            return false;
+        }
+        // The value must be representable in this format's syntax.
+        structured_fix::serialize_scalar(self.format, want).is_some()
     }
 }
 
@@ -140,11 +158,10 @@ impl Fixer for StructuredFixer {
         // document-dependent declines (a non-scalar TARGET node, a repeated-block
         // / array-parent removal) are fix-time concerns `check` cannot predict.
         match &self.op {
-            // `set_value` applies only for a scalar value, and never when the
-            // wanted value is statically unsatisfiable on this format.
-            StructuredOp::Set(want) => {
-                is_scalar(want) && !self.set_is_statically_unsatisfiable(want)
-            }
+            // `set_value` is advertised fixable exactly when its value clears the
+            // config-only static preconditions (scalar + can-match + can-serialize);
+            // `collect_edits` gates on the SAME predicate, so check and fix agree.
+            StructuredOp::Set(want) => self.set_value_is_statically_applicable(want),
             // A removal has no statically-unsatisfiable case: whether a matched
             // node can be deleted is document-dependent (the resolver declines a
             // repeated-block / array-parent node, or the document root -- deleting
@@ -192,18 +209,19 @@ impl Fixer for StructuredFixer {
                 let Some(node) = located.iter().next() else {
                     return Vec::new();
                 };
-                if !is_scalar(node.node()) || !is_scalar(want) {
+                // The existing node must be a scalar to overwrite (document-dependent).
+                if !is_scalar(node.node()) {
                     return Vec::new();
                 }
-                // Emit nothing when the value can never satisfy the rule on this
-                // format (a non-string `equals` on a string-leaf format): re-verify
-                // would demote it, and `can_fix` already reports it unfixable, so a
-                // suggestion here would only mislead. Decline, matching `can_fix`.
-                if self.set_is_statically_unsatisfiable(want) {
+                // Gate on the SAME config-only predicate `can_fix` uses, so a value
+                // check advertised as fixable is emitted here, and one check declined
+                // (non-matching type, or un-serializable) emits nothing -- never a
+                // suggestion re-verify would only demote. Keeps check and fix honest.
+                if !self.set_value_is_statically_applicable(want) {
                     return Vec::new();
                 }
                 let Some(content) = structured_fix::serialize_scalar(self.format, want) else {
-                    return Vec::new();
+                    return Vec::new(); // unreachable: the predicate proved serialization succeeds
                 };
                 let segs = to_segs(node.location());
                 let Some(range) = structured_fix::resolve_value_span(self.format, bytes, &segs)
@@ -507,6 +525,60 @@ mod tests {
         assert!(
             StructuredFixer::remove(Format::Xml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v)
+        );
+    }
+
+    #[test]
+    fn set_value_un_serializable_value_declines_check_and_fix_together() {
+        // Regression (dotenv audit): a string `equals` carrying an un-escapable
+        // control char (vertical tab -- dotenv escapes only \n \r \t) is
+        // STATICALLY un-serializable, so `check` must NOT advertise it fixable and
+        // `fix` must emit nothing -- the two agree via the shared static predicate.
+        let v = Violation::new("x");
+        let vtab = json!("a\u{0b}b");
+        let denv = StructuredFixer::set(
+            Format::Dotenv,
+            jp("$.MSG"),
+            "$.MSG".into(),
+            vtab.clone(),
+            Applicability::Safe,
+        );
+        assert!(
+            !denv.can_fix(&v),
+            "check must not advertise an un-serializable dotenv value"
+        );
+        assert!(
+            denv.collect_edits(&[], Path::new("a.env"), b"MSG=old\n", Path::new("/r"))
+                .is_empty(),
+            "fix must emit nothing for the same value (agree with can_fix)"
+        );
+        // The SAME value on HCL IS fixable: HCL escapes control chars (`\u000B`)
+        // rather than declining, so check AND fix both accept it.
+        let hcl = StructuredFixer::set(
+            Format::Hcl,
+            jp("$.msg"),
+            "$.msg".into(),
+            vtab,
+            Applicability::Safe,
+        );
+        assert!(hcl.can_fix(&v), "HCL escapes controls, so it stays fixable");
+        assert_eq!(
+            hcl.collect_edits(&[], Path::new("a.hcl"), b"msg = \"old\"\n", Path::new("/r"))
+                .len(),
+            1,
+            "HCL emits an edit for the same value"
+        );
+        // dotenv CAN escape \n, so a newline value stays fixable (the boundary).
+        assert!(
+            StructuredFixer::set(
+                Format::Dotenv,
+                jp("$.MSG"),
+                "$.MSG".into(),
+                json!("a\nb"),
+                Applicability::Safe
+            )
+            .can_fix(&v),
+            "dotenv escapes \\n, so a newline value stays fixable"
         );
     }
 
