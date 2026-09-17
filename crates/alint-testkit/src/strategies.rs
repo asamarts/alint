@@ -330,6 +330,18 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "rv.env".to_string()],
         "KEEP=1\nBANNED=x\n".to_string(),
     );
+    // INI analogs (2-level section paths). The removal target is a unique
+    // single-line section key (a multi-line or duplicate key would decline).
+    insert_file(
+        root,
+        &[dir.clone(), "sv.ini".to_string()],
+        "[s]\nregion = OLD\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.ini".to_string()],
+        "[s]\nkeep = 1\nbanned = x\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -569,6 +581,32 @@ fn rule_dotenv_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// An `ini_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the section-scoped scalar at `$['s']['region']` (planted as "OLD"
+/// only in `_trig/sv.ini`) to "NEW". Safe, so a bare `Fix` applies it --
+/// exercising the hand-rolled INI resolver (2-level section nav -> value span ->
+/// splice -> re-parse verify).
+fn rule_ini_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("isetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: ini_path_equals\n    paths: \"**/sv.ini\"\n    path: \"$['s']['region']\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// An `ini_path_absent` rule fixed via the located `remove_value` op (Phase 2):
+/// deletes the unique single-line section key `$['s']['banned']` (planted only
+/// in `_trig/rv.ini`). Unsafe by default, so it is *suggested* under a bare
+/// `Fix` and *applied* under `FixUnsafe` -- exercising the INI whole-line
+/// removal + the tier gate.
+fn rule_ini_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("iremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: ini_path_absent\n    paths: \"**/rv.ini\"\n    path: \"$['s']['banned']\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -676,13 +714,15 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2), HCL + XML + dotenv resolvers.
+        // the located structured ops (Phase 2), HCL + XML + dotenv + INI resolvers.
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
         rule_xml_path_equals_set_value(),
         rule_xml_path_absent_remove_value(),
         rule_dotenv_path_equals_set_value(),
         rule_dotenv_path_absent_remove_value(),
+        rule_ini_path_equals_set_value(),
+        rule_ini_path_absent_remove_value(),
     ]
 }
 

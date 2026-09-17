@@ -6,9 +6,9 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv (a
-//! hand-rolled re-scan of the raw text, since the `.env` parser keeps no spans)
-//! are span-capable today. Every other [`Format`] returns `None`, so its
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv + INI
+//! (a hand-rolled re-scan of the raw text, since those parsers keep no spans) are
+//! span-capable today. Every other [`Format`] returns `None`, so its
 //! `set_value` / `remove_value` declines cleanly (the violation is reported
 //! unfixed) until that format's resolver lands. This is a SAFE degradation: a
 //! `None` never corrupts bytes, and a wrong-but-parseable splice is still caught
@@ -52,6 +52,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
         Format::Hcl => hcl::hcl_value_span(text, path),
         Format::Xml => xml::xml_value_span(text, path),
         Format::Dotenv => dotenv::dotenv_value_span(text, path),
+        Format::Ini => ini::ini_value_span(text, path),
         _ => None,
     }
 }
@@ -71,6 +72,7 @@ pub fn resolve_removal_span(
         Format::Hcl => hcl::hcl_removal_span(text, path),
         Format::Xml => xml::xml_removal_span(text, path),
         Format::Dotenv => dotenv::dotenv_removal_span(text, path),
+        Format::Ini => ini::ini_removal_span(text, path),
         _ => None,
     }
 }
@@ -85,6 +87,7 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
         Format::Hcl => hcl::hcl_serialize_scalar(value),
         Format::Xml => xml::xml_serialize_scalar(value),
         Format::Dotenv => dotenv::dotenv_serialize_scalar(value),
+        Format::Ini => ini::ini_serialize_scalar(value),
         _ => None,
     }
 }
@@ -774,6 +777,159 @@ mod dotenv {
     }
 }
 
+/// INI / `.cfg` span resolution + value serialization.
+///
+/// Like dotenv, the [`crate::ini`] parser keeps no byte offsets, so this
+/// re-scans the raw text, mirroring the parser (BOM strip, `str::lines()`,
+/// leading `[section]` scope, earliest `=`/`:` split, `trim`ed literal value,
+/// full-line `;`/`#` comments, configparser indentation-continuation). A path is
+/// a GLOBAL key `[Key(k)]` or a SECTION key `[Key(section), Key(key)]`; anything
+/// deeper or indexed (an array element of a duplicated key) declines.
+///
+/// CONSERVATIVE by design -- it resolves ONLY a single-line, single-occurrence
+/// scalar key. It DECLINES (degrade to a Suggestion, never a wrong edit): a key
+/// with continuation lines (a value spanning several physical lines -- removing
+/// or overwriting it is a multi-line edit a single range cannot express, and is
+/// the precise over-deletion risk the audits flag), a duplicate key (collapsed
+/// to an array), a whole section, and any object-valued target. Multi-line
+/// continuation + array-element edits are deferred.
+mod ini {
+    use super::PathSeg;
+    use std::ops::Range;
+
+    /// A located single-line assignment.
+    struct Located {
+        /// The whole physical line INCLUDING its trailing newline (removal).
+        full: Range<usize>,
+        /// The trimmed value token after the separator (set overwrites this).
+        value: Range<usize>,
+    }
+
+    pub(super) fn ini_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let (section, key) = target(path)?;
+        locate(text, section, key).map(|l| l.value)
+    }
+
+    pub(super) fn ini_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let (section, key) = target(path)?;
+        locate(text, section, key).map(|l| l.full)
+    }
+
+    /// A resolvable INI path: a GLOBAL key (one segment) or a SECTION key (two).
+    /// An `Index` (an array element of a duplicated key) or a deeper path is not
+    /// resolved.
+    fn target(path: &[PathSeg]) -> Option<(Option<&str>, &str)> {
+        match path {
+            [PathSeg::Key(k)] => Some((None, k.as_str())),
+            [PathSeg::Key(s), PathSeg::Key(k)] => Some((Some(s.as_str()), k.as_str())),
+            _ => None,
+        }
+    }
+
+    /// Scan for the UNIQUE single-line assignment of `key` in scope `section`
+    /// (`None` = the global pre-section scope), mirroring [`crate::ini::parse`].
+    /// `None` if it is absent, appears more than once (a duplicate array), or has
+    /// continuation lines (a multi-line value) -- all declined.
+    fn locate(text: &str, want_section: Option<&str>, want_key: &str) -> Option<Located> {
+        let (body, base) = match text.strip_prefix('\u{feff}') {
+            Some(rest) => (rest, '\u{feff}'.len_utf8()),
+            None => (text, 0),
+        };
+        let mut matches: Vec<Located> = Vec::new();
+        let mut section: Option<String> = None;
+        // The current key's indent, and its index in `matches` when it is the
+        // target (so a following continuation line marks it multi-line). `None`
+        // once a section header or a separator-less line resets the key.
+        let mut cur: Option<(usize, Option<usize>)> = None;
+        let mut multiline_target = false;
+        let mut cursor = 0usize;
+        for chunk in body.split_inclusive('\n') {
+            let line_start = base + cursor;
+            let line_end = line_start + chunk.len();
+            cursor += chunk.len();
+            let content = chunk
+                .strip_suffix('\n')
+                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
+            let indent = content
+                .chars()
+                .take_while(|&c| c == ' ' || c == '\t')
+                .count();
+            let line = content.trim();
+            // Blank / full-line comment: transparent, does not reset the key.
+            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                continue;
+            }
+            // Continuation (checked BEFORE the section header, as the parser does):
+            // a deeper-indented line is value text, not a section or key.
+            if let Some((cur_indent, match_idx)) = cur {
+                if indent > cur_indent {
+                    if match_idx.is_some() {
+                        multiline_target = true;
+                    }
+                    continue;
+                }
+            }
+            // Section header: `[` .. LAST `]`.
+            if let Some(rest) = line.strip_prefix('[') {
+                if let Some(name) = rest.strip_suffix(']') {
+                    section = Some(name.trim().to_string());
+                }
+                cur = None;
+                continue;
+            }
+            // `key = value` / `key : value`: earliest separator wins.
+            let Some(sep) = line.find(['=', ':']) else {
+                cur = None; // separator-less line (a parse error upstream); reset
+                continue;
+            };
+            let key = line[..sep].trim();
+            let is_match = section.as_deref() == want_section && key == want_key;
+            if is_match {
+                // Byte ranges (absolute). `line` is `content` trimmed; its offset
+                // within content is the leading-whitespace width.
+                let lead = content.len() - content.trim_start().len();
+                let raw_val = &line[sep + 1..];
+                let vlead = raw_val.len() - raw_val.trim_start().len();
+                let vtok = raw_val.trim();
+                let vstart = line_start + lead + sep + 1 + vlead;
+                matches.push(Located {
+                    full: line_start..line_end,
+                    value: vstart..vstart + vtok.len(),
+                });
+                cur = Some((indent, Some(matches.len() - 1)));
+            } else {
+                cur = Some((indent, None));
+            }
+        }
+        // Exactly one occurrence (a duplicate is an array -> decline), and it is
+        // single-line (a continuation is a multi-line value -> decline).
+        if matches.len() == 1 && !multiline_target {
+            matches.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    /// Serialize a scalar as a literal INI value. INI has NO escaping and trims
+    /// leading/trailing value whitespace, so a value with edge whitespace or a
+    /// newline (which would need a continuation) cannot round-trip -> decline
+    /// (the value is written verbatim otherwise, quotes / `;` / `#` / `=` / `:`
+    /// all literal).
+    pub(super) fn ini_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value;
+        let s = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Null | Value::Array(_) | Value::Object(_) => return None,
+        };
+        if s != s.trim() || s.contains('\n') || s.contains('\r') {
+            return None;
+        }
+        Some(s.into_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,10 +1180,8 @@ mod tests {
         // three entry points.
         for &f in Format::ALL {
             let has_resolver = match f {
-                Format::Hcl | Format::Xml | Format::Dotenv => true,
-                Format::Json | Format::Yaml | Format::Toml | Format::Properties | Format::Ini => {
-                    false
-                }
+                Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini => true,
+                Format::Json | Format::Yaml | Format::Toml | Format::Properties => false,
             };
             if !has_resolver {
                 assert!(
@@ -1047,6 +1201,7 @@ mod tests {
         // A supported format actually resolves.
         assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
         assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
+        assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
     }
 
     // ---- XML (roxmltree spans): elements, attributes, text, siblings ----
@@ -1337,5 +1492,119 @@ mod tests {
             resolve_removal_span(Format::Dotenv, src.as_bytes(), &[key("DBURL")]).unwrap();
         assert_eq!(&src[removal], "DBURL=real\n");
         assert!(resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("DBURL")]).is_some());
+    }
+
+    // ---- INI (hand-rolled re-scan; 2-level sections, continuation-aware) ----
+
+    fn ini_value(src: &str, path: &[PathSeg]) -> std::ops::Range<usize> {
+        resolve_value_span(Format::Ini, src.as_bytes(), path).unwrap()
+    }
+
+    #[test]
+    fn ini_value_span_covers_global_and_section_keys() {
+        let src = "root = true\n[server]\nport = 8080\n";
+        assert_eq!(&src[ini_value(src, &[key("root")])], "true");
+        assert_eq!(&src[ini_value(src, &[key("server"), key("port")])], "8080");
+    }
+
+    #[test]
+    fn ini_removal_span_is_the_whole_key_line() {
+        let src = "[s]\nkeep = 1\ndrop = 2\n";
+        let span =
+            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("s"), key("drop")]).unwrap();
+        assert_eq!(&src[span], "drop = 2\n");
+    }
+
+    #[test]
+    fn ini_colon_separator_keeps_the_literal_value_including_inline_comment() {
+        // The earliest `=`/`:` splits; an inline `;` is literal VALUE text (only a
+        // full-line `;`/`#` is a comment), so the whole token is the value.
+        let src = "[db]\nurl : http://h:5432 ; note\n";
+        assert_eq!(
+            &src[ini_value(src, &[key("db"), key("url")])],
+            "http://h:5432 ; note"
+        );
+    }
+
+    #[test]
+    fn ini_declines_a_multiline_continuation_value() {
+        // `deps`'s value spans continuation lines -- a single range can't express
+        // it, so both set and remove decline (the over-deletion risk, refused).
+        let src = "[tox]\ndeps =\n    pytest\n    mock\nother = 1\n";
+        assert!(
+            resolve_value_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).is_none()
+        );
+        assert!(
+            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).is_none()
+        );
+        // a single-line sibling in the same section still resolves.
+        assert!(
+            resolve_value_span(Format::Ini, src.as_bytes(), &[key("tox"), key("other")]).is_some()
+        );
+    }
+
+    #[test]
+    fn ini_declines_a_duplicate_key_even_across_repeated_sections() {
+        let same = "[s]\nk = 1\nk = 2\n";
+        assert!(
+            resolve_removal_span(Format::Ini, same.as_bytes(), &[key("s"), key("k")]).is_none()
+        );
+        let split = "[s]\nk = 1\n[o]\nx = 0\n[s]\nk = 2\n";
+        assert!(
+            resolve_removal_span(Format::Ini, split.as_bytes(), &[key("s"), key("k")]).is_none()
+        );
+    }
+
+    #[test]
+    fn ini_isolates_a_global_key_from_a_same_named_section_key() {
+        let src = "name = global\n[sec]\nname = sectioned\n";
+        assert_eq!(&src[ini_value(src, &[key("name")])], "global");
+        assert_eq!(
+            &src[ini_value(src, &[key("sec"), key("name")])],
+            "sectioned"
+        );
+    }
+
+    #[test]
+    fn ini_resolves_a_key_under_a_repeated_section_header() {
+        let src = "[s]\na = 1\n[o]\nx = 9\n[s]\nb = old\n";
+        assert_eq!(&src[ini_value(src, &[key("s"), key("b")])], "old");
+    }
+
+    #[test]
+    fn ini_declines_a_whole_section_and_an_indexed_path() {
+        let src = "[drop]\nk = 1\n";
+        // `$['drop']` names the section OBJECT -- removal declines (deferred).
+        assert!(resolve_removal_span(Format::Ini, src.as_bytes(), &[key("drop")]).is_none());
+        // an array-element (`Index`) path declines.
+        assert!(
+            resolve_value_span(
+                Format::Ini,
+                src.as_bytes(),
+                &[key("drop"), key("k"), idx(0)]
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn ini_value_span_is_offset_past_a_bom() {
+        let src = "\u{feff}[s]\nk = v\n";
+        assert_eq!(&src[ini_value(src, &[key("s"), key("k")])], "v");
+    }
+
+    #[test]
+    fn ini_serialize_is_literal_and_declines_unrepresentable_values() {
+        // Literal: quotes / `;` / `:` kept verbatim, no escaping.
+        assert_eq!(
+            serialize_scalar(Format::Ini, &json!("http://h ; x")).unwrap(),
+            b"http://h ; x"
+        );
+        assert_eq!(serialize_scalar(Format::Ini, &json!("")).unwrap(), b"");
+        // Edge whitespace (the parser trims it) and newlines (which would need a
+        // continuation) cannot round-trip -> decline.
+        assert!(serialize_scalar(Format::Ini, &json!(" pad ")).is_none());
+        assert!(serialize_scalar(Format::Ini, &json!("a\nb")).is_none());
+        assert!(serialize_scalar(Format::Ini, &json!("a\rb")).is_none());
     }
 }
