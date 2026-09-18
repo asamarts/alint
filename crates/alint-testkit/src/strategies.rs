@@ -353,6 +353,17 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "rv.toml".to_string()],
         "keep = 1\nbanned = \"x\"\n".to_string(),
     );
+    // properties analogs (flat, hand-rolled). Simple `key=value` lines.
+    insert_file(
+        root,
+        &[dir.clone(), "sv.properties".to_string()],
+        "region=OLD\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.properties".to_string()],
+        "keep=1\nbanned=x\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -643,6 +654,30 @@ fn rule_toml_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `properties_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.region` (planted as "OLD" only in
+/// `_trig/sv.properties`) to "NEW". Safe, so a bare `Fix` applies it -- exercising
+/// the hand-rolled conservative properties resolver.
+fn rule_properties_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("psetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: properties_path_equals\n    paths: \"**/sv.properties\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// A `properties_path_absent` rule fixed via the located `remove_value` op
+/// (Phase 2): deletes the `$.banned` key line (planted only in
+/// `_trig/rv.properties`). Unsafe by default, so *suggested* under a bare `Fix`
+/// and *applied* under `FixUnsafe` -- exercising the properties whole-line removal.
+fn rule_properties_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("premv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: properties_path_absent\n    paths: \"**/rv.properties\"\n    path: \"$.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -762,6 +797,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_ini_path_absent_remove_value(),
         rule_toml_path_equals_set_value(),
         rule_toml_path_absent_remove_value(),
+        rule_properties_path_equals_set_value(),
+        rule_properties_path_absent_remove_value(),
     ]
 }
 

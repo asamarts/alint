@@ -6,9 +6,10 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv + INI
-//! (a hand-rolled re-scan of the raw text, since those parsers keep no spans) are
-//! span-capable today. Every other [`Format`] returns `None`, so its
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv + INI +
+//! properties (a hand-rolled re-scan of the raw text, since those parsers keep no
+//! spans) are span-capable today; TOML is document-rewrite (`toml_edit`). Every
+//! other [`Format`] returns `None`, so its
 //! `set_value` / `remove_value` declines cleanly (the violation is reported
 //! unfixed) until that format's resolver lands. This is a SAFE degradation: a
 //! `None` never corrupts bytes, and a wrong-but-parseable splice is still caught
@@ -53,6 +54,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
         Format::Xml => xml::xml_value_span(text, path),
         Format::Dotenv => dotenv::dotenv_value_span(text, path),
         Format::Ini => ini::ini_value_span(text, path),
+        Format::Properties => properties::properties_value_span(text, path),
         _ => None,
     }
 }
@@ -73,6 +75,7 @@ pub fn resolve_removal_span(
         Format::Xml => xml::xml_removal_span(text, path),
         Format::Dotenv => dotenv::dotenv_removal_span(text, path),
         Format::Ini => ini::ini_removal_span(text, path),
+        Format::Properties => properties::properties_removal_span(text, path),
         _ => None,
     }
 }
@@ -88,6 +91,7 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
         Format::Xml => xml::xml_serialize_scalar(value),
         Format::Dotenv => dotenv::dotenv_serialize_scalar(value),
         Format::Ini => ini::ini_serialize_scalar(value),
+        Format::Properties => properties::properties_serialize_scalar(value),
         Format::Toml => toml_::serialize_scalar(value),
         _ => None,
     }
@@ -989,6 +993,130 @@ mod ini {
             Value::Null | Value::Array(_) | Value::Object(_) => return None,
         };
         if s != s.trim() || s.chars().any(|c| c.is_control() && c != '\t') {
+            return None;
+        }
+        Some(s.into_bytes())
+    }
+}
+
+/// Java `.properties` span resolution + value serialization (CONSERVATIVE).
+///
+/// The parse uses `java-properties` (escape-aware; `=`/`:`/whitespace separators,
+/// `\`-continuation, `\uXXXX`) and keeps no spans, so this re-scans the raw text.
+/// It is DELIBERATELY conservative -- it resolves ONLY a simple single physical
+/// line `key = value` / `key : value` with NO backslash (no escaped separator, no
+/// continuation, no `\uXXXX`) and an EXPLICIT `=`/`:` separator, and DECLINES
+/// everything else (a whitespace-only separator, a `\`-continuation or escaped
+/// line, a duplicate key) so an ambiguous edit degrades to a Suggestion. Escaped
+/// / continued / space-separated properties are deferred.
+///
+/// Properties is FLAT (a path is one `Key`), and each simple key owns its physical
+/// line. The parser strips LEADING value whitespace but keeps TRAILING whitespace,
+/// so the value span runs from after the separator to the END of the line.
+mod properties {
+    use super::PathSeg;
+    use std::ops::Range;
+
+    /// A located simple assignment line.
+    struct Located {
+        /// The whole physical line INCLUDING its trailing newline (removal).
+        full: Range<usize>,
+        /// The value span (after the separator, to end of line).
+        value: Range<usize>,
+    }
+
+    pub(super) fn properties_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        locate(text, single_key(path)?).map(|l| l.value)
+    }
+
+    pub(super) fn properties_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        locate(text, single_key(path)?).map(|l| l.full)
+    }
+
+    /// A properties path is FLAT: exactly one `Key` segment.
+    fn single_key(path: &[PathSeg]) -> Option<&str> {
+        match path {
+            [PathSeg::Key(k)] => Some(k.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Scan for the UNIQUE simple assignment line of `name`. `None` if it is
+    /// absent, appears more than once, or is a complex (escaped / continued /
+    /// space-separated) line the conservative resolver declines.
+    fn locate(text: &str, name: &str) -> Option<Located> {
+        let (body, base) = match text.strip_prefix('\u{feff}') {
+            Some(rest) => (rest, '\u{feff}'.len_utf8()),
+            None => (text, 0),
+        };
+        let mut found: Option<Located> = None;
+        let mut cursor = 0usize;
+        for chunk in body.split_inclusive('\n') {
+            let line_start = base + cursor;
+            let full = line_start..line_start + chunk.len();
+            cursor += chunk.len();
+            let content = chunk
+                .strip_suffix('\n')
+                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
+            let Some(value) = value_span_in_line(content, name) else {
+                continue;
+            };
+            if found.is_some() {
+                return None; // a second occurrence -> ambiguous, decline
+            }
+            found = Some(Located {
+                full,
+                value: line_start + value.start..line_start + value.end,
+            });
+        }
+        found
+    }
+
+    /// If `content` is a SIMPLE `key = value` / `key : value` line for `name`
+    /// (no backslash, an explicit `=`/`:` separator), return the value span as a
+    /// range WITHIN `content`; else `None`.
+    fn value_span_in_line(content: &str, name: &str) -> Option<Range<usize>> {
+        // Any backslash means an escape or a line-continuation -- too complex for
+        // the conservative resolver, decline the whole line.
+        if content.contains('\\') {
+            return None;
+        }
+        let trimmed = content.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
+            return None;
+        }
+        let lead = content.len() - trimmed.len();
+        // The key runs to the first separator character (`=`, `:`, or whitespace).
+        let key_end = trimmed.find(|c: char| c == '=' || c == ':' || c.is_whitespace())?;
+        if trimmed[..key_end] != *name {
+            return None;
+        }
+        // The separator must be an explicit `=`/`:` (with optional surrounding
+        // whitespace); a whitespace-ONLY separator is declined.
+        let after_key = &trimmed[key_end..];
+        let ws1 = after_key.len() - after_key.trim_start().len();
+        let after_sep = after_key.trim_start().strip_prefix(['=', ':'])?;
+        let ws2 = after_sep.len() - after_sep.trim_start().len();
+        // Value: leading whitespace stripped, TRAILING whitespace kept -> to the
+        // end of the line. `=`/`:` are 1 ASCII byte.
+        let vstart = lead + key_end + ws1 + 1 + ws2;
+        Some(vstart..content.len())
+    }
+
+    /// Serialize a scalar as a RAW properties value, declining any value that
+    /// would not round-trip verbatim: a control char or backslash (would need an
+    /// escape, and a trailing `\` is a line-continuation), or LEADING whitespace
+    /// (the parser strips it). Trailing whitespace is significant, so it is kept;
+    /// `=`/`:`/`#`/`!` inside a value are literal (only line-leading matters).
+    pub(super) fn properties_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value;
+        let s = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Null | Value::Array(_) | Value::Object(_) => return None,
+        };
+        if s.starts_with(char::is_whitespace) || s.chars().any(|c| c == '\\' || c.is_control()) {
             return None;
         }
         Some(s.into_bytes())

@@ -1,0 +1,40 @@
+name: set_value rewrites a properties value (both separators), keeping siblings
+tags: [fix, properties_path_equals, set_value, properties]
+
+# The sixth structured format (hand-rolled re-scan; the java-properties parser
+# keeps no spans). `set_value` overwrites only the value token at `$['db.host']`,
+# so the leading comment, the sibling `db.port` (a `:` separator with its spacing
+# preserved), and everything else survive. Dotted keys are ONE key, queried with
+# bracket notation. Safe (a scalar replacing an existing scalar).
+
+given:
+  tree:
+    app.properties: |
+      # config
+      db.host=localhost
+      db.port : 5432
+  config: |
+    version: 1
+    rules:
+      - id: host
+        kind: properties_path_equals
+        paths: "**/*.properties"
+        path: "$['db.host']"
+        equals: "prod.db"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: host, level: error, path: app.properties}
+  - applied: [host]
+  - violations: []
+
+expect_tree:
+  app.properties: |
+    # config
+    db.host=prod.db
+    db.port : 5432

@@ -255,9 +255,11 @@ fn every_format_is_classified_for_structured_fix() {
     }
     for &f in Format::ALL {
         let regime = match f {
-            Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini => Regime::Span,
+            Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini | Format::Properties => {
+                Regime::Span
+            }
             Format::Toml => Regime::Document,
-            Format::Json | Format::Yaml | Format::Properties => Regime::Unsupported,
+            Format::Json | Format::Yaml => Regime::Unsupported,
         };
         match regime {
             Regime::Span => {
@@ -302,6 +304,7 @@ fn every_format_is_classified_for_structured_fix() {
     assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
     assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
+    assert!(resolve_value_span(Format::Properties, b"a=1\n", &[key("a")]).is_some());
     assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
     assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
 }
@@ -886,4 +889,74 @@ fn toml_finalize_preserves_crlf_bom_and_trailing_newline() {
         set("port = 8080\n", &[key("port")], &json!(9090)),
         "port = 9090\n"
     );
+}
+
+// ---- properties (hand-rolled re-scan; conservative simple key=value) ----
+
+fn props_value(src: &str, k: &str) -> std::ops::Range<usize> {
+    resolve_value_span(Format::Properties, src.as_bytes(), &[key(k)]).unwrap()
+}
+
+#[test]
+fn properties_value_span_for_both_separators_and_dotted_keys() {
+    let src = "db.host=localhost\ndb.port : 5432\n";
+    assert_eq!(&src[props_value(src, "db.host")], "localhost");
+    assert_eq!(&src[props_value(src, "db.port")], "5432");
+}
+
+#[test]
+fn properties_value_span_strips_leading_but_keeps_trailing_whitespace() {
+    // The parser strips LEADING value whitespace but keeps TRAILING, so the span
+    // runs from after the separator to the END of the line.
+    let src = "k=  val  \n";
+    assert_eq!(&src[props_value(src, "k")], "val  ");
+}
+
+#[test]
+fn properties_removal_span_is_the_whole_line() {
+    let src = "keep=1\ndrop=2\n";
+    let span = resolve_removal_span(Format::Properties, src.as_bytes(), &[key("drop")]).unwrap();
+    assert_eq!(&src[span], "drop=2\n");
+}
+
+#[test]
+fn properties_declines_complex_lines_but_skips_comments() {
+    // A backslash (escape / continuation), a whitespace-ONLY separator, an escaped
+    // key, and a duplicate all decline.
+    let cont = "cont=a\\\n  b\n";
+    assert!(resolve_removal_span(Format::Properties, cont.as_bytes(), &[key("cont")]).is_none());
+    let space = "app.name value here\n";
+    assert!(resolve_value_span(Format::Properties, space.as_bytes(), &[key("app.name")]).is_none());
+    let esc = "a\\:b=v\n";
+    assert!(resolve_value_span(Format::Properties, esc.as_bytes(), &[key("a:b")]).is_none());
+    let dup = "k=1\nk=2\n";
+    assert!(resolve_value_span(Format::Properties, dup.as_bytes(), &[key("k")]).is_none());
+    // `#` / `!` comment lines are skipped, so a real assignment still resolves.
+    let cmt = "# k=nope\n! also\nk=real\n";
+    assert_eq!(
+        &cmt[resolve_value_span(Format::Properties, cmt.as_bytes(), &[key("k")]).unwrap()],
+        "real"
+    );
+}
+
+#[test]
+fn properties_value_span_is_offset_past_a_bom() {
+    let src = "\u{feff}k=v\n";
+    assert_eq!(&src[props_value(src, "k")], "v");
+}
+
+#[test]
+fn properties_serialize_is_raw_and_declines_unrepresentable() {
+    let b = |v: &serde_json::Value| serialize_scalar(Format::Properties, v).unwrap();
+    assert_eq!(b(&json!("plain")), b"plain");
+    assert_eq!(b(&json!("http://h:5432")), b"http://h:5432"); // `:` / `/` literal in a value
+    assert_eq!(b(&json!("a#b")), b"a#b"); // `#` is only a comment at line start
+    assert_eq!(b(&json!("trailing ")), b"trailing "); // trailing whitespace kept
+    assert_eq!(b(&json!("")), b"");
+    // Leading whitespace (stripped on re-parse), a backslash (escape /
+    // continuation), and control chars cannot round-trip raw -> decline.
+    assert!(serialize_scalar(Format::Properties, &json!(" leading")).is_none());
+    assert!(serialize_scalar(Format::Properties, &json!("a\\b")).is_none());
+    assert!(serialize_scalar(Format::Properties, &json!("a\nb")).is_none());
+    assert!(serialize_scalar(Format::Properties, &json!("a\tb")).is_none());
 }

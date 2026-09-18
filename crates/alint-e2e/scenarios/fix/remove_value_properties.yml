@@ -1,0 +1,36 @@
+name: remove_value deletes a properties key line, keeping its siblings
+tags: [fix, properties_path_absent, remove_value, properties]
+
+# `remove_value` deletes the whole `debug=true` physical line (a simple key owns
+# exactly its one line), leaving the sibling `db.host` / `db.port` intact.
+# `remove_value` is Unsafe by default; this rule promotes it to `safe`.
+
+given:
+  tree:
+    app.properties: |
+      db.host=localhost
+      debug=true
+      db.port=5432
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: properties_path_absent
+        paths: "**/*.properties"
+        path: "$.debug"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.properties}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  app.properties: |
+    db.host=localhost
+    db.port=5432
