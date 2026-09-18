@@ -580,6 +580,24 @@ mod tests {
             .can_fix(&v),
             "dotenv escapes \\n, so a newline value stays fixable"
         );
+        // INI also declines an un-escapable control char (INI has no escaping), and
+        // the SAME shared predicate keeps can_fix and collect_edits in agreement.
+        let ini = StructuredFixer::set(
+            Format::Ini,
+            jp("$['s']['k']"),
+            "$['s']['k']".into(),
+            json!("a\u{0b}b"),
+            Applicability::Safe,
+        );
+        assert!(
+            !ini.can_fix(&v),
+            "INI can_fix must decline a raw control char"
+        );
+        assert!(
+            ini.collect_edits(&[], Path::new("a.ini"), b"[s]\nk = old\n", Path::new("/r"))
+                .is_empty(),
+            "INI collect_edits must emit nothing for the same value (agree with can_fix)"
+        );
     }
 
     #[test]

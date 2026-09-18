@@ -786,28 +786,40 @@ mod dotenv {
 /// a GLOBAL key `[Key(k)]` or a SECTION key `[Key(section), Key(key)]`; anything
 /// deeper or indexed (an array element of a duplicated key) declines.
 ///
-/// CONSERVATIVE by design -- it resolves ONLY a single-line, single-occurrence
-/// scalar key. It DECLINES (degrade to a Suggestion, never a wrong edit): a key
-/// with continuation lines (a value spanning several physical lines -- removing
-/// or overwriting it is a multi-line edit a single range cannot express, and is
-/// the precise over-deletion risk the audits flag), a duplicate key (collapsed
-/// to an array), a whole section, and any object-valued target. Multi-line
-/// continuation + array-element edits are deferred.
+/// `remove_value` handles a multi-line CONTINUATION value: it deletes the key's
+/// line through its LAST continuation line (sweeping the transparent blank/comment
+/// lines interleaved between continuations, which must go too or a deeper line is
+/// orphaned), but never a trailing blank after the last continuation nor a
+/// following key. `set_value`, by contrast, declines a multi-line value
+/// (collapsing several value lines into one scalar is a different, deferred edit)
+/// -- it resolves only a single-line value token.
+///
+/// It DECLINES (degrade to a Suggestion, never a wrong edit): a duplicate key
+/// (collapsed to an array), a whole section (`$['sec']` names the object), and any
+/// indexed / array-element path. Array-element edits are deferred.
 mod ini {
     use super::PathSeg;
     use std::ops::Range;
 
-    /// A located single-line assignment.
+    /// A located assignment of the target key.
     struct Located {
-        /// The whole physical line INCLUDING its trailing newline (removal).
+        /// The removal span: the key's own line for a single-line value, EXTENDED
+        /// through the last continuation line for a multi-line value. Interspersed
+        /// transparent blank/comment lines fall inside it (a later continuation
+        /// extends past them); trailing blanks after the last continuation do not
+        /// (nothing extends onto them), so `remove_value` cannot orphan a deeper
+        /// line nor sweep a following key.
         full: Range<usize>,
-        /// The trimmed value token after the separator (set overwrites this).
-        value: Range<usize>,
+        /// The value token on the key's own line -- `Some` ONLY for a single-line
+        /// value. `None` once the value continues onto further lines, so
+        /// `set_value` declines a multi-line value (overwriting it with one scalar
+        /// is a different, deferred edit).
+        value: Option<Range<usize>>,
     }
 
     pub(super) fn ini_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
         let (section, key) = target(path)?;
-        locate(text, section, key).map(|l| l.value)
+        locate(text, section, key).and_then(|l| l.value)
     }
 
     pub(super) fn ini_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
@@ -826,10 +838,12 @@ mod ini {
         }
     }
 
-    /// Scan for the UNIQUE single-line assignment of `key` in scope `section`
-    /// (`None` = the global pre-section scope), mirroring [`crate::ini::parse`].
-    /// `None` if it is absent, appears more than once (a duplicate array), or has
-    /// continuation lines (a multi-line value) -- all declined.
+    /// Scan for the UNIQUE assignment of `key` in scope `section` (`None` = the
+    /// global pre-section scope), mirroring [`crate::ini::parse`] line for line.
+    /// `None` if it is absent OR appears more than once (a duplicate array --
+    /// decline). A single match resolves; its `full` span covers any continuation
+    /// lines (so `remove_value` deletes the whole multi-line value), while its
+    /// `value` is `None` for a multi-line value (so `set_value` declines it).
     fn locate(text: &str, want_section: Option<&str>, want_key: &str) -> Option<Located> {
         let (body, base) = match text.strip_prefix('\u{feff}') {
             Some(rest) => (rest, '\u{feff}'.len_utf8()),
@@ -838,10 +852,10 @@ mod ini {
         let mut matches: Vec<Located> = Vec::new();
         let mut section: Option<String> = None;
         // The current key's indent, and its index in `matches` when it is the
-        // target (so a following continuation line marks it multi-line). `None`
-        // once a section header or a separator-less line resets the key.
+        // target (so a following continuation line extends its removal span and
+        // marks it multi-line). `None` after a section header or a separator-less
+        // line resets the current key.
         let mut cur: Option<(usize, Option<usize>)> = None;
-        let mut multiline_target = false;
         let mut cursor = 0usize;
         for chunk in body.split_inclusive('\n') {
             let line_start = base + cursor;
@@ -855,7 +869,9 @@ mod ini {
                 .take_while(|&c| c == ' ' || c == '\t')
                 .count();
             let line = content.trim();
-            // Blank / full-line comment: transparent, does not reset the key.
+            // Blank / full-line comment: transparent -- does not reset the key AND
+            // does not itself extend a removal span (only a real continuation line
+            // does, which sweeps any such lines that precede it).
             if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
                 continue;
             }
@@ -863,10 +879,11 @@ mod ini {
             // a deeper-indented line is value text, not a section or key.
             if let Some((cur_indent, match_idx)) = cur {
                 if indent > cur_indent {
-                    if match_idx.is_some() {
-                        multiline_target = true;
+                    if let Some(idx) = match_idx {
+                        matches[idx].value = None; // multi-line -> set_value declines
+                        matches[idx].full.end = line_end; // extend removal through here
                     }
-                    continue;
+                    continue; // `cur` unchanged: even deeper lines still continue
                 }
             }
             // Section header: `[` .. LAST `]`.
@@ -894,27 +911,33 @@ mod ini {
                 let vstart = line_start + lead + sep + 1 + vlead;
                 matches.push(Located {
                     full: line_start..line_end,
-                    value: vstart..vstart + vtok.len(),
+                    value: Some(vstart..vstart + vtok.len()),
                 });
                 cur = Some((indent, Some(matches.len() - 1)));
             } else {
                 cur = Some((indent, None));
             }
         }
-        // Exactly one occurrence (a duplicate is an array -> decline), and it is
-        // single-line (a continuation is a multi-line value -> decline).
-        if matches.len() == 1 && !multiline_target {
+        // Exactly one occurrence (a duplicate is an array -> decline).
+        if matches.len() == 1 {
             matches.into_iter().next()
         } else {
             None
         }
     }
 
-    /// Serialize a scalar as a literal INI value. INI has NO escaping and trims
-    /// leading/trailing value whitespace, so a value with edge whitespace or a
-    /// newline (which would need a continuation) cannot round-trip -> decline
-    /// (the value is written verbatim otherwise, quotes / `;` / `#` / `=` / `:`
-    /// all literal).
+    /// Serialize a scalar as a literal INI value (quotes / `;` / `#` / `=` / `:`
+    /// are all written verbatim -- INI has NO escaping). Declines a value that
+    /// cannot round-trip or would corrupt the file:
+    /// - EDGE whitespace -- the parser trims it, so it would not read back;
+    /// - a CONTROL char other than a tab -- a newline would need a continuation,
+    ///   and every other control (NUL / ESC / BEL / VT / FF ...) would be written
+    ///   RAW (no escaping), a portability + terminal-escape-injection hazard (the
+    ///   `equals` value can come from an untrusted `extends:`'d ruleset). This
+    ///   matches the dotenv serializer's stance and routes through the shared
+    ///   `set_value_is_statically_applicable` predicate, so `check` and `fix`
+    ///   agree. A tab is benign single-line whitespace (interior tabs survive;
+    ///   an edge tab is already caught above), so it is allowed.
     pub(super) fn ini_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
         use serde_json::Value;
         let s = match value {
@@ -923,7 +946,7 @@ mod ini {
             Value::Bool(b) => b.to_string(),
             Value::Null | Value::Array(_) | Value::Object(_) => return None,
         };
-        if s != s.trim() || s.contains('\n') || s.contains('\r') {
+        if s != s.trim() || s.chars().any(|c| c.is_control() && c != '\t') {
             return None;
         }
         Some(s.into_bytes())
@@ -1527,20 +1550,47 @@ mod tests {
     }
 
     #[test]
-    fn ini_declines_a_multiline_continuation_value() {
-        // `deps`'s value spans continuation lines -- a single range can't express
-        // it, so both set and remove decline (the over-deletion risk, refused).
+    fn ini_set_declines_a_multiline_value_but_remove_takes_the_whole_block() {
+        // `deps`'s value spans continuation lines. `set_value` DECLINES (collapsing
+        // several value lines into one scalar is a deferred edit); `remove_value`
+        // deletes the key line THROUGH the last continuation line.
         let src = "[tox]\ndeps =\n    pytest\n    mock\nother = 1\n";
         assert!(
             resolve_value_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).is_none()
         );
-        assert!(
-            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).is_none()
-        );
-        // a single-line sibling in the same section still resolves.
+        let span =
+            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).unwrap();
+        assert_eq!(&src[span], "deps =\n    pytest\n    mock\n");
+        // a single-line sibling in the same section still resolves for set.
         assert!(
             resolve_value_span(Format::Ini, src.as_bytes(), &[key("tox"), key("other")]).is_some()
         );
+    }
+
+    #[test]
+    fn ini_multiline_removal_sweeps_interspersed_blanks_and_comments_only() {
+        // A blank and a comment BETWEEN continuations are inside the value block and
+        // MUST go (else the deeper `mock` line is orphaned); a trailing blank AFTER
+        // the last continuation is NOT swept, and the following key is untouched.
+        let src = "[tox]\ndeps =\n    pytest\n\n# note\n    mock\n\nother = 1\n";
+        let span =
+            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).unwrap();
+        assert_eq!(
+            &src[span.clone()],
+            "deps =\n    pytest\n\n# note\n    mock\n"
+        );
+        // What survives re-parses cleanly (no orphaned continuation).
+        let out = format!("{}{}", &src[..span.start], &src[span.end..]);
+        assert_eq!(out, "[tox]\n\nother = 1\n");
+    }
+
+    #[test]
+    fn ini_multiline_removal_runs_to_eof_without_a_trailing_newline() {
+        let src = "[tox]\ndeps =\n    pytest\n    mock";
+        let span =
+            resolve_removal_span(Format::Ini, src.as_bytes(), &[key("tox"), key("deps")]).unwrap();
+        assert_eq!(&src[span.clone()], "deps =\n    pytest\n    mock");
+        assert_eq!(&src[..span.start], "[tox]\n");
     }
 
     #[test]
@@ -1606,5 +1656,14 @@ mod tests {
         assert!(serialize_scalar(Format::Ini, &json!(" pad ")).is_none());
         assert!(serialize_scalar(Format::Ini, &json!("a\nb")).is_none());
         assert!(serialize_scalar(Format::Ini, &json!("a\rb")).is_none());
+        // Any other control char would be written RAW (no escaping) -> decline
+        // (NUL / ESC / vertical tab), matching dotenv; an interior tab is allowed.
+        assert!(serialize_scalar(Format::Ini, &json!("a\u{0}b")).is_none());
+        assert!(serialize_scalar(Format::Ini, &json!("a\u{1b}b")).is_none());
+        assert!(serialize_scalar(Format::Ini, &json!("a\u{0b}b")).is_none());
+        assert_eq!(
+            serialize_scalar(Format::Ini, &json!("a\tb")).unwrap(),
+            b"a\tb"
+        );
     }
 }
