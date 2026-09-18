@@ -960,3 +960,33 @@ fn properties_serialize_is_raw_and_declines_unrepresentable() {
     assert!(serialize_scalar(Format::Properties, &json!("a\nb")).is_none());
     assert!(serialize_scalar(Format::Properties, &json!("a\tb")).is_none());
 }
+
+#[test]
+fn properties_splits_on_bare_cr_crlf_and_lf() {
+    // The line scan must match java-properties: a bare `\r`, `\r\n`, and `\n` all
+    // terminate a line. An LF-only split saw `a=1\rb=2` as ONE line and set/remove
+    // over-DELETED the CR-separated neighbor (a HIGH bug the value-only verify
+    // could not catch). Each key resolves independently; removal takes each line
+    // WITH its own terminator, never the next assignment.
+    let src = "a=1\rb=2\r\nc=3\n"; // bare CR, then CRLF, then LF
+    assert_eq!(
+        &src[resolve_value_span(Format::Properties, src.as_bytes(), &[key("a")]).unwrap()],
+        "1"
+    );
+    assert_eq!(
+        &src[resolve_value_span(Format::Properties, src.as_bytes(), &[key("b")]).unwrap()],
+        "2"
+    );
+    assert_eq!(
+        &src[resolve_value_span(Format::Properties, src.as_bytes(), &[key("c")]).unwrap()],
+        "3"
+    );
+    assert_eq!(
+        &src[resolve_removal_span(Format::Properties, src.as_bytes(), &[key("a")]).unwrap()],
+        "a=1\r"
+    );
+    assert_eq!(
+        &src[resolve_removal_span(Format::Properties, src.as_bytes(), &[key("b")]).unwrap()],
+        "b=2\r\n"
+    );
+}

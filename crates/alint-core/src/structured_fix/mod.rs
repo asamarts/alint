@@ -1008,11 +1008,18 @@ mod ini {
 /// continuation, no `\uXXXX`) and an EXPLICIT `=`/`:` separator, and DECLINES
 /// everything else (a whitespace-only separator, a `\`-continuation or escaped
 /// line, a duplicate key) so an ambiguous edit degrades to a Suggestion. Escaped
-/// / continued / space-separated properties are deferred.
+/// / continued / space-separated properties are deferred. These are all
+/// DOCUMENT-dependent declines, so `check`'s static `can_fix` (which cannot
+/// inspect the file) may advertise such a key "fixable" while `fix` then skips it
+/// -- the tolerated over-promise in the safe direction (check never claims LESS
+/// than fix resolves), which the conservative resolver simply hits more often
+/// here (a `\uXXXX` value is common). It never corrupts: fix skips, exit stays 1.
 ///
 /// Properties is FLAT (a path is one `Key`), and each simple key owns its physical
 /// line. The parser strips LEADING value whitespace but keeps TRAILING whitespace,
-/// so the value span runs from after the separator to the END of the line.
+/// so the value span runs from after the separator to the END of the line. Lines
+/// split on `\r\n` / bare `\r` / `\n` -- `java-properties`'s line model (see
+/// `locate`), so a CR-separated neighbor is never over-deleted.
 mod properties {
     use super::PathSeg;
     use std::ops::Range;
@@ -1044,20 +1051,39 @@ mod properties {
     /// Scan for the UNIQUE simple assignment line of `name`. `None` if it is
     /// absent, appears more than once, or is a complex (escaped / continued /
     /// space-separated) line the conservative resolver declines.
+    ///
+    /// Lines are split on `\r\n`, a bare `\r`, OR `\n` -- `java-properties`'s line
+    /// model. This MUST match the parser: a bare `\r` (classic-Mac / hand-edited
+    /// files) is a line terminator there, so splitting on `\n` only would see two
+    /// CR-separated assignments as one line and OVER-DELETE the neighbor (the span
+    /// runs to end-of-line). Byte-scanning for `\r`/`\n` is UTF-8-safe -- both are
+    /// ASCII and never occur inside a multibyte char.
     fn locate(text: &str, name: &str) -> Option<Located> {
         let (body, base) = match text.strip_prefix('\u{feff}') {
             Some(rest) => (rest, '\u{feff}'.len_utf8()),
             None => (text, 0),
         };
+        let bytes = body.as_bytes();
         let mut found: Option<Located> = None;
-        let mut cursor = 0usize;
-        for chunk in body.split_inclusive('\n') {
-            let line_start = base + cursor;
-            let full = line_start..line_start + chunk.len();
-            cursor += chunk.len();
-            let content = chunk
-                .strip_suffix('\n')
-                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
+        let mut i = 0usize; // byte offset of the current line's start within `body`
+        while i < bytes.len() {
+            // Content runs to the next `\r` or `\n` (or EOF).
+            let mut j = i;
+            while j < bytes.len() && bytes[j] != b'\n' && bytes[j] != b'\r' {
+                j += 1;
+            }
+            // Terminator: `\r\n` (2), a lone `\r`/`\n` (1), or none at EOF (0).
+            let term = if j >= bytes.len() {
+                0
+            } else if bytes[j] == b'\r' && bytes.get(j + 1) == Some(&b'\n') {
+                2
+            } else {
+                1
+            };
+            let content = &body[i..j];
+            let line_start = base + i;
+            let line_end = base + j + term;
+            i = j + term;
             let Some(value) = value_span_in_line(content, name) else {
                 continue;
             };
@@ -1065,7 +1091,7 @@ mod properties {
                 return None; // a second occurrence -> ambiguous, decline
             }
             found = Some(Located {
-                full,
+                full: line_start..line_end,
                 value: line_start + value.start..line_start + value.end,
             });
         }
