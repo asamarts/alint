@@ -342,6 +342,17 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "rv.ini".to_string()],
         "[s]\nkeep = 1\nbanned = x\n".to_string(),
     );
+    // TOML analogs (toml_edit whole-document rewrite). Valid TOML syntax.
+    insert_file(
+        root,
+        &[dir.clone(), "sv.toml".to_string()],
+        "region = \"OLD\"\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.toml".to_string()],
+        "keep = 1\nbanned = \"x\"\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -607,6 +618,31 @@ fn rule_ini_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `toml_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.toml`)
+/// to "NEW". Safe, so a bare `Fix` applies it -- exercising the `toml_edit`
+/// whole-document rewrite path (parse -> decor-preserving set -> reserialize ->
+/// re-parse verify), distinct from the span-splice resolvers.
+fn rule_toml_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("tsetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: toml_path_equals\n    paths: \"**/sv.toml\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// A `toml_path_absent` rule fixed via the located `remove_value` op (Phase 2):
+/// deletes the `$.banned` key (planted only in `_trig/rv.toml`). Unsafe by
+/// default, so it is *suggested* under a bare `Fix` and *applied* under
+/// `FixUnsafe` -- exercising the `toml_edit` whole-document removal + the tier gate.
+fn rule_toml_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("tremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: toml_path_absent\n    paths: \"**/rv.toml\"\n    path: \"$.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -714,7 +750,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2), HCL + XML + dotenv + INI resolvers.
+        // the located structured ops (Phase 2): HCL/XML/dotenv/INI resolvers +
+        // the TOML whole-document rewriter.
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
         rule_xml_path_equals_set_value(),
@@ -723,6 +760,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_dotenv_path_absent_remove_value(),
         rule_ini_path_equals_set_value(),
         rule_ini_path_absent_remove_value(),
+        rule_toml_path_equals_set_value(),
+        rule_toml_path_absent_remove_value(),
     ]
 }
 

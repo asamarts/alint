@@ -67,6 +67,11 @@ indicatif = "0.18"
 portable-pty = "0.9"
 serde_json_path = "0.7"
 toml = "1.1"
+# Round-trip TOML CST for the Phase-2 structured `set_value`/`remove_value`
+# fixers (alint-core `structured_fix`). Same license as `toml` (MIT OR
+# Apache-2.0) and already in the tree -- the `toml` crate is built on it -- so
+# this promotes an existing transitive crate to a direct dep, adding none.
+toml_edit = "0.25"
 roxmltree = "0.20"
 java-properties = "2"
 encoding_rs = "0.8"

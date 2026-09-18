@@ -194,6 +194,62 @@ impl Fixer for StructuredFixer {
             return Vec::new();
         };
         let located = self.path_expr.query_located(&value);
+
+        // A round-trip-CST format (TOML / toml_edit) rewrites the WHOLE document
+        // rather than splicing a span: toml_edit despans on parse, and owns the
+        // formatting / comment / removal surgery, round-tripping byte-identically.
+        // Emit ONE ReplaceRange over the entire file. (Two such rules on one file
+        // emit overlapping whole-file edits; the engine applies one and the others
+        // re-apply on the next fixpoint re-walk -- correct, just multi-pass.)
+        if structured_fix::uses_document_rewrite(self.format) {
+            let whole = 0..bytes.len();
+            let one = |content: Vec<u8>, expect: ExpectedValue| {
+                vec![CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range: whole.clone(),
+                        content,
+                    },
+                    applicability: self.applicability,
+                    verify: self.verifier(expect),
+                    isolation_group: None,
+                }]
+            };
+            return match &self.op {
+                StructuredOp::Set(want) => {
+                    if located.len() != 1 {
+                        return Vec::new();
+                    }
+                    let Some(node) = located.iter().next() else {
+                        return Vec::new();
+                    };
+                    // Same gates as the span path: single scalar match + the shared
+                    // config-only predicate (so check and fix agree). TOML is TYPED,
+                    // so a numeric/bool `equals` clears the predicate.
+                    if !is_scalar(node.node()) || !self.set_value_is_statically_applicable(want) {
+                        return Vec::new();
+                    }
+                    let segs = to_segs(node.location());
+                    match structured_fix::document_set(self.format, bytes, &segs, want) {
+                        Some(doc) => one(doc, ExpectedValue::Scalar(want.clone())),
+                        None => Vec::new(),
+                    }
+                }
+                StructuredOp::Remove => {
+                    // Remove every matched key in ONE rewrite; the shared `Absent`
+                    // verifier re-checks the whole file, so a partial removal (some
+                    // path unresolved) demotes -- all-or-nothing, as with the span
+                    // path. `document_remove` returns None when NOTHING was removed.
+                    let paths: Vec<Vec<PathSeg>> =
+                        located.iter().map(|n| to_segs(n.location())).collect();
+                    match structured_fix::document_remove(self.format, bytes, &paths) {
+                        Some(doc) => one(doc, ExpectedValue::Absent),
+                        None => Vec::new(),
+                    }
+                }
+            };
+        }
+
         match &self.op {
             StructuredOp::Set(want) => {
                 // The Safe case ONLY: exactly one match, the existing node AND the
@@ -681,5 +737,68 @@ mod tests {
         let (start, end, content, _) = edit_of(&edits[0]);
         assert_eq!(&src[start..end], "  <drop>x</drop>\n");
         assert_eq!(content, "");
+    }
+
+    #[test]
+    fn toml_set_emits_a_whole_document_rewrite() {
+        // A round-trip-CST format emits ONE ReplaceRange over the WHOLE file (the
+        // mutated document), not a span splice.
+        let src = b"[s]\nport = 8080\n";
+        let f = StructuredFixer::set(
+            Format::Toml,
+            jp("$['s']['port']"),
+            "$['s']['port']".into(),
+            json!(9090),
+            Applicability::Safe,
+        );
+        let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
+        assert_eq!(edits.len(), 1);
+        let (start, end, content, _) = edit_of(&edits[0]);
+        assert_eq!((start, end), (0, src.len())); // whole-file range
+        assert_eq!(content, "[s]\nport = 9090\n"); // typed, decor preserved
+    }
+
+    #[test]
+    fn toml_remove_emits_a_whole_document_rewrite() {
+        let src = b"[s]\nkeep = 1\ndrop = 2\n";
+        let f = StructuredFixer::remove(
+            Format::Toml,
+            jp("$['s']['drop']"),
+            "$['s']['drop']".into(),
+            Applicability::Unsafe,
+        );
+        let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
+        assert_eq!(edits.len(), 1);
+        let (start, end, content, _) = edit_of(&edits[0]);
+        assert_eq!((start, end), (0, src.len()));
+        assert_eq!(content, "[s]\nkeep = 1\n");
+    }
+
+    #[test]
+    fn toml_numeric_equals_is_fixable_unlike_string_leaf_formats() {
+        let v = Violation::new("x");
+        // TOML is TYPED, so a numeric `equals` clears can_fix (contrast the
+        // dotenv/XML string-leaf decline of a non-string value).
+        assert!(
+            StructuredFixer::set(
+                Format::Toml,
+                jp("$.x"),
+                "$.x".into(),
+                json!(8080),
+                Applicability::Safe
+            )
+            .can_fix(&v)
+        );
+        // Null is unrepresentable in TOML -> not fixable.
+        assert!(
+            !StructuredFixer::set(
+                Format::Toml,
+                jp("$.x"),
+                "$.x".into(),
+                json!(null),
+                Applicability::Safe
+            )
+            .can_fix(&v)
+        );
     }
 }

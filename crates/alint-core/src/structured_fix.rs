@@ -88,6 +88,48 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
         Format::Xml => xml::xml_serialize_scalar(value),
         Format::Dotenv => dotenv::dotenv_serialize_scalar(value),
         Format::Ini => ini::ini_serialize_scalar(value),
+        Format::Toml => toml_::serialize_scalar(value),
+        _ => None,
+    }
+}
+
+/// Whether `format`'s fixer rewrites the WHOLE document via a round-trip CST
+/// (TOML / `toml_edit`) instead of splicing a value/removal span. Such a format
+/// emits a single [`FixEdit::ReplaceRange`](crate::rule::FixEdit) over the entire
+/// file; `toml_edit` round-trips byte-identically, so only the mutated node
+/// actually changes and the diff stays surgical.
+#[must_use]
+pub fn uses_document_rewrite(format: Format) -> bool {
+    matches!(format, Format::Toml)
+}
+
+/// Whole-document `set_value` for a [`uses_document_rewrite`] format: set the
+/// scalar at `path` (decor-preserving) and return the FULL new document bytes.
+/// `None` when the format has no rewriter, the source does not parse, the path
+/// does not resolve to a scalar, or the value is not representable. Never panics.
+#[must_use]
+pub fn document_set(
+    format: Format,
+    bytes: &[u8],
+    path: &[PathSeg],
+    want: &serde_json::Value,
+) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    match format {
+        Format::Toml => toml_::document_set(text, path, want),
+        _ => None,
+    }
+}
+
+/// Whole-document `remove_value` for a [`uses_document_rewrite`] format: remove
+/// every node at `paths` in ONE rewrite and return the FULL new document bytes.
+/// `None` when the format has no rewriter, the source does not parse, or NOTHING
+/// could be removed (so the fixer declines rather than emit a no-op edit).
+#[must_use]
+pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    match format {
+        Format::Toml => toml_::document_remove(text, paths),
         _ => None,
     }
 }
@@ -953,6 +995,109 @@ mod ini {
     }
 }
 
+/// TOML structured edits via the `toml_edit` round-trip CST.
+///
+/// Unlike the hand-rolled resolvers, `toml_edit`'s `DocumentMut` DESPANS on parse
+/// (its `.span()` all return `None`), so a value/removal-span splice is not
+/// possible. Instead this EDITS the parsed document (a decor-preserving `set`, a
+/// `remove` for a key) and re-serializes the WHOLE file: `toml_edit` round-trips
+/// byte-identically and rewrites ONLY the mutated node, so the result is as
+/// surgical as a splice while the library owns all formatting / comment / removal
+/// surgery. The fixer emits ONE `ReplaceRange` over the entire file (gated by
+/// `uses_document_rewrite`), not a span splice.
+///
+/// TOML is a TYPED format (`format_leaves_are_strings` is false for it), so a
+/// numeric / bool / datetime `equals` is fixable, unlike the string-leaf formats.
+/// Only KEY navigation is resolved; an `Index` (array-element) path declines, and
+/// a non-scalar target (a table / array) is declined by the caller (`is_scalar`).
+mod toml_ {
+    use super::PathSeg;
+    use toml_edit::{DocumentMut, Item, Value};
+
+    /// The TOML rendering of a scalar, or `None` for a value TOML cannot hold.
+    /// The representability oracle for the fixer's static-applicability check;
+    /// `document_set` converts the same way.
+    pub(super) fn serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        Some(json_to_value(value)?.to_string().into_bytes())
+    }
+
+    /// Set the scalar at `path`, preserving the existing value's decor
+    /// (surrounding whitespace + a trailing comment), and return the whole new
+    /// document. `None` to decline: no parse, path unresolved or not an existing
+    /// scalar value, or the value is unrepresentable.
+    pub(super) fn document_set(
+        text: &str,
+        path: &[PathSeg],
+        want: &serde_json::Value,
+    ) -> Option<Vec<u8>> {
+        let mut doc = text.parse::<DocumentMut>().ok()?;
+        let new_val = json_to_value(want)?;
+        let val = navigate_mut(doc.as_item_mut(), path)?.as_value_mut()?;
+        let decor = val.decor().clone();
+        *val = new_val;
+        *val.decor_mut() = decor;
+        Some(doc.to_string().into_bytes())
+    }
+
+    /// Remove every key in `paths` in one rewrite; the whole new document, or
+    /// `None` if NONE could be removed (so the fixer declines rather than emit a
+    /// no-op whole-file edit).
+    pub(super) fn document_remove(text: &str, paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+        let mut doc = text.parse::<DocumentMut>().ok()?;
+        let mut removed_any = false;
+        for path in paths {
+            if remove_one(doc.as_item_mut(), path) {
+                removed_any = true;
+            }
+        }
+        removed_any.then(|| doc.to_string().into_bytes())
+    }
+
+    /// Navigate down `path` by KEY at each step. `None` on a missing key, a
+    /// non-table step, or an `Index` (array-element paths are not resolved).
+    fn navigate_mut<'a>(item: &'a mut Item, path: &[PathSeg]) -> Option<&'a mut Item> {
+        let mut cur = item;
+        for seg in path {
+            let PathSeg::Key(k) = seg else { return None };
+            cur = cur.as_table_like_mut()?.get_mut(k)?;
+        }
+        Some(cur)
+    }
+
+    /// Remove the final key of `path` from its parent table; whether a node went.
+    /// Declines an empty path or an `Index` final segment.
+    fn remove_one(root: &mut Item, path: &[PathSeg]) -> bool {
+        let Some((PathSeg::Key(key), parents)) = path.split_last() else {
+            return false;
+        };
+        navigate_mut(root, parents)
+            .and_then(Item::as_table_like_mut)
+            .and_then(|t| t.remove(key))
+            .is_some()
+    }
+
+    /// Convert a JSON scalar to a TYPED `toml_edit::Value`. `None` for null (TOML
+    /// has no null), a non-scalar, or a u64 above `i64::MAX` (TOML integers are
+    /// i64-only) -- declining beats a lossy float.
+    fn json_to_value(value: &serde_json::Value) -> Option<Value> {
+        use serde_json::Value as J;
+        Some(match value {
+            J::String(s) => Value::from(s.as_str()),
+            J::Bool(b) => Value::from(*b),
+            J::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Value::from(i)
+                } else if n.is_f64() {
+                    Value::from(n.as_f64()?)
+                } else {
+                    return None;
+                }
+            }
+            J::Null | J::Array(_) | J::Object(_) => return None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,8 +1193,11 @@ mod tests {
 
     #[test]
     fn a_format_without_a_resolver_declines() {
-        assert!(resolve_value_span(Format::Toml, b"a = 1\n", &[key("a")]).is_none());
-        assert!(serialize_scalar(Format::Toml, &json!("x")).is_none());
+        // JSON has no structured-fix support yet (TOML, once also unsupported, is
+        // now a document-rewrite format -- see the classification gate).
+        assert!(resolve_value_span(Format::Json, b"{\"a\": 1}", &[key("a")]).is_none());
+        assert!(serialize_scalar(Format::Json, &json!("x")).is_none());
+        assert!(!uses_document_rewrite(Format::Json));
     }
 
     // ---- F4: labeled blocks (the dominant Terraform shape) ----
@@ -1196,35 +1344,68 @@ mod tests {
 
     #[test]
     fn every_format_is_classified_for_structured_fix() {
-        // A new `Format` must be consciously classified as having a structured-fix
-        // resolver or explicitly not-yet-supported. The exhaustive match is
-        // compile-forced, so a new variant can't silently decline forever; the
-        // runtime checks pin that an unsupported format actually declines all
-        // three entry points.
+        // A new `Format` must be consciously classified into ONE of three
+        // structured-fix regimes. The exhaustive match is compile-forced, so a new
+        // variant can't silently decline forever; the runtime checks pin the
+        // classification (a span resolver resolves + is not document-rewrite; a
+        // document-rewrite format declines spans but serializes + rewrites; an
+        // unsupported format declines everything).
+        enum Regime {
+            Span,
+            Document,
+            Unsupported,
+        }
         for &f in Format::ALL {
-            let has_resolver = match f {
-                Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini => true,
-                Format::Json | Format::Yaml | Format::Toml | Format::Properties => false,
+            let regime = match f {
+                Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini => Regime::Span,
+                Format::Toml => Regime::Document,
+                Format::Json | Format::Yaml | Format::Properties => Regime::Unsupported,
             };
-            if !has_resolver {
-                assert!(
-                    resolve_value_span(f, b"", &[key("a")]).is_none(),
-                    "unsupported {f:?} must decline set_value span resolution"
-                );
-                assert!(
-                    resolve_removal_span(f, b"", &[key("a")]).is_none(),
-                    "unsupported {f:?} must decline remove_value span resolution"
-                );
-                assert!(
-                    serialize_scalar(f, &json!("x")).is_none(),
-                    "unsupported {f:?} must decline serialization"
-                );
+            match regime {
+                Regime::Span => {
+                    assert!(
+                        !uses_document_rewrite(f),
+                        "span-resolver {f:?} must not also be document-rewrite"
+                    );
+                }
+                Regime::Document => {
+                    assert!(uses_document_rewrite(f), "{f:?} must be document-rewrite");
+                    // A document-rewrite format does NOT splice a span.
+                    assert!(
+                        resolve_value_span(f, b"", &[key("a")]).is_none(),
+                        "document-rewrite {f:?} must decline span resolution"
+                    );
+                    assert!(
+                        serialize_scalar(f, &json!("x")).is_some(),
+                        "document-rewrite {f:?} must serialize a representable scalar"
+                    );
+                }
+                Regime::Unsupported => {
+                    assert!(
+                        resolve_value_span(f, b"", &[key("a")]).is_none(),
+                        "unsupported {f:?} must decline set_value span resolution"
+                    );
+                    assert!(
+                        resolve_removal_span(f, b"", &[key("a")]).is_none(),
+                        "unsupported {f:?} must decline remove_value span resolution"
+                    );
+                    assert!(
+                        serialize_scalar(f, &json!("x")).is_none(),
+                        "unsupported {f:?} must decline serialization"
+                    );
+                    assert!(
+                        !uses_document_rewrite(f),
+                        "unsupported {f:?} must not be document-rewrite"
+                    );
+                }
             }
         }
-        // A supported format actually resolves.
+        // A span format actually resolves; the document format actually rewrites.
         assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
         assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
         assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
+        assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
+        assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
     }
 
     // ---- XML (roxmltree spans): elements, attributes, text, siblings ----
@@ -1665,5 +1846,116 @@ mod tests {
             serialize_scalar(Format::Ini, &json!("a\tb")).unwrap(),
             b"a\tb"
         );
+    }
+
+    // ---- TOML (toml_edit whole-document rewrite; TYPED) ----
+
+    fn toml_set(src: &str, path: &[PathSeg], want: &serde_json::Value) -> String {
+        String::from_utf8(document_set(Format::Toml, src.as_bytes(), path, want).unwrap()).unwrap()
+    }
+
+    fn toml_remove(src: &str, paths: &[Vec<PathSeg>]) -> String {
+        String::from_utf8(document_remove(Format::Toml, src.as_bytes(), paths).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn toml_set_preserves_decor_and_is_typed() {
+        let src = "[server]\nport = 8080  # keep\nname = \"old\"\n";
+        // A numeric value renders bare (TOML is typed), and the trailing comment +
+        // alignment whitespace (the value's decor) survive.
+        assert_eq!(
+            toml_set(src, &[key("server"), key("port")], &json!(9090)),
+            "[server]\nport = 9090  # keep\nname = \"old\"\n"
+        );
+        assert_eq!(
+            toml_set(src, &[key("server"), key("name")], &json!("new")),
+            "[server]\nport = 8080  # keep\nname = \"new\"\n"
+        );
+        // A float stays a float; a bool renders bare.
+        assert_eq!(toml_set("x = 1\n", &[key("x")], &json!(1.5)), "x = 1.5\n");
+        assert_eq!(
+            toml_set("x = true\n", &[key("x")], &json!(false)),
+            "x = false\n"
+        );
+    }
+
+    #[test]
+    fn toml_set_navigates_nested_and_declines_non_scalar_missing_or_null() {
+        assert_eq!(
+            toml_set("[a.b]\nc = 1\n", &[key("a"), key("b"), key("c")], &json!(2)),
+            "[a.b]\nc = 2\n"
+        );
+        let src = "[a.b]\nc = 1\n";
+        // A table target is not a scalar value -> decline.
+        assert!(document_set(Format::Toml, src.as_bytes(), &[key("a")], &json!("x")).is_none());
+        // A missing key -> decline.
+        assert!(
+            document_set(
+                Format::Toml,
+                src.as_bytes(),
+                &[key("a"), key("b"), key("z")],
+                &json!(1)
+            )
+            .is_none()
+        );
+        // Null is unrepresentable in TOML -> decline.
+        assert!(
+            document_set(
+                Format::Toml,
+                src.as_bytes(),
+                &[key("a"), key("b"), key("c")],
+                &json!(null)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn toml_remove_deletes_key_table_and_inline_member() {
+        // A scalar key: the line goes.
+        assert_eq!(
+            toml_remove("[p]\nkeep = 1\ndrop = 2\n", &[vec![key("p"), key("drop")]]),
+            "[p]\nkeep = 1\n"
+        );
+        // A whole table -- toml_edit removes it cleanly (safe, unlike the
+        // hand-rolled INI/XML section/root cases, which had to decline).
+        assert_eq!(
+            toml_remove("[keep]\nx = 1\n[drop]\ny = 2\n", &[vec![key("drop")]]),
+            "[keep]\nx = 1\n"
+        );
+        // An inline-table member.
+        assert_eq!(
+            toml_remove("x = { a = 1, b = 2 }\n", &[vec![key("x"), key("a")]]),
+            "x = { b = 2 }\n"
+        );
+    }
+
+    #[test]
+    fn toml_remove_returns_none_when_nothing_removed() {
+        // A missing key removes nothing -> None (the fixer declines, never a
+        // whole-file no-op edit).
+        assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("z")]]).is_none());
+        // An array-element (`Index`) path is not resolved.
+        assert!(
+            document_remove(Format::Toml, b"a = [1, 2]\n", &[vec![key("a"), idx(0)]]).is_none()
+        );
+    }
+
+    #[test]
+    fn toml_serialize_scalar_is_typed_and_declines_null_and_nonscalar() {
+        assert_eq!(
+            serialize_scalar(Format::Toml, &json!(8080)).unwrap(),
+            b"8080"
+        );
+        assert_eq!(
+            serialize_scalar(Format::Toml, &json!(true)).unwrap(),
+            b"true"
+        );
+        assert_eq!(
+            serialize_scalar(Format::Toml, &json!("x")).unwrap(),
+            b"\"x\""
+        );
+        assert!(serialize_scalar(Format::Toml, &json!(null)).is_none());
+        assert!(serialize_scalar(Format::Toml, &json!({"k": 1})).is_none());
     }
 }

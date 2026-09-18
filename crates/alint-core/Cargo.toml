@@ -29,6 +29,7 @@ tracing.workspace = true
 schemars.workspace = true
 serde_json_path.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 roxmltree.workspace = true
 java-properties.workspace = true
 encoding_rs.workspace = true
