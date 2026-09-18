@@ -55,6 +55,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
         Format::Dotenv => dotenv::dotenv_value_span(text, path),
         Format::Ini => ini::ini_value_span(text, path),
         Format::Properties => properties::properties_value_span(text, path),
+        Format::Json => json_::json_value_span(text, path),
         _ => None,
     }
 }
@@ -92,8 +93,12 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
         Format::Dotenv => dotenv::dotenv_serialize_scalar(value),
         Format::Ini => ini::ini_serialize_scalar(value),
         Format::Properties => properties::properties_serialize_scalar(value),
+        Format::Json => json_::json_serialize_scalar(value),
         Format::Toml => toml_::serialize_scalar(value),
-        _ => None,
+        // The last format without a serializer yet; naming it (rather than a
+        // wildcard) makes the YAML increment a compile error here, not a silent
+        // fall-through.
+        Format::Yaml => None,
     }
 }
 
@@ -1288,6 +1293,66 @@ mod toml_ {
             }
             J::Null | J::Array(_) | J::Object(_) => return None,
         })
+    }
+}
+
+/// JSON / JSONC span resolution + value serialization via `jsonc-parser`.
+///
+/// `parse_to_ast` yields an AST whose every node carries a byte `range`, so
+/// `set_value` is a SPAN-splice of the target value node's range (like HCL/XML):
+/// disjoint edits co-apply in one pass, and JSONC comments / trailing commas
+/// survive untouched (the splice never reformats). JSON is TYPED
+/// (`format_leaves_are_strings` is false for it), so a numeric / bool / null
+/// `equals` is fixable, and `null` is a representable value.
+///
+/// `remove_value` is DEFERRED: deleting an object member needs comma /
+/// trailing-comma / comment surgery (the over-deletion risk class), so
+/// `resolve_removal_span` has NO JSON arm today -- JSON removal degrades to a
+/// Suggestion until a dedicated increment lands it safely. The check side parses
+/// via `serde_json` (+ `strip_jsonc`); this spanned AST is the fix side's view,
+/// and the two agree on standard-JSON structure.
+mod json_ {
+    use super::PathSeg;
+    use jsonc_parser::common::Ranged;
+    use jsonc_parser::{CollectOptions, CommentCollectionStrategy, ParseOptions, parse_to_ast};
+    use std::ops::Range;
+
+    /// The byte range of the value at `path` (what `set_value` overwrites). `None`
+    /// if the source does not parse or the path does not resolve to a node.
+    pub(super) fn json_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let ast = parse_to_ast(
+            text,
+            &CollectOptions {
+                comments: CommentCollectionStrategy::Off,
+                tokens: false,
+            },
+            &ParseOptions {
+                allow_comments: true,
+                allow_trailing_commas: true,
+                allow_loose_object_property_names: false,
+            },
+        )
+        .ok()?;
+        let mut node = ast.value.as_ref()?;
+        for seg in path {
+            node = match seg {
+                PathSeg::Key(k) => &node.as_object()?.get(k)?.value,
+                PathSeg::Index(i) => node.as_array()?.elements.get(*i)?,
+            };
+        }
+        let r = node.range();
+        Some(r.start..r.end)
+    }
+
+    /// Serialize a scalar as JSON bytes (a number / bool bare, a string
+    /// quoted + escaped, null as `null`). `None` for a non-scalar (an object /
+    /// array), which the caller routes to a Suggestion.
+    pub(super) fn json_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value as J;
+        match value {
+            J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),
+            J::Array(_) | J::Object(_) => None,
+        }
     }
 }
 

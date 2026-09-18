@@ -92,11 +92,13 @@ fn hcl_serialize_string_escapes_quotes_and_template_markers() {
 
 #[test]
 fn a_format_without_a_resolver_declines() {
-    // JSON has no structured-fix support yet (TOML, once also unsupported, is
-    // now a document-rewrite format -- see the classification gate).
-    assert!(resolve_value_span(Format::Json, b"{\"a\": 1}", &[key("a")]).is_none());
-    assert!(serialize_scalar(Format::Json, &json!("x")).is_none());
-    assert!(!uses_document_rewrite(Format::Json));
+    // YAML has no structured-fix support yet. (JSON and TOML, once also
+    // unsupported, now resolve -- JSON via a span-splice, TOML via a
+    // document-rewrite -- so the "unsupported" canary moves to YAML; see the
+    // classification gate.)
+    assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_none());
+    assert!(serialize_scalar(Format::Yaml, &json!("x")).is_none());
+    assert!(!uses_document_rewrite(Format::Yaml));
 }
 
 // ---- F4: labeled blocks (the dominant Terraform shape) ----
@@ -250,6 +252,7 @@ fn every_format_is_classified_for_structured_fix() {
     // unsupported format declines everything).
     enum Regime {
         Span,
+        SpanSetOnly,
         Document,
         Unsupported,
     }
@@ -258,14 +261,28 @@ fn every_format_is_classified_for_structured_fix() {
             Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini | Format::Properties => {
                 Regime::Span
             }
+            // JSON resolves a SET span but defers `remove_value` (comma surgery).
+            Format::Json => Regime::SpanSetOnly,
             Format::Toml => Regime::Document,
-            Format::Json | Format::Yaml => Regime::Unsupported,
+            Format::Yaml => Regime::Unsupported,
         };
         match regime {
             Regime::Span => {
                 assert!(
                     !uses_document_rewrite(f),
                     "span-resolver {f:?} must not also be document-rewrite"
+                );
+            }
+            Regime::SpanSetOnly => {
+                assert!(!uses_document_rewrite(f), "{f:?} is a span format, not doc");
+                // set resolves (asserted below); remove is deferred -> declines.
+                assert!(
+                    resolve_removal_span(f, b"", &[key("a")]).is_none(),
+                    "set-only {f:?} must decline remove_value (deferred)"
+                );
+                assert!(
+                    serialize_scalar(f, &json!("x")).is_some(),
+                    "set-only {f:?} must serialize a representable scalar"
                 );
             }
             Regime::Document => {
@@ -305,6 +322,7 @@ fn every_format_is_classified_for_structured_fix() {
     assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
     assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Properties, b"a=1\n", &[key("a")]).is_some());
+    assert!(resolve_value_span(Format::Json, b"{\"a\": 1}", &[key("a")]).is_some());
     assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
     assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
 }
@@ -989,4 +1007,55 @@ fn properties_splits_on_bare_cr_crlf_and_lf() {
         &src[resolve_removal_span(Format::Properties, src.as_bytes(), &[key("b")]).unwrap()],
         "b=2\r\n"
     );
+}
+
+// ---- JSON / JSONC (jsonc-parser AST ranges; SET only, remove deferred) ----
+
+fn json_value(src: &str, path: &[PathSeg]) -> std::ops::Range<usize> {
+    resolve_value_span(Format::Json, src.as_bytes(), path).unwrap()
+}
+
+#[test]
+fn json_value_span_navigates_objects_arrays_and_typed_scalars() {
+    let src = "{\n  \"a\": {\"b\": 8080},\n  \"arr\": [1, 2, 3]\n}";
+    assert_eq!(&src[json_value(src, &[key("a"), key("b")])], "8080");
+    assert_eq!(&src[json_value(src, &[key("arr"), idx(1)])], "2");
+    // a string value's span includes its quotes.
+    let s = "{\"s\": \"hi\"}";
+    assert_eq!(&s[json_value(s, &[key("s")])], "\"hi\"");
+}
+
+#[test]
+fn json_value_span_preserves_jsonc_and_declines_bad_input() {
+    // JSONC (comments + a trailing comma) parses; the span is just the value.
+    let src = "{\n  // c\n  \"x\": 1, /* t */\n}";
+    assert_eq!(&src[json_value(src, &[key("x")])], "1");
+    // Malformed -> None (no panic); a missing key -> None.
+    assert!(resolve_value_span(Format::Json, b"{\"x\": }", &[key("x")]).is_none());
+    assert!(resolve_value_span(Format::Json, b"{\"x\": 1}", &[key("z")]).is_none());
+    // `remove_value` is DEFERRED (comma surgery) -> always declines.
+    assert!(resolve_removal_span(Format::Json, b"{\"x\": 1}", &[key("x")]).is_none());
+}
+
+#[test]
+fn json_serialize_scalar_is_typed_including_null() {
+    assert_eq!(
+        serialize_scalar(Format::Json, &json!(8080)).unwrap(),
+        b"8080"
+    );
+    assert_eq!(
+        serialize_scalar(Format::Json, &json!(true)).unwrap(),
+        b"true"
+    );
+    // JSON null IS representable (unlike TOML / dotenv).
+    assert_eq!(
+        serialize_scalar(Format::Json, &json!(null)).unwrap(),
+        b"null"
+    );
+    assert_eq!(
+        serialize_scalar(Format::Json, &json!("a\"b")).unwrap(),
+        b"\"a\\\"b\""
+    );
+    assert!(serialize_scalar(Format::Json, &json!({"k": 1})).is_none());
+    assert!(serialize_scalar(Format::Json, &json!([1])).is_none());
 }

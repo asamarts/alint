@@ -1,0 +1,51 @@
+name: remove_value on JSON is deferred -- declines cleanly, never corrupts the file
+tags: [fix, json_path_absent, remove_value, json, safety]
+
+# JSON `remove_value` is DEFERRED this increment: deleting an object member means
+# comma surgery (which of the two flanking commas to take, and where a trailing
+# comment then attaches) -- the same over-deletion risk class that verify cannot
+# catch, since a mis-spliced-but-still-valid JSON re-parses with the key absent
+# and the `Absent` verifier would be satisfied. So the resolver declines every
+# JSON removal (`resolve_removal_span(Format::Json, ..) == None`): no edit is
+# formed, the fix is `skipped`, the violation survives, and `expect_tree` proves
+# the file is byte-for-byte intact. The rule promotes to `safe` to show the
+# decline is at resolution, not the tier gate. (SET ships this increment; REMOVE
+# is a tracked follow-up.)
+
+given:
+  tree:
+    app.json: |
+      {
+        "server": {
+          "host": "localhost",
+          "debug": true
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: json_path_absent
+        paths: "**/*.json"
+        path: "$['server']['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.json}
+  - skipped: [no-debug]
+  - violations:
+      - {rule: no-debug, level: error, path: app.json}
+
+expect_tree:
+  app.json: |
+    {
+      "server": {
+        "host": "localhost",
+        "debug": true
+      }
+    }

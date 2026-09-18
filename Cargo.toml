@@ -72,7 +72,14 @@ toml = "1.1"
 # Apache-2.0) and already in the tree -- the `toml` crate is built on it -- so
 # this promotes an existing transitive crate to a direct dep, adding none.
 toml_edit = "0.25"
+# Span-capable JSONC AST for the Phase-2 structured `set_value`/`remove_value`
+# fixers (alint-core `structured_fix`): `parse_to_ast` yields node byte ranges, so
+# JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing
+# commas survive. The check side parses JSON via serde_json (+ `strip_jsonc`); this
+# is the fix side's spanned view.
+jsonc-parser = "0.26.2"
 roxmltree = "0.20"
+# NOTE: pinned; see structured_fix::json_ for the AST-range API used.
 java-properties = "2"
 encoding_rs = "0.8"
 hcl = { package = "hcl-rs", version = "0.18" }

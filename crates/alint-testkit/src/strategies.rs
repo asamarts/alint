@@ -364,6 +364,23 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "rv.properties".to_string()],
         "keep=1\nbanned=x\n".to_string(),
     );
+    // JSON analogs (jsonc-parser spanned AST; SET is a span-splice). The tree
+    // generator DOES emit `.json`, so the rule globs the specific names
+    // `**/sv.json` / `**/rv.json` (never `**/*.json`) to match ONLY these
+    // planted triggers. `sv.json`'s `$.region` scalar is rewritten in place;
+    // `rv.json`'s removal is DEFERRED this increment, so the fixer cleanly
+    // DECLINES (no edit, `skipped`) -- the fuzzer confirms that decline never
+    // corrupts a co-resident file across arbitrary trees.
+    insert_file(
+        root,
+        &[dir.clone(), "sv.json".to_string()],
+        "{\"region\": \"OLD\"}\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "rv.json".to_string()],
+        "{\"keep\": 1, \"banned\": \"x\"}\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -678,6 +695,33 @@ fn rule_properties_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `json_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.json`)
+/// to "NEW" via a span-splice over jsonc-parser's AST range. Like TOML, JSON is
+/// TYPED, but the target here is a STRING so a bare `Fix` applies it -- exercising
+/// the spanned JSON resolver against arbitrary co-resident trees.
+fn rule_json_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("jsetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: json_path_equals\n    paths: \"**/sv.json\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// A `json_path_absent` rule declaring `remove_value` (Phase 2): JSON removal is
+/// DEFERRED this increment (comma surgery -- a verify-invisible over-deletion
+/// risk), so `resolve_removal_span(Format::Json, ..)` always declines. The fixer
+/// forms NO edit and the violation is `skipped`; this generator fuzzes that the
+/// clean decline never corrupts `_trig/rv.json` (nor any co-resident file) across
+/// arbitrary trees. (SET ships this increment; REMOVE is a tracked follow-up.)
+fn rule_json_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("jremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: json_path_absent\n    paths: \"**/rv.json\"\n    path: \"$.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -785,8 +829,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2): HCL/XML/dotenv/INI resolvers +
-        // the TOML whole-document rewriter.
+        // the located structured ops (Phase 2): HCL/XML/dotenv/INI/properties/JSON
+        // span resolvers + the TOML whole-document rewriter. (JSON `remove_value`
+        // is deferred, so its generator fuzzes the clean-decline path.)
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
         rule_xml_path_equals_set_value(),
@@ -799,6 +844,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_toml_path_absent_remove_value(),
         rule_properties_path_equals_set_value(),
         rule_properties_path_absent_remove_value(),
+        rule_json_path_equals_set_value(),
+        rule_json_path_absent_remove_value(),
     ]
 }
 
