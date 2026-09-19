@@ -742,6 +742,13 @@ pub struct FileCollapseBlankLinesFixSpec {}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceFixSpec {
+    /// The search regex, applied to the SCALAR VALUE at the rule's `path:`. Used
+    /// (and REQUIRED) by `*_path_matches` only: there the rule's `matches:` is the
+    /// check + re-verify target, so the transformation needs its own search
+    /// pattern. `file_content_forbidden` / `file_content_matches` leave this
+    /// unset -- they use the HOST rule's own pattern as the whole-file search.
+    #[serde(default)]
+    pub pattern: Option<String>,
     /// The replacement template written in place of each match. Supports the
     /// regex crate's `$1` / `${name}` capture references; `$$` is a literal `$`.
     pub replacement: String,

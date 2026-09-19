@@ -240,6 +240,17 @@ fn verify_structured(bytes: &[u8], format: Format, query: &str, expect: &Expecte
     match expect {
         ExpectedValue::Absent => nodes.is_empty(),
         ExpectedValue::Scalar(want) => nodes.at_most_one().ok().flatten() == Some(want),
+        ExpectedValue::Matches(re_src) => {
+            let Ok(re) = regex::Regex::new(re_src) else {
+                return false;
+            };
+            nodes
+                .at_most_one()
+                .ok()
+                .flatten()
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|s| re.is_match(s))
+        }
     }
 }
 

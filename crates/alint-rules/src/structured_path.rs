@@ -684,6 +684,49 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
     let re = Regex::new(&opts.matches).map_err(|e| {
         Error::rule_config(&spec.id, format!("invalid regex {:?}: {e}", opts.matches))
     })?;
+    // `*_path_matches` accepts ONLY the `replace` op: the value at `path` is
+    // rewritten (by the fix's OWN `pattern:` -> `replacement:`) so it satisfies the
+    // rule's `matches:` -- which stays the check + re-verify target. Any other op is
+    // a config error. Unsafe by default (a regex rewrite is not behavior-preserving).
+    let fixer = match &spec.fix {
+        Some(FixSpec::Replace { replace }) => {
+            let Some(pattern) = &replace.pattern else {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    format!(
+                        "fix.replace on {kind_label} requires a `pattern:` (the search \
+                         regex applied to the value at `path`); the rule's `matches:` is \
+                         the check target, not the search"
+                    ),
+                ));
+            };
+            let search = Regex::new(pattern).map_err(|e| {
+                Error::rule_config(
+                    &spec.id,
+                    format!("invalid fix.replace.pattern {pattern:?}: {e}"),
+                )
+            })?;
+            Some(StructuredFixer::replace(
+                format,
+                path_expr.clone(),
+                opts.path.clone(),
+                search,
+                replace.replacement.clone(),
+                opts.matches.clone(),
+                replace.applicability.unwrap_or(Applicability::Unsafe),
+            ))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `replace` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -696,10 +739,7 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         path_src: opts.path,
         op: Op::Matches(re),
         if_present: opts.if_present,
-        // `*_path_matches` fixability (the Phase-1 `replace` op extended to a
-        // user-supplied template) is a separable follow-up; a `*_path_matches`
-        // rule is unfixed for now.
-        fixer: None,
+        fixer,
     }))
 }
 
@@ -764,6 +804,59 @@ mod tests {
         // latent bug this previously had).
         let e = json_path_matches_build(&spec).unwrap_err().to_string();
         assert!(e.contains("regex"), "expected a regex error, got: {e}");
+    }
+
+    #[test]
+    fn path_matches_replace_requires_a_pattern() {
+        // `*_path_matches` + `replace` needs its OWN search `pattern:` (the rule's
+        // `matches:` is the check target, not the search) -> config error without it.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { replace: { replacement: \"v\" } }\n",
+        );
+        let e = json_path_matches_build(&spec).unwrap_err().to_string();
+        assert!(
+            e.contains("pattern"),
+            "expected a missing-pattern error, got: {e}"
+        );
+    }
+
+    #[test]
+    fn path_matches_replace_with_a_pattern_builds() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { replace: { pattern: \"^\", replacement: \"v\" } }\n",
+        );
+        assert!(json_path_matches_build(&spec).is_ok());
+    }
+
+    #[test]
+    fn path_matches_rejects_a_non_replace_fix() {
+        // Only `replace` is compatible with `*_path_matches`.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { set_value: {} }\n",
+        );
+        let e = json_path_matches_build(&spec).unwrap_err().to_string();
+        assert!(
+            e.contains("not compatible") && e.contains("replace"),
+            "expected an incompatibility error naming `replace`, got: {e}"
+        );
     }
 
     // ─── json_path_equals ─────────────────────────────────────

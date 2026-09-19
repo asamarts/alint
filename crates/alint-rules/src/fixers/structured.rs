@@ -27,6 +27,14 @@ enum StructuredOp {
     /// `remove_value`: delete every node the query selects, plus its
     /// format-specific separator.
     Remove,
+    /// `replace` on `*_path_matches`: apply the `search` -> `replacement` regex to
+    /// the STRING value each node selects, rewriting it to satisfy the rule's
+    /// `matches` pattern (kept for the post-edit re-verify).
+    Replace {
+        search: regex::Regex,
+        replacement: String,
+        matches: String,
+    },
 }
 
 /// A located fixer for the structured-query kinds. Owns a clone of the rule's
@@ -77,6 +85,33 @@ impl StructuredFixer {
             path_expr,
             path_src,
             op: StructuredOp::Remove,
+            applicability,
+        }
+    }
+
+    /// `replace` (host `*_path_matches`): rewrite the STRING value at `path_src`
+    /// by applying `search` -> `replacement`, so it satisfies the host rule's
+    /// `matches` pattern (the re-verify target). `Unsafe` by default (a regex
+    /// rewrite is not behavior-preserving).
+    #[must_use]
+    pub fn replace(
+        format: Format,
+        path_expr: JsonPath,
+        path_src: String,
+        search: regex::Regex,
+        replacement: String,
+        matches: String,
+        applicability: Applicability,
+    ) -> Self {
+        Self {
+            format,
+            path_expr,
+            path_src,
+            op: StructuredOp::Replace {
+                search,
+                replacement,
+                matches,
+            },
             applicability,
         }
     }
@@ -144,6 +179,9 @@ impl Fixer for StructuredFixer {
         match &self.op {
             StructuredOp::Set(_) => format!("set the value at `{}`", self.path_src),
             StructuredOp::Remove => format!("remove the node at `{}`", self.path_src),
+            StructuredOp::Replace { .. } => {
+                format!("rewrite the value at `{}` to match", self.path_src)
+            }
         }
     }
 
@@ -175,6 +213,12 @@ impl Fixer for StructuredFixer {
             // "fixable" and a later `fix` may `skip` it: the tolerated over-promise
             // in the safe direction, exercised by `remove_value_xml_root_is_declined`.
             StructuredOp::Remove => structured_fix::format_supports_removal(self.format),
+            // `replace` is advertised fixable statically (every format resolves a
+            // value span, and a valid search/replacement was compiled at build).
+            // Whether the matched value is a STRING the search actually rewrites is
+            // document-dependent -> surfaces at fix time as a skip (tolerated
+            // over-promise, safe direction).
+            StructuredOp::Replace { .. } => true,
         }
     }
 
@@ -262,6 +306,11 @@ impl Fixer for StructuredFixer {
                         None => Vec::new(),
                     }
                 }
+                // `replace` on a document-rewrite format (TOML) is DEFERRED: it has
+                // no value span to splice, and a document-level string rewrite is a
+                // separate increment. Declines (skipped); the other 7 formats do
+                // `toml_path_matches`-style replace via the span path below.
+                StructuredOp::Replace { .. } => Vec::new(),
             };
         }
 
@@ -362,6 +411,45 @@ impl Fixer for StructuredFixer {
                             },
                             applicability: self.applicability,
                             verify: self.verifier(ExpectedValue::Absent),
+                            isolation_group: None,
+                        })
+                    })
+                    .collect()
+            }
+            StructuredOp::Replace {
+                search,
+                replacement,
+                matches,
+            } => {
+                // One rewrite edit per matched STRING node whose value the search
+                // actually changes. Decode the value (the check-side string), apply
+                // `search` -> `replacement`, re-serialize as a format token, and
+                // splice it over the value span (reusing the `set_value` machinery).
+                // A non-string node, an un-serializable result, an unresolvable span,
+                // or a search that matched nothing emits NO edit -- the `Matches`
+                // verifier would demote a no-op anyway, and this keeps it honest.
+                located
+                    .iter()
+                    .filter_map(|node| {
+                        let current = node.node().as_str()?;
+                        let rewritten = search.replace_all(current, replacement.as_str());
+                        if rewritten == current {
+                            return None;
+                        }
+                        let content = structured_fix::serialize_scalar(
+                            self.format,
+                            &Value::String(rewritten.into_owned()),
+                        )?;
+                        let segs = to_segs(node.location());
+                        let range = structured_fix::resolve_value_span(self.format, bytes, &segs)?;
+                        Some(CollectedEdit {
+                            edit: FixEdit::ReplaceRange {
+                                path: file.to_path_buf(),
+                                range,
+                                content,
+                            },
+                            applicability: self.applicability,
+                            verify: self.verifier(ExpectedValue::Matches(matches.clone())),
                             isolation_group: None,
                         })
                     })
@@ -819,7 +907,11 @@ mod tests {
         let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
         assert_eq!(edits.len(), 1);
         let (start, end, content, _) = edit_of(&edits[0]);
-        assert_ne!((start, end), (0, src.len()), "the edit is minimal, not whole-file");
+        assert_ne!(
+            (start, end),
+            (0, src.len()),
+            "the edit is minimal, not whole-file"
+        );
         let mut out = src.to_vec();
         out.splice(start..end, content.bytes());
         assert_eq!(out, b"[s]\nport = 9090\n");
@@ -837,7 +929,11 @@ mod tests {
         let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
         assert_eq!(edits.len(), 1);
         let (start, end, content, _) = edit_of(&edits[0]);
-        assert_ne!((start, end), (0, src.len()), "the edit is minimal, not whole-file");
+        assert_ne!(
+            (start, end),
+            (0, src.len()),
+            "the edit is minimal, not whole-file"
+        );
         let mut out = src.to_vec();
         out.splice(start..end, content.bytes());
         assert_eq!(out, b"[s]\nkeep = 1\n");

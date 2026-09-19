@@ -988,7 +988,7 @@
           "properties": {
             "replace": {
               "additionalProperties": false,
-              "description": "Rewrite each span matching the rule's `pattern:` with `replacement`. Wired to `file_content_forbidden` (a violation there means the banned pattern is present, so replacing each occurrence removes/rewrites it). A located edit, Unsafe by default (a regex rewrite is not behavior-preserving): a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.",
+              "description": "Rewrite each span matching a search regex with `replacement`. Wired to `file_content_forbidden` (a violation there means the banned pattern is present, so replacing each occurrence removes/rewrites it; the search is the rule's own `pattern:`) and to `*_path_matches` (the value at `path:` is rewritten by the fix's own `pattern:` so it satisfies the rule's `matches:`). A located edit, Unsafe by default (a regex rewrite is not behavior-preserving): a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.",
               "properties": {
                 "applicability": {
                   "description": "Per-rule tier override. Defaults to `unsafe`; set `safe` in your OWN top-level config when the rewrite is provably a normalization (an inherited config may only demote to `suggestion`/`never`).",
@@ -998,6 +998,10 @@
                     "suggestion",
                     "never"
                   ]
+                },
+                "pattern": {
+                  "description": "For `*_path_matches` only (REQUIRED there): the search regex applied to the scalar value at `path:` (the rule's `matches:` stays the check + re-verify target). Not used by `file_content_forbidden` / `file_content_matches`, which search the whole file with the host rule's own pattern.",
+                  "type": "string"
                 },
                 "replacement": {
                   "description": "Replacement template written in place of each match. Supports the regex crate's `$1` / `${name}` capture references; write `$$` for a literal `$`.",

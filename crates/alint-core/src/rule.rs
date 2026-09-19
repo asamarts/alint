@@ -716,6 +716,11 @@ pub enum ExpectedValue {
     /// shift, so only re-running the query and asserting zero matches is
     /// correct).
     Absent,
+    /// The query must resolve to a STRING that matches this regex (its source).
+    /// Used by `*_path_matches` + `replace`: the fixer rewrites the value so it
+    /// satisfies the rule's `matches:` pattern, and this re-checks that goal
+    /// (stored as the source string, since `regex::Regex` is not `PartialEq`).
+    Matches(String),
 }
 
 /// An executable post-edit check the engine can run *without knowing the
