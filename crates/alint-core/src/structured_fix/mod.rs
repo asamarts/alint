@@ -56,7 +56,10 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
         Format::Ini => ini::ini_value_span(text, path),
         Format::Properties => properties::properties_value_span(text, path),
         Format::Json => json_::json_value_span(text, path),
-        _ => None,
+        Format::Yaml => yaml_::yaml_value_span(text, path),
+        // TOML is a document-rewrite format (see `document_set`), not a span
+        // splice; named (not a wildcard) so a future span format is compile-forced.
+        Format::Toml => None,
     }
 }
 
@@ -95,10 +98,7 @@ pub fn serialize_scalar(format: Format, value: &serde_json::Value) -> Option<Vec
         Format::Properties => properties::properties_serialize_scalar(value),
         Format::Json => json_::json_serialize_scalar(value),
         Format::Toml => toml_::serialize_scalar(value),
-        // The last format without a serializer yet; naming it (rather than a
-        // wildcard) makes the YAML increment a compile error here, not a silent
-        // fall-through.
-        Format::Yaml => None,
+        Format::Yaml => yaml_::yaml_serialize_scalar(value),
     }
 }
 
@@ -1383,6 +1383,135 @@ mod json_ {
     /// quoted + escaped, null as `null`). `None` for a non-scalar (an object /
     /// array), which the caller routes to a Suggestion.
     pub(super) fn json_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
+        use serde_json::Value as J;
+        match value {
+            J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),
+            J::Array(_) | J::Object(_) => None,
+        }
+    }
+}
+
+/// YAML span resolution + value serialization via `saphyr::MarkedYaml`.
+///
+/// `MarkedYaml` is a spanned YAML node tree, so `set_value` is a SPAN-splice of
+/// the target scalar's range (like JSON): the span covers the full scalar token
+/// (quotes included for quoted scalars, trailing comment/whitespace EXCLUDED), so
+/// the splice never disturbs a neighbour. The check side parses YAML via
+/// `serde_yaml_ng` (libyaml), which exposes no spans, hence this separate spanned
+/// view; a JSON scalar is valid YAML with the same value+type (YAML is a superset
+/// of JSON), so the serializer reuses `serde_json`.
+///
+/// CONSERVATIVE by design (scalar SET only): `remove_value` is DEFERRED (structural
+/// / comment surgery, [`format_supports_removal`] is false for YAML), and the
+/// resolver declines a multi-document stream, a non-scalar target, an aliased value
+/// (`saphyr` leaves aliases un-expanded as `Alias` nodes, so it never expands a
+/// billion-laughs bomb -- but the path then resolves to a non-scalar and declines),
+/// and a non-string mapping key.
+///
+/// TWO `saphyr` 0.0.12 quirks handled here: (1) `Marker::index` is a CHAR offset
+/// despite the `index()` rustdoc claiming bytes (verified empirically), so spans
+/// are converted char->byte; a bump must re-verify this (the multibyte resolver
+/// test guards it). (2) `saphyr` does not bound recursion, so a defensive
+/// flow-depth guard mirrors the check side's `Format::parse` (which the fixer runs
+/// first anyway) to keep this resolver self-safe on deeply-nested flow input.
+mod yaml_ {
+    use super::PathSeg;
+    use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};
+    use std::ops::Range;
+
+    /// The byte range of the scalar value at `path`. `None` if the source does not
+    /// parse, is a multi-document stream, or the path does not resolve to a scalar.
+    pub(super) fn yaml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        // Defensive DoS guard (parser-guard parity): `saphyr` is recursive-descent
+        // and unbounded. The fixer runs `Format::parse` (which applies this) before
+        // reaching here, but guard directly so the resolver is self-safe.
+        if !crate::yaml_depth::flow_depth_within_limit(text) {
+            return None;
+        }
+        let docs = MarkedYaml::load_from_str(text).ok()?;
+        // Conservative: only a single-document stream (multi-doc `$path` resolution
+        // is ambiguous).
+        let [doc] = docs.as_slice() else {
+            return None;
+        };
+        let mut node = doc;
+        for seg in path {
+            node = match seg {
+                PathSeg::Key(k) => get_key(node, k)?,
+                PathSeg::Index(i) => get_index(node, *i)?,
+            };
+        }
+        // Only a SCALAR leaf is a set_value target (a mapping/sequence/tagged node
+        // declines). Its span covers the full scalar token.
+        if !matches!(node.data, YamlData::Value(_) | YamlData::Representation(..)) {
+            return None;
+        }
+        // `saphyr`'s `Marker::index` is a CHAR offset -> convert to bytes.
+        let span = char_span_to_byte(text, node.span.start.index(), node.span.end.index())?;
+        // Decline a YAML ALIAS reference (`use: *anchor`): saphyr resolves it to the
+        // anchored VALUE but leaves the span on the `*ref` text, so a splice would
+        // silently DE-ALIAS it (replace the reference with a literal) -- a semantic
+        // change, so decline (conservative). A plain scalar can never begin with the
+        // reserved `*`; an anchor DEFINITION value (`&a 5`) has span `5` (the `&a` is
+        // excluded) and stays fixable. A quoted `"*x"` string's span starts with `"`.
+        if text.get(span.clone())?.starts_with('*') {
+            return None;
+        }
+        Some(span)
+    }
+
+    /// The mapping value for a STRING key `key` (declines a non-mapping node or a
+    /// non-string key -- the conservative common case).
+    fn get_key<'a, 'i>(node: &'a MarkedYaml<'i>, key: &str) -> Option<&'a MarkedYaml<'i>> {
+        let YamlData::Mapping(m) = &node.data else {
+            return None;
+        };
+        m.iter().find_map(|(k, v)| match &k.data {
+            YamlData::Value(Scalar::String(s)) if s == key => Some(v),
+            _ => None,
+        })
+    }
+
+    /// The `i`th sequence element (declines a non-sequence node).
+    fn get_index<'a, 'i>(node: &'a MarkedYaml<'i>, i: usize) -> Option<&'a MarkedYaml<'i>> {
+        let YamlData::Sequence(seq) = &node.data else {
+            return None;
+        };
+        seq.get(i)
+    }
+
+    /// Map a `[cs, ce)` CHAR span to a `[bs, be)` BYTE span over `text`. An offset
+    /// equal to the total char count is the end of the string.
+    fn char_span_to_byte(text: &str, cs: usize, ce: usize) -> Option<Range<usize>> {
+        if cs > ce {
+            return None;
+        }
+        let (mut bs, mut be) = (None, None);
+        let mut count = 0usize;
+        for (b, _) in text.char_indices() {
+            if count == cs {
+                bs = Some(b);
+            }
+            if count == ce {
+                be = Some(b);
+            }
+            count += 1;
+        }
+        if cs == count {
+            bs = Some(text.len());
+        }
+        if ce == count {
+            be = Some(text.len());
+        }
+        Some(bs?..be?)
+    }
+
+    /// Serialize a scalar as YAML bytes. A JSON scalar is valid YAML with the same
+    /// value + type (YAML is a superset of JSON): a number/bool renders bare, `null`
+    /// as `null`, a string double-quoted + escaped -- and it re-parses to the same
+    /// value so the `equals` re-verify holds. `None` for a non-scalar (routed to a
+    /// Suggestion).
+    pub(super) fn yaml_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
         use serde_json::Value as J;
         match value {
             J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),

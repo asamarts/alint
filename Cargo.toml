@@ -78,6 +78,15 @@ toml_edit = "0.25"
 # commas survive. The check side parses JSON via serde_json (+ `strip_jsonc`); this
 # is the fix side's spanned view.
 jsonc-parser = "0.26.2"
+# Span-capable YAML AST for the Phase-2 structured `set_value` fixer (alint-core
+# `structured_fix::yaml_`): `saphyr::MarkedYaml` is a spanned node tree, so a YAML
+# scalar edit is a span-splice (like JSON). The check side parses YAML via
+# `serde_yaml_ng` (libyaml), which exposes no spans, so this is the fix side's
+# spanned view. MIT OR Apache-2.0 (same as the workspace). PINNED at 0.0.12: it is
+# pre-1.0 AND its `Marker.index` is a CHAR offset (the `index()` rustdoc wrongly
+# says bytes -- verified empirically), which `yaml_` converts to bytes; a bump must
+# re-verify that offset semantics (the multibyte resolver test guards it).
+saphyr = "0.0.12"
 roxmltree = "0.20"
 # NOTE: pinned; see structured_fix::json_ for the AST-range API used.
 java-properties = "2"

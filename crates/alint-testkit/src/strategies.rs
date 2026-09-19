@@ -286,101 +286,43 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "replaceme.txt".to_string()],
         "DEBUGME token\n".to_string(),
     );
-    // Phase-2 structured ops. Distinct single-file globs (`**/sv.tf` / `**/rv.tf`
-    // / `**/sv.xml` / `**/rv.xml`) so each rule matches ONLY its own trigger; the
-    // tree generator emits no `.tf`/`.xml` and no content/strip/case rule globs
-    // them, so these files are otherwise inert. set_value: `$.region` is "OLD"
-    // (!= the rule's "NEW"), rewritten in place. remove_value: the `banned` node
-    // is present, its whole line deleted -- and it is a NON-root element (its
-    // parent is `<root>`), since removing the document root is declined (it would
-    // empty the file).
-    insert_file(
-        root,
-        &[dir.clone(), "sv.tf".to_string()],
-        "region = \"OLD\"\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.tf".to_string()],
-        "keep = 1\nbanned = \"x\"\n".to_string(),
-    );
-    // XML analogs. XML leaves parse as strings, so the `equals` target is a
-    // STRING ("NEW"); the removal target is a nested element so the resolver does
-    // not decline it as the root.
-    insert_file(
-        root,
-        &[dir.clone(), "sv.xml".to_string()],
-        "<region>OLD</region>\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.xml".to_string()],
-        "<root>\n  <keep>1</keep>\n  <banned>x</banned>\n</root>\n".to_string(),
-    );
-    // dotenv analogs. The `dotenv_path_*` kind FORCES dotenv parsing regardless
-    // of the filename, so `sv.env`/`rv.env` need not be `.env`. Flat KEY=value;
-    // the removal target is a unique key (a duplicate would decline).
-    insert_file(
-        root,
-        &[dir.clone(), "sv.env".to_string()],
-        "REGION=OLD\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.env".to_string()],
-        "KEEP=1\nBANNED=x\n".to_string(),
-    );
-    // INI analogs (2-level section paths). The removal target is a unique
-    // single-line section key (a multi-line or duplicate key would decline).
-    insert_file(
-        root,
-        &[dir.clone(), "sv.ini".to_string()],
-        "[s]\nregion = OLD\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.ini".to_string()],
-        "[s]\nkeep = 1\nbanned = x\n".to_string(),
-    );
-    // TOML analogs (toml_edit whole-document rewrite). Valid TOML syntax.
-    insert_file(
-        root,
-        &[dir.clone(), "sv.toml".to_string()],
-        "region = \"OLD\"\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.toml".to_string()],
-        "keep = 1\nbanned = \"x\"\n".to_string(),
-    );
-    // properties analogs (flat, hand-rolled). Simple `key=value` lines.
-    insert_file(
-        root,
-        &[dir.clone(), "sv.properties".to_string()],
-        "region=OLD\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.properties".to_string()],
-        "keep=1\nbanned=x\n".to_string(),
-    );
-    // JSON analogs (jsonc-parser spanned AST; SET is a span-splice). The tree
-    // generator DOES emit `.json`, so the rule globs the specific names
-    // `**/sv.json` / `**/rv.json` (never `**/*.json`) to match ONLY these
-    // planted triggers. `sv.json`'s `$.region` scalar is rewritten in place;
-    // `rv.json`'s removal is DEFERRED this increment, so the fixer cleanly
-    // DECLINES (no edit, `skipped`) -- the fuzzer confirms that decline never
-    // corrupts a co-resident file across arbitrary trees.
-    insert_file(
-        root,
-        &[dir.clone(), "sv.json".to_string()],
-        "{\"region\": \"OLD\"}\n".to_string(),
-    );
-    insert_file(
-        root,
-        &[dir.clone(), "rv.json".to_string()],
-        "{\"keep\": 1, \"banned\": \"x\"}\n".to_string(),
-    );
+    // Phase-2 structured ops: one `sv.<ext>` (set_value) + one `rv.<ext>`
+    // (remove_value) trigger per format. Distinct single-file globs (`**/sv.<ext>`
+    // / `**/rv.<ext>`) so each rule matches ONLY its own trigger; the tree generator
+    // emits none of these names, so they are otherwise inert. `sv.*`'s `$.region`
+    // is "OLD" (!= the rule's "NEW"), rewritten in place. `rv.*`'s removal target is
+    // a UNIQUE key/element (a duplicate / document-root / multi-line value would
+    // decline); JSON and YAML removal is DEFERRED, so those `rv.*` fixers cleanly
+    // skip. XML/dotenv/INI/properties leaves are strings (so `equals` is "NEW"); the
+    // XML removal target is a NON-root element (removing the root is declined).
+    let structured: &[(&str, &str)] = &[
+        ("sv.tf", "region = \"OLD\"\n"),
+        ("rv.tf", "keep = 1\nbanned = \"x\"\n"),
+        ("sv.xml", "<region>OLD</region>\n"),
+        (
+            "rv.xml",
+            "<root>\n  <keep>1</keep>\n  <banned>x</banned>\n</root>\n",
+        ),
+        ("sv.env", "REGION=OLD\n"),
+        ("rv.env", "KEEP=1\nBANNED=x\n"),
+        ("sv.ini", "[s]\nregion = OLD\n"),
+        ("rv.ini", "[s]\nkeep = 1\nbanned = x\n"),
+        ("sv.toml", "region = \"OLD\"\n"),
+        ("rv.toml", "keep = 1\nbanned = \"x\"\n"),
+        ("sv.properties", "region=OLD\n"),
+        ("rv.properties", "keep=1\nbanned=x\n"),
+        ("sv.json", "{\"region\": \"OLD\"}\n"),
+        ("rv.json", "{\"keep\": 1, \"banned\": \"x\"}\n"),
+        ("sv.yaml", "region: OLD\n"),
+        ("rv.yaml", "keep: 1\nbanned: x\n"),
+    ];
+    for (name, content) in structured {
+        insert_file(
+            root,
+            &[dir.clone(), (*name).to_string()],
+            (*content).to_string(),
+        );
+    }
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -722,6 +664,34 @@ fn rule_json_path_absent_remove_value() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `yaml_path_equals` rule fixed via the located `set_value` op (Phase 2):
+/// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.yaml`)
+/// to "NEW" via a span-splice over saphyr's `MarkedYaml` node range. YAML is
+/// TYPED, but the target here is a STRING so a bare `Fix` applies it -- exercising
+/// the spanned YAML resolver (incl. its char->byte offset conversion) against
+/// arbitrary co-resident trees.
+fn rule_yaml_path_equals_set_value() -> impl Strategy<Value = String> {
+    rule_id("ysetv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: yaml_path_equals\n    paths: \"**/sv.yaml\"\n    path: \"$.region\"\n    equals: \"NEW\"\n    level: error\n    fix:\n      set_value: {{}}\n"
+        )
+    })
+}
+
+/// A `yaml_path_absent` rule declaring `remove_value` (Phase 2): YAML removal is
+/// DEFERRED this increment (structural surgery), so `resolve_removal_span(Format::
+/// Yaml, ..)` always declines and `can_fix` never advertises it. The fixer forms
+/// NO edit and the violation is `skipped`; this generator fuzzes that the clean
+/// decline never corrupts `_trig/rv.yaml` (nor any co-resident file) across
+/// arbitrary trees. (SET ships this increment; REMOVE is a tracked follow-up.)
+fn rule_yaml_path_absent_remove_value() -> impl Strategy<Value = String> {
+    rule_id("yremv").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: yaml_path_absent\n    paths: \"**/rv.yaml\"\n    path: \"$.banned\"\n    level: error\n    fix:\n      remove_value: {{}}\n"
+        )
+    })
+}
+
 // ─── single-rule fixable catalogue (all fix ops) ──────────────
 //
 // These generators each emit ONE fixable rule covering a fix op that the
@@ -829,9 +799,10 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_no_zero_width_chars(),
         // the located `replace` op (Phase 1).
         rule_file_content_forbidden_replace(),
-        // the located structured ops (Phase 2): HCL/XML/dotenv/INI/properties/JSON
-        // span resolvers + the TOML whole-document rewriter. (JSON `remove_value`
-        // is deferred, so its generator fuzzes the clean-decline path.)
+        // the located structured ops (Phase 2): HCL/XML/dotenv/INI/properties/JSON/
+        // YAML span resolvers + the TOML whole-document rewriter. (JSON and YAML
+        // `remove_value` are deferred, so their generators fuzz the clean-decline
+        // path.)
         rule_hcl_path_equals_set_value(),
         rule_hcl_path_absent_remove_value(),
         rule_xml_path_equals_set_value(),
@@ -846,6 +817,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_properties_path_absent_remove_value(),
         rule_json_path_equals_set_value(),
         rule_json_path_absent_remove_value(),
+        rule_yaml_path_equals_set_value(),
+        rule_yaml_path_absent_remove_value(),
     ]
 }
 

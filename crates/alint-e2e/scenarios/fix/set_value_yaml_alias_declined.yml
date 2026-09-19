@@ -1,0 +1,43 @@
+name: set_value declines a YAML alias reference -- never silently de-aliases
+tags: [fix, yaml_path_equals, set_value, yaml, safety]
+
+# Safety: `use: *d` is an ALIAS to the `&d` anchor, so the check side (which
+# expands aliases) sees `use == 5` and the rule fires against `equals: 9`. But
+# saphyr resolves the alias while leaving its span on the `*d` reference text, so
+# a splice would replace `*d` with a literal `9` -- silently DE-ALIASING it (a
+# semantic change). The resolver declines any scalar whose span begins with the
+# reserved `*`, so the fix is `skipped`, the violation survives, and `expect_tree`
+# proves the file (anchor + alias intact) is byte-for-byte unchanged. An anchor
+# DEFINITION value (`&d 5`) has span `5` and stays fixable -- only the reference
+# declines.
+
+given:
+  tree:
+    app.yaml: |
+      defaults: &d 5
+      use: *d
+  config: |
+    version: 1
+    rules:
+      - id: use-nine
+        kind: yaml_path_equals
+        paths: "**/*.yaml"
+        path: "$['use']"
+        equals: 9
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: use-nine, level: error, path: app.yaml}
+  - skipped: [use-nine]
+  - violations:
+      - {rule: use-nine, level: error, path: app.yaml}
+
+expect_tree:
+  app.yaml: |
+    defaults: &d 5
+    use: *d

@@ -90,16 +90,10 @@ fn hcl_serialize_string_escapes_quotes_and_template_markers() {
     );
 }
 
-#[test]
-fn a_format_without_a_resolver_declines() {
-    // YAML has no structured-fix support yet. (JSON and TOML, once also
-    // unsupported, now resolve -- JSON via a span-splice, TOML via a
-    // document-rewrite -- so the "unsupported" canary moves to YAML; see the
-    // classification gate.)
-    assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_none());
-    assert!(serialize_scalar(Format::Yaml, &json!("x")).is_none());
-    assert!(!uses_document_rewrite(Format::Yaml));
-}
+// (The former `a_format_without_a_resolver_declines` canary retired at the YAML
+// increment: every `Format` now resolves SET, so no format declines everything.
+// The `every_format_is_classified_for_structured_fix` gate covers per-format
+// classification, incl. YAML/JSON's deferred `remove_value`.)
 
 // ---- F4: labeled blocks (the dominant Terraform shape) ----
 
@@ -248,23 +242,23 @@ fn every_format_is_classified_for_structured_fix() {
     // structured-fix regimes. The exhaustive match is compile-forced, so a new
     // variant can't silently decline forever; the runtime checks pin the
     // classification (a span resolver resolves + is not document-rewrite; a
-    // document-rewrite format declines spans but serializes + rewrites; an
-    // unsupported format declines everything).
+    // document-rewrite format declines spans but serializes + rewrites). Every
+    // `Format` now resolves SET, so there is no longer an "unsupported" regime;
+    // JSON/YAML resolve SET but defer `remove_value` (the SpanSetOnly regime).
     enum Regime {
         Span,
         SpanSetOnly,
         Document,
-        Unsupported,
     }
     for &f in Format::ALL {
         let regime = match f {
             Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini | Format::Properties => {
                 Regime::Span
             }
-            // JSON resolves a SET span but defers `remove_value` (comma surgery).
-            Format::Json => Regime::SpanSetOnly,
+            // JSON/YAML resolve a SET span but defer `remove_value` (structural
+            // surgery); YAML via `saphyr::MarkedYaml`, JSON via `jsonc-parser`.
+            Format::Json | Format::Yaml => Regime::SpanSetOnly,
             Format::Toml => Regime::Document,
-            Format::Yaml => Regime::Unsupported,
         };
         match regime {
             Regime::Span => {
@@ -313,28 +307,6 @@ fn every_format_is_classified_for_structured_fix() {
                     "document-rewrite {f:?} must serialize a representable scalar"
                 );
             }
-            Regime::Unsupported => {
-                assert!(
-                    resolve_value_span(f, b"", &[key("a")]).is_none(),
-                    "unsupported {f:?} must decline set_value span resolution"
-                );
-                assert!(
-                    resolve_removal_span(f, b"", &[key("a")]).is_none(),
-                    "unsupported {f:?} must decline remove_value span resolution"
-                );
-                assert!(
-                    !format_supports_removal(f),
-                    "unsupported {f:?} must report remove_value unsupported"
-                );
-                assert!(
-                    serialize_scalar(f, &json!("x")).is_none(),
-                    "unsupported {f:?} must decline serialization"
-                );
-                assert!(
-                    !uses_document_rewrite(f),
-                    "unsupported {f:?} must not be document-rewrite"
-                );
-            }
         }
     }
     // A span format actually resolves; the document format actually rewrites.
@@ -343,6 +315,7 @@ fn every_format_is_classified_for_structured_fix() {
     assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Properties, b"a=1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Json, b"{\"a\": 1}", &[key("a")]).is_some());
+    assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_some());
     assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
     assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
 }
@@ -1094,4 +1067,80 @@ fn json_serialize_scalar_is_typed_including_null() {
     );
     assert!(serialize_scalar(Format::Json, &json!({"k": 1})).is_none());
     assert!(serialize_scalar(Format::Json, &json!([1])).is_none());
+}
+
+// ---- YAML (saphyr::MarkedYaml spans; SET only, remove deferred) ----
+
+fn yaml_value(src: &str, path: &[PathSeg]) -> std::ops::Range<usize> {
+    resolve_value_span(Format::Yaml, src.as_bytes(), path).unwrap()
+}
+
+#[test]
+fn yaml_value_span_navigates_mappings_sequences_and_typed_scalars() {
+    let src = "server:\n  host: localhost\n  port: 8080\nlist:\n  - a\n  - b\n";
+    assert_eq!(&src[yaml_value(src, &[key("server"), key("port")])], "8080");
+    assert_eq!(
+        &src[yaml_value(src, &[key("server"), key("host")])],
+        "localhost"
+    );
+    assert_eq!(&src[yaml_value(src, &[key("list"), idx(1)])], "b");
+}
+
+#[test]
+fn yaml_value_span_includes_quotes_and_converts_char_offsets_to_bytes() {
+    // A quoted scalar's span includes its quotes (double and single).
+    let dq = "a: \"hi\"\n";
+    assert_eq!(&dq[yaml_value(dq, &[key("a")])], "\"hi\"");
+    let sq = "a: 'hi'\n";
+    assert_eq!(&sq[yaml_value(sq, &[key("a")])], "'hi'");
+    // CRITICAL regression: saphyr's `Marker::index` is a CHAR offset (its `index()`
+    // rustdoc wrongly says bytes); the resolver converts to BYTES, so a multibyte
+    // char BEFORE the target must not shift the span. `é`/`ï` are 2 bytes each.
+    let mb = "note: \"café\"\nport: 42\n";
+    assert_eq!(&mb[yaml_value(mb, &[key("port")])], "42");
+    let mb2 = "a:\n  x: \"naïve\"\n  y: 7\n";
+    assert_eq!(&mb2[yaml_value(mb2, &[key("a"), key("y")])], "7");
+}
+
+#[test]
+fn yaml_value_span_declines_non_scalar_alias_multidoc_and_bad_input() {
+    // A non-scalar target (mapping / sequence) declines -- only a scalar is spliced.
+    let src = "a:\n  b: 1\nlist:\n  - x\n";
+    assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("a")]).is_none());
+    assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("list")]).is_none());
+    // An aliased value is an `Alias` node (saphyr does not expand) -> declines,
+    // so a splice can never corrupt the alias / its anchor.
+    let al = "defaults: &d 5\nuse: *d\n";
+    assert!(resolve_value_span(Format::Yaml, al.as_bytes(), &[key("use")]).is_none());
+    // A multi-document stream is ambiguous -> declines.
+    let multi = "a: 1\n---\nb: 2\n";
+    assert!(resolve_value_span(Format::Yaml, multi.as_bytes(), &[key("a")]).is_none());
+    // Malformed YAML / a missing key -> None (no panic).
+    assert!(resolve_value_span(Format::Yaml, b"a: [1, 2\n", &[key("a")]).is_none());
+    assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("z")]).is_none());
+    // remove_value is DEFERRED for YAML -> always declines.
+    assert!(resolve_removal_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_none());
+}
+
+#[test]
+fn yaml_serialize_scalar_is_typed_including_null() {
+    assert_eq!(
+        serialize_scalar(Format::Yaml, &json!(8080)).unwrap(),
+        b"8080"
+    );
+    assert_eq!(
+        serialize_scalar(Format::Yaml, &json!(true)).unwrap(),
+        b"true"
+    );
+    // YAML null IS representable.
+    assert_eq!(
+        serialize_scalar(Format::Yaml, &json!(null)).unwrap(),
+        b"null"
+    );
+    assert_eq!(
+        serialize_scalar(Format::Yaml, &json!("a\"b")).unwrap(),
+        b"\"a\\\"b\""
+    );
+    assert!(serialize_scalar(Format::Yaml, &json!({"k": 1})).is_none());
+    assert!(serialize_scalar(Format::Yaml, &json!([1])).is_none());
 }
