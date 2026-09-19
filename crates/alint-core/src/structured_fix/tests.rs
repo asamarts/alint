@@ -247,6 +247,7 @@ fn every_format_is_classified_for_structured_fix() {
     // JSON/YAML resolve SET but defer `remove_value` (the SpanSetOnly regime).
     enum Regime {
         Span,
+        SpanSetDocRemove,
         SpanSetOnly,
         Document,
     }
@@ -255,21 +256,57 @@ fn every_format_is_classified_for_structured_fix() {
             Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini | Format::Properties => {
                 Regime::Span
             }
-            // JSON/YAML resolve a SET span but defer `remove_value` (structural
-            // surgery); YAML via `saphyr::MarkedYaml`, JSON via `jsonc-parser`.
-            Format::Json | Format::Yaml => Regime::SpanSetOnly,
+            // JSON: span SET (jsonc-parser AST) + WHOLE-DOCUMENT remove (jsonc-parser
+            // editable CST -- correct comma surgery), a per-op split.
+            Format::Json => Regime::SpanSetDocRemove,
+            // YAML: span SET (`saphyr::MarkedYaml`) but remove is DEFERRED (saphyr is
+            // read-only, no edit API).
+            Format::Yaml => Regime::SpanSetOnly,
             Format::Toml => Regime::Document,
         };
+        // `removal_uses_document` is JSON-only (TOML removal goes via the all-ops
+        // `uses_document_rewrite` branch instead).
+        assert_eq!(
+            removal_uses_document(f),
+            matches!(regime, Regime::SpanSetDocRemove),
+            "{f:?} removal_uses_document must match the SpanSetDocRemove regime"
+        );
         match regime {
             Regime::Span => {
                 assert!(
                     !uses_document_rewrite(f),
                     "span-resolver {f:?} must not also be document-rewrite"
                 );
-                // A span format resolves removals, so `can_fix` may advertise them.
+                // A span format resolves removals via a span, so `can_fix` advertises.
                 assert!(
                     format_supports_removal(f),
                     "span-resolver {f:?} must support remove_value"
+                );
+                assert!(
+                    resolve_removal_span(f, b"", &[key("a")]).is_none()
+                        || resolve_removal_span(f, b"a = 1\n", &[key("a")]).is_some(),
+                    "span-resolver {f:?} removal is span-based"
+                );
+            }
+            Regime::SpanSetDocRemove => {
+                // SET is a span splice (not a full document rewrite)...
+                assert!(
+                    !uses_document_rewrite(f),
+                    "{f:?} SET is a span splice, not doc"
+                );
+                // ...REMOVE is a whole-document CST rewrite (NOT a span), and it IS
+                // supported (so `check` honestly advertises it).
+                assert!(
+                    resolve_removal_span(f, b"{\"a\": 1}", &[key("a")]).is_none(),
+                    "{f:?} removal is document-based, not a span"
+                );
+                assert!(
+                    format_supports_removal(f),
+                    "{f:?} must support remove_value (via the document CST)"
+                );
+                assert!(
+                    serialize_scalar(f, &json!("x")).is_some(),
+                    "{f:?} must serialize a representable scalar"
                 );
             }
             Regime::SpanSetOnly => {
@@ -309,7 +346,7 @@ fn every_format_is_classified_for_structured_fix() {
             }
         }
     }
-    // A span format actually resolves; the document format actually rewrites.
+    // A span format actually resolves; the document formats actually rewrite.
     assert!(resolve_value_span(Format::Hcl, b"a = 1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Dotenv, b"A=1\n", &[key("A")]).is_some());
     assert!(resolve_value_span(Format::Ini, b"a = 1\n", &[key("a")]).is_some());
@@ -318,6 +355,8 @@ fn every_format_is_classified_for_structured_fix() {
     assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_some());
     assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
     assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
+    // JSON removal actually rewrites the document (via the editable CST).
+    assert!(document_remove(Format::Json, b"{\"a\": 1, \"b\": 2}", &[vec![key("a")]]).is_some());
 }
 
 // ---- XML (roxmltree spans): elements, attributes, text, siblings ----
@@ -1198,4 +1237,66 @@ fn yaml_value_span_offsets_past_a_leading_bom() {
     let src = "\u{feff}port: 8080\n";
     let span = resolve_value_span(Format::Yaml, src.as_bytes(), &[key("port")]).unwrap();
     assert_eq!(&src[span], "8080"); // indexes the value in the raw (BOM-prefixed) bytes.
+}
+
+#[test]
+fn json_document_remove_deletes_a_member_without_over_deleting() {
+    let rm = |src: &str, path: &[PathSeg]| -> String {
+        String::from_utf8(document_remove(Format::Json, src.as_bytes(), &[path.to_vec()]).unwrap())
+            .unwrap()
+    };
+    // Middle member: comma surgery keeps BOTH siblings (the anti-over-deletion gate --
+    // a hand-rolled splice could eat `c` and still pass the `Absent` verifier).
+    assert_eq!(
+        rm("{\"a\":1,\"b\":2,\"c\":3}", &[key("b")]),
+        "{\"a\":1,\"c\":3}"
+    );
+    // Last member: the LEADING comma is removed.
+    assert_eq!(rm("{\"a\":1,\"b\":2}", &[key("b")]), "{\"a\":1}");
+    // Nested member.
+    assert_eq!(
+        rm("{\"s\":{\"x\":1,\"d\":true}}", &[key("s"), key("d")]),
+        "{\"s\":{\"x\":1}}"
+    );
+    // Array element by index.
+    assert_eq!(rm("{\"a\":[1,2,3]}", &[key("a"), idx(1)]), "{\"a\":[1,3]}");
+    // A member's OWN trailing comment goes with it; a sibling's comment stays.
+    let c = rm(
+        "{\n  \"a\": 1,  // keep\n  \"b\": 2  // drop\n}\n",
+        &[key("b")],
+    );
+    assert!(c.contains("// keep") && !c.contains("// drop"), "got: {c}");
+    // Removing the ONLY member leaves an empty object (valid; key is absent).
+    assert_eq!(rm("{\"a\":1}", &[key("a")]), "{}");
+    // A leading BOM is preserved.
+    let bom = String::from_utf8(
+        document_remove(
+            Format::Json,
+            "\u{feff}{\"a\":1,\"b\":2}".as_bytes(),
+            &[vec![key("a")]],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(bom, "\u{feff}{\"b\":2}");
+    // A path that does not resolve -> None (nothing removed, so no edit).
+    assert!(document_remove(Format::Json, b"{\"a\":1}", &[vec![key("z")]]).is_none());
+    // Malformed JSON -> None (no panic).
+    assert!(document_remove(Format::Json, b"{\"a\":", &[vec![key("a")]]).is_none());
+}
+
+#[test]
+fn json_document_remove_handles_multiple_paths_in_one_rewrite() {
+    // Two distinct members removed together (collect-then-remove is order-free for
+    // keys); the survivor stays.
+    let out = String::from_utf8(
+        document_remove(
+            Format::Json,
+            b"{\"a\":1,\"b\":2,\"c\":3}",
+            &[vec![key("a")], vec![key("c")]],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(out, "{\"b\":2}");
 }

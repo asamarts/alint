@@ -139,6 +139,7 @@ pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> 
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Toml => toml_::document_remove(text, paths),
+        Format::Json => json_::json_document_remove(text, paths),
         _ => None,
     }
 }
@@ -157,16 +158,15 @@ pub fn format_leaves_are_strings(format: Format) -> bool {
     )
 }
 
-/// Whether `format` has a `remove_value` resolver at all. JSON and YAML defer
-/// object-member removal (comma / trailing-comma / comment surgery -- the
-/// verify-invisible over-deletion class), so [`resolve_removal_span`] never
-/// resolves for them and a `remove_value` fix ALWAYS declines, on EVERY document.
-/// The fixer's `can_fix` consults this so `check` does not advertise an auto-fix
-/// that `fix` can never apply -- distinct from a DOCUMENT-dependent decline (e.g.
-/// the XML document root, or a repeated-block parent), which resolves for most
-/// inputs and so stays honestly advertised (the tolerated over-promise). Keep
-/// this in lockstep with the removal arms of [`resolve_removal_span`] /
-/// [`document_remove`]; the structured-fix classification gate asserts the parity.
+/// Whether `format` has a `remove_value` implementation at all. Only YAML defers
+/// removal (`saphyr::MarkedYaml` is read-only, no edit API), so its `remove_value`
+/// ALWAYS declines on EVERY document. The fixer's `can_fix` consults this so
+/// `check` does not advertise an auto-fix that `fix` can never apply -- distinct
+/// from a DOCUMENT-dependent decline (e.g. the XML document root, or a
+/// repeated-block parent), which resolves for most inputs and so stays honestly
+/// advertised (the tolerated over-promise). Keep this in lockstep with the removal
+/// arms of [`resolve_removal_span`] / [`document_remove`] / [`removal_uses_document`];
+/// the structured-fix classification gate asserts the parity.
 #[must_use]
 pub fn format_supports_removal(format: Format) -> bool {
     match format {
@@ -175,9 +175,22 @@ pub fn format_supports_removal(format: Format) -> bool {
         | Format::Dotenv
         | Format::Ini
         | Format::Properties
-        | Format::Toml => true,
-        Format::Json | Format::Yaml => false,
+        | Format::Toml
+        | Format::Json => true,
+        Format::Yaml => false,
     }
+}
+
+/// Whether `format`'s `remove_value` is a WHOLE-DOCUMENT rewrite (edit + reserialize
+/// an editable CST) rather than a per-node span splice. JSON removal uses the
+/// `jsonc-parser` editable CST for correct comma / comment surgery, while its SET
+/// stays a span splice -- a per-OP split, so JSON is listed here but is NOT
+/// [`uses_document_rewrite`] (which is all-ops, for TOML, and whose branch handles
+/// TOML removal already). The fixer emits ONE `ReplaceRange` over the whole file
+/// for a removal on a format listed here.
+#[must_use]
+pub fn removal_uses_document(format: Format) -> bool {
+    matches!(format, Format::Json)
 }
 
 /// HCL span resolution + value serialization over the `hcl::edit` CST.
@@ -1328,12 +1341,14 @@ mod toml_ {
 /// (`format_leaves_are_strings` is false for it), so a numeric / bool / null
 /// `equals` is fixable, and `null` is a representable value.
 ///
-/// `remove_value` is DEFERRED: deleting an object member needs comma /
-/// trailing-comma / comment surgery (the over-deletion risk class), so
-/// `resolve_removal_span` has NO JSON arm today -- JSON removal degrades to a
-/// Suggestion until a dedicated increment lands it safely. The check side parses
-/// via `serde_json` (+ `strip_jsonc`); this spanned AST is the fix side's view,
-/// and the two agree on standard-JSON structure.
+/// `remove_value` is a WHOLE-DOCUMENT rewrite via the `jsonc-parser` editable CST
+/// (`json_document_remove` / [`removal_uses_document`]): the CST owns the comma /
+/// trailing-comma / comment surgery, so a deletion NEVER over-deletes a sibling --
+/// the trap a hand-rolled span splice falls into (the `Absent` verifier is blind to
+/// eating a neighbour that still leaves the target absent). So JSON is a per-OP
+/// split: span SET + document REMOVE. The check side parses via `serde_json`
+/// (+ `strip_jsonc`); this spanned AST (+ the CST for removal) is the fix side's
+/// view, and the two agree on standard-JSON structure.
 mod json_ {
     use super::PathSeg;
     use jsonc_parser::common::Ranged;
@@ -1388,6 +1403,85 @@ mod json_ {
             J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),
             J::Array(_) | J::Object(_) => None,
         }
+    }
+
+    /// Remove the object member / array element at each `path` from the JSON via
+    /// the `jsonc-parser` editable CST, returning the reserialized document. Unlike
+    /// `set_value` (a span splice), removal is a WHOLE-DOCUMENT rewrite: the CST
+    /// owns the comma / trailing-comma / comment surgery (dprint's editor), so a
+    /// deletion NEVER over-deletes a sibling -- the trap a hand-rolled span splice
+    /// falls into (the `Absent` verifier is blind to eating a neighbour that still
+    /// leaves the target absent). The CST round-trips byte-identically, so an
+    /// unmodified region is untouched. `None` if the source does not parse or NO
+    /// path resolved (nothing removed).
+    pub(super) fn json_document_remove(text: &str, paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+        use jsonc_parser::cst::CstRootNode;
+        // The check side strips a leading BOM; strip before the CST parse (which
+        // rejects it) and re-prepend it to the reserialized output.
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom = &text[..text.len() - stripped.len()];
+        let root = CstRootNode::parse(
+            stripped,
+            &ParseOptions {
+                allow_comments: true,
+                allow_trailing_commas: true,
+                allow_loose_object_property_names: false,
+            },
+        )
+        .ok()?;
+        // Resolve ALL target handles FIRST, then remove -- removing by handle (not
+        // by re-navigating) is index-shift-safe for array elements and order-free
+        // for object members.
+        let targets: Vec<RemoveTarget> = paths
+            .iter()
+            .filter_map(|p| navigate_to_removable(&root, p))
+            .collect();
+        if targets.is_empty() {
+            return None;
+        }
+        for t in targets {
+            t.remove();
+        }
+        Some(format!("{bom}{root}").into_bytes())
+    }
+
+    /// A removable CST node: an object member (removed with its comma) or an array
+    /// element. Both `remove(self)` handle the surrounding separator surgery.
+    enum RemoveTarget {
+        Prop(jsonc_parser::cst::CstObjectProp),
+        Elem(jsonc_parser::cst::CstNode),
+    }
+
+    impl RemoveTarget {
+        fn remove(self) {
+            match self {
+                RemoveTarget::Prop(p) => p.remove(),
+                RemoveTarget::Elem(n) => n.remove(),
+            }
+        }
+    }
+
+    /// Navigate the CST to the removable node at `path` (the object PROP for a
+    /// trailing key, or the array ELEMENT for a trailing index). `None` if any
+    /// segment does not resolve (declines rather than guess).
+    fn navigate_to_removable(
+        root: &jsonc_parser::cst::CstRootNode,
+        path: &[PathSeg],
+    ) -> Option<RemoveTarget> {
+        let (last, parents) = path.split_last()?;
+        let mut node = root.value()?;
+        for seg in parents {
+            node = match seg {
+                PathSeg::Key(k) => node.as_object()?.get(k)?.value()?,
+                PathSeg::Index(i) => node.as_array()?.elements().into_iter().nth(*i)?,
+            };
+        }
+        Some(match last {
+            PathSeg::Key(k) => RemoveTarget::Prop(node.as_object()?.get(k)?),
+            PathSeg::Index(i) => {
+                RemoveTarget::Elem(node.as_array()?.elements().into_iter().nth(*i)?)
+            }
+        })
     }
 }
 

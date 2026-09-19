@@ -182,6 +182,12 @@ impl Fixer for StructuredFixer {
         true
     }
 
+    // A cohesive dispatcher over three edit regimes (whole-document rewrite for
+    // TOML; per-op document removal for JSON; span splice for the rest) x two ops
+    // (set/remove), all emitting `CollectedEdit`s from the shared `located` query
+    // result. Splitting it would fragment that dispatch and fight `located`'s
+    // borrow lifetime for marginal benefit (cf. `Engine::fix`).
+    #[allow(clippy::too_many_lines)]
     fn collect_edits(
         &self,
         _violations: &[Violation],
@@ -250,6 +256,32 @@ impl Fixer for StructuredFixer {
                         None => Vec::new(),
                     }
                 }
+            };
+        }
+
+        // JSON `remove_value` is a WHOLE-DOCUMENT CST rewrite (the `jsonc-parser`
+        // editable CST owns the comma / comment surgery, so a deletion never
+        // over-deletes a sibling -- the trap a hand-rolled span splice falls into,
+        // invisible to the `Absent` verifier). JSON `set_value` stays a span splice,
+        // so this is a per-OP document path, handled before the span path below.
+        // Emits ONE ReplaceRange over the file; the `Absent` verifier re-checks the
+        // whole post-edit file, so a partial removal (an unresolved path) demotes.
+        if matches!(self.op, StructuredOp::Remove)
+            && structured_fix::removal_uses_document(self.format)
+        {
+            let paths: Vec<Vec<PathSeg>> = located.iter().map(|n| to_segs(n.location())).collect();
+            return match structured_fix::document_remove(self.format, bytes, &paths) {
+                Some(doc) => vec![CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range: 0..bytes.len(),
+                        content: doc,
+                    },
+                    applicability: self.applicability,
+                    verify: self.verifier(ExpectedValue::Absent),
+                    isolation_group: None,
+                }],
+                None => Vec::new(),
             };
         }
 
@@ -586,14 +618,16 @@ mod tests {
             StructuredFixer::remove(Format::Xml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v)
         );
-        // But JSON/YAML defer removal entirely (no resolver), so it declines on
-        // EVERY document -- `check` must NOT advertise it (honesty: else it
-        // promises a fix `fix` always skips). Regression for the JSON-audit gap.
+        // JSON removal is now supported (via the jsonc-parser editable CST), so
+        // `check` advertises it (its declines are document-dependent, like XML).
         assert!(
-            !StructuredFixer::remove(Format::Json, jp("$.a"), "$.a".into(), Applicability::Unsafe)
+            StructuredFixer::remove(Format::Json, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v),
-            "JSON remove_value is deferred -> check must not advertise it fixable"
+            "JSON remove_value is supported (CST) -> check advertises it"
         );
+        // Only YAML defers removal (saphyr is read-only, no edit API), so it
+        // declines on EVERY document -- `check` must NOT advertise it (honesty:
+        // else it promises a fix `fix` always skips).
         assert!(
             !StructuredFixer::remove(Format::Yaml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v),

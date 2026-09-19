@@ -292,9 +292,10 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
     // emits none of these names, so they are otherwise inert. `sv.*`'s `$.region`
     // is "OLD" (!= the rule's "NEW"), rewritten in place. `rv.*`'s removal target is
     // a UNIQUE key/element (a duplicate / document-root / multi-line value would
-    // decline); JSON and YAML removal is DEFERRED, so those `rv.*` fixers cleanly
-    // skip. XML/dotenv/INI/properties leaves are strings (so `equals` is "NEW"); the
-    // XML removal target is a NON-root element (removing the root is declined).
+    // decline); YAML removal is DEFERRED, so `rv.yaml`'s fixer cleanly skips (JSON
+    // removal now applies via the CST). XML/dotenv/INI/properties leaves are strings
+    // (so `equals` is "NEW"); the XML removal target is a NON-root element (removing
+    // the root is declined).
     let structured: &[(&str, &str)] = &[
         ("sv.tf", "region = \"OLD\"\n"),
         ("rv.tf", "keep = 1\nbanned = \"x\"\n"),
@@ -650,12 +651,11 @@ fn rule_json_path_equals_set_value() -> impl Strategy<Value = String> {
     })
 }
 
-/// A `json_path_absent` rule declaring `remove_value` (Phase 2): JSON removal is
-/// DEFERRED this increment (comma surgery -- a verify-invisible over-deletion
-/// risk), so `resolve_removal_span(Format::Json, ..)` always declines. The fixer
-/// forms NO edit and the violation is `skipped`; this generator fuzzes that the
-/// clean decline never corrupts `_trig/rv.json` (nor any co-resident file) across
-/// arbitrary trees. (SET ships this increment; REMOVE is a tracked follow-up.)
+/// A `json_path_absent` rule fixed via the located `remove_value` op: deletes the
+/// `$.banned` member (planted only in `_trig/rv.json`) via the jsonc-parser editable
+/// CST (a WHOLE-DOCUMENT rewrite with correct comma surgery -- unlike JSON `set_value`,
+/// which is a span splice). Unsafe by default, so *suggested* under a bare `Fix` and
+/// *applied* under `FixUnsafe` -- exercising the CST removal across arbitrary trees.
 fn rule_json_path_absent_remove_value() -> impl Strategy<Value = String> {
     rule_id("jremv").prop_map(|id| {
         format!(

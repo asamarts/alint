@@ -77,7 +77,7 @@ toml_edit = "0.25"
 # JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing
 # commas survive. The check side parses JSON via serde_json (+ `strip_jsonc`); this
 # is the fix side's spanned view.
-jsonc-parser = "0.26.2"
+jsonc-parser = { version = "0.26.2", features = ["cst"] }
 # Span-capable YAML AST for the Phase-2 structured `set_value` fixer (alint-core
 # `structured_fix::yaml_`): `saphyr::MarkedYaml` is a spanned node tree, so a YAML
 # scalar edit is a span-splice (like JSON). The check side parses YAML via
