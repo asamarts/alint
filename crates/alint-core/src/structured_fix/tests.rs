@@ -272,6 +272,11 @@ fn every_format_is_classified_for_structured_fix() {
                     !uses_document_rewrite(f),
                     "span-resolver {f:?} must not also be document-rewrite"
                 );
+                // A span format resolves removals, so `can_fix` may advertise them.
+                assert!(
+                    format_supports_removal(f),
+                    "span-resolver {f:?} must support remove_value"
+                );
             }
             Regime::SpanSetOnly => {
                 assert!(!uses_document_rewrite(f), "{f:?} is a span format, not doc");
@@ -279,6 +284,12 @@ fn every_format_is_classified_for_structured_fix() {
                 assert!(
                     resolve_removal_span(f, b"", &[key("a")]).is_none(),
                     "set-only {f:?} must decline remove_value (deferred)"
+                );
+                // ...and the static predicate `can_fix` reads must agree, so
+                // `check` does not advertise a removal that always declines.
+                assert!(
+                    !format_supports_removal(f),
+                    "set-only {f:?} must report remove_value unsupported (honesty)"
                 );
                 assert!(
                     serialize_scalar(f, &json!("x")).is_some(),
@@ -291,6 +302,11 @@ fn every_format_is_classified_for_structured_fix() {
                 assert!(
                     resolve_value_span(f, b"", &[key("a")]).is_none(),
                     "document-rewrite {f:?} must decline span resolution"
+                );
+                // ...but it DOES own removal surgery, so removals are supported.
+                assert!(
+                    format_supports_removal(f),
+                    "document-rewrite {f:?} must support remove_value"
                 );
                 assert!(
                     serialize_scalar(f, &json!("x")).is_some(),
@@ -305,6 +321,10 @@ fn every_format_is_classified_for_structured_fix() {
                 assert!(
                     resolve_removal_span(f, b"", &[key("a")]).is_none(),
                     "unsupported {f:?} must decline remove_value span resolution"
+                );
+                assert!(
+                    !format_supports_removal(f),
+                    "unsupported {f:?} must report remove_value unsupported"
                 );
                 assert!(
                     serialize_scalar(f, &json!("x")).is_none(),
@@ -1035,6 +1055,22 @@ fn json_value_span_preserves_jsonc_and_declines_bad_input() {
     assert!(resolve_value_span(Format::Json, b"{\"x\": 1}", &[key("z")]).is_none());
     // `remove_value` is DEFERRED (comma surgery) -> always declines.
     assert!(resolve_removal_span(Format::Json, b"{\"x\": 1}", &[key("x")]).is_none());
+}
+
+#[test]
+fn json_value_span_offsets_past_a_leading_bom() {
+    // Regression (JSON audit): the check side strips a leading BOM (`Format::parse`)
+    // so a BOM-prefixed file fires + advertises a fix, but `jsonc-parser` rejects a
+    // `\u{FEFF}` prefix. The resolver must strip it and return the span in ORIGINAL
+    // byte coordinates (BOM included), else every BOM JSON was advertised-fixable
+    // yet always skipped.
+    let src = "\u{feff}{\"port\": 8080}"; // 3-byte UTF-8 BOM, then the JSON.
+    let span = resolve_value_span(Format::Json, src.as_bytes(), &[key("port")]).unwrap();
+    assert_eq!(&src[span], "8080"); // indexes the value in the raw (BOM-prefixed) bytes.
+    // A run of consecutive BOMs is stripped too (matches `trim_start_matches`).
+    let two = "\u{feff}\u{feff}{\"a\": 1}";
+    let s2 = resolve_value_span(Format::Json, two.as_bytes(), &[key("a")]).unwrap();
+    assert_eq!(&two[s2], "1");
 }
 
 #[test]

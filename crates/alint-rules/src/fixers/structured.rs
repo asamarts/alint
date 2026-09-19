@@ -162,16 +162,19 @@ impl Fixer for StructuredFixer {
             // config-only static preconditions (scalar + can-match + can-serialize);
             // `collect_edits` gates on the SAME predicate, so check and fix agree.
             StructuredOp::Set(want) => self.set_value_is_statically_applicable(want),
-            // A removal has no statically-unsatisfiable case: whether a matched
-            // node can be deleted is document-dependent (the resolver declines a
-            // repeated-block / array-parent node, or the document root -- deleting
-            // the root would empty the file). Those declines surface at fix time as
-            // a `skipped`/`suggested`, never a corruption. So `check` reports
-            // "fixable" and a later `fix` may `skip` it: a KNOWN residual
-            // over-promise in the safe direction (check never claims LESS than fix
-            // resolves; the reverse -- claiming fixable then skipping -- is the
-            // tolerated gap, and is exercised by `remove_value_xml_root_is_declined`).
-            StructuredOp::Remove => true,
+            // `remove_value` is advertised fixable only for a format that HAS a
+            // removal resolver at all. JSON/YAML defer object-member removal
+            // (comma surgery), so their removal declines on EVERY document -- a
+            // statically-knowable never-appliable case, so `check` must not
+            // promise it (else it advertises a fix `fix` can never apply, every
+            // time). For a format that DOES resolve removals, whether a given
+            // matched node can be deleted stays document-dependent (the resolver
+            // declines a repeated-block / array-parent node, or the XML document
+            // root -- deleting it would empty the file); those surface at fix time
+            // as `skipped`/`suggested`, never a corruption. So `check` reports
+            // "fixable" and a later `fix` may `skip` it: the tolerated over-promise
+            // in the safe direction, exercised by `remove_value_xml_root_is_declined`.
+            StructuredOp::Remove => structured_fix::format_supports_removal(self.format),
         }
     }
 
@@ -577,10 +580,24 @@ mod tests {
             )
             .can_fix(&v)
         );
-        // remove_value's declines are document-dependent -> reported fixable.
+        // remove_value on a format WITH a removal resolver is reported fixable
+        // (its declines are document-dependent -- e.g. the XML root).
         assert!(
             StructuredFixer::remove(Format::Xml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v)
+        );
+        // But JSON/YAML defer removal entirely (no resolver), so it declines on
+        // EVERY document -- `check` must NOT advertise it (honesty: else it
+        // promises a fix `fix` always skips). Regression for the JSON-audit gap.
+        assert!(
+            !StructuredFixer::remove(Format::Json, jp("$.a"), "$.a".into(), Applicability::Unsafe)
+                .can_fix(&v),
+            "JSON remove_value is deferred -> check must not advertise it fixable"
+        );
+        assert!(
+            !StructuredFixer::remove(Format::Yaml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
+                .can_fix(&v),
+            "YAML remove_value is deferred -> check must not advertise it fixable"
         );
     }
 

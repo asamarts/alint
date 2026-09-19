@@ -157,6 +157,29 @@ pub fn format_leaves_are_strings(format: Format) -> bool {
     )
 }
 
+/// Whether `format` has a `remove_value` resolver at all. JSON and YAML defer
+/// object-member removal (comma / trailing-comma / comment surgery -- the
+/// verify-invisible over-deletion class), so [`resolve_removal_span`] never
+/// resolves for them and a `remove_value` fix ALWAYS declines, on EVERY document.
+/// The fixer's `can_fix` consults this so `check` does not advertise an auto-fix
+/// that `fix` can never apply -- distinct from a DOCUMENT-dependent decline (e.g.
+/// the XML document root, or a repeated-block parent), which resolves for most
+/// inputs and so stays honestly advertised (the tolerated over-promise). Keep
+/// this in lockstep with the removal arms of [`resolve_removal_span`] /
+/// [`document_remove`]; the structured-fix classification gate asserts the parity.
+#[must_use]
+pub fn format_supports_removal(format: Format) -> bool {
+    match format {
+        Format::Hcl
+        | Format::Xml
+        | Format::Dotenv
+        | Format::Ini
+        | Format::Properties
+        | Format::Toml => true,
+        Format::Json | Format::Yaml => false,
+    }
+}
+
 /// HCL span resolution + value serialization over the `hcl::edit` CST.
 mod hcl {
     use super::PathSeg;
@@ -1320,8 +1343,20 @@ mod json_ {
     /// The byte range of the value at `path` (what `set_value` overwrites). `None`
     /// if the source does not parse or the path does not resolve to a node.
     pub(super) fn json_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        // Mirror `Format::parse`: strip leading UTF-8 BOM(s) before parsing.
+        // `jsonc-parser` rejects a `\u{FEFF}` prefix as a syntax error, but the
+        // check side strips it (so a BOM-prefixed file DOES fire the rule and
+        // advertise a fix). Resolve against the stripped text, then shift the
+        // span back into the ORIGINAL byte space by the stripped BOM length --
+        // the caller splices the raw file bytes, BOM included. Without this,
+        // every BOM-prefixed JSON was advertised fixable yet always skipped
+        // (JSON was the outlier: dotenv/INI/properties offset it, TOML restores
+        // it). `trim_start_matches` drops any run of consecutive BOMs, matching
+        // `Format::parse`.
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
         let ast = parse_to_ast(
-            text,
+            stripped,
             &CollectOptions {
                 comments: CommentCollectionStrategy::Off,
                 tokens: false,
@@ -1341,7 +1376,7 @@ mod json_ {
             };
         }
         let r = node.range();
-        Some(r.start..r.end)
+        Some(r.start + bom_len..r.end + bom_len)
     }
 
     /// Serialize a scalar as JSON bytes (a number / bool bare, a string
