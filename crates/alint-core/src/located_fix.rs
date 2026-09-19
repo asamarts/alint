@@ -244,12 +244,20 @@ fn verify_structured(bytes: &[u8], format: Format, query: &str, expect: &Expecte
             let Ok(re) = regex::Regex::new(re_src) else {
                 return false;
             };
-            nodes
-                .at_most_one()
-                .ok()
-                .flatten()
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|s| re.is_match(s))
+            // EVERY node the query selects must now be a string matching the regex
+            // (a wildcard `path:` selects many; `*_path_matches` fires unless ALL of
+            // them satisfy `matches:`, so the fix's goal is all-match -- NOT
+            // `at_most_one`, which would demote every multi-match replace). Require
+            // at least one node: a query that now resolves to nothing did not
+            // achieve the rule's goal.
+            let mut any = false;
+            for v in nodes.iter() {
+                any = true;
+                if !v.as_str().is_some_and(|s| re.is_match(s)) {
+                    return false;
+                }
+            }
+            any
         }
     }
 }

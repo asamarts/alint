@@ -1366,3 +1366,39 @@ fn minimal_replace_computes_the_minimal_changed_span() {
         );
     }
 }
+
+#[test]
+fn yaml_removal_span_declines_a_multi_line_flow_member() {
+    // HIGH regression (follow-up-1 audit): a MULTI-LINE flow mapping puts the key at
+    // the START of a physical line it SHARES with sibling members after the value; a
+    // whole-line delete would eat them (an over-deletion that still parses, so the
+    // Absent verify is blind to it). The line-TAIL check declines it.
+    assert!(
+        resolve_removal_span(
+            Format::Yaml,
+            b"x: {\n  a: 1, b: 2, c: 3\n}\n",
+            &[key("x"), key("a")]
+        )
+        .is_none()
+    );
+    // A single-line flow member already declined (key not at line start) -- still does.
+    assert!(
+        resolve_removal_span(Format::Yaml, b"x: {a: 1, b: 2}\n", &[key("x"), key("a")]).is_none()
+    );
+    // A plain block entry with a trailing `#` comment STILL resolves (tail is a comment).
+    assert!(resolve_removal_span(Format::Yaml, b"a: 1  # c\nb: 2\n", &[key("a")]).is_some());
+}
+
+#[test]
+fn json_document_remove_drops_descendant_paths_without_panicking() {
+    // HIGH regression (follow-up-1 audit): a recursive query (`$..a`) matches an
+    // ancestor AND a descendant; removing the ancestor detaches the descendant's CST
+    // handle, and `.remove()` on the orphan used to PANIC. The descendant path is
+    // dropped (the ancestor removal subsumes it). Both path orders are handled.
+    let rm = |paths: &[Vec<PathSeg>]| -> String {
+        String::from_utf8(document_remove(Format::Json, b"{\"a\": {\"a\": 1}}", paths).unwrap())
+            .unwrap()
+    };
+    assert_eq!(rm(&[vec![key("a")], vec![key("a"), key("a")]]), "{}");
+    assert_eq!(rm(&[vec![key("a"), key("a")], vec![key("a")]]), "{}"); // reverse order
+}

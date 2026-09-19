@@ -213,12 +213,14 @@ impl Fixer for StructuredFixer {
             // "fixable" and a later `fix` may `skip` it: the tolerated over-promise
             // in the safe direction, exercised by `remove_value_xml_root_is_declined`.
             StructuredOp::Remove => structured_fix::format_supports_removal(self.format),
-            // `replace` is advertised fixable statically (every format resolves a
-            // value span, and a valid search/replacement was compiled at build).
-            // Whether the matched value is a STRING the search actually rewrites is
-            // document-dependent -> surfaces at fix time as a skip (tolerated
-            // over-promise, safe direction).
-            StructuredOp::Replace { .. } => true,
+            // `replace` is advertised fixable for a SPAN format (all but TOML): it
+            // rewrites the value at a resolved span. TOML is document-rewrite with
+            // no value span, so its `replace` declines on EVERY document (a
+            // statically-knowable never-appliable case -> `check` must not promise
+            // it, mirroring the `remove_value` / `format_supports_removal` gate).
+            // Whether a span-format node is a STRING the search rewrites stays
+            // document-dependent -> a fix-time skip (tolerated, safe direction).
+            StructuredOp::Replace { .. } => !structured_fix::uses_document_rewrite(self.format),
         }
     }
 
@@ -428,10 +430,18 @@ impl Fixer for StructuredFixer {
                 // A non-string node, an un-serializable result, an unresolvable span,
                 // or a search that matched nothing emits NO edit -- the `Matches`
                 // verifier would demote a no-op anyway, and this keeps it honest.
+                // Rewrite ONLY the VIOLATING nodes: skip any that already satisfy
+                // the rule's `matches:` (a wildcard `path:` selects compliant AND
+                // non-compliant nodes; rewriting a compliant one would clobber it --
+                // e.g. `^`->`v` on an already-`v`-prefixed value). Compiled once here.
+                let compliant = regex::Regex::new(matches).ok();
                 located
                     .iter()
                     .filter_map(|node| {
                         let current = node.node().as_str()?;
+                        if compliant.as_ref().is_some_and(|re| re.is_match(current)) {
+                            return None; // already matches `matches:` -- leave it
+                        }
                         let rewritten = search.replace_all(current, replacement.as_str());
                         if rewritten == current {
                             return None;
@@ -965,5 +975,36 @@ mod tests {
             )
             .can_fix(&v)
         );
+    }
+
+    #[test]
+    fn replace_gates_toml_and_rewrites_only_violating_nodes() {
+        // Follow-up-1 audit MED fixes. Build a `*_path_matches` + replace fixer:
+        // search `^` -> `v`, verify the value matches `^v`.
+        let mk = |fmt| {
+            StructuredFixer::replace(
+                fmt,
+                jp("$.deps.*"),
+                "$.deps.*".into(),
+                regex::Regex::new("^").unwrap(),
+                "v".into(),
+                "^v".into(),
+                Applicability::Unsafe,
+            )
+        };
+        let v = Violation::new("x");
+        // TOML replace is document-rewrite (no value span) -> declines on EVERY
+        // document, so `check` must NOT advertise it; a span format (JSON) IS.
+        assert!(!mk(Format::Toml).can_fix(&v));
+        assert!(mk(Format::Json).can_fix(&v));
+        // A wildcard match hits a COMPLIANT node (`ok: "v9"`, already `^v`) and a
+        // VIOLATING one (`bad: "2.0"`). Only the violating node is rewritten -- the
+        // compliant one is left alone (rewriting it would clobber `v9` -> `vv9`).
+        let src = b"{\"deps\": {\"ok\": \"v9\", \"bad\": \"2.0\"}}";
+        let edits = mk(Format::Json).collect_edits(&[], Path::new("a.json"), src, Path::new("/r"));
+        assert_eq!(edits.len(), 1, "only the non-compliant node is rewritten");
+        let (start, end, content, _) = edit_of(&edits[0]);
+        assert_eq!(content, "\"v2.0\"");
+        assert_eq!(&String::from_utf8_lossy(src)[start..end], "\"2.0\"");
     }
 }

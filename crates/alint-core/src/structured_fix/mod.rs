@@ -1462,9 +1462,18 @@ mod json_ {
         .ok()?;
         // Resolve ALL target handles FIRST, then remove -- removing by handle (not
         // by re-navigating) is index-shift-safe for array elements and order-free
-        // for object members.
+        // for object members. But DROP any path that is a strict DESCENDANT of
+        // another matched path (a recursive query like `$..a` can match both a
+        // container and a node inside it): removing the ancestor detaches the
+        // descendant's CST node, and `.remove()` on the orphaned handle PANICS. The
+        // ancestor's removal subsumes the descendant, so dropping it is correct.
         let targets: Vec<RemoveTarget> = paths
             .iter()
+            .filter(|p| {
+                !paths
+                    .iter()
+                    .any(|q| q.len() < p.len() && p.starts_with(q.as_slice()))
+            })
             .filter_map(|p| navigate_to_removable(&root, p))
             .collect();
         if targets.is_empty() {
@@ -1777,6 +1786,19 @@ mod yaml_ {
         let line_end = stripped[entry.end..]
             .find('\n')
             .map_or(stripped.len(), |i| entry.end + i + 1);
+        // The value must also be the LAST content on its physical line: the tail
+        // after it may be only whitespace and/or a `#` comment. Without this, a
+        // MULTI-LINE flow mapping (`x: {\n  a: 1, b: 2\n}` -- where the key starts a
+        // physical line it SHARES with sibling members after the value) would have
+        // the whole-line delete engulf those siblings: an over-deletion that still
+        // parses, so the `Absent` re-verify is blind to it (the audit HIGH bug --
+        // symmetric to the leading `line_start..entry.start` guard, mirroring HCL).
+        let tail = stripped[entry.end..line_end]
+            .trim_end_matches(['\r', '\n'])
+            .trim_start_matches([' ', '\t']);
+        if !(tail.is_empty() || tail.starts_with('#')) {
+            return None;
+        }
         Some(line_start + bom_len..line_end + bom_len)
     }
 }
