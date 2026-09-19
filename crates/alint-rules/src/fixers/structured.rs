@@ -207,16 +207,22 @@ impl Fixer for StructuredFixer {
         // A round-trip-CST format (TOML / toml_edit) rewrites the WHOLE document
         // rather than splicing a span: toml_edit despans on parse, and owns the
         // formatting / comment / removal surgery, round-tripping byte-identically.
-        // Emit ONE ReplaceRange over the entire file. (Two such rules on one file
-        // emit overlapping whole-file edits; the engine applies one and the others
-        // re-apply on the next fixpoint re-walk -- correct, just multi-pass.)
+        // The rewrite is reduced to its MINIMAL changed span (`minimal_replace`),
+        // NOT emitted as a `0..len` whole-file edit: independent whole-doc rules on
+        // one file then produce DISJOINT edits that co-apply in ONE fixpoint pass
+        // (no false exit-2 at >10 rules, and `--diff` shows every change). Two rules
+        // touching the SAME span still overlap -> the engine serializes them (a
+        // genuinely conflicting config still oscillates to a loud exit 2).
         if structured_fix::uses_document_rewrite(self.format) {
-            let whole = 0..bytes.len();
-            let one = |content: Vec<u8>, expect: ExpectedValue| {
+            let one = |doc: Vec<u8>, expect: ExpectedValue| {
+                let (range, content) = structured_fix::minimal_replace(bytes, &doc);
+                if range.is_empty() && content.is_empty() {
+                    return Vec::new(); // reserialize was byte-identical: no-op
+                }
                 vec![CollectedEdit {
                     edit: FixEdit::ReplaceRange {
                         path: file.to_path_buf(),
-                        range: whole.clone(),
+                        range,
                         content,
                     },
                     applicability: self.applicability,
@@ -264,25 +270,31 @@ impl Fixer for StructuredFixer {
         // over-deletes a sibling -- the trap a hand-rolled span splice falls into,
         // invisible to the `Absent` verifier). JSON `set_value` stays a span splice,
         // so this is a per-OP document path, handled before the span path below.
-        // Emits ONE ReplaceRange over the file; the `Absent` verifier re-checks the
-        // whole post-edit file, so a partial removal (an unresolved path) demotes.
+        // Reduced to its MINIMAL changed span (`minimal_replace`) like the TOML
+        // whole-doc branch, so multiple removals on one file co-apply in one pass;
+        // the `Absent` verifier re-checks the whole post-edit file, so a partial
+        // removal (an unresolved path) demotes.
         if matches!(self.op, StructuredOp::Remove)
             && structured_fix::removal_uses_document(self.format)
         {
             let paths: Vec<Vec<PathSeg>> = located.iter().map(|n| to_segs(n.location())).collect();
-            return match structured_fix::document_remove(self.format, bytes, &paths) {
-                Some(doc) => vec![CollectedEdit {
-                    edit: FixEdit::ReplaceRange {
-                        path: file.to_path_buf(),
-                        range: 0..bytes.len(),
-                        content: doc,
-                    },
-                    applicability: self.applicability,
-                    verify: self.verifier(ExpectedValue::Absent),
-                    isolation_group: None,
-                }],
-                None => Vec::new(),
+            let Some(doc) = structured_fix::document_remove(self.format, bytes, &paths) else {
+                return Vec::new();
             };
+            let (range, content) = structured_fix::minimal_replace(bytes, &doc);
+            if range.is_empty() && content.is_empty() {
+                return Vec::new();
+            }
+            return vec![CollectedEdit {
+                edit: FixEdit::ReplaceRange {
+                    path: file.to_path_buf(),
+                    range,
+                    content,
+                },
+                applicability: self.applicability,
+                verify: self.verifier(ExpectedValue::Absent),
+                isolation_group: None,
+            }];
         }
 
         match &self.op {
@@ -791,9 +803,11 @@ mod tests {
     }
 
     #[test]
-    fn toml_set_emits_a_whole_document_rewrite() {
-        // A round-trip-CST format emits ONE ReplaceRange over the WHOLE file (the
-        // mutated document), not a span splice.
+    fn toml_set_emits_a_minimal_document_edit() {
+        // A round-trip-CST format reserializes the whole document, but the fixer
+        // reduces it to its MINIMAL changed span (follow-up 2) so independent rules
+        // on one file stay disjoint. The edit is NOT whole-file, and applying it
+        // reconstructs the mutated (typed, decor-preserved) document.
         let src = b"[s]\nport = 8080\n";
         let f = StructuredFixer::set(
             Format::Toml,
@@ -805,12 +819,14 @@ mod tests {
         let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
         assert_eq!(edits.len(), 1);
         let (start, end, content, _) = edit_of(&edits[0]);
-        assert_eq!((start, end), (0, src.len())); // whole-file range
-        assert_eq!(content, "[s]\nport = 9090\n"); // typed, decor preserved
+        assert_ne!((start, end), (0, src.len()), "the edit is minimal, not whole-file");
+        let mut out = src.to_vec();
+        out.splice(start..end, content.bytes());
+        assert_eq!(out, b"[s]\nport = 9090\n");
     }
 
     #[test]
-    fn toml_remove_emits_a_whole_document_rewrite() {
+    fn toml_remove_emits_a_minimal_document_edit() {
         let src = b"[s]\nkeep = 1\ndrop = 2\n";
         let f = StructuredFixer::remove(
             Format::Toml,
@@ -821,8 +837,10 @@ mod tests {
         let edits = f.collect_edits(&[], Path::new("a.toml"), src, Path::new("/r"));
         assert_eq!(edits.len(), 1);
         let (start, end, content, _) = edit_of(&edits[0]);
-        assert_eq!((start, end), (0, src.len()));
-        assert_eq!(content, "[s]\nkeep = 1\n");
+        assert_ne!((start, end), (0, src.len()), "the edit is minimal, not whole-file");
+        let mut out = src.to_vec();
+        out.splice(start..end, content.bytes());
+        assert_eq!(out, b"[s]\nkeep = 1\n");
     }
 
     #[test]

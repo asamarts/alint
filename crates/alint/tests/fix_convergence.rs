@@ -219,6 +219,54 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
     );
 }
 
+/// Follow-up 2 regression: many WHOLE-DOCUMENT rules (TOML `set_value`) on ONE
+/// file must converge in a SINGLE pass and exit 0. Before `minimal_replace`, each
+/// rule emitted a `0..len` whole-file edit; N such edits on one file OVERLAP, so
+/// the engine applied one per pass -> 12 rules > `MAX_PASSES` (10) -> a FALSE exit
+/// 2 on a perfectly resolvable config. Reducing each rewrite to its minimal changed
+/// span makes the 12 edits DISJOINT -> all co-apply in one pass. (Integration test,
+/// not a scenario: the >10-rules-per-file shape is the point, and the old bug was
+/// an exit code / pass-cap interaction a scenario cannot assert.)
+#[test]
+fn many_whole_doc_rules_on_one_file_converge_in_one_pass() {
+    use std::fmt::Write as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let n = 12; // > MAX_PASSES (10)
+    let mut toml = String::new();
+    let mut cfg = String::from("version: 1\nrules:\n");
+    for i in 0..n {
+        let _ = writeln!(toml, "k{i} = 0");
+        let _ = writeln!(
+            cfg,
+            "  - {{id: r{i}, kind: toml_path_equals, paths: \"**/*.toml\", \
+             path: \"$['k{i}']\", equals: {}, level: error, fix: {{ set_value: {{}} }}}}",
+            i + 100
+        );
+    }
+    write(root, "app.toml", toml.as_bytes());
+    config(root, &cfg);
+    let out = Command::new(alint())
+        .args(["fix", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{n} whole-doc rules on one file must converge (exit 0), not falsely cap; \
+         stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Every key was rewritten and a fresh check is clean.
+    assert!(check_is_clean(root), "the tree must be clean after the fix");
+    let fixed = std::fs::read_to_string(root.join("app.toml")).unwrap();
+    assert!(
+        fixed.contains("k11 = 111") && fixed.contains("k0 = 100"),
+        "got: {fixed}"
+    );
+}
+
 /// Audit regression (false negative, size path): a located `replace` on a file
 /// larger than `fix_size_limit` (default 1 MiB) but smaller than the check read
 /// cap used to produce NO report item -> `fix` exited 0 while the forbidden

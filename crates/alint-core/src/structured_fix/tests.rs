@@ -1332,3 +1332,37 @@ fn yaml_removal_span_declines_risky_shapes() {
     // A missing key -> None (no panic).
     assert!(d("a: 1\n", &[key("z")]));
 }
+
+#[test]
+fn minimal_replace_computes_the_minimal_changed_span() {
+    // A single interior change: only the differing middle.
+    let (r, c) = minimal_replace(b"abcXdef", b"abcYdef");
+    assert_eq!((r, c.as_slice()), (3..4, b"Y".as_slice()));
+    // Identical -> empty range + empty content (an identity no-op).
+    let (r, c) = minimal_replace(b"same", b"same");
+    assert!(r.is_empty() && c.is_empty());
+    // Insertion at the start.
+    let (r, c) = minimal_replace(b"bcd", b"abcd");
+    assert_eq!((r, c.as_slice()), (0..0, b"a".as_slice()));
+    // Applying the minimal edit reconstructs `new` EXACTLY (the load-bearing
+    // property), across a value change, a deletion, and a whole-file rewrite.
+    let cases: &[(&[u8], &[u8])] = &[
+        (
+            b"port = 8080\nhost = \"x\"\n",
+            b"port = 9090\nhost = \"x\"\n",
+        ),
+        (b"{\"a\": 1, \"b\": 2}", b"{\"b\": 2}"),
+        (b"a,b,c", b"a,c"),
+        (b"x", b""),
+        (b"", b"y"),
+    ];
+    for &(o, n) in cases {
+        let (r, c) = minimal_replace(o, n);
+        let mut out = o.to_vec();
+        out.splice(r, c);
+        assert_eq!(
+            out, n,
+            "minimal edit must reconstruct new from {o:?} -> {n:?}"
+        );
+    }
+}

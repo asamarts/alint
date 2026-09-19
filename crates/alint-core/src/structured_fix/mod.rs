@@ -198,6 +198,35 @@ pub fn removal_uses_document(format: Format) -> bool {
     matches!(format, Format::Json)
 }
 
+/// The MINIMAL `(range, content)` edit that turns `original` into `new`: the span
+/// between their common byte prefix and common byte suffix, and the differing
+/// middle of `new`. A whole-document rewrite (TOML / JSON removal) reserializes the
+/// ENTIRE file, but typically only ONE value/member changed; emitting this minimal
+/// splice (instead of `0..len` over the whole file) makes independent whole-doc
+/// rules on ONE file DISJOINT, so they co-apply in a SINGLE fixpoint pass (no more
+/// one-rule-per-pass serialization: no false exit-2 at >10 rules, and `--diff`
+/// shows every change). Two rules touching the SAME span still overlap -> the
+/// engine's overlap-skip serializes them (a genuinely conflicting config still
+/// oscillates to a loud exit 2). `original[range]` replaced by `content` yields
+/// exactly `new` by construction. An unchanged document yields an empty range +
+/// empty content (an identity no-op the caller / engine drops).
+#[must_use]
+pub fn minimal_replace(original: &[u8], new: &[u8]) -> (Range<usize>, Vec<u8>) {
+    let common_prefix = original.iter().zip(new).take_while(|(a, b)| a == b).count();
+    // The suffix may not overlap the prefix in either buffer.
+    let max_suffix = original.len().min(new.len()) - common_prefix;
+    let common_suffix = original
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(max_suffix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let range = common_prefix..original.len() - common_suffix;
+    let content = new[common_prefix..new.len() - common_suffix].to_vec();
+    (range, content)
+}
+
 /// HCL span resolution + value serialization over the `hcl::edit` CST.
 mod hcl {
     use super::PathSeg;
@@ -1207,17 +1236,14 @@ mod properties {
 /// otherwise normalizes (CRLF line endings, a leading BOM, a missing trailing
 /// newline) so the whole rewrite is byte-identical apart from the edit.
 ///
-/// LIMITATION (the whole-document model's cost): each edit is a whole-file
-/// `0..len` range, so TWO such edits on ONE file OVERLAP. The engine applies one
-/// and re-applies the others on later fixpoint passes -- so N whole-document fix
-/// rules matching ONE file need N passes. That converges (each pass makes
-/// progress) and never corrupts, but a config with MORE than `MAX_PASSES` (10)
-/// such rules on one file reports non-convergence (exit 2 -- re-run to continue),
-/// and `--diff` / `--dry-run`, being single-pass previews, show only ONE such
-/// rule's change per file (the real `fix` applies them all). Span formats
-/// (HCL/XML/dotenv/INI) do not have this: their disjoint spans co-apply in one
-/// pass. The proper fix -- coalescing a file's whole-document mutations across
-/// rules into one edit -- is deferred.
+/// The whole reserialized document is reduced to its MINIMAL changed span by the
+/// fixer ([`minimal_replace`]) before it becomes a `ReplaceRange`, NOT emitted as a
+/// `0..len` whole-file edit. So two whole-document rules changing DIFFERENT keys in
+/// ONE file produce DISJOINT edits that co-apply in a single fixpoint pass -- like
+/// the span formats -- with no false exit-2 at >10 rules and a `--diff` that shows
+/// every change (follow-up 2). Two rules touching the SAME span still overlap, so a
+/// genuinely conflicting config (two different values for one key) still oscillates
+/// to a loud exit 2.
 ///
 /// TOML is a TYPED format (`format_leaves_are_strings` is false for it), so a
 /// numeric / bool / datetime `equals` is fixable, unlike the string-leaf formats.
