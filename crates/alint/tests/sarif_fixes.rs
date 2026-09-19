@@ -85,6 +85,42 @@ fn sarif_carries_a_located_replace_fix_with_line_column_region() {
     assert_eq!(replacements[0]["insertedContent"]["text"], "\"v2.0\"");
 }
 
+/// A whole-file normalizer (`no_trailing_whitespace` -> the
+/// `file_trim_trailing_whitespace` fixer, which rewrites the whole file via
+/// `SetContent`) renders a `result.fixes[]` whose `deletedRegion` spans the
+/// entire artifact and whose `insertedContent` is the normalized file.
+#[test]
+fn sarif_carries_a_whole_file_fix_spanning_the_artifact() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: no-ws\n",
+            "    kind: no_trailing_whitespace\n",
+            "    paths: \"**/*.txt\"\n",
+            "    level: error\n",
+            "    fix:\n",
+            "      file_trim_trailing_whitespace: {}\n",
+        ),
+    )
+    .unwrap();
+    // Line 1 has trailing spaces; the whole two-line file is rewritten trimmed.
+    std::fs::write(dir.path().join("bad.txt"), "a   \nb\n").unwrap();
+
+    let sarif = check_sarif(dir.path());
+    let result = &sarif["runs"][0]["results"][0];
+    assert_eq!(result["ruleId"], "no-ws");
+    let repl = &result["fixes"][0]["artifactChanges"][0]["replacements"][0];
+    let region = &repl["deletedRegion"];
+    assert_eq!(region["startLine"], 1);
+    assert_eq!(region["startColumn"], 1);
+    assert_eq!(region["endLine"], 3);
+    assert_eq!(region["endColumn"], 1);
+    assert_eq!(repl["insertedContent"]["text"], "a\nb\n");
+}
+
 /// A finding whose rule has no fixer carries no `fixes` key — the ordinary
 /// SARIF shape is unchanged for non-fixable findings.
 #[test]

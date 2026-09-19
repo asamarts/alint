@@ -6,18 +6,21 @@
 //! replacement text, so a consumer (GitHub Code Scanning's "fix" suggestions)
 //! can preview or apply it without running `alint fix`.
 //!
-//! [`attach_proposed_edits`] fills [`Violation::proposed_edits`](crate::Violation) by re-running
-//! each fixable finding's fixer against the file's current bytes (the same
-//! `collect_edits` the LSP and the fix pass use), then mapping each byte-range
-//! edit to a 1-based line/column [`EditRegion`]. It runs only when a fix-carrying
-//! format asks (the CLI gates it on `--format sarif`), so the ordinary check
-//! path pays nothing.
+//! [`attach_proposed_edits`] fills [`Violation::proposed_edits`](crate::Violation)
+//! by re-running each fixable finding's fixer against the file's current bytes
+//! (the same `collect_edits` / `fix_edit` the LSP and the fix pass use), then
+//! mapping each resulting edit to a 1-based line/column [`EditRegion`]. It runs
+//! only when a fix-carrying format asks (the CLI gates it on `--format sarif`),
+//! so the ordinary check path pays nothing.
 //!
-//! Scope today: **located** fixers (the structured `set_value` / `remove_value`
-//! / `replace` ops), whose edits are byte-range [`FixEdit::ReplaceRange`]s with a
-//! 1:1 source region. Whole-file normalizers and file-ops
-//! (`SetContent` / `CreateFile` / `DeleteFile` / `RenameFile`) attach in a
-//! follow-on increment.
+//! Scope: **located** fixers (the structured `set_value` / `remove_value` /
+//! `replace` ops) map their byte-range [`FixEdit::ReplaceRange`]s to 1:1 source
+//! regions; **whole-file** normalizers ([`FixEdit::SetContent`]) become a
+//! full-artifact replacement, and **create** fixers ([`FixEdit::CreateFile`]) an
+//! insertion. File deletion / rename / chmod
+//! ([`FixEdit::DeleteFile`] / [`FixEdit::RenameFile`] / [`FixEdit::SetMode`])
+//! edit artifact *existence* / name / mode rather than content, which SARIF
+//! `fix`es cannot express, so they carry no proposed edit.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -113,14 +116,16 @@ fn located_edit_to_proposed(edit: &FixEdit, text: &str) -> Option<ProposedEdit> 
 /// Attach the concrete fixes alint would make to every fixable finding in
 /// `report`, reading files under `root`. Populates
 /// [`Violation::proposed_edits`](crate::Violation); leaves non-fixable findings
-/// and findings whose fixer is not located untouched (empty).
+/// and findings whose fixer has no content-replacement form (delete / rename /
+/// chmod) untouched (empty).
 ///
 /// A located fixer's `collect_edits` is *file-scoped* — it ignores the
-/// individual violation and re-scans the whole file — so its edits belong to
+/// individual violation and re-scans the whole file — and a whole-file fixer's
+/// `fix_edit` likewise describes the whole file, so a fixer's edits belong to
 /// the file, not one violation. When a rule fires more than once on a file
-/// (unusual for the structured ops, which fire once per file), the edits attach
-/// to the FIRST fixable violation for that `(rule, file)`; later ones stay empty
-/// so the same fix is not rendered twice.
+/// (unusual for these ops, which fire once per file), the edits attach to the
+/// FIRST fixable violation for that `(rule, file)`; later ones stay empty so the
+/// same fix is not rendered twice.
 ///
 /// Only fixable findings are considered (matching what `check` promises as
 /// fixable and what a bare `alint fix` would apply), and each file is read at
@@ -133,11 +138,12 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) 
         let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
             continue;
         };
-        // Located fixers only: their edits are byte-range `ReplaceRange`s with a
-        // 1:1 source region. Whole-file / file-op fixers attach later.
-        if !fixer.collects_located_edits() {
-            continue;
-        }
+        // A located fixer (structured `set_value`/`remove_value`/`replace`) emits
+        // byte-range `ReplaceRange`s via `collect_edits`; every other fixer is a
+        // whole-file normalizer or a file-op and describes its change via
+        // `fix_edit`. Both paths read nothing from disk beyond the file's current
+        // bytes, so neither needs the fix pass's `FixContext`.
+        let located = fixer.collects_located_edits();
         for v in &mut rr.violations {
             if !v.is_fixable {
                 continue;
@@ -149,27 +155,89 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) 
             if !attached.insert((rr.rule_id.to_string(), rel.clone())) {
                 continue; // this file's edits already attached to an earlier finding
             }
-            let bytes = file_cache
+            let bytes_opt = file_cache
                 .entry(rel.clone())
                 .or_insert_with(|| std::fs::read(root.join(&rel)).ok());
-            let Some(bytes) = bytes.as_deref() else {
-                continue;
+            // A missing file (`None`) is empty bytes: a located fixer finds nothing
+            // to locate there, and a `CreateFile` fixer wants the empty state.
+            let bytes: &[u8] = bytes_opt.as_deref().unwrap_or(&[]);
+            let proposed: Vec<ProposedEdit> = if located {
+                // Byte offsets map to line/col only over valid UTF-8. The structured
+                // formats are UTF-8; a non-UTF-8 file yields no fix rather than a
+                // wrong region.
+                let Ok(text) = std::str::from_utf8(bytes) else {
+                    continue;
+                };
+                fixer
+                    .collect_edits(std::slice::from_ref(v), &rel, bytes, root)
+                    .iter()
+                    .filter_map(|ce| located_edit_to_proposed(&ce.edit, text))
+                    .collect()
+            } else {
+                fixer
+                    .fix_edit(v, bytes, root)
+                    .and_then(|edit| whole_file_edit_to_proposed(&edit, bytes))
+                    .into_iter()
+                    .collect()
             };
-            // Byte offsets map to line/col only over valid UTF-8. The structured
-            // formats are UTF-8; a non-UTF-8 file yields no fix rather than a
-            // wrong region.
-            let Ok(text) = std::str::from_utf8(bytes) else {
-                continue;
-            };
-            let edits = fixer.collect_edits(std::slice::from_ref(v), &rel, bytes, root);
-            let proposed: Vec<ProposedEdit> = edits
-                .iter()
-                .filter_map(|ce| located_edit_to_proposed(&ce.edit, text))
-                .collect();
             if !proposed.is_empty() {
                 v.proposed_edits = proposed;
             }
         }
+    }
+}
+
+/// Map a whole-file / file-op [`FixEdit`] (from a non-located fixer's
+/// [`fix_edit`](crate::Fixer::fix_edit)) to a [`ProposedEdit`] against the
+/// file's current `bytes`.
+///
+/// - [`FixEdit::SetContent`] replaces the entire artifact: the deleted region
+///   spans from `(1,1)` to end-of-file, and `inserted` is the new content.
+/// - [`FixEdit::CreateFile`] inserts a new artifact: an empty deleted region at
+///   `(1,1)` with the file's content as `inserted`.
+/// - [`FixEdit::ReplaceRange`] (unusual from `fix_edit`) reuses the located
+///   mapping.
+/// - [`FixEdit::DeleteFile`] / [`FixEdit::RenameFile`] / [`FixEdit::SetMode`]
+///   have no SARIF content-replacement representation (SARIF `fix`es edit
+///   artifact *content*, not existence, name, or mode), so they carry no fix.
+///
+/// Returns `None` for the unrepresentable variants and when content or the
+/// existing bytes are not UTF-8 (a SARIF replacement is text).
+fn whole_file_edit_to_proposed(edit: &FixEdit, bytes: &[u8]) -> Option<ProposedEdit> {
+    match edit {
+        FixEdit::SetContent { path, content } => {
+            let inserted = String::from_utf8(content.clone()).ok()?;
+            let text = std::str::from_utf8(bytes).ok()?;
+            let (end_line, end_column) = byte_to_line_col(text, text.len());
+            Some(ProposedEdit {
+                path: path.clone(),
+                region: Some(EditRegion {
+                    start_line: 1,
+                    start_column: 1,
+                    end_line,
+                    end_column,
+                }),
+                inserted,
+            })
+        }
+        FixEdit::CreateFile { path, content } => {
+            let inserted = String::from_utf8(content.clone()).ok()?;
+            Some(ProposedEdit {
+                path: path.clone(),
+                region: Some(EditRegion {
+                    start_line: 1,
+                    start_column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                }),
+                inserted,
+            })
+        }
+        FixEdit::ReplaceRange { .. } => {
+            let text = std::str::from_utf8(bytes).ok()?;
+            located_edit_to_proposed(edit, text)
+        }
+        FixEdit::DeleteFile { .. } | FixEdit::RenameFile { .. } | FixEdit::SetMode { .. } => None,
     }
 }
 
@@ -241,5 +309,52 @@ mod tests {
             content: vec![0xff, 0xfe],
         };
         assert!(located_edit_to_proposed(&bad, "abc").is_none());
+    }
+
+    #[test]
+    fn set_content_maps_to_a_full_artifact_region() {
+        let bytes = b"old line 1\nold 2\n";
+        let edit = FixEdit::SetContent {
+            path: PathBuf::from("x.txt"),
+            content: b"new\n".to_vec(),
+        };
+        let pe = whole_file_edit_to_proposed(&edit, bytes).unwrap();
+        assert_eq!(pe.inserted, "new\n");
+        let r = pe.region.unwrap();
+        assert_eq!((r.start_line, r.start_column), (1, 1));
+        // End is just past the final char of the two-line file: line 3, col 1.
+        assert_eq!((r.end_line, r.end_column), (3, 1));
+    }
+
+    #[test]
+    fn create_file_maps_to_an_empty_insertion_at_start() {
+        let edit = FixEdit::CreateFile {
+            path: PathBuf::from("new.txt"),
+            content: b"hello\n".to_vec(),
+        };
+        // The file does not exist yet -> empty current bytes.
+        let pe = whole_file_edit_to_proposed(&edit, b"").unwrap();
+        assert_eq!(pe.inserted, "hello\n");
+        let r = pe.region.unwrap();
+        assert_eq!((r.start_line, r.start_column), (1, 1));
+        assert_eq!((r.end_line, r.end_column), (1, 1)); // empty deleted region
+    }
+
+    #[test]
+    fn delete_rename_chmod_have_no_content_fix() {
+        let del = FixEdit::DeleteFile {
+            path: PathBuf::from("x"),
+        };
+        let ren = FixEdit::RenameFile {
+            from: PathBuf::from("a"),
+            to: PathBuf::from("b"),
+        };
+        let chmod = FixEdit::SetMode {
+            path: PathBuf::from("x"),
+            mode: 0o755,
+        };
+        assert!(whole_file_edit_to_proposed(&del, b"x").is_none());
+        assert!(whole_file_edit_to_proposed(&ren, b"x").is_none());
+        assert!(whole_file_edit_to_proposed(&chmod, b"x").is_none());
     }
 }
