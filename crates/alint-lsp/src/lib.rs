@@ -1412,6 +1412,79 @@ mod tests {
         assert_eq!(tes[0].range.end, Position::new(0, 6));
     }
 
+    #[tokio::test]
+    async fn code_action_offers_a_structured_set_value_fix() {
+        // Follow-up 4: the structured located fixers (`set_value`/`remove_value`/
+        // `replace` on the `*_path_*` kinds) reach the editor through the SAME
+        // `collects_located_edits` branch as `replace`. Drive `code_action` for a
+        // real `json_path_equals` + `set_value` session: the response must carry a
+        // quick-fix whose `TextEdit` rewrites just the value span.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: port\n    kind: json_path_equals\n    \
+             paths: \"*.json\"\n    path: \"$.port\"\n    equals: 9090\n    level: error\n    \
+             fix: { set_value: {} }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("app.json")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 9), Position::new(0, 13)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "port".to_string(),
+            message: "value at path does not equal expected".to_string(),
+            line: Some(1),
+            column: Some(10),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents
+                .insert(uri.clone(), "{\"port\": 8080}".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 9), Position::new(0, 13)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction");
+        };
+        let ws = action.edit.as_ref().expect("workspace edit");
+        let tes = &ws.changes.as_ref().expect("changes map")[&uri];
+        assert_eq!(tes.len(), 1, "one TextEdit for the value span");
+        assert_eq!(tes[0].new_text, "9090");
+        // `{"port": 8080}`: `8080` occupies UTF-16 columns 9..13.
+        assert_eq!(tes[0].range.start, Position::new(0, 9));
+        assert_eq!(tes[0].range.end, Position::new(0, 13));
+    }
+
     #[test]
     fn located_lsp_path_maps_a_real_replace_fixer_to_utf16_text_edits() {
         // End-to-end for the located `code_action` path: a REAL `file_content_forbidden`
