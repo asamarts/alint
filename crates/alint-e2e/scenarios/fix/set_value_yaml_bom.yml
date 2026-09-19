@@ -1,0 +1,35 @@
+name: set_value fixes a BOM-prefixed YAML file, preserving the BOM
+tags: [fix, yaml_path_equals, set_value, yaml]
+
+# Regression (YAML audit, mirrors the JSON BOM fix): the check side strips a
+# leading BOM (`Format::parse`) so a BOM file fires + advertises a fix, but saphyr
+# rejects a leading U+FEFF. `yaml_value_span` now strips the BOM and shifts the
+# span into original byte coordinates, so the value is rewritten and the BOM
+# survives. The tree value is double-quoted with a `\uFEFF` escape so a real 3-byte
+# BOM lands on disk (no literal BOM byte in this source file).
+
+given:
+  tree:
+    app.yaml: "\uFEFFport: 8080\n"
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: yaml_path_equals
+        paths: "**/*.yaml"
+        path: "$['port']"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.yaml}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  app.yaml: "\uFEFFport: 9090\n"

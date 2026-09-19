@@ -1144,3 +1144,58 @@ fn yaml_serialize_scalar_is_typed_including_null() {
     assert!(serialize_scalar(Format::Yaml, &json!({"k": 1})).is_none());
     assert!(serialize_scalar(Format::Yaml, &json!([1])).is_none());
 }
+
+#[test]
+fn yaml_value_span_tightens_a_quoted_scalar_past_a_trailing_comment() {
+    // HIGH regression: saphyr runs a QUOTED scalar's span to end-of-line (over the
+    // trailing whitespace + `#` comment); the resolver must clamp it to the closing
+    // quote so a splice never eats the comment. (A plain scalar is already tight.)
+    let dq = "a: \"old\"  # keep this pin\n";
+    assert_eq!(&dq[yaml_value(dq, &[key("a")])], "\"old\"");
+    let sq = "a: 'old'  # keep\nb: 2\n";
+    assert_eq!(&sq[yaml_value(sq, &[key("a")])], "'old'");
+    // A single-quoted scalar with an escaped `''` quote clamps at the real close.
+    let esc = "a: 'it''s'  # c\n";
+    assert_eq!(&esc[yaml_value(esc, &[key("a")])], "'it''s'");
+    // A double-quoted scalar with an escaped `\"` clamps correctly.
+    let dqe = "a: \"a\\\"b\"  # c\n";
+    assert_eq!(&dqe[yaml_value(dqe, &[key("a")])], "\"a\\\"b\"");
+    // Trailing whitespace only (no comment) is also excluded.
+    let ws = "a: \"old\"   \n";
+    assert_eq!(&ws[yaml_value(ws, &[key("a")])], "\"old\"");
+    // A plain scalar with a trailing comment stays tight (unchanged behavior).
+    let pl = "a: old  # keep\n";
+    assert_eq!(&pl[yaml_value(pl, &[key("a")])], "old");
+    // A `#` INSIDE the quotes is content, not a comment: the clamp keeps it and
+    // stops at the real closing quote (never mistakes the interior `#` for EOL).
+    let hash = "a: \"has # hash\"  # real comment\n";
+    assert_eq!(&hash[yaml_value(hash, &[key("a")])], "\"has # hash\"");
+}
+
+#[test]
+fn yaml_value_span_declines_block_scalars_and_implicit_null() {
+    // A block literal / folded scalar's span is the block CONTENT (multi-line); a
+    // flow-scalar splice would leave the `|`/`>` indicator -> decline.
+    assert!(resolve_value_span(Format::Yaml, b"msg: |\n  a\n  b\nk: 1\n", &[key("msg")]).is_none());
+    assert!(resolve_value_span(Format::Yaml, b"msg: >\n  folded text\n", &[key("msg")]).is_none());
+    // An IMPLICIT null (`x:`) gets a bogus zero-width span at the colon -> decline.
+    assert!(resolve_value_span(Format::Yaml, b"x:\ny: 1\n", &[key("x")]).is_none());
+    // But an EXPLICIT null (`~`) and an empty quoted string ARE fixable.
+    assert_eq!(
+        &"x: ~\n"[resolve_value_span(Format::Yaml, b"x: ~\n", &[key("x")]).unwrap()],
+        "~"
+    );
+    assert_eq!(
+        &"x: \"\"\n"[resolve_value_span(Format::Yaml, b"x: \"\"\n", &[key("x")]).unwrap()],
+        "\"\""
+    );
+}
+
+#[test]
+fn yaml_value_span_offsets_past_a_leading_bom() {
+    // Regression (YAML audit): mirror JSON -- the check side strips a leading BOM,
+    // but saphyr rejects it, so a BOM YAML was advertised-fixable yet always skipped.
+    let src = "\u{feff}port: 8080\n";
+    let span = resolve_value_span(Format::Yaml, src.as_bytes(), &[key("port")]).unwrap();
+    assert_eq!(&src[span], "8080"); // indexes the value in the raw (BOM-prefixed) bytes.
+}
