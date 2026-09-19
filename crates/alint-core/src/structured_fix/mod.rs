@@ -80,7 +80,10 @@ pub fn resolve_removal_span(
         Format::Dotenv => dotenv::dotenv_removal_span(text, path),
         Format::Ini => ini::ini_removal_span(text, path),
         Format::Properties => properties::properties_removal_span(text, path),
-        _ => None,
+        Format::Yaml => yaml_::yaml_removal_span(text, path),
+        // JSON removal is a whole-document CST rewrite (see `removal_uses_document`);
+        // TOML removal goes via `document_remove` (`uses_document_rewrite`).
+        Format::Json | Format::Toml => None,
     }
 }
 
@@ -158,15 +161,17 @@ pub fn format_leaves_are_strings(format: Format) -> bool {
     )
 }
 
-/// Whether `format` has a `remove_value` implementation at all. Only YAML defers
-/// removal (`saphyr::MarkedYaml` is read-only, no edit API), so its `remove_value`
-/// ALWAYS declines on EVERY document. The fixer's `can_fix` consults this so
-/// `check` does not advertise an auto-fix that `fix` can never apply -- distinct
-/// from a DOCUMENT-dependent decline (e.g. the XML document root, or a
-/// repeated-block parent), which resolves for most inputs and so stays honestly
+/// Whether `format` has a `remove_value` implementation at all. ALL formats now do
+/// (YAML via a conservative single-line block-entry line scan, JSON via the CST,
+/// TOML via `toml_edit`, the rest via a span). The fixer's `can_fix` consults this
+/// so `check` does not advertise an auto-fix a format can NEVER apply; a
+/// DOCUMENT-dependent decline (e.g. the XML document root, a repeated-block parent,
+/// or a YAML block scalar) still resolves for most inputs and stays honestly
 /// advertised (the tolerated over-promise). Keep this in lockstep with the removal
 /// arms of [`resolve_removal_span`] / [`document_remove`] / [`removal_uses_document`];
-/// the structured-fix classification gate asserts the parity.
+/// the structured-fix classification gate asserts the parity. (Kept as a predicate
+/// -- not a constant `true` -- so a future format defaults to declining until it is
+/// explicitly wired here, and so the gate's parity check has something to assert.)
 #[must_use]
 pub fn format_supports_removal(format: Format) -> bool {
     match format {
@@ -176,8 +181,8 @@ pub fn format_supports_removal(format: Format) -> bool {
         | Format::Ini
         | Format::Properties
         | Format::Toml
-        | Format::Json => true,
-        Format::Yaml => false,
+        | Format::Json
+        | Format::Yaml => true,
     }
 }
 
@@ -1495,13 +1500,16 @@ mod json_ {
 /// separate spanned view; a JSON scalar is valid YAML with the same value+type
 /// (YAML is a superset of JSON), so the serializer reuses `serde_json`.
 ///
-/// CONSERVATIVE by design (scalar SET only): `remove_value` is DEFERRED (structural
-/// / comment surgery, [`format_supports_removal`] is false for YAML), and the
-/// resolver declines a multi-document stream, a non-scalar target, an aliased value
-/// (`saphyr` leaves aliases un-expanded as `Alias` nodes, so it never expands a
-/// billion-laughs bomb -- but the path then resolves to a non-scalar and declines),
-/// a non-string mapping key, a BLOCK (`|` / `>`) or line-folded scalar (multi-line
-/// span), and an IMPLICIT null (`x:` -- saphyr's zero-width span sits at the colon).
+/// CONSERVATIVE by design: for SET the resolver declines a multi-document stream, a
+/// non-scalar target, an aliased value (`saphyr` leaves aliases un-expanded as
+/// `Alias` nodes, so it never expands a billion-laughs bomb -- but the path then
+/// resolves to a non-scalar and declines), a non-string mapping key, a BLOCK (`|` /
+/// `>`) or line-folded scalar (multi-line span), and an IMPLICIT null (`x:` --
+/// saphyr's zero-width span sits at the colon). `remove_value` (`yaml_removal_span`)
+/// deletes a single-line block-mapping entry's whole line (saphyr is read-only, so
+/// this is a hand-rolled line scan kept provably minimal -- it declines a
+/// sequence-element path, a multi-line / non-scalar value, and a flow member whose
+/// key does not own its line).
 ///
 /// THREE `saphyr` 0.0.12 quirks handled here (all verified empirically + gated):
 /// (1) `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming
@@ -1671,6 +1679,79 @@ mod yaml_ {
             J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),
             J::Array(_) | J::Object(_) => None,
         }
+    }
+
+    /// The byte range `remove_value` deletes for the block-mapping entry at `path`:
+    /// the target key's WHOLE physical line (through its trailing newline), so the
+    /// splice is a clean line removal. `saphyr` is read-only (no edit CST), so this
+    /// is a hand-rolled line scan -- CONSERVATIVE to stay provably minimal (the
+    /// over-deletion class): resolves ONLY when
+    ///   - the last path segment is a mapping KEY (sequence-element removal declines);
+    ///   - the value is a single-line SCALAR (a block `|`/`>` or nested mapping /
+    ///     sequence value spans lines -> declines, else the line delete would orphan
+    ///     the continuation);
+    ///   - the KEY OWNS its line (only indentation precedes it) -- so a FLOW-mapping
+    ///     member (`x: {a: 1, b: 2}`, key not at line start) declines rather than
+    ///     delete the whole `x:` line and eat its siblings.
+    ///
+    /// Deleting exactly that one line removes exactly the one entry (block mappings
+    /// are one entry per line); a trailing `# comment` on the line goes with it. The
+    /// `Absent` re-verify catches any residual syntax breakage (e.g. a now-dangling
+    /// anchor alias). A leading BOM is stripped before parse + the span offset back.
+    pub(super) fn yaml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        if !crate::yaml_depth::flow_depth_within_limit(text) {
+            return None;
+        }
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        let docs = MarkedYaml::load_from_str(stripped).ok()?;
+        let [doc] = docs.as_slice() else {
+            return None;
+        };
+        // The last segment must be a mapping KEY (sequence-element removal deferred).
+        let (PathSeg::Key(target), parents) = path.split_last()? else {
+            return None;
+        };
+        let mut node = doc;
+        for seg in parents {
+            node = match seg {
+                PathSeg::Key(k) => get_key(node, k)?,
+                PathSeg::Index(i) => get_index(node, *i)?,
+            };
+        }
+        // Find the `target` (key_node, value_node) pair in the parent mapping.
+        let YamlData::Mapping(m) = &node.data else {
+            return None;
+        };
+        let (knode, vnode) = m
+            .iter()
+            .find(|(k, _)| matches!(&k.data, YamlData::Value(Scalar::String(s)) if s == target))?;
+        // The value must be a SCALAR (a mapping/sequence value is multi-line).
+        if !matches!(
+            vnode.data,
+            YamlData::Value(_) | YamlData::Representation(..)
+        ) {
+            return None;
+        }
+        // The entry, from the key start to the value end, must be single-line.
+        let entry = char_span_to_byte(stripped, knode.span.start.index(), vnode.span.end.index())?;
+        if stripped.get(entry.clone())?.contains('\n') {
+            return None;
+        }
+        // The KEY must OWN its line: only indentation before it (excludes a flow
+        // member, whose deletion would eat siblings on the same physical line).
+        let line_start = stripped[..entry.start].rfind('\n').map_or(0, |i| i + 1);
+        if !stripped[line_start..entry.start]
+            .bytes()
+            .all(|b| b == b' ' || b == b'\t')
+        {
+            return None;
+        }
+        // Delete the whole line, through its trailing newline (or to EOF).
+        let line_end = stripped[entry.end..]
+            .find('\n')
+            .map_or(stripped.len(), |i| entry.end + i + 1);
+        Some(line_start + bom_len..line_end + bom_len)
     }
 }
 

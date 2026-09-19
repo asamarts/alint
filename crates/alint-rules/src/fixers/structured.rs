@@ -625,13 +625,13 @@ mod tests {
                 .can_fix(&v),
             "JSON remove_value is supported (CST) -> check advertises it"
         );
-        // Only YAML defers removal (saphyr is read-only, no edit API), so it
-        // declines on EVERY document -- `check` must NOT advertise it (honesty:
-        // else it promises a fix `fix` always skips).
+        // YAML removal is now supported too (a conservative single-line block-entry
+        // line scan), so `check` advertises it (declines -- block scalar, flow member,
+        // multi-line value -- are document-dependent). ALL formats now support removal.
         assert!(
-            !StructuredFixer::remove(Format::Yaml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
+            StructuredFixer::remove(Format::Yaml, jp("$.a"), "$.a".into(), Applicability::Unsafe)
                 .can_fix(&v),
-            "YAML remove_value is deferred -> check must not advertise it fixable"
+            "YAML remove_value is supported (line scan) -> check advertises it"
         );
     }
 

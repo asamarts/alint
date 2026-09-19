@@ -248,20 +248,21 @@ fn every_format_is_classified_for_structured_fix() {
     enum Regime {
         Span,
         SpanSetDocRemove,
-        SpanSetOnly,
         Document,
     }
     for &f in Format::ALL {
         let regime = match f {
-            Format::Hcl | Format::Xml | Format::Dotenv | Format::Ini | Format::Properties => {
-                Regime::Span
-            }
+            // Span SET + span REMOVE. YAML joined here once its (conservative
+            // line-scan) removal landed; its SET is a span splice via saphyr.
+            Format::Hcl
+            | Format::Xml
+            | Format::Dotenv
+            | Format::Ini
+            | Format::Properties
+            | Format::Yaml => Regime::Span,
             // JSON: span SET (jsonc-parser AST) + WHOLE-DOCUMENT remove (jsonc-parser
             // editable CST -- correct comma surgery), a per-op split.
             Format::Json => Regime::SpanSetDocRemove,
-            // YAML: span SET (`saphyr::MarkedYaml`) but remove is DEFERRED (saphyr is
-            // read-only, no edit API).
-            Format::Yaml => Regime::SpanSetOnly,
             Format::Toml => Regime::Document,
         };
         // `removal_uses_document` is JSON-only (TOML removal goes via the all-ops
@@ -309,24 +310,6 @@ fn every_format_is_classified_for_structured_fix() {
                     "{f:?} must serialize a representable scalar"
                 );
             }
-            Regime::SpanSetOnly => {
-                assert!(!uses_document_rewrite(f), "{f:?} is a span format, not doc");
-                // set resolves (asserted below); remove is deferred -> declines.
-                assert!(
-                    resolve_removal_span(f, b"", &[key("a")]).is_none(),
-                    "set-only {f:?} must decline remove_value (deferred)"
-                );
-                // ...and the static predicate `can_fix` reads must agree, so
-                // `check` does not advertise a removal that always declines.
-                assert!(
-                    !format_supports_removal(f),
-                    "set-only {f:?} must report remove_value unsupported (honesty)"
-                );
-                assert!(
-                    serialize_scalar(f, &json!("x")).is_some(),
-                    "set-only {f:?} must serialize a representable scalar"
-                );
-            }
             Regime::Document => {
                 assert!(uses_document_rewrite(f), "{f:?} must be document-rewrite");
                 // A document-rewrite format does NOT splice a span.
@@ -353,6 +336,8 @@ fn every_format_is_classified_for_structured_fix() {
     assert!(resolve_value_span(Format::Properties, b"a=1\n", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Json, b"{\"a\": 1}", &[key("a")]).is_some());
     assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_some());
+    // YAML removal actually resolves a single-line block-mapping entry's line.
+    assert!(resolve_removal_span(Format::Yaml, b"a: 1\nb: 2\n", &[key("a")]).is_some());
     assert!(document_set(Format::Toml, b"a = 1\n", &[key("a")], &json!(2)).is_some());
     assert!(document_remove(Format::Toml, b"a = 1\n", &[vec![key("a")]]).is_some());
     // JSON removal actually rewrites the document (via the editable CST).
@@ -1157,8 +1142,9 @@ fn yaml_value_span_declines_non_scalar_alias_multidoc_and_bad_input() {
     // Malformed YAML / a missing key -> None (no panic).
     assert!(resolve_value_span(Format::Yaml, b"a: [1, 2\n", &[key("a")]).is_none());
     assert!(resolve_value_span(Format::Yaml, b"a: 1\n", &[key("z")]).is_none());
-    // remove_value is DEFERRED for YAML -> always declines.
-    assert!(resolve_removal_span(Format::Yaml, b"a: 1\n", &[key("a")]).is_none());
+    // (YAML `remove_value` now resolves a single-line entry -- see
+    // `yaml_removal_span_deletes_one_entry_line_without_over_deleting` and
+    // `yaml_removal_span_declines_risky_shapes`.)
 }
 
 #[test]
@@ -1299,4 +1285,50 @@ fn json_document_remove_handles_multiple_paths_in_one_rewrite() {
     )
     .unwrap();
     assert_eq!(out, "{\"b\":2}");
+}
+
+#[test]
+fn yaml_removal_span_deletes_one_entry_line_without_over_deleting() {
+    let rm = |src: &str, path: &[PathSeg]| -> String {
+        let sp = resolve_removal_span(Format::Yaml, src.as_bytes(), path).unwrap();
+        let mut out = src.to_string();
+        out.replace_range(sp, "");
+        out
+    };
+    // Top-level: delete the target's line; the siblings stay (anti-over-deletion).
+    assert_eq!(rm("a: 1\nb: 2\nc: 3\n", &[key("a")]), "b: 2\nc: 3\n");
+    assert_eq!(rm("a: 1\nb: 2\nc: 3\n", &[key("b")]), "a: 1\nc: 3\n");
+    // Nested: delete the indented line; the sibling stays.
+    assert_eq!(
+        rm("s:\n  a: 1\n  b: 2\n", &[key("s"), key("a")]),
+        "s:\n  b: 2\n"
+    );
+    // A trailing `# comment` on the line goes with the entry.
+    assert_eq!(rm("a: 1  # note\nb: 2\n", &[key("a")]), "b: 2\n");
+    // A quoted value + comment: the whole line goes.
+    assert_eq!(rm("a: \"x\"  # c\nb: 2\n", &[key("a")]), "b: 2\n");
+    // Last line without a trailing newline.
+    assert_eq!(rm("a: 1\nb: 2", &[key("b")]), "a: 1\n");
+    // BOM preserved (line offset shifts past it).
+    assert_eq!(rm("\u{feff}a: 1\nb: 2\n", &[key("a")]), "\u{feff}b: 2\n");
+}
+
+#[test]
+fn yaml_removal_span_declines_risky_shapes() {
+    let d = |src: &str, path: &[PathSeg]| {
+        resolve_removal_span(Format::Yaml, src.as_bytes(), path).is_none()
+    };
+    // A BLOCK scalar value (multi-line) -> decline (a line delete would orphan lines).
+    assert!(d("msg: |\n  a\n  b\nk: 1\n", &[key("msg")]));
+    // A nested-MAPPING value (multi-line) -> decline.
+    assert!(d("s:\n  a: 1\n", &[key("s")]));
+    // A FLOW member -> decline (its key does not own the line; a line delete would
+    // eat the whole `x:` line and its siblings -- the over-deletion trap).
+    assert!(d("x: {a: 1, b: 2}\n", &[key("x"), key("a")]));
+    // A SEQUENCE-element removal (trailing Index) is deferred.
+    assert!(d("arr:\n  - a\n  - b\n", &[key("arr"), idx(0)]));
+    // A multi-document stream -> decline.
+    assert!(d("a: 1\n---\nb: 2\n", &[key("a")]));
+    // A missing key -> None (no panic).
+    assert!(d("a: 1\n", &[key("z")]));
 }

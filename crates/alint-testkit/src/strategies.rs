@@ -292,10 +292,10 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
     // emits none of these names, so they are otherwise inert. `sv.*`'s `$.region`
     // is "OLD" (!= the rule's "NEW"), rewritten in place. `rv.*`'s removal target is
     // a UNIQUE key/element (a duplicate / document-root / multi-line value would
-    // decline); YAML removal is DEFERRED, so `rv.yaml`'s fixer cleanly skips (JSON
-    // removal now applies via the CST). XML/dotenv/INI/properties leaves are strings
-    // (so `equals` is "NEW"); the XML removal target is a NON-root element (removing
-    // the root is declined).
+    // decline). JSON removal applies via the CST; YAML removal deletes the single-
+    // line entry's line. XML/dotenv/INI/properties leaves are strings (so `equals`
+    // is "NEW"); the XML removal target is a NON-root element (removing the root is
+    // declined).
     let structured: &[(&str, &str)] = &[
         ("sv.tf", "region = \"OLD\"\n"),
         ("rv.tf", "keep = 1\nbanned = \"x\"\n"),
@@ -678,12 +678,11 @@ fn rule_yaml_path_equals_set_value() -> impl Strategy<Value = String> {
     })
 }
 
-/// A `yaml_path_absent` rule declaring `remove_value` (Phase 2): YAML removal is
-/// DEFERRED this increment (structural surgery), so `resolve_removal_span(Format::
-/// Yaml, ..)` always declines and `can_fix` never advertises it. The fixer forms
-/// NO edit and the violation is `skipped`; this generator fuzzes that the clean
-/// decline never corrupts `_trig/rv.yaml` (nor any co-resident file) across
-/// arbitrary trees. (SET ships this increment; REMOVE is a tracked follow-up.)
+/// A `yaml_path_absent` rule fixed via the located `remove_value` op: deletes the
+/// single-line `$.banned` block-mapping entry (planted only in `_trig/rv.yaml`) by
+/// removing its whole physical line (a conservative hand-rolled scan -- saphyr is
+/// read-only). Unsafe by default, so *suggested* under a bare `Fix` and *applied*
+/// under `FixUnsafe` -- exercising the YAML line removal across arbitrary trees.
 fn rule_yaml_path_absent_remove_value() -> impl Strategy<Value = String> {
     rule_id("yremv").prop_map(|id| {
         format!(
