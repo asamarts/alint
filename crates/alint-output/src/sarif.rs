@@ -196,6 +196,8 @@ fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
         Some(SarifRegion {
             start_line: v.line,
             start_column: v.column,
+            end_line: None,
+            end_column: None,
         })
     } else {
         None
@@ -222,7 +224,64 @@ fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
         suppressions: Vec::new(),
         baseline_state: None,
         partial_fingerprints: None,
+        fixes: build_fixes(rule_id, v),
     }
+}
+
+/// Build the SARIF `result.fixes` for a violation from its check-computed
+/// [`proposed_edits`](alint_core::Violation). Empty (the common case, and every
+/// non-fixable finding) yields no `fixes` key.
+///
+/// All of a violation's proposed edits target its own artifact, so they group
+/// as one fix, one `artifactChange` per path, and one `replacement` per edit. A
+/// located edit carries a 1-based line/column region (SARIF `deletedRegion`); a
+/// region-less edit (a whole-artifact rewrite, a later increment) omits the
+/// region so SARIF replaces the whole artifact. An empty replacement string is a
+/// pure deletion (no `insertedContent`).
+fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
+    if v.proposed_edits.is_empty() {
+        return Vec::new();
+    }
+    let mut by_path: BTreeMap<String, Vec<SarifReplacement>> = BTreeMap::new();
+    for pe in &v.proposed_edits {
+        let deleted_region = pe.region.as_ref().map_or(
+            SarifRegion {
+                start_line: None,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+            },
+            |r| SarifRegion {
+                start_line: Some(r.start_line),
+                start_column: Some(r.start_column),
+                end_line: Some(r.end_line),
+                end_column: Some(r.end_column),
+            },
+        );
+        let inserted_content = (!pe.inserted.is_empty()).then(|| SarifText {
+            text: pe.inserted.clone(),
+        });
+        by_path
+            .entry(path_to_uri(&pe.path))
+            .or_default()
+            .push(SarifReplacement {
+                deleted_region,
+                inserted_content,
+            });
+    }
+    let artifact_changes = by_path
+        .into_iter()
+        .map(|(uri, replacements)| SarifArtifactChange {
+            artifact_location: SarifArtifactLocation { uri },
+            replacements,
+        })
+        .collect();
+    vec![SarifFix {
+        description: SarifText {
+            text: format!("alint: fix `{rule_id}`"),
+        },
+        artifact_changes,
+    }]
 }
 
 fn fingerprint_map(fp: &str) -> BTreeMap<&'static str, String> {
@@ -295,6 +354,37 @@ struct SarifResult {
         skip_serializing_if = "Option::is_none"
     )]
     partial_fingerprints: Option<BTreeMap<&'static str, String>>,
+    /// Concrete fixes alint would apply for this finding (rendered from the
+    /// violation's proposed edits). Empty (the common case) omits the key.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fixes: Vec<SarifFix>,
+}
+
+/// A SARIF `fix` — a described set of artifact changes a consumer can apply.
+#[derive(Serialize)]
+struct SarifFix {
+    description: SarifText,
+    #[serde(rename = "artifactChanges")]
+    artifact_changes: Vec<SarifArtifactChange>,
+}
+
+/// A SARIF `artifactChange` — the replacements to make in one artifact.
+#[derive(Serialize)]
+struct SarifArtifactChange {
+    #[serde(rename = "artifactLocation")]
+    artifact_location: SarifArtifactLocation,
+    replacements: Vec<SarifReplacement>,
+}
+
+/// A SARIF `replacement` — delete `deletedRegion`, insert `insertedContent`.
+/// A region-less `deletedRegion` (all fields absent) replaces the whole
+/// artifact; an absent `insertedContent` is a pure deletion.
+#[derive(Serialize)]
+struct SarifReplacement {
+    #[serde(rename = "deletedRegion")]
+    deleted_region: SarifRegion,
+    #[serde(rename = "insertedContent", skip_serializing_if = "Option::is_none")]
+    inserted_content: Option<SarifText>,
 }
 
 /// A SARIF `suppression` — alint emits `kind: "external"` for findings
@@ -329,14 +419,18 @@ struct SarifRegion {
     start_line: Option<usize>,
     #[serde(rename = "startColumn", skip_serializing_if = "Option::is_none")]
     start_column: Option<usize>,
+    #[serde(rename = "endLine", skip_serializing_if = "Option::is_none")]
+    end_line: Option<usize>,
+    #[serde(rename = "endColumn", skip_serializing_if = "Option::is_none")]
+    end_column: Option<usize>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{Report, RuleResult, Violation};
+    use alint_core::{EditRegion, ProposedEdit, Report, RuleResult, Violation};
     use serde_json::Value;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn path_to_uri_slashes_and_percent_encodes() {
@@ -352,6 +446,91 @@ mod tests {
         let mut buf = Vec::new();
         write_sarif(report, &mut buf).unwrap();
         serde_json::from_slice(&buf).unwrap()
+    }
+
+    #[test]
+    fn a_fixable_finding_renders_result_fixes_with_a_line_column_region() {
+        let mut v = Violation::new("bad value").with_path(Path::new("app.json"));
+        v.is_fixable = true;
+        v.proposed_edits = vec![ProposedEdit {
+            path: PathBuf::from("app.json"),
+            region: Some(EditRegion {
+                start_line: 4,
+                start_column: 12,
+                end_line: 4,
+                end_column: 17,
+            }),
+            inserted: "\"v2.0\"".to_string(),
+        }];
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "v-pins".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: vec![v],
+                notes: Vec::new(),
+                is_fixable: true,
+            }],
+        };
+        let out = render(&report);
+        let fix = &out["runs"][0]["results"][0]["fixes"][0];
+        assert_eq!(fix["description"]["text"], "alint: fix `v-pins`");
+        let change = &fix["artifactChanges"][0];
+        assert_eq!(change["artifactLocation"]["uri"], "app.json");
+        let repl = &change["replacements"][0];
+        assert_eq!(repl["deletedRegion"]["startLine"], 4);
+        assert_eq!(repl["deletedRegion"]["startColumn"], 12);
+        assert_eq!(repl["deletedRegion"]["endLine"], 4);
+        assert_eq!(repl["deletedRegion"]["endColumn"], 17);
+        assert_eq!(repl["insertedContent"]["text"], "\"v2.0\"");
+    }
+
+    #[test]
+    fn a_finding_without_proposed_edits_omits_the_fixes_key() {
+        // The common case (and every non-fixable finding): no `fixes` key at all,
+        // so existing consumers and snapshots are unchanged.
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "has-readme".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: vec![Violation::new("missing")],
+                notes: Vec::new(),
+                is_fixable: false,
+            }],
+        };
+        let out = render(&report);
+        assert!(out["runs"][0]["results"][0]["fixes"].is_null());
+    }
+
+    #[test]
+    fn a_region_less_proposed_edit_replaces_the_whole_artifact() {
+        // A whole-artifact rewrite (no region) still renders a replacement, with
+        // an empty `deletedRegion` (SARIF: replace the entire artifact). This is
+        // the shape the whole-file fixers will use in the next increment.
+        let mut v = Violation::new("normalize").with_path(Path::new("x.txt"));
+        v.is_fixable = true;
+        v.proposed_edits = vec![ProposedEdit {
+            path: PathBuf::from("x.txt"),
+            region: None,
+            inserted: "new\n".to_string(),
+        }];
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "r".into(),
+                level: Level::Warning,
+                policy_url: None,
+                violations: vec![v],
+                notes: Vec::new(),
+                is_fixable: true,
+            }],
+        };
+        let out = render(&report);
+        let repl =
+            &out["runs"][0]["results"][0]["fixes"][0]["artifactChanges"][0]["replacements"][0];
+        assert!(repl["deletedRegion"]["startLine"].is_null());
+        assert!(repl["deletedRegion"]["endColumn"].is_null());
+        assert_eq!(repl["insertedContent"]["text"], "new\n");
     }
 
     #[test]
@@ -455,6 +634,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
                 notes: Vec::new(),
                 is_fixable: false,

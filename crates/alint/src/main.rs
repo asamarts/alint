@@ -568,7 +568,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
-    let (report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
+    let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         let mut reader = FileReader::new(path);
         let applied =
@@ -593,6 +593,14 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     } else {
         (report, None)
     };
+
+    // SARIF carries the concrete fixes alint would make (`result.fixes[]`),
+    // computed from each fixable finding's fixer. Only SARIF consumes them and
+    // only located fixers contribute today, so the extra file re-reads are
+    // scoped to `--format sarif` runs that actually have fixable findings.
+    if matches!(format, Format::Sarif) {
+        alint_core::attach_proposed_edits(&engine, &mut report, path);
+    }
 
     let (mut out, opts) = render_env(cli)?;
     // SARIF and JSON render baselined findings (marked / counted) so Code

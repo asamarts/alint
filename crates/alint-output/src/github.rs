@@ -136,6 +136,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
                 notes: Vec::new(),
                 is_fixable: false,

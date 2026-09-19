@@ -57,6 +57,14 @@ pub struct Violation {
     /// whenever the rule has no fixer. The rule-level [`RuleResult::is_fixable`]
     /// ("the rule declares a fixer") is independent and backs the machine formats.
     pub is_fixable: bool,
+    /// Check-side-computed concrete edits a fix would make to resolve *this*
+    /// violation, for the machine formats (SARIF `result.fixes[]`) to render as
+    /// source region + replacement text. Empty by default and for every
+    /// non-fixable violation; the CLI populates it (via
+    /// [`crate::proposed_fix::attach_proposed_edits`]) only for a fix-carrying
+    /// format, so the ordinary check path pays nothing. Never affects rendering
+    /// of the finding itself, pass/fail, or fixability.
+    pub proposed_edits: Vec<crate::proposed_fix::ProposedEdit>,
 }
 
 impl Violation {
@@ -69,6 +77,7 @@ impl Violation {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            proposed_edits: Vec::new(),
         }
     }
 

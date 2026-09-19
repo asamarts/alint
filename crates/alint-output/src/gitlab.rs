@@ -262,6 +262,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -350,6 +351,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -371,6 +373,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -401,6 +404,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -423,6 +427,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            proposed_edits: Vec::new(),
         };
         let report = Report {
             results: vec![rule("no-pat", Level::Error, vec![mk_v(3), mk_v(9)])],
@@ -452,6 +457,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            proposed_edits: Vec::new(),
         };
         let report = Report {
             results: vec![rule("r", Level::Error, vec![mk_v(1), mk_v(2)])],
@@ -517,6 +523,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };

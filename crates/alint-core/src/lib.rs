@@ -18,6 +18,7 @@ pub mod jsonpath_diagnostics;
 mod level;
 pub mod located_fix;
 mod pathsafe;
+pub mod proposed_fix;
 mod registry;
 mod report;
 mod rule;
@@ -45,6 +46,7 @@ pub use extract::{Extract, ExtractSpec, LinesOpts, WholeFileOpts, extract_values
 pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use level::Level;
 pub use pathsafe::{derive_target, normalize_confined};
+pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_line_col};
 pub use registry::{RuleBuilder, RuleRegistry};
 pub use report::{FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report};
 pub use rule::{
