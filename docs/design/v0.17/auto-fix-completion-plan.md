@@ -51,7 +51,7 @@ the flip "at the v0.17 fix-engine rework, a natural breaking point, rather than
 after a separate deprecation-warning release"). `file_remove` is Unsafe today; a
 bare `fix` only suggests it, `--unsafe-fixes` applies it; the scenarios
 (`file_remove_unsafe_by_default.yml`, `..._unsafe_flag_applies.yml`) assert this.
-There is **no deprecation-warning release** and **no v0.18 flip** — so the
+There is **no deprecation-warning release** and **no v0.18 flip** -- so the
 "pull v0.18 into v0.17" request is satisfied.
 
 Action (docs-only, tracked): the stale warn-then-flip prose in
