@@ -233,10 +233,9 @@ fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
 /// non-fixable finding) yields no `fixes` key.
 ///
 /// All of a violation's proposed edits target its own artifact, so they group
-/// as one fix, one `artifactChange` per path, and one `replacement` per edit. A
-/// located edit carries a 1-based line/column region (SARIF `deletedRegion`); a
-/// region-less edit (a whole-artifact rewrite, a later increment) omits the
-/// region so SARIF replaces the whole artifact. An empty replacement string is a
+/// as one fix, one `artifactChange` per path, and one `replacement` per edit.
+/// Every edit carries a concrete 1-based line/column `deletedRegion` (an
+/// insertion is an empty region at its point). An empty replacement string is a
 /// pure deletion (no `insertedContent`).
 fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
     if v.proposed_edits.is_empty() {
@@ -244,20 +243,13 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
     }
     let mut by_path: BTreeMap<String, Vec<SarifReplacement>> = BTreeMap::new();
     for pe in &v.proposed_edits {
-        let deleted_region = pe.region.as_ref().map_or(
-            SarifRegion {
-                start_line: None,
-                start_column: None,
-                end_line: None,
-                end_column: None,
-            },
-            |r| SarifRegion {
-                start_line: Some(r.start_line),
-                start_column: Some(r.start_column),
-                end_line: Some(r.end_line),
-                end_column: Some(r.end_column),
-            },
-        );
+        let r = &pe.region;
+        let deleted_region = SarifRegion {
+            start_line: Some(r.start_line),
+            start_column: Some(r.start_column),
+            end_line: Some(r.end_line),
+            end_column: Some(r.end_column),
+        };
         let inserted_content = (!pe.inserted.is_empty()).then(|| SarifText {
             text: pe.inserted.clone(),
         });
@@ -454,12 +446,12 @@ mod tests {
         v.is_fixable = true;
         v.proposed_edits = vec![ProposedEdit {
             path: PathBuf::from("app.json"),
-            region: Some(EditRegion {
+            region: EditRegion {
                 start_line: 4,
                 start_column: 12,
                 end_line: 4,
                 end_column: 17,
-            }),
+            },
             inserted: "\"v2.0\"".to_string(),
         }];
         let report = Report {
@@ -504,16 +496,20 @@ mod tests {
     }
 
     #[test]
-    fn a_region_less_proposed_edit_replaces_the_whole_artifact() {
-        // A whole-artifact rewrite (no region) still renders a replacement, with
-        // an empty `deletedRegion` (SARIF: replace the entire artifact). This is
-        // the shape the whole-file fixers will use in the next increment.
-        let mut v = Violation::new("normalize").with_path(Path::new("x.txt"));
+    fn a_pure_deletion_emits_a_region_without_inserted_content() {
+        // An empty replacement string is a deletion: a valid `deletedRegion`
+        // (always present, SARIF-required) and NO `insertedContent`.
+        let mut v = Violation::new("remove").with_path(Path::new("x.txt"));
         v.is_fixable = true;
         v.proposed_edits = vec![ProposedEdit {
             path: PathBuf::from("x.txt"),
-            region: None,
-            inserted: "new\n".to_string(),
+            region: EditRegion {
+                start_line: 1,
+                start_column: 2,
+                end_line: 1,
+                end_column: 5,
+            },
+            inserted: String::new(),
         }];
         let report = Report {
             results: vec![RuleResult {
@@ -528,9 +524,10 @@ mod tests {
         let out = render(&report);
         let repl =
             &out["runs"][0]["results"][0]["fixes"][0]["artifactChanges"][0]["replacements"][0];
-        assert!(repl["deletedRegion"]["startLine"].is_null());
-        assert!(repl["deletedRegion"]["endColumn"].is_null());
-        assert_eq!(repl["insertedContent"]["text"], "new\n");
+        assert_eq!(repl["deletedRegion"]["startLine"], 1);
+        assert_eq!(repl["deletedRegion"]["startColumn"], 2);
+        assert_eq!(repl["deletedRegion"]["endColumn"], 5);
+        assert!(repl["insertedContent"].is_null()); // pure deletion
     }
 
     #[test]

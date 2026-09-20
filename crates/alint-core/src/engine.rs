@@ -283,6 +283,16 @@ impl Engine {
         self
     }
 
+    /// The `fix_size_limit` (bytes) a bare `fix` pass enforces: a file larger
+    /// than this is skipped rather than fixed. `None` disables the limit.
+    /// Exposed so the SARIF proposed-edit computation
+    /// ([`crate::proposed_fix::attach_proposed_edits`]) can apply the SAME guard
+    /// and never advertise a fix for a file `fix` would skip.
+    #[must_use]
+    pub fn fix_size_limit(&self) -> Option<u64> {
+        self.fix_size_limit
+    }
+
     #[must_use]
     pub fn with_facts(mut self, facts: Vec<FactSpec>) -> Self {
         self.facts = facts;
