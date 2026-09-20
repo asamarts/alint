@@ -54,12 +54,12 @@ bare `fix` only suggests it, `--unsafe-fixes` applies it; the scenarios
 There is **no deprecation-warning release** and **no v0.18 flip** -- so the
 "pull v0.18 into v0.17" request is satisfied.
 
-Action (docs-only, tracked): the stale warn-then-flip prose in
-`auto-fix-implementation-plan.md` (§4 W5, §5, §11 R-FILEREMOVE, §12) and
-`auto-fix.md` §9 still describes the superseded plan; correct it to "flipped in
-v0.17" so the design record matches the shipped behavior. (Reconciled in the same
-change that lands this doc where the spots are one-liners; the rest are noted
-here.)
+Docs reconciliation (done): the stale warn-then-flip prose in
+`auto-fix-implementation-plan.md` (§4 W5, §5 op-classification, §11 R-FILEREMOVE,
+and both §12 bullets -- Phase 0 and the flip paragraph) and `auto-fix.md` §9 has
+been corrected to the shipped reality (each spot marked SUPERSEDED or pointing at
+the flip commit `266c88f9`), so the design record no longer claims a deprecation
+warning or a v0.18 migration.
 
 ## 3. Remaining v0.17 work, prioritized
 
@@ -69,9 +69,12 @@ here.)
   SARIF `result.fixes[]` AND an `agent`/`json --include-fixes` `proposed_edit`
   field. Only SARIF ships. The infrastructure (`alint_core::proposed_fix` +
   `Violation.proposed_edits`) is format-agnostic, so this is: run
-  `attach_proposed_edits` for `agent` (always) and `json` (behind
-  `--include-fixes`), add the field to `AgentViolation` / `JsonViolation`, and
-  test. Small, self-contained.
+  `attach_proposed_edits` for `agent` and `json`, add the field to
+  `AgentViolation` / `JsonViolation`, and test. Small, self-contained. (One small
+  gating decision, §6: the DoD phrasing "`agent`/`json --include-fixes` carry
+  `proposed_edit`" is ambiguous whether `agent` is always-on; the natural reading
+  is `agent` always-on -- mirroring its existing always-on `fix_command` -- and
+  `json` behind an `--include-fixes` flag.)
 - **W3 open decision (needs the user): "all tiers".** SARIF currently advertises
   only Safe/auto-applicable fixes (gated on per-violation `is_fixable`); the plan
   DoD says "all tiers". This is a real fork: a SARIF `fix` has no per-fix safety
@@ -82,11 +85,15 @@ here.)
 - **W4 - baseline-aware `fix`.** `fix` still rejects `--baseline` /
   `--strict-baseline` / `--show-baselined` (main.rs). Make it baseline-aware:
   skip suppressed findings, surface them as Suggestions, fix only new ones.
-  Scheduled "by Phase 2"; extends ADR-0006.
+  Scheduled "by Phase 2"; extends ADR-0006. (Sub-task: this INVERTS the
+  `baseline-flag-fix-rejected` trycmd added in `0bfe00b3` -- the reject test
+  becomes an accept/behaves test.)
 
 ### P1 - Phase 3 (metadata, VCS, repo-scale cross-file)
 
-Not started. Ops: `chmod` (`SetMode`; `executable_bit`, `shebang_has_executable`,
+Ops not started (though the core plumbing is pre-laid: the `FixEdit::SetMode`
+edit variant is defined + dispatched, and the empty `SPAWNING_FIX_OPS` SSOT +
+its emptiness gate already exist). Ops: `chmod` (`SetMode`; `executable_bit`, `shebang_has_executable`,
 `executable_has_shebang`); **`git_untrack`** (the FIRST spawning fix op -> W2's
 spawning-refusal gate goes live: `SPAWNING_FIX_OPS` + the parity gate + the
 `extends:`-refusal canary, R-SPAWNGATE); a user `command`-backed fix;
@@ -103,8 +110,8 @@ aware). Risk: low-medium. The clean deterministic wins; a good final phase.
 
 ### Coverage follow-ups (tracked from the audit; regression-prevention)
 
-The core is sound and the highest-value gaps are filled; these remain (not
-blocking, but wanted for the "comprehensive suite" bar):
+The core algorithms held and the highest-value gaps are filled; these remain
+(not blocking, but wanted for the "comprehensive suite" bar):
 
 - `fix --base <ref>` (only working-tree `--changed` is tested).
 - CRLF e2e goldens for the structured ops (units cover HCL/dotenv/TOML/properties
@@ -133,7 +140,7 @@ blocking, but wanted for the "comprehensive suite" bar):
   no tier signal -- decide whether to label them distinctly).
 - **TOML array-of-tables fixability** (`[[x]]` inner values are unfixable today:
   `toml_::navigate_mut` handles only `Key`).
-- **`structured_fix/mod.rs` `formats/` split** (~1850 lines, nearing the 2000
+- **`structured_fix/mod.rs` `formats/` split** (~1820 lines, nearing the 2000
   cap).
 
 ## 4. Deferred-and-special items (§10): keep deferred
@@ -160,8 +167,14 @@ is prioritized:
 4. **Coverage + engineering follow-ups**: fold the tracked items in alongside the
    phase that touches their code (e.g. the LSP tier test with any LSP work; the
    `--diff` fidelity with Phase 3's write-path rework).
-5. **DoD sweep + release**: all blocking rungs green, downstream artifacts
-   updated, `ROADMAP.md`/`roadmap.json` v0.17 entry finalized, then tag v0.17.
+5. **DoD sweep + release**: all blocking rungs green; downstream artifacts
+   updated (docs-export / rule pages / `facts.json` / the gen-X `--check`
+   artifacts); CHANGELOG `[Unreleased]` -> `[0.17.0]` finalized (the `file_remove`
+   breaking entry already sits there); version bump; `ROADMAP.md`/`roadmap.json`
+   v0.17 entry finalized; tag v0.17. **Then** the release is not live until
+   alint.org's install-pins + prose claims are bumped (the STALE DOCS BUNDLE
+   guard blocks deploy otherwise) -- see the general `RELEASING.md` process and
+   the `alint.org` pin-bump step.
 
 ## 6. Decisions needed from the user
 
@@ -171,3 +184,6 @@ is prioritized:
   quick-fixes (current) vs label/gate them.
 - **§10 pull-in**: keep all deferred (recommended) vs pull a specific item into
   v0.17.
+- **W3b `agent` gating** (§3 P0 W3b): `agent` carries `proposed_edit` always
+  (recommended, mirrors its always-on `fix_command`) vs behind `--include-fixes`
+  like `json`. Minor.

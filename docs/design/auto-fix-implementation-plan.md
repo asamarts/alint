@@ -211,15 +211,17 @@ Five threads span phases; scheduled inside the phases.
 - **W4 - Baseline-aware fix.** `fix` rejects the `--baseline` family today (`main.rs:179-186`, all
   three flags). Make `fix` baseline-aware for all three (skip suppressed, surface as Suggestions, fix
   only new). Lands **by Phase 2**. Extends [ADR-0006](../adr/0006-baseline-suppression.md).
-- **W5 - Versioning and deprecation.** Tiers ship in **v0.17** (Phase 0) with a deprecation warning
-  that `file_remove` will become Unsafe; `file_remove` flips Safe -> Unsafe about two minors later.
-  The flip is not free: `file_remove` backs `file_absent`/`no_empty_files`/`no_submodules`/
+- **W5 - Versioning and deprecation.** Tiers ship in **v0.17** (Phase 0). **SUPERSEDED (flipped in
+  v0.17; see [`v0.17/auto-fix-completion-plan.md`](v0.17/auto-fix-completion-plan.md) §2):** this
+  originally planned a deprecation warning in v0.17 and the `file_remove` Safe -> Unsafe flip two
+  minors later, but the flip landed directly in v0.17 (`266c88f9`) at the fix-engine rework, so there
+  is no warning release and no later migration. The (now-completed) migration was not free:
+  `file_remove` backs `file_absent`/`no_empty_files`/`no_submodules`/
   `no_symlinks`, and existing scenarios assert a **default** `fix` removes the file
   (`scenarios/fix/{file_remove,no_empty_files,no_submodules}.yml`, `fix-file-remove` trycmd, and
   `fix/interactions/multiple_fixes_in_one_pass.yml`'s `no-bak` case). The flip PR migrates every one
-  (add `fix_unsafe` or `fix: { file_remove: { applicability: safe } }`); DoD item 3 will not catch it
-  (existing op, changed default). W5 also specifies where the v0.17 deprecation warning fires (the
-  fix-report path) and tests it.
+  (add `fix_unsafe` or `fix: { file_remove: { applicability: safe } }`); DoD item 3 did not catch it
+  (existing op, changed default), so the flip commit migrated them by hand.
 
 ## 5. Phase 0: the fix-engine foundation
 
@@ -236,7 +238,8 @@ identical.
    (chmod has no LSP `WorkspaceEdit`). `ReplaceRange`'s minimal-`TextEdit` mapping is deferred to
    Phase 1.
 2. New `Applicability` enum (Safe/Unsafe/Suggestion/Never). Classify the **existing 12 ops as Safe**,
-   except `file_remove` (Safe in v0.17 with a deprecation warning per W5).
+   except `file_remove` (**Unsafe in v0.17**; the Safe -> Unsafe flip landed at the fix-engine
+   rework, `266c88f9` -- see W5).
 3. **The collect contract carries its own verification obligation (R-VERIFY)** (this is the load-bearing type
    the design's translation-validation rests on). Rule-level
    `collect_edits(&[Violation], file, bytes, root) -> Vec<CollectedEdit>` where
@@ -558,7 +561,7 @@ Not numbered phases; each needs an explicit opt-in and its own design record.
 | R-TWOOP | `FixSpec` `#[serde(untagged)]` dispatch picks the first matching variant and silently drops sibling op-keys (the inner structs' `deny_unknown_fields` does not apply across the fix-block map) | a load-time guard rejecting a >1-op-key `fix:` block + a test, scheduled in Phase 0 (item 8) |
 | R-CSTMAP | the `NormalizedPath` is over the alphabetized detached `Value`; XML siblings / TOML array-of-tables may not map back to the CST node | per-format NormalizedPath->CST fidelity tests (XML-sibling, TOML-array-of-tables) before that format is Safe |
 | R-RETRO | W2 retroactively flips existing `file_create`/`file_prepend`/`file_append` from auto-apply to Suggestion from a remote `extends:` (not a no-op) | announce it; `trusted_extends:` opts back in; DoD item 3 exception |
-| R-FILEREMOVE | the `file_remove`->Unsafe flip reds every existing scenario that asserts a default `fix` removes a file; the no-op DoD misses it | the flip PR migrates the enumerated scenarios + tests the v0.17 deprecation warning (W5) |
+| R-FILEREMOVE | the `file_remove`->Unsafe flip reds every existing scenario that asserts a default `fix` removes a file; the no-op DoD misses it | RESOLVED: the flip (`266c88f9`) migrated the enumerated scenarios to the Unsafe default in v0.17 (W5) |
 | R-DETGATE | the deterministic perf gate is advisory and I/O-blind; the collect step is read-heavy and a dry-run cell is single-pass | pair with a `fix_throughput.rs` wall-clock/syscall cell; the perf rung (7) is advisory, not blocking - not a must-be-green DoD gate |
 | R-UTF16 | LSP `Position.character` is UTF-16; a `ReplaceRange` needs offset -> UTF-16 conversion | convert from the fixer's bytes; multi-byte / emoji / CRLF tests in Phase 1 |
 | R-PROV | the content-fixer trust demotion needs per-source provenance that does not exist in the loader today | build it at the single classification site (Phase 1 W2); adversarial four-provenance-class tests |
@@ -581,8 +584,9 @@ merges toward a long-lived v0.17 integration line, never released on its own:
 
 - **Phase 0 (foundation).** The tiers, the primitives, the `CollectedEdit`/verify machinery, the
   fixpoint driver (dormant: no op collects located edits yet), the flags, report/exit plumbing, the
-  two-op guard, the coverage gate, and the R-KANI proof-count fix. Ships the `file_remove`
-  deprecation warning. A genuine no-op (byte-identical) for existing configs.
+  two-op guard, the coverage gate, and the R-KANI proof-count fix. Ships `file_remove` as **Unsafe**
+  by default (`266c88f9`; W5). A genuine no-op (byte-identical) for existing configs that do not
+  rely on a bare `fix` removing a file.
 - **Phase 1.** `replace` + the active fixpoint + `--changed` confinement + the content-fixer trust
   gate (W2 demotes existing remote-`extends:` content ops to Suggestion, R-RETRO). First Unsafe op.
 - **Phase 2** (prelude, then 2a-lib -> 2a-handrolled -> 2b -> 2c -> 2d -> 2e): the flagship
@@ -599,8 +603,9 @@ item 3) wants a full minor of warning first. That was superseded: commit
 point -- so v0.17 ships `file_remove` as Unsafe directly, with no separate
 warning release and no v0.18 migration PR. The migrated scenarios
 (`file_remove_unsafe_by_default.yml`, `file_remove_unsafe_flag_applies.yml`)
-assert the Unsafe default; R-FILEREMOVE is closed. The W5 / §5 / §11 references
-to a "deprecation warning" are stale in the same way.
+assert the Unsafe default; R-FILEREMOVE is closed. The W5 / §5 / §11 and the
+Phase 0 bullet above have been reconciled to match (each now marked SUPERSEDED
+or pointing at the flip commit).
 
 `ROADMAP.md` / `roadmap.json` carry the public `## v0.17: Auto-fix` entry; this section is the
 source of truth for the internal phase order behind it.
