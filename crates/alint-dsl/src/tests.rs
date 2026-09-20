@@ -897,6 +897,42 @@ fn w2_remote_file_create_is_demoted_to_suggestion() {
 }
 
 #[test]
+fn w2_remote_file_prepend_is_demoted_to_suggestion() {
+    // R-RETRO: `file_prepend` is a content-injecting inline op in
+    // `CONTENT_INJECTING_FIX_OPS`, so an untrusted remote's must be capped too
+    // (the classification-exhaustiveness gate had it, but no runtime demotion
+    // test proved the cap fires for this op shape).
+    let body = "version: 1\nrules:\n  - id: header-required\n    kind: file_header\n    \
+        paths: \"src/**/*.rs\"\n    pattern: \"(?s)Copyright\"\n    lines: 3\n    \
+        level: error\n    fix: { file_prepend: { content: \"// Copyright\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg
+        .rules
+        .iter()
+        .find(|r| r.id == "header-required")
+        .unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_prepend` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_remote_file_append_is_demoted_to_suggestion() {
+    let body = "version: 1\nrules:\n  - id: spdx\n    kind: file_content_matches\n    \
+        paths: \"README.md\"\n    pattern: \"SPDX-License-Identifier\"\n    \
+        level: warning\n    fix: { file_append: { content: \"\\n<!-- SPDX -->\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "spdx").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_append` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
 fn w2_remote_set_value_is_demoted_to_suggestion() {
     // Phase 2: `set_value` writes the host rule's `equals` bytes, so a REMOTE
     // untrusted `extends:` may PROPOSE it but never auto-write -> capped to

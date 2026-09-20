@@ -256,6 +256,40 @@ fn nonconvergent_fix_only_json_still_flags_non_convergence() {
     );
 }
 
+/// Structured non-convergence: two `set_value` rules pinning ONE node to
+/// different values oscillate (each pass overlap-skips one, changes the file,
+/// the re-walk applies the other) and must hit the cap + exit 2. The `replace`
+/// path already exercises the exit-2 contract; this drives it through the
+/// STRUCTURED verify + overlap-skip code path (Phase 2), which the audit found
+/// was not covered end-to-end. `set_value` is Safe, so a bare `fix` applies it.
+#[test]
+fn nonconvergent_set_value_hits_the_cap_and_exits_2() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "app.json", b"{\n  \"port\": 0\n}\n");
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: a\n    kind: json_path_equals\n    paths: \"*.json\"\n    path: \"$.port\"\n    equals: 1\n    level: error\n    fix: { set_value: {} }\n\
+         \x20 - id: b\n    kind: json_path_equals\n    paths: \"*.json\"\n    path: \"$.port\"\n    equals: 2\n    level: error\n    fix: { set_value: {} }\n",
+    );
+    let out = Command::new(alint())
+        .args(["fix", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "structured non-convergence must exit 2, not silently succeed"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("did not settle"),
+        "the cap must warn on stderr; got: {stderr}"
+    );
+}
+
 /// Follow-up 2 regression: many WHOLE-DOCUMENT rules (TOML `set_value`) on ONE
 /// file must converge in a SINGLE pass and exit 0. Before `minimal_replace`, each
 /// rule emitted a `0..len` whole-file edit; N such edits on one file OVERLAP, so

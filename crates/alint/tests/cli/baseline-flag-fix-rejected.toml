@@ -1,0 +1,8 @@
+bin.name = "alint"
+# Audit GAP: the baseline flags apply only to `check`. `fix` must reject them
+# loudly (this was pinned via `list` only, so a future fix-specific special-case
+# would slip through). Rejected before any config load or tree mutation.
+args = ["--baseline", "bl.json", "fix"]
+status.code = 2
+fs.sandbox = true
+stderr = "[..]apply only to `check`[..]"
