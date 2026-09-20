@@ -5,14 +5,15 @@
 //!    `fix_unsafe` step whose rule declares that op inline; and
 //! 2. **proven convergent** - covered by a scenario whose second pass is a
 //!    no-op, accepted in either shape: `[.., fix, check]` ending in
-//!    `violations: []` (15 of the 17 shipped scenarios), or `[.., fix, fix]`
+//!    `violations: []` (most shipped scenarios), or `[.., fix, fix]`
 //!    whose trailing fix reports `applied: []` with no residual `skipped:`.
 //!
 //! Ops are resolved from **inline** rules only: an `applied:` id supplied by an
 //! `extends:`'d ruleset is skipped, so an external scenario can't red-herring
-//! the gate. The Phase-0 back-fill was empty (all 12 shipped ops already have
-//! both), so this gate exists to stop future drift: a new op that ships without
-//! a scenario, or without an idempotence proof, reds here.
+//! the gate. The Phase-0 back-fill was empty (all shipped ops -- 15 as of the
+//! Phase-2 structured + replace ops -- already have both), so this gate exists
+//! to stop future drift: a new op that ships without a scenario, or without an
+//! idempotence proof, reds here.
 //!
 //! Mechanism mirrors `coverage_audit_pass_fail.rs`: parse each scenario's
 //! `given.config` YAML string, map every rule `id` to its single `fix:` op key

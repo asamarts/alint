@@ -1,0 +1,27 @@
+name: fix --dry-run on a whole-file trim reports would-apply but writes nothing
+tags: [fix, fix_dry_run, no_trailing_whitespace]
+
+# Companion to set_value_dry_run: the whole-file (compose-buffer) dry-run path.
+
+given:
+  tree:
+    a.txt: "keep me   \ndone\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.txt"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix_dry_run, check]
+
+expect:
+  - applied: [no-ws]
+  - violations:
+      - {rule: no-ws, level: error, path: a.txt}
+
+expect_tree:
+  a.txt: "keep me   \ndone\n"
