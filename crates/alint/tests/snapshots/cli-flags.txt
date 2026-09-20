@@ -7,6 +7,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -29,6 +30,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -49,6 +51,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -68,6 +71,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -92,6 +96,7 @@
   --dry-run
   --fail-on-warning
   --fix-only
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -112,6 +117,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -131,6 +137,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --monorepo
   --no-docs
   --no-gitignore
@@ -154,6 +161,7 @@
   --explain
   --fail-on-warning
   --include-bundled
+  --include-fixes
   --no-docs
   --no-gitignore
   --only <RULE_ID>
@@ -173,6 +181,7 @@
   --color <WHEN>
   --compact
   --fail-on-warning
+  --include-fixes
   --include-info
   --inline
   --no-docs

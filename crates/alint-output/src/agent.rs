@@ -27,7 +27,7 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{Level, Report, RuleResult, Violation};
+use alint_core::{Level, ProposedEdit, Report, RuleResult, Violation};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -89,6 +89,12 @@ struct AgentViolation<'a> {
     /// set should add `--changed` (and `--base <ref>`) itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     fix_command: Option<Vec<&'a str>>,
+    /// The concrete Safe fix edit(s) alint would apply for this violation
+    /// (source region + replacement text) -- distinct from `fix_command` (the
+    /// argv to run). Lets an agent apply the fix directly. Present iff the
+    /// finding is Safe-fixable; always computed for the `agent` format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proposed_edit: Option<&'a [ProposedEdit]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     policy_url: Option<&'a str>,
 }
@@ -131,6 +137,8 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 fix_command: v
                     .is_fixable
                     .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
+                proposed_edit: (!v.proposed_edits.is_empty())
+                    .then_some(v.proposed_edits.as_slice()),
                 policy_url: r.policy_url.as_deref(),
             });
         }

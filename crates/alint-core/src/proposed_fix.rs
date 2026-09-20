@@ -47,7 +47,7 @@ use crate::walker::read_capped_or_skip;
 /// inclusive) and `end_column` is one past that character (SARIF §3.30.8,
 /// exclusive). Columns count Unicode scalar values from the start of the line
 /// (matching alint's other column output). An insertion is `start == end`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct EditRegion {
     pub start_line: usize,
     pub start_column: usize,
@@ -61,7 +61,7 @@ pub struct EditRegion {
 ///
 /// `path` is root-relative, matching [`Violation::path`](crate::Violation).
 /// `inserted` is the replacement text (empty for a pure deletion).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ProposedEdit {
     pub path: PathBuf,
     pub region: EditRegion,

@@ -65,14 +65,11 @@ warning or a v0.18 migration.
 
 ### P0 - Finish Phase 2's tail (W3 remainder + W4)
 
-- **W3b - `agent` / `json` `proposed_edit`.** The plan's W3 (§4, §7 DoD) is
-  SARIF `result.fixes[]` AND an `agent`/`json --include-fixes` `proposed_edit`
-  field. Only SARIF ships. The infrastructure (`alint_core::proposed_fix` +
-  `Violation.proposed_edits`) is format-agnostic, so this is: run
-  `attach_proposed_edits` for `agent` and `json`, add the field to
-  `AgentViolation` / `JsonViolation`, and test. Small, self-contained. (Gating,
-  decided §6: `agent` carries `proposed_edit` always -- mirroring its always-on
-  `fix_command` -- and `json` behind an `--include-fixes` flag.)
+- **W3b - `agent` / `json` `proposed_edit`. DONE.** `agent` (always) and `json`
+  (behind the new `--include-fixes` flag) now carry a `proposed_edit` array
+  (`{path, region, inserted}`) -- the same Safe-only edits SARIF advertises,
+  reusing the format-agnostic `attach_proposed_edits`. Gate:
+  `agent_and_json_carry_proposed_edit_per_the_include_fixes_flag`.
 - **W3 tier scope: RESOLVED -> Safe-only (DECISION 2026-09-20).** The SARIF /
   agent / json machine surfaces advertise ONLY Safe (applyable) fixes -- the
   DoD's original "all tiers" is superseded, because SARIF has no machine-honored

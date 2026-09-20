@@ -81,6 +81,16 @@ Options:
           Useful for narrow terminals, screen recordings, and CI logs where long URLs disrupt visual
           alignment. URLs remain in JSON / SARIF / GitHub / markdown output regardless.
 
+      --include-fixes
+          Include the concrete proposed fix edit(s) in `json` output.
+          
+          Adds a `proposed_edit` array (source region + replacement text) to each fixable finding in
+          `--format json`, so a tool can preview/apply the fix without running `alint fix`. Only
+          Safe (auto-applyable) fixes are included -- Unsafe fixes stay suggestions on alint's own
+          `fix`. The `agent` format always carries this; SARIF carries it as `result.fixes[]`. No
+          effect on other formats. Computing the edit re-reads the fixable files during `check`, so
+          it is opt-in here.
+
       --progress <WHEN>
           When to render progress on stderr for slow operations.
           

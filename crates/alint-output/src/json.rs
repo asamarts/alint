@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{FixReport, FixStatus, Level, Report};
+use alint_core::{FixReport, FixStatus, Level, ProposedEdit, Report};
 use serde::Serialize;
 
 use crate::BaselineMarks;
@@ -83,6 +83,11 @@ struct JsonViolation<'a> {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
+    /// The concrete Safe fix(es) alint would apply to resolve this violation
+    /// (source region + replacement text). Present only under `--include-fixes`
+    /// and only for a fixable finding; a note never carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proposed_edit: Option<&'a [ProposedEdit]>,
 }
 
 pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
@@ -123,6 +128,8 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    proposed_edit: (!v.proposed_edits.is_empty())
+                        .then_some(v.proposed_edits.as_slice()),
                 })
                 .collect(),
             notes: r
@@ -133,6 +140,7 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    proposed_edit: None, // notes are non-violations; no fix
                 })
                 .collect(),
         })

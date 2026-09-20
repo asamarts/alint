@@ -98,6 +98,18 @@ pub(crate) struct Cli {
     #[arg(long, global = true)]
     pub(crate) no_docs: bool,
 
+    /// Include the concrete proposed fix edit(s) in `json` output.
+    ///
+    /// Adds a `proposed_edit` array (source region + replacement text) to each
+    /// fixable finding in `--format json`, so a tool can preview/apply the fix
+    /// without running `alint fix`. Only Safe (auto-applyable) fixes are
+    /// included -- Unsafe fixes stay suggestions on alint's own `fix`. The
+    /// `agent` format always carries this; SARIF carries it as `result.fixes[]`.
+    /// No effect on other formats. Computing the edit re-reads the fixable files
+    /// during `check`, so it is opt-in here.
+    #[arg(long, global = true)]
+    pub(crate) include_fixes: bool,
+
     /// When to render progress on stderr for slow operations.
     ///
     /// Currently just `alint suggest`. `auto` (the default) renders

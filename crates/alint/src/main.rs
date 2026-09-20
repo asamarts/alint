@@ -594,11 +594,14 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
         (report, None)
     };
 
-    // SARIF carries the concrete fixes alint would make (`result.fixes[]`),
-    // computed from each fixable finding's fixer. Only SARIF consumes them and
-    // only located fixers contribute today, so the extra file re-reads are
-    // scoped to `--format sarif` runs that actually have fixable findings.
-    if matches!(format, Format::Sarif) {
+    // The machine formats that carry the concrete proposed fix: SARIF
+    // (`result.fixes[]`), `agent` (always), and `json` (behind `--include-fixes`).
+    // Only Safe fixes are attached (`attach_proposed_edits` gates on `is_fixable`),
+    // per the tier decision. The compute re-reads each fixable file, so it is
+    // scoped to a run that actually asks for fixes.
+    if matches!(format, Format::Sarif | Format::Agent)
+        || (format == Format::Json && cli.include_fixes)
+    {
         alint_core::attach_proposed_edits(&engine, &mut report, path);
     }
 

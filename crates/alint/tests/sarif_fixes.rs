@@ -34,6 +34,77 @@ fn check_sarif(dir: &Path) -> serde_json::Value {
     })
 }
 
+/// Run `alint <extra...> check .` and parse stdout JSON (a live finding -> exit 1).
+fn check_json(dir: &Path, extra: &[&str]) -> serde_json::Value {
+    let mut args: Vec<&str> = extra.to_vec();
+    args.extend(["check", "."]);
+    let out = Command::new(alint_bin())
+        .args(&args)
+        .current_dir(dir)
+        .output()
+        .expect("spawn alint");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout is not JSON ({e}):\n{}",
+            String::from_utf8_lossy(&out.stdout)
+        )
+    })
+}
+
+/// W3b: the machine formats carry a `proposed_edit` (source region + replacement)
+/// -- `agent` ALWAYS, `json` only under `--include-fixes` -- with the same
+/// Safe-only edit SARIF advertises. Drives the real binary + the CLI flag gating.
+#[test]
+fn agent_and_json_carry_proposed_edit_per_the_include_fixes_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: v-pins\n",
+            "    kind: json_path_matches\n",
+            "    paths: \"**/*.json\"\n",
+            "    path: \"$.deps.*\"\n",
+            "    matches: \"^v\"\n",
+            "    level: error\n",
+            "    fix: { replace: { pattern: \"^\", replacement: \"v\", applicability: safe } }\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("app.json"),
+        "{\n  \"deps\": {\n    \"bad\": \"2.0\"\n  }\n}\n",
+    )
+    .unwrap();
+
+    // agent: always-on (mirrors its always-on fix_command).
+    let agent = check_json(dir.path(), &["--format", "agent"]);
+    let pe = &agent["violations"][0]["proposed_edit"][0];
+    assert_eq!(pe["inserted"], "\"v2.0\"");
+    assert_eq!(pe["region"]["start_line"], 3);
+
+    // json WITHOUT the flag: no proposed_edit (attach didn't run).
+    let plain = check_json(dir.path(), &["--format", "json"]);
+    assert!(
+        plain["results"][0]["violations"][0]["proposed_edit"].is_null(),
+        "json must not carry proposed_edit without --include-fixes"
+    );
+
+    // json --include-fixes: present, same Safe-only edit.
+    let with = check_json(dir.path(), &["--format", "json", "--include-fixes"]);
+    let pe2 = &with["results"][0]["violations"][0]["proposed_edit"][0];
+    assert_eq!(pe2["inserted"], "\"v2.0\"");
+    assert_eq!(pe2["region"]["start_line"], 3);
+    assert_eq!(pe2["region"]["end_column"], 17);
+}
+
 /// A `replace` fix on a `json_path_matches` rule (a located fixer) renders a
 /// `result.fixes[]` whose `deletedRegion` is a 1-based line/column span and
 /// whose `insertedContent` is the replacement. Only the *violating* node
