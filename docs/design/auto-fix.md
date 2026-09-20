@@ -1070,10 +1070,10 @@ Resolved after review (folded into the sections above):
   explicitly-opted-in fix or a future WASM plugin, never a bare `alint fix` (6, Deferred).
 - **Versioning:** the whole arc ships as **v0.17**, released only once every phase (0 through 4) is
   complete: the tiers, the primitives, and every fixer through ordering and headers land together, so
-  v0.17 is `alint`'s first fixing release rather than a dormant no-op. The one thing held back is the
-  `file_remove` default flip: v0.17 introduces its deprecation warning, and the Safe-to-Unsafe flip
-  lands one minor later in **v0.18** (a warned, pre-1.0 MINOR change with a full minor of overlap)
-  (5.6, 6).
+  v0.17 is `alint`'s first fixing release rather than a dormant no-op. (SUPERSEDED: the
+  `file_remove` Safe-to-Unsafe flip was originally deferred to v0.18 behind a deprecation-warning
+  release; it now lands directly in v0.17 at the fix-engine rework breaking point -- commit
+  `266c88f9`, no separate warning release. See `v0.17/auto-fix-completion-plan.md` §2.)
 - **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for all tiers, and
   `agent` / `json --include-fixes` carry a `proposed_edit`; the edit is computed during `check`
   **only** when such a format is selected, so the default check path is unchanged (5.7).

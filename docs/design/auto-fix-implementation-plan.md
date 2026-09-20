@@ -590,12 +590,17 @@ merges toward a long-lived v0.17 integration line, never released on its own:
 - **Phase 3, then Phase 4.**
 - **Deferred** items (section 10) stay demand-gated and out of v0.17.
 
-**The one thing v0.17 does NOT do is flip the `file_remove` default.** Reclassifying `file_remove`
-from Safe to Unsafe changes an existing default (R-FILEREMOVE, DoD item 3), and the safety contract
-(`auto-fix.md` 5.6, 7) requires the deprecation warning to ship at least one full minor before the
-flip. So v0.17 ships the warning and **v0.18** flips the default in its own migration PR. This is the
-deliberate exception to "the whole arc is v0.17," and it exists so users get one release of warning
-before a default changes under them.
+**`file_remove` Safe -> Unsafe: flipped IN v0.17 (this paragraph is SUPERSEDED;
+see [`v0.17/auto-fix-completion-plan.md`](v0.17/auto-fix-completion-plan.md) §2).**
+This section originally deferred the flip to v0.18 behind a deprecation-warning
+release, on the reasoning that changing an existing default (R-FILEREMOVE, DoD
+item 3) wants a full minor of warning first. That was superseded: commit
+`266c88f9` lands the flip at the v0.17 fix-engine rework -- a natural breaking
+point -- so v0.17 ships `file_remove` as Unsafe directly, with no separate
+warning release and no v0.18 migration PR. The migrated scenarios
+(`file_remove_unsafe_by_default.yml`, `file_remove_unsafe_flag_applies.yml`)
+assert the Unsafe default; R-FILEREMOVE is closed. The W5 / §5 / §11 references
+to a "deprecation warning" are stale in the same way.
 
 `ROADMAP.md` / `roadmap.json` carry the public `## v0.17: Auto-fix` entry; this section is the
 source of truth for the internal phase order behind it.
