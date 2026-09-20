@@ -467,7 +467,8 @@ note the migration for external configs.
   `jsonpath_into()` generators, section 2); structured no-op preserves comments/order.
 - LSP: a code-action-offered-for-Suggestion test, a multi-file `WorkspaceEdit` test, and a
   stale-version-rejected test.
-- W3: `check --format sarif` emits `result.fixes[]` for all tiers and validates against the SARIF fix
+- W3: `check --format sarif` emits `result.fixes[]` for the Safe (applyable) tier only (DECISION
+  2026-09-20; see auto-fix.md 5.7) and validates against the SARIF fix
   schema; `agent`/`json --include-fixes` carry `proposed_edit`; the default check path computes no
   edits. W4: `fix --baseline`/`--strict-baseline`/`--show-baselined` behave.
 

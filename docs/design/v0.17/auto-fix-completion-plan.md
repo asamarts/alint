@@ -75,13 +75,15 @@ warning or a v0.18 migration.
   `proposed_edit`" is ambiguous whether `agent` is always-on; the natural reading
   is `agent` always-on -- mirroring its existing always-on `fix_command` -- and
   `json` behind an `--include-fixes` flag.)
-- **W3 open decision (needs the user): "all tiers".** SARIF currently advertises
-  only Safe/auto-applicable fixes (gated on per-violation `is_fixable`); the plan
-  DoD says "all tiers". This is a real fork: a SARIF `fix` has no per-fix safety
-  marker, so emitting Unsafe/Suggestion fixes as one-click suggestions could be
-  mis-applied. Options: (a) keep Safe-only (honest: fixes[] == what `fix`
-  applies); (b) emit all non-`Never` tiers (richer, but a consumer can't tell
-  Safe from Unsafe). Recommend (a) unless a fix.description tier tag is added.
+- **W3 tier scope: RESOLVED -> Safe-only (DECISION 2026-09-20).** The SARIF /
+  agent / json machine surfaces advertise ONLY Safe (applyable) fixes -- the
+  DoD's original "all tiers" is superseded, because SARIF has no machine-honored
+  per-fix safety field, so a third-party auto-applier could apply an Unsafe edit
+  blind. This is the CURRENT behavior (gated on per-violation `is_fixable`), so
+  W3b requires no tier change: `agent`/`json` simply surface the same Safe-only
+  proposed edits SARIF already does. alint's OWN `fix` keeps the full tier
+  control (Unsafe fixes shown as suggestions, applied only with
+  `--unsafe-fixes`). Docs (auto-fix.md 5.7 / §9, plan §7) reconciled.
 - **W4 - baseline-aware `fix`.** `fix` still rejects `--baseline` /
   `--strict-baseline` / `--show-baselined` (main.rs). Make it baseline-aware:
   skip suppressed findings, surface them as Suggestions, fix only new ones.
@@ -176,10 +178,13 @@ is prioritized:
    guard blocks deploy otherwise) -- see the general `RELEASING.md` process and
    the `alint.org` pin-bump step.
 
-## 6. Decisions needed from the user
+## 6. Decisions
 
-- **SARIF "all tiers"** (§3 P0): Safe-only (recommended) vs all non-`Never`
-  tiers.
+**Resolved:**
+- **SARIF/machine tier scope -> Safe-only** (2026-09-20). Machine surfaces
+  advertise only Safe fixes; alint's own `fix` keeps full tier control. See §3 P0.
+
+**Still open:**
 - **LSP Unsafe UX** (§3 engineering): keep offering Unsafe fixes as plain
   quick-fixes (current) vs label/gate them.
 - **§10 pull-in**: keep all deferred (recommended) vs pull a specific item into

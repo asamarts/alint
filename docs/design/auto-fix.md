@@ -780,10 +780,15 @@ template expansion) closes it, and closing it flips that test.
   and fail nonzero" posture of section 7 is preserved). Carrying a fix in a **check-side finding
   format** is a separate, deliberate feature: `alint check --format sarif` emits SARIF 2.1.0
   `result.fixes[]` (an `artifactChange` -> `replacement` of a `deletedRegion` + `insertedContent`,
-  which `ReplaceRange { range, content }` maps onto almost 1:1) for **every tier** (Safe, Unsafe,
-  Suggestion), tagging the tier in each fix's `description`. SARIF fixes are advisory (the consumer
-  chooses to apply), so surfacing all tiers is safe and is the point of emitting SARIF at all;
-  `agent` and `json` gain the same `proposed_edit: {path, range, content}[]` + `applicability`.
+  which `ReplaceRange { range, content }` maps onto almost 1:1) for the **Safe (applyable) tier
+  only** (DECISION 2026-09-20). The original design emitted every tier (Safe/Unsafe/Suggestion) with
+  a `description` tier tag, reasoning that SARIF fixes are advisory; that was revised to Safe-only,
+  because SARIF has no machine-honored per-fix safety FIELD -- the `description` tag is
+  human-advisory text a script ignores -- so a third-party tool that auto-applies `fixes[]` could
+  apply an Unsafe edit (e.g. a value or file removal) blind. alint's own `fix` keeps the full tier
+  surface (Unsafe fixes are shown as suggestions, applied only with `--unsafe-fixes`); the machine
+  export hands out only what is safe to apply without judgement. `agent` and `json --include-fixes`
+  gain the same Safe-only `proposed_edit: {path, range, content}[]`.
   Because computing an edit means running `collect_edits` during `check` (today `check` computes no
   edit bytes, only `is_fixable`), it runs **only when a fix-carrying format is selected**
   (`--format sarif` / `agent`, or `--format json --include-fixes`); the default `human` / `github`
@@ -1074,8 +1079,9 @@ Resolved after review (folded into the sections above):
   `file_remove` Safe-to-Unsafe flip was originally deferred to v0.18 behind a deprecation-warning
   release; it now lands directly in v0.17 at the fix-engine rework breaking point -- commit
   `266c88f9`, no separate warning release. See `v0.17/auto-fix-completion-plan.md` §2.)
-- **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for all tiers, and
-  `agent` / `json --include-fixes` carry a `proposed_edit`; the edit is computed during `check`
+- **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for the Safe (applyable)
+  tier only (DECISION 2026-09-20; see 5.7), and `agent` / `json --include-fixes` carry a
+  `proposed_edit`; the edit is computed during `check`
   **only** when such a format is selected, so the default check path is unchanged (5.7).
 
 Still open:
@@ -1152,7 +1158,7 @@ corrected the trust boundary's false claim that per-source provenance already ex
 listed ARCHITECTURE / schema / `facts.json` / README / `docs/rules.md` as downstream artifacts each
 phase must update (5.6), fixed the per-rule `applicability` schema shape, made the multi-file
 failure model honest (all-or-nothing through verify, best-effort through the per-file writes,
-5.2.4), and added SARIF `fixes[]` for all tiers on `check --format sarif`, a
+5.2.4), and added SARIF `fixes[]` (Safe tier only, per the 2026-09-20 decision) on `check --format sarif`, a
 performance-and-perf-gate section (5.9), a preview-mode table, and Windows / `nested_configs`
 handling. The maintainer resolved: the v0.17 warned-migration slot, all-tier SARIF fixes, and
 computing check-side edits only when a fix-carrying format is selected. Round 5 (a holistic
