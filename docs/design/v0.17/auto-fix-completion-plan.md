@@ -70,11 +70,9 @@ warning or a v0.18 migration.
   field. Only SARIF ships. The infrastructure (`alint_core::proposed_fix` +
   `Violation.proposed_edits`) is format-agnostic, so this is: run
   `attach_proposed_edits` for `agent` and `json`, add the field to
-  `AgentViolation` / `JsonViolation`, and test. Small, self-contained. (One small
-  gating decision, §6: the DoD phrasing "`agent`/`json --include-fixes` carry
-  `proposed_edit`" is ambiguous whether `agent` is always-on; the natural reading
-  is `agent` always-on -- mirroring its existing always-on `fix_command` -- and
-  `json` behind an `--include-fixes` flag.)
+  `AgentViolation` / `JsonViolation`, and test. Small, self-contained. (Gating,
+  decided §6: `agent` carries `proposed_edit` always -- mirroring its always-on
+  `fix_command` -- and `json` behind an `--include-fixes` flag.)
 - **W3 tier scope: RESOLVED -> Safe-only (DECISION 2026-09-20).** The SARIF /
   agent / json machine surfaces advertise ONLY Safe (applyable) fixes -- the
   DoD's original "all tiers" is superseded, because SARIF has no machine-honored
@@ -188,10 +186,11 @@ is prioritized:
   advertise only Safe fixes; alint's own `fix` keeps full tier control. See §3 P0.
 - **LSP Unsafe UX -> option b** (2026-09-20). Unsafe fixes offered but labeled
   `(unsafe)` + never auto-preferred. Implemented; see §3 engineering.
+- **§10 pull-in -> keep all deferred** (2026-09-20). No §10 item is a clean Safe
+  win (out-of-scope / ambiguous / Suggestion-only / a security surface); each
+  stays demand-gated with its own future design record. See §4.
+- **W3b `agent` gating -> `agent` always-on** (2026-09-20). `agent` carries
+  `proposed_edit` always (mirroring its always-on `fix_command`); `json` carries
+  it behind `--include-fixes`. Applies when W3b is built.
 
-**Still open:**
-- **§10 pull-in**: keep all deferred (recommended) vs pull a specific item into
-  v0.17.
-- **W3b `agent` gating** (§3 P0 W3b): `agent` carries `proposed_edit` always
-  (recommended, mirrors its always-on `fix_command`) vs behind `--include-fixes`
-  like `json`. Minor.
+_All open decisions are resolved; the plan is ready to execute (start with P0)._
