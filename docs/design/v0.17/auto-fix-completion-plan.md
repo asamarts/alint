@@ -137,9 +137,12 @@ The core algorithms held and the highest-value gaps are filled; these remain
 - **Full multi-pass `--diff` fidelity** (currently a deferred located edit warns
   on stderr; a faithful preview would re-collect against the composed bytes or
   run the stage as a fixpoint).
-- **LSP UX for Unsafe fixes** (the plan intends offering Suggestions to a human;
-  the audit flags one-click Unsafe delete + presenting Unsafe/demoted fixes with
-  no tier signal -- decide whether to label them distinctly).
+- **LSP UX for Unsafe fixes: RESOLVED (option b, DECISION 2026-09-20).** Unsafe
+  fixes are still offered as quick-fixes (human-in-the-loop) but their title is
+  labeled `(unsafe)` and they are never marked preferred, so the click is a
+  visible, deliberate opt-in (the LSP analogue of `--unsafe-fixes`) rather than a
+  silent one-click apply of a behavior-changing edit. Safe fixes are unchanged.
+  Suggestion / W2-demoted fixes remain excluded (audit HIGH-1/HIGH-2).
 - **TOML array-of-tables fixability** (`[[x]]` inner values are unfixable today:
   `toml_::navigate_mut` handles only `Key`).
 - **`structured_fix/mod.rs` `formats/` split** (~1820 lines, nearing the 2000
@@ -183,10 +186,10 @@ is prioritized:
 **Resolved:**
 - **SARIF/machine tier scope -> Safe-only** (2026-09-20). Machine surfaces
   advertise only Safe fixes; alint's own `fix` keeps full tier control. See §3 P0.
+- **LSP Unsafe UX -> option b** (2026-09-20). Unsafe fixes offered but labeled
+  `(unsafe)` + never auto-preferred. Implemented; see §3 engineering.
 
 **Still open:**
-- **LSP Unsafe UX** (§3 engineering): keep offering Unsafe fixes as plain
-  quick-fixes (current) vs label/gate them.
 - **§10 pull-in**: keep all deferred (recommended) vs pull a specific item into
   v0.17.
 - **W3b `agent` gating** (§3 P0 W3b): `agent` carries `proposed_edit` always

@@ -485,6 +485,13 @@ impl LanguageServer for Backend {
 
         let bytes = text.as_bytes();
         let mut actions: CodeActionResponse = Vec::new();
+        // Parallel to `actions`: whether each offered fix is Unsafe-tier. An Unsafe
+        // quick-fix is labeled `(unsafe)` and never auto-preferred, so the click is
+        // a visible, explicit opt-in (the LSP analogue of `--unsafe-fixes`) rather
+        // than a silent one-click apply of a behavior-changing edit (e.g. a file
+        // delete). Only Safe and Unsafe tiers reach here -- Suggestion / demoted
+        // fixes are already filtered out below.
+        let mut unsafe_flags: Vec<bool> = Vec::new();
         for finding in &findings {
             if !finding.fixable || !ranges_overlap(finding.range, selection) {
                 continue;
@@ -492,6 +499,7 @@ impl LanguageServer for Backend {
             let Some(fixer) = session.engine.fixer_for(&finding.rule_id) else {
                 continue;
             };
+            let unsafe_fix = fixer.applicability() == Applicability::Unsafe;
             let mut violation = Violation::new(finding.message.clone()).with_path(rel.clone());
             // Preserve the reported location so range-scoped fixers act on
             // the right line/column (not just whole-file fixers).
@@ -548,19 +556,27 @@ impl LanguageServer for Backend {
                     None => continue,
                 }
             };
+            let title = if unsafe_fix {
+                format!("alint: fix `{}` (unsafe)", finding.rule_id)
+            } else {
+                format!("alint: fix `{}`", finding.rule_id)
+            };
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("alint: fix `{}`", finding.rule_id),
+                title,
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![finding_to_diagnostic(finding)]),
                 edit: Some(workspace_edit),
                 ..CodeAction::default()
             }));
+            unsafe_flags.push(unsafe_fix);
         }
         if actions.is_empty() {
             return Ok(None);
         }
-        // A single fix is the obvious one to apply.
-        if actions.len() == 1 {
+        // A single SAFE fix is the obvious one to apply (some clients auto-apply
+        // the preferred action); an Unsafe fix is never auto-preferred -- applying
+        // it must stay a deliberate choice.
+        if actions.len() == 1 && !unsafe_flags[0] {
             if let CodeActionOrCommand::CodeAction(action) = &mut actions[0] {
                 action.is_preferred = Some(true);
             }
@@ -1577,6 +1593,76 @@ mod tests {
         assert!(
             resp.is_none(),
             "a fix the pipeline demotes must not be offered; got: {resp:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
+        // An Unsafe fix (here `replace`, default Unsafe) IS offered as a quick-fix
+        // (human-in-the-loop), but its title is labeled `(unsafe)` and it is NOT
+        // marked preferred -- so clicking it is a visible, deliberate opt-in (the
+        // LSP analogue of `--unsafe-fixes`), never an editor auto-apply.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 2), Position::new(0, 6)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-todo".to_string(),
+            message: "forbidden".to_string(),
+            line: Some(1),
+            column: Some(3),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), "x TODO\n".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 2), Position::new(0, 6)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction");
+        };
+        assert_eq!(action.title, "alint: fix `no-todo` (unsafe)");
+        assert_ne!(
+            action.is_preferred,
+            Some(true),
+            "an Unsafe fix must not be auto-preferred"
         );
     }
 
