@@ -56,6 +56,27 @@ fn hcl_removal_span_takes_the_whole_line() {
 }
 
 #[test]
+fn hcl_value_span_is_offset_past_a_bom() {
+    // Audit MED: hcl-rs rejects a leading BOM, so the HCL resolver must strip it
+    // and offset the span back into the ORIGINAL bytes -- else a BOM-prefixed
+    // `.tf` is advertised fixable yet always skipped (every other format offsets
+    // the BOM; HCL was the lone exception).
+    let src = "\u{feff}port = 8080\n";
+    let span = resolve_value_span(Format::Hcl, src.as_bytes(), &[key("port")]).unwrap();
+    assert_eq!(&src[span], "8080");
+}
+
+#[test]
+fn hcl_removal_span_is_offset_past_a_bom() {
+    let src = "\u{feff}keep = 1\ndrop = 2\n";
+    let span = resolve_removal_span(Format::Hcl, src.as_bytes(), &[key("drop")]).unwrap();
+    assert_eq!(&src[span.clone()], "drop = 2\n");
+    let mut out = src.to_string();
+    out.replace_range(span, "");
+    assert_eq!(out, "\u{feff}keep = 1\n");
+}
+
+#[test]
 fn hcl_serialize_scalar_covers_the_scalar_types() {
     assert_eq!(
         serialize_scalar(Format::Hcl, &json!("x")).unwrap(),

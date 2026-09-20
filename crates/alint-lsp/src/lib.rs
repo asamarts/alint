@@ -49,9 +49,10 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result as JsonRpcResult};
 
+use alint_core::located_fix::{self, LocatedEdit, LocatedOutcome};
 use alint_core::{
-    CollectedEdit, Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult, Violation,
-    WalkOptions, walk,
+    Applicability, CollectedEdit, Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult,
+    Violation, WalkOptions, walk,
 };
 
 /// One cached finding for a file: enough to publish a diagnostic and to
@@ -503,17 +504,42 @@ impl LanguageServer for Backend {
             // `alint fix` (the diagnostic is one-per-file but the located fix is
             // per-match). A whole-file fixer keeps the `fix_edit` -> edit path.
             let workspace_edit = if fixer.collects_located_edits() {
-                let edits = fixer.collect_edits(
-                    std::slice::from_ref(&violation),
-                    &rel,
-                    bytes,
-                    &session.root,
-                );
-                match located_edits_to_workspace_edit(&edits, &text, &rel, &session.root) {
+                // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
+                // -> post-splice verify/demote) and offer ONLY the surviving edits.
+                // Without this the LSP would one-click-apply a fix the engine
+                // refuses -- a partial removal that leaves the violation, an
+                // unverifiable `replace`, or a below-threshold / W2-demoted
+                // (Suggestion-tier) untrusted-remote content fixer.
+                let batch: Vec<LocatedEdit> = fixer
+                    .collect_edits(std::slice::from_ref(&violation), &rel, bytes, &session.root)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, ce)| LocatedEdit {
+                        rule_index: 0,
+                        violation_index: i,
+                        collected: ce,
+                    })
+                    .collect();
+                let (_, outcomes) =
+                    located_fix::apply_file_edits(bytes, batch, Applicability::Unsafe);
+                let applied: Vec<CollectedEdit> = outcomes
+                    .into_iter()
+                    .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
+                    .map(|(le, _)| le.collected)
+                    .collect();
+                match located_edits_to_workspace_edit(&applied, &text, &rel, &session.root) {
                     Some(we) => we,
                     None => continue,
                 }
             } else {
+                // Whole-file / file-op fixer: gate on its tier so a Suggestion-tier
+                // fixer -- notably a W2-demoted content fixer from an untrusted
+                // remote `extends:` -- is not offered as an ordinary quick-fix
+                // (demotion drops it to Suggestion; a bare `alint fix` only
+                // suggests it, never auto-writes).
+                if !fixer.applicability().applies_at(Applicability::Unsafe) {
+                    continue;
+                }
                 let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
                     continue;
                 };
@@ -1484,6 +1510,74 @@ mod tests {
         // `{"port": 8080}`: `8080` occupies UTF-16 columns 9..13.
         assert_eq!(tes[0].range.start, Position::new(0, 9));
         assert_eq!(tes[0].range.end, Position::new(0, 13));
+    }
+
+    #[tokio::test]
+    async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
+        // Audit HIGH: the LSP must not offer a quick-fix the engine refuses. It
+        // now routes located edits through `apply_file_edits` (the same verify /
+        // overlap / tier pipeline `alint fix` uses) and offers only survivors. A
+        // `remove_value` batch that can only partially remove is demoted
+        // all-or-nothing (the `Absent` verify fails), so `alint fix` writes
+        // nothing -- the code action must offer nothing, never a partial (here:
+        // secret-leaking) removal.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-secret\n    kind: hcl_path_absent\n    \
+             paths: \"*.tf\"\n    path: \"$..secret\"\n    level: error\n    \
+             fix: { remove_value: { applicability: safe } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("main.tf")).unwrap();
+        // A top-level secret + two block secrets: the block members can't be
+        // removed, so the whole batch demotes.
+        let content =
+            "secret = \"top\"\nitem {\n  secret = \"a\"\n}\nitem {\n  secret = \"b\"\n}\n";
+        let finding = Finding {
+            range: Range::new(Position::new(0, 0), Position::new(0, 6)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-secret".to_string(),
+            message: "secret present".to_string(),
+            line: Some(1),
+            column: Some(1),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), content.to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(0, 6)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend.code_action(params).await.expect("code_action ok");
+        assert!(
+            resp.is_none(),
+            "a fix the pipeline demotes must not be offered; got: {resp:?}"
+        );
     }
 
     #[test]

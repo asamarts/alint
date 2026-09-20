@@ -219,6 +219,43 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
     );
 }
 
+/// Audit MED-1: `--fix-only --format json` rebuilds a filtered report for
+/// rendering and USED to hardcode `non_convergent: false`, so a capped run
+/// reported clean in the only machine signal of exit 2 (the exit code itself was
+/// still correct). The flag must reflect the real convergence verdict.
+#[test]
+fn nonconvergent_fix_only_json_still_flags_non_convergence() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "f.txt", b"a\n");
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: no-a\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"a\"\n    level: error\n    fix: { replace: { replacement: \"b\" } }\n\
+         \x20 - id: no-b\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"b\"\n    level: error\n    fix: { replace: { replacement: \"a\" } }\n",
+    );
+    let json = Command::new(alint())
+        .args([
+            "fix",
+            "--fix-only",
+            "--unsafe-fixes",
+            "--format",
+            "json",
+            ".",
+        ])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --fix-only --format json");
+    assert_eq!(json.status.code(), Some(2));
+    let parsed: serde_json::Value = serde_json::from_slice(&json.stdout).expect("fix json parses");
+    assert_eq!(
+        parsed["summary"]["non_convergent"],
+        serde_json::json!(true),
+        "--fix-only --format json must flag non-convergence, not hardcode false: {}",
+        String::from_utf8_lossy(&json.stdout)
+    );
+}
+
 /// Follow-up 2 regression: many WHOLE-DOCUMENT rules (TOML `set_value`) on ONE
 /// file must converge in a SINGLE pass and exit 0. Before `minimal_replace`, each
 /// rule emitted a `0..len` whole-file edit; N such edits on one file OVERLAP, so

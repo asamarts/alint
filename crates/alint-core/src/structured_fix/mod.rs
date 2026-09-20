@@ -249,8 +249,16 @@ mod hcl {
     /// Parse `text` into a spanned CST and return the VALUE span at `path`
     /// (what `set_value` overwrites).
     pub(super) fn hcl_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        let body = hcl::edit::parser::parse_body(text).ok()?;
-        resolve_in_body(&body, path).map(|t| t.value_span)
+        // `hcl-rs` rejects a leading BOM, so strip it (as `Format::parse` does)
+        // and shift the resolved span back into the ORIGINAL byte space by the
+        // BOM length -- else a BOM-prefixed HCL file is advertised fixable yet
+        // always skipped (HCL was the lone format not offsetting the BOM; the
+        // other 7 do). `trim_start_matches` drops any run of BOMs.
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        let body = hcl::edit::parser::parse_body(stripped).ok()?;
+        let span = resolve_in_body(&body, path).map(|t| t.value_span)?;
+        Some(span.start + bom_len..span.end + bom_len)
     }
 
     /// Resolve `path` within a block body to a single unambiguous target. A
@@ -367,9 +375,14 @@ mod hcl {
     /// block over-deletion the audit found). Declines (`None`) for an object
     /// member (comma surgery deferred) or a block.
     pub(super) fn hcl_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        let body = hcl::edit::parser::parse_body(text).ok()?;
+        // Strip a leading BOM (hcl-rs rejects it) and offset the result back into
+        // the original byte space -- see `hcl_value_span`. All line math below is
+        // on the stripped text.
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        let body = hcl::edit::parser::parse_body(stripped).ok()?;
         let attr_span = resolve_in_body(&body, path)?.attr_span?;
-        let bytes = text.as_bytes();
+        let bytes = stripped.as_bytes();
         let line_start = bytes[..attr_span.start]
             .iter()
             .rposition(|&b| b == b'\n')
@@ -382,13 +395,15 @@ mod hcl {
         // whitespace (or a trailing `#` / `//` comment) follows it. A `{` before
         // or `}` after means a single-line block wraps it -- widening to the
         // line would delete the block, so remove just the attribute span.
-        let before = &text[line_start..attr_span.start];
-        let after = &text[attr_span.end..line_end];
-        if before.chars().all(char::is_whitespace) && line_tail_is_blank_or_comment(after) {
-            Some(line_start..line_end)
-        } else {
-            Some(attr_span)
-        }
+        let before = &stripped[line_start..attr_span.start];
+        let after = &stripped[attr_span.end..line_end];
+        let span =
+            if before.chars().all(char::is_whitespace) && line_tail_is_blank_or_comment(after) {
+                line_start..line_end
+            } else {
+                attr_span
+            };
+        Some(span.start + bom_len..span.end + bom_len)
     }
 
     /// Whether the bytes from an attribute's end to the line end are only

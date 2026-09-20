@@ -378,3 +378,30 @@ fn diff_still_rejects_a_bogus_format_string() {
         "the parse error should name the bad format; stderr:\n{stderr}"
     );
 }
+
+/// Audit MED: `fix --diff` is single-pass, so a located edit that the pipeline
+/// DEFERS (because a whole-file fixer changed the same file first, making the
+/// collect-time offsets stale) is absent from the preview. That omission used to
+/// be SILENT (exit 0, no hunk, no signal); a consumer applying the previewed
+/// patch would keep the violation. It must now warn on stderr. (Full multi-pass
+/// `--diff` fidelity is a tracked follow-up.)
+#[test]
+fn diff_warns_when_a_located_edit_is_deferred_behind_a_whole_file_fix() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nrules:\n\
+         \x20 - id: no-todo\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    level: error\n    fix: { replace: { replacement: DONE } }\n\
+         \x20 - id: no-ws\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n",
+    )
+    .unwrap();
+    // Located rule (`no-todo`) is ordered before the whole-file rule (`no-ws`):
+    // the whole-file compose changes the file, so the located batch defers.
+    std::fs::write(tmp.path().join("a.txt"), "TODO x   \n").unwrap();
+    let out = run(tmp.path(), &["fix", "--diff", "--unsafe-fixes", "."]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--diff preview omits") && stderr.contains("located edit"),
+        "a deferred located edit must warn, not silently vanish; stderr:\n{stderr}"
+    );
+}

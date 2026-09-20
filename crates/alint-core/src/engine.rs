@@ -1735,6 +1735,24 @@ impl Engine {
                 // (`--dry-run` / `--diff`) writes nothing, so this branch cannot
                 // fire there; the batch simply applies against consistent bytes.
                 if deferred || current.as_ref() != original {
+                    // In a real multi-pass `fix` the batch is retried on the next
+                    // pass against the flushed bytes (silent + correct). A
+                    // single-pass STAGE (`--diff`) has no next pass, so the
+                    // deferred located edits are absent from the preview -- and the
+                    // located offsets index the collect-time bytes, so splicing
+                    // them onto the (whole-file-changed) current bytes would
+                    // corrupt. Rather than silently omit them (a consumer applying
+                    // the previewed patch would keep the violation), warn. Full
+                    // multi-pass `--diff` fidelity is a follow-up.
+                    if stage_ops.is_some() {
+                        eprintln!(
+                            "alint: warning: --diff preview omits {} located edit(s) in {} \
+                             that a later fix pass would apply (a whole-file fix changed the \
+                             file first); run `alint fix` to apply them.",
+                            batch.len(),
+                            file.display()
+                        );
+                    }
                     continue;
                 }
                 let original = original.expect("current == original implies Some").clone();

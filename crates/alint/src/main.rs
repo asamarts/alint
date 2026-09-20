@@ -1086,7 +1086,12 @@ fn cmd_fix(
         // (`fix_exit_code` below), so hiding it would leave a CI operator with a
         // failed step, a report reading "0 applied, 0 skipped", and no cause.
         let applied_only = FixReport {
-            non_convergent: false,
+            // Carry the real convergence verdict (was hardcoded `false`): the
+            // exit code comes from the unfiltered `report`, but the rendered
+            // JSON's `non_convergent` is the only machine signal of a capped
+            // exit-2 run, so `--fix-only --format json` must not report `false`
+            // on a non-convergent run.
+            non_convergent: report.non_convergent,
             results: report
                 .results
                 .iter()

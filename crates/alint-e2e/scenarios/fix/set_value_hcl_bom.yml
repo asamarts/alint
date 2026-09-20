@@ -1,0 +1,37 @@
+name: set_value fixes a BOM-prefixed HCL file, preserving the BOM
+tags: [fix, hcl_path_equals, set_value, hcl]
+
+# Regression (arc-wide audit MED): a leading UTF-8 BOM made every HCL set_value /
+# remove_value silently decline. The check side strips a leading BOM
+# (`Format::parse`) so the rule fires and advertises a fix, but `hcl-rs` rejects a
+# leading U+FEFF -- so the HCL resolver used to return None and skip on EVERY BOM
+# file (HCL was the lone format not offsetting the BOM; the other 7 handle it). The
+# resolver now strips the BOM and shifts the span into original byte coordinates, so
+# the value is rewritten in place and the BOM survives. The tree uses a \uFEFF escape
+# so a real 3-byte BOM lands on disk (no literal BOM byte in this source file).
+
+given:
+  tree:
+    main.tf: "\uFEFFport = 8080\n"
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: hcl_path_equals
+        paths: "**/*.tf"
+        path: "$.port"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: main.tf}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  main.tf: "\uFEFFport = 9090\n"
