@@ -177,12 +177,9 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
     // error, never a silent no-op" contract. Reject them loudly off `check`,
     // matching `--only`. (The `baseline` subcommand writes via its own
     // `--output`, not this flag.)
-    // `--baseline` works on `check` AND `fix` (W4: a baseline-aware `fix` skips the
-    // grandfathered findings and resolves only new ones). `--strict-baseline` /
-    // `--show-baselined` remain `check`-only for now -- their `fix` semantics
-    // (stale-fail across a content-mutating fixpoint; suppressed-finding
-    // visibility) are a tracked follow-up. Reject loudly off their allowed
-    // commands, never a silent no-op.
+    // `--baseline` works on `check` AND `fix` (W4). `--strict-baseline` /
+    // `--show-baselined` remain `check`-only for now (a tracked follow-up). Reject
+    // loudly off their allowed commands, never a silent no-op.
     if cli.baseline.is_some() && !matches!(command, Command::Check { .. } | Command::Fix { .. }) {
         bail!(
             "`--baseline` applies only to `check` and `fix` (the `baseline` \
@@ -1050,12 +1047,9 @@ fn cmd_fix(
         .baseline
         .clone()
         .or_else(|| loaded.baseline.as_ref().map(|b| path.join(b)));
-    // W4: a resolved baseline (from `--baseline` or the config `baseline:` key)
-    // makes `fix` skip the grandfathered findings and resolve only NEW ones --
-    // mirroring `check --baseline`, so a repo with accepted debt can `fix` without
-    // touching it. The engine classifies per rule, per fixpoint pass, on the
-    // current content. The artifact itself is excluded from the walk below so a
-    // content fixer can't rewrite it.
+    // W4: a resolved baseline (flag or config `baseline:` key) makes `fix` skip
+    // grandfathered findings and resolve only NEW ones (mirrors `check --baseline`;
+    // the artifact is excluded from the walk below). Classified in engine `fix_run`.
     if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         engine = engine.with_fix_baseline(baseline);
