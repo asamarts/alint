@@ -249,6 +249,11 @@ pub struct Engine {
     /// engine bypasses every changed-set short-circuit. See
     /// [`Engine::with_changed_paths`] for the contract.
     changed_paths: Option<HashSet<PathBuf>>,
+    /// When set (`fix --baseline`), the loaded baseline: the fix pass SKIPS
+    /// (surfaces, never applies) any violation the baseline suppresses, so `fix`
+    /// resolves only NEW findings -- matching `check --baseline`. `None` means
+    /// "fix everything". See [`Engine::with_fix_baseline`].
+    fix_baseline: Option<crate::baseline::Baseline>,
 }
 
 impl Engine {
@@ -262,6 +267,7 @@ impl Engine {
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
             changed_paths: None,
+            fix_baseline: None,
         }
     }
 
@@ -274,12 +280,25 @@ impl Engine {
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
             changed_paths: None,
+            fix_baseline: None,
         }
     }
 
     #[must_use]
     pub fn with_fix_size_limit(mut self, limit: Option<u64>) -> Self {
         self.fix_size_limit = limit;
+        self
+    }
+
+    /// Make the fix pass baseline-aware (`fix --baseline`): a violation the
+    /// `baseline` suppresses is SKIPPED (reported as `baselined`, never applied),
+    /// so `fix` resolves only new findings. Classification reuses
+    /// [`crate::baseline::apply`] per rule (the fingerprint includes the rule id,
+    /// so per-rule application equals report-level), per fixpoint pass, on the
+    /// current file content -- identical to how `check --baseline` suppresses.
+    #[must_use]
+    pub fn with_fix_baseline(mut self, baseline: crate::baseline::Baseline) -> Self {
+        self.fix_baseline = Some(baseline);
         self
     }
 
@@ -1414,6 +1433,10 @@ impl Engine {
         let mut located_bytes: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
         let mut located_deferred: std::collections::HashSet<PathBuf> =
             std::collections::HashSet::new();
+        // W4 (`fix --baseline`): per-file byte cache for the baseline
+        // content-fingerprint, so a file is read at most once per pass for
+        // classification. Unused (empty) when no fix-baseline is active.
+        let mut fp_cache: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
         for (rule_index, entry) in self.entries.iter().enumerate() {
             // Skip a rule scoped ENTIRELY outside the changed set (plus files this
             // run created), exactly as `check --changed` does, so `fix` and `check`
@@ -1453,6 +1476,66 @@ impl Engine {
             let violations = match entry.rule.evaluate(ctx) {
                 Ok(v) => v,
                 Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+            };
+            // W4 (`fix --baseline`): SKIP -- surface, never apply -- any violation
+            // the baseline grandfathers, so `fix` resolves only NEW findings. Reuse
+            // `baseline::apply` on THIS rule's violations: the fingerprint includes
+            // the rule id (so per-rule application equals report-level), computed on
+            // the CURRENT file content each pass -- identical to how
+            // `check --baseline` suppresses. The grandfathered findings are reported
+            // as a benign `baselined` skip (they do not fail the exit), and only the
+            // live ones reach the fixer.
+            let violations = if let Some(bl) = self.fix_baseline.as_ref() {
+                let single = crate::Report {
+                    results: vec![crate::RuleResult {
+                        rule_id: Arc::from(entry.rule.id()),
+                        level: entry.rule.level(),
+                        policy_url: None,
+                        violations,
+                        notes: Vec::new(),
+                        is_fixable: false,
+                    }],
+                };
+                let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
+                    let bytes = match v.path.as_ref() {
+                        Some(p) => fp_cache
+                            .entry(p.to_path_buf())
+                            .or_insert_with(|| {
+                                let full = root.join(p);
+                                let size = std::fs::metadata(&full).map_or(0, |m| m.len());
+                                crate::read_capped_or_skip(&full, size)
+                            })
+                            .as_deref(),
+                        None => None,
+                    };
+                    crate::baseline::fingerprint(rid, v, bytes)
+                });
+                if !applied.suppressed.is_empty() {
+                    results.push(FixRuleResult {
+                        rule_id: Arc::from(entry.rule.id()),
+                        level: entry.rule.level(),
+                        items: applied
+                            .suppressed
+                            .into_iter()
+                            .map(|s| FixItem {
+                                violation: s.violation,
+                                status: FixStatus::Skipped(format!(
+                                    "{} grandfathered by the baseline (not fixed; run without \
+                                     --baseline to fix it, or re-run `alint baseline`)",
+                                    crate::report::BASELINED_SKIP_PREFIX
+                                )),
+                            })
+                            .collect(),
+                    });
+                }
+                // Only the live (new) violations proceed to the fixer.
+                applied
+                    .live
+                    .results
+                    .pop()
+                    .map_or_else(Vec::new, |r| r.violations)
+            } else {
+                violations
             };
             if violations.is_empty() {
                 continue;

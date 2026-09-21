@@ -147,6 +147,7 @@ fn init_tracing() {
         .try_init();
 }
 
+#[allow(clippy::too_many_lines)]
 fn run(mut cli: Cli) -> Result<ExitCode> {
     let command = cli.command.take().unwrap_or(Command::Check {
         path: PathBuf::from("."),
@@ -176,12 +177,23 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
     // error, never a silent no-op" contract. Reject them loudly off `check`,
     // matching `--only`. (The `baseline` subcommand writes via its own
     // `--output`, not this flag.)
-    if (cli.baseline.is_some() || cli.strict_baseline || cli.show_baselined)
-        && !matches!(command, Command::Check { .. })
-    {
+    // `--baseline` works on `check` AND `fix` (W4: a baseline-aware `fix` skips the
+    // grandfathered findings and resolves only new ones). `--strict-baseline` /
+    // `--show-baselined` remain `check`-only for now -- their `fix` semantics
+    // (stale-fail across a content-mutating fixpoint; suppressed-finding
+    // visibility) are a tracked follow-up. Reject loudly off their allowed
+    // commands, never a silent no-op.
+    if cli.baseline.is_some() && !matches!(command, Command::Check { .. } | Command::Fix { .. }) {
         bail!(
-            "`--baseline`, `--strict-baseline`, and `--show-baselined` apply only to \
-             `check` (the `baseline` subcommand writes via `--output`)"
+            "`--baseline` applies only to `check` and `fix` (the `baseline` \
+             subcommand writes via `--output`)"
+        );
+    }
+    if (cli.strict_baseline || cli.show_baselined) && !matches!(command, Command::Check { .. }) {
+        bail!(
+            "`--strict-baseline` and `--show-baselined` apply only to `check` \
+             (a baseline-aware `fix` supports `--baseline`; strict / show for \
+             `fix` are not yet implemented)"
         );
     }
     match command {
@@ -976,6 +988,7 @@ struct FixOptions {
     diff: bool,
 }
 
+#[allow(clippy::too_many_lines)]
 fn cmd_fix(
     path: &Path,
     changed: &ChangedMode,
@@ -1037,6 +1050,16 @@ fn cmd_fix(
         .baseline
         .clone()
         .or_else(|| loaded.baseline.as_ref().map(|b| path.join(b)));
+    // W4: a resolved baseline (from `--baseline` or the config `baseline:` key)
+    // makes `fix` skip the grandfathered findings and resolve only NEW ones --
+    // mirroring `check --baseline`, so a repo with accepted debt can `fix` without
+    // touching it. The engine classifies per rule, per fixpoint pass, on the
+    // current content. The artifact itself is excluded from the walk below so a
+    // content fixer can't rewrite it.
+    if let Some(baseline_path) = &effective_baseline {
+        let baseline = load_baseline(baseline_path)?;
+        engine = engine.with_fix_baseline(baseline);
+    }
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
     let walk_opts = WalkOptions {

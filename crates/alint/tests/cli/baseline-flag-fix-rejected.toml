@@ -1,8 +1,9 @@
 bin.name = "alint"
-# Audit GAP: the baseline flags apply only to `check`. `fix` must reject them
-# loudly (this was pinned via `list` only, so a future fix-specific special-case
-# would slip through). Rejected before any config load or tree mutation.
-args = ["--baseline", "bl.json", "fix"]
+# W4: `fix` now SUPPORTS `--baseline` (baseline-aware fix). But `--strict-baseline`
+# and `--show-baselined` remain check-only for now, and must still be rejected off
+# `check` -- never a silent no-op. (Previously this pinned `fix --baseline`'s
+# rejection, which W4 lifted.)
+args = ["--strict-baseline", "fix"]
 status.code = 2
 fs.sandbox = true
 stderr = "[..]apply only to `check`[..]"

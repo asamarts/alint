@@ -10,6 +10,13 @@ use crate::rule::{FixEdit, RuleResult, Violation};
 /// two never drift.
 pub const FIX_ERROR_PREFIX: &str = "fix error:";
 
+/// Prefix on a [`FixStatus::Skipped`] reason marking a violation the baseline
+/// GRANDFATHERS (`fix --baseline`): it is intentionally not fixed, so -- like a
+/// baseline-suppressed `check` finding -- it does NOT count as unresolved and
+/// does not drive a nonzero exit. `Engine::fix` emits it; [`has_unresolved`]
+/// excludes it. Single source of truth so the two never drift.
+pub const BASELINED_SKIP_PREFIX: &str = "baselined:";
+
 #[derive(Debug, Clone)]
 pub struct Report {
     pub results: Vec<RuleResult>,
@@ -155,11 +162,14 @@ fn has_unresolved(items: &[FixItem]) -> bool {
     // `level: error` it must still drive a nonzero exit (a user must opt
     // into `--unsafe-fixes` or act on the suggestion). This is the W1
     // exit-code contract.
-    items.iter().any(|i| {
-        matches!(
-            i.status,
-            FixStatus::Skipped(_) | FixStatus::Suggested { .. } | FixStatus::Unfixable
-        )
+    items.iter().any(|i| match &i.status {
+        // A baseline-grandfathered violation (`fix --baseline`) is intentionally
+        // not fixed -- like a baseline-suppressed `check` finding, it is NOT
+        // unresolved and must not drive a nonzero exit. Every OTHER skip means the
+        // error still stands.
+        FixStatus::Skipped(reason) => !reason.starts_with(BASELINED_SKIP_PREFIX),
+        FixStatus::Suggested { .. } | FixStatus::Unfixable => true,
+        FixStatus::Applied(_) => false,
     })
 }
 
@@ -269,6 +279,39 @@ mod tests {
         };
         assert!(r.has_unfixable_errors());
         assert!(!r.has_unfixable_warnings());
+    }
+
+    #[test]
+    fn has_unfixable_errors_false_for_a_baselined_skip_but_true_for_a_plain_one() {
+        // W4: a baseline-grandfathered violation is a BENIGN skip -- it must not
+        // count as unresolved, so `fix --baseline` exits 0 with only grandfathered
+        // findings left. Every OTHER error-level skip still means the error stands.
+        let grandfathered = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::Skipped(format!(
+                    "{BASELINED_SKIP_PREFIX} grandfathered"
+                ))],
+            )],
+        };
+        assert!(
+            !grandfathered.has_unfixable_errors(),
+            "a baselined skip must be benign for the exit code"
+        );
+        let plain = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::Skipped("size limit; not fixed".into())],
+            )],
+        };
+        assert!(
+            plain.has_unfixable_errors(),
+            "a non-baselined error-level skip still stands"
+        );
     }
 
     #[test]

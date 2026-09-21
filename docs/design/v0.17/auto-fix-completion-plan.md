@@ -79,12 +79,18 @@ warning or a v0.18 migration.
   proposed edits SARIF already does. alint's OWN `fix` keeps the full tier
   control (Unsafe fixes shown as suggestions, applied only with
   `--unsafe-fixes`). Docs (auto-fix.md 5.7 / §9, plan §7) reconciled.
-- **W4 - baseline-aware `fix`.** `fix` still rejects `--baseline` /
-  `--strict-baseline` / `--show-baselined` (main.rs). Make it baseline-aware:
-  skip suppressed findings, surface them as Suggestions, fix only new ones.
-  Scheduled "by Phase 2"; extends ADR-0006. (Sub-task: this INVERTS the
-  `baseline-flag-fix-rejected` trycmd added in `0bfe00b3` -- the reject test
-  becomes an accept/behaves test.)
+- **W4 - baseline-aware `fix`. CORE DONE (`--baseline`).** `fix --baseline` (and
+  a config `baseline:` key) now SKIPS the grandfathered findings and resolves only
+  NEW ones -- classified by reusing `baseline::apply` per rule (the fingerprint
+  includes the rule id, so per-rule == report-level), per fixpoint pass, on the
+  current content (identical to `check --baseline`). A grandfathered finding is a
+  benign `baselined` skip (new `BASELINED_SKIP_PREFIX`, excluded from
+  `has_unresolved`), so it does not fail the exit -- a converged `fix --baseline`
+  with only accepted debt left exits 0. Gates: `fix_baseline.rs` (fixes-new /
+  skips-grandfathered / converges-to-0 / rejects-strict-show) + a `report` unit.
+  **Follow-up:** `--strict-baseline` (stale-fail across a fixpoint) and
+  `--show-baselined` (suppressed visibility) for `fix` are still `check`-only
+  (loudly rejected, not silent). Extends ADR-0006.
 
 ### P1 - Phase 3 (metadata, VCS, repo-scale cross-file)
 
