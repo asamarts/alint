@@ -167,6 +167,44 @@ fn to_segs(loc: &NormalizedPath<'_>) -> Vec<PathSeg> {
         .collect()
 }
 
+/// Render located segments as a VALID single-node `JSONPath` for the post-edit
+/// re-query verify. `serde_json_path`'s `NormalizedPath` `Display` emits the RAW
+/// key (`['it's']`), which is INVALID `JSONPath` for a key containing `'`, `\`, or a
+/// control character -- `JsonPath::parse` then fails and the safe fix is wrongly
+/// demoted to a Suggestion that never applies (audit 2026-09-20). Escape each name
+/// per RFC 9535's single-quoted string rules so the query round-trips.
+fn segs_to_query(segs: &[PathSeg]) -> String {
+    use std::fmt::Write as _;
+    let mut q = String::from("$");
+    for seg in segs {
+        match seg {
+            PathSeg::Key(k) => {
+                q.push_str("['");
+                for c in k.chars() {
+                    match c {
+                        '\'' => q.push_str("\\'"),
+                        '\\' => q.push_str("\\\\"),
+                        '\u{08}' => q.push_str("\\b"),
+                        '\t' => q.push_str("\\t"),
+                        '\n' => q.push_str("\\n"),
+                        '\u{0C}' => q.push_str("\\f"),
+                        '\r' => q.push_str("\\r"),
+                        c if (c as u32) < 0x20 => {
+                            let _ = write!(q, "\\u{:04x}", c as u32);
+                        }
+                        c => q.push(c),
+                    }
+                }
+                q.push_str("']");
+            }
+            PathSeg::Index(i) => {
+                let _ = write!(q, "[{i}]");
+            }
+        }
+    }
+    q
+}
+
 /// Whether `value` is a scalar (the only shape `set_value` overwrites at tier).
 fn is_scalar(value: &Value) -> bool {
     matches!(
@@ -502,19 +540,21 @@ impl Fixer for StructuredFixer {
                                 content,
                             },
                             applicability: self.applicability,
-                            // Verify THIS node (its normalized path), not the whole
+                            // Verify THIS node (its own path), not the whole
                             // `matches:` query. A `fix --baseline` deliberately leaves
                             // grandfathered siblings non-matching, so an
                             // all-selected-nodes-match verify (over `self.path_src`)
                             // would demote this legitimate new-node edit to a
                             // Suggestion. Per-node scoping also isolates one bad
-                            // rewrite to its own edit under a plain `fix`. The
-                            // normalized path round-trips through `JsonPath::parse`
-                            // (RFC 9535), and the splice changes only the scalar
-                            // value, so the node stays at the same path.
+                            // rewrite to its own edit under a plain `fix`. Build the
+                            // query with `segs_to_query` (RFC 9535 escaping), NOT
+                            // `NormalizedPath::to_string()` -- the latter emits raw
+                            // keys and fails to parse for keys with `'`/`\`/controls,
+                            // which would silently demote the fix. The splice changes
+                            // only the scalar value, so the node stays at this path.
                             verify: EditVerifier::Structured {
                                 format: self.format,
-                                query: node.location().to_string(),
+                                query: segs_to_query(&segs),
                                 expect: ExpectedValue::Matches(matches.clone()),
                             },
                             isolation_group: None,
@@ -1130,5 +1170,37 @@ mod tests {
             2,
             "both non-compliant nodes are rewritten (fix-all fallback)"
         );
+    }
+
+    #[test]
+    fn segs_to_query_round_trips_special_keys() {
+        // The per-node verify re-queries this path; a key with `'`, `\`, a control
+        // char, a quote, unicode, or empty must produce a PARSEABLE JSONPath that
+        // re-resolves to the node -- else `JsonPath::parse` fails and the safe fix
+        // is silently demoted (audit 2026-09-20).
+        for key in [
+            "normal",
+            "it's",
+            "back\\slash",
+            "tab\tkey",
+            "quote\"dq",
+            "café",
+            "",
+            "$.weird[0]",
+        ] {
+            let mut m = serde_json::Map::new();
+            m.insert(key.to_string(), Value::String("x".into()));
+            let doc = Value::Object(m);
+            let q = segs_to_query(&[PathSeg::Key(key.to_string())]);
+            let jp = JsonPath::parse(&q)
+                .unwrap_or_else(|e| panic!("query {q:?} for key {key:?} must parse: {e}"));
+            let nodes = jp.query(&doc);
+            assert_eq!(
+                nodes.iter().count(),
+                1,
+                "query {q:?} must resolve key {key:?} to exactly one node"
+            );
+            assert_eq!(nodes.iter().next().and_then(|v| v.as_str()), Some("x"));
+        }
     }
 }
