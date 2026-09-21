@@ -552,6 +552,14 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
         // default and advertised (or omitted) fixes `fix` would not (audit HIGH,
         // 2026-09-20). Inert for a plain `check` (no fix derivation runs).
         .with_fix_size_limit(loaded.fix_size_limit);
+    // When a baseline is active, make the engine baseline-aware so the
+    // `stage_fixes`-based proposed-edit derivation (for a fix-carrying format)
+    // advertises fixes ONLY for the live (new) findings, never grandfathered ones.
+    // Inert for `engine.run` (check uses no fix baseline), so a plain `check
+    // --baseline` is unaffected.
+    if let Some(bp) = &effective_baseline {
+        engine = engine.with_fix_baseline(load_baseline(bp)?);
+    }
     let changed_active = match changed.resolve(path)? {
         Some(set) => {
             engine = engine.with_changed_paths(set);
@@ -611,13 +619,13 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
 
     // The machine formats that carry the concrete proposed fix: SARIF
     // (`result.fixes[]`), `agent` (always), and `json` (behind `--include-fixes`).
-    // Only Safe fixes are attached (`attach_proposed_edits` gates on `is_fixable`),
-    // per the tier decision. The compute re-reads each fixable file, so it is
+    // Only Safe fixes are attached (derived from the engine's single-pass compose
+    // at the Safe threshold). The compute runs the fix pass in stage mode, so it is
     // scoped to a run that actually asks for fixes.
     if matches!(format, Format::Sarif | Format::Agent)
         || (format == Format::Json && cli.include_fixes)
     {
-        alint_core::attach_proposed_edits(&engine, &mut report, path);
+        alint_core::attach_proposed_edits(&engine, &mut report, path, &index);
     }
 
     let (mut out, opts) = render_env(cli)?;

@@ -9,23 +9,27 @@
 //! Copilot-based — so this targets other SARIF consumers.)
 //!
 //! **Fidelity is the invariant.** The advertised fix MUST equal what `alint
-//! fix` actually writes. So [`attach_proposed_edits`] does NOT trust the raw
-//! output of `collect_edits`/`fix_edit`; it runs edits through the SAME pipeline
-//! the fix pass uses ([`located_fix::apply_file_edits`] at the `Safe` threshold,
-//! plus the `fix_size_limit` guard) and advertises only the edits that
-//! **survive** it — tier-filtered, overlap-skipped, and post-splice
-//! **verified/demoted**. An edit the fix pass would demote (e.g. a
-//! `remove_value` batch that can only partially remove, which alint refuses
-//! all-or-nothing) or overlap-skip is therefore NOT advertised, so a consumer
-//! can never apply a change alint itself declines.
+//! fix` actually writes. So [`attach_proposed_edits`] does NOT re-derive the
+//! edits itself (a hand-rolled re-derivation drifted -- it advertised a second
+//! whole-file fixer's edit in the wrong coordinate frame, and let a located +
+//! whole-file pair overlap, both corrupting on apply -- audit 2026-09-21).
+//! Instead it runs the engine's OWN single-pass compose ([`Engine::stage_fixes`],
+//! the same pass `alint fix --diff` runs) at the `Safe` threshold, and expresses
+//! each changed file's (original -> composed) delta as one minimal replacement in
+//! the ORIGINAL file's coordinate frame. Cross-rule overlaps are deconflicted,
+//! whole-file normalizers are composed, and tier / verify demotion are applied --
+//! exactly as `fix` does -- so a consumer can never apply a change alint declines.
 //!
-//! Scope: **located** fixers (`set_value` / `remove_value` / `replace`) map
-//! their surviving byte-range [`FixEdit::ReplaceRange`]s to source regions;
-//! **whole-file** normalizers ([`FixEdit::SetContent`]) become a *minimal*
-//! changed span (so independent same-file fixes compose, as the located ones
-//! do); **create** fixers ([`FixEdit::CreateFile`]) an insertion. File deletion
-//! / rename / chmod ([`FixEdit::DeleteFile`] / [`FixEdit::RenameFile`] /
-//! [`FixEdit::SetMode`]) edit artifact *existence* / name / mode, which SARIF
+//! Fidelity caveat (single-pass, shared with `--diff`): a file that needs a SECOND
+//! fix pass (e.g. a located `set_value` that a whole-file normalizer defers within
+//! one pass) advertises only the FIRST pass's change -- a valid, non-corrupting
+//! subset, completed by a re-run, never a wrong or overlapping edit.
+//!
+//! Scope: in-place content changes ([`StagedKind::Modify`]) become a minimal
+//! changed span; **create** fixers ([`FixEdit::CreateFile`]) an insertion (derived
+//! directly, since a create composes with nothing and its violation has no path).
+//! File deletion / rename / chmod ([`FixEdit::DeleteFile`] / [`FixEdit::RenameFile`]
+//! / [`FixEdit::SetMode`]) edit artifact *existence* / name / mode, which SARIF
 //! `fix`es cannot express, so they carry no proposed edit.
 //!
 //! Runs only when a fix-carrying format asks (the CLI gates it on `--format
@@ -35,11 +39,10 @@ use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use crate::engine::Engine;
-use crate::located_fix::{self, LocatedEdit, LocatedOutcome};
+use crate::engine::{Engine, StagedKind};
 use crate::report::Report;
-use crate::rule::{Applicability, FixEdit, Violation};
-use crate::walker::read_capped_or_skip;
+use crate::rule::{Applicability, FixEdit};
+use crate::walker::FileIndex;
 
 /// A 1-based source region `[start, end)` following SARIF's convention:
 /// `start_line`/`start_column` are the first character of the region;
@@ -242,183 +245,58 @@ fn whole_file_edit_to_proposed(orig: &[u8], edit: &FixEdit) -> Option<ProposedEd
     }
 }
 
-/// Read a file for proposed-edit computation, applying the SAME guards the fix
-/// pass does: skip a non-regular file or one over `fix_limit` (so a fix a bare
-/// `alint fix` would skip is not advertised), and bound the read. `None` = no
-/// fix.
-fn read_fixable_file(abs: &Path, fix_limit: Option<u64>) -> Option<Vec<u8>> {
-    let meta = std::fs::metadata(abs).ok()?;
-    if !meta.is_file() {
-        return None; // refuse a FIFO / dir / symlink-to-special (TOCTOU vs the walk)
-    }
-    if fix_limit.is_some_and(|limit| meta.len() > limit) {
-        return None; // over fix_size_limit: `alint fix` skips it, so advertise nothing
-    }
-    read_capped_or_skip(abs, meta.len())
-}
-
 /// Attach the concrete fixes alint would make to every fixable finding in
-/// `report`, reading files under `root`. Populates
+/// `report`, reading files under `root` against `index`. Populates
 /// [`Violation::proposed_edits`](crate::Violation); leaves untouched (empty) any
-/// non-fixable finding, any finding whose surviving-edit set is empty (the fix
-/// pass would demote/skip it), and any fixer with no content-replacement form
-/// (delete / rename / chmod).
+/// non-fixable finding, any finding the fix pass would demote/skip, and any fixer
+/// with no content-replacement form (delete / rename / chmod).
 ///
-/// Edits are derived PER FILE, exactly as `alint fix` composes them, so the
-/// surfaces advertise what `fix` would write and nothing it would skip:
-/// `located_proposed_edits` batches every located rule's edits for a file into
-/// one overlap-deconflicting + verifying pass (cross-rule overlaps are dropped,
-/// as `fix` drops them), and `whole_file_proposed_edits` threads the bytes
-/// through a file's whole-file normalizers in config order (each sees the
-/// previous one's output). Each surviving/incremental edit attaches to the first
-/// fixable violation of the rule that produced it, for that file; later ones stay
-/// empty so the same fix is not rendered twice. (A rare file touched by BOTH a
-/// located and a whole-file fixer has their mutual composition unmodeled here;
-/// `fix` still composes it.)
+/// The in-place content edits are derived from the engine's OWN single-pass
+/// compose -- [`Engine::stage_fixes`], the same pass `alint fix --diff` runs -- so
+/// the surfaces advertise EXACTLY what `fix` writes: cross-rule overlaps are
+/// deconflicted, whole-file normalizers are composed, and a located/whole-file
+/// clash defers as `fix` defers, ALL in the ORIGINAL file's coordinate frame. A
+/// hand-rolled per-file re-derivation drifted -- it advertised a second whole-file
+/// fixer's edit in the intermediate buffer's coordinates (corrupting unrelated
+/// bytes on apply) and let a located + whole-file pair overlap (audit
+/// CRITICAL/HIGH 2026-09-21). The composed change for a file is one minimal
+/// replacement, attached to the first fixable violation for that file.
+///
+/// CREATE fixers ([`FixEdit::CreateFile`]) are the exception: a create is a fresh
+/// file, not composed with anything this pass, and its violation carries no path,
+/// so it is derived directly from `fix_edit` and keyed by result index.
 // NOTE (`--changed`): the fix pass demotes an edit that would write OUTSIDE the
-// changed set (`writes_outside_changed`); this routine does not consult it.
-// Reachable divergence needs a Safe, path-bearing, full-index fixer, of which
-// none ship today (per-file rules are confined to the changed set, so their fix
-// target is always in scope; the full-index fixers are `file_exists` (path-less
-// create) and the Unsafe `file_remove`). If such a fixer is added, thread the
-// changed set through here so SARIF does not advertise a fix `fix --changed`
-// would decline.
-pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) {
-    let fix_limit = engine.fix_size_limit();
-
-    // Advertised edits keyed by the rule result they belong to. A path-bearing
-    // finding keys on (result index, file); a create fixer's finding carries no
-    // path, so it keys on the result index alone.
-    let mut by_rule_file: BTreeMap<(usize, PathBuf), Vec<ProposedEdit>> = BTreeMap::new();
-    let mut by_create_rule: BTreeMap<usize, Vec<ProposedEdit>> = BTreeMap::new();
-
-    located_proposed_edits(engine, report, root, fix_limit, &mut by_rule_file);
-    whole_file_proposed_edits(
-        engine,
-        report,
-        root,
-        fix_limit,
-        &mut by_rule_file,
-        &mut by_create_rule,
-    );
-
-    // Attach each rule's edits to its FIRST fixable violation for the file (a
-    // create rule's to its first pathless fixable violation); later findings for
-    // the same (rule, file) stay empty so the same fix is not rendered twice.
-    for (ri, rr) in report.results.iter_mut().enumerate() {
-        let mut done: HashSet<PathBuf> = HashSet::new();
-        let mut create_done = false;
-        for v in &mut rr.violations {
-            if !v.is_fixable {
+// changed set; `stage_fixes` is NOT run with the changed set here, so a Safe,
+// path-bearing, full-index fixer whose target is out of scope could be advertised.
+// None ship today (per-file rules are confined to the changed set; the full-index
+// fixers are `file_exists` (path-less create) and the Unsafe `file_remove`). If
+// such a fixer is added, thread the changed set into this stage.
+pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, index: &FileIndex) {
+    // In-place content changes, composed exactly as `fix` composes them (one
+    // single-pass compose; the `--diff` fidelity caveat about multi-pass cascades
+    // applies here identically). Best-effort: a hard error -> no advertised fixes.
+    let mut modify: BTreeMap<PathBuf, ProposedEdit> = BTreeMap::new();
+    if let Ok((_, staged)) = engine.stage_fixes(root, index, Applicability::Safe) {
+        for sf in staged {
+            // Creates handled below; delete / rename / chmod carry no text region.
+            if !matches!(sf.kind, StagedKind::Modify) {
                 continue;
             }
-            if let Some(p) = v.path.as_deref() {
-                let rel = p.to_path_buf();
-                if done.contains(&rel) {
-                    continue;
-                }
-                if let Some(pes) = by_rule_file.get(&(ri, rel.clone())) {
-                    v.proposed_edits.clone_from(pes);
-                    done.insert(rel);
-                }
-            } else if !create_done {
-                if let Some(pes) = by_create_rule.get(&ri) {
-                    v.proposed_edits.clone_from(pes);
-                    create_done = true;
-                }
+            if let Some(pe) = whole_file_edit_to_proposed(
+                &sf.old,
+                &FixEdit::SetContent {
+                    path: sf.path.clone(),
+                    content: sf.new,
+                },
+            ) {
+                modify.insert(sf.path, pe);
             }
         }
     }
-}
 
-/// Located fixers, batched ACROSS rules per file. Gather every located rule's
-/// edits for a file into ONE batch (each tagged with its rule's result index) and
-/// run the SAME per-file overlap-deconflict + verify the fix pass uses, so two
-/// located rules whose spans overlap never advertise edits `alint fix` would skip
-/// (audit CRITICAL, 2026-09-20). Each surviving edit is attributed back to the
-/// rule that produced it. The file is read ONCE so every rule's byte offsets index
-/// the same buffer, exactly as the fix pass's per-file batch does.
-fn located_proposed_edits(
-    engine: &Engine,
-    report: &Report,
-    root: &Path,
-    fix_limit: Option<u64>,
-    out: &mut BTreeMap<(usize, PathBuf), Vec<ProposedEdit>>,
-) {
-    let mut files: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
-    let mut batches: BTreeMap<PathBuf, Vec<LocatedEdit>> = BTreeMap::new();
-    for (ri, rr) in report.results.iter().enumerate() {
-        let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
-            continue;
-        };
-        if !fixer.collects_located_edits() {
-            continue;
-        }
-        let mut per_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
-        for v in rr.violations.iter().filter(|v| v.is_fixable) {
-            if let Some(p) = v.path.as_deref() {
-                per_file.entry(p.to_path_buf()).or_default().push(v.clone());
-            }
-        }
-        for (rel, vs) in per_file {
-            if !files.contains_key(&rel) {
-                let Some(b) = read_fixable_file(&root.join(&rel), fix_limit) else {
-                    continue; // over-limit / unreadable: `fix` skips it too
-                };
-                files.insert(rel.clone(), b);
-            }
-            let edits = fixer.collect_edits(&vs, &rel, &files[&rel], root);
-            let batch = batches.entry(rel).or_default();
-            for ce in edits {
-                let idx = batch.len();
-                batch.push(LocatedEdit {
-                    rule_index: ri,
-                    violation_index: idx,
-                    collected: ce,
-                });
-            }
-        }
-    }
-    for (rel, batch) in batches {
-        let bytes = &files[&rel];
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            continue; // byte offsets map to line/col only over valid UTF-8
-        };
-        let (_, outcomes) = located_fix::apply_file_edits(bytes, batch, Applicability::Safe);
-        for (le, outcome) in outcomes {
-            if outcome != LocatedOutcome::Applied {
-                continue;
-            }
-            if let Some(pe) = located_edit_to_proposed(bytes, text, &le.collected.edit) {
-                out.entry((le.rule_index, rel.clone()))
-                    .or_default()
-                    .push(pe);
-            }
-        }
-    }
-}
-
-/// Whole-file fixers, composed per file. Thread the file bytes through each
-/// whole-file NORMALIZER in result (config) order so a fixer sees the previous
-/// one's output -- as the fix pass's compose buffer does -- and advertise each
-/// fixer's INCREMENTAL change; a fixer whose finding an earlier one already
-/// resolved advertises nothing (audit HIGH, 2026-09-20). CREATE fixers (a
-/// violation with no path -- the file does not exist yet) are standalone
-/// insertions, keyed by result index.
-///
-/// A file touched by BOTH a located and a whole-file fixer is a rare edge these
-/// two passes derive independently (each against the original bytes), so their
-/// mutual composition is not modeled here; `alint fix` still composes them.
-fn whole_file_proposed_edits(
-    engine: &Engine,
-    report: &Report,
-    root: &Path,
-    fix_limit: Option<u64>,
-    out: &mut BTreeMap<(usize, PathBuf), Vec<ProposedEdit>>,
-    creates_out: &mut BTreeMap<usize, Vec<ProposedEdit>>,
-) {
-    let mut per_file: BTreeMap<PathBuf, Vec<(usize, Violation)>> = BTreeMap::new();
-    let mut creates: Vec<(usize, Violation)> = Vec::new();
+    // Create fixers: standalone, keyed by result index (their violation has no
+    // path; a create composes with nothing this pass).
+    let mut creates: BTreeMap<usize, ProposedEdit> = BTreeMap::new();
     for (ri, rr) in report.results.iter().enumerate() {
         let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
             continue;
@@ -426,46 +304,43 @@ fn whole_file_proposed_edits(
         if fixer.collects_located_edits() {
             continue;
         }
-        for v in rr.violations.iter().filter(|v| v.is_fixable) {
-            match v.path.as_deref() {
-                Some(p) => per_file
-                    .entry(p.to_path_buf())
-                    .or_default()
-                    .push((ri, v.clone())),
-                None => creates.push((ri, v.clone())),
+        for v in rr
+            .violations
+            .iter()
+            .filter(|v| v.is_fixable && v.path.is_none())
+        {
+            if let Some(edit) = fixer.fix_edit(v, &[], root) {
+                if let Some(pe) = whole_file_edit_to_proposed(&[], &edit) {
+                    creates.entry(ri).or_insert(pe);
+                }
             }
         }
     }
-    for (rel, items) in per_file {
-        let Some(mut cur) = read_fixable_file(&root.join(&rel), fix_limit) else {
-            continue;
-        };
-        for (ri, v) in items {
-            let Some(fixer) = engine.fixer_for(&report.results[ri].rule_id) else {
+
+    // Attach a file's composed edit to its FIRST fixable path-bearing violation
+    // (across all rules -- the fix belongs to the file); a create rule's edit to
+    // its first pathless fixable violation. `done_*` keep each fix rendered once.
+    let mut done_files: HashSet<PathBuf> = HashSet::new();
+    let mut done_creates: HashSet<usize> = HashSet::new();
+    for (ri, rr) in report.results.iter_mut().enumerate() {
+        for v in &mut rr.violations {
+            if !v.is_fixable {
                 continue;
-            };
-            let Some(edit) = fixer.fix_edit(&v, &cur, root) else {
-                continue;
-            };
-            if let Some(pe) = whole_file_edit_to_proposed(&cur, &edit) {
-                out.entry((ri, rel.clone())).or_default().push(pe);
             }
-            // Advance the composed bytes so the next whole-file fixer sees this
-            // one's output (the compose-buffer fixpoint the fix pass runs).
-            if let FixEdit::SetContent { content, .. } = &edit {
-                cur.clone_from(content);
+            if let Some(p) = v.path.as_deref() {
+                let rel = p.to_path_buf();
+                if !done_files.contains(&rel) {
+                    if let Some(pe) = modify.get(&rel) {
+                        v.proposed_edits = vec![pe.clone()];
+                        done_files.insert(rel);
+                    }
+                }
+            } else if !done_creates.contains(&ri) {
+                if let Some(pe) = creates.get(&ri) {
+                    v.proposed_edits = vec![pe.clone()];
+                    done_creates.insert(ri);
+                }
             }
-        }
-    }
-    for (ri, v) in creates {
-        let Some(fixer) = engine.fixer_for(&report.results[ri].rule_id) else {
-            continue;
-        };
-        let Some(edit) = fixer.fix_edit(&v, &[], root) else {
-            continue;
-        };
-        if let Some(pe) = whole_file_edit_to_proposed(&[], &edit) {
-            creates_out.entry(ri).or_default().push(pe);
         }
     }
 }

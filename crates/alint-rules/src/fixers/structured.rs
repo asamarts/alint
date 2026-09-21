@@ -240,12 +240,12 @@ impl Fixer for StructuredFixer {
             // `collect_edits` gates on the SAME predicate, so check and fix agree.
             StructuredOp::Set(want) => self.set_value_is_statically_applicable(want),
             // `remove_value` is advertised fixable only for a format that HAS a
-            // removal resolver at all. JSON/YAML defer object-member removal
-            // (comma surgery), so their removal declines on EVERY document -- a
-            // statically-knowable never-appliable case, so `check` must not
-            // promise it (else it advertises a fix `fix` can never apply, every
-            // time). For a format that DOES resolve removals, whether a given
-            // matched node can be deleted stays document-dependent (the resolver
+            // removal resolver at all. All shipped structured formats now do (JSON
+            // and YAML object-member removal -- comma/newline surgery -- landed, so
+            // `format_supports_removal` is true across the board today; a future
+            // format without a resolver would decline statically here so `check`
+            // never promises a fix `fix` can never apply). Whether a given matched
+            // node can actually be deleted stays document-dependent (the resolver
             // declines a repeated-block / array-parent node, or the XML document
             // root -- deleting it would empty the file); those surface at fix time
             // as `skipped`/`suggested`, never a corruption. So `check` reports

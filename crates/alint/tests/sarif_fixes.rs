@@ -57,6 +57,84 @@ fn check_json(dir: &Path, extra: &[&str]) -> serde_json::Value {
     })
 }
 
+/// 1-based (line, col) -> byte offset in `bytes` (UTF-8). Columns count Unicode
+/// scalars; a leading BOM at offset 0 is not a column (matching `byte_to_line_col`).
+/// An `end_column` one past a line's last scalar (SARIF's exclusive convention,
+/// which for a region ending at a `\n` lands one past that newline on its line)
+/// maps to the byte AFTER the newline.
+fn region_to_byte(bytes: &[u8], line: usize, col: usize) -> usize {
+    let text = std::str::from_utf8(bytes).expect("utf8");
+    let (mut cur_line, mut cur_col) = (1usize, 1usize);
+    for (idx, ch) in text.char_indices() {
+        if cur_line == line && cur_col == col {
+            return idx;
+        }
+        if idx == 0 && ch == '\u{feff}' {
+            continue;
+        }
+        if ch == '\n' {
+            if cur_line == line && col == cur_col + 1 {
+                return idx + ch.len_utf8(); // one past the newline
+            }
+            cur_line += 1;
+            cur_col = 1;
+        } else {
+            cur_col += 1;
+        }
+    }
+    bytes.len()
+}
+
+/// A `region` JSON object -> its `(start_byte, end_byte)` in `bytes`.
+fn region_bytes(bytes: &[u8], r: &serde_json::Value) -> (usize, usize) {
+    let u = |k: &str| usize::try_from(r[k].as_u64().unwrap()).unwrap();
+    (
+        region_to_byte(bytes, u("start_line"), u("start_column")),
+        region_to_byte(bytes, u("end_line"), u("end_column")),
+    )
+}
+
+/// THE fidelity invariant, tested directly: applying every advertised
+/// `proposed_edit` (agent format) for `file` to `original` reproduces EXACTLY what
+/// `alint fix` writes -- robust to the edit representation (minimal insert vs
+/// value-span replace vs composed span). Returns the advertised edit count.
+fn assert_fidelity(dir: &Path, file: &str, original: &[u8]) -> usize {
+    // What `alint fix` writes (a copy of the same config + file).
+    let fixdir = tempfile::tempdir().unwrap();
+    std::fs::copy(dir.join(".alint.yml"), fixdir.path().join(".alint.yml")).unwrap();
+    std::fs::write(fixdir.path().join(file), original).unwrap();
+    let out = Command::new(alint_bin())
+        .args(["fix", "."])
+        .current_dir(fixdir.path())
+        .output()
+        .expect("spawn alint fix");
+    assert!(matches!(out.status.code(), Some(0 | 1)));
+    let fixout = std::fs::read(fixdir.path().join(file)).unwrap();
+    // The advertised edits, converted to byte splices.
+    let agent = check_json(dir, &["--format", "agent"]);
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for v in agent["violations"].as_array().unwrap() {
+        for e in v["proposed_edit"].as_array().into_iter().flatten() {
+            if e["path"] == file {
+                let (s, en) = region_bytes(original, &e["region"]);
+                edits.push((s, en, e["inserted"].as_str().unwrap().to_string()));
+            }
+        }
+    }
+    let n = edits.len();
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0)); // apply descending so offsets stay valid
+    let mut buf = original.to_vec();
+    for (s, en, ins) in edits {
+        buf.splice(s..en, ins.bytes().collect::<Vec<_>>());
+    }
+    assert_eq!(
+        String::from_utf8_lossy(&buf),
+        String::from_utf8_lossy(&fixout),
+        "applying advertised edits must reproduce `alint fix` for {file}"
+    );
+    n
+}
+
 /// W3b: the machine formats carry a `proposed_edit` (source region + replacement)
 /// -- `agent` ALWAYS, `json` only under `--include-fixes` -- with the same
 /// Safe-only edit SARIF advertises. Drives the real binary + the CLI flag gating.
@@ -86,9 +164,10 @@ fn agent_and_json_carry_proposed_edit_per_the_include_fixes_flag() {
 
     // agent: always-on (mirrors its always-on fix_command).
     let agent = check_json(dir.path(), &["--format", "agent"]);
-    let pe = &agent["violations"][0]["proposed_edit"][0];
-    assert_eq!(pe["inserted"], "\"v2.0\"");
-    assert_eq!(pe["region"]["start_line"], 3);
+    assert!(
+        !agent["violations"][0]["proposed_edit"].is_null(),
+        "agent must carry proposed_edit with no flag"
+    );
 
     // json WITHOUT the flag: no proposed_edit (attach didn't run).
     let plain = check_json(dir.path(), &["--format", "json"]);
@@ -97,12 +176,19 @@ fn agent_and_json_carry_proposed_edit_per_the_include_fixes_flag() {
         "json must not carry proposed_edit without --include-fixes"
     );
 
-    // json --include-fixes: present, same Safe-only edit.
+    // json --include-fixes: present.
     let with = check_json(dir.path(), &["--format", "json", "--include-fixes"]);
-    let pe2 = &with["results"][0]["violations"][0]["proposed_edit"][0];
-    assert_eq!(pe2["inserted"], "\"v2.0\"");
-    assert_eq!(pe2["region"]["start_line"], 3);
-    assert_eq!(pe2["region"]["end_column"], 17);
+    assert!(
+        !with["results"][0]["violations"][0]["proposed_edit"].is_null(),
+        "json --include-fixes must carry proposed_edit"
+    );
+
+    // ...and the advertised edit, applied, reproduces `alint fix`.
+    assert_fidelity(
+        dir.path(),
+        "app.json",
+        b"{\n  \"deps\": {\n    \"bad\": \"2.0\"\n  }\n}\n",
+    );
 }
 
 /// A `replace` fix on a `json_path_matches` rule (a located fixer) renders a
@@ -145,23 +231,25 @@ fn sarif_carries_a_located_replace_fix_with_line_column_region() {
     let changes = &result["fixes"][0]["artifactChanges"];
     assert_eq!(changes[0]["artifactLocation"]["uri"], "app.json");
     let replacements = changes[0]["replacements"].as_array().unwrap();
-    // Exactly one replacement: the compliant `ok` node is skipped, not rewritten.
+    // Exactly one replacement: the compliant `ok` node is not rewritten.
     assert_eq!(replacements.len(), 1);
+    // The change is a 1-based line/column span on the violating line 4.
+    assert_eq!(replacements[0]["deletedRegion"]["startLine"], 4);
 
-    let region = &replacements[0]["deletedRegion"];
-    assert_eq!(region["startLine"], 4);
-    assert_eq!(region["startColumn"], 12);
-    assert_eq!(region["endLine"], 4);
-    assert_eq!(region["endColumn"], 17);
-    assert_eq!(replacements[0]["insertedContent"]["text"], "\"v2.0\"");
+    // And the advertised deletedRegion + insertedContent, applied, reproduce
+    // `alint fix` (checked via the agent surface, which derives the same edits).
+    assert_fidelity(
+        dir.path(),
+        "app.json",
+        b"{\n  \"deps\": {\n    \"ok\": \"v9\",\n    \"bad\": \"2.0\"\n  }\n}\n",
+    );
 }
 
-/// Fidelity regression (audit 2026-09-20): when a `*_path_matches` file has
-/// MULTIPLE failing nodes, the machine surfaces must advertise EVERY edit `alint
-/// fix` writes, not just the first. The located `replace` fixer correlates its
-/// edits to the violation SET (W4), so `attach_proposed_edits` must hand it ALL of
-/// the file's fixable violations at once; feeding one at a time returned only that
-/// violation's edit and advertised 1 fix where `fix` writes N.
+/// Fidelity regression (audit 2026-09-20): a `*_path_matches` file with MULTIPLE
+/// failing nodes must advertise a fix that, APPLIED, reproduces exactly what
+/// `alint fix` writes for every node -- not a subset. (The edit is derived from
+/// the engine's composed pass, so it is one minimal span covering all three nodes
+/// rather than three separate edits; the aggregate is faithful.)
 #[test]
 fn machine_surfaces_advertise_every_edit_fix_would_write() {
     let dir = tempfile::tempdir().unwrap();
@@ -185,51 +273,16 @@ fn machine_surfaces_advertise_every_edit_fix_would_write() {
         "{\n  \"deps\": {\n    \"a\": \"1.0\",\n    \"b\": \"2.0\",\n    \"c\": \"3.0\"\n  }\n}\n";
     std::fs::write(dir.path().join("app.json"), original).unwrap();
 
-    // SARIF: collect every replacement across all results/fixes/changes.
+    // The advertised edit(s), applied, reproduce EXACTLY what `alint fix` writes
+    // for all three nodes -- the composed change is one minimal span rather than
+    // three separate edits, but the aggregate is faithful.
+    let n = assert_fidelity(dir.path(), "app.json", original.as_bytes());
+    assert!(n >= 1, "a multi-node fixable file must advertise a fix");
+    // SARIF carries the same composed fix.
     let sarif = check_sarif(dir.path());
-    let mut sarif_ins: Vec<String> = sarif["runs"][0]["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|r| r["fixes"].as_array().into_iter().flatten())
-        .flat_map(|f| f["artifactChanges"].as_array().into_iter().flatten())
-        .flat_map(|c| c["replacements"].as_array().into_iter().flatten())
-        .map(|rep| rep["insertedContent"]["text"].as_str().unwrap().to_string())
-        .collect();
-    sarif_ins.sort();
-    assert_eq!(
-        sarif_ins,
-        vec!["\"v1.0\"", "\"v2.0\"", "\"v3.0\""],
-        "SARIF must advertise all three node fixes"
-    );
-
-    // agent: every proposed_edit across all violations.
-    let agent = check_json(dir.path(), &["--format", "agent"]);
-    let mut agent_ins: Vec<String> = agent["violations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|v| v["proposed_edit"].as_array().into_iter().flatten())
-        .map(|pe| pe["inserted"].as_str().unwrap().to_string())
-        .collect();
-    agent_ins.sort();
-    assert_eq!(
-        agent_ins,
-        vec!["\"v1.0\"", "\"v2.0\"", "\"v3.0\""],
-        "agent must advertise all three node fixes"
-    );
-
-    // FIDELITY: what `alint fix` actually writes equals the advertised edits.
-    let fixed = Command::new(alint_bin())
-        .args(["fix", "."])
-        .current_dir(dir.path())
-        .output()
-        .expect("spawn alint");
-    assert_eq!(fixed.status.code(), Some(0));
-    let after = std::fs::read_to_string(dir.path().join("app.json")).unwrap();
     assert!(
-        after.contains("\"v1.0\"") && after.contains("\"v2.0\"") && after.contains("\"v3.0\""),
-        "fix must write exactly the advertised edits; got:\n{after}"
+        !sarif["runs"][0]["results"][0]["fixes"].is_null(),
+        "SARIF must advertise the fix"
     );
 }
 
@@ -508,4 +561,96 @@ fn whole_file_normalizers_are_advertised_composed() {
     assert_eq!(edits[0]["region"]["start_line"], 2);
     assert_eq!(edits[0]["region"]["start_column"], 1);
     assert_eq!(edits[0]["region"]["end_column"], 3);
+}
+
+/// CRITICAL regression (audit 2026-09-21): when an earlier whole-file fixer SHIFTS
+/// byte offsets (a prepended header), a later fixer's advertised edit must be in
+/// the ORIGINAL file's coordinate frame, not the intermediate buffer's -- else
+/// applying it corrupts unrelated content (here it deleted bytes from `SECRETXY`).
+/// The composed derivation puts every edit in the original frame.
+#[test]
+fn whole_file_edits_advertised_in_the_original_coordinate_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: hdr\n",
+            "    kind: file_header\n",
+            "    paths: \"**/*.txt\"\n",
+            "    pattern: \"^HEADER\"\n",
+            "    level: error\n",
+            "    fix: { file_prepend: { content: \"HEADER\\n\" } }\n",
+            "  - id: no-ws\n",
+            "    kind: no_trailing_whitespace\n",
+            "    paths: \"**/*.txt\"\n",
+            "    level: error\n",
+            "    fix: { file_trim_trailing_whitespace: {} }\n",
+        ),
+    )
+    .unwrap();
+    // Line 1 has trailing whitespace (no-ws fires); line 2 is unrelated content the
+    // buggy intermediate-frame edit corrupted.
+    let original = b"aaaa   \nSECRETXY\n";
+    std::fs::write(dir.path().join("f.txt"), original).unwrap();
+    assert_fidelity(dir.path(), "f.txt", original);
+}
+
+/// HIGH regression (audit 2026-09-21): a located `set_value` and a whole-file
+/// normalizer on ONE file must not advertise OVERLAPPING edits that corrupt on
+/// apply. The composed derivation (`stage_fixes`) deconflicts/defers exactly as
+/// `fix` does per pass, so the advertised set is a single, non-corrupting edit. (It
+/// is the single-pass result -- `set_value` defers to the next pass when `no_ws`
+/// buffers the file -- matching `fix --diff`'s documented single-pass preview.)
+#[test]
+fn located_and_whole_file_on_one_file_do_not_corrupt() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: set-k\n",
+            "    kind: properties_path_equals\n",
+            "    paths: \"**/*.properties\"\n",
+            "    path: \"$.key\"\n",
+            "    equals: \"newval\"\n",
+            "    level: error\n",
+            "    fix: { set_value: { applicability: safe } }\n",
+            "  - id: no-ws\n",
+            "    kind: no_trailing_whitespace\n",
+            "    paths: \"**/*.properties\"\n",
+            "    level: error\n",
+            "    fix: { file_trim_trailing_whitespace: {} }\n",
+        ),
+    )
+    .unwrap();
+    let original = b"key=oldval   \n";
+    std::fs::write(dir.path().join("app.properties"), original).unwrap();
+
+    // At most one advertised edit for the file (no overlapping pair), and applying
+    // it yields a VALID, non-corrupting result -- the trailing whitespace trimmed,
+    // never the old overlap corruption (`key=newval` with the final newline eaten).
+    let agent = check_json(dir.path(), &["--format", "agent"]);
+    let edits: Vec<_> = agent["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|v| v["proposed_edit"].as_array().into_iter().flatten())
+        .collect();
+    assert!(edits.len() <= 1, "no overlapping pair; got {edits:?}");
+    let mut buf = original.to_vec();
+    for e in &edits {
+        let (s, en) = region_bytes(original, &e["region"]);
+        buf.splice(
+            s..en,
+            e["inserted"].as_str().unwrap().bytes().collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(
+        String::from_utf8_lossy(&buf),
+        "key=oldval\n",
+        "applying the advertised edit is a valid (trimmed) subset, never corrupt"
+    );
 }
