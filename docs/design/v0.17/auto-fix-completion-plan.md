@@ -1,6 +1,6 @@
 # v0.17 auto-fix: completion plan and priorities
 
-Status: **living plan** as of 2026-09-20. Branch: `phase-0-fix-engine` (the
+Status: **living plan** as of 2026-09-21. Branch: `phase-0-fix-engine` (the
 long-lived v0.17 integration line). This document is the SSOT for what remains to
 cut v0.17, written after an arc-wide adversarial audit; it supersedes the
 warn-then-flip `file_remove` sections of
@@ -24,12 +24,18 @@ warn-then-flip `file_remove` sections of
 - **W3 (SARIF `result.fixes[]`)**: `check --format sarif` advertises the
   concrete fix each fixable finding would apply, derived from the REAL pipeline
   (so it equals what `alint fix` writes).
+- **Phase 3 `chmod` (first metadata op)**: `fix: { chmod: {} }` on
+  `executable_bit` / `shebang_has_executable` sets or clears the Unix `0o111`
+  bits, preserving every other bit. Safe by default; Unix-only; `fix --diff`
+  renders a git-style `old mode`/`new mode` pair. Drawn by the property net
+  (single_fixable strategy + a planted shebang trigger) so convergence /
+  idempotence / dry-run purity are asserted across 3000 cases.
 
-**15 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+**16 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
 `file_remove`, `file_rename`, `file_prepend`, `file_append`,
 `file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
 `file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
-`file_strip_zero_width`.
+`file_strip_zero_width`, `chmod`.
 
 **Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
 up under adversarial probing (no silent corruption or uncaught over-deletion was
@@ -123,11 +129,20 @@ warning or a v0.18 migration.
 
 ### P1 - Phase 3 (metadata, VCS, repo-scale cross-file)
 
-Ops not started (though the core plumbing is pre-laid: the `FixEdit::SetMode`
-edit variant is defined + dispatched, and the empty `SPAWNING_FIX_OPS` SSOT +
-its emptiness gate already exist). Ops: `chmod` (`SetMode`; `executable_bit`, `shebang_has_executable`,
-`executable_has_shebang`); **`git_untrack`** (the FIRST spawning fix op -> W2's
-spawning-refusal gate goes live: `SPAWNING_FIX_OPS` + the parity gate + the
+- **`chmod`. DONE (commit `9643891e`).** `SetMode` on `executable_bit`
+  (direction from `require:`) and `shebang_has_executable` (always +x);
+  `executable_has_shebang` stays fix-less (ambiguous target). The `ChmodFixer`
+  does the `set_permissions` itself and records `StagedKind::Chmod` for the
+  git-style `--diff`; dry-run / `--diff` short-circuit before touching disk.
+  Gates: property net (single_fixable + planted `_trig/needsx.sh`), 2 e2e
+  scenarios (+x and -x), unit tests (set/clear/idempotent, dry-run, stage,
+  fix_edit), fix_spec cases + `w2_content_injecting_ssot` (`chmod` in
+  FIXED_BEHAVIOR_FIX_OPS) + facts.json (auto_fix_ops 16). No ruleset bytes, so
+  no W2 trust surface.
+
+Ops remaining (core plumbing pre-laid: the empty `SPAWNING_FIX_OPS` SSOT + its
+emptiness gate already exist). **`git_untrack`** (the FIRST spawning fix op ->
+W2's spawning-refusal gate goes live: `SPAWNING_FIX_OPS` + the parity gate + the
 `extends:`-refusal canary, R-SPAWNGATE); a user `command`-backed fix;
 `sync_from` (Unsafe whole-file copy) + cross-file create-and-register + cross-file
 value propagation (multi-file transaction with an injectable-writer test seam);
