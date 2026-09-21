@@ -79,18 +79,32 @@ warning or a v0.18 migration.
   proposed edits SARIF already does. alint's OWN `fix` keeps the full tier
   control (Unsafe fixes shown as suggestions, applied only with
   `--unsafe-fixes`). Docs (auto-fix.md 5.7 / §9, plan §7) reconciled.
-- **W4 - baseline-aware `fix`. CORE DONE (`--baseline`).** `fix --baseline` (and
-  a config `baseline:` key) now SKIPS the grandfathered findings and resolves only
-  NEW ones -- classified by reusing `baseline::apply` per rule (the fingerprint
-  includes the rule id, so per-rule == report-level), per fixpoint pass, on the
-  current content (identical to `check --baseline`). A grandfathered finding is a
-  benign `baselined` skip (new `BASELINED_SKIP_PREFIX`, excluded from
+- **W4 - baseline-aware `fix`. DONE + AUDIT-HARDENED (`--baseline`).** `fix
+  --baseline` (and a config `baseline:` key) SKIPS the grandfathered findings and
+  resolves only NEW ones -- classified by reusing `baseline::apply` per rule (the
+  fingerprint includes the rule id, so per-rule == report-level), per fixpoint
+  pass, on the current content (identical to `check --baseline`). A grandfathered
+  finding is a benign `baselined` skip (`SkipKind::Baselined`, excluded from
   `has_unresolved`), so it does not fail the exit -- a converged `fix --baseline`
-  with only accepted debt left exits 0. Gates: `fix_baseline.rs` (fixes-new /
-  skips-grandfathered / converges-to-0 / rejects-strict-show) + a `report` unit.
+  with only accepted debt left exits 0. Gates: `fix_baseline.rs` (10 tests) +
+  `report` units.
   **Follow-up:** `--strict-baseline` (stale-fail across a fixpoint) and
   `--show-baselined` (suppressed visibility) for `fix` are still `check`-only
   (loudly rejected, not silent). Extends ADR-0006.
+  - **Independent adversarial audit (2 agents, 2026-09-20) -> 5 findings fixed:**
+    (1) CRITICAL: the located `StructuredFixer` ignored its `violations` arg and
+    re-derived every failing node, so `fix --baseline` REWROTE grandfathered
+    `*_path_matches` nodes -- fixed with count-aware correlation on the shared
+    `matches_baseline_key` + per-node (not whole-query) verify. (2) HIGH / (3)
+    MEDIUM: the skip exit-code class was sniffed from a forgeable reason PREFIX
+    (`baselined:` / `fix error:`), so a filename could flip the exit code -- now
+    a structural `SkipKind`. (4) MEDIUM: three whole-file-fixer rules
+    (no_zero_width_chars, no_bidi_controls, max_consecutive_blank_lines) lacked a
+    path `baseline_key` and stripped grandfathered occurrences -- now keyed on the
+    path (the file is the unit of accepted debt). (5) LOW: a debug tripwire now
+    asserts the `violation_key` no-collision invariant the fixpoint merge relies
+    on. All five have regression gates; the baseline classifier and per-rule ==
+    report-level equivalence audited CLEAN.
 
 ### P1 - Phase 3 (metadata, VCS, repo-scale cross-file)
 
@@ -132,6 +146,12 @@ The core algorithms held and the highest-value gaps are filled; these remain
 - json rule-level vs SARIF/agent per-violation fixability consistency doc-test.
 - Gate hardening: make `ALL_OP_NAMES` type-derived (e.g. `strum::EnumCount`) so a
   new `FixSpec` variant can't slip past the fix-coverage gate.
+- W4 baseline-fix interactions the audit verified CLEAN but left un-gated (heavier
+  fixtures, no behavior gap): non-convergence WITH a baseline present -> exit 2
+  (baselined skips must not fake convergence); `--changed` + `--baseline`
+  precedence (a grandfathered-and-out-of-scope finding surfaces as the benign
+  baselined skip, not an out-of-scope Suggestion); a baselined skip surviving a
+  multi-pass cascade exactly once (not dropped, not duplicated).
 
 ### Engineering follow-ups
 
