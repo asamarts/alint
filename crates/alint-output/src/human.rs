@@ -496,7 +496,7 @@ pub fn write_fix_human(
                         summary.clone(),
                     )
                 }
-                FixStatus::Skipped(reason) => (
+                FixStatus::Skipped { reason, .. } => (
                     opts.glyphs.bullet,
                     format!("{dim}"),
                     format!("{dim:#}"),

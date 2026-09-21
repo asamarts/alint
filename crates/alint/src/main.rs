@@ -1121,8 +1121,11 @@ fn cmd_fix(
                         .iter()
                         .filter(|i| match &i.status {
                             FixStatus::Applied(_) => true,
-                            FixStatus::Skipped(reason) => {
-                                reason.starts_with(alint_core::FIX_ERROR_PREFIX)
+                            // Classify on the structural kind, not the reason text:
+                            // a benign residual on a file named `fix error:*` must
+                            // not be kept as an error (audit F2, 2026-09-20).
+                            FixStatus::Skipped { kind, .. } => {
+                                *kind == alint_core::SkipKind::Errored
                             }
                             _ => false,
                         })

@@ -48,7 +48,9 @@ pub use level::Level;
 pub use pathsafe::{derive_target, normalize_confined};
 pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_line_col};
 pub use registry::{RuleBuilder, RuleRegistry};
-pub use report::{FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report};
+pub use report::{
+    FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report, SkipKind,
+};
 pub use rule::{
     Applicability, CollectedEdit, Context, EditVerifier, ExpectedValue, FixContext, FixEdit,
     FixOutcome, Fixer, GitTrackedMode, GroupId, PerFileRule, ReadForFix, Rule, RuleResult,

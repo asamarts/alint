@@ -3,18 +3,17 @@ use std::sync::Arc;
 use crate::level::Level;
 use crate::rule::{FixEdit, RuleResult, Violation};
 
-/// Prefix the engine puts on a [`FixStatus::Skipped`] reason when a fix was
-/// *attempted but errored* (a fixer `Err`, or a failed write) -- as opposed to
-/// a declined or unfixable skip. [`FixReport::had_fix_error`] recognizes it and
-/// `Engine::fix` produces it; kept here as the single source of truth so the
-/// two never drift.
+/// Human-output prefix the engine puts on an errored `Skipped` reason (a fixer
+/// `Err`, or a failed write). Classification is now STRUCTURAL
+/// ([`SkipKind::Errored`], via [`FixStatus::errored`]); this is only the display
+/// convention so `fix` output still reads `fix error: ...`. Kept as the single
+/// source of truth for that text.
 pub const FIX_ERROR_PREFIX: &str = "fix error:";
 
-/// Prefix on a [`FixStatus::Skipped`] reason marking a violation the baseline
-/// GRANDFATHERS (`fix --baseline`): it is intentionally not fixed, so -- like a
-/// baseline-suppressed `check` finding -- it does NOT count as unresolved and
-/// does not drive a nonzero exit. `Engine::fix` emits it; [`has_unresolved`]
-/// excludes it. Single source of truth so the two never drift.
+/// Human-output prefix on a baseline-grandfathered `Skipped` reason
+/// (`fix --baseline`). Classification is now STRUCTURAL ([`SkipKind::Baselined`],
+/// via [`FixStatus::baselined`]); this is only the display convention. Single
+/// source of truth for that text.
 pub const BASELINED_SKIP_PREFIX: &str = "baselined:";
 
 #[derive(Debug, Clone)]
@@ -75,13 +74,39 @@ pub struct FixItem {
     pub status: FixStatus,
 }
 
+/// Why a fixable violation was left unresolved by a `Skipped` outcome. This
+/// classification is STRUCTURAL -- never sniffed from the human `reason` string.
+/// The reason is frequently built from a file path (`"{path} exceeds ..."`), so a
+/// path could forge a sentinel prefix and flip the exit code (audit F1/F2,
+/// 2026-09-20): a file named `baselined:*` made a genuinely-unresolved error skip
+/// look grandfathered (exit 0 instead of 1), and one named `fix error:*` made a
+/// benign residual look like a fix error (exit 1 instead of 0). Keying off this
+/// enum makes the class unforgeable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipKind {
+    /// The fixer declined (already-satisfied, missing path, unresolvable span,
+    /// over `fix_size_limit`, below the tier threshold, an isolation conflict).
+    /// The violation STANDS -> a nonzero exit at `level: error`.
+    Declined,
+    /// A fix was ATTEMPTED and hit a genuine I/O error (a read-only target,
+    /// ENOSPC, a failed re-read). Recognized by [`FixReport::had_fix_error`];
+    /// the violation stands.
+    Errored,
+    /// Grandfathered by a `fix --baseline` run -- intentionally not fixed, like a
+    /// baseline-suppressed `check` finding. Benign: NOT unresolved, never a
+    /// nonzero exit.
+    Baselined,
+}
+
 #[derive(Debug, Clone)]
 pub enum FixStatus {
     /// The fix was applied (or would be, under `--dry-run`).
     Applied(String),
-    /// The rule has a fixer but it declined to act (e.g. file already
-    /// exists, violation lacked a path).
-    Skipped(String),
+    /// The rule has a fixer but the fix was not applied; `reason` is the human
+    /// one-liner and `kind` classifies it (see [`SkipKind`]). Construct via
+    /// [`FixStatus::declined`] / [`FixStatus::errored`] / [`FixStatus::baselined`]
+    /// so the class is set explicitly at every site.
+    Skipped { reason: String, kind: SkipKind },
     /// A fix is available but was NOT applied, so the violation stands: an
     /// `Unsafe` edit without `--unsafe-fixes`, a `Suggestion`-tier edit, or
     /// an edit whose post-edit verification failed (the engine declined to
@@ -97,6 +122,36 @@ pub enum FixStatus {
     Unfixable,
 }
 
+impl FixStatus {
+    /// A `Skipped` the fixer DECLINED (the violation stands). The common case.
+    pub fn declined(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
+            kind: SkipKind::Declined,
+        }
+    }
+
+    /// A `Skipped` for a fix that was ATTEMPTED and errored (I/O). The reason is
+    /// conventionally prefixed [`FIX_ERROR_PREFIX`] for human output, but
+    /// [`FixReport::had_fix_error`] classifies on the kind, not the text.
+    pub fn errored(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
+            kind: SkipKind::Errored,
+        }
+    }
+
+    /// A `Skipped` a `fix --baseline` run GRANDFATHERS (benign; never unresolved).
+    /// The reason is conventionally prefixed `BASELINED_SKIP_PREFIX` for output,
+    /// but the `has_unresolved` classifier keys on the kind, not the text.
+    pub fn baselined(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
+            kind: SkipKind::Baselined,
+        }
+    }
+}
+
 impl FixReport {
     pub fn applied(&self) -> usize {
         self.items()
@@ -106,7 +161,7 @@ impl FixReport {
 
     pub fn skipped(&self) -> usize {
         self.items()
-            .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+            .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
             .count()
     }
 
@@ -126,16 +181,22 @@ impl FixReport {
     }
 
     /// Whether any fix was *attempted and errored* (as opposed to declined or
-    /// unfixable). The engine reports a fixer error or a failed write as a
-    /// `Skipped` whose reason begins with `"fix error:"` (see `Engine::fix`);
-    /// this recognizes that convention. Used by `alint fix --fix-only`, which
-    /// otherwise exits 0: an errored fix is a real problem, a declined one is
-    /// the residual the flag is meant to suppress. The `FIX_ERROR_PREFIX`
-    /// constant is the shared source of truth for the marker.
+    /// unfixable). The engine records a fixer error or a failed write as a
+    /// `Skipped { kind: SkipKind::Errored, .. }` (see `Engine::fix`). Used by
+    /// `alint fix --fix-only`, which otherwise exits 0: an errored fix is a real
+    /// problem, a declined one is the residual the flag is meant to suppress.
+    /// Classifies on the structural kind, NOT the reason text -- a residual on a
+    /// file named `fix error:*` must not forge this (audit F2, 2026-09-20).
     #[must_use]
     pub fn had_fix_error(&self) -> bool {
         self.items().any(|i| {
-            matches!(&i.status, FixStatus::Skipped(reason) if reason.starts_with(FIX_ERROR_PREFIX))
+            matches!(
+                &i.status,
+                FixStatus::Skipped {
+                    kind: SkipKind::Errored,
+                    ..
+                }
+            )
         })
     }
 
@@ -165,9 +226,11 @@ fn has_unresolved(items: &[FixItem]) -> bool {
     items.iter().any(|i| match &i.status {
         // A baseline-grandfathered violation (`fix --baseline`) is intentionally
         // not fixed -- like a baseline-suppressed `check` finding, it is NOT
-        // unresolved and must not drive a nonzero exit. Every OTHER skip means the
-        // error still stands.
-        FixStatus::Skipped(reason) => !reason.starts_with(BASELINED_SKIP_PREFIX),
+        // unresolved and must not drive a nonzero exit. Every OTHER skip
+        // (declined, errored) means the error still stands. Classified on the
+        // structural kind, NOT the reason text -- a size-skip on a file named
+        // `baselined:*` must not forge benignity (audit F1, 2026-09-20).
+        FixStatus::Skipped { kind, .. } => *kind != SkipKind::Baselined,
         FixStatus::Suggested { .. } | FixStatus::Unfixable => true,
         FixStatus::Applied(_) => false,
     })
@@ -256,7 +319,7 @@ mod tests {
                     vec![
                         FixStatus::Applied("ok".into()),
                         FixStatus::Applied("ok".into()),
-                        FixStatus::Skipped("nope".into()),
+                        FixStatus::declined("nope"),
                     ],
                 ),
                 frr(
@@ -291,7 +354,7 @@ mod tests {
             results: vec![frr(
                 "a",
                 Level::Error,
-                vec![FixStatus::Skipped(format!(
+                vec![FixStatus::baselined(format!(
                     "{BASELINED_SKIP_PREFIX} grandfathered"
                 ))],
             )],
@@ -305,7 +368,7 @@ mod tests {
             results: vec![frr(
                 "a",
                 Level::Error,
-                vec![FixStatus::Skipped("size limit; not fixed".into())],
+                vec![FixStatus::declined("size limit; not fixed")],
             )],
         };
         assert!(
@@ -333,11 +396,7 @@ mod tests {
         // not `has_unfixable_errors` — severity gates the check.
         let r = FixReport {
             non_convergent: false,
-            results: vec![frr(
-                "a",
-                Level::Warning,
-                vec![FixStatus::Skipped("nope".into())],
-            )],
+            results: vec![frr("a", Level::Warning, vec![FixStatus::declined("nope")])],
         };
         assert!(!r.has_unfixable_errors());
         assert!(r.has_unfixable_warnings());
@@ -391,15 +450,15 @@ mod tests {
     }
 
     #[test]
-    fn had_fix_error_recognizes_the_error_prefix() {
-        // A fixer error / failed write is a Skipped whose reason starts with
-        // FIX_ERROR_PREFIX; a declined skip is not.
+    fn had_fix_error_recognizes_the_errored_kind() {
+        // A fixer error / failed write is a Skipped of kind `Errored`
+        // (FixStatus::errored); a declined skip is not.
         let errored = FixReport {
             non_convergent: false,
             results: vec![frr(
                 "a",
                 Level::Error,
-                vec![FixStatus::Skipped(format!(
+                vec![FixStatus::errored(format!(
                     "{FIX_ERROR_PREFIX} permission denied"
                 ))],
             )],
@@ -411,12 +470,80 @@ mod tests {
             results: vec![frr(
                 "a",
                 Level::Error,
-                vec![FixStatus::Skipped("already exists".into())],
+                vec![FixStatus::declined("already exists")],
             )],
         };
         assert!(
             !declined.had_fix_error(),
             "a declined skip is not a fix error"
+        );
+    }
+
+    #[test]
+    fn skip_classification_is_structural_not_reason_text() {
+        // Audit F1/F2 (2026-09-20): the skip class is the KIND, never a reason-text
+        // prefix. A skip reason is usually built from a file path, so a path could
+        // otherwise forge a sentinel and flip the exit code.
+
+        // F1: a DECLINED error-level skip whose reason merely STARTS WITH the
+        // literal `baselined:` (a file named `baselined:evil.txt`, size-skipped) is
+        // STILL unresolved -> exit 1, not the benign exit 0 a baselined skip gets.
+        let forged_baseline = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::declined(format!(
+                    "{BASELINED_SKIP_PREFIX}evil.txt is 40 bytes; exceeds fix_size_limit"
+                ))],
+            )],
+        };
+        assert!(
+            forged_baseline.has_unfixable_errors(),
+            "a declined skip stays unresolved even if its reason starts with `baselined:`"
+        );
+        // The genuinely baselined skip (kind) is benign despite the same prefix.
+        let real_baseline = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Error,
+                vec![FixStatus::baselined(format!(
+                    "{BASELINED_SKIP_PREFIX} grandfathered"
+                ))],
+            )],
+        };
+        assert!(!real_baseline.has_unfixable_errors());
+
+        // F2: a DECLINED skip whose reason STARTS WITH `fix error:` (a file named
+        // `fix error:big.txt`, size-skipped) is NOT a fix error -> `--fix-only`
+        // exit 0, not a spurious 1.
+        let forged_error = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Warning,
+                vec![FixStatus::declined(format!(
+                    "{FIX_ERROR_PREFIX}big.txt is 40 bytes; exceeds fix_size_limit"
+                ))],
+            )],
+        };
+        assert!(
+            !forged_error.had_fix_error(),
+            "a declined skip is not a fix error even if its reason starts with `fix error:`"
+        );
+        // The genuinely errored skip (kind) IS a fix error despite... no prefix at all.
+        let real_error = FixReport {
+            non_convergent: false,
+            results: vec![frr(
+                "a",
+                Level::Warning,
+                vec![FixStatus::errored("could not write: read-only file system")],
+            )],
+        };
+        assert!(
+            real_error.had_fix_error(),
+            "an errored-kind skip is a fix error regardless of its reason text"
         );
     }
 }

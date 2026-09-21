@@ -65,11 +65,11 @@ fn fix_exit_status_maps_the_fix_contract() {
         }],
     };
     let err_rule = || rule(Level::Error, FixStatus::Unfixable);
-    // A fix that was ATTEMPTED and errored (a `Skipped` carrying FIX_ERROR_PREFIX).
+    // A fix that was ATTEMPTED and errored (a `Skipped` of kind `Errored`).
     let fix_error = || {
         rule(
             Level::Warning,
-            FixStatus::Skipped(format!(
+            FixStatus::errored(format!(
                 "{} permission denied",
                 alint_core::FIX_ERROR_PREFIX
             )),
@@ -97,10 +97,7 @@ fn fix_exit_status_maps_the_fix_contract() {
     assert_eq!(
         fix_exit_status(
             &report(
-                vec![rule(
-                    Level::Error,
-                    FixStatus::Skipped("no applicable fix".into())
-                )],
+                vec![rule(Level::Error, FixStatus::declined("no applicable fix"))],
                 false
             ),
             false,

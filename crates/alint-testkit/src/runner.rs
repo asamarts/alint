@@ -355,7 +355,7 @@ fn assert_step(
             }
             if let Some(skipped) = &expect.skipped {
                 assert_fix_status(&prefix, "skipped", report, skipped, |s| {
-                    matches!(s, FixStatus::Skipped(_))
+                    matches!(s, FixStatus::Skipped { .. })
                 })?;
             }
             if let Some(suggested) = &expect.suggested {

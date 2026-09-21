@@ -1519,7 +1519,7 @@ impl Engine {
                             .into_iter()
                             .map(|s| FixItem {
                                 violation: s.violation,
-                                status: FixStatus::Skipped(format!(
+                                status: FixStatus::baselined(format!(
                                     "{} grandfathered by the baseline (not fixed; run without \
                                      --baseline to fix it, or re-run `alint baseline`)",
                                     crate::report::BASELINED_SKIP_PREFIX
@@ -1617,7 +1617,7 @@ impl Engine {
                             for v in file_violations {
                                 declined.push(FixItem {
                                     violation: v,
-                                    status: FixStatus::Skipped(reason.clone()),
+                                    status: FixStatus::declined(reason.clone()),
                                 });
                             }
                             continue;
@@ -1633,7 +1633,7 @@ impl Engine {
                             for v in file_violations {
                                 declined.push(FixItem {
                                     violation: v,
-                                    status: FixStatus::Skipped(format!(
+                                    status: FixStatus::errored(format!(
                                         "{FIX_ERROR_PREFIX} could not read {}: {e}",
                                         file.display()
                                     )),
@@ -1666,7 +1666,7 @@ impl Engine {
                         for v in file_violations {
                             declined.push(FixItem {
                                 violation: v,
-                                status: FixStatus::Skipped(format!(
+                                status: FixStatus::declined(format!(
                                     "{}: no applicable fix ({} declined)",
                                     file.display(),
                                     f.describe()
@@ -1717,7 +1717,7 @@ impl Engine {
                                 ),
                                 edit,
                             },
-                            None => FixStatus::Skipped(format!(
+                            None => FixStatus::declined(format!(
                                 "{} skipped: target is outside the --changed set",
                                 f.describe()
                             )),
@@ -1727,8 +1727,8 @@ impl Engine {
                     Some(f) if f.applicability().applies_at(threshold) => {
                         match f.apply(&v, &fix_ctx) {
                             Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
-                            Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
-                            Err(e) => FixStatus::Skipped(format!("{FIX_ERROR_PREFIX} {e}")),
+                            Ok(FixOutcome::Skipped(s)) => FixStatus::declined(s),
+                            Err(e) => FixStatus::errored(format!("{FIX_ERROR_PREFIX} {e}")),
                         }
                     }
                     // Available but not applied at this threshold: surface it
@@ -1753,7 +1753,7 @@ impl Engine {
                                 summary: format!("{}{hint}", f.describe()),
                                 edit,
                             },
-                            None => FixStatus::Skipped(format!(
+                            None => FixStatus::declined(format!(
                                 "{} is available but not applicable here",
                                 f.describe()
                             )),
@@ -1762,7 +1762,7 @@ impl Engine {
                     // A fixer whose tier neither applies nor is suggested here
                     // (`Never`) -- collected for provenance only.
                     Some(f) => {
-                        FixStatus::Skipped(format!("{} is not applied at this tier", f.describe()))
+                        FixStatus::declined(format!("{} is not applied at this tier", f.describe()))
                     }
                     None => FixStatus::Unfixable,
                 };
@@ -1885,7 +1885,7 @@ impl Engine {
                     // check subsumes it -- disjoint edits cannot cancel, so an
                     // unchanged file means every edit was an identity.
                     let status = if is_identity && matches!(status, FixStatus::Applied(_)) {
-                        FixStatus::Skipped(format!(
+                        FixStatus::declined(format!(
                             "{}: located edit at {range_key} left its span unchanged",
                             file.display()
                         ))
@@ -1958,7 +1958,7 @@ impl Engine {
                                 failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
                             });
                             if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
-                                item.status = FixStatus::Skipped(format!(
+                                item.status = FixStatus::errored(format!(
                                     "{FIX_ERROR_PREFIX} file could not be written"
                                 ));
                             }
@@ -2454,11 +2454,11 @@ fn located_status(
             },
             edit: edit.clone(),
         },
-        LocatedOutcome::SkippedConflict => FixStatus::Skipped(format!(
+        LocatedOutcome::SkippedConflict => FixStatus::declined(format!(
             "edit to {path} skipped: conflicts with another edit"
         )),
         LocatedOutcome::Dropped => {
-            FixStatus::Skipped(format!("edit to {path} not applicable at this tier"))
+            FixStatus::declined(format!("edit to {path} not applicable at this tier"))
         }
     }
 }
@@ -2900,7 +2900,7 @@ mod tests {
             .count();
         let skipped = items
             .iter()
-            .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+            .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
             .count();
         assert_eq!(
             applied, 1,
@@ -2955,7 +2955,7 @@ mod tests {
         assert_eq!(
             items
                 .iter()
-                .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
                 .count(),
             1
         );
@@ -3002,7 +3002,7 @@ mod tests {
             !items.is_empty()
                 && items
                     .iter()
-                    .all(|i| matches!(i.status, FixStatus::Skipped(_))),
+                    .all(|i| matches!(i.status, FixStatus::Skipped { .. })),
             "every identity edit reports Skipped, none Applied"
         );
     }
@@ -3041,7 +3041,7 @@ mod tests {
             "the size-skipped violation is reported once"
         );
         assert!(
-            matches!(items[0].status, FixStatus::Skipped(_)),
+            matches!(items[0].status, FixStatus::Skipped { .. }),
             "reported as a Skip, not Applied or silently dropped"
         );
         assert!(
@@ -3082,7 +3082,7 @@ mod tests {
         assert_eq!(
             items
                 .iter()
-                .filter(|i| matches!(i.status, FixStatus::Skipped(_)))
+                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
                 .count(),
             1
         );

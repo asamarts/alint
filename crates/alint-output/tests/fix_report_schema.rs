@@ -32,7 +32,7 @@ fn canonical_fix_report() -> FixReport {
                         violation: Violation::new("trailing whitespace on line 3")
                             .with_path(std::path::Path::new("CONTRIBUTING.md"))
                             .with_location(3, 1),
-                        status: FixStatus::Skipped("file no longer exists".into()),
+                        status: FixStatus::declined("file no longer exists"),
                     },
                 ],
             },
