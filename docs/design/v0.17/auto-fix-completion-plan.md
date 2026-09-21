@@ -30,12 +30,20 @@ warn-then-flip `file_remove` sections of
   renders a git-style `old mode`/`new mode` pair. Drawn by the property net
   (single_fixable strategy + a planted shebang trigger) so convergence /
   idempotence / dry-run purity are asserted across 3000 cases.
+- **Phase 3 `git_untrack` (first SPAWNING op -> the W2 spawn gate is LIVE)**:
+  `fix: { git_untrack: {} }` on `file_absent` runs `git rm --cached` to drop a
+  committed artifact from the index while keeping it on disk (converges with
+  `git_tracked_only: true`). Unsafe by default; refused from any non-top-level
+  source. The empty `SPAWNING_FIX_OPS` SSOT is now `["git_untrack"]`, wired to
+  `reject_spawning_fix_ops_in` (+ template / finalize / nested backstops) and both
+  R-SPAWNGATE tests (the parity gate + the RCE canary). An index-only op has no
+  worktree-diff form, so no `FixEdit` variant was needed.
 
-**16 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+**17 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
 `file_remove`, `file_rename`, `file_prepend`, `file_append`,
 `file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
 `file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
-`file_strip_zero_width`, `chmod`.
+`file_strip_zero_width`, `chmod`, `git_untrack`.
 
 **Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
 up under adversarial probing (no silent corruption or uncaught over-deletion was
@@ -140,13 +148,30 @@ warning or a v0.18 migration.
   FIXED_BEHAVIOR_FIX_OPS) + facts.json (auto_fix_ops 16). No ruleset bytes, so
   no W2 trust surface.
 
-Ops remaining (core plumbing pre-laid: the empty `SPAWNING_FIX_OPS` SSOT + its
-emptiness gate already exist). **`git_untrack`** (the FIRST spawning fix op ->
-W2's spawning-refusal gate goes live: `SPAWNING_FIX_OPS` + the parity gate + the
-`extends:`-refusal canary, R-SPAWNGATE); a user `command`-backed fix;
-`sync_from` (Unsafe whole-file copy) + cross-file create-and-register + cross-file
-value propagation (multi-file transaction with an injectable-writer test seam);
-`dir_create`; lockfile `relocate`. Risk: medium.
+- **`git_untrack`. DONE (commit `f0688643`).** The FIRST spawning fix op on
+  `file_absent`: `git rm --cached` via a new `alint_core::git::untrack_path`
+  (idempotent, `--` option-injection guard, non-git-repo skip). Unsafe by
+  default. **The W2 spawn gate is now LIVE**: `SPAWNING_FIX_OPS = ["git_untrack"]`
+  + `reject_spawning_fix_ops_in` (rules at every `require:` depth) +
+  `reject_spawning_fix_op_templates_in` + a `finalize` backstop, wired in
+  `loader.rs` (extends) and `nested.rs`. R-SPAWNGATE landed as TWO tests in two
+  files: the parity gate `coverage_audit_fix_spawn_gate.rs` (the fixer that
+  spawns == `SPAWNING_FIX_OPS`; the rule gate now skips `fixers/`) and the RCE
+  canary `crates/alint/tests/fix_spawn_gate.rs` (drives the real binary in `fix
+  --unsafe-fixes`; every smuggled vector refused, the tracked file stays tracked;
+  a positive control proves a trusted top-level git_untrack untracks). The W2
+  partition gate is now three-way (content / spawning / fixed). An index-only op
+  has no worktree-diff form, so no `FixEdit` variant was added. **Fast-follow:**
+  the optional `.gitignore` append (`gitignore: bool`, default true per the op
+  table) is deferred -- untrack alone converges; the append adds content-mutation
+  + `--diff`-hunk work worth its own increment.
+
+Ops remaining. A user `command`-backed fix (the SECOND spawning op; lifts the
+`command.rs` fix rejection, reuses the now-live `SPAWNING_FIX_OPS` gate; exempt
+from the rung-8 convergence requirement); `sync_from` (Unsafe whole-file copy) +
+cross-file create-and-register + cross-file value propagation (multi-file
+transaction with an injectable-writer test seam); `dir_create` (Safe); lockfile
+`relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 
