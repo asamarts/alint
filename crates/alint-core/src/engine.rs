@@ -1021,6 +1021,40 @@ impl Engine {
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
             let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
+            // F4 tripwire (audit 2026-09-20): the cross-pass merge below keys items
+            // by `violation_key`, which for a path-bearing, keyless violation
+            // collapses to `(rule_id, path)` (line/column/message ignored). Every
+            // SHIPPED fixable rule is safe: a multi-finding fixable rule
+            // (`*_path_matches`) sets a per-value `baseline_key` AND its
+            // identical-value findings are truly indistinguishable (no line), while
+            // the first-offender / whole-file rules emit one finding per file. A
+            // FUTURE multi-finding fixable rule that distinguishes its findings only
+            // by line/column/message under a COARSE (path) key would let one item
+            // silently supersede another in the merge. Fail loudly in debug/tests
+            // before it ships: within one rule result, two items whose violations
+            // differ must not share a `violation_key`.
+            #[cfg(debug_assertions)]
+            for rr in &report.results {
+                let mut seen: HashMap<String, (Option<usize>, Option<usize>, &str)> =
+                    HashMap::new();
+                for it in &rr.items {
+                    let id = (
+                        it.violation.line,
+                        it.violation.column,
+                        it.violation.message.as_ref(),
+                    );
+                    let key = Self::violation_key(&rr.rule_id, &it.violation);
+                    if let Some(prev) = seen.insert(key, id) {
+                        assert!(
+                            prev == id,
+                            "fixable rule {:?} emits distinct violations that collide on \
+                             violation_key ({prev:?} vs {id:?}); give them a distinguishing \
+                             baseline_key or the fixpoint merge will drop one (audit F4)",
+                            rr.rule_id
+                        );
+                    }
+                }
+            }
             let applied = report.applied();
             last_applied_rules = report
                 .results
@@ -1274,8 +1308,13 @@ impl Engine {
     /// `baseline_key`). It is NOT a termination device -- the byte-level fixpoint
     /// converges on "a pass applied nothing", not on this key -- so its coarseness
     /// (a path-bearing keyless violation keys on `(rule_id, path)`, message and
-    /// line ignored) is harmless here: it only decides which earlier report item a
-    /// later pass's item supersedes or which `Applied` outcome to lock.
+    /// line ignored) is harmless FOR SHIPPED RULES: it only decides which earlier
+    /// report item a later pass's item supersedes or which `Applied` outcome to
+    /// lock, and every fixable rule either emits one finding per `(rule_id, path)`
+    /// or (`*_path_matches`) sets a per-value `baseline_key` whose collisions are
+    /// truly identical findings. A future multi-finding fixable rule that
+    /// distinguishes findings only by line/message under a coarse key would break
+    /// that; the F4 tripwire in `fix` (the fixpoint driver) asserts it in debug.
     /// `file_bytes` is `None` (no re-read); the discriminator is the rule's
     /// `baseline_key` or, absent one, the path (or the message for a pathless
     /// violation).
