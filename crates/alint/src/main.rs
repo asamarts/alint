@@ -545,7 +545,13 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     let rule_count = entries.len();
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
-        .with_vars(loaded.vars);
+        .with_vars(loaded.vars)
+        // `check --format sarif/agent/json --include-fixes` runs
+        // `attach_proposed_edits`, which gates advertised fixes on the SAME
+        // `fix_size_limit` as `fix`; without this it silently used the 1 MiB
+        // default and advertised (or omitted) fixes `fix` would not (audit HIGH,
+        // 2026-09-20). Inert for a plain `check` (no fix derivation runs).
+        .with_fix_size_limit(loaded.fix_size_limit);
     let changed_active = match changed.resolve(path)? {
         Some(set) => {
             engine = engine.with_changed_paths(set);

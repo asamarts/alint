@@ -75,6 +75,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `trusted_extends:` (above). This retroactively affects `file_create` /
   `file_prepend` / `file_append` reached via a remote `extends:` (they previously
   auto-applied).
+- Baseline fingerprints for `no_zero_width_chars`, `no_bidi_controls`, and
+  `max_consecutive_blank_lines` now key on the file path (the file is the unit of
+  accepted debt), matching `no_trailing_whitespace`, so `alint fix --baseline`
+  never strips a grandfathered occurrence when a new one appears ahead of it. This
+  CHANGES those three rules' fingerprint: a baseline recorded by an older alint
+  will show a soft "stale entry" note for them on upgrade -- re-run `alint
+  baseline` to re-tighten. Other rules' baselines are unaffected.
 
 ### Fixed
 

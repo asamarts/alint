@@ -202,9 +202,22 @@ fn whole_file_edit_to_proposed(orig: &[u8], edit: &FixEdit) -> Option<ProposedEd
             }
             let text = std::str::from_utf8(orig).ok()?;
             let (range, inserted) = char_align(orig, byte_range, &byte_content)?;
+            let region = region_of(text, &range);
+            // A change with no LINE/COLUMN extent and no inserted text is
+            // inexpressible as a text region and applies to nothing -- notably a
+            // leading-BOM strip, whose deleted bytes both map to (1,1) because
+            // `byte_to_line_col` skips the BOM. Omit it rather than advertise an
+            // empty edit that tells a consumer "apply this" when applying is a
+            // no-op (audit MEDIUM, 2026-09-20). `alint fix` still strips it.
+            if region.start_line == region.end_line
+                && region.start_column == region.end_column
+                && inserted.is_empty()
+            {
+                return None;
+            }
             Some(ProposedEdit {
                 path: path.clone(),
-                region: region_of(text, &range),
+                region,
                 inserted,
             })
         }
@@ -251,14 +264,17 @@ fn read_fixable_file(abs: &Path, fix_limit: Option<u64>) -> Option<Vec<u8>> {
 /// pass would demote/skip it), and any fixer with no content-replacement form
 /// (delete / rename / chmod).
 ///
-/// A located fixer's `collect_edits` correlates its edits to the violation SET it
-/// is handed (W4), and a whole-file fixer's `fix_edit` describes the whole file,
-/// so a fixer's edits belong to the file, derived from ALL of the file's fixable
-/// violations. `collect_edits` therefore receives EVERY fixable violation for the
-/// `(rule, file)` at once -- exactly as the fix pass does -- so a multi-node file
-/// (e.g. `*_path_matches`) advertises every fix `alint fix` would write, not just
-/// the first. The resulting edits attach to the first fixable violation for that
-/// `(rule, file)`; later ones stay empty so the same fix is not rendered twice.
+/// Edits are derived PER FILE, exactly as `alint fix` composes them, so the
+/// surfaces advertise what `fix` would write and nothing it would skip:
+/// `located_proposed_edits` batches every located rule's edits for a file into
+/// one overlap-deconflicting + verifying pass (cross-rule overlaps are dropped,
+/// as `fix` drops them), and `whole_file_proposed_edits` threads the bytes
+/// through a file's whole-file normalizers in config order (each sees the
+/// previous one's output). Each surviving/incremental edit attaches to the first
+/// fixable violation of the rule that produced it, for that file; later ones stay
+/// empty so the same fix is not rendered twice. (A rare file touched by BOTH a
+/// located and a whole-file fixer has their mutual composition unmodeled here;
+/// `fix` still composes it.)
 // NOTE (`--changed`): the fix pass demotes an edit that would write OUTSIDE the
 // changed set (`writes_outside_changed`); this routine does not consult it.
 // Reachable divergence needs a Safe, path-bearing, full-index fixer, of which
@@ -269,100 +285,187 @@ fn read_fixable_file(abs: &Path, fix_limit: Option<u64>) -> Option<Vec<u8>> {
 // would decline.
 pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) {
     let fix_limit = engine.fix_size_limit();
-    let mut attached: HashSet<(String, PathBuf)> = HashSet::new();
 
-    for rr in &mut report.results {
-        let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
-            continue;
-        };
-        let located = fixer.collects_located_edits();
-        // Post-W4 a located fixer correlates its edits to the violation SET, so the
-        // derivation must hand `collect_edits` ALL of a file's fixable violations at
-        // once (as the fix pass does) -- one at a time returns only that
-        // violation's edit, so a multi-node file advertises fewer fixes than
-        // `alint fix` writes. Precompute per file before the mutable attach loop.
-        let file_violations: BTreeMap<PathBuf, Vec<Violation>> = if located {
-            let mut m: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
-            for v in rr.violations.iter().filter(|v| v.is_fixable) {
-                if let Some(p) = v.path.as_deref() {
-                    m.entry(p.to_path_buf()).or_default().push(v.clone());
-                }
-            }
-            m
-        } else {
-            BTreeMap::new()
-        };
+    // Advertised edits keyed by the rule result they belong to. A path-bearing
+    // finding keys on (result index, file); a create fixer's finding carries no
+    // path, so it keys on the result index alone.
+    let mut by_rule_file: BTreeMap<(usize, PathBuf), Vec<ProposedEdit>> = BTreeMap::new();
+    let mut by_create_rule: BTreeMap<usize, Vec<ProposedEdit>> = BTreeMap::new();
+
+    located_proposed_edits(engine, report, root, fix_limit, &mut by_rule_file);
+    whole_file_proposed_edits(
+        engine,
+        report,
+        root,
+        fix_limit,
+        &mut by_rule_file,
+        &mut by_create_rule,
+    );
+
+    // Attach each rule's edits to its FIRST fixable violation for the file (a
+    // create rule's to its first pathless fixable violation); later findings for
+    // the same (rule, file) stay empty so the same fix is not rendered twice.
+    for (ri, rr) in report.results.iter_mut().enumerate() {
+        let mut done: HashSet<PathBuf> = HashSet::new();
+        let mut create_done = false;
         for v in &mut rr.violations {
             if !v.is_fixable {
                 continue;
             }
-            if located {
-                let Some(path_arc) = v.path.clone() else {
+            if let Some(p) = v.path.as_deref() {
+                let rel = p.to_path_buf();
+                if done.contains(&rel) {
                     continue;
-                };
-                let rel: PathBuf = path_arc.as_ref().to_path_buf();
-                if attached.contains(&(rr.rule_id.to_string(), rel.clone())) {
-                    continue; // this file's edits already attached to an earlier finding
                 }
-                let Some(bytes) = read_fixable_file(&root.join(&rel), fix_limit) else {
-                    continue;
-                };
-                let Ok(text) = std::str::from_utf8(&bytes) else {
-                    continue; // byte offsets map to line/col only over valid UTF-8
-                };
-                // Run the SAME pipeline the fix pass uses, over ALL of this file's
-                // fixable violations, and keep only the edits that SURVIVE it
-                // (verify/overlap/tier), so SARIF advertises exactly what `alint
-                // fix` would write.
-                let batch: Vec<LocatedEdit> = fixer
-                    .collect_edits(
-                        file_violations.get(&rel).map_or(&[][..], Vec::as_slice),
-                        &rel,
-                        &bytes,
-                        root,
-                    )
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, ce)| LocatedEdit {
-                        rule_index: 0,
-                        violation_index: i,
-                        collected: ce,
-                    })
-                    .collect();
-                let (_, outcomes) =
-                    located_fix::apply_file_edits(&bytes, batch, Applicability::Safe);
-                let proposed: Vec<ProposedEdit> = outcomes
-                    .into_iter()
-                    .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
-                    .filter_map(|(le, _)| {
-                        located_edit_to_proposed(&bytes, text, &le.collected.edit)
-                    })
-                    .collect();
-                if !proposed.is_empty() {
-                    attached.insert((rr.rule_id.to_string(), rel));
-                    v.proposed_edits = proposed;
+                if let Some(pes) = by_rule_file.get(&(ri, rel.clone())) {
+                    v.proposed_edits.clone_from(pes);
+                    done.insert(rel);
                 }
-            } else {
-                // Whole-file normalizer or create fixer. A create fixer's
-                // violation carries no path (the file does not exist yet) -> read
-                // the empty state and take the target from the returned edit.
-                let bytes = match v.path.as_deref() {
-                    Some(p) => match read_fixable_file(&root.join(p), fix_limit) {
-                        Some(b) => b,
-                        None => continue, // over-limit / unreadable: no fix
-                    },
-                    None => Vec::new(),
-                };
-                let Some(edit) = fixer.fix_edit(v, &bytes, root) else {
-                    continue;
-                };
-                let Some(pe) = whole_file_edit_to_proposed(&bytes, &edit) else {
-                    continue;
-                };
-                if attached.insert((rr.rule_id.to_string(), pe.path.clone())) {
-                    v.proposed_edits = vec![pe];
+            } else if !create_done {
+                if let Some(pes) = by_create_rule.get(&ri) {
+                    v.proposed_edits.clone_from(pes);
+                    create_done = true;
                 }
             }
+        }
+    }
+}
+
+/// Located fixers, batched ACROSS rules per file. Gather every located rule's
+/// edits for a file into ONE batch (each tagged with its rule's result index) and
+/// run the SAME per-file overlap-deconflict + verify the fix pass uses, so two
+/// located rules whose spans overlap never advertise edits `alint fix` would skip
+/// (audit CRITICAL, 2026-09-20). Each surviving edit is attributed back to the
+/// rule that produced it. The file is read ONCE so every rule's byte offsets index
+/// the same buffer, exactly as the fix pass's per-file batch does.
+fn located_proposed_edits(
+    engine: &Engine,
+    report: &Report,
+    root: &Path,
+    fix_limit: Option<u64>,
+    out: &mut BTreeMap<(usize, PathBuf), Vec<ProposedEdit>>,
+) {
+    let mut files: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
+    let mut batches: BTreeMap<PathBuf, Vec<LocatedEdit>> = BTreeMap::new();
+    for (ri, rr) in report.results.iter().enumerate() {
+        let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
+            continue;
+        };
+        if !fixer.collects_located_edits() {
+            continue;
+        }
+        let mut per_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
+        for v in rr.violations.iter().filter(|v| v.is_fixable) {
+            if let Some(p) = v.path.as_deref() {
+                per_file.entry(p.to_path_buf()).or_default().push(v.clone());
+            }
+        }
+        for (rel, vs) in per_file {
+            if !files.contains_key(&rel) {
+                let Some(b) = read_fixable_file(&root.join(&rel), fix_limit) else {
+                    continue; // over-limit / unreadable: `fix` skips it too
+                };
+                files.insert(rel.clone(), b);
+            }
+            let edits = fixer.collect_edits(&vs, &rel, &files[&rel], root);
+            let batch = batches.entry(rel).or_default();
+            for ce in edits {
+                let idx = batch.len();
+                batch.push(LocatedEdit {
+                    rule_index: ri,
+                    violation_index: idx,
+                    collected: ce,
+                });
+            }
+        }
+    }
+    for (rel, batch) in batches {
+        let bytes = &files[&rel];
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            continue; // byte offsets map to line/col only over valid UTF-8
+        };
+        let (_, outcomes) = located_fix::apply_file_edits(bytes, batch, Applicability::Safe);
+        for (le, outcome) in outcomes {
+            if outcome != LocatedOutcome::Applied {
+                continue;
+            }
+            if let Some(pe) = located_edit_to_proposed(bytes, text, &le.collected.edit) {
+                out.entry((le.rule_index, rel.clone()))
+                    .or_default()
+                    .push(pe);
+            }
+        }
+    }
+}
+
+/// Whole-file fixers, composed per file. Thread the file bytes through each
+/// whole-file NORMALIZER in result (config) order so a fixer sees the previous
+/// one's output -- as the fix pass's compose buffer does -- and advertise each
+/// fixer's INCREMENTAL change; a fixer whose finding an earlier one already
+/// resolved advertises nothing (audit HIGH, 2026-09-20). CREATE fixers (a
+/// violation with no path -- the file does not exist yet) are standalone
+/// insertions, keyed by result index.
+///
+/// A file touched by BOTH a located and a whole-file fixer is a rare edge these
+/// two passes derive independently (each against the original bytes), so their
+/// mutual composition is not modeled here; `alint fix` still composes them.
+fn whole_file_proposed_edits(
+    engine: &Engine,
+    report: &Report,
+    root: &Path,
+    fix_limit: Option<u64>,
+    out: &mut BTreeMap<(usize, PathBuf), Vec<ProposedEdit>>,
+    creates_out: &mut BTreeMap<usize, Vec<ProposedEdit>>,
+) {
+    let mut per_file: BTreeMap<PathBuf, Vec<(usize, Violation)>> = BTreeMap::new();
+    let mut creates: Vec<(usize, Violation)> = Vec::new();
+    for (ri, rr) in report.results.iter().enumerate() {
+        let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
+            continue;
+        };
+        if fixer.collects_located_edits() {
+            continue;
+        }
+        for v in rr.violations.iter().filter(|v| v.is_fixable) {
+            match v.path.as_deref() {
+                Some(p) => per_file
+                    .entry(p.to_path_buf())
+                    .or_default()
+                    .push((ri, v.clone())),
+                None => creates.push((ri, v.clone())),
+            }
+        }
+    }
+    for (rel, items) in per_file {
+        let Some(mut cur) = read_fixable_file(&root.join(&rel), fix_limit) else {
+            continue;
+        };
+        for (ri, v) in items {
+            let Some(fixer) = engine.fixer_for(&report.results[ri].rule_id) else {
+                continue;
+            };
+            let Some(edit) = fixer.fix_edit(&v, &cur, root) else {
+                continue;
+            };
+            if let Some(pe) = whole_file_edit_to_proposed(&cur, &edit) {
+                out.entry((ri, rel.clone())).or_default().push(pe);
+            }
+            // Advance the composed bytes so the next whole-file fixer sees this
+            // one's output (the compose-buffer fixpoint the fix pass runs).
+            if let FixEdit::SetContent { content, .. } = &edit {
+                cur.clone_from(content);
+            }
+        }
+    }
+    for (ri, v) in creates {
+        let Some(fixer) = engine.fixer_for(&report.results[ri].rule_id) else {
+            continue;
+        };
+        let Some(edit) = fixer.fix_edit(&v, &[], root) else {
+            continue;
+        };
+        if let Some(pe) = whole_file_edit_to_proposed(&[], &edit) {
+            creates_out.entry(ri).or_default().push(pe);
         }
     }
 }

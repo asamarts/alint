@@ -410,3 +410,102 @@ fn sarif_omits_fixes_for_a_finding_with_no_fixer() {
         "a no-fixer finding must not carry a fixes key"
     );
 }
+
+/// CRITICAL regression (audit 2026-09-20): two located rules whose spans OVERLAP
+/// on one file must be DECONFLICTED across rules (as `alint fix`'s per-file batch
+/// does), so the surfaces never advertise two overlapping edits that corrupt on
+/// apply. `$..a` (remove the outer block) and `$..b` (remove the nested one)
+/// overlap; only the surviving outer edit is advertised.
+#[test]
+fn cross_rule_overlapping_located_edits_are_deconflicted() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: no-a\n",
+            "    kind: xml_path_absent\n",
+            "    paths: \"**/*.xml\"\n",
+            "    path: \"$..a\"\n",
+            "    level: error\n",
+            "    fix: { remove_value: { applicability: safe } }\n",
+            "  - id: no-b\n",
+            "    kind: xml_path_absent\n",
+            "    paths: \"**/*.xml\"\n",
+            "    path: \"$..b\"\n",
+            "    level: error\n",
+            "    fix: { remove_value: { applicability: safe } }\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("n.xml"),
+        "<root>\n  <a>\n    <b>x</b>\n  </a>\n</root>\n",
+    )
+    .unwrap();
+
+    let sarif = check_sarif(dir.path());
+    let repls: Vec<_> = sarif["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["fixes"].as_array().into_iter().flatten())
+        .flat_map(|f| f["artifactChanges"].as_array().into_iter().flatten())
+        .flat_map(|c| c["replacements"].as_array().into_iter().flatten())
+        .collect();
+    assert_eq!(
+        repls.len(),
+        1,
+        "cross-rule overlapping edits must deconflict to the single survivor; got {repls:?}"
+    );
+    // The survivor removes the OUTER <a> block (lines 2-4), matching `alint fix`.
+    assert_eq!(repls[0]["deletedRegion"]["startLine"], 2);
+    assert_eq!(repls[0]["deletedRegion"]["endLine"], 4);
+}
+
+/// HIGH regression (audit 2026-09-20): whole-file normalizers are advertised
+/// COMPOSED (each sees the previous one's output), so `no_trailing_whitespace` +
+/// `final_newline` on a last line of trailing spaces with no final newline
+/// advertises only the trim -- NOT a spurious `final_newline` edit `fix` skips
+/// (after the trim the file already ends in a newline).
+#[test]
+fn whole_file_normalizers_are_advertised_composed() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: no-ws\n",
+            "    kind: no_trailing_whitespace\n",
+            "    paths: \"**/*.txt\"\n",
+            "    level: error\n",
+            "    fix: { file_trim_trailing_whitespace: {} }\n",
+            "  - id: fnl\n",
+            "    kind: final_newline\n",
+            "    paths: \"**/*.txt\"\n",
+            "    level: error\n",
+            "    fix: { file_append_final_newline: {} }\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("f.txt"), "a\n  ").unwrap();
+
+    let agent = check_json(dir.path(), &["--format", "agent"]);
+    let edits: Vec<_> = agent["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|v| v["proposed_edit"].as_array().into_iter().flatten())
+        .collect();
+    assert_eq!(
+        edits.len(),
+        1,
+        "composed: only the trim is advertised, not a spurious newline; got {edits:?}"
+    );
+    assert_eq!(edits[0]["inserted"], "");
+    assert_eq!(edits[0]["region"]["start_line"], 2);
+    assert_eq!(edits[0]["region"]["start_column"], 1);
+    assert_eq!(edits[0]["region"]["end_column"], 3);
+}
