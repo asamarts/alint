@@ -65,11 +65,26 @@ warning or a v0.18 migration.
 
 ### P0 - Finish Phase 2's tail (W3 remainder + W4)
 
-- **W3b - `agent` / `json` `proposed_edit`. DONE.** `agent` (always) and `json`
-  (behind the new `--include-fixes` flag) now carry a `proposed_edit` array
-  (`{path, region, inserted}`) -- the same Safe-only edits SARIF advertises,
-  reusing the format-agnostic `attach_proposed_edits`. Gate:
+- **W3b - `agent` / `json` `proposed_edit`. DONE + AUDIT-HARDENED.** `agent`
+  (always) and `json` (behind the new `--include-fixes` flag) now carry a
+  `proposed_edit` array (`{path, region, inserted}`) -- the same Safe-only edits
+  SARIF advertises, reusing the format-agnostic `attach_proposed_edits`. Gate:
   `agent_and_json_carry_proposed_edit_per_the_include_fixes_flag`.
+  - **Independent P0 fidelity audit (2 agents, 2026-09-20) -> 7 findings fixed.**
+    THE FIDELITY INVARIANT (machine surfaces == what `alint fix` writes) had
+    diverged because `attach_proposed_edits` derived edits PER RULE while `fix`
+    composes PER FILE. Fixed: (CRITICAL) two located rules whose spans overlap on
+    one file now batch into one overlap-deconflicting pass, so no overlapping edit
+    `fix` skips is advertised; (HIGH) whole-file normalizers are threaded per file
+    in config order (each sees the previous one's output), so no spurious
+    `final_newline`-after-trim edit; (HIGH) `cmd_check` now wires
+    `fix_size_limit`; (MEDIUM) the per-node `replace` verify round-trips keys with
+    `'`/`\`/controls (was silently demoting safe fixes); (MEDIUM) a `no_bom`
+    empty-region no-op is omitted; (LOW) F3 baseline-fingerprint change noted in
+    CHANGELOG; (LOW) a non-UTF-8 byte-fix stays unadvertised (documented). Two A1
+    interactions caught by grounding were fixed first: the located `replace`
+    fidelity + the LSP keyless fix-all fallback. Gates in `sarif_fixes.rs` +
+    `structured.rs`. Per-edit granularity preserved.
 - **W3 tier scope: RESOLVED -> Safe-only (DECISION 2026-09-20).** The SARIF /
   agent / json machine surfaces advertise ONLY Safe (applyable) fixes -- the
   DoD's original "all tiers" is superseded, because SARIF has no machine-honored
