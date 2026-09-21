@@ -1035,6 +1035,15 @@ impl Engine {
             // differ must not share a `violation_key`.
             #[cfg(debug_assertions)]
             for rr in &report.results {
+                // Only FIXABLE rules are merged/locked by violation_key; a
+                // non-fixable rule's items are appended without dedup and never
+                // Applied, so a key collision among its findings is benign (they
+                // all survive the reconciliation). Guarding on all rules panicked
+                // `fix` on valid multi-finding keyless NON-fixable rules
+                // (for_each_match, import_gate, ...) -- audit 2026-09-21.
+                if self.fixer_for(&rr.rule_id).is_none() {
+                    continue;
+                }
                 let mut seen: HashMap<String, (Option<usize>, Option<usize>, &str)> =
                     HashMap::new();
                 for it in &rr.items {
