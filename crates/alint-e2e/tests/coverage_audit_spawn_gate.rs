@@ -98,6 +98,16 @@ fn spawning_module_paths() -> Vec<String> {
         for entry in std::fs::read_dir(&dir).expect("read alint-rules/src dir") {
             let path = entry.unwrap().path();
             if path.is_dir() {
+                // `fixers/` holds FIXERS, not rule kinds. A fixer that shells out
+                // (e.g. `GitUntrackFixer`'s `git rm --cached`) is a fix-op trust
+                // concern, gated by `alint_dsl::SPAWNING_FIX_OPS` + the sibling
+                // `coverage_audit_fix_spawn_gate` audit -- NOT a spawning rule kind.
+                // Excluding the subtree keeps this rule-kind gate from tripping on a
+                // fixer's subprocess (which would be a false RED, since no fixer
+                // module maps to a `SPAWNING_RULE_KINDS` entry).
+                if path.file_name().and_then(|n| n.to_str()) == Some("fixers") {
+                    continue;
+                }
                 stack.push(path);
                 continue;
             }

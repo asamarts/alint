@@ -50,6 +50,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only `0o111` changes); a per-rule `applicability:` can demote it. Unix-only, as
   the rules are; `alint fix --diff` previews it as a git-style `old mode`/`new
   mode` change.
+- New `git_untrack` auto-fix op for `file_absent` (`fix: { git_untrack: {} }`):
+  runs `git rm --cached` to drop a committed-but-forbidden path from git's index
+  while leaving it on disk, for the "a build artifact got committed and should be
+  untracked" hygiene case (pair it with `git_tracked_only: true` so the rule
+  converges once the path leaves the tracked set). It is the first *spawning* fix
+  op, so -- exactly like a `kind: command` rule -- it is refused from any
+  non-top-level source (an `extends:`'d or bundled ruleset, a `templates:` block,
+  or a nested `.alint.yml`) to keep an adopted ruleset from shelling out on a bare
+  `alint fix`; declare it only in your own top-level config. `Unsafe` by default
+  (it restructures the git index), so a bare `alint fix` surfaces it as a
+  suggestion and `alint fix --unsafe-fixes` applies it.
 
 ### Changed
 

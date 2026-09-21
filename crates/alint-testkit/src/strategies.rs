@@ -800,6 +800,22 @@ fn rule_shebang_chmod() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `file_absent` rule fixed via the spawning `git_untrack` op (Phase 3):
+/// `git rm --cached` on a tracked-but-forbidden path. Scoped with
+/// `git_tracked_only: true`, so on the property net's NON-git trees the host rule
+/// is a silent no-op (the tracked set is `None`) -- it produces no violation, and
+/// the fix laws early-return (nothing to apply / converge / stage). Its value here
+/// is purely the fix-op coverage gate (`single_fixable_scenario_tree_covers_all_fix_ops`);
+/// real apply/convergence lives in `scenarios/fix/git_untrack_*` and the fixer
+/// units. Scoped to `**/*.trackjunk` so it never collides with a generated name.
+fn rule_git_untrack() -> impl Strategy<Value = String> {
+    rule_id("gu").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: file_absent\n    paths: \"**/*.trackjunk\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -844,6 +860,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_yaml_path_absent_remove_value(),
         // the metadata `chmod` op (Phase 3): +x on a planted shebang script.
         rule_shebang_chmod(),
+        // the spawning `git_untrack` op (Phase 3): a no-op on the non-git property
+        // trees (git_tracked_only), so it only exercises the op-coverage gate.
+        rule_git_untrack(),
     ]
 }
 

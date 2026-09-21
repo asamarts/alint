@@ -210,6 +210,11 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // are refused wholesale just above, and `finalize` re-checks the
     // expanded rule set as a backstop.
     crate::reject_command_rules_in(&config.rules, &source)?;
+    // ...and no *spawning fix op* (`git_untrack`, `git rm --cached`) either: a
+    // subtree `.alint.yml` is as untrusted as an `extends:`'d ruleset, so a
+    // spawning fixer it declares would shell out on `alint fix`. (Templates are
+    // already refused wholesale above, so only `rules:` needs this gate here.)
+    crate::reject_spawning_fix_ops_in(&config.rules, &source)?;
     // ...and no inherited rule may promote a destructive fix to auto-apply.
     crate::reject_fix_promotion_in(&config.rules, &source)?;
 

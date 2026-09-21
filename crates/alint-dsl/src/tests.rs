@@ -1,14 +1,27 @@
 use super::*;
 
 #[test]
-fn spawning_fix_ops_empty_until_phase_3() {
-    // Phase 0 ships no spawning fix op. The SSOT exists so W2's trust gate
-    // has a list to scan; the first entry (e.g. `git_untrack`) lands in
-    // Phase 3 alongside the extends:-rejection wiring and its test.
+fn spawning_fix_ops_are_gated() {
+    // Phase 3 shipped the first spawning fix op. Every entry must be a real fix
+    // op, and `git_untrack` (`git rm --cached`) must be present -- its
+    // top-level-only trust gate is `reject_spawning_fix_ops_in` (+ the template
+    // and `finalize` backstops), exercised by the `load_rejects_git_untrack_*`
+    // tests below and the e2e canary `crates/alint/tests/fix_spawn_gate.rs`.
+    use std::collections::BTreeSet;
     assert!(
-        SPAWNING_FIX_OPS.is_empty(),
-        "a spawning fix op was added; wire the top-level-only trust gate \
-         (like reject_command_rules_in) and update this test in the SAME change"
+        !SPAWNING_FIX_OPS.is_empty(),
+        "SPAWNING_FIX_OPS is empty; the first spawning op (git_untrack) should be listed"
+    );
+    let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+    let spawning: BTreeSet<&str> = SPAWNING_FIX_OPS.iter().copied().collect();
+    assert!(
+        spawning.is_subset(&all),
+        "SPAWNING_FIX_OPS names an unknown op: {:?}",
+        &spawning - &all
+    );
+    assert!(
+        spawning.contains("git_untrack"),
+        "git_untrack (the first spawning fix op) must be gated"
     );
 }
 
@@ -1037,15 +1050,17 @@ fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
 
 #[test]
 fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
-    // Defense-in-depth for the W2 audit's architectural risk: the demotion keys on
-    // a hand-maintained SSOT (`CONTENT_INJECTING_FIX_OPS`), so a FUTURE fix op that
-    // writes ruleset bytes could be added to the engine yet forgotten here -- left
-    // un-demoted from a remote `extends:` (the class of the templates bypass this
-    // audit found). This gate forces EVERY fix op to be classified content-vs-fixed,
-    // so a new op fails the build until the call is made (and, if content, wired in).
+    // Defense-in-depth for the W2 audit's architectural risk: the trust handling
+    // keys on hand-maintained SSOTs, so a FUTURE fix op could be added to the
+    // engine yet forgotten here -- left un-demoted / un-refused from a remote
+    // `extends:` (the class of the templates bypass this audit found). This gate
+    // forces EVERY fix op into exactly ONE of THREE trust classes, so a new op
+    // fails the build until the call is made (and wired in): content-injecting
+    // (demoted from an untrusted remote), spawning (refused from any non-top-level
+    // source), or fixed-behavior (no ruleset bytes, no spawn -- honored anywhere).
     use std::collections::BTreeSet;
-    // Fix ops that carry NO ruleset-authored bytes (no injection surface): honored
-    // from any source. The exhaustive complement of the content SSOT.
+    // Fix ops that carry NO ruleset-authored bytes AND do not spawn: honored from
+    // any source. The exhaustive complement of the content + spawning SSOTs.
     const FIXED_BEHAVIOR_FIX_OPS: &[&str] = &[
         "file_remove",
         "file_rename",
@@ -1060,9 +1075,13 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         "remove_value",
         // `chmod` sets/clears a permission bit -- no ruleset bytes, no injection.
         "chmod",
+        // NOTE: `git_untrack` is NOT here -- it SPAWNS (`git rm --cached`), so it is
+        // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
+        // a strictly stronger gate than the content demotion.
     ];
     let content: BTreeSet<&str> = crate::CONTENT_INJECTING_FIX_OPS.iter().copied().collect();
     let fixed: BTreeSet<&str> = FIXED_BEHAVIOR_FIX_OPS.iter().copied().collect();
+    let spawning: BTreeSet<&str> = crate::SPAWNING_FIX_OPS.iter().copied().collect();
     let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
 
     assert!(
@@ -1071,16 +1090,36 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         &content - &all
     );
     assert!(
+        spawning.is_subset(&all),
+        "spawning SSOT names an unknown op: {:?}",
+        &spawning - &all
+    );
+    // The three trust classes must be PAIRWISE disjoint: each op has exactly one
+    // trust posture.
+    assert!(
         content.is_disjoint(&fixed),
         "op(s) marked BOTH content-injecting and fixed-behavior: {:?}",
         &content & &fixed
     );
-    let classified: BTreeSet<&str> = content.union(&fixed).copied().collect();
+    assert!(
+        content.is_disjoint(&spawning),
+        "op(s) marked BOTH content-injecting and spawning: {:?}",
+        &content & &spawning
+    );
+    assert!(
+        fixed.is_disjoint(&spawning),
+        "op(s) marked BOTH fixed-behavior and spawning: {:?}",
+        &fixed & &spawning
+    );
+    // ...and together they must cover EVERY op (exhaustive partition).
+    let classified: BTreeSet<&str> = content.union(&fixed).copied().collect::<BTreeSet<_>>();
+    let classified: BTreeSet<&str> = classified.union(&spawning).copied().collect();
     assert_eq!(
         classified,
         all,
-        "unclassified fix op(s) -- decide content-injecting (must demote from a \
-         remote `extends:`, add to CONTENT_INJECTING_FIX_OPS) vs fixed-behavior: {:?}",
+        "unclassified fix op(s) -- decide content-injecting (add to \
+         CONTENT_INJECTING_FIX_OPS, demoted from a remote `extends:`), spawning (add \
+         to SPAWNING_FIX_OPS, refused from any non-top-level source), or fixed-behavior: {:?}",
         &all - &classified
     );
 }
@@ -1309,6 +1348,108 @@ fn finalize_rejects_a_top_level_spawning_template() {
     let err = load(&cfg).unwrap_err().to_string();
     assert!(err.contains("generated_file_fresh"), "{err}");
     assert!(err.contains("templates"), "{err}");
+}
+
+// ── git_untrack: the first SPAWNING fix op (R-SPAWNGATE, DSL layer) ──────────
+// The spawn gate keys on the rule KIND, but a spawning FIXER hangs off a
+// non-spawning kind (`git_untrack` on `file_absent`), so these prove the
+// fix-op gate (`reject_spawning_fix_ops_in` + the template / finalize backstops)
+// refuses it from every non-top-level source, while a top-level declaration
+// still loads. The RCE-canary end-to-end analogue lives in
+// `crates/alint/tests/fix_spawn_gate.rs`.
+
+#[test]
+fn load_rejects_git_untrack_fix_declared_in_extends() {
+    // A `git_untrack` fix shells out (`git rm --cached`), so an extended ruleset
+    // declaring one must be refused -- adopting a published ruleset must never
+    // imply it can run git against the user's repo on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: sneaky-untrack\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not named: {err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn load_rejects_git_untrack_fix_in_extends_require_block() {
+    // Depth check: a spawning fix buried in a `require:` block (a `for_each_dir`
+    // nested rule) must be refused too -- the gate recurses at every depth, like
+    // the spawning-KIND gate.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: outer\n    kind: for_each_dir\n    paths: \"**/\"\n    level: error\n    require:\n      - id: inner-untrack\n        kind: file_absent\n        paths: \"*\"\n        git_tracked_only: true\n        fix:\n          git_untrack: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "nested op not gated: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn load_rejects_git_untrack_fix_template_smuggled_via_extends() {
+    // Template-bypass analogue of the spawning-kind C1: an extended ruleset hides
+    // the `git_untrack` fix in a `templates:` block referenced by a
+    // `kind`-less `extends_template:` rule; the template's `fix:` splices in at
+    // finalize, after the rule-level gate. The template gate must catch it.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\ntemplates:\n  - id: ut\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    fix:\n      git_untrack: {}\nrules:\n  - id: pwned\n    level: error\n    extends_template: ut\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not named: {err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn finalize_rejects_a_top_level_git_untrack_template() {
+    // Source-agnostic backstop: a spawning fix op may never live in a `templates:`
+    // block (a latent bypass the moment the config is extended), so even a
+    // top-level `git_untrack` template is a hard error -- declare the fix directly
+    // on a rule. Mirrors `finalize_rejects_a_top_level_spawning_template`.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\ntemplates:\n  - id: ut\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    fix:\n      git_untrack: {}\nrules:\n  - id: x\n    level: error\n    extends_template: ut\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "{err}");
+    assert!(err.contains("templates"), "{err}");
+}
+
+#[test]
+fn load_allows_git_untrack_in_the_users_top_level_config() {
+    // No over-rejection: the whole point of the gate is that a `git_untrack` fix
+    // in the USER'S OWN top-level `rules:` is allowed (it is their explicit call
+    // to let alint run `git rm --cached`). Only inherited sources are refused.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: no-tracked-build\n    kind: file_absent\n    paths: \"build/**\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    let cfg = load(&cfg).expect("a top-level git_untrack fix must load");
+    assert_eq!(cfg.rules.len(), 1, "the git_untrack rule is kept");
 }
 
 #[test]
@@ -1692,6 +1833,27 @@ fn nested_command_rule_is_rejected() {
         .unwrap();
     let err = load(&root_cfg).unwrap_err().to_string();
     assert!(err.contains("command"), "{err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn nested_config_rejects_a_git_untrack_fix() {
+    // The nested-config analogue: a subtree `.alint.yml` is untrusted like an
+    // `extends:`'d ruleset, so a `git_untrack` fix it declares (which shells out
+    // to `git rm --cached`) must be refused -- otherwise a monorepo PR adding one
+    // subtree config grants it git access on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: sneaky-untrack\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    let err = load(&root_cfg).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not gated in nested: {err}");
     assert!(err.contains("arbitrary code"), "{err}");
 }
 

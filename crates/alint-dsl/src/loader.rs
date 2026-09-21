@@ -182,8 +182,16 @@ pub(crate) fn load_recursive(
         // write. Same trust model on both sides.
         alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
         reject_command_rules_in(&parent.rules, url)?;
+        // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
+        // rule kind: refuse it from any extended source, at every `require:` depth
+        // (auto-fix.md 5.5). The kind gate above misses it because a spawning
+        // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
+        crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
         crate::reject_fix_promotion_in(&parent.rules, url)?;
         reject_spawning_templates_in(&parent.templates, url)?;
+        // ...and the template analogue: a spawning fix in a `templates:` block
+        // would splice into its referencing rule at finalize, past the gate above.
+        crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
         // ...and the same promotion refusal for a `templates:` block, which a
         // template instance would otherwise smuggle a `fix.<op>.applicability:
         // safe` past the rule-level gate above (it expands at finalize time).

@@ -80,6 +80,57 @@ pub fn collect_tracked_paths(root: &Path) -> Option<HashSet<PathBuf>> {
     Some(out)
 }
 
+/// The result of a [`untrack_path`] attempt.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UntrackOutcome {
+    /// The path was removed from git's index (it stays on disk).
+    Untracked,
+    /// `root` is not inside a git repo, or `git` is unavailable — nothing done.
+    NotAGitRepo,
+    /// The path is already absent from the index — nothing done (idempotent).
+    NotTracked,
+    /// `git rm --cached` ran but exited non-zero (e.g. staged content differs
+    /// from HEAD, so a non-forced remove is refused); carries the stderr tail.
+    Failed(String),
+}
+
+/// Remove `rel_path` from git's index WITHOUT deleting it from the working tree
+/// (`git rm --cached -- <path>`), running in `root`. `rel_path` is
+/// root-relative (a rule's violation path). Unlike the advisory readers above,
+/// this MUTATES the repo, so the caller (the `git_untrack` fixer) reports
+/// Applied / Skipped / error from the returned [`UntrackOutcome`].
+///
+/// Safety and idempotence:
+/// - the path is passed after `--`, never as an option, so a path beginning
+///   with `-` can never be read as a git flag (option-injection guard, matching
+///   the `-`-rejection in the diff readers below);
+/// - outside a repo it returns `NotAGitRepo` and an already-untracked path
+///   returns `NotTracked` (both no-ops), so a second run is a clean skip rather
+///   than a `git` error;
+/// - it does NOT pass `-f`: a path with staged content differing from HEAD is
+///   left untouched and reported as `Failed`, never force-removed.
+pub fn untrack_path(root: &Path, rel_path: &Path) -> UntrackOutcome {
+    // Pre-classify by reusing the advisory reader: outside a repo -> NotAGitRepo;
+    // not in the index -> NotTracked (the idempotent no-op). This also means the
+    // real `git rm` only runs on a path we have already confirmed is tracked.
+    match collect_tracked_paths(root) {
+        None => return UntrackOutcome::NotAGitRepo,
+        Some(tracked) if !tracked.contains(rel_path) => return UntrackOutcome::NotTracked,
+        Some(_) => {}
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rm", "--cached", "--quiet", "--"])
+        .arg(rel_path)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => UntrackOutcome::Untracked,
+        Ok(o) => UntrackOutcome::Failed(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Err(e) => UntrackOutcome::Failed(e.to_string()),
+    }
+}
+
 /// Resolve the set of paths that have changed in the working tree
 /// (and optionally relative to a base ref), expressed as paths
 /// relative to `root`.

@@ -290,6 +290,25 @@ impl RawConfig {
                      command rule directly in your top-level `rules:`."
                 )));
             }
+            // The same backstop for a spawning FIX op (see `SPAWNING_FIX_OPS`): a
+            // template's `fix:` block splices into its referencing rule at finalize
+            // (below), after the extends/nested fix-op spawn gate, so a spawning
+            // fixer in a template would smuggle code execution past it. Confined to
+            // a top-level `rules:` entry like a spawning kind, for EVERY source.
+            if let Some(fix) = t.get("fix").and_then(|v| v.as_mapping()) {
+                for (op, _args) in fix {
+                    if op.as_str().is_some_and(|o| SPAWNING_FIX_OPS.contains(&o)) {
+                        let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+                        let op = op.as_str().unwrap_or("<fix>");
+                        return Err(Error::Other(format!(
+                            "template {id:?}: `fix.{op}` spawns a process and is not allowed \
+                             in a `templates:` block - a template is expanded after the spawn \
+                             gate, so this would let a ruleset run arbitrary code. Declare the \
+                             fix directly on a rule in your top-level `rules:`."
+                        )));
+                    }
+                }
+            }
         }
         let templates_by_id: std::collections::HashMap<String, &Mapping> = self
             .templates
@@ -526,14 +545,17 @@ pub fn parse(yaml: &str) -> Result<Config> {
 pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "command_idempotent"];
 
 /// Fix ops that shell out, trust-gated identically to
-/// [`SPAWNING_RULE_KINDS`]: a spawning fix (e.g. the future `git_untrack`)
-/// may be declared **only** in the user's own top-level config, never
-/// introduced via `extends:` (auto-fix.md 5.5). Empty until Phase 3 ships
-/// the first spawning op; the SSOT exists now so W2's trust gate has a
-/// list to scan and adding a spawn-capable op without listing it here is a
-/// code-execution gap, exactly as for rule kinds. Kept empty is asserted
-/// by `spawning_fix_ops_empty_until_phase_3`.
-pub const SPAWNING_FIX_OPS: &[&str] = &[];
+/// [`SPAWNING_RULE_KINDS`]: a spawning fix may be declared **only** in the
+/// user's own top-level config, never introduced via `extends:` / a nested
+/// `.alint.yml` / a `templates:` block / bundled (auto-fix.md 5.5). Enforced by
+/// [`reject_spawning_fix_ops_in`] (rules, at every `require:` depth),
+/// [`reject_spawning_fix_op_templates_in`] (inherited templates), and a
+/// `finalize` backstop that refuses one in ANY source's templates. Adding a
+/// spawn-capable op without listing it here is a code-execution gap, exactly as
+/// for rule kinds; `spawning_fix_ops_are_gated` asserts every entry is a real op
+/// and that `git_untrack` (the first spawning fix op, `git rm --cached`) is
+/// present.
+pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack"];
 
 /// Reject any process-spawning rule kind (see
 /// [`SPAWNING_RULE_KINDS`]) in the given mapping list. Used by the
@@ -709,6 +731,65 @@ fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
                 reject_spawning_in_rule(nested_map, source)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Reject any *spawning* fix op (see [`SPAWNING_FIX_OPS`]) declared in the given
+/// mapping list. The fix-op analogue of [`reject_command_rules_in`]: a fixer that
+/// shells out (today `git_untrack`, `git rm --cached`) is a code-execution
+/// surface, so it may be declared ONLY in the user's own top-level config, never
+/// introduced via `extends:` / a nested `.alint.yml` / bundled (auto-fix.md 5.5).
+/// The existing spawn gate keys on the rule *kind*, so a spawning FIXER attached
+/// to a non-spawning kind (a `git_untrack` fix on `file_absent`) slips past it --
+/// this gate closes that gap. `source` names the offending config in the error.
+/// Scans nested `require:` blocks at every depth, exactly like the kind gate.
+pub fn reject_spawning_fix_ops_in(rules: &[Mapping], source: &str) -> Result<()> {
+    for rule in rules {
+        reject_spawning_fix_op_in_rule(rule, source)?;
+    }
+    Ok(())
+}
+
+fn reject_spawning_fix_op_in_rule(rule: &Mapping, source: &str) -> Result<()> {
+    if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
+        for (op, _args) in fix {
+            let Some(op) = op.as_str() else { continue };
+            if SPAWNING_FIX_OPS.contains(&op) {
+                let id = rule
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(unknown)");
+                return Err(Error::Other(format!(
+                    "rule {id:?}: `fix.{op}` spawns a process and is only allowed in the \
+                     user's top-level config; declaring one in an extended config ({source}) - \
+                     including inside a `require:` block or a `templates:` entry - is refused \
+                     because it would let a ruleset run arbitrary code on a bare `alint fix`"
+                )));
+            }
+        }
+    }
+    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
+        for nested in require {
+            if let Some(nested_map) = nested.as_mapping() {
+                reject_spawning_fix_op_in_rule(nested_map, source)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reject a spawning fix op declared inside a `templates:` block of an inherited
+/// ruleset. A template's `fix:` block splices into its referencing rule at
+/// `finalize` (after the per-rule gate above), so a spawning fixer smuggled
+/// through a `templates:` entry would otherwise expand into a spawning fix past
+/// the gate -- the fix-op analogue of [`reject_spawning_templates_in`]. A
+/// template is shaped like a rule (`fix:` + optional `require:`), so the same
+/// per-rule scan applies. `finalize` enforces the same invariant for every
+/// source; this earlier per-source check names the offending ruleset.
+pub fn reject_spawning_fix_op_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
+    for template in templates {
+        reject_spawning_fix_op_in_rule(template, source)?;
     }
     Ok(())
 }

@@ -5,7 +5,7 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-use crate::fixers::FileRemoveFixer;
+use crate::fixers::{FileRemoveFixer, GitUntrackFixer};
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -54,7 +54,10 @@ pub struct FileAbsentRule {
     /// matching (the historical behaviour); non-empty ⇒ a name match is only
     /// reported when the file's leading bytes equal one of these prefixes.
     content_prefixes: Vec<Vec<u8>>,
-    fixer: Option<FileRemoveFixer>,
+    /// The configured fix: `file_remove` (delete from disk) or `git_untrack`
+    /// (remove from git's index, keep on disk) — boxed since `file_absent` hosts
+    /// two distinct fixer types.
+    fixer: Option<Box<dyn Fixer>>,
 }
 
 impl Rule for FileAbsentRule {
@@ -123,7 +126,7 @@ impl Rule for FileAbsentRule {
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
-        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+        self.fixer.as_deref()
     }
 }
 
@@ -165,12 +168,22 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map(|hex| parse_content_prefix(hex))
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|msg| Error::rule_config(&spec.id, msg))?;
-    let fixer = match &spec.fix {
-        Some(FixSpec::FileRemove { file_remove }) => Some(FileRemoveFixer::new(
+    // `file_absent` hosts two fixes: `file_remove` (delete from disk) and
+    // `git_untrack` (remove from git's index, keep on disk) -- both `Unsafe` by
+    // default (each irreversibly restructures state on a bare `alint fix`). The
+    // `git_untrack` op is *spawning*, so the DSL's `reject_spawning_fix_ops_in`
+    // refuses it from any non-top-level source before this builder ever runs.
+    let fixer: Option<Box<dyn Fixer>> = match &spec.fix {
+        Some(FixSpec::FileRemove { file_remove }) => Some(Box::new(FileRemoveFixer::new(
             file_remove
                 .applicability
                 .unwrap_or(alint_core::Applicability::Unsafe),
-        )),
+        ))),
+        Some(FixSpec::GitUntrack { git_untrack }) => Some(Box::new(GitUntrackFixer::new(
+            git_untrack
+                .applicability
+                .unwrap_or(alint_core::Applicability::Unsafe),
+        ))),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
@@ -270,6 +283,24 @@ mod tests {
         );
         let rule = build(&spec).expect("valid file_remove fix");
         assert!(rule.fixer().is_some(), "fixer should be present");
+    }
+
+    #[test]
+    fn build_accepts_git_untrack_fix() {
+        // The sibling fix on file_absent: untrack from git rather than delete.
+        // The canonical shape pairs it with `git_tracked_only: true` so it
+        // converges (the file leaves the tracked set).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"build/**\"\n\
+             git_tracked_only: true\n\
+             level: error\n\
+             fix:\n  \
+               git_untrack: {}\n",
+        );
+        let rule = build(&spec).expect("valid git_untrack fix");
+        assert!(rule.fixer().is_some(), "git_untrack fixer should attach");
     }
 
     #[test]

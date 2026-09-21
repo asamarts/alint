@@ -10,6 +10,8 @@
 //!   (`FileCreateFixer`, `FilePrependFixer`, `FileAppendFixer`).
 //! - [`file_ops`] — file CRUD + mode (`FileRemoveFixer`, `FileRenameFixer`,
 //!   `ChmodFixer`).
+//! - [`git_ops`] — git-index ops (`GitUntrackFixer`); the first *spawning* fixer
+//!   (shells out to `git rm --cached`), so it is top-level-only trust-gated.
 //! - [`hygiene`] — text-level cleanup (`FileTrimTrailingWhitespaceFixer`,
 //!   `FileAppendFinalNewlineFixer`, `FileNormalizeLineEndingsFixer`,
 //!   `FileCollapseBlankLinesFixer`).
@@ -23,6 +25,7 @@
 
 pub mod creators;
 pub mod file_ops;
+pub mod git_ops;
 pub mod hygiene;
 pub mod replace;
 pub mod strip;
@@ -30,6 +33,7 @@ pub mod structured;
 
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
 pub use file_ops::{ChmodFixer, FileRemoveFixer, FileRenameFixer};
+pub use git_ops::GitUntrackFixer;
 pub(crate) use hygiene::line_is_blank;
 pub use hygiene::{
     FileAppendFinalNewlineFixer, FileCollapseBlankLinesFixer, FileNormalizeLineEndingsFixer,

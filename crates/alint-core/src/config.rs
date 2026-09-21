@@ -438,6 +438,9 @@ pub enum FixSpec {
     Chmod {
         chmod: ChmodFixSpec,
     },
+    GitUntrack {
+        git_untrack: GitUntrackFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -522,6 +525,7 @@ impl FixSpec {
         "set_value",
         "remove_value",
         "chmod",
+        "git_untrack",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -543,6 +547,7 @@ impl FixSpec {
             Self::SetValue { .. } => "set_value",
             Self::RemoveValue { .. } => "remove_value",
             Self::Chmod { .. } => "chmod",
+            Self::GitUntrack { .. } => "git_untrack",
         }
     }
 }
@@ -810,6 +815,23 @@ pub struct RemoveValueFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChmodFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `git_untrack`: remove the violating path from git's index (`git rm --cached`)
+/// while leaving it on disk, for the "a committed artifact should be untracked"
+/// hygiene case (host `file_absent` with `git_tracked_only: true`, so the rule
+/// converges once the path leaves the tracked set). A **spawning** fix op: it
+/// shells out to `git`, so it is refused from any non-top-level source
+/// (`extends:`/nested/bundled) exactly like a spawning rule kind (auto-fix.md
+/// 5.5), and it is **`Unsafe` by default** (irreversibly restructures the index
+/// on a bare `alint fix`; surfaced as a suggestion, applied only with
+/// `--unsafe-fixes`). A user may promote a specific rule to `Safe` in their OWN
+/// top-level config.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitUntrackFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1252,6 +1274,7 @@ mod tests {
             ("set_value: {}", "set_value"),
             ("remove_value: {}", "remove_value"),
             ("chmod: {}", "chmod"),
+            ("git_untrack: {}", "git_untrack"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =
