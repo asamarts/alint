@@ -229,6 +229,48 @@ fn fix_baseline_located_replace_respects_the_grandfathered_count() {
     );
 }
 
+/// W4 MEDIUM regression (audit F3, 2026-09-20): a WHOLE-FILE-fixer rule that
+/// reports only the first offender (`no_zero_width_chars`) must not strip a
+/// GRANDFATHERED occurrence when a NEW one precedes it. Keying the violation on
+/// the path (the file is the unit of accepted debt) grandfathers the whole file,
+/// so `fix --baseline` leaves it byte-identical.
+#[test]
+fn fix_baseline_whole_file_fixer_leaves_grandfathered_occurrences() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-zw\n    kind: no_zero_width_chars\n    \
+         paths: \"**/*.txt\"\n    level: error\n    fix: { file_strip_zero_width: {} }\n",
+    )
+    .unwrap();
+    // Grandfathered state: a zero-width char (U+200B, built via escape) on line 2.
+    let before = "cleanline\nold\u{200B}content\n";
+    std::fs::write(root.join("f.txt"), before).unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(bl.status.success());
+
+    // A NEW zero-width char on line 1, ahead of the grandfathered one -- this is
+    // what shifted the first-offender fingerprint and let the whole-file fixer run.
+    let after_edit = "new\u{200B}line\nold\u{200B}content\n";
+    std::fs::write(root.join("f.txt"), after_edit).unwrap();
+
+    let out = run(root, &["fix", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the whole file is grandfathered -> benign exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The file is byte-identical: neither the grandfathered nor the new char is
+    // stripped -- the whole-file strip fixer never runs on grandfathered content.
+    assert_eq!(
+        std::fs::read_to_string(root.join("f.txt")).unwrap(),
+        after_edit,
+        "no zero-width char may be stripped from a grandfathered file"
+    );
+}
+
 /// `--strict-baseline` / `--show-baselined` remain `check`-only for `fix` -- a
 /// loud rejection, never a silent no-op.
 #[test]

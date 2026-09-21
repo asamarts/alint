@@ -93,7 +93,13 @@ impl PerFileRule for MaxConsecutiveBlankLinesRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line_no, 1),
+                .with_location(line_no, 1)
+                // First-offender rule with a WHOLE-FILE fixer (it collapses every
+                // over-limit run). The file is the unit of accepted debt: key on
+                // the path so `fix --baseline` grandfathers the whole file and
+                // never collapses a grandfathered run when a NEW one precedes it
+                // (audit F3, 2026-09-20). Matches no_trailing_whitespace.
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }
