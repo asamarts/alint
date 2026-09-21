@@ -455,6 +455,16 @@ impl Fixer for StructuredFixer {
                         *live.entry(k).or_default() += 1;
                     }
                 }
+                // Correlation is active only when the caller handed us KEYED
+                // violations (the fix pass, `check --baseline`, and
+                // `attach_proposed_edits` all pass the host's keyed violations).
+                // The LSP `code_action` synthesizes a positional violation with NO
+                // baseline_key to offer a "fix every occurrence" action; there the
+                // budget is empty, so fall back to the legacy file-scoped behavior
+                // (rewrite every non-compliant node). This never re-opens the
+                // grandfather bug: a baseline run always carries keys, so `live` is
+                // non-empty and the filter engages.
+                let correlate = !live.is_empty();
                 located
                     .iter()
                     .filter_map(|node| {
@@ -466,16 +476,18 @@ impl Fixer for StructuredFixer {
                         if rewritten == current {
                             return None;
                         }
-                        // Grandfathered (key absent, or its live budget already
-                        // spent by an earlier identical node) -> leave it untouched.
-                        let key = crate::structured_path::matches_baseline_key(
-                            &self.path_src,
-                            matches,
-                            node.node(),
-                        );
-                        match live.get_mut(key.as_str()) {
-                            Some(n) if *n > 0 => *n -= 1,
-                            _ => return None,
+                        // Grandfathered (key absent from the live set, or its budget
+                        // already spent by an earlier identical node) -> leave it.
+                        if correlate {
+                            let key = crate::structured_path::matches_baseline_key(
+                                &self.path_src,
+                                matches,
+                                node.node(),
+                            );
+                            match live.get_mut(key.as_str()) {
+                                Some(n) if *n > 0 => *n -= 1,
+                                _ => return None,
+                            }
                         }
                         let content = structured_fix::serialize_scalar(
                             self.format,
@@ -1090,6 +1102,33 @@ mod tests {
             &String::from_utf8_lossy(src)[start..end],
             "\"2.0\"",
             "the rewritten span is the LIVE node, not the grandfathered one"
+        );
+    }
+
+    #[test]
+    fn replace_without_keyed_violations_fixes_all_nodes() {
+        // The LSP `code_action` synthesizes a positional violation with NO
+        // baseline_key to offer a "fix every occurrence" action. With no keyed
+        // violation to correlate against, the fixer falls back to rewriting every
+        // non-compliant node (the legacy file-scoped behavior) -- otherwise the LSP
+        // would offer no `*_path_matches` fix at all (audit 2026-09-20).
+        let f = StructuredFixer::replace(
+            Format::Json,
+            jp("$.deps.*"),
+            "$.deps.*".into(),
+            regex::Regex::new("^").unwrap(),
+            "v".into(),
+            "^v".into(),
+            Applicability::Unsafe,
+        );
+        let src = b"{\"deps\": {\"a\": \"1.0\", \"b\": \"2.0\"}}";
+        // A keyless violation, exactly as the LSP builds it.
+        let keyless = Violation::new("forbidden");
+        let edits = f.collect_edits(&[keyless], Path::new("a.json"), src, Path::new("/r"));
+        assert_eq!(
+            edits.len(),
+            2,
+            "both non-compliant nodes are rewritten (fix-all fallback)"
         );
     }
 }

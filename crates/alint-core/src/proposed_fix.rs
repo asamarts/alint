@@ -31,14 +31,14 @@
 //! Runs only when a fix-carrying format asks (the CLI gates it on `--format
 //! sarif`), so the ordinary check path pays nothing.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use crate::engine::Engine;
 use crate::located_fix::{self, LocatedEdit, LocatedOutcome};
 use crate::report::Report;
-use crate::rule::{Applicability, FixEdit};
+use crate::rule::{Applicability, FixEdit, Violation};
 use crate::walker::read_capped_or_skip;
 
 /// A 1-based source region `[start, end)` following SARIF's convention:
@@ -251,12 +251,14 @@ fn read_fixable_file(abs: &Path, fix_limit: Option<u64>) -> Option<Vec<u8>> {
 /// pass would demote/skip it), and any fixer with no content-replacement form
 /// (delete / rename / chmod).
 ///
-/// A located fixer's `collect_edits` is file-scoped (it ignores the individual
-/// violation) and a whole-file fixer's `fix_edit` describes the whole file, so a
-/// fixer's edits belong to the file, not one violation. When a rule fires more
-/// than once on a file (unusual for these ops), the edits attach to the first
-/// fixable violation for that `(rule, file)` that actually yields a fix; later
-/// ones stay empty so the same fix is not rendered twice.
+/// A located fixer's `collect_edits` correlates its edits to the violation SET it
+/// is handed (W4), and a whole-file fixer's `fix_edit` describes the whole file,
+/// so a fixer's edits belong to the file, derived from ALL of the file's fixable
+/// violations. `collect_edits` therefore receives EVERY fixable violation for the
+/// `(rule, file)` at once -- exactly as the fix pass does -- so a multi-node file
+/// (e.g. `*_path_matches`) advertises every fix `alint fix` would write, not just
+/// the first. The resulting edits attach to the first fixable violation for that
+/// `(rule, file)`; later ones stay empty so the same fix is not rendered twice.
 // NOTE (`--changed`): the fix pass demotes an edit that would write OUTSIDE the
 // changed set (`writes_outside_changed`); this routine does not consult it.
 // Reachable divergence needs a Safe, path-bearing, full-index fixer, of which
@@ -274,6 +276,22 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) 
             continue;
         };
         let located = fixer.collects_located_edits();
+        // Post-W4 a located fixer correlates its edits to the violation SET, so the
+        // derivation must hand `collect_edits` ALL of a file's fixable violations at
+        // once (as the fix pass does) -- one at a time returns only that
+        // violation's edit, so a multi-node file advertises fewer fixes than
+        // `alint fix` writes. Precompute per file before the mutable attach loop.
+        let file_violations: BTreeMap<PathBuf, Vec<Violation>> = if located {
+            let mut m: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
+            for v in rr.violations.iter().filter(|v| v.is_fixable) {
+                if let Some(p) = v.path.as_deref() {
+                    m.entry(p.to_path_buf()).or_default().push(v.clone());
+                }
+            }
+            m
+        } else {
+            BTreeMap::new()
+        };
         for v in &mut rr.violations {
             if !v.is_fixable {
                 continue;
@@ -292,11 +310,17 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path) 
                 let Ok(text) = std::str::from_utf8(&bytes) else {
                     continue; // byte offsets map to line/col only over valid UTF-8
                 };
-                // Run the SAME pipeline the fix pass uses and keep only the edits
-                // that SURVIVE it (verify/overlap/tier), so SARIF advertises
-                // exactly what `alint fix` would write.
+                // Run the SAME pipeline the fix pass uses, over ALL of this file's
+                // fixable violations, and keep only the edits that SURVIVE it
+                // (verify/overlap/tier), so SARIF advertises exactly what `alint
+                // fix` would write.
                 let batch: Vec<LocatedEdit> = fixer
-                    .collect_edits(std::slice::from_ref(v), &rel, &bytes, root)
+                    .collect_edits(
+                        file_violations.get(&rel).map_or(&[][..], Vec::as_slice),
+                        &rel,
+                        &bytes,
+                        root,
+                    )
                     .into_iter()
                     .enumerate()
                     .map(|(i, ce)| LocatedEdit {

@@ -156,6 +156,83 @@ fn sarif_carries_a_located_replace_fix_with_line_column_region() {
     assert_eq!(replacements[0]["insertedContent"]["text"], "\"v2.0\"");
 }
 
+/// Fidelity regression (audit 2026-09-20): when a `*_path_matches` file has
+/// MULTIPLE failing nodes, the machine surfaces must advertise EVERY edit `alint
+/// fix` writes, not just the first. The located `replace` fixer correlates its
+/// edits to the violation SET (W4), so `attach_proposed_edits` must hand it ALL of
+/// the file's fixable violations at once; feeding one at a time returned only that
+/// violation's edit and advertised 1 fix where `fix` writes N.
+#[test]
+fn machine_surfaces_advertise_every_edit_fix_would_write() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        concat!(
+            "version: 1\n",
+            "rules:\n",
+            "  - id: v-pins\n",
+            "    kind: json_path_matches\n",
+            "    paths: \"**/*.json\"\n",
+            "    path: \"$.deps.*\"\n",
+            "    matches: \"^v\"\n",
+            "    level: error\n",
+            "    fix: { replace: { pattern: \"^\", replacement: \"v\", applicability: safe } }\n",
+        ),
+    )
+    .unwrap();
+    // THREE failing nodes, distinct values.
+    let original =
+        "{\n  \"deps\": {\n    \"a\": \"1.0\",\n    \"b\": \"2.0\",\n    \"c\": \"3.0\"\n  }\n}\n";
+    std::fs::write(dir.path().join("app.json"), original).unwrap();
+
+    // SARIF: collect every replacement across all results/fixes/changes.
+    let sarif = check_sarif(dir.path());
+    let mut sarif_ins: Vec<String> = sarif["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["fixes"].as_array().into_iter().flatten())
+        .flat_map(|f| f["artifactChanges"].as_array().into_iter().flatten())
+        .flat_map(|c| c["replacements"].as_array().into_iter().flatten())
+        .map(|rep| rep["insertedContent"]["text"].as_str().unwrap().to_string())
+        .collect();
+    sarif_ins.sort();
+    assert_eq!(
+        sarif_ins,
+        vec!["\"v1.0\"", "\"v2.0\"", "\"v3.0\""],
+        "SARIF must advertise all three node fixes"
+    );
+
+    // agent: every proposed_edit across all violations.
+    let agent = check_json(dir.path(), &["--format", "agent"]);
+    let mut agent_ins: Vec<String> = agent["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|v| v["proposed_edit"].as_array().into_iter().flatten())
+        .map(|pe| pe["inserted"].as_str().unwrap().to_string())
+        .collect();
+    agent_ins.sort();
+    assert_eq!(
+        agent_ins,
+        vec!["\"v1.0\"", "\"v2.0\"", "\"v3.0\""],
+        "agent must advertise all three node fixes"
+    );
+
+    // FIDELITY: what `alint fix` actually writes equals the advertised edits.
+    let fixed = Command::new(alint_bin())
+        .args(["fix", "."])
+        .current_dir(dir.path())
+        .output()
+        .expect("spawn alint");
+    assert_eq!(fixed.status.code(), Some(0));
+    let after = std::fs::read_to_string(dir.path().join("app.json")).unwrap();
+    assert!(
+        after.contains("\"v1.0\"") && after.contains("\"v2.0\"") && after.contains("\"v3.0\""),
+        "fix must write exactly the advertised edits; got:\n{after}"
+    );
+}
+
 /// A whole-file normalizer (`no_trailing_whitespace` -> the
 /// `file_trim_trailing_whitespace` fixer, which rewrites the whole file via
 /// `SetContent`) renders a *minimal* changed span (not a full-artifact rewrite),

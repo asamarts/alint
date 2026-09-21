@@ -510,7 +510,10 @@ impl LanguageServer for Backend {
             // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
             // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
             // `alint fix` (the diagnostic is one-per-file but the located fix is
-            // per-match). A whole-file fixer keeps the `fix_edit` -> edit path.
+            // per-match). The synthetic `violation` carries NO baseline_key, so the
+            // structured fixer's W4 violation-set correlation finds an empty budget
+            // and falls back to fixing every occurrence -- exactly the "fix all"
+            // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
             let workspace_edit = if fixer.collects_located_edits() {
                 // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
                 // -> post-splice verify/demote) and offer ONLY the surviving edits.
@@ -1711,5 +1714,49 @@ mod tests {
         assert!(tes.iter().all(|te| te.new_text == "DONE"));
         // 'x'=0, emoji=cols 1-2 (two UTF-16 units), ' '=3 -> first TODO at character 4.
         assert_eq!(tes[0].range.start, Position::new(0, 4));
+    }
+
+    #[test]
+    fn code_action_offers_every_match_for_a_path_matches_replace() {
+        // Regression (audit 2026-09-20): the located `replace` fixer now correlates
+        // its edits to the violation SET (W4). `code_action` synthesizes a
+        // positional violation with NO baseline_key, so the fixer falls back to
+        // fixing every occurrence -- otherwise the empty correlation budget would
+        // leave the LSP offering NO `*_path_matches` fix.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: v-pins\n    kind: json_path_matches\n    \
+             paths: \"*.json\"\n    path: \"$.deps.*\"\n    matches: \"^v\"\n    level: error\n    \
+             fix: { replace: { pattern: \"^\", replacement: \"v\", applicability: safe } }\n",
+        )
+        .unwrap();
+        let session = build_session(root)
+            .expect("build_session succeeds")
+            .expect("a config is present");
+        let fixer = session
+            .engine
+            .fixer_for("v-pins")
+            .expect("v-pins declares a fixer");
+        assert!(fixer.collects_located_edits());
+        let text = "{\"deps\": {\"a\": \"1.0\", \"b\": \"2.0\"}}";
+        // As `code_action` builds it: a positional path-bearing violation, NO key.
+        let violation = Violation::new("v-pins").with_path(PathBuf::from("app.json"));
+        let edits = fixer.collect_edits(
+            std::slice::from_ref(&violation),
+            Path::new("app.json"),
+            text.as_bytes(),
+            root,
+        );
+        let ws = located_edits_to_workspace_edit(&edits, text, Path::new("app.json"), root)
+            .expect("the located edits map to a workspace edit");
+        let changes = ws.changes.expect("located edits use the changes map");
+        let uri = Url::from_file_path(root.join("app.json")).unwrap();
+        assert_eq!(
+            changes[&uri].len(),
+            2,
+            "both failing nodes are offered (the keyless fix-all fallback)"
+        );
     }
 }
