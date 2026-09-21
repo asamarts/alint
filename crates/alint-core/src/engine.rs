@@ -1296,12 +1296,31 @@ impl Engine {
                         kind: StagedKind::Rename { from },
                     });
                 }
+                // A chmod: content is unchanged, so `old`/`new` are the current
+                // bytes and the diff renders the mode change from the recorded pair.
+                FixEdit::SetMode { path, mode } => {
+                    #[cfg(unix)]
+                    let old_mode = {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::metadata(root.join(&path)).map_or(0, |m| m.permissions().mode())
+                    };
+                    #[cfg(not(unix))]
+                    let old_mode = 0u32;
+                    let content = std::fs::read(root.join(&path)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path,
+                        new: content.clone(),
+                        old: content,
+                        kind: StagedKind::Chmod {
+                            old_mode,
+                            new_mode: mode,
+                        },
+                    });
+                }
                 // Content-shaped edits belong in the compose buffer, not here;
                 // ignore defensively so a future mis-wired fixer can't smuggle a
                 // content write past the diff.
-                FixEdit::SetContent { .. }
-                | FixEdit::ReplaceRange { .. }
-                | FixEdit::SetMode { .. } => {}
+                FixEdit::SetContent { .. } | FixEdit::ReplaceRange { .. } => {}
             }
         }
 
@@ -2448,6 +2467,9 @@ pub enum StagedKind {
     /// A rename from `from` to [`StagedFix::path`]; `old`/`new` are the file's
     /// bytes (equal when the rename doesn't also rewrite content).
     Rename { from: PathBuf },
+    /// A permission-bit change (`chmod`); `old`/`new` bytes are the (unchanged)
+    /// file content, and the diff renders a git-style `old mode` / `new mode` pair.
+    Chmod { old_mode: u32, new_mode: u32 },
 }
 
 /// Append a fix item to the fixpoint's aggregated results, grouping by

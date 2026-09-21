@@ -115,6 +115,14 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
                     write_hunks(&a(&from), &b(&path), old, new, w)?;
                 }
             }
+            // A permission change: git's `old mode`/`new mode` pair (6-octal,
+            // including the file-type bits, e.g. 100644 -> 100755). Content is
+            // unchanged, so there is no hunk.
+            StagedKind::Chmod { old_mode, new_mode } => {
+                writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
+                writeln!(w, "old mode {old_mode:06o}")?;
+                writeln!(w, "new mode {new_mode:06o}")?;
+            }
         }
     }
     Ok(())
@@ -210,6 +218,9 @@ fn write_binary_summary(fix: &StagedFix, w: &mut dyn Write) -> std::io::Result<(
             fix.old.len(),
             fix.new.len()
         ),
+        StagedKind::Chmod { old_mode, new_mode } => {
+            writeln!(w, "mode change {path} ({old_mode:06o} -> {new_mode:06o})")
+        }
     }
 }
 

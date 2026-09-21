@@ -324,6 +324,16 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
             (*content).to_string(),
         );
     }
+    // A shebang script WITHOUT the executable bit triggers shebang_has_executable
+    // + the Phase-3 `chmod` fix, which sets +x. `insert_file` materializes it as a
+    // plain (non-exec) file, so on Unix the rule fires; on non-Unix the host rule
+    // no-ops. `.sh` is outside every content/structured rule's glob, so it is
+    // otherwise inert. `**/needsx.sh` matches only this trigger.
+    insert_file(
+        root,
+        &[dir.clone(), "needsx.sh".to_string()],
+        "#!/bin/sh\necho hi\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -776,6 +786,20 @@ fn rule_file_header_prepend() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `shebang_has_executable` rule fixed via the `chmod` op (Phase 3): sets +x on
+/// the planted shebang script `_trig/needsx.sh` (materialized WITHOUT the exec
+/// bit, so on Unix the rule fires). Safe, so a bare `Fix` applies it. Unix-only:
+/// on a non-Unix target the host rule no-ops, so the scenario converges trivially
+/// (nothing to fix, nothing to converge). Scoped to `**/needsx.sh` so it matches
+/// ONLY its own trigger; `.sh` is outside every other single-rule glob.
+fn rule_shebang_chmod() -> impl Strategy<Value = String> {
+    rule_id("chmodx").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: shebang_has_executable\n    paths: \"**/needsx.sh\"\n    level: error\n    fix:\n      chmod: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -818,6 +842,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_json_path_absent_remove_value(),
         rule_yaml_path_equals_set_value(),
         rule_yaml_path_absent_remove_value(),
+        // the metadata `chmod` op (Phase 3): +x on a planted shebang script.
+        rule_shebang_chmod(),
     ]
 }
 

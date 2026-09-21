@@ -10,8 +10,12 @@
 //! rule is a no-op (never produces violations). Document this in
 //! the config so platform-specific behaviour isn't a surprise.
 
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Applicability, Context, Error, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope, Violation,
+};
 use serde::Deserialize;
+
+use crate::fixers::ChmodFixer;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +38,7 @@ pub struct ExecutableBitRule {
     message: Option<String>,
     scope: Scope,
     require_exec: bool,
+    fixer: Option<ChmodFixer>,
 }
 
 impl Rule for ExecutableBitRule {
@@ -82,6 +87,10 @@ impl Rule for ExecutableBitRule {
         // so configs stay portable across platforms.
         Ok(Vec::new())
     }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -92,12 +101,24 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    if spec.fix.is_some() {
-        return Err(Error::rule_config(
-            &spec.id,
-            "executable_bit has no fix op - chmod auto-apply is deferred (see ROADMAP)",
-        ));
-    }
+    // The only supported fix op is `chmod`, which sets (`require: true`) or clears
+    // (`require: false`) the executable bits to match the rule.
+    let fixer = match &spec.fix {
+        None => None,
+        Some(FixSpec::Chmod { chmod }) => Some(ChmodFixer::new(
+            opts.require,
+            chmod.applicability.unwrap_or(Applicability::Safe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with executable_bit (only `chmod`)",
+                    other.op_name()
+                ),
+            ));
+        }
+    };
     Ok(Box::new(ExecutableBitRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -105,6 +126,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_spec(spec)?,
         require_exec: opts.require,
+        fixer,
     }))
 }
 
@@ -141,7 +163,8 @@ mod tests {
     }
 
     #[test]
-    fn build_rejects_fix_block() {
+    fn build_rejects_an_incompatible_fix() {
+        // Only `chmod` is compatible; any other op is a config error.
         let spec = spec_yaml(
             "id: t\n\
              kind: executable_bit\n\
@@ -152,6 +175,20 @@ mod tests {
                file_remove: {}\n",
         );
         assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_accepts_a_chmod_fix() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_bit\n\
+             paths: \"scripts/**\"\n\
+             require: true\n\
+             level: error\n\
+             fix: { chmod: {} }\n",
+        );
+        let rule = build(&spec).expect("chmod fix builds");
+        assert!(rule.fixer().is_some(), "the rule exposes a chmod fixer");
     }
 
     /// ADR-0008: `git_tracked_only` is a kind-specific option on the existence

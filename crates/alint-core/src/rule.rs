@@ -660,10 +660,11 @@ pub enum FixEdit {
         content: Vec<u8>,
     },
     /// Set the permission bits of a file (a `chmod`). `mode` is the full
-    /// mode word (e.g. `0o755`). Applied only on Unix; on other platforms
-    /// the engine records it as `Skipped`. Host wiring (the `chmod` op,
-    /// `executable_bit`, `shebang_has_executable`) lands in Phase 3; the
-    /// variant exists now so the engine's edit-application path is total.
+    /// mode word (e.g. `0o755`). Applied only on Unix; on other platforms the
+    /// host rule never fires, so this is unreachable. Emitted by the `ChmodFixer`
+    /// (the `chmod` fix op on `executable_bit` / `shebang_has_executable`); the
+    /// fixer performs the `set_permissions` itself and records this in the stage
+    /// sink so `fix --diff` renders the mode change.
     SetMode { path: PathBuf, mode: u32 },
 }
 

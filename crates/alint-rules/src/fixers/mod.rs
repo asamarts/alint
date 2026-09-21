@@ -8,7 +8,8 @@
 //! Families:
 //! - [`creators`] — file-creating + content-prepending/appending
 //!   (`FileCreateFixer`, `FilePrependFixer`, `FileAppendFixer`).
-//! - [`file_ops`] — file CRUD (`FileRemoveFixer`, `FileRenameFixer`).
+//! - [`file_ops`] — file CRUD + mode (`FileRemoveFixer`, `FileRenameFixer`,
+//!   `ChmodFixer`).
 //! - [`hygiene`] — text-level cleanup (`FileTrimTrailingWhitespaceFixer`,
 //!   `FileAppendFinalNewlineFixer`, `FileNormalizeLineEndingsFixer`,
 //!   `FileCollapseBlankLinesFixer`).
@@ -28,7 +29,7 @@ pub mod strip;
 pub mod structured;
 
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
-pub use file_ops::{FileRemoveFixer, FileRenameFixer};
+pub use file_ops::{ChmodFixer, FileRemoveFixer, FileRenameFixer};
 pub(crate) use hygiene::line_is_blank;
 pub use hygiene::{
     FileAppendFinalNewlineFixer, FileCollapseBlankLinesFixer, FileNormalizeLineEndingsFixer,

@@ -435,6 +435,9 @@ pub enum FixSpec {
     RemoveValue {
         remove_value: RemoveValueFixSpec,
     },
+    Chmod {
+        chmod: ChmodFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -518,6 +521,7 @@ impl FixSpec {
         "replace",
         "set_value",
         "remove_value",
+        "chmod",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -538,6 +542,7 @@ impl FixSpec {
             Self::Replace { .. } => "replace",
             Self::SetValue { .. } => "set_value",
             Self::RemoveValue { .. } => "remove_value",
+            Self::Chmod { .. } => "chmod",
         }
     }
 }
@@ -792,6 +797,19 @@ pub struct SetValueFixSpec {
 pub struct RemoveValueFixSpec {
     /// Per-rule applicability override. `remove_value` defaults to `Unsafe`; a
     /// user may promote a specific rule to `Safe` in their OWN top-level config.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `chmod`: set or clear the Unix executable bits (`0o111`) on the violating
+/// file, preserving every other permission bit. The host rule (`executable_bit`,
+/// `shebang_has_executable`) picks the direction. Unix-only; a no-op on platforms
+/// without an executable bit, where the host rule never fires. `Safe` by default:
+/// the rule explicitly requires the +x state, the change is reversible, and it
+/// touches only the executable bits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChmodFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1233,6 +1251,7 @@ mod tests {
             ("replace:\n  replacement: x\n", "replace"),
             ("set_value: {}", "set_value"),
             ("remove_value: {}", "remove_value"),
+            ("chmod: {}", "chmod"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

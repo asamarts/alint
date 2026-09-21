@@ -410,6 +410,7 @@ ExecutableBitRule {
     message: None,
     scope: Scope { ... },
     require_exec: true,
+    fixer: None,
 }
 
 === kind: executable_has_shebang | id: exec-needs-shebang ===
@@ -2035,6 +2036,7 @@ ShebangHasExecutableRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    fixer: None,
 }
 
 === kind: toml_path_absent | id: no-cargo-patch-section ===

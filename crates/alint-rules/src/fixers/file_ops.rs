@@ -302,6 +302,128 @@ impl Fixer for FileRenameFixer {
     }
 }
 
+/// Sets or clears the Unix executable bits (`0o111`) on the violating file,
+/// preserving every other permission bit. Paired with `executable_bit` /
+/// `shebang_has_executable`. `desired_exec` picks the direction: `true` sets +x,
+/// `false` clears it. `Safe` by default (the rule explicitly requires the state;
+/// reversible; touches only `0o111`).
+///
+/// Unix-only. On a non-Unix target the host rules never fire, so `apply` is
+/// unreachable; it returns a clean skip defensively and `fix_edit` returns `None`
+/// (a mode change has no cross-platform form).
+#[derive(Debug)]
+pub struct ChmodFixer {
+    desired_exec: bool,
+    applicability: Applicability,
+}
+
+impl ChmodFixer {
+    #[must_use]
+    pub fn new(desired_exec: bool, applicability: Applicability) -> Self {
+        Self {
+            desired_exec,
+            applicability,
+        }
+    }
+
+    /// The target mode for `current`, or `None` if `current` already satisfies
+    /// the rule (a no-op the fixer then skips). Only the `0o111` bits change.
+    #[cfg(unix)]
+    fn target_mode(&self, current: u32) -> Option<u32> {
+        let want = if self.desired_exec {
+            current | 0o111
+        } else {
+            current & !0o111
+        };
+        (want != current).then_some(want)
+    }
+}
+
+impl Fixer for ChmodFixer {
+    fn describe(&self) -> String {
+        if self.desired_exec {
+            "make the file executable (chmod +x)".to_string()
+        } else {
+            "clear the executable bit (chmod -x)".to_string()
+        }
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    #[cfg(unix)]
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        let Ok(meta) = std::fs::metadata(&abs) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} could not be read",
+                path.display()
+            )));
+        };
+        let Some(new_mode) = self.target_mode(meta.permissions().mode()) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already has the required mode",
+                path.display()
+            )));
+        };
+        // A dry run reports only; a stage (`--diff`) records the mode change so
+        // the diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::SetMode {
+                    path: path.to_path_buf(),
+                    mode: new_mode,
+                });
+            }
+            return Ok(FixOutcome::Applied(format!(
+                "would chmod {} to {new_mode:o}",
+                path.display()
+            )));
+        }
+        std::fs::set_permissions(&abs, PermissionsExt::from_mode(new_mode)).map_err(|source| {
+            Error::Io {
+                path: abs.clone(),
+                source,
+            }
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "chmod {} to {new_mode:o}",
+            path.display()
+        )))
+    }
+
+    #[cfg(not(unix))]
+    fn apply(&self, _violation: &Violation, _ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        Ok(FixOutcome::Skipped(
+            "chmod is a no-op on non-Unix platforms".to_string(),
+        ))
+    }
+
+    #[cfg(unix)]
+    fn fix_edit(&self, violation: &Violation, _bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        use std::os::unix::fs::PermissionsExt;
+        let path = violation.path.as_deref()?;
+        let meta = std::fs::metadata(root.join(path)).ok()?;
+        let new_mode = self.target_mode(meta.permissions().mode())?;
+        Some(FixEdit::SetMode {
+            path: path.to_path_buf(),
+            mode: new_mode,
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn fix_edit(&self, _violation: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +438,134 @@ mod tests {
             compose: None,
             stage_ops: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_sets_clears_and_is_idempotent() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(PathBuf::from("hello.sh"));
+        let ctx = make_ctx(&tmp, false);
+        let mode = |f: &std::path::Path| std::fs::metadata(f).unwrap().permissions().mode() & 0o777;
+
+        // +x sets the executable bits, preserving the rest.
+        let out = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)));
+        assert_eq!(mode(&file), 0o755);
+
+        // Already +x -> a no-op skip (never re-applies).
+        let again = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(again, FixOutcome::Skipped(_)));
+
+        // -x clears them back.
+        let cleared = ChmodFixer::new(false, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(cleared, FixOutcome::Applied(_)));
+        assert_eq!(mode(&file), 0o644);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_dry_run_keeps_mode() {
+        // Dry-run must report the intended change but leave the mode on disk
+        // untouched (the direct-write trap: `apply` calls `set_permissions`, so it
+        // MUST short-circuit before that under `dry_run`).
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(PathBuf::from("hello.sh"));
+        let out = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &make_ctx(&tmp, true))
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => {
+                assert!(s.starts_with("would chmod"), "dry-run summary: {s}");
+                assert!(s.contains("hello.sh"), "summary must name the file: {s}");
+            }
+            FixOutcome::Skipped(_) => panic!("expected Applied (would-chmod)"),
+        }
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "dry-run must not change the mode"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_in_stage_mode_records_without_chmod() {
+        // Stage mode (`--diff`): the fixer records a `SetMode` edit for the diff
+        // renderer and leaves the on-disk mode untouched.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let outcome = ChmodFixer::new(true, Applicability::Safe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("hello.sh")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "stage must not change the mode"
+        );
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::SetMode {
+                path: PathBuf::from("hello.sh"),
+                // The recorded mode is the FULL st_mode (regular-file type bits
+                // 0o100000 | 0o755), which is exactly git's `new mode 100755` form.
+                mode: 0o100_755,
+            }]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_fix_edit_returns_setmode_and_is_idempotent() {
+        // The editor/proposed-edit path mirrors `apply`: it reads the current mode
+        // and returns a `SetMode` edit, or `None` when the file already conforms.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(Path::new("hello.sh"));
+        let edit = ChmodFixer::new(true, Applicability::Safe)
+            .fix_edit(&v, &[], tmp.path())
+            .unwrap();
+        assert_eq!(
+            edit,
+            FixEdit::SetMode {
+                path: PathBuf::from("hello.sh"),
+                // Full st_mode (type bits | 0o755) == git's `100755`.
+                mode: 0o100_755,
+            }
+        );
+        // Already +x -> no edit proposed (idempotent at the editor layer too).
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o755)).unwrap();
+        assert!(
+            ChmodFixer::new(true, Applicability::Safe)
+                .fix_edit(&v, &[], tmp.path())
+                .is_none(),
+            "a conforming file yields no proposed edit"
+        );
     }
 
     #[test]

@@ -42,6 +42,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   but decline the fix until their span resolvers land. `set_value` is
   content-injecting, so a remote `extends:` demotes it under the trust boundary
   above.
+- New `chmod` auto-fix op for `executable_bit` and `shebang_has_executable`
+  (`fix: { chmod: {} }`): sets or clears the Unix executable bits (`0o111`) to
+  match the rule, preserving every other permission bit. `executable_bit` picks
+  the direction from `require:`; `shebang_has_executable` always sets +x. Safe by
+  default (the rule explicitly requires the state, the change is reversible, and
+  only `0o111` changes); a per-rule `applicability:` can demote it. Unix-only, as
+  the rules are; `alint fix --diff` previews it as a git-style `old mode`/`new
+  mode` change.
 
 ### Changed
 
