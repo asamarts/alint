@@ -271,6 +271,161 @@ fn fix_baseline_whole_file_fixer_leaves_grandfathered_occurrences() {
     );
 }
 
+/// A suggestion-tier `replace` on `*_path_matches`: the fix is offered but NEVER
+/// auto-applied, so a live finding STANDS (exit per its level). Used to check the
+/// "a new unresolved finding still fails" half of the `fix --baseline` contract.
+fn suggest_config(level: &str) -> String {
+    format!(
+        "version: 1\nrules:\n  - id: v-pins\n    kind: json_path_matches\n    \
+         paths: \"**/*.json\"\n    path: \"$.deps.*\"\n    matches: \"^v\"\n    \
+         level: {level}\n    fix: {{ replace: {{ pattern: \"^\", replacement: \"v\", \
+         applicability: suggestion }} }}\n"
+    )
+}
+
+/// A missing or unparseable `--baseline` file is a LOUD error (exit 2), never a
+/// silent full-fix -- the safety contract in this file's header.
+#[test]
+fn fix_rejects_a_missing_or_invalid_baseline_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
+    std::fs::write(root.join("f.txt"), "trailing   \n").unwrap();
+
+    let missing = run(root, &["fix", "--baseline", "does-not-exist.json", "."]);
+    assert_eq!(
+        missing.status.code(),
+        Some(2),
+        "a missing baseline must be a loud error, not a silent full-fix"
+    );
+    std::fs::write(root.join("bad.json"), "not a baseline\n").unwrap();
+    let invalid = run(root, &["fix", "--baseline", "bad.json", "."]);
+    assert_eq!(
+        invalid.status.code(),
+        Some(2),
+        "an unparseable baseline must be a loud error"
+    );
+    // Neither error run may have fixed the file.
+    assert_eq!(
+        std::fs::read_to_string(root.join("f.txt")).unwrap(),
+        "trailing   \n"
+    );
+}
+
+/// The config `baseline:` key auto-enables baseline-aware `fix` -- no `--baseline`
+/// flag needed (parity with `check`, which honors the same key).
+#[test]
+fn fix_honors_the_config_baseline_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
+    std::fs::write(root.join("old.txt"), "grandfathered   \n").unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(bl.status.success());
+
+    // Point the config at the baseline (no flag), then add a new finding.
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!("{CONFIG}baseline: bl.json\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join("new.txt"), "fresh   \n").unwrap();
+
+    let out = run(root, &["fix", "."]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "config-key baseline fixes new + grandfathers old; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("old.txt")).unwrap(),
+        "grandfathered   \n",
+        "the config-baselined finding is grandfathered"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("new.txt")).unwrap(),
+        "fresh\n",
+        "the new finding is fixed"
+    );
+}
+
+/// A NEW error-level finding whose fix is suggestion-tier (never auto-applied) is
+/// UNRESOLVED even under `--baseline` -> exit 1. The baseline suppresses only the
+/// grandfathered finding; a new one still fails the run.
+#[test]
+fn fix_baseline_new_suggestion_only_error_still_exits_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), suggest_config("error")).unwrap();
+    std::fs::write(
+        root.join("d.json"),
+        "{\n  \"deps\": {\n    \"old\": \"1.0\"\n  }\n}\n",
+    )
+    .unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(bl.status.success());
+    std::fs::write(
+        root.join("d.json"),
+        "{\n  \"deps\": {\n    \"old\": \"1.0\",\n    \"new\": \"2.0\"\n  }\n}\n",
+    )
+    .unwrap();
+
+    let out = run(root, &["fix", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a new suggestion-only error is unresolved under --baseline; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The suggestion is not applied and old is grandfathered.
+    assert!(
+        std::fs::read_to_string(root.join("d.json"))
+            .unwrap()
+            .contains("\"new\": \"2.0\""),
+        "the suggestion-tier fix is not auto-applied"
+    );
+}
+
+/// A NEW warning-level unresolved finding under `--baseline` exits 0 by default
+/// and 1 under `--fail-on-warning` -- identical to `fix` WITHOUT a baseline, so
+/// the baseline never changes warning-vs-error exit semantics for NEW findings.
+#[test]
+fn fix_baseline_new_warning_respects_fail_on_warning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), suggest_config("warning")).unwrap();
+    std::fs::write(
+        root.join("d.json"),
+        "{\n  \"deps\": {\n    \"old\": \"1.0\"\n  }\n}\n",
+    )
+    .unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(bl.status.success());
+    std::fs::write(
+        root.join("d.json"),
+        "{\n  \"deps\": {\n    \"old\": \"1.0\",\n    \"new\": \"2.0\"\n  }\n}\n",
+    )
+    .unwrap();
+
+    let default = run(root, &["fix", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        default.status.code(),
+        Some(0),
+        "a new warning is benign by default; stderr: {}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    let strict = run(
+        root,
+        &["fix", "--baseline", "bl.json", "--fail-on-warning", "."],
+    );
+    assert_eq!(
+        strict.status.code(),
+        Some(1),
+        "--fail-on-warning fails on the new warning"
+    );
+}
+
 /// `--strict-baseline` / `--show-baselined` remain `check`-only for `fix` -- a
 /// loud rejection, never a silent no-op.
 #[test]
