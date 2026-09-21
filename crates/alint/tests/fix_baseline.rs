@@ -100,6 +100,135 @@ fn fix_baseline_converges_to_exit_zero_on_only_grandfathered() {
     );
 }
 
+/// A `*_path_matches` rule whose located `replace` fixer emits ONE edit per
+/// failing node. This is the shape that exposed the W4 CRITICAL under-suppression
+/// bug: the fixer re-derives every failing node from the file, so it must be
+/// constrained to the engine's LIVE (non-grandfathered) violation set.
+const PATH_MATCHES_CONFIG: &str = concat!(
+    "version: 1\n",
+    "rules:\n",
+    "  - id: v-pins\n",
+    "    kind: json_path_matches\n",
+    "    paths: \"**/*.json\"\n",
+    "    path: \"$.deps.*\"\n",
+    "    matches: \"^v\"\n",
+    "    level: error\n",
+    "    fix: { replace: { pattern: \"^\", replacement: \"v\", applicability: safe } }\n",
+);
+
+/// W4 CRITICAL regression (audit 2026-09-20): a located `replace` fixer must NOT
+/// rewrite GRANDFATHERED nodes. The fixer re-derives every failing node from the
+/// file, so before the fix it ignored the live-only set the engine handed it and
+/// mutated accepted debt -- `check --baseline` reported only the new node while
+/// `fix --baseline` rewrote the grandfathered ones in the SAME file. `check` and
+/// `fix` must agree: only the new node changes.
+#[test]
+fn fix_baseline_located_replace_leaves_grandfathered_nodes_untouched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), PATH_MATCHES_CONFIG).unwrap();
+    // Two pre-existing failing nodes (distinct values) -> grandfathered.
+    std::fs::write(
+        root.join("data.json"),
+        "{\n  \"deps\": {\n    \"alpha\": \"1.0\",\n    \"beta\": \"2.0\"\n  }\n}\n",
+    )
+    .unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(
+        bl.status.success(),
+        "baseline: {}",
+        String::from_utf8_lossy(&bl.stderr)
+    );
+
+    // A NEW failing node in the SAME file.
+    std::fs::write(
+        root.join("data.json"),
+        "{\n  \"deps\": {\n    \"alpha\": \"1.0\",\n    \"beta\": \"2.0\",\n    \"gamma\": \"3.0\"\n  }\n}\n",
+    )
+    .unwrap();
+
+    // `check --baseline` reports ONLY the new node (the baseline suppresses the
+    // two grandfathered ones).
+    let chk = run(root, &["check", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        chk.status.code(),
+        Some(1),
+        "the new node still fails check --baseline"
+    );
+
+    // `fix --baseline` fixes ONLY the new node; the grandfathered two are
+    // byte-identical.
+    let out = run(root, &["fix", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "fix --baseline exits 0 (new fixed, grandfathered baselined); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let data = std::fs::read_to_string(root.join("data.json")).unwrap();
+    assert!(
+        data.contains("\"alpha\": \"1.0\""),
+        "grandfathered alpha must be untouched; got:\n{data}"
+    );
+    assert!(
+        data.contains("\"beta\": \"2.0\""),
+        "grandfathered beta must be untouched; got:\n{data}"
+    );
+    assert!(
+        data.contains("\"gamma\": \"v3.0\""),
+        "the new node gamma must be fixed; got:\n{data}"
+    );
+}
+
+/// W4 CRITICAL regression (budget half): when N identical failing values are
+/// grandfathered with a count, and MORE identical values appear, `fix --baseline`
+/// resolves exactly the delta (the live count) and leaves the grandfathered count
+/// as accepted debt -- mirroring how `check --baseline` draws down the budget.
+#[test]
+fn fix_baseline_located_replace_respects_the_grandfathered_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), PATH_MATCHES_CONFIG).unwrap();
+    // Two IDENTICAL failing values -> the baseline records count 2 for the one
+    // "dup" fingerprint.
+    std::fs::write(
+        root.join("data.json"),
+        "{\n  \"deps\": {\n    \"a\": \"dup\",\n    \"b\": \"dup\"\n  }\n}\n",
+    )
+    .unwrap();
+    let bl = run(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(bl.status.success());
+
+    // A THIRD identical value: 3 present, 2 grandfathered -> exactly 1 live.
+    std::fs::write(
+        root.join("data.json"),
+        "{\n  \"deps\": {\n    \"a\": \"dup\",\n    \"b\": \"dup\",\n    \"c\": \"dup\"\n  }\n}\n",
+    )
+    .unwrap();
+
+    let out = run(root, &["fix", "--baseline", "bl.json", "."]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let data = std::fs::read_to_string(root.join("data.json")).unwrap();
+    // Exactly one occurrence fixed (3 present - 2 grandfathered); two remain as
+    // debt. (`"vdup"` does not contain the substring `"dup"`, so the counts are
+    // disjoint.)
+    assert_eq!(
+        data.matches("\"vdup\"").count(),
+        1,
+        "exactly one new node fixed; got:\n{data}"
+    );
+    assert_eq!(
+        data.matches("\"dup\"").count(),
+        2,
+        "two grandfathered nodes remain as debt; got:\n{data}"
+    );
+}
+
 /// `--strict-baseline` / `--show-baselined` remain `check`-only for `fix` -- a
 /// loud rejection, never a silent no-op.
 #[test]

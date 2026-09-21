@@ -389,11 +389,27 @@ impl PerFileRule for StructuredPathRule {
 fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
     let op_descr = match op {
         Op::Equals(expected) => format!("== {expected}"),
-        Op::Matches(re) => format!("=~ {}", re.as_str()),
+        // The `matches:` key is shared with the located `replace` fixer -- route
+        // it through the single source so the two can never drift.
+        Op::Matches(re) => return matches_baseline_key(path_src, re.as_str(), m),
         // Unreached: `Absent` violations are file-level (built in `evaluate_file`).
         Op::Absent => "absent".to_string(),
     };
     format!("{path_src}\u{0}{op_descr}\u{0}got {m}")
+}
+
+/// The baseline identity of one failing `matches:` node -- the SINGLE definition
+/// of that key, shared with the located `replace` fixer
+/// ([`crate::fixers::StructuredFixer::collect_edits`]). `fix --baseline` drops
+/// the grandfathered violations upstream and hands the fixer only the LIVE set;
+/// the fixer re-derives every node from the file, so it must correlate each
+/// candidate back to a live violation by this exact key. If the check side and
+/// the fixer ever computed it differently, a grandfathered node would be
+/// silently re-fixed (an under-suppression trust bug) -- routing both callers
+/// through this fn makes that drift impossible. Output is byte-identical to the
+/// former inline `=~ {re}` branch, so recorded baselines stay valid.
+pub(crate) fn matches_baseline_key(path_src: &str, matches_regex_src: &str, m: &Value) -> String {
+    format!("{path_src}\u{0}=~ {matches_regex_src}\u{0}got {m}")
 }
 
 /// Return `Some(message)` if the match fails the op; `None` if it passes.

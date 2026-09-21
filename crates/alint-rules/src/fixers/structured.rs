@@ -8,6 +8,7 @@
 //! edit whose result does not verify to a Suggestion instead of writing bad
 //! bytes (auto-fix.md 5.3/5.4/5.8).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use alint_core::structured_fix::{self, PathSeg};
@@ -236,7 +237,7 @@ impl Fixer for StructuredFixer {
     #[allow(clippy::too_many_lines)]
     fn collect_edits(
         &self,
-        _violations: &[Violation],
+        violations: &[Violation],
         file: &Path,
         bytes: &[u8],
         _root: &Path,
@@ -435,6 +436,25 @@ impl Fixer for StructuredFixer {
                 // non-compliant nodes; rewriting a compliant one would clobber it --
                 // e.g. `^`->`v` on an already-`v`-prefixed value). Compiled once here.
                 let compliant = regex::Regex::new(matches).ok();
+                // W4 (`fix --baseline`): rewrite only the nodes the engine handed us
+                // as LIVE violations. The baseline filter (Engine::fix_run) drops the
+                // grandfathered nodes upstream, but this fixer re-derives every
+                // failing node from the file, so without this it would rewrite
+                // accepted, reviewed debt (an under-suppression trust bug: `check
+                // --baseline` reports only the new node, but `fix` would mutate the
+                // grandfathered ones). Correlate each candidate back to a handed
+                // violation by the SAME key the host recorded it under
+                // (`matches_baseline_key`, the single shared definition), COUNT-aware
+                // so N identical values with M live get exactly M edits -- the
+                // check-side budget semantics. Under a plain `fix` (no baseline) the
+                // engine passes ALL failing nodes, so every key has budget and every
+                // node is fixed: this is transparent to the non-baseline path.
+                let mut live: HashMap<&str, usize> = HashMap::new();
+                for v in violations {
+                    if let Some(k) = v.baseline_key.as_deref() {
+                        *live.entry(k).or_default() += 1;
+                    }
+                }
                 located
                     .iter()
                     .filter_map(|node| {
@@ -445,6 +465,17 @@ impl Fixer for StructuredFixer {
                         let rewritten = search.replace_all(current, replacement.as_str());
                         if rewritten == current {
                             return None;
+                        }
+                        // Grandfathered (key absent, or its live budget already
+                        // spent by an earlier identical node) -> leave it untouched.
+                        let key = crate::structured_path::matches_baseline_key(
+                            &self.path_src,
+                            matches,
+                            node.node(),
+                        );
+                        match live.get_mut(key.as_str()) {
+                            Some(n) if *n > 0 => *n -= 1,
+                            _ => return None,
                         }
                         let content = structured_fix::serialize_scalar(
                             self.format,
@@ -459,7 +490,21 @@ impl Fixer for StructuredFixer {
                                 content,
                             },
                             applicability: self.applicability,
-                            verify: self.verifier(ExpectedValue::Matches(matches.clone())),
+                            // Verify THIS node (its normalized path), not the whole
+                            // `matches:` query. A `fix --baseline` deliberately leaves
+                            // grandfathered siblings non-matching, so an
+                            // all-selected-nodes-match verify (over `self.path_src`)
+                            // would demote this legitimate new-node edit to a
+                            // Suggestion. Per-node scoping also isolates one bad
+                            // rewrite to its own edit under a plain `fix`. The
+                            // normalized path round-trips through `JsonPath::parse`
+                            // (RFC 9535), and the splice changes only the scalar
+                            // value, so the node stays at the same path.
+                            verify: EditVerifier::Structured {
+                                format: self.format,
+                                query: node.location().to_string(),
+                                expect: ExpectedValue::Matches(matches.clone()),
+                            },
                             isolation_group: None,
                         })
                     })
@@ -1000,11 +1045,51 @@ mod tests {
         // A wildcard match hits a COMPLIANT node (`ok: "v9"`, already `^v`) and a
         // VIOLATING one (`bad: "2.0"`). Only the violating node is rewritten -- the
         // compliant one is left alone (rewriting it would clobber `v9` -> `vv9`).
+        // The engine hands the fixer the LIVE violations (it never calls a located
+        // fixer with none -- the `is_empty` guard fires first); each carries the
+        // value-keyed baseline id the fixer correlates on, so `fix --baseline` never
+        // rewrites a grandfathered node. Here only `bad` is live.
         let src = b"{\"deps\": {\"ok\": \"v9\", \"bad\": \"2.0\"}}";
-        let edits = mk(Format::Json).collect_edits(&[], Path::new("a.json"), src, Path::new("/r"));
+        let bad = Violation::new("bad").with_baseline_key(
+            crate::structured_path::matches_baseline_key("$.deps.*", "^v", &json!("2.0")),
+        );
+        let edits =
+            mk(Format::Json).collect_edits(&[bad], Path::new("a.json"), src, Path::new("/r"));
         assert_eq!(edits.len(), 1, "only the non-compliant node is rewritten");
         let (start, end, content, _) = edit_of(&edits[0]);
         assert_eq!(content, "\"v2.0\"");
         assert_eq!(&String::from_utf8_lossy(src)[start..end], "\"2.0\"");
+    }
+
+    #[test]
+    fn replace_rewrites_only_the_live_violations_it_is_handed() {
+        // W4 CRITICAL (audit 2026-09-20): two non-compliant nodes, but the engine
+        // hands the fixer only ONE as live -- the other is baseline-grandfathered
+        // and filtered out upstream. The fixer re-derives BOTH from the file, so it
+        // must correlate against the handed set and rewrite only the live node;
+        // re-deriving both would mutate accepted debt (under-suppression).
+        let f = StructuredFixer::replace(
+            Format::Json,
+            jp("$.deps.*"),
+            "$.deps.*".into(),
+            regex::Regex::new("^").unwrap(),
+            "v".into(),
+            "^v".into(),
+            Applicability::Unsafe,
+        );
+        let src = b"{\"deps\": {\"old\": \"1.0\", \"new\": \"2.0\"}}";
+        // Only `new` (value "2.0") is live; `old` (value "1.0") is grandfathered.
+        let live = Violation::new("new").with_baseline_key(
+            crate::structured_path::matches_baseline_key("$.deps.*", "^v", &json!("2.0")),
+        );
+        let edits = f.collect_edits(&[live], Path::new("a.json"), src, Path::new("/r"));
+        assert_eq!(edits.len(), 1, "only the live node is rewritten");
+        let (start, end, content, _) = edit_of(&edits[0]);
+        assert_eq!(content, "\"v2.0\"");
+        assert_eq!(
+            &String::from_utf8_lossy(src)[start..end],
+            "\"2.0\"",
+            "the rewritten span is the LIVE node, not the grandfathered one"
+        );
     }
 }
