@@ -4,7 +4,7 @@
 # remains responsible for enforcing the declared permissions at runtime.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="${WORKFLOW_PERMISSIONS_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO_ROOT"
 
 python3 - <<'PY'
@@ -14,9 +14,10 @@ import sys
 
 WORKFLOW_DIR = Path('.github/workflows')
 PERMISSION_KEYS = {
-    'actions', 'attestations', 'checks', 'contents', 'deployments',
-    'discussions', 'id-token', 'issues', 'models', 'packages', 'pages',
-    'pull-requests', 'security-events', 'statuses',
+    'actions', 'artifact-metadata', 'attestations', 'checks', 'code-quality',
+    'contents', 'deployments', 'discussions', 'id-token', 'issues', 'models',
+    'packages', 'pages', 'pull-requests', 'security-events', 'statuses',
+    'vulnerability-alerts',
 }
 
 EXPECTED_TOP = {
@@ -271,21 +272,46 @@ approval_patterns = (
 )
 raw_mutation_patterns = (
     re.compile(r'\bgh\s+api\b[^\n]*(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b', re.IGNORECASE),
+    re.compile(r'\bgh\s+api\b[^\n]*(?:^|\s)(?:-f|-F|--field|--raw-field|--input)(?:\s|=)', re.IGNORECASE),
+    re.compile(r'\bgh\s+api\s+graphql\b[^\n]*\bmutation\b', re.IGNORECASE),
     re.compile(r'\bcurl\b[^\n]*(?:-X|--request)\s+(?:POST|PUT|PATCH|DELETE)\b[^\n]*api\.github\.com', re.IGNORECASE),
+    re.compile(r'\bcurl\b[^\n]*(?:-d|--data(?:-ascii|-binary|-raw|-urlencode)?|--json)(?:\s|=)[^\n]*api\.github\.com', re.IGNORECASE),
+    re.compile(r'\bcurl\b[^\n]*api\.github\.com[^\n]*(?:-d|--data(?:-ascii|-binary|-raw|-urlencode)?|--json)(?:\s|=)', re.IGNORECASE),
 )
-approval_sources = [*paths, *sorted(Path('ci/scripts').glob('*.sh'))]
+SOURCE_SUFFIXES = {
+    '.bash', '.js', '.json', '.mjs', '.py', '.rs', '.sh', '.toml', '.ts',
+    '.tsx', '.yaml', '.yml',
+}
+# Cover workflow files and the repository programs they can invoke. Host-side
+# runner lifecycle utilities under ci/runner are an operator boundary: they do
+# not execute inside a workflow and use a separate registration credential.
+SOURCE_ROOTS = (Path('.github'), Path('ci/scripts'), Path('scripts'), Path('xtask'))
+approval_sources = set(paths)
+for root in SOURCE_ROOTS:
+    if not root.exists():
+        continue
+    approval_sources.update(
+        path for path in root.rglob('*')
+        if path.is_file() and path.suffix in SOURCE_SUFFIXES
+    )
+approval_sources.add(Path('install.sh'))
+approval_sources = sorted(path for path in approval_sources if path.exists())
 for source in approval_sources:
-    if source.name == 'test-workflow-permissions.sh':
+    if source.name.startswith('test-workflow-permissions'):
         continue
     text = '\n'.join(
         line for line in source.read_text(encoding='utf-8').splitlines()
         if not line.lstrip().startswith('#')
     )
+    # A shell backslash continuation is one command at runtime. Scan both the
+    # source form and that logical form so moving a prohibited flag to the next
+    # line cannot evade the policy.
+    scan_forms = (text, re.sub(r'\\\s*\n\s*', ' ', text))
     for pattern in approval_patterns:
-        if pattern.search(text):
+        if any(pattern.search(form) for form in scan_forms):
             fail(f'{source}: pull-request approval operation is prohibited')
     for pattern in raw_mutation_patterns:
-        if pattern.search(text):
+        if any(pattern.search(form) for form in scan_forms):
             fail(f'{source}: raw GitHub API mutation requires an explicit policy mapping')
 
 # Self-test the two policy engines so a future refactor cannot make the gate
@@ -299,6 +325,7 @@ if not raw_mutation_patterns[0].search('gh api repos/o/r/issues/1 --method PATCH
 
 print(
     f'[workflow-permissions] OK — {len(paths)} workflows, '
-    f'{sum(len(jobs) for _, jobs in parsed.values())} jobs, explicit least privilege'
+    f'{sum(len(jobs) for _, jobs in parsed.values())} jobs, '
+    f'{len(approval_sources)} runtime source files, explicit least privilege'
 )
 PY
