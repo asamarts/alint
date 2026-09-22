@@ -32,6 +32,8 @@ on:
         required: false
         default: "edge"
 
+permissions: {}
+
 concurrency:
   # Coalesce rapid pushes — only one image build in flight per ref,
   # and a newer push cancels an older one. Prevents two builds

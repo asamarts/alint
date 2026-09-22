@@ -52,9 +52,7 @@ on:
         required: false
         default: ""
 
-permissions:
-  contents: write       # commit the bench dirs + HISTORY.md update
-  pull-requests: write  # open the review PR
+permissions: {}
 
 # Hard serialisation: only one bench run at a time per ref. A second
 # tag push while a bench is in flight queues rather than racing for
@@ -76,6 +74,8 @@ jobs:
   guard:
     name: engine-change guard
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       should_bench: ${{ steps.decide.outputs.should_bench }}
     steps:
@@ -125,6 +125,9 @@ jobs:
     # run a different CPU, kernel, and FS, voiding cross-version
     # comparability.
     runs-on: [self-hosted, linux, bench]
+    permissions:
+      contents: write       # commit the bench dirs + HISTORY.md update
+      pull-requests: write  # open the review PR
     timeout-minutes: 360   # 6h cap; ~3.5h expected at publish-grade flags
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

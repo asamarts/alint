@@ -138,6 +138,34 @@ effect. The target design separates secretless coverage computation from an
 independently authorized upload. Bench smoke and deterministic perf remain
 box-specific signals and are skipped outside an approved route.
 
+### Token authority is independent of runner placement
+
+Hosted execution isolates the maintainer's machine; it does not make an
+overpowered `GITHUB_TOKEN` safe. Every workflow therefore has an explicit
+top-level permission boundary. Ordinary action, CI, coverage, cross-platform,
+editor, issue-26 and mutants workflows receive only `contents: read`. Workflows
+whose jobs have different effects use top-level `permissions: {}` and exact
+job declarations:
+
+- the benchmark-image job has `contents: read` plus `packages: write`;
+- the benchmark guard has `contents: read`, while only the canonical benchmark
+  job has `contents: write` and `pull-requests: write`;
+- release preflight/build and external-credential publishers have
+  `contents: read`; GitHub Release, GHCR, OIDC/attestation and follow-on
+  dispatch jobs retain only their respective declared scopes; and
+- the docs-bundle workflow retains `contents: write` because its one job pushes
+  the dedicated branch. Its Cloudflare hook is a separate credential and does
+  not expand `GITHUB_TOKEN`.
+
+GitHub exposes one repository setting for both creating and approving pull
+requests. It remains enabled because `bench-record` must run `gh pr create`;
+this is a compatibility exception, not approval authority. Repository code is
+forbidden from submitting an approving review. The
+`test-workflow-permissions.sh` harness inventories every workflow/job, compares
+the exact allowed maps, binds known write indicators to their required scope,
+records the Homebrew deploy-key push as an explicit external-credential edge,
+and rejects review-approval operations.
+
 ## 5. Verification contract
 
 `ci/scripts/test-ci-pr-routing.sh` models and checks:

@@ -15,6 +15,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: cross-platform-${{ github.ref }}
   cancel-in-progress: true

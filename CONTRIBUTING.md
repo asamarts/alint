@@ -194,6 +194,13 @@ a content rule that fans out over `**/*.rs`.
     are skipped for PRs. Exact admitted human PRs may return to local compute
     only after the disposable one-job executor passes its isolation canaries.
     See `docs/design/v0.14/ci-fork-pr-isolation.md`.
+  - Every workflow declares its `GITHUB_TOKEN` permissions. Ordinary test and
+    build workflows are `contents: read`; release, package, docs and benchmark
+    writers grant only the scopes used by the individual writer job. The
+    repository's combined "create and approve pull requests" setting remains
+    enabled solely because the benchmark recorder opens a review PR. Workflow
+    code may create that PR but must never approve one; the shell-test policy
+    gate rejects permission drift and approval operations.
 - One approving review (currently a single-maintainer project; this is the
   spot to call out if you'd like to be added as a co-maintainer)
 
