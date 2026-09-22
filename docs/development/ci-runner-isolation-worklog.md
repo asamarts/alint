@@ -111,3 +111,7 @@ records alint-owned workflow/design/test changes and their immutable commits.
 - Final read-back kept `container-alint-runner.service` inactive/dead and
   enabled, and `alint-runner` exited with PID zero. It was not started for
   validation; no other runner was changed.
+- Committed the workflow, test and documentation change as
+  `462ea132ebec0dbb73b1960a28914946129ef028` on
+  `ci/minemon-isolated-runner`. Push and PR evidence follow separately so this
+  log does not claim remote state before it exists.
