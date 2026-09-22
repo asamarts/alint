@@ -115,3 +115,29 @@ records alint-owned workflow/design/test changes and their immutable commits.
   `462ea132ebec0dbb73b1960a28914946129ef028` on
   `ci/minemon-isolated-runner`. Push and PR evidence follow separately so this
   log does not claim remote state before it exists.
+
+### 11:53–11:56 EDT — remote and owner-authority read-back
+
+- Pushed the branch and read it back at
+  `dbc179ca0b1a13efa9ec01b9bda67fa8fc4913ae`; GitHub listed no workflow run for
+  the branch push. This matches the workflow's main/master/tag-only push scope.
+- Used the already configured `asamarts` CLI profile ephemerally, without
+  changing the globally active `kaminsod` profile or printing credentials.
+  GitHub confirmed admin authority, repository ID `1214597864`, and `main` as
+  the default branch.
+- The effective collaborator list contained only `asamarts` (admin); no deploy
+  keys were returned. This does not prove the absence of installed GitHub Apps,
+  which needs a separate installation-authority inventory.
+- Repository Actions are enabled with all actions allowed. Default workflow
+  token permission is `write`, workflow tokens may approve PR reviews, and the
+  fork approval policy covers only first-time contributors. There are nine
+  Actions secrets by count, zero Actions variables, zero environments, no
+  rulesets and no `main` branch protection.
+- GitHub reported `alint-runner` offline and idle, as required by the hold.
+  The distinct `kbench-bench` runner remained online and idle; it was neither
+  stopped nor reconfigured. No repository setting or runner registration was
+  changed during this read-back.
+- The write-default/all-actions/approval posture is a separate hardening
+  finding. It must be mapped against every workflow's actual permissions and
+  actions before a least-privilege change; this containment task does not
+  silently alter it.
