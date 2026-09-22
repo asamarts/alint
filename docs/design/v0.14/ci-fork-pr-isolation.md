@@ -1,248 +1,207 @@
-# CI fork-PR isolation — keep untrusted PR code off the self-hosted runner
+# CI PR isolation — keep unapproved code off local runners
 
-Status: **Implemented (#106).** Follows the post-v0.13 audit finding
-**H6** (`post_v0.13_audit.md`). The immediate mitigation — the GitHub
-*"Require approval for all outside collaborators"* setting — was already in
-place; this durable, defence-in-depth fix landed in **#106**: the §4 router in
-`ci.yml`, dynamic `runs-on` on every portable job, the box-only jobs
-(`bench-smoke`/`perf-gate`/`coverage`) gated on `untrusted != 'true'`, the §5
-ephemeral-path gaps closed (`docs` job `setup-node`, `audit.sh` self-installs
-`cargo-audit`). The design below is the as-built spec; the recommendations in
-§8 were taken as written (dynamic routing, skip coverage on fork PRs, tool
-installs folded into the scripts).
+Status: **canonical routing corrected; all PRs hosted while local capacity is held.** The
+original fork routing landed in #106 after audit finding H6. A September 2026
+review found two gaps: same-repository bot PRs passed its repository-name test,
+and the design incorrectly treated `pull_request` workflow YAML as immutable
+base-branch policy. The current workflow uses exact numeric identity checks,
+but the persistent `alint` listener must remain offline until a separately
+qualified base-controlled broker provisions a unique disposable one-job
+runner. Operational evidence is in
+`docs/development/ci-runner-isolation-worklog.md`.
 
-Scope: `.github/workflows/ci.yml`, `.github/workflows/coverage.yml`.
-Related: ADR-0004 (trust boundary), `deterministic-perf-gating.md`,
-`post_v0.13_audit.md` §H6.
-
----
+Scope: `.github/workflows/ci.yml`, `.github/workflows/coverage.yml` and
+`ci/scripts/test-ci-pr-routing.sh`. Related: ADR-0004 (trust boundary),
+`deterministic-perf-gating.md`, `post_v0.13_audit.md` §H6.
 
 ## 1. Problem
 
-`asamarts/alint` is a **public** repo. `ci.yml` and `coverage.yml` trigger
-on `pull_request` and run almost every job on
-`runs-on: [self-hosted, linux, alint]` — which is the maintainer's
-**persistent** box (it also hosts the bench baseline and other services,
-and on disk holds the `asamarts` + `kaminsod` `gh` tokens, SSH/deploy keys,
-and cargo credentials). A pull request from a **fork** checks out the PR's
-code and runs it — `ci/scripts/*.sh`, `xtask`, `build.rs` — so a malicious
-fork PR can read those secrets, persist, or poison the cache/bench
-baseline. This is GitHub's documented "don't use self-hosted runners with
-public repos" hazard.
+`asamarts/alint` is public. Its build, test and coverage jobs execute repository
+code: shell scripts, Rust build scripts, tests and project tools. A persistent
+self-hosted runner on a developer machine is therefore a host-compromise and
+cross-job-persistence boundary, even if the runner process itself is rootless.
+GitHub explicitly recommends against persistent self-hosted runners for public
+repositories because pull requests can execute attacker-controlled code and a
+self-hosted machine is not guaranteed to be clean or ephemeral.
 
-The approval setting stops fork PRs from running *without a maintainer
-click*. It does **not** make the box safe once approved (approving still
-runs the code there), and "remember to never click approve on anything
-fishy" is not a control. The durable fix is: **untrusted fork-PR code must
-never execute on the self-hosted runner — only on throwaway,
-GitHub-hosted runners.**
+The first fix classified only external forks as untrusted. That was
+insufficient. Dependabot PR 250 had the same base and head repository ID as the
+project, so the former `head.repo.full_name == github.repository` check routed
+its ordinary and coverage jobs locally. More generally, a bot, installed App,
+deploy key or other principal can update a same-repository branch without being
+one of the two approved human development authorities.
 
-## 2. Goals / non-goals
+There is a deeper boundary: a `pull_request` run uses the PR merge ref and merge
+commit. GitHub selects workflow files from the event-associated ref/commit, so
+a PR can alter the very YAML that contains `runs-on` and the routing check. An
+allowlist inside that file can correct normal/canonical routing but cannot
+protect an online persistent runner with predictable labels from a workflow
+edit. First-time-contributor approval is also not a durable isolation boundary:
+approval allows the proposed workflow/code to run and future approval policy
+may change.
 
-**Goals**
-- A fork PR's jobs run only on ephemeral `ubuntu-latest`, never on the box.
-- A fork PR still gets the full correctness gate it can get without the
-  box (fmt, clippy, test, build, audit, deny, docs, dogfood, examples,
-  shell-tests) so contributors get real feedback.
-- **Trusted** events keep using the fast, warm self-hosted box: `push` to
-  `main`, tags, `workflow_dispatch`, `schedule`, and same-repo
-  (collaborator-branch) PRs.
-- For a public repo, GitHub-hosted minutes are free, so this costs $0.
+## 2. Policy and goals
 
-**Non-goals**
-- Replacing the self-hosted runner (bench, deterministic perf-gate, and
-  tuned coverage still need it for trusted events).
-- Giving fork PRs the box-only gates (bench, Valgrind perf-gate, the tuned
-  coverage run). They are deliberately skipped on fork PRs — see §6.
-- Changing the GitHub approval setting (it stays on as the first layer).
+For a PR, canonical local eligibility requires all of the following:
 
-## 3. Threat model & the load-bearing GitHub fact
+- event repository ID, base repository ID and head repository ID are exactly
+  `1214597864` (`asamarts/alint` at the recorded review);
+- PR author ID is one of `11239806` (`asamarts`) or `12991611` (`kaminsod`);
+- webhook event sender ID and `github.actor_id` are in the same human-ID set;
+  and
+- every field exists and compares successfully. Missing/null/unknown values
+  fail closed.
 
-A PR is **untrusted** iff it comes from a fork:
-`github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true`.
-That value is computed by GitHub from the PR's source repo; a fork cannot
-forge it.
+Numeric IDs are intentional: login and repository names can change. An
+`author_association`, owner-name wildcard, `head.repo.fork` bit, branch name,
+label or same-repository test is not authorization. The sender check rejects a
+bot/App synchronizing an approved author's branch; the author check rejects an
+unapproved author whose event is retriggered by an approved actor. GitHub rerun
+identity has additional semantics, so the future broker also validates the live
+run attempt and triggering actor through the API.
 
-**The fact this design rests on:** for a `pull_request` event, GitHub
-evaluates the workflow **definition from the base repository** (the PR's
-target branch), while checking out the **PR's code** for the run. So:
-- the **YAML** (jobs, `runs-on`, `if:`) is the base repo's and a fork
-  cannot rewrite it for its own run — the routing guards below are
-  authoritative;
-- the **scripts** the YAML invokes (`ci/scripts/*.sh`, `xtask`, …) are the
-  **fork's** version.
+The desired end state is:
 
-The hard consequence: **the fork-vs-trusted decision must be taken in the
-base YAML from the immutable `head.repo.fork` context — never derived from
-a checked-out script's output.** A fork's `detect-changes.sh` runs with the
-PR's code; if routing read *its* output, a fork could emit
-`runner=[self-hosted,…]` and land on the box. Routing reads only the
-GitHub context.
+- approved development PRs may use local compute only in a fresh, secretless,
+  one-job VM with an independently admitted job and unique non-default runner
+  registration;
+- all other PRs run portable jobs on GitHub-hosted ephemeral capacity, while
+  box-only jobs and local coverage remain skipped/held;
+- release, publication, Codecov upload and other write/secret effects stay
+  separate from PR compute; and
+- a missing identity, API failure, broker mismatch, label collision or absent
+  qualified guest leaves the local job queued/held. It never falls back to the
+  legacy listener.
 
-(`pull_request` from a fork also gets a **read-only** `GITHUB_TOKEN` and
-**no repository secrets** — e.g. `CODECOV_TOKEN` is empty on a fork run.
-Those are GitHub-enforced and independent of this change.)
+This correction deliberately preserves existing non-PR route behavior in the
+workflow while the replacement is designed. For PRs, the exact identity
+predicate is retained but an explicit false capacity switch sends even admitted
+human PRs to hosted portable CI until MN-167 qualifies the replacement. Push,
+tag, schedule and manual events need their own exact principal/ref contracts
+before local provisioning; “not a PR” is not sufficient admission for the
+future broker.
 
-## 4. Design (recommended): route once from context, reuse per job
+## 3. Current containment
 
-Add a cheap **router** to the existing `changes` job and move it to
-`ubuntu-latest` (it is the entry point — it must never touch the box, and
-`detect-changes.sh` is just a `git diff`, fine on a hosted runner). It
-emits two new outputs, computed from the immutable context in their **own
-step** (so the fork's `detect-changes.sh`, which runs in a different step,
-cannot influence them):
+The `changes` job always starts on `ubuntu-latest`. Its first step, before any
+checkout, evaluates only GitHub context values. It retains the exact admitted-
+identity predicate, but `LOCAL_PR_CAPACITY_ENABLED` is explicitly false while
+the legacy listener is held. Every PR therefore emits `ubuntu-latest` and
+`hosted=true`; portable downstream jobs consume that one output. Box-only jobs
+require `hosted != 'true'`. `coverage.yml` repeats the exact admission
+predicate behind an explicit false capacity term in its job-level `if`, so
+every PR skips before runner assignment.
 
-```yaml
-  changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest            # was [self-hosted, linux, alint]
-    outputs:
-      rust: ${{ steps.detect.outputs.rust }}
-      # …existing change-detection outputs…
-      runner: ${{ steps.route.outputs.runner }}
-      untrusted: ${{ steps.route.outputs.untrusted }}
-    steps:
-      - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
-      - id: route                      # BEFORE detect; pure context, no PR code
-        env:
-          IS_FORK: ${{ github.event_name == 'pull_request'
-                       && github.event.pull_request.head.repo.fork }}
-        run: |
-          if [ "$IS_FORK" = "true" ]; then
-            echo 'runner=["ubuntu-latest"]'              >> "$GITHUB_OUTPUT"
-            echo 'untrusted=true'                        >> "$GITHUB_OUTPUT"
-          else
-            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=false'                       >> "$GITHUB_OUTPUT"
-          fi
-      - id: detect
-        env: { GH_EVENT: ${{ github.event_name }}, … }
-        run: ci/scripts/detect-changes.sh
-```
+`hosted` describes the selected executor rather than the contributor's trust.
+That distinction is load-bearing: an approved human PR still needs Node setup
+on a fresh hosted runner and still must not receive a box-specific benchmark.
+The false switch is canonical routing only. Because PR YAML can change it, the
+stopped listener remains the actual protection until the base-controlled
+broker exists.
 
-Every downstream **portable** job (fmt, clippy, test, audit, deny, build,
-docs, dogfood, examples, shell-tests, summary) changes one line:
+This ordering prevents the checked-out `detect-changes.sh` from changing the
+canonical route. It does **not** make PR-controlled workflow YAML authoritative.
+For that reason the persistent runner remains stopped, even after this patch.
+With no fixed-label listener online, a PR that edits the workflow to request
+`[self-hosted, linux, alint]` can at worst leave a job queued; it cannot acquire
+this host through that label.
 
-```yaml
-    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
-```
+### Per-job canonical disposition
 
-→ trusted events resolve to `[self-hosted, linux, alint]` (fast, warm box);
-fork PRs resolve to `[ubuntu-latest]` (throwaway VM, no box secrets).
-
-The **box-only** jobs additionally skip on fork PRs (see §6):
-
-```yaml
-    if: >-
-      … existing conditions …
-      && needs.changes.outputs.untrusted != 'true'
-```
-
-`editors` is already `ubuntu-latest` — unchanged.
-
-### Per-job disposition
-
-| Job | Needs the box? | Disposition |
+| Job | Approved PR | Other PR |
 |---|---|---|
-| `changes` (router) | no | **always `ubuntu-latest`** (entry point) |
-| `fmt`, `clippy`, `test`, `build`, `dogfood`, `examples`, `shell-tests`, `summary` | no | dynamic `runs-on` (box when trusted, hosted on fork PR) |
-| `audit` | tool only | dynamic + ensure `cargo-audit` is installed on the hosted path (§5) |
-| `deny` | tool only | dynamic (`deny.sh` already self-installs `cargo-deny`) |
-| `docs` | Node 22 + likec4 | dynamic + add `setup-node` + likec4 install on the hosted path (§5) |
-| `bench-smoke` | **yes** (bench) | **skip on fork PRs** |
-| `perf-gate` | **yes** (Valgrind) | **skip on fork PRs** (already PR-only + rust) |
-| `editors` | no | unchanged (`ubuntu-latest`) |
-| `coverage` (coverage.yml) | **yes** (tuned pids/jobs + secret) | **skip on fork PRs** (§6) |
+| `changes` (routing/change detection) | GitHub-hosted | GitHub-hosted |
+| `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | GitHub-hosted while capacity is held | GitHub-hosted |
+| `bench-smoke`, `perf-gate` | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard |
+| `editors` | GitHub-hosted | GitHub-hosted |
+| `coverage` | skipped before assignment while capacity is held | skipped before assignment |
 
-## 5. Ephemeral-path gaps to close
+The route step is intentionally inline. A checked-out repository script is PR
+code and cannot be trusted to choose a runner. The mirrored coverage predicate
+is protected against accidental drift by `test-ci-pr-routing.sh`.
 
-The box has tools pre-installed that a fresh `ubuntu-latest` does not. For
-the jobs that run there on a fork PR:
+## 4. Hosted-path compatibility
 
-- **`docs`** runs `docs.sh` → `likec4.sh` (`likec4 validate`,
-  `gen-mermaid --check`), needing **Node 22 + `@likec4/cli`** and the
-  `--no-use-dot` wasm layouter. Add `actions/setup-node@v6` (node 22) +
-  a pinned `npm i -g @likec4/cli@<ver>` step, guarded to the hosted path
-  (or unconditionally — it's cheap). Without it, the LikeC4/mermaid
-  sub-gates would error on a fork PR. The `gen-{schema,facts,arch}` and
-  `docs-export` checks are pure cargo and need nothing extra.
-- **`audit`** assumes `cargo-audit` is present (`audit.sh` has no install
-  step, unlike `deny.sh`). Add a `command -v cargo-audit || cargo install
-  cargo-audit --locked` guard to the script, or an install step on the
-  hosted path.
-- **Caches**: GitHub isolates fork caches — a fork PR gets **read-only**
-  access to the base cache and cannot write it (so it can't poison
-  `Swatinem/rust-cache`, a bonus), but its builds are colder/slower.
-  Acceptable for a correctness gate.
-- **`RUSTFLAGS: -D warnings`** etc. are env-level and already portable.
+Portable jobs on a fresh `ubuntu-latest` host need the tools formerly assumed
+from the warm box:
 
-These are the only deltas; the cargo/shell scripts themselves are
-platform-portable.
+- `docs` installs Node 22 before the LikeC4 checks on every hosted route;
+- `audit.sh` and `deny.sh` bootstrap their pinned/locked Cargo tools as already
+  documented by their scripts; and
+- hosted caches are performance inputs, never authorization. No artifact or
+  cache produced by an unapproved route may be executed by a later privileged
+  or local job without independent provenance validation.
 
-## 6. Why box-only jobs skip fork PRs (and where the gate still runs)
+Coverage remains held for unapproved PRs because the existing instrumented
+build depends on local tuning and the combined job also has a Codecov upload
+effect. The target design separates secretless coverage computation from an
+independently authorized upload. Bench smoke and deterministic perf remain
+box-specific signals and are skipped outside an approved route.
 
-- **`bench-smoke` / `perf-gate`** are meaningless or impossible on a shared
-  hosted VM (wall-clock is noisy; the deterministic gate needs Valgrind +
-  the merge-base build on the box). They are maintainer-facing perf
-  signals, not contributor-blocking correctness — skipping them on fork
-  PRs loses nothing a fork could act on. They still run on every
-  collaborator PR and on push.
-- **`coverage`** needs the box's `pids-limit`/`CARGO_BUILD_JOBS` tuning to
-  avoid the instrumented-build OOM/hang (documented in the runner-recovery
-  notes), and its Codecov upload secret is withheld from forks anyway. Skip
-  it on fork PRs; the `ALINT_COVERAGE_FLOOR` gate still runs on push-to-main
-  and on every collaborator PR, which is where regressions must not land.
-  (Future option: a reduced-parallelism hosted coverage run for fork PRs —
-  see §8.)
+## 5. Verification contract
 
-Net for a fork PR: full fmt/clippy/test/build/audit/deny/docs/dogfood/
-examples/shell-tests on `ubuntu-latest`; bench/perf/coverage skipped. A
-contributor still sees a real green/red.
+`ci/scripts/test-ci-pr-routing.sh` models and checks:
 
-## 7. Rollout & testing
+- approved same-repository events for each admitted human ID;
+- stable-ID behavior independent of renamed logins;
+- same-repository Dependabot, external fork, wrong base/event repository,
+  unknown author, unknown synchronizing actor and null head repository denial;
+- presence of every exact-ID term in both workflows;
+- route-before-checkout ordering; and
+- absence of the former `head.repo.full_name`/`head.repo.fork` trust tests.
 
-1. Land the workflow change behind the router; keep the box-only jobs'
-   existing `if:` plus the `untrusted != 'true'` clause.
-2. **Verify with a real fork:** open a PR from a throwaway fork and confirm
-   (a) every job lands on `ubuntu-latest`, (b) `bench-smoke`/`perf-gate`/
-   `coverage` are skipped, (c) the `docs` job's likec4 gate runs (Node
-   installed). Confirm the box's runner shows **no** jobs for that PR.
-3. **Verify trusted paths unchanged:** a same-repo branch PR and a push to
-   `main` both still run on `[self-hosted, linux, alint]`, full matrix.
-4. Keep the GitHub approval setting on throughout — belt **and** suspenders.
-5. Update `post_v0.13_audit.md` H6 → done, and add a one-line note to
-   `CONTRIBUTING.md` / `RELEASING.md` that fork PRs run on hosted runners.
+Before merging, run the routing harness, all shell harnesses, a YAML parse,
+workflow lint where an admitted `actionlint` is available, and the repository
+preflight. The owner PR itself must show that an admitted human receives the
+complete portable hosted graph while box-only jobs and coverage skip. After
+merging, observe an actual bot/unapproved PR with the same executor result and
+no local worker. The prior owner-PR run already recorded the admitted local
+legs safely queued while the listener was offline; changing the canonical
+route to hosted restores portable validation without restarting it.
 
-## 8. Open questions
+The disposable cutover later requires live positive and negative canaries. Its
+base-controlled broker must independently verify repository, workflow, event,
+ref, immutable SHA, run attempt, actor/sender authority and the actual assigned
+job before creating a repository-scoped JIT registration with a unique label.
+It must destroy the guest and registration after one job and prove a competing
+same-label job receives neither the guest nor any credential.
 
-1. **Coverage on fork PRs** — skip (recommended, simplest) vs a
-   reduced-parallelism hosted run (`CARGO_BUILD_JOBS=2`, no Codecov
-   upload). Skipping means a fork PR shows no coverage delta; the floor is
-   still enforced where it matters. Decide per how much fork-PR coverage
-   feedback is worth.
-2. **Full-ephemeral vs dynamic** — should *trusted* CI also move to
-   `ubuntu-latest` (retire the box for PR/push, keep it only for
-   bench/coverage/release)? Simpler YAML, slower maintainer CI, but removes
-   the box from the correctness path entirely. The dynamic design keeps the
-   fast path; full-ephemeral maximises simplicity. (Recommendation:
-   dynamic — the box is fast and warm and the maintainer's own pushes
-   benefit.)
-3. **`audit`/`deny` on hosted** — fold the tool-install guard into the
-   scripts (portable everywhere) vs a workflow step (hosted-only). Folding
-   into the scripts is cleaner and helps local runs too.
+## 6. Rollback and failure behavior
 
-## 9. Alternatives considered
+If the exact-ID or capacity-hold change breaks portable hosted CI, revert only
+the workflow/test commit and keep the legacy listener stopped. Reverting to the
+name-only guard does not authorize local execution. If GitHub payload
+semantics, repository ownership or an approved numeric ID changes, the route
+fails hosted/held until the new fact is reviewed and both workflow predicates/
+tests are updated.
 
-- **GitHub setting only (status quo + approval).** The first layer, kept.
-  Insufficient alone: approving a fork PR still runs its code on the box.
-- **Skip all self-hosted jobs on fork PRs, add one combined hosted job.**
-  Simpler YAML, but fork PRs get a coarse single check instead of the real
-  per-job graph, and it diverges from the trusted path (drift risk). The
-  dynamic `runs-on` gives forks the *same* job graph on hosted runners.
-- **Per-job inline fork expression** (no router job). Secure but repeats a
-  long `${{ … fromJSON … }}` ternary on every job; the single router output
-  is DRYer and equally safe (it reads only the immutable context).
-- **`pull_request_target`.** Rejected outright — it runs with secrets and
-  the base token against PR code; the opposite of what we want. This design
-  must never introduce it.
+Do not test rollback by starting the persistent container. Do not treat a
+green hosted run as proof of local isolation, or a listener process as proof of
+runner health. Local stop/start/restart and host-escape tests belong to the
+qualified disposable replacement.
+
+## 7. Rejected shortcuts
+
+- **Repository name, fork bit or author login.** Mutable/incomplete identity;
+  it failed on a real same-repository bot PR.
+- **Workflow predicate plus persistent fixed label.** The PR can edit its
+  workflow and target the label directly.
+- **Approval setting only.** Approval executes code; it does not isolate the
+  host or constrain a same-repository bot/App.
+- **Run PR code directly under `pull_request_target`.** That event uses the base
+  context and may have write/secrets authority; checking out and executing PR
+  code there creates a privilege-confusion path. A narrowly permissioned
+  base-controlled metadata broker may observe/dispatch, but it must not execute
+  the PR payload or expose credentials.
+- **Reusable fixed registration or secret label.** A queued job is not a
+  reservation and label secrecy is not authorization. Admission must bind and
+  recheck the actual job before any capacity or credential is released.
+- **Container-only replacement.** A rootless container shares the host kernel
+  and retains cross-job state; it is not the required hostile-code boundary.
+
+## 8. Primary GitHub references
+
+- [Events that trigger workflows (`pull_request` merge-ref semantics)](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
+- [Secure use reference (self-hosted runner warning)](https://docs.github.com/en/actions/reference/security/secure-use)
+- [Contexts reference (`github.actor_id` and rerun semantics)](https://docs.github.com/en/actions/learn-github-actions/contexts#github-context)
+- [Webhook payload reference (`pull_request.user` and `sender`)](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request)

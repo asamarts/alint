@@ -187,7 +187,13 @@ a content rule that fans out over `**/*.rs`.
 `main` is protected; PRs require:
 
 - Passing the PR CI workflows: `ci.yml` (preflight: fmt/clippy/test/docs/version-pins/dogfood, plus the `bench-smoke` and advisory `perf-gate` jobs) and `cross-platform.yml` (Linux/macOS/Windows tests). (`release.yml` is tag-triggered only and does not gate PRs.)
-  - **PRs from a fork** run the portable gate (fmt/clippy/test/build/audit/deny/docs/dogfood/examples/shell-tests) on ephemeral GitHub-hosted `ubuntu-latest` runners, never the maintainer's self-hosted box; the box-only jobs (`bench-smoke`, `perf-gate`, `coverage`) are skipped there and still run on push-to-`main` and collaborator-branch PRs. So a fork PR may show fewer checks and colder (uncached) build times; that's expected, not a failure. See `docs/design/v0.14/ci-fork-pr-isolation.md`.
+  - **Temporary security hold:** every PR currently runs the portable gate
+    (fmt/clippy/test/build/audit/deny/docs/dogfood/examples/shell-tests) on
+    ephemeral GitHub-hosted `ubuntu-latest` runners. The legacy fixed-label
+    listener is offline, so box-only `bench-smoke`, `perf-gate`, and `coverage`
+    are skipped for PRs. Exact admitted human PRs may return to local compute
+    only after the disposable one-job executor passes its isolation canaries.
+    See `docs/design/v0.14/ci-fork-pr-isolation.md`.
 - One approving review (currently a single-maintainer project; this is the
   spot to call out if you'd like to be added as a co-maintainer)
 

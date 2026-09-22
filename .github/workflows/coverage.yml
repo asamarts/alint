@@ -23,13 +23,23 @@ env:
 jobs:
   coverage:
     name: cargo-llvm-cov
-    # SECURITY (audit H6): never run on the self-hosted box for a fork PR.
-    # Coverage needs the box's pids-limit / CARGO_BUILD_JOBS tuning (a hosted
-    # instrumented build OOMs/hangs) and its Codecov secret is withheld from
-    # forks anyway. The ALINT_COVERAGE_FLOOR gate still runs on push-to-main
-    # and on every same-repo (collaborator) PR. See
-    # docs/design/v0.14/ci-fork-pr-isolation.md.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # SECURITY (audit H6): all PR coverage is held while the fixed-label
+    # listener is offline. Keep the full exact-ID predicate beside the explicit
+    # false capacity switch so its future disposable route cannot silently
+    # broaden admission. This is defence in depth, not scheduling authority.
+    # See docs/design/v0.14/ci-fork-pr-isolation.md.
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        (false &&
+          format('{0}', github.event.repository.id) == '1214597864' &&
+          format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
+          format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
+          contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
+          contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
+          contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
+        )
+      }}
     runs-on: [self-hosted, linux, alint]
     # Self-fail fast if the runner ever hangs again, instead of sitting at the
     # 360-min GitHub default and holding the single self-hosted runner. 90 min

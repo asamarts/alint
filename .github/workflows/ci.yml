@@ -25,13 +25,15 @@ env:
 jobs:
 
   # ── Change detection + runner routing ─────────────────────────────
-  # SECURITY (audit H6): this entry job runs on ubuntu-latest, never the
-  # self-hosted box — it's the first job a fork PR reaches and it checks out
-  # (untrusted) PR code. It routes every downstream job's runner from the
-  # IMMUTABLE `head.repo.fork` context: a fork PR → ephemeral ubuntu-latest;
-  # anything trusted (push / tag / same-repo PR) → the warm self-hosted box.
-  # The decision is taken from context, NOT from a checked-out script — see
-  # docs/design/v0.14/ci-fork-pr-isolation.md.
+  # SECURITY (audit H6): this entry job always runs on ubuntu-latest. The route
+  # step executes before checkout and fails closed for a PR unless the event,
+  # base/head repositories, PR author and event sender have exact admitted
+  # numeric IDs. This fixes canonical routing for same-repository bots as well
+  # as forks. It is defence in depth, not the scheduling security boundary:
+  # pull_request workflow YAML comes from the PR merge context and can itself
+  # be edited. The legacy fixed-label listener therefore stays offline until a
+  # base-controlled broker creates a unique disposable one-job registration.
+  # See docs/design/v0.14/ci-fork-pr-isolation.md.
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
@@ -43,31 +45,48 @@ jobs:
       editors: ${{ steps.detect.outputs.editors }}
       supply_chain: ${{ steps.detect.outputs.supply_chain }}
       runner: ${{ steps.route.outputs.runner }}
-      untrusted: ${{ steps.route.outputs.untrusted }}
+      hosted: ${{ steps.route.outputs.hosted }}
     steps:
+      # Keep this before checkout. IDs survive login/repository renames and a
+      # null/missing payload field formats as an empty string, failing closed.
+      # Requiring the event sender as well as the PR author catches bot/App or
+      # otherwise unapproved synchronize events on an approved author's branch.
+      # The github.actor_id equality is an additional stable-ID consistency
+      # check; a later base-controlled broker must also validate rerun metadata.
+      - id: route
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_ADMITTED_PR: >-
+            ${{
+              github.event_name == 'pull_request' &&
+              (
+                format('{0}', github.event.repository.id) == '1214597864' &&
+                format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
+                format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
+                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
+                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
+                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
+              )
+            }}
+          # Capacity switch, not an authorization boundary. Keep false while
+          # the fixed-label listener is held; MN-167 may replace this only
+          # after base-controlled disposable admission passes its canaries.
+          LOCAL_PR_CAPACITY_ENABLED: "false"
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=false' >> "$GITHUB_OUTPUT"
+          elif [ "$IS_ADMITTED_PR" = "true" ] &&
+               [ "$LOCAL_PR_CAPACITY_ENABLED" = "true" ]; then
+            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      # Routing runs FIRST and writes to its OWN step output, which the
-      # (untrusted) detect step below cannot touch — so a fork's
-      # detect-changes.sh can never force the downstream jobs onto the box.
-      # Trust is decided by full_name equality and fails CLOSED: a non-PR
-      # event (push/tag), or a PR whose head repo IS this repo (a collaborator
-      # branch), is trusted → self-hosted. A fork — OR a null/absent head.repo
-      # (a deleted/detached fork) — is untrusted → ephemeral ubuntu-latest.
-      # (`== github.repository`, not the `fork` bit, so it also stays correct
-      # were this repo itself a fork.)
-      - id: route
-        env:
-          IS_TRUSTED: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          if [ "$IS_TRUSTED" = "true" ]; then
-            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=true' >> "$GITHUB_OUTPUT"
-          fi
       - id: detect
         env:
           GH_EVENT: ${{ github.event_name }}
@@ -234,11 +253,11 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: ci-docs
-      # Ephemeral fork-PR path only: the box's runner image already ships
-      # Node 22, but a fresh ubuntu-latest needs it so docs.sh's
+      # Ephemeral hosted path: the box's runner image already ships Node 22,
+      # but a fresh ubuntu-latest needs it so docs.sh's
       # `likec4 validate` + `gen-mermaid --check` gates run (they fetch
       # likec4 via `npx -y likec4@<pin>`). Skipped on the box.
-      - if: needs.changes.outputs.untrusted == 'true'
+      - if: needs.changes.outputs.hosted == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
@@ -272,12 +291,12 @@ jobs:
   bench-smoke:
     name: Bench Smoke
     needs: [changes, build]
-    # `untrusted != 'true'` keeps this box-only job off fork PRs (they route
-    # to ubuntu-latest, where a bench job is meaningless).
+    # `hosted != 'true'` keeps this box-only job off every hosted PR while the
+    # local route is held; a hosted bench result would not match its corpus.
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.bench == 'true'
-      && needs.changes.outputs.untrusted != 'true'
+      && needs.changes.outputs.hosted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -299,12 +318,12 @@ jobs:
   perf-gate:
     name: Perf Gate (deterministic)
     needs: [changes, build]
-    # `untrusted != 'true'` keeps this box-only (Valgrind) job off fork PRs.
+    # `hosted != 'true'` keeps this box-only Valgrind job off hosted PRs.
     if: >-
       !cancelled() && !failure()
       && github.event_name == 'pull_request'
       && needs.changes.outputs.rust == 'true'
-      && needs.changes.outputs.untrusted != 'true'
+      && needs.changes.outputs.hosted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     env:
       # Advisory: a perf regression annotates but does not fail the job. When
