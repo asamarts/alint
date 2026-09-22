@@ -23,16 +23,15 @@ env:
 jobs:
   coverage:
     name: cargo-llvm-cov
-    # SECURITY (audit H6): a PR may select this fixed-label job only when the
-    # event, base/head repositories, author and sender have exact admitted
-    # numeric IDs. Bot/App, fork and missing identity cases skip before runner
-    # assignment. This canonical guard is defence in depth: the fixed-label
-    # listener remains offline until disposable base-controlled admission is
-    # available. See docs/design/v0.14/ci-fork-pr-isolation.md.
+    # SECURITY (audit H6): all PR coverage is held while the fixed-label
+    # listener is offline. Keep the full exact-ID predicate beside the explicit
+    # false capacity switch so its future disposable route cannot silently
+    # broaden admission. This is defence in depth, not scheduling authority.
+    # See docs/design/v0.14/ci-fork-pr-isolation.md.
     if: >-
       ${{
         github.event_name != 'pull_request' ||
-        (
+        (false &&
           format('{0}', github.event.repository.id) == '1214597864' &&
           format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
           format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&

@@ -1,6 +1,6 @@
 # CI PR isolation — keep unapproved code off local runners
 
-Status: **canonical routing corrected; local fixed-label capacity held.** The
+Status: **canonical routing corrected; all PRs hosted while local capacity is held.** The
 original fork routing landed in #106 after audit finding H6. A September 2026
 review found two gaps: same-repository bot PRs passed its repository-name test,
 and the design incorrectly treated `pull_request` workflow YAML as immutable
@@ -74,18 +74,30 @@ The desired end state is:
   legacy listener.
 
 This correction deliberately preserves existing non-PR route behavior in the
-workflow while the replacement is designed. Push, tag, schedule and manual
-events need their own exact principal/ref contracts before local provisioning;
-“not a PR” is not sufficient admission for the future broker.
+workflow while the replacement is designed. For PRs, the exact identity
+predicate is retained but an explicit false capacity switch sends even admitted
+human PRs to hosted portable CI until MN-167 qualifies the replacement. Push,
+tag, schedule and manual events need their own exact principal/ref contracts
+before local provisioning; “not a PR” is not sufficient admission for the
+future broker.
 
 ## 3. Current containment
 
 The `changes` job always starts on `ubuntu-latest`. Its first step, before any
-checkout, evaluates only GitHub context values. For an approved PR it emits the
-local selector; otherwise it emits `ubuntu-latest` and `untrusted=true`.
-Portable downstream jobs consume that one output. Box-only jobs additionally
-require `untrusted != 'true'`. `coverage.yml` repeats the exact admission
-predicate in its job-level `if`, which is evaluated before runner assignment.
+checkout, evaluates only GitHub context values. It retains the exact admitted-
+identity predicate, but `LOCAL_PR_CAPACITY_ENABLED` is explicitly false while
+the legacy listener is held. Every PR therefore emits `ubuntu-latest` and
+`hosted=true`; portable downstream jobs consume that one output. Box-only jobs
+require `hosted != 'true'`. `coverage.yml` repeats the exact admission
+predicate behind an explicit false capacity term in its job-level `if`, so
+every PR skips before runner assignment.
+
+`hosted` describes the selected executor rather than the contributor's trust.
+That distinction is load-bearing: an approved human PR still needs Node setup
+on a fresh hosted runner and still must not receive a box-specific benchmark.
+The false switch is canonical routing only. Because PR YAML can change it, the
+stopped listener remains the actual protection until the base-controlled
+broker exists.
 
 This ordering prevents the checked-out `detect-changes.sh` from changing the
 canonical route. It does **not** make PR-controlled workflow YAML authoritative.
@@ -99,10 +111,10 @@ this host through that label.
 | Job | Approved PR | Other PR |
 |---|---|---|
 | `changes` (routing/change detection) | GitHub-hosted | GitHub-hosted |
-| `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | local selector (held until replacement exists) | GitHub-hosted |
-| `bench-smoke`, `perf-gate` | local selector (held until replacement exists) | skipped by `untrusted` guard |
+| `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | GitHub-hosted while capacity is held | GitHub-hosted |
+| `bench-smoke`, `perf-gate` | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard |
 | `editors` | GitHub-hosted | GitHub-hosted |
-| `coverage` | local selector (held until replacement exists) | skipped before assignment |
+| `coverage` | skipped before assignment while capacity is held | skipped before assignment |
 
 The route step is intentionally inline. A checked-out repository script is PR
 code and cannot be trusted to choose a runner. The mirrored coverage predicate
@@ -113,7 +125,7 @@ is protected against accidental drift by `test-ci-pr-routing.sh`.
 Portable jobs on a fresh `ubuntu-latest` host need the tools formerly assumed
 from the warm box:
 
-- `docs` installs Node 22 before the LikeC4 checks on the untrusted route;
+- `docs` installs Node 22 before the LikeC4 checks on every hosted route;
 - `audit.sh` and `deny.sh` bootstrap their pinned/locked Cargo tools as already
   documented by their scripts; and
 - hosted caches are performance inputs, never authorization. No artifact or
@@ -140,11 +152,12 @@ box-specific signals and are skipped outside an approved route.
 
 Before merging, run the routing harness, all shell harnesses, a YAML parse,
 workflow lint where an admitted `actionlint` is available, and the repository
-preflight. After merging, observe an actual bot/unapproved PR: every portable
-job must use hosted capacity, box-only jobs and coverage must skip, and no local
-worker may handle it. An approved PR is expected to leave its local legs queued
-while the legacy listener is held; that is safe degradation, not a reason to
-restart it.
+preflight. The owner PR itself must show that an admitted human receives the
+complete portable hosted graph while box-only jobs and coverage skip. After
+merging, observe an actual bot/unapproved PR with the same executor result and
+no local worker. The prior owner-PR run already recorded the admitted local
+legs safely queued while the listener was offline; changing the canonical
+route to hosted restores portable validation without restarting it.
 
 The disposable cutover later requires live positive and negative canaries. Its
 base-controlled broker must independently verify repository, workflow, event,
@@ -155,11 +168,12 @@ same-label job receives neither the guest nor any credential.
 
 ## 6. Rollback and failure behavior
 
-If the exact-ID change breaks portable hosted CI, revert only the workflow/test
-commit and keep the legacy listener stopped. Reverting to the name-only guard
-does not authorize local execution. If GitHub payload semantics, repository
-ownership or an approved numeric ID changes, the route fails hosted/held until
-the new fact is reviewed and both workflow predicates/tests are updated.
+If the exact-ID or capacity-hold change breaks portable hosted CI, revert only
+the workflow/test commit and keep the legacy listener stopped. Reverting to the
+name-only guard does not authorize local execution. If GitHub payload
+semantics, repository ownership or an approved numeric ID changes, the route
+fails hosted/held until the new fact is reviewed and both workflow predicates/
+tests are updated.
 
 Do not test rollback by starting the persistent container. Do not treat a
 green hosted run as proof of local isolation, or a listener process as proof of

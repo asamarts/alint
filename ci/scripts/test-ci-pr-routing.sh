@@ -17,7 +17,7 @@ is_approved_human() {
 
 route() {
   local event_name=$1 event_repo=$2 base_repo=$3 head_repo=$4
-  local author_id=$5 sender_id=$6 actor_id=$7
+  local author_id=$5 sender_id=$6 actor_id=$7 local_pr_capacity_enabled=$8
 
   if [[ "$event_name" != pull_request ]]; then
     printf 'local\n'
@@ -26,7 +26,8 @@ route() {
           "$head_repo" == "$repo_id" ]] &&
        is_approved_human "$author_id" &&
        is_approved_human "$sender_id" &&
-       is_approved_human "$actor_id"; then
+       is_approved_human "$actor_id" &&
+       [[ "$local_pr_capacity_enabled" == true ]]; then
     printf 'local\n'
   else
     printf 'hosted\n'
@@ -46,33 +47,42 @@ expect_route() {
 }
 
 # Existing non-PR behavior is deliberately unchanged by this containment.
-expect_route push-local local push '' '' '' '' '' ''
+expect_route push-local local push '' '' '' '' '' '' false
 
-expect_route asamarts-same-repo local pull_request \
+expect_route asamarts-same-repo-held hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
-  "$asamarts_id" "$asamarts_id" "$asamarts_id"
-expect_route kaminsod-same-repo local pull_request \
+  "$asamarts_id" "$asamarts_id" "$asamarts_id" false
+expect_route kaminsod-same-repo-held hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
-  "$kaminsod_id" "$kaminsod_id" "$kaminsod_id"
+  "$kaminsod_id" "$kaminsod_id" "$kaminsod_id" false
 # A login rename is intentionally absent from the inputs: stable IDs decide.
-expect_route renamed-login-stable-ids local pull_request \
+expect_route renamed-login-stable-ids-held hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
-  "$asamarts_id" "$kaminsod_id" "$kaminsod_id"
+  "$asamarts_id" "$kaminsod_id" "$kaminsod_id" false
+
+# Model the future capacity switch as well: only the exact admitted identities
+# become local if MN-167 replaces the held route with qualified capacity.
+expect_route asamarts-qualified-capacity local pull_request \
+  "$repo_id" "$repo_id" "$repo_id" \
+  "$asamarts_id" "$asamarts_id" "$asamarts_id" true
+expect_route kaminsod-qualified-capacity local pull_request \
+  "$repo_id" "$repo_id" "$repo_id" \
+  "$kaminsod_id" "$kaminsod_id" "$kaminsod_id" true
 
 expect_route dependabot-same-repo hosted pull_request \
-  "$repo_id" "$repo_id" "$repo_id" 49699333 49699333 49699333
+  "$repo_id" "$repo_id" "$repo_id" 49699333 49699333 49699333 true
 expect_route external-fork hosted pull_request \
-  "$repo_id" "$repo_id" 987654321 "$asamarts_id" "$asamarts_id" "$asamarts_id"
+  "$repo_id" "$repo_id" 987654321 "$asamarts_id" "$asamarts_id" "$asamarts_id" true
 expect_route unapproved-synchronizer hosted pull_request \
-  "$repo_id" "$repo_id" "$repo_id" "$asamarts_id" 987654321 987654321
+  "$repo_id" "$repo_id" "$repo_id" "$asamarts_id" 987654321 987654321 true
 expect_route unapproved-author hosted pull_request \
-  "$repo_id" "$repo_id" "$repo_id" 987654321 "$asamarts_id" "$asamarts_id"
+  "$repo_id" "$repo_id" "$repo_id" 987654321 "$asamarts_id" "$asamarts_id" true
 expect_route null-head-repository hosted pull_request \
-  "$repo_id" "$repo_id" '' "$asamarts_id" "$asamarts_id" "$asamarts_id"
+  "$repo_id" "$repo_id" '' "$asamarts_id" "$asamarts_id" "$asamarts_id" true
 expect_route wrong-base-repository hosted pull_request \
-  "$repo_id" 987654321 "$repo_id" "$asamarts_id" "$asamarts_id" "$asamarts_id"
+  "$repo_id" 987654321 "$repo_id" "$asamarts_id" "$asamarts_id" "$asamarts_id" true
 expect_route wrong-event-repository hosted pull_request \
-  987654321 "$repo_id" "$repo_id" "$asamarts_id" "$asamarts_id" "$asamarts_id"
+  987654321 "$repo_id" "$repo_id" "$asamarts_id" "$asamarts_id" "$asamarts_id" true
 
 assert_contains() {
   local file=$1 needle=$2
@@ -106,17 +116,15 @@ import sys
 ci = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
 coverage = Path('.github/workflows/coverage.yml').read_text(encoding='utf-8')
 
-expected = r'''${{
-  github.event_name != 'pull_request' ||
-  (
-    format('{0}', github.event.repository.id) == '1214597864' &&
-    format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
-    format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
-    contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
-    contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
-    contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
-  )
-}}'''
+identity = r'''format('{0}', github.event.repository.id) == '1214597864' &&
+format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
+format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
+contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
+contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
+contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))'''
+
+expected_ci = "${{ github.event_name == 'pull_request' && (" + identity + ") }}"
+expected_coverage = "${{ github.event_name != 'pull_request' || (false && " + identity + ") }}"
 
 def normalize(value: str) -> str:
     return ''.join(value.split())
@@ -127,11 +135,10 @@ def expression(document: str, start: str, end: str, name: str) -> str:
         raise SystemExit(f'[ci-pr-routing] could not extract {name} policy')
     return normalize(match.group('body'))
 
-expected_normalized = normalize(expected)
 ci_policy = expression(
     ci,
-    r'^\s{10}IS_TRUSTED: >-\n',
-    r'^\s{8}run: \|$',
+    r'^\s{10}IS_ADMITTED_PR: >-\n',
+    r'^\s{10}# Capacity switch',
     'ci.yml',
 )
 coverage_policy = expression(
@@ -141,8 +148,11 @@ coverage_policy = expression(
     'coverage.yml',
 )
 
-for name, actual in (('ci.yml', ci_policy), ('coverage.yml', coverage_policy)):
-    if actual != expected_normalized:
+for name, actual, expected in (
+    ('ci.yml', ci_policy, normalize(expected_ci)),
+    ('coverage.yml', coverage_policy, normalize(expected_coverage)),
+):
+    if actual != expected:
         print(f'[ci-pr-routing] {name} full policy differs from the canonical expression', file=sys.stderr)
         raise SystemExit(1)
 
@@ -162,6 +172,15 @@ if coverage_selectors != ['[self-hosted, linux, alint]']:
     print(f'[ci-pr-routing] coverage runner selector drifted: {coverage_selectors}', file=sys.stderr)
     raise SystemExit(1)
 PY
+
+assert_contains .github/workflows/ci.yml 'LOCAL_PR_CAPACITY_ENABLED: "false"'
+assert_contains .github/workflows/ci.yml 'needs.changes.outputs.hosted'
+assert_contains .github/workflows/coverage.yml '(false &&'
+
+if grep -Fq 'outputs.untrusted' .github/workflows/ci.yml; then
+  printf '[ci-pr-routing] trust and executor selection became conflated again\n' >&2
+  exit 1
+fi
 
 route_line=$(grep -n -- '- id: route' .github/workflows/ci.yml | cut -d: -f1)
 checkout_line=$(grep -n -- 'uses: actions/checkout@' .github/workflows/ci.yml | head -n 1 | cut -d: -f1)

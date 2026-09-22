@@ -157,3 +157,40 @@ records alint-owned workflow/design/test changes and their immutable commits.
   locally.
 - Other PR workflows using GitHub-hosted runners began normally. The separate
   `kbench-bench` runner remained online/idle and was not selected or changed.
+
+### 15:07–15:34 EDT — portable PR CI restored without restarting local capacity
+
+- Re-read PR 251, its current workflow runs, the held service/container and
+  GitHub runner registrations. The PR was mergeable, its independent hosted
+  workflows were green, and its ordinary/coverage legs were still pending or
+  queued because `alint-runner` remained offline. The separate
+  `kbench-bench` registration remained online/idle.
+- Changed canonical PR routing so every PR—including an exact admitted human
+  PR—uses `ubuntu-latest` for the portable graph while local capacity is held.
+  Renamed the route output from the conflated `untrusted` flag to executor-
+  descriptive `hosted`, so the Node bootstrap and box-only guards follow the
+  actual executor rather than contributor identity. Existing non-PR routing is
+  unchanged.
+- Retained the complete numeric repository/author/sender/actor predicate beside
+  an explicit `LOCAL_PR_CAPACITY_ENABLED=false` switch. The routing harness
+  proves current admitted PRs are hosted, a future true switch admits only the
+  two exact human IDs, and every bot/fork/null/wrong-identity fixture remains
+  hosted even if capacity is enabled. The switch is not treated as a security
+  boundary: PR YAML can edit it, so the fixed-label listener remains stopped
+  until MN-167's base-controlled one-job broker exists.
+- Held the combined coverage/Codecov job for every PR before assignment and
+  held `bench-smoke`/`perf-gate` on hosted PRs. Updated the design and
+  contributor contract to state this temporary behavior. Portable fmt,
+  clippy, test, audit, deny, supply-chain, build, docs, dogfood, examples,
+  shell and summary work remains present on the hosted route.
+- Passed `test-ci-pr-routing.sh`, all six shell harnesses, Bash syntax, PyYAML
+  parsing, source-built `actionlint` v1.7.12 and `git diff --check`. A complete
+  `TERM=xterm-256color ci/scripts/preflight.sh` passed fmt, clippy, every
+  workspace test and doctest, docs/export/schema/facts/categories/roadmap/
+  architecture/model checks, LikeC4/Mermaid/Node tests, version pins,
+  dependency floors, secret inventory and dogfood. Dogfood retained only the
+  two pre-existing line-count warnings in unchanged files.
+- Final local/owner read-back still showed
+  `container-alint-runner.service` inactive, `alint-runner` exited/offline and
+  idle, and `kbench-bench` online/idle. No runner, registration, service,
+  container, GitHub setting, secret or benchmark route was changed.

@@ -45,7 +45,7 @@ jobs:
       editors: ${{ steps.detect.outputs.editors }}
       supply_chain: ${{ steps.detect.outputs.supply_chain }}
       runner: ${{ steps.route.outputs.runner }}
-      untrusted: ${{ steps.route.outputs.untrusted }}
+      hosted: ${{ steps.route.outputs.hosted }}
     steps:
       # Keep this before checkout. IDs survive login/repository renames and a
       # null/missing payload field formats as an empty string, failing closed.
@@ -55,9 +55,10 @@ jobs:
       # check; a later base-controlled broker must also validate rerun metadata.
       - id: route
         env:
-          IS_TRUSTED: >-
+          EVENT_NAME: ${{ github.event_name }}
+          IS_ADMITTED_PR: >-
             ${{
-              github.event_name != 'pull_request' ||
+              github.event_name == 'pull_request' &&
               (
                 format('{0}', github.event.repository.id) == '1214597864' &&
                 format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
@@ -67,13 +68,21 @@ jobs:
                 contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
               )
             }}
+          # Capacity switch, not an authorization boundary. Keep false while
+          # the fixed-label listener is held; MN-167 may replace this only
+          # after base-controlled disposable admission passes its canaries.
+          LOCAL_PR_CAPACITY_ENABLED: "false"
         run: |
-          if [ "$IS_TRUSTED" = "true" ]; then
+          if [ "$EVENT_NAME" != "pull_request" ]; then
             echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=false' >> "$GITHUB_OUTPUT"
+            echo 'hosted=false' >> "$GITHUB_OUTPUT"
+          elif [ "$IS_ADMITTED_PR" = "true" ] &&
+               [ "$LOCAL_PR_CAPACITY_ENABLED" = "true" ]; then
+            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=false' >> "$GITHUB_OUTPUT"
           else
             echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-            echo 'untrusted=true' >> "$GITHUB_OUTPUT"
+            echo 'hosted=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -244,11 +253,11 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: ci-docs
-      # Ephemeral unapproved-PR path only: the box's runner image already ships
-      # Node 22, but a fresh ubuntu-latest needs it so docs.sh's
+      # Ephemeral hosted path: the box's runner image already ships Node 22,
+      # but a fresh ubuntu-latest needs it so docs.sh's
       # `likec4 validate` + `gen-mermaid --check` gates run (they fetch
       # likec4 via `npx -y likec4@<pin>`). Skipped on the box.
-      - if: needs.changes.outputs.untrusted == 'true'
+      - if: needs.changes.outputs.hosted == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
@@ -282,12 +291,12 @@ jobs:
   bench-smoke:
     name: Bench Smoke
     needs: [changes, build]
-    # `untrusted != 'true'` keeps this box-only job off unapproved PRs (their
-    # portable work routes to ubuntu-latest, where a bench job is meaningless).
+    # `hosted != 'true'` keeps this box-only job off every hosted PR while the
+    # local route is held; a hosted bench result would not match its corpus.
     if: >-
       !cancelled() && !failure()
       && needs.changes.outputs.bench == 'true'
-      && needs.changes.outputs.untrusted != 'true'
+      && needs.changes.outputs.hosted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -309,12 +318,12 @@ jobs:
   perf-gate:
     name: Perf Gate (deterministic)
     needs: [changes, build]
-    # `untrusted != 'true'` keeps this box-only (Valgrind) job off unapproved PRs.
+    # `hosted != 'true'` keeps this box-only Valgrind job off hosted PRs.
     if: >-
       !cancelled() && !failure()
       && github.event_name == 'pull_request'
       && needs.changes.outputs.rust == 'true'
-      && needs.changes.outputs.untrusted != 'true'
+      && needs.changes.outputs.hosted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     env:
       # Advisory: a perf regression annotates but does not fail the job. When
