@@ -141,3 +141,19 @@ records alint-owned workflow/design/test changes and their immutable commits.
   finding. It must be mapped against every workflow's actual permissions and
   actions before a least-privilege change; this containment task does not
   silently alter it.
+
+### 12:01 EDT — normal PR and safe positive-route observation
+
+- Opened owner PR `asamarts/alint#251` from the pushed branch to `main`. Its
+  body records the held-runner boundary, validation results and the two
+  pre-existing preflight findings; it does not claim that queued local work is
+  a passed canary.
+- On head `2346a0e756a0806c145c00426fb22aa1663b2312`, hosted CI entry jobs Detect
+  Changes and Secrets Inventory completed successfully. The approved-human
+  predicate selected local labels for Format, Shell Tests and coverage, which
+  remained queued while GitHub independently reported `alint-runner` offline
+  and idle. This is the intended bounded positive-route observation before
+  disposable capacity exists: policy selection is visible, but no PR code ran
+  locally.
+- Other PR workflows using GitHub-hosted runners began normally. The separate
+  `kbench-bench` runner remained online/idle and was not selected or changed.
