@@ -194,3 +194,55 @@ records alint-owned workflow/design/test changes and their immutable commits.
   `container-alint-runner.service` inactive, `alint-runner` exited/offline and
   idle, and `kbench-bench` online/idle. No runner, registration, service,
   container, GitHub setting, secret or benchmark route was changed.
+
+### 16:34 EDT — token least-privilege change prepared
+
+- Created `ci/minemon-token-permissions` from immutable remote `main`
+  `4a96640602f8f58d9d8b15a133396231acd8544c`, after PR 251's containment
+  merge. No release, benchmark or deployment workflow was dispatched.
+- Gave each formerly inherited ordinary workflow an explicit
+  `contents: read` boundary. Changed the mixed-authority benchmark-image,
+  benchmark-record and release workflows to top-level `permissions: {}` and
+  exact job declarations. Repository/package/attestation/dispatch writes are
+  retained only on the jobs that perform them; external Homebrew, VS Code and
+  JetBrains credential users retain only `contents: read` from this
+  repository's `GITHUB_TOKEN`.
+- Added `ci/scripts/test-workflow-permissions.sh`. It inventories all 14
+  workflow files and all 53 jobs, compares the complete expected top/job maps,
+  requires every job under a deny-all workflow to declare permissions, binds
+  known write indicators to their required scopes, records the Homebrew SSH
+  deploy-key push as the sole external-repository exemption, and rejects
+  workflow/script PR approvals or unmapped raw GitHub API mutations. Its
+  ordinary-job negative contract permits only `contents: read`, which makes
+  `contents`, `pull-requests` and `actions` writes unavailable.
+- Updated the contributor and isolation-design contracts. The repository's
+  combined create/approve switch must stay enabled because `bench-record`
+  opens its result PR with `gh pr create`; source policy forbids using that
+  compatibility setting to approve a review.
+- Local source gates passed: the new policy test, the PR-routing test, all
+  seven shell harnesses, Bash syntax, `shellcheck`, workflow YAML validation,
+  `actionlint` v1.7.12 and `git diff --check`. `actionlint` still emits only
+  pre-existing shellcheck advisories in unchanged benchmark/release shell
+  blocks. The added `bench` runner label declaration removes the former
+  unknown-label warning.
+- GitHub's official workflow syntax confirms that once a workflow/job
+  `permissions` map names any scope, every omitted scope is `none`; its REST
+  contract accepts the default-permission and combined-PR booleans together.
+  No repository setting has changed yet. The full local preflight, reviewed
+  PR, immutable hosted run, final owner-visible pre-state and exact post-state
+  read-back remain mandatory before the one-field default change.
+
+### 16:56 EDT — complete local preflight passed
+
+- `TERM=xterm-256color bash ci/scripts/preflight.sh` completed successfully:
+  formatting, clippy, the full workspace test and doctest suites, API docs,
+  deterministic docs export, schema/facts/categories/roadmap/architecture
+  drift gates, LikeC4 and Mermaid generation checks, Node tests, version pins,
+  dependency floors, secret inventory and dogfood all passed.
+- Dogfood retained only the two known line-count warnings in unchanged
+  `crates/alint-core/src/engine.rs` (2,016 lines) and
+  `xtask/src/docs_export.rs` (2,384 lines). Neither file differs from the
+  immutable branch base; no rule, threshold or snapshot was relaxed.
+- The working tree remained limited to the declared workflow, policy-test and
+  documentation changes. No GitHub setting, credential, runner, service,
+  container, release, publication, benchmark or deployment was touched.
