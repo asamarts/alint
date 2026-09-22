@@ -246,3 +246,69 @@ records alint-owned workflow/design/test changes and their immutable commits.
 - The working tree remained limited to the declared workflow, policy-test and
   documentation changes. No GitHub setting, credential, runner, service,
   container, release, publication, benchmark or deployment was touched.
+
+### 16:57–17:14 EDT — reviewed hosted canary and merge
+
+- Committed the source/design/test change as
+  `2afa2f5d0692bffa957a24657781897ed4c1ca1b`, pushed the dedicated branch and
+  opened owner PR 252. The branch push itself matched no push trigger; no
+  publisher, release, benchmark or deployment was manually dispatched.
+- The PR graph ran from that exact head on GitHub-hosted capacity. CI run
+  `35783691606` included the permission gate in its successful Shell Tests job;
+  the action, cross-platform, editor and issue-26 runs were `35783691564`,
+  `35783691529`, `35783691663` and `35783691450`. Every assigned job reported
+  a distinct `GitHub Actions ...` runner name. Coverage run `35783691583` and
+  CI's Bench Smoke/Perf Gate skipped before local assignment as designed.
+- The terminal PR rollup was 30 successes, three expected skips and no other
+  result. Merged through the normal PR path as
+  `d05084ec293d46692a61b291c7c45cb86a618d76`; source history, rather than a
+  repository setting, now carries every token declaration and the policy
+  regression test.
+
+### 17:14–17:15 EDT — exact default-permission cutover
+
+- Immediately before mutation, the owner API identity was `asamarts` ID
+  `11239806`; repository `asamarts/alint` was public ID `1214597864`, default
+  branch `main` at the merge commit above. Actions remained enabled/all-actions
+  with SHA-pinning enforcement off; the workflow default was `write` and the
+  combined PR switch was `true`; fork approval was
+  `first_time_contributors`.
+- The redacted authority/state baseline remained nine Actions secrets by
+  count, zero variables, environments, rulesets and deploy keys, no `main`
+  protection, and one administrator/collaborator (`asamarts`). Registered
+  `alint-runner` was offline/idle and `kbench-bench` online/idle. Locally, only
+  the target service was inactive/dead and enabled; its container was exited,
+  non-running, PID zero, exit 143, not restarting.
+- Used GitHub's repository workflow-permissions REST endpoint once with both
+  fields present: `default_workflow_permissions=read` and
+  `can_approve_pull_request_reviews=true`. The latter deliberately preserves
+  `bench-record` PR creation; it is not authorization for an approval, which
+  repository policy and the source test prohibit.
+- Immediate post-state read-back returned exactly `read`/`true`. Repository
+  identity/default branch/merge SHA, all-actions policy, SHA-pinning flag, fork
+  policy, redacted counts, branch protection, collaborator, both runner
+  registrations and local service/container state were unchanged. No token,
+  secret, registration, billing control, environment or branch rule was
+  created, rotated or exposed.
+
+### 17:15–17:29 EDT — natural writer compatibility observation
+
+- The normal merge push—not a manual canary—started existing main-branch
+  workflows. Action self-test run `35785439729`, Cross-Platform run
+  `35785439715`, GHCR edge-image run `35785439858` and Docs bundle run
+  `35785439721` completed successfully. The latter two exercised the retained
+  `contents: read`/`packages: write` job and single-job `contents: write`
+  workflow respectively, including the ordinary docs-branch/hook path.
+- Ordinary CI run `35785439714` and Coverage run `35785439755` remained
+  pending/queued on the intentionally offline legacy route. That is the
+  pre-existing containment hold, not a token-permission failure; the listener
+  was not restarted to make the signal green.
+- Release, benchmark-record and external registry/marketplace publishers were
+  not dispatched. Their exact declarations, prior successful immutable runs
+  and non-destructive source-policy inspection are the compatibility evidence;
+  do not manufacture an irreversible publication solely as a permission test.
+- If a future legitimate writer proves a missing scope, correct that one
+  workflow/job and repeat its safe gates. Restore the repository write default
+  only as a temporary, explicit owner-approved incident action after a
+  demonstrated required operation fails; never restore it for convenience.
+  Any unexpected local-route behavior leaves `alint-runner` stopped.
