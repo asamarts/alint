@@ -447,6 +447,9 @@ pub enum FixSpec {
     DirCreate {
         dir_create: DirCreateFixSpec,
     },
+    SyncFrom {
+        sync_from: SyncFromFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -534,6 +537,7 @@ impl FixSpec {
         "git_untrack",
         "command",
         "dir_create",
+        "sync_from",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -558,6 +562,7 @@ impl FixSpec {
             Self::GitUntrack { .. } => "git_untrack",
             Self::Command { .. } => "command",
             Self::DirCreate { .. } => "dir_create",
+            Self::SyncFrom { .. } => "sync_from",
         }
     }
 }
@@ -862,6 +867,23 @@ pub struct GitUntrackFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirCreateFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `sync_from`: overwrite a drifted target with its canonical source, so a
+/// `cross_file` `relation: identical` rule converges. A **content-injecting** op:
+/// it writes another file's bytes wholesale, and the host rule's `source:`
+/// decides which file overwrites which, so a remote `extends:` the user has not
+/// trusted demotes it to `suggestion` (auto-fix.md 5.5). **`Unsafe` by default**
+/// (a whole-file overwrite can discard uncommitted target content). Only valid on
+/// `relation: identical` with `skip_header_lines: 0` (a header-preserving sync is
+/// a deferred follow-up) and a single-file `source:` (not a glob-union); other
+/// shapes are rejected at load. Takes its source from the host rule, not a new
+/// field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncFromFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1324,6 +1346,7 @@ mod tests {
             ("git_untrack: {}", "git_untrack"),
             ("command:\n  run: [\"x\"]\n", "command"),
             ("dir_create: {}", "dir_create"),
+            ("sync_from: {}", "sync_from"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

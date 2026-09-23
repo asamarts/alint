@@ -77,6 +77,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   directory (a glob or multiple patterns is ambiguous and rejected at load). Note
   that git does not track an empty directory, so pair it with a `file_create` of a
   `.gitkeep` if the directory must persist in the repo.
+- New `sync_from` auto-fix op for `cross_file` `relation: identical`
+  (`fix: { sync_from: {} }`): overwrites a drifted target with the canonical
+  `source:` file so the two are byte-identical again -- the workspace
+  LICENSE-mirroring case, where each crate's copy must match the root one.
+  `Unsafe` by default (a whole-file overwrite can discard uncommitted target
+  content), so a bare `alint fix` suggests it and `alint fix --unsafe-fixes`
+  applies it. Valid only on `relation: identical` with `skip_header_lines: 0` (a
+  value relation or a preserved header is rejected at load). Both the source read
+  and the target write are confined to the repo root.
 
 ### Changed
 

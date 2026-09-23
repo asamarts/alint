@@ -334,6 +334,22 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "needsx.sh".to_string()],
         "#!/bin/sh\necho hi\n".to_string(),
     );
+    // A canonical source + a DRIFTED copy trigger cross_file `identical` + the
+    // Phase-3 `sync_from` fix, which overwrites the copy with the source. Both are
+    // clean `.txt` (no trailing ws / BOM / bidi / final-newline flaw and no
+    // `DEBUGME`), so no other single-rule draw touches them; their 8-char stems
+    // exceed the generator's 7-char limit, so they never collide. `**/sync_dst.txt`
+    // matches only the copy; the source is referenced by its exact path.
+    insert_file(
+        root,
+        &[dir.clone(), "sync_src.txt".to_string()],
+        "canonical line\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[dir.clone(), "sync_dst.txt".to_string()],
+        "drifted line\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -830,6 +846,22 @@ fn rule_dir_create() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `cross_file` `relation: identical` rule fixed via the content-injecting
+/// `sync_from` op (Phase 3): the planted target `_trig/sync_dst.txt` drifts from
+/// its canonical source `_trig/sync_src.txt`, so the rule fires and `sync_from`
+/// overwrites the target with the source -> byte-identical -> converges (and is
+/// idempotent on a second pass). Unsafe by default, so a bare `Fix` *suggests*
+/// it; `--unsafe-fixes` applies it (exercising `fix_unsafe_converges`). Both
+/// trigger names have 8-char stems, above the generator's 7-char limit, so they
+/// never collide with a random file.
+fn rule_sync_from() -> impl Strategy<Value = String> {
+    rule_id("sf").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: cross_file\n    relation: identical\n    source:\n      file: _trig/sync_src.txt\n    targets:\n      files: \"**/sync_dst.txt\"\n    level: error\n    fix:\n      sync_from: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -879,6 +911,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         rule_git_untrack(),
         // the `dir_create` op (Phase 3): creates the absent `_reqdir` -> converges.
         rule_dir_create(),
+        // the cross-file `sync_from` op (Phase 3): mirrors a drifted target from its
+        // canonical source -> converges (applied under --unsafe-fixes).
+        rule_sync_from(),
     ]
 }
 

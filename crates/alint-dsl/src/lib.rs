@@ -640,6 +640,11 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // 5.5). `remove_value` is a DELETION (no ruleset bytes) -> fixed-behavior,
     // gated by its Unsafe tier like `file_remove`, so it is deliberately absent.
     "set_value",
+    // `sync_from` overwrites a target with another file's bytes wholesale, and the
+    // host `cross_file` rule's `source:` chooses which file overwrites which -- so
+    // an untrusted remote could aim it at your files. It PROPOSES, never
+    // auto-writes, from an untrusted remote (auto-fix.md 5.5).
+    "sync_from",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

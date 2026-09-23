@@ -237,9 +237,36 @@ warning or a v0.18 migration.
   - Gates: 13 fixer units (was 4; +7 for confinement / symlink / stage / broken
     symlink) + build-reject tests + e2e + generator.
 
-Ops remaining. `sync_from` (Unsafe whole-file copy) + cross-file
-create-and-register + cross-file value propagation (multi-file transaction with an
-injectable-writer test seam); lockfile `relocate`. Risk: medium.
+- **`sync_from`. DONE.** The first CROSS-FILE content fix op, on
+  `cross_file` `relation: identical`: overwrite a drifted target with the
+  canonical `source:` so the rule converges (the workspace LICENSE-mirroring
+  case). `SyncFromFixer` (in `fixers/cross_file_ops.rs`) is a content fixer -- it
+  routes a whole-file write through the compose buffer (`SetContent` for the
+  editor / SARIF / `--diff` surfaces), so it needs no `apply`-direct-write path.
+  **`Unsafe` by default** (a whole-file overwrite can discard uncommitted target
+  content), and **content-injecting** in the W2 partition (the ruleset's `source:`
+  chooses which file overwrites which, so an untrusted remote demotes it to a
+  suggestion). `cross_file` grew a `fixer: Option<SyncFromFixer>` + `fn fixer`;
+  `build()` accepts `sync_from` ONLY on `relation: identical` with
+  `skip_header_lines: 0` and a single-file source (a value / set / resolves
+  relation, or a preserved header, is rejected at load -- a whole-file copy has no
+  single "correct bytes" there / would clobber the kept header). Both endpoints
+  are confined via the shared `confine_fix_path` (an absolute / symlinked-parent
+  `source:` or target can't read or write out of tree -- built in from the start,
+  not a post-audit fix). Converges + idempotent (target := source -> identical ->
+  no violation; a second pass finds them equal -> Skip), so it is IN the property
+  net (`rule_sync_from` + a planted `_trig/sync_src.txt` / `_trig/sync_dst.txt`
+  pair, applied under `--unsafe-fixes`). Gates: 13 fixer units (mirror / binary /
+  dry-run / stage-compose / confinement x2 / missing-source / self-copy /
+  allow_out_of_root / fix_edit x2 / tier) + 4 build tests + 2 e2e (applied +
+  suggested) + facts.json (auto_fix_ops 20). **The whole-file overwrite is the
+  deliberate scope: cross-file value propagation (`equals`) is a SEPARATE, harder
+  increment (a located value patch with the injectable-writer seam), and a
+  header-preserving sync is a deferred follow-up.**
+
+Ops remaining. Cross-file value propagation (`equals`, a located patch with an
+injectable-writer test seam) + cross-file create-and-register; lockfile
+`relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 

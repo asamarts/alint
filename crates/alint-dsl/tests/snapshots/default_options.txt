@@ -117,6 +117,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    fixer: None,
 }
 
 === kind: cross_file | id: hl-groups-doc-matches-code ===
@@ -152,6 +153,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    fixer: None,
 }
 
 === kind: cross_file | id: license-copies-have-identical-content ===
@@ -177,6 +179,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    fixer: None,
 }
 
 === kind: cross_file_value_equals | id: workspace-versions-coherent ===
@@ -211,6 +214,7 @@ CrossFileRule {
     ],
     allow_missing: false,
     skip_header_lines: 0,
+    fixer: None,
 }
 
 === kind: dir_absent | id: no-target ===

@@ -1,0 +1,39 @@
+name: sync_from is a suggestion (requires --unsafe-fixes) under a bare fix
+# sync_from is Unsafe (a whole-file overwrite can discard target content), so a
+# bare `alint fix` must SUGGEST it, not apply it -- consistent with its
+# content-injecting siblings under the Unsafe tier. The `[check, fix]` shape
+# asserts the bare fix step suggests and does NOT overwrite the drifted target.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    LICENSE: "MIT License\n(c) 2026 acme\n"
+    crates:
+      widget:
+        LICENSE: "OLD License\nstale text\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-mirror
+        kind: cross_file
+        relation: identical
+        source:
+          file: LICENSE
+        targets:
+          files: "crates/*/LICENSE"
+        level: error
+        fix:
+          sync_from: {}
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: license-mirror, level: error, path: crates/widget/LICENSE}
+  - suggested: [license-mirror]
+
+expect_tree:
+  LICENSE: "MIT License\n(c) 2026 acme\n"
+  crates:
+    widget:
+      LICENSE: "OLD License\nstale text\n"

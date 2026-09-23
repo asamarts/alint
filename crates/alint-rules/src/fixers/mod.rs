@@ -14,6 +14,8 @@
 //!   (shells out to `git rm --cached`), so it is top-level-only trust-gated.
 //! - [`command_ops`] — the `command` fix op (`CommandFixFixer`); runs a
 //!   user-supplied fix command, a *spawning* fixer, top-level-only trust-gated.
+//! - [`cross_file_ops`] — the cross-file `sync_from` op (`SyncFromFixer`);
+//!   overwrites a drifted target with its canonical source (content-injecting).
 //! - [`hygiene`] — text-level cleanup (`FileTrimTrailingWhitespaceFixer`,
 //!   `FileAppendFinalNewlineFixer`, `FileNormalizeLineEndingsFixer`,
 //!   `FileCollapseBlankLinesFixer`).
@@ -27,6 +29,7 @@
 
 pub mod command_ops;
 pub mod creators;
+pub mod cross_file_ops;
 pub mod file_ops;
 pub mod git_ops;
 pub mod hygiene;
@@ -36,6 +39,7 @@ pub mod structured;
 
 pub use command_ops::CommandFixFixer;
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
+pub use cross_file_ops::SyncFromFixer;
 pub use file_ops::{ChmodFixer, DirCreateFixer, FileRemoveFixer, FileRenameFixer};
 pub use git_ops::GitUntrackFixer;
 pub(crate) use hygiene::line_is_blank;

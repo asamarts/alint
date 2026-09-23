@@ -38,10 +38,12 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
-    extract_values, is_non_literal,
+    Applicability, Context, Error, Extract, ExtractSpec, FixSpec, Fixer, Level, Result, Rule,
+    RuleSpec, Scope, Violation, extract_values, is_non_literal,
 };
 use serde::Deserialize;
+
+use crate::fixers::SyncFromFixer;
 
 /// The file whose extracted value(s) form the reference side of the relation:
 /// a single `{ file, extract }`, or (set relations only) `{ files: <glob>,
@@ -315,6 +317,10 @@ pub struct CrossFileRule {
     normalize: Vec<Normalize>,
     allow_missing: bool,
     skip_header_lines: usize,
+    /// The `sync_from` fixer (only for `relation: identical`), which overwrites a
+    /// drifted target with the canonical `source_file`. `None` for every other
+    /// relation and when no `fix:` block is set.
+    fixer: Option<SyncFromFixer>,
 }
 
 impl Rule for CrossFileRule {
@@ -324,6 +330,10 @@ impl Rule for CrossFileRule {
         // Cross-file: the source and every target may live
         // anywhere in the tree; never `--changed`-scoped.
         true
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -990,6 +1000,64 @@ fn validate_extract_regexes(
     Ok(())
 }
 
+/// Build the `sync_from` fixer for a `cross_file` rule, or reject an unsupported
+/// `fix:` block. The only fix op `cross_file` supports is `sync_from`: overwrite a
+/// drifted target with the canonical source so an `identical` rule converges. It
+/// is a WHOLE-FILE copy, so it is only coherent on `relation: identical` with no
+/// header skipped (a value / set / resolves relation has no single "correct bytes"
+/// to write, and `skip_header_lines` means the target keeps its own header -- a
+/// whole-file overwrite would clobber it).
+fn build_sync_from_fixer(
+    fix: Option<&FixSpec>,
+    relation: Relation,
+    skip_header_lines: usize,
+    source_file: &str,
+    single_file_source: bool,
+    cfg: &impl Fn(String) -> Error,
+) -> Result<Option<SyncFromFixer>> {
+    match fix {
+        None => Ok(None),
+        Some(FixSpec::SyncFrom { sync_from }) => {
+            if relation != Relation::Identical {
+                return Err(cfg(format!(
+                    "`sync_from` requires `relation: identical` (a whole-file copy); \
+                     `{relation:?}` compares extracted values, which `sync_from` cannot \
+                     propagate yet"
+                )));
+            }
+            if skip_header_lines != 0 {
+                return Err(cfg(
+                    "`sync_from` cannot preserve the target's header: it copies the \
+                     whole source file, which would overwrite the `skip_header_lines` \
+                     header the rule deliberately ignores. Drop `skip_header_lines`, or \
+                     fix the drift by hand."
+                        .into(),
+                ));
+            }
+            // `identical` always has a single-file source (the glob-union form is
+            // rejected earlier for non-set relations), so `source_file` is the one
+            // canonical path; assert it defensively.
+            debug_assert!(
+                single_file_source,
+                "identical must have a single-file source"
+            );
+            Ok(Some(SyncFromFixer::new(
+                PathBuf::from(source_file),
+                sync_from.applicability.unwrap_or(Applicability::Unsafe),
+            )))
+        }
+        Some(other) => Err(cfg(format!(
+            "fix.{} is not compatible with cross_file (only `sync_from`, on \
+             `relation: identical`)",
+            other.op_name()
+        ))),
+    }
+}
+
+// A long but linear config parser: source (single / glob-union) x relation shape
+// validation, then the `sync_from` fixer. Splitting it further would scatter the
+// coupled shape checks; the fixer construction is already extracted.
+#[allow(clippy::too_many_lines)]
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     alint_core::reject_scope_filter_on_cross_file(spec, "cross_file")?;
     let opts: Options = spec
@@ -1088,6 +1156,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         )));
     }
 
+    let fixer = build_sync_from_fixer(
+        spec.fix.as_ref(),
+        opts.relation,
+        opts.skip_header_lines.unwrap_or(0),
+        &source_file,
+        source_glob.is_none(),
+        &cfg,
+    )?;
+
     Ok(Box::new(CrossFileRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -1101,6 +1178,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         normalize,
         allow_missing: opts.allow_missing_target,
         skip_header_lines: opts.skip_header_lines.unwrap_or(0),
+        fixer,
     }))
 }
 
@@ -1209,6 +1287,7 @@ mod tests {
             normalize: NormalizeSpec::One(normalize).into_list(),
             allow_missing: false,
             skip_header_lines: 0,
+            fixer: None,
         }
     }
 
@@ -1601,6 +1680,7 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            fixer: None,
         };
         // union {Comment, String, Number} == highlight.c set → silent.
         assert!(eval(&r, root, &idx).is_empty(), "matched union should pass");
@@ -1635,6 +1715,7 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            fixer: None,
         };
         let v = eval(&r, root, &idx);
         assert_eq!(v.len(), 1, "{v:?}");
@@ -1751,6 +1832,78 @@ mod tests {
     }
 
     #[test]
+    fn build_accepts_sync_from_on_identical() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: identical\n\
+             source: { file: canon.txt }\n\
+             targets: { files: \"**/copy.txt\" }\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let rule = build(&spec).expect("sync_from builds on identical");
+        assert!(rule.fixer().is_some(), "the sync_from fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_sync_from_on_a_value_relation() {
+        // `sync_from` is a whole-file copy, meaningless for a value relation (there
+        // is no single "correct bytes" to write) -- rejected at load.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: equals\n\
+             source: { file: a.txt, extract: { regex: \"(.*)\" } }\n\
+             targets: { files: \"**/*.txt\", extract: { regex: \"(.*)\" } }\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("sync_from") && err.contains("identical"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn build_rejects_sync_from_with_skip_header_lines() {
+        // A whole-file copy would clobber the header the rule deliberately skips.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: identical\n\
+             source: { file: canon.txt }\n\
+             targets: { files: \"**/copy.txt\" }\n\
+             skip_header_lines: 2\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("sync_from") && err.contains("header"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_an_incompatible_fix_op_on_cross_file() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: identical\n\
+             source: { file: canon.txt }\n\
+             targets: { files: \"**/copy.txt\" }\n\
+             level: error\n\
+             fix: { file_remove: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_remove"), "{err}");
+        assert!(err.contains("not compatible with cross_file"), "{err}");
+    }
+
+    #[test]
     fn build_surfaces_friendly_untagged_error_through_options_wrapper() {
         // The `expecting` message must reach the user through build()'s
         // `invalid options: {e}` wrapping, not just the isolated enum. Guards a
@@ -1786,6 +1939,7 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines,
+            fixer: None,
         }
     }
 
@@ -1863,6 +2017,7 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines: 0,
+            fixer: None,
         }
     }
 
