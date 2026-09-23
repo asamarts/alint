@@ -46,11 +46,16 @@ warn-then-flip `file_remove` sections of
   idempotence is the author's business), so excluded from the property net +
   `CONVERGENCE_EXEMPT`, with its own fire/silent tests.
 
-**18 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+- **Phase 3 `dir_create` (Safe)**: `fix: { dir_create: {} }` on `dir_exists`
+  creates the required literal directory when missing (glob/multi/`..` rejected at
+  load; the host's violation is path-less, so the fixer carries the target). Safe,
+  fixed-behavior, converges + idempotent (joins the property net).
+
+**19 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
 `file_remove`, `file_rename`, `file_prepend`, `file_append`,
 `file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
 `file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
-`file_strip_zero_width`, `chmod`, `git_untrack`, `command`.
+`file_strip_zero_width`, `chmod`, `git_untrack`, `command`, `dir_create`.
 
 **Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
 up under adversarial probing (no silent corruption or uncaught over-deletion was
@@ -206,6 +211,15 @@ warning or a v0.18 migration.
     default-suggested tiers (H2), the silent half (M1), the TimedOut arm (M2), the
     editless `--dry-run` preview (M3), chmod default tier (L3). Docs: timeout
     default 30, the templated program token, the auto-fix.md chmod tier.
+
+- **`dir_create`. DONE (commit `3aed5abf`).** Safe fix on `dir_exists`:
+  `DirCreateFixer` (in `fixers/file_ops.rs`) creates the required literal
+  directory. `dir_exists` fires a PATH-LESS violation, so the fixer carries the
+  target; `build()` requires `paths` to be one literal dir (glob / multiple / `..`
+  rejected at load). No-op skip when the dir exists; refuses to clobber a
+  non-directory; no `fix_edit` (an empty dir has no worktree-diff form). Converges
+  + idempotent -> in the property net; fixed-behavior in the partition. Gates: 4
+  fixer units + build tests + e2e + generator.
 
 Ops remaining. `sync_from` (Unsafe whole-file copy) + cross-file
 create-and-register + cross-file value propagation (multi-file transaction with an
