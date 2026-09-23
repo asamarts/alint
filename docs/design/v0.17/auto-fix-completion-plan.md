@@ -39,11 +39,18 @@ warn-then-flip `file_remove` sections of
   R-SPAWNGATE tests (the parity gate + the RCE canary). An index-only op has no
   worktree-diff form, so no `FixEdit` variant was needed.
 
-**17 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+- **Phase 3 `command` fix (second SPAWNING op)**: `fix: { command: { run: [...] }
+  }` on the `command` rule runs a user-supplied fix command (e.g. `eslint --fix
+  {path}`), reusing the spawn gate. Unsafe by default, Safe-promotable in the
+  user's own top-level config. Convergence-EXEMPT (an arbitrary command's
+  idempotence is the author's business), so excluded from the property net +
+  `CONVERGENCE_EXEMPT`, with its own fire/silent tests.
+
+**18 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
 `file_remove`, `file_rename`, `file_prepend`, `file_append`,
 `file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
 `file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
-`file_strip_zero_width`, `chmod`, `git_untrack`.
+`file_strip_zero_width`, `chmod`, `git_untrack`, `command`.
 
 **Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
 up under adversarial probing (no silent corruption or uncaught over-deletion was
@@ -179,11 +186,21 @@ warning or a v0.18 migration.
     true per the op table) is deferred -- untrack alone converges; the append adds
     content-mutation + `--diff`-hunk work worth its own increment.
 
-Ops remaining. A user `command`-backed fix (the SECOND spawning op; lifts the
-`command.rs` fix rejection, reuses the now-live `SPAWNING_FIX_OPS` gate; exempt
-from the rung-8 convergence requirement); `sync_from` (Unsafe whole-file copy) +
-cross-file create-and-register + cross-file value propagation (multi-file
-transaction with an injectable-writer test seam); `dir_create` (Safe); lockfile
+- **`command` fix. DONE (commit `e315b72d`).** The SECOND spawning op: `fix: {
+  command: { run: [...] } }` on the `command` rule lifts its fix rejection and
+  runs a user-supplied fix command (`CommandFixFixer` reusing `spawn::run_capturing`;
+  exit 0 -> Applied, non-zero/spawn-error/timeout -> fix error; dry-run/`--diff`
+  report "would run" and spawn nothing; no `fix_edit`). **Unsafe by default,
+  Safe-promotable** in the user's own top-level config (asamarts's call -- uniform
+  with file_remove/git_untrack, reusing `reject_fix_promotion_in`, no new gate).
+  Second entry in `SPAWNING_FIX_OPS` (belt-and-suspenders atop the top-level-only
+  `command` rule kind). Convergence-EXEMPT (`CONVERGENCE_EXEMPT = ["command"]`,
+  excluded from the property net), with its own fire/silent tests + the e2e fire
+  scenario + the parity gate (`command` -> `command_ops.rs`).
+
+Ops remaining. `sync_from` (Unsafe whole-file copy) + cross-file
+create-and-register + cross-file value propagation (multi-file transaction with an
+injectable-writer test seam); `dir_create` (Safe, host `dir_exists`); lockfile
 `relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
