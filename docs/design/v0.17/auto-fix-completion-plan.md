@@ -161,10 +161,23 @@ warning or a v0.18 migration.
   --unsafe-fixes`; every smuggled vector refused, the tracked file stays tracked;
   a positive control proves a trusted top-level git_untrack untracks). The W2
   partition gate is now three-way (content / spawning / fixed). An index-only op
-  has no worktree-diff form, so no `FixEdit` variant was added. **Fast-follow:**
-  the optional `.gitignore` append (`gitignore: bool`, default true per the op
-  table) is deferred -- untrack alone converges; the append adds content-mutation
-  + `--diff`-hunk work worth its own increment.
+  has no worktree-diff form, so no `FixEdit` variant was added.
+  - **AUDIT-HARDENED (commit `c12c0b64`; 3 independent agents -- the spawn gate got
+    a clean bill on 25+ bypass vectors). Fixed:** (CRITICAL) `git rm --cached --
+    <path>` glob-expands the path as a git PATHSPEC (`--` blocks options, NOT
+    globbing; `*` crosses `/`), so a `[id].tsx`/`*`-named file collaterally
+    untracked siblings / emptied the index -- fixed with `GIT_LITERAL_PATHSPECS=1`
+    (a trap for EVERY future git-shelling fixer). (MED) dry-run/`--diff` now routes
+    through git's own `--dry-run` so it can't diverge from the real run on a
+    staged-differs path. (MED) chmod `--diff` rendered an invalid git mode for a
+    suid file + downgraded a binary chmod to a summary -- fixed with a
+    pre-content-gate render + canonical `100644`/`100755`. (MED) an editless Unsafe
+    suggestion (git_untrack) was a misleading skip, not a `requires --unsafe-fixes`
+    suggestion -- `FixStatus::Suggested.edit` is now `Option`. (LOW) the finalize
+    template backstop now recurses `require:` like the per-source gate.
+  - **Fast-follow:** the optional `.gitignore` append (`gitignore: bool`, default
+    true per the op table) is deferred -- untrack alone converges; the append adds
+    content-mutation + `--diff`-hunk work worth its own increment.
 
 Ops remaining. A user `command`-backed fix (the SECOND spawning op; lifts the
 `command.rs` fix rejection, reuses the now-live `SPAWNING_FIX_OPS` gate; exempt
