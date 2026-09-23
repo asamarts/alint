@@ -426,10 +426,12 @@ impl Fixer for ChmodFixer {
 
 /// Creates the (single, literal) directory a `dir_exists` rule requires, when it
 /// is missing. The target comes from the RULE (`dir_exists` fires a path-less
-/// violation), so the fixer carries it. `Safe` by default (an empty directory is
-/// benign). Creating an empty dir has no worktree-diff form (git does not track
-/// empty directories), so like `git_untrack` it stages/previews as "would create"
-/// and offers no `fix_edit`.
+/// violation), so the fixer carries it -- confined to the repo root (unless the
+/// rule sets `allow_out_of_root`) via the shared `confine_fix_path`. `Safe` by
+/// default (an empty directory is benign). Creating an empty dir has no
+/// worktree-diff form (git does not track empty directories), so like
+/// `git_untrack` it offers no `fix_edit` and `--dry-run` reports "would create"
+/// while `--diff` (a worktree patch) shows nothing.
 #[derive(Debug)]
 pub struct DirCreateFixer {
     dir: PathBuf,
@@ -454,8 +456,34 @@ impl Fixer for DirCreateFixer {
 
     fn apply(&self, _violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
         // `dir_exists`'s violation carries no path (it fires when NO matching dir
-        // exists), so the fixer creates its own configured target.
-        let abs = ctx.root.join(&self.dir);
+        // exists), so the fixer creates its own configured target -- CONFINED to
+        // the repo root (unless the owning rule sets `allow_out_of_root`), exactly
+        // like `FileCreateFixer`. Without this an absolute `paths` (`root.join`
+        // discards the base) or a symlinked-parent `paths` would `mkdir` OUT OF
+        // ROOT -- and because `dir_create` is fixed-behavior it is honored from any
+        // source, so even an untrusted `extends:`'d ruleset could do it on a bare
+        // `alint fix` (audit C1, CRITICAL).
+        let abs = match crate::fixers::creators::confine_fix_path(
+            &self.dir,
+            ctx.root,
+            ctx.allow_out_of_root,
+        ) {
+            Ok(p) => p,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        // A symlink NODE at the target (incl. a BROKEN one, which `exists()` reads
+        // as absent) must not be created through -- `symlink_metadata` does not
+        // follow the link. Parity with `FileCreateFixer`; also fixes the raw-errno
+        // leak on a dangling symlink (audit M1).
+        if abs
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} exists but is not a directory (a symlink)",
+                self.dir.display()
+            )));
+        }
         if abs.is_dir() {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is already a directory",
@@ -463,7 +491,7 @@ impl Fixer for DirCreateFixer {
             )));
         }
         if abs.exists() {
-            // A non-directory (file / symlink) already occupies the path -- do NOT
+            // A non-directory (a regular file) already occupies the path -- do NOT
             // clobber it; the mismatch is a human call.
             return Ok(FixOutcome::Skipped(format!(
                 "{} exists but is not a directory",
@@ -1131,6 +1159,117 @@ mod tests {
         assert!(
             !tmp.path().join("docs").exists(),
             "dry-run must not create the directory"
+        );
+    }
+
+    #[test]
+    fn dir_create_confines_an_absolute_path_to_root() {
+        // Audit C1 (CRITICAL): an absolute `paths` must NOT escape the repo root
+        // (`root.join("/abs")` discards the base). Confined -> Skipped, no create.
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let abs_target = outside.path().join("escaped");
+        let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes the repo root")),
+            "an absolute path must be confined, got {out:?}"
+        );
+        assert!(!abs_target.exists(), "must NOT create outside the root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_create_confines_a_symlinked_parent_escape() {
+        // Audit C1/F2: a `paths` whose PARENT is an in-repo symlink pointing
+        // OUTSIDE the root must not let `create_dir_all` escape.
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("linkdir")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("linkdir/sub"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes the repo root")),
+            "a symlinked-parent escape must be confined, got {out:?}"
+        );
+        assert!(
+            !outside.path().join("sub").exists(),
+            "must NOT create through the symlink"
+        );
+    }
+
+    #[test]
+    fn dir_create_out_of_root_is_permitted_with_allow_out_of_root() {
+        // Parity with `file_create`: `allow_out_of_root` opts INTO an out-of-root
+        // create (the flag was dead for dir_create before -- audit F3).
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let abs_target = outside.path().join("allowed");
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: true,
+            compose: None,
+            stage_ops: None,
+        };
+        let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
+            .apply(&Violation::new("x"), &ctx)
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Applied(_)),
+            "allow_out_of_root permits the create, got {out:?}"
+        );
+        assert!(abs_target.is_dir(), "the out-of-root dir is created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_create_refuses_a_broken_symlink_target_with_a_clean_skip() {
+        // Audit M1: a broken symlink at the target -> a clean "not a directory"
+        // skip, not a raw errno (`exists()` reads a broken symlink as absent, so
+        // the guard is `symlink_metadata`-based).
+        let tmp = TempDir::new().unwrap();
+        std::os::unix::fs::symlink("/nonexistent-target-xyz", tmp.path().join("docs")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("symlink")),
+            "a broken symlink is a clean skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn dir_create_in_stage_mode_reports_without_creating() {
+        // Audit M2: stage mode (`--diff`) must NOT create; an editless op pushes
+        // nothing to the sink.
+        let tmp = TempDir::new().unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: Some(&sink),
+        };
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &ctx)
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("would create"), "{s}"),
+            FixOutcome::Skipped(s) => panic!("expected would-create, got Skipped({s})"),
+        }
+        assert!(
+            !tmp.path().join("docs").exists(),
+            "stage must not create the directory"
+        );
+        assert!(
+            sink.into_inner().is_empty(),
+            "an editless op has no stage edit"
         );
     }
 }

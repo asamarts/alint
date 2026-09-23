@@ -131,6 +131,27 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                      (no glob metacharacters, no `..`)",
                 )
             })?;
+            // Reject combos an EMPTY directory can never satisfy, else `check` tags
+            // the violation fixable and `fix` reports "created directory" but the
+            // rule never clears -- a silent non-convergence (audit H1/H2).
+            if opts.git_tracked_only {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "dir_create cannot satisfy `git_tracked_only`: git does not track an \
+                     empty directory, so a created directory has no tracked content. Commit \
+                     a `.gitkeep` (via a `file_create` fix) instead.",
+                ));
+            }
+            if opts.root_only && crate::is_nested(&dir) {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    format!(
+                        "dir_create with `root_only` requires a root-level (single-component) \
+                         directory; {} is nested and could never satisfy the rule",
+                        dir.display()
+                    ),
+                ));
+            }
             Some(DirCreateFixer::new(
                 dir,
                 dir_create.applicability.unwrap_or(Applicability::Safe),
@@ -377,5 +398,37 @@ scope_filter:
         let err = build(&spec).unwrap_err().to_string();
         assert!(err.contains("file_remove"), "{err}");
         assert!(err.contains("not compatible with dir_exists"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_dir_create_with_git_tracked_only() {
+        // Audit H1: git never tracks an empty directory, so `git_tracked_only` +
+        // dir_create can never converge -- reject at load, not silently.
+        let spec = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"vendored\"\ngit_tracked_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("git_tracked_only"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_dir_create_with_root_only_and_a_nested_path() {
+        // Audit H2: a nested directory can never satisfy `root_only`.
+        let nested = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"a/docs\"\nroot_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        let err = build(&nested).unwrap_err().to_string();
+        assert!(err.contains("root_only") && err.contains("nested"), "{err}");
+        // ...but root_only + a single-component directory is fine.
+        let ok = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"docs\"\nroot_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        assert!(
+            build(&ok).is_ok(),
+            "root_only + a single-component dir_create must build"
+        );
     }
 }

@@ -212,19 +212,34 @@ warning or a v0.18 migration.
     editless `--dry-run` preview (M3), chmod default tier (L3). Docs: timeout
     default 30, the templated program token, the auto-fix.md chmod tier.
 
-- **`dir_create`. DONE (commit `3aed5abf`).** Safe fix on `dir_exists`:
-  `DirCreateFixer` (in `fixers/file_ops.rs`) creates the required literal
-  directory. `dir_exists` fires a PATH-LESS violation, so the fixer carries the
-  target; `build()` requires `paths` to be one literal dir (glob / multiple / `..`
-  rejected at load). No-op skip when the dir exists; refuses to clobber a
-  non-directory; no `fix_edit` (an empty dir has no worktree-diff form). Converges
-  + idempotent -> in the property net; fixed-behavior in the partition. Gates: 4
-  fixer units + build tests + e2e + generator.
+- **`dir_create`. DONE (commit `3aed5abf`) + AUDIT-HARDENED (3 independent
+  agents + own probe -- path confinement was the CRITICAL miss).** Safe fix on
+  `dir_exists`: `DirCreateFixer` (in `fixers/file_ops.rs`) creates the required
+  literal directory. `dir_exists` fires a PATH-LESS violation, so the fixer
+  carries the target; `build()` requires `paths` to be one literal dir (glob /
+  multiple / `..` rejected at load). No-op skip when the dir already exists; no
+  `fix_edit` (an empty dir has no worktree-diff form). Converges + idempotent ->
+  in the property net; fixed-behavior in the partition.
+  - **C1 (CRITICAL, own probe -> agents escalated): out-of-root write.** An
+    absolute `paths: "/tmp/x"` or a symlinked-parent `paths: "link/sub"` made
+    `ctx.root.join(dir)` mkdir OUTSIDE the repo. Since `dir_create` is
+    fixed-behavior it is honored from an untrusted `extends:`, so a remote
+    ruleset could mkdir anywhere on a bare `alint fix`. FIX: route through the
+    shared `creators::confine_fix_path` (lexical + filesystem symlink-parent
+    check); out-of-root now needs a top-level `allow_out_of_root`.
+  - **H1: `git_tracked_only` never converges** (git cannot track an empty dir)
+    and **H2: `root_only` + a nested path never converges.** Both now
+    **rejected at `build()`** with an actionable message (H1 points at a
+    `.gitkeep` via `file_create`).
+  - **M1: broken-symlink errno leak** -> explicit symlink guard returns a clean
+    `Skipped` ("exists but is not a directory (a symlink)"), so the fixer truly
+    refuses to clobber a non-directory. **M2: no stage-mode test** -> added.
+  - Gates: 13 fixer units (was 4; +7 for confinement / symlink / stage / broken
+    symlink) + build-reject tests + e2e + generator.
 
 Ops remaining. `sync_from` (Unsafe whole-file copy) + cross-file
 create-and-register + cross-file value propagation (multi-file transaction with an
-injectable-writer test seam); `dir_create` (Safe, host `dir_exists`); lockfile
-`relocate`. Risk: medium.
+injectable-writer test seam); lockfile `relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 

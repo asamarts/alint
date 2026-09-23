@@ -182,8 +182,14 @@ impl Fixer for FileCreateFixer {
 /// when it escapes and isn't permitted — the write/read is then refused. This is
 /// the fixer-side counterpart of the read rules' `confine_read` gate; without it
 /// an untrusted `extends:`'d ruleset's fixer could write or exfiltrate
-/// out-of-tree on `alint fix`.
-fn confine_fix_path(rel: &Path, root: &Path, allow: bool) -> std::result::Result<PathBuf, String> {
+/// out-of-tree on `alint fix`. Shared with `DirCreateFixer` (see
+/// `crate::fixers::file_ops`), which must confine its `dir_create` target the
+/// same way.
+pub(crate) fn confine_fix_path(
+    rel: &Path,
+    root: &Path,
+    allow: bool,
+) -> std::result::Result<PathBuf, String> {
     match crate::pathsafe::confine_read(rel, root, allow) {
         crate::pathsafe::Confined::In(p) | crate::pathsafe::Confined::AllowedEscape(p) => {
             Ok(root.join(p))
