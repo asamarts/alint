@@ -110,12 +110,15 @@ pub enum FixStatus {
     /// A fix is available but was NOT applied, so the violation stands: an
     /// `Unsafe` edit without `--unsafe-fixes`, a `Suggestion`-tier edit, or
     /// an edit whose post-edit verification failed (the engine declined to
-    /// write rather than corrupt the file). `summary` is the human one-liner.
-    /// `edit` is the proposed change when the fixer has an editor-expressible
-    /// form, carried so `fix --diff --unsafe-fixes` can preview it; it is `None`
-    /// for a fixer with no `fix_edit` -- a spawning/side-effect op such as
-    /// `git_untrack` (`git rm --cached` has no worktree edit), which is still a
-    /// genuine withheld suggestion (`requires --unsafe-fixes`), NOT a decline.
+    /// write rather than corrupt the file). `summary` is the human one-liner (what
+    /// every shipped formatter renders). `edit` is the proposed change when the
+    /// fixer has an editor-expressible form, `None` for a fixer with no `fix_edit`
+    /// -- a spawning/side-effect op such as `git_untrack` (`git rm --cached` has no
+    /// worktree edit) or a `command` fix -- which is still a genuine withheld
+    /// suggestion (`requires --unsafe-fixes`), NOT a decline. The field is
+    /// public-API context only: no built-in formatter reads it (human/json/markdown
+    /// use `summary`; `fix --diff` recomputes edits via the stage pass), so `None`
+    /// renders identically.
     /// Produced whenever a fixer's tier is below the run's threshold -- the
     /// `Unsafe` `file_remove` / `git_untrack` (on `file_absent` etc.) under a bare
     /// `alint fix`, or any fixer a user demotes to `suggestion`.

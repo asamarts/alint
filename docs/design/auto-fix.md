@@ -964,7 +964,9 @@ per format: firing + silent + idempotence + a comment/order-preservation golden 
 ### Phase 3: metadata, VCS, and the repo-scale cross-file classes (2.2)
 
 - **chmod (`SetMode`):** `shebang_has_executable` -> add +x (Safe); `executable_bit` -> set/clear
-  (Unsafe); `executable_has_shebang` -> Suggestion.
+  (Safe as shipped: the rule requires the state, reversible, only `0o111` moves; a per-rule
+  `applicability:` may demote it); `executable_has_shebang` -> fix-less (ambiguous target: add a
+  shebang vs clear +x is a human call), not a Suggestion.
 - **VCS untrack:** a `git_untrack` fix (spawning, gated per 5.5) running `git rm --cached` plus an
   optional `.gitignore` line, Unsafe by default.
 - **Sync-from-canonical (`sync_from`)** and cross-file partner creation, using the multi-file

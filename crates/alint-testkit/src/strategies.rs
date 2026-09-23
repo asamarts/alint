@@ -974,8 +974,10 @@ mod tests {
         // `command` (a user-supplied fix command) is EXEMPT from the property net:
         // alint cannot guarantee an arbitrary command's convergence / idempotence,
         // so it is not drawn here (the convergence + idempotence laws would be
-        // ill-defined). It is covered by its own fire/silent tests in `command.rs`
-        // + `command_ops.rs` instead (auto-fix.md 5.6). Every OTHER op must appear.
+        // ill-defined). It is covered instead by `command_ops.rs`/`command.rs` unit
+        // tests and by its own fire (`command_runs_the_user_fix_command.yml`) +
+        // silent (`command_is_silent_when_check_passes.yml`) e2e scenarios
+        // (auto-fix.md 5.6). Every OTHER op must appear.
         let expected: BTreeSet<&'static str> = alint_core::FixSpec::ALL_OP_NAMES
             .iter()
             .copied()

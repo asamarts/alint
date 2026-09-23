@@ -188,7 +188,15 @@ mod tests {
              fix: { chmod: {} }\n",
         );
         let rule = build(&spec).expect("chmod fix builds");
-        assert!(rule.fixer().is_some(), "the rule exposes a chmod fixer");
+        let fixer = rule.fixer().expect("the rule exposes a chmod fixer");
+        // Audit L3: chmod is Safe by DEFAULT (the rule requires the state, the
+        // change is reversible, only 0o111 moves). A flip to Unsafe would silently
+        // stop a bare `alint fix` from applying it.
+        assert_eq!(
+            fixer.applicability(),
+            Applicability::Safe,
+            "chmod must default to Safe"
+        );
     }
 
     /// ADR-0008: `git_tracked_only` is a kind-specific option on the existence

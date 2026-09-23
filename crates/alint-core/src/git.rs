@@ -24,11 +24,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Resolve the repo's tracked-paths set, relative to `root`.
 ///
 /// `root` should be the alint root (the path passed to
-/// `alint check`). When `root` IS the git root, this returns the
-/// full set of tracked files (no path translation needed). When
-/// `root` is a subdirectory of the git root, the implementation
-/// uses `git ls-files -- <root>` so the returned paths are still
-/// relative to `root`.
+/// `alint check`). The implementation runs `git -C <root> ls-files
+/// -z` with NO pathspec, so git returns paths relative to `root`
+/// whether `root` is the git root or a subdirectory of it (git's
+/// `-C <dir>` default). No pathspec means no globbing, so this
+/// reader is immune to the pathspec-magic hazard the mutating
+/// [`untrack_path`] guards against.
 ///
 /// Returns `None` when:
 /// - `git` isn't on PATH

@@ -1277,6 +1277,29 @@ rules:
 }
 
 #[test]
+fn load_rejects_command_fix_op_via_extends_on_a_non_command_kind() {
+    // Audit H1: the `command` FIX op is spawning, so it must be refused from an
+    // extended source even on a NON-command host kind. This is a path the
+    // command-RULE gate (`reject_command_rules_in`, keyed on `kind: command`) does
+    // NOT cover -- a `fix: { command: {...} }` on `file_absent` -- but the fix-op
+    // gate (`reject_spawning_fix_ops_in`, which scans `fix:` blocks) does. Without
+    // it an adopted ruleset could shell out on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: smuggled\n    kind: file_absent\n    paths: \"**/*\"\n    level: error\n    fix:\n      command:\n        run: [\"sh\", \"-c\", \"touch pwned\"]\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("command"), "op not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
+}
+
+#[test]
 fn load_rejects_every_spawning_kind_in_extends_not_just_command() {
     // Regression for the closed trust-gate gap:
     // `generated_file_fresh` and `command_idempotent` shell

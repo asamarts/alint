@@ -506,9 +506,9 @@ pub fn write_fix_human(
                     ),
                 ),
                 // Available but not applied (below the tier threshold, a
-                // suggestion, or verification-demoted). No shipped op emits
-                // this yet (Phase 1+); Phase 1 refines the styling with a
-                // dedicated snapshot.
+                // suggestion, or verification-demoted). Emitted by the Unsafe ops
+                // under a bare `alint fix` -- `file_remove`, `git_untrack`, an
+                // unpromoted `command` fix, and any user-demoted fixer.
                 FixStatus::Suggested { summary, .. } => (
                     opts.glyphs.bullet,
                     format!("{dim}"),

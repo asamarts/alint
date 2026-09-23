@@ -127,3 +127,37 @@ fn plain_fix_reports_residual_and_exits_nonzero() {
         "an unfixable error exits nonzero without --fix-only"
     );
 }
+
+/// M3 audit: an editless spawning op (a `command` fix) has no worktree hunk, so
+/// `fix --diff` shows nothing -- but `fix --dry-run` must still SURFACE it as
+/// "would run", never silently drop it (indistinguishable from nothing-to-fix),
+/// and must NOT actually spawn the command.
+#[test]
+#[cfg(unix)]
+fn dry_run_previews_an_editless_command_fix_as_would_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let config = r#"version: 1
+rules:
+  - id: js
+    kind: command
+    paths: "**/*.js"
+    command: ["sh", "-c", "grep -q FIXED \"$1\"", "_", "{path}"]
+    level: error
+    fix:
+      command:
+        run: ["sh", "-c", "touch RAN_MARKER", "_", "{path}"]
+"#;
+    std::fs::write(root.join(".alint.yml"), config).unwrap();
+    std::fs::write(root.join("a.js"), "x\n").unwrap();
+    let out = run(root, &["fix", "--dry-run", "--unsafe-fixes", "."]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("would run"),
+        "dry-run must surface the editless command fix; stdout: {stdout}"
+    );
+    assert!(
+        !root.join("RAN_MARKER").exists(),
+        "dry-run must NOT spawn the command"
+    );
+}

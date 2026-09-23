@@ -851,11 +851,13 @@ pub struct GitUntrackFixSpec {
 #[serde(deny_unknown_fields)]
 pub struct CommandFixSpec {
     /// The fix command argv. The first token is the program (PATH-looked-up if a
-    /// bare name); the rest accept the same `{path}` / `{dir}` / `{stem}` / ...
-    /// templates as the `command` rule's `command:`. Must be non-empty.
+    /// bare name). EVERY token -- the program included -- accepts the same `{path}`
+    /// / `{dir}` / `{stem}` / ... templates (with the option-injection guard) as
+    /// the `command` rule's `command:`; put a fixed program name first unless you
+    /// intend to run a repo file. Must be non-empty.
     pub run: Vec<String>,
-    /// Per-invocation timeout in seconds (default 120). Past it the child is
-    /// killed and the fix reports an error.
+    /// Per-invocation timeout in seconds (default 30, matching the `command`
+    /// rule). Past it the child is killed and the fix reports an error.
     #[serde(default)]
     pub timeout: Option<u64>,
     #[serde(default)]
