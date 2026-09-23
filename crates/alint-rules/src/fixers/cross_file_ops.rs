@@ -322,6 +322,41 @@ mod tests {
     }
 
     #[test]
+    fn skips_a_non_regular_target_without_hanging() {
+        // SECURITY/DoS (audit HIGH): a `targets:` LIST entry is a config-verbatim
+        // path that skips the walker's special-file filter. A bare read of a FIFO
+        // target would block `fix` forever. A directory is the portable, hang-free
+        // proxy for a non-regular file; the fixer must Skip (via read_for_fix's
+        // guard), never reach a blocking read.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "canon.txt", b"canonical\n");
+        std::fs::create_dir(tmp.path().join("a_dir")).unwrap();
+        let out = SyncFromFixer::new(PathBuf::from("canon.txt"), Applicability::Unsafe)
+            .apply(&viol("a_dir"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("not a regular file")),
+            "a non-regular target must Skip cleanly, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn skips_a_non_regular_source_without_hanging() {
+        // Symmetric guard for the `source:` read (also config-verbatim).
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("src_dir")).unwrap();
+        write(&tmp, "copy.txt", b"stale\n");
+        let out = SyncFromFixer::new(PathBuf::from("src_dir"), Applicability::Unsafe)
+            .apply(&viol("copy.txt"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("not a regular file")),
+            "a non-regular source must Skip cleanly, got {out:?}"
+        );
+        assert_eq!(read(&tmp, "copy.txt"), b"stale\n", "target untouched");
+    }
+
+    #[test]
     fn skips_a_self_referential_target() {
         let tmp = TempDir::new().unwrap();
         write(&tmp, "canon.txt", b"x\n");

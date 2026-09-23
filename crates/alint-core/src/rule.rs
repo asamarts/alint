@@ -978,6 +978,21 @@ pub fn read_for_fix(
             return Ok(ReadForFix::Bytes(bytes.clone()));
         }
     }
+    // Refuse a non-regular file (FIFO / socket / device) BEFORE the read: a bare
+    // `std::fs::read` opens a named pipe `O_RDONLY` and BLOCKS until a writer
+    // appears, hanging the whole `fix` run -- including the `--dry-run` / `--diff`
+    // previews users run to stay safe. The walker prunes special files at index
+    // time, but a fixer can be handed a config-verbatim path that skips the walker
+    // (a `sync_from` `targets:` list entry or `source:`), so this direct-read path
+    // must guard exactly as `read_capped` / `open_regular` do. A stat error (e.g. a
+    // missing file) falls through so the read surfaces the same I/O error callers
+    // already handle.
+    if std::fs::metadata(abs).is_ok_and(|m| !m.is_file()) {
+        return Ok(ReadForFix::Skipped(FixOutcome::Skipped(format!(
+            "{} is not a regular file",
+            display_path.display()
+        ))));
+    }
     if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {
         return Ok(ReadForFix::Skipped(outcome));
     }
@@ -1326,6 +1341,34 @@ mod tests {
                 panic!("expected Skipped, got Skipped(Applied)")
             }
             ReadForFix::Bytes(_) => panic!("expected Skipped, got Bytes"),
+        }
+    }
+
+    #[test]
+    fn read_for_fix_refuses_a_non_regular_file() {
+        // A fixer can be handed a config-verbatim path that skips the walker's
+        // special-file filter (a `sync_from` `targets:` list entry). A bare
+        // `std::fs::read` of a FIFO would block `O_RDONLY` forever, hanging `fix`.
+        // A directory is the portable, hang-free proxy for a non-regular file
+        // (same `metadata().is_file() == false` branch as a FIFO; this crate takes
+        // no libc dep, so it cannot `mkfifo(3)` here). The read must Skip, never
+        // reach the blocking `std::fs::read`.
+        let dir = tempfile::tempdir().unwrap();
+        let subdir = dir.path().join("adir");
+        std::fs::create_dir(&subdir).unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        match read_for_fix(&subdir, Path::new("adir"), &ctx).unwrap() {
+            ReadForFix::Skipped(FixOutcome::Skipped(r)) => {
+                assert!(r.contains("not a regular file"), "{r}");
+            }
+            other => panic!("a non-regular file must Skip, got {other:?}"),
         }
     }
 

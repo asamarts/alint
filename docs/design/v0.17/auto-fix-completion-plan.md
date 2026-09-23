@@ -263,6 +263,27 @@ warning or a v0.18 migration.
   deliberate scope: cross-file value propagation (`equals`) is a SEPARATE, harder
   increment (a located value patch with the injectable-writer seam), and a
   header-preserving sync is a deferred follow-up.**
+  - **AUDIT-HARDENED (3 independent agents + own 11-probe pass). 1 HIGH + 1 LOW
+    fixed:** (HIGH) `read_for_fix` (alint-core) did a bare `std::fs::read` with NO
+    non-regular-file guard, so a FIFO named as a `sync_from` `targets:` LIST entry
+    (a config-verbatim path that skips the walker's special-file filter) HUNG `fix`
+    forever -- including the `--dry-run` / `--diff` previews. `check` was safe
+    (`read_capped` refuses non-regular), so the fixer diverged. FIX: `read_for_fix`
+    now refuses a non-regular file (a `metadata().is_file()` guard, mirroring
+    `read_capped`/`open_regular`) -> a clean Skip; this hardens EVERY fixer, not
+    just sync_from. (LOW) no `w2_remote_sync_from_is_demoted_to_suggestion` test
+    existed (every sibling content op has one) and `declared_content_tier` lacked a
+    `SyncFrom` arm -- the demotion WORKED but nothing locked it in; both added.
+    Agents confirmed the rest SOUND: confinement (absolute + symlinked-parent),
+    convergence (incl. mutually-referential swap/cycle rules), tier honesty,
+    machine-surface Safe-only gating, and the untrusted-remote demotion firing.
+
+- **`cross_file.rs` split into a `cross_file/` module (spec / eval / mod).** The
+  file had passed 2000 lines (the dogfooded `rust-file-max-lines` limit); split by
+  responsibility with co-located tests, all three files well under. Faithful
+  refactor (a third agent verified 39==39 tests preserved + byte-identical
+  production code); `xtask` `rule_source_files` now resolves a `<stem>/mod.rs`
+  directory module so alint.org's source links stay valid.
 
 Ops remaining. Cross-file value propagation (`equals`, a located patch with an
 injectable-writer test seam) + cross-file create-and-register; lockfile

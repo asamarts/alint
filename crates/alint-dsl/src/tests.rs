@@ -841,6 +841,7 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         FixSpec::FileAppend { file_append } => file_append.applicability,
         FixSpec::SetValue { set_value } => set_value.applicability,
         FixSpec::RemoveValue { remove_value } => remove_value.applicability,
+        FixSpec::SyncFrom { sync_from } => sync_from.applicability,
         _ => None,
     }
 }
@@ -964,6 +965,28 @@ fn w2_remote_set_value_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `set_value` must be demoted to suggestion"
+    );
+}
+
+const REMOTE_SYNC_FROM: &str = "version: 1\nrules:\n  - id: mirror\n    \
+     kind: cross_file\n    relation: identical\n    source: { file: LICENSE }\n    \
+     targets: { files: \"crates/*/LICENSE\" }\n    level: error\n    \
+     fix: { sync_from: {} }\n";
+
+#[test]
+fn w2_remote_sync_from_is_demoted_to_suggestion() {
+    // `sync_from` overwrites a target with the ruleset-chosen `source:` bytes, so a
+    // REMOTE `extends:` the user has not trusted may PROPOSE but never auto-write:
+    // its tier is capped to `suggestion`. This locks in the demotion that otherwise
+    // rests only on structural assumptions about where a `cross_file` rule's `fix:`
+    // sits (audit gap). Teeth: dropping `sync_from` from CONTENT_INJECTING_FIX_OPS
+    // reverts this to None (default Unsafe) and reds here.
+    let cfg = load_extending(REMOTE_SYNC_FROM, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "mirror").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sync_from` must be demoted to suggestion"
     );
 }
 
