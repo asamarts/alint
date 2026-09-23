@@ -12,6 +12,8 @@
 //!   `ChmodFixer`).
 //! - [`git_ops`] — git-index ops (`GitUntrackFixer`); the first *spawning* fixer
 //!   (shells out to `git rm --cached`), so it is top-level-only trust-gated.
+//! - [`command_ops`] — the `command` fix op (`CommandFixFixer`); runs a
+//!   user-supplied fix command, a *spawning* fixer, top-level-only trust-gated.
 //! - [`hygiene`] — text-level cleanup (`FileTrimTrailingWhitespaceFixer`,
 //!   `FileAppendFinalNewlineFixer`, `FileNormalizeLineEndingsFixer`,
 //!   `FileCollapseBlankLinesFixer`).
@@ -23,6 +25,7 @@
 //!   (`StructuredFixer`), splicing a value/removal span located via a
 //!   span-resolving parser (Phase 2).
 
+pub mod command_ops;
 pub mod creators;
 pub mod file_ops;
 pub mod git_ops;
@@ -31,6 +34,7 @@ pub mod replace;
 pub mod strip;
 pub mod structured;
 
+pub use command_ops::CommandFixFixer;
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
 pub use file_ops::{ChmodFixer, FileRemoveFixer, FileRenameFixer};
 pub use git_ops::GitUntrackFixer;

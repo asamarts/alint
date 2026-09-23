@@ -23,6 +23,10 @@ fn spawning_fix_ops_are_gated() {
         spawning.contains("git_untrack"),
         "git_untrack (the first spawning fix op) must be gated"
     );
+    assert!(
+        spawning.contains("command"),
+        "the `command` fix op (a user-supplied fix command) must be gated"
+    );
 }
 
 #[test]

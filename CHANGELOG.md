@@ -61,6 +61,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `alint fix`; declare it only in your own top-level config. `Unsafe` by default
   (it restructures the git index), so a bare `alint fix` surfaces it as a
   suggestion and `alint fix --unsafe-fixes` applies it.
+- The `command` plugin rule can now carry a fix (`fix: { command: { run: [...] }
+  }`): a user-supplied fix command run per violation, with the same `{path}` /
+  `{dir}` / `{stem}` templates (and option-injection guard) as the rule's
+  `command:`. Pair a checker with its fixer, e.g. check `eslint {path}`, fix
+  `eslint --fix {path}`. Like `git_untrack` it is a spawning fix -- refused from
+  any non-top-level source, so an adopted ruleset can never run a command on your
+  `alint fix` -- and `Unsafe` by default (a bare `alint fix` suggests; a top-level
+  `applicability: safe` opts a specific rule into running on a bare fix). Its
+  idempotence is the command author's business, so it is exempt from the harness's
+  convergence requirement.
 
 ### Changed
 

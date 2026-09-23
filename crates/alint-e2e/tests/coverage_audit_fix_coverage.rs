@@ -27,10 +27,12 @@ use alint_core::FixSpec;
 use serde_yaml_ng::Value;
 
 /// Ops exempt from the convergence requirement. A user-supplied `command`-fix
-/// (Phase 3) runs an arbitrary command, so idempotence is the command author's
-/// business, not the harness's. Empty until that op ships; the tripwire test
-/// `convergence_exempt_stays_empty` fails if a future entry is added silently.
-const CONVERGENCE_EXEMPT: &[&str] = &[];
+/// runs an arbitrary command, so idempotence is the command author's business,
+/// not the harness's (auto-fix.md 5.6); it must still be EXERCISED (an
+/// `applied:`), just not proven convergent. The tripwire test
+/// `convergence_exempt_is_only_the_user_command` fails if any OTHER op is added
+/// silently.
+const CONVERGENCE_EXEMPT: &[&str] = &["command"];
 
 /// Every `*.yml` under `dir`, recursively.
 fn yml_files(dir: &Path) -> Vec<PathBuf> {
@@ -173,13 +175,21 @@ fn classify_scenario(
 }
 
 #[test]
-fn convergence_exempt_stays_empty() {
-    assert!(
-        CONVERGENCE_EXEMPT.is_empty(),
-        "the convergence-exempt list should stay empty until a `command`-fix op \
-         ships (Phase 3); a new entry means an op is skipping its idempotence \
-         proof - confirm that is really the user's-command exemption first"
+fn convergence_exempt_is_only_the_user_command() {
+    use std::collections::BTreeSet;
+    // Only the user-supplied `command`-fix is exempt from the idempotence proof
+    // (an arbitrary command's convergence is the author's business). Any OTHER
+    // entry means an op is silently skipping its convergence gate -- confirm it is
+    // really a user's-command-class exemption first.
+    let exempt: BTreeSet<&str> = CONVERGENCE_EXEMPT.iter().copied().collect();
+    assert_eq!(
+        exempt,
+        BTreeSet::from(["command"]),
+        "only `command` may be convergence-exempt"
     );
+    // ...and every exempt op must be a real fix op.
+    let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+    assert!(exempt.is_subset(&all), "exempt names an unknown op");
 }
 
 #[test]

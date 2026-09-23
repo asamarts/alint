@@ -550,10 +550,10 @@ pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "c
 /// [`reject_spawning_fix_op_templates_in`] (inherited templates), and a
 /// `finalize` backstop that refuses one in ANY source's templates. Adding a
 /// spawn-capable op without listing it here is a code-execution gap, exactly as
-/// for rule kinds; `spawning_fix_ops_are_gated` asserts every entry is a real op
-/// and that `git_untrack` (the first spawning fix op, `git rm --cached`) is
-/// present.
-pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack"];
+/// for rule kinds; `spawning_fix_ops_are_gated` asserts every entry is a real op.
+/// `git_untrack` (`git rm --cached`) and `command` (a user-supplied `run:` fix
+/// command on the `command` rule) are the two spawning fix ops.
+pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack", "command"];
 
 /// Reject any process-spawning rule kind (see
 /// [`SPAWNING_RULE_KINDS`]) in the given mapping list. Used by the

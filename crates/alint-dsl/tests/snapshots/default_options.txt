@@ -25,6 +25,7 @@ CommandRule {
         "shellcheck",
     ],
     timeout: 30s,
+    fixer: None,
 }
 
 === kind: command_idempotent | id: fmt-is-idempotent ===

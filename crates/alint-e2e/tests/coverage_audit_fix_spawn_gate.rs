@@ -80,7 +80,8 @@ fn spawning_fixer_modules() -> Vec<String> {
 /// kinds (module named for the kind), a fix op's fixer module name is arbitrary,
 /// so the mapping is explicit. Adding a spawning fix op forces a new row here (in
 /// tandem with `SPAWNING_FIX_OPS`) — the tripwire that keeps the two in sync.
-const SPAWNING_FIX_OP_MODULES: &[(&str, &str)] = &[("git_untrack", "git_ops.rs")];
+const SPAWNING_FIX_OP_MODULES: &[(&str, &str)] =
+    &[("git_untrack", "git_ops.rs"), ("command", "command_ops.rs")];
 
 #[test]
 fn spawning_fix_op_allowlist_matches_the_fixers_that_actually_spawn() {

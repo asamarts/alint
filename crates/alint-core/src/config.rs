@@ -441,6 +441,9 @@ pub enum FixSpec {
     GitUntrack {
         git_untrack: GitUntrackFixSpec,
     },
+    Command {
+        command: CommandFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -526,6 +529,7 @@ impl FixSpec {
         "remove_value",
         "chmod",
         "git_untrack",
+        "command",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -548,6 +552,7 @@ impl FixSpec {
             Self::RemoveValue { .. } => "remove_value",
             Self::Chmod { .. } => "chmod",
             Self::GitUntrack { .. } => "git_untrack",
+            Self::Command { .. } => "command",
         }
     }
 }
@@ -832,6 +837,27 @@ pub struct ChmodFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GitUntrackFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `command`: run a user-supplied fix command per violation on a `command` rule
+/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
+/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
+/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
+/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
+/// specific rule to `Safe` in their OWN top-level config.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandFixSpec {
+    /// The fix command argv. The first token is the program (PATH-looked-up if a
+    /// bare name); the rest accept the same `{path}` / `{dir}` / `{stem}` / ...
+    /// templates as the `command` rule's `command:`. Must be non-empty.
+    pub run: Vec<String>,
+    /// Per-invocation timeout in seconds (default 120). Past it the child is
+    /// killed and the fix reports an error.
+    #[serde(default)]
+    pub timeout: Option<u64>,
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1275,6 +1301,7 @@ mod tests {
             ("remove_value: {}", "remove_value"),
             ("chmod: {}", "chmod"),
             ("git_untrack: {}", "git_untrack"),
+            ("command:\n  run: [\"x\"]\n", "command"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

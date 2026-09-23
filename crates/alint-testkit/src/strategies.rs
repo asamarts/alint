@@ -971,12 +971,20 @@ mod tests {
                 seen.insert(fix.op_name());
             }
         }
-        let expected: BTreeSet<&'static str> =
-            alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+        // `command` (a user-supplied fix command) is EXEMPT from the property net:
+        // alint cannot guarantee an arbitrary command's convergence / idempotence,
+        // so it is not drawn here (the convergence + idempotence laws would be
+        // ill-defined). It is covered by its own fire/silent tests in `command.rs`
+        // + `command_ops.rs` instead (auto-fix.md 5.6). Every OTHER op must appear.
+        let expected: BTreeSet<&'static str> = alint_core::FixSpec::ALL_OP_NAMES
+            .iter()
+            .copied()
+            .filter(|op| *op != "command")
+            .collect();
         assert_eq!(
             seen,
             expected,
-            "single-fixable strategy did not cover every fix op; missing: {:?}",
+            "single-fixable strategy did not cover every (non-command) fix op; missing: {:?}",
             expected.difference(&seen).collect::<Vec<_>>()
         );
     }
