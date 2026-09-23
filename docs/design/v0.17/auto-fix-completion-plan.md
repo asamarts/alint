@@ -197,6 +197,15 @@ warning or a v0.18 migration.
   `command` rule kind). Convergence-EXEMPT (`CONVERGENCE_EXEMPT = ["command"]`,
   excluded from the property net), with its own fire/silent tests + the e2e fire
   scenario + the parity gate (`command` -> `command_ops.rs`).
+  - **AUDIT-HARDENED (commit `777c84ba`; 3 agents -- injection + trust gate got a
+    clean bill). Fixed:** (behavior) a non-converging command-fix re-ran the
+    command to the 10-pass fixpoint cap -- now the fixer reports `Applied` only when
+    it CHANGES `{path}` (Skip = the idempotence signal), so it runs <=2x; (MED) a
+    failing command's output was surfaced uncapped (64 MiB) -- now truncated to 16
+    KiB. Filled coverage: non-command-kind extends refusal (H1), Safe-promoted +
+    default-suggested tiers (H2), the silent half (M1), the TimedOut arm (M2), the
+    editless `--dry-run` preview (M3), chmod default tier (L3). Docs: timeout
+    default 30, the templated program token, the auto-fix.md chmod tier.
 
 Ops remaining. `sync_from` (Unsafe whole-file copy) + cross-file
 create-and-register + cross-file value propagation (multi-file transaction with an
